@@ -6,6 +6,7 @@ Item {
     id: root
 
     signal requestWriteBacktestMetrics(var report)
+    signal requestImportToStrategy(var report)
 
     property var factorService: null
     property string selectedFactorId: ""
@@ -32,6 +33,7 @@ Item {
     readonly property var activeResult: resolveActiveResult(backtestReport)
     readonly property var activeFactorQuality: extractFactorQuality(activeResult)
     readonly property bool hasActiveFactorQuality: hasKeys(activeFactorQuality)
+    readonly property bool canImportActiveResultToStrategy: factorIdText() !== "-"
 
     function normalizedListValue(value) {
         if (!value) {
@@ -69,7 +71,7 @@ Item {
             return rawReport
         }
 
-        var normalizedFactorId = String(selectedFactorId || "")
+        var normalizedFactorId = String(rawReport.activeAnalysisFactorId || selectedFactorId || "")
         if (normalizedFactorId) {
             for (var index = 0; index < results.length; index++) {
                 var candidate = results[index] || ({})
@@ -120,6 +122,14 @@ Item {
         return factorId ? factorId : "-"
     }
 
+    function persistedFactorDetail() {
+        var factorId = factorIdText()
+        if (!factorId || !factorService || typeof factorService.getFactorById !== "function") {
+            return ({})
+        }
+        return factorService.getFactorById(factorId) || ({})
+    }
+
     function dateRangeText() {
         var result = activeResult || ({})
         var config = result.config || ({})
@@ -132,6 +142,32 @@ Item {
             return startDate || endDate
         }
         return "时间范围未知"
+    }
+
+    function effectiveRangeText() {
+        var result = activeResult || ({})
+        var config = result.config || ({})
+        var persisted = persistedFactorDetail()
+        var actualStartDate = String(config.actualStartDate || persisted.actualStartDate || persisted.effectiveStartDate || "")
+        var endDate = String(config.endDate || persisted.effectiveEndDate || "")
+        if (actualStartDate && endDate) {
+            return actualStartDate + " 至 " + endDate
+        }
+        if (actualStartDate) {
+            return actualStartDate
+        }
+        return dateRangeText()
+    }
+
+    function warmupTrimText() {
+        var result = activeResult || ({})
+        var config = result.config || ({})
+        var persisted = persistedFactorDetail()
+        var days = Number(config.warmupTrimmedTradingDays || persisted.warmupTrimmedTradingDays || 0)
+        if (!isFinite(days) || days < 0) {
+            days = 0
+        }
+        return Math.round(days).toString() + " 天"
     }
 
     function benchmarkText() {
@@ -803,6 +839,31 @@ Item {
                                     onClicked: root.requestWriteBacktestMetrics(activeResult)
                                 }
                             }
+
+                            Rectangle {
+                                width: 108
+                                height: 40
+                                radius: 12
+                                color: canImportActiveResultToStrategy ? "#BFDBFE" : panelRaisedBackground
+                                border.width: 1
+                                border.color: canImportActiveResultToStrategy ? "#60A5FA" : panelBorder
+                                opacity: canImportActiveResultToStrategy ? 1 : 0.5
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "导入策略"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: canImportActiveResultToStrategy ? "#0F172A" : textSecondary
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    enabled: canImportActiveResultToStrategy
+                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                    onClicked: root.requestImportToStrategy(activeResult)
+                                }
+                            }
                         }
 
                         Flow {
@@ -812,8 +873,11 @@ Item {
                             Repeater {
                                 model: [
                                     { label: "区间", value: dateRangeText() },
+                                    { label: "有效期", value: effectiveRangeText() },
+                                    { label: "因子", value: factorDisplayName() },
                                     { label: "基准", value: benchmarkText() },
                                     { label: "分组", value: groupsText() },
+                                    { label: "预热裁剪", value: warmupTrimText() },
                                     { label: "定义版本", value: intText(factorDefinitionRevision) }
                                 ]
 

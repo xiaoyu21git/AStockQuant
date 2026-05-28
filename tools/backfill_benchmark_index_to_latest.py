@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import datetime as dt
 import sys
 from pathlib import Path
 
@@ -10,6 +9,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from tools.history_start_policy import resolve_history_date_bounds
 from tools.update_daily_data import BENCHMARK_INDEX_SYMBOLS, fetch_benchmark_daily, persist_daily_rows_with_fallback
 
 MYSQL_CONFIG = {
@@ -27,12 +27,12 @@ def get_target_date_range(conn):
         cursor.execute("SELECT MIN(trade_date), MAX(trade_date) FROM cleaned_daily_bar")
         row = cursor.fetchone()
         if row and row[0] and row[1]:
-            return row[0], row[1]
+            return resolve_history_date_bounds(row[0], row[1], "cleaned_daily_bar")
 
         cursor.execute("SELECT MIN(trade_date), MAX(trade_date) FROM daily_bar")
         row = cursor.fetchone()
         if row and row[0] and row[1]:
-            return row[0], row[1]
+            return resolve_history_date_bounds(row[0], row[1], "daily_bar")
 
     return None, None
 

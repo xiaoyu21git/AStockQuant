@@ -2,7 +2,11 @@
 // 策略视图模型 - 负责策略数据的视图展示，不包含业务逻辑
 #pragma once
 
+#include "StrategyLifecycleStatus.h"
+#include "../../../domain/backtest/include/ResolvedStrategyBehavior.h"
+
 #include <QAbstractListModel>
+#include <QDateTime>
 #include <QVector>
 #include <QString>
 #include <QVariant>
@@ -60,15 +64,15 @@ public:
     Q_INVOKABLE QVariantMap getStrategyById(const QString& strategyId) const;
     Q_INVOKABLE QVariantList getAllStrategies() const;
     Q_INVOKABLE QVariantList searchStrategies(const QString& keyword) const;
-    Q_INVOKABLE QVariantList filterStrategiesByType(const QString& strategyType) const;
-    Q_INVOKABLE QVariantList filterStrategiesByStatus(const QString& status) const;
+    Q_INVOKABLE QVariantList filterStrategiesByType(int strategyTypeIndex) const;
+    Q_INVOKABLE QVariantList filterStrategiesByStatus(int statusIndex) const;
     
     // 单个策略操作
     Q_INVOKABLE void updateStrategy(const QString& strategyId, const QVariantMap& strategyData);
     Q_INVOKABLE void removeStrategy(const QString& strategyId);
     
     // 状态更新
-    Q_INVOKABLE bool updateStrategyStatus(const QString& strategyId, const QString& status);
+    Q_INVOKABLE bool updateStrategyStatus(const QString& strategyId, int statusIndex);
     Q_INVOKABLE bool updateStrategyPerformance(const QString& strategyId, const QVariantMap& performance);
     
 signals:
@@ -76,34 +80,78 @@ signals:
     void dataUpdated();
     
 private:
+    enum class StrategyAssetCategory {
+        Unknown = 0,
+        Stock,
+        Future,
+        Option,
+        Fund,
+        Index,
+        MultiAsset,
+    };
+
+    enum class StrategyTimeFrameKind {
+        Unknown = 0,
+        Tick,
+        Minute1,
+        Minute5,
+        Minute15,
+        Minute30,
+        Hour1,
+        Daily,
+        Weekly,
+        Monthly,
+        Custom,
+    };
+
+    enum class StrategyRiskLevelKind {
+        Unknown = 0,
+        Low,
+        Medium,
+        High,
+        VeryHigh,
+    };
+
+    struct StrategyPerformanceSnapshot {
+        double returns{0.0};
+        double maxDrawdown{0.0};
+        double sharpeRatio{0.0};
+        double winRate{0.0};
+        int runningDays{0};
+        int tradesCount{0};
+        double position{0.0};
+        double dailyPnL{0.0};
+    };
+
     // 策略数据结构
     struct StrategyViewData {
         QString strategyId;
         QString strategyName;
-        QString strategyType;
-        QString subType;
+        domain::backtest::ResolvedStrategyIdentity strategyIdentity;
         QString description;
-        QString status;  // "running", "paused", "stopped", "DRAFT", "ACTIVE", etc.
-        QString returns;
-        QString maxDrawdown;
-        QString sharpeRatio;
-        QString winRate;
-        int runningDays;
-        int tradesCount;
-        double position;
-        double dailyPnL;
-        QString assetType;
-        QString timeFrame;
-        QString riskLevel;
+        strategy_view::StrategyLifecycleStatus status{strategy_view::StrategyLifecycleStatus::Unknown};
+        StrategyPerformanceSnapshot performance;
+        StrategyAssetCategory assetType{StrategyAssetCategory::Unknown};
+        StrategyTimeFrameKind timeFrame{StrategyTimeFrameKind::Unknown};
+        StrategyRiskLevelKind riskLevel{StrategyRiskLevelKind::Unknown};
         QStringList tags;
-        QString createdAt;
-        QString updatedAt;
+        QDateTime createdAt;
+        QDateTime updatedAt;
         QString author;
         QString version;
         
         QVariantMap toVariantMap() const;
         static StrategyViewData fromVariantMap(const QVariantMap& map);
     };
+
+    static StrategyAssetCategory assetCategoryFromIndex(const QVariant& value);
+    static int assetCategoryIndex(StrategyAssetCategory assetType);
+    static StrategyTimeFrameKind timeFrameFromIndex(const QVariant& value);
+    static int timeFrameIndex(StrategyTimeFrameKind timeFrame);
+    static StrategyRiskLevelKind riskLevelFromIndex(const QVariant& value);
+    static int riskLevelIndex(StrategyRiskLevelKind riskLevel);
+    static double parseNumericValue(const QVariant& value);
+    static QDateTime parseDateTimeValue(const QVariant& value);
     
     // 数据查找
     int findIndexById(const QString& strategyId) const;

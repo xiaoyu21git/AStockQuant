@@ -1,13 +1,11 @@
 #include "DatabaseFactorDataProvider.h"
 #include "../../ui/bridge/include/FactorService.h"
-#include "../../ui/bridge/include/DataServiceCache.h"
 
 #include <foundation/log/logging.hpp>
 
 #include <QDate>
 #include <QString>
-#include <QVariant>
-#include <QVariantList>
+#include <QStringList>
 #include <QVariantMap>
 
 #include <stdexcept>
@@ -16,8 +14,10 @@
 namespace domain::backtest {
 
 DatabaseFactorDataProvider::DatabaseFactorDataProvider(
-    std::shared_ptr<FactorService> factorService)
-    : factorService_(std::move(factorService)) {
+    std::shared_ptr<FactorService> factorService,
+    std::function<void()> rangeLoadStartedCallback)
+    : factorService_(std::move(factorService))
+    , rangeLoadStartedCallback_(std::move(rangeLoadStartedCallback)) {
     if (factorService_) {
         INTERNAL_INFO_STREAM << "DatabaseFactorDataProvider initialized with FactorService";
     } else {
@@ -52,84 +52,53 @@ std::map<std::string, std::map<std::string, double>> DatabaseFactorDataProvider:
             throw std::runtime_error("FactorService is not available");
         }
 
-        const QString cacheKey = QString("factor_values_range_%1_%2_%3")
-            .arg(qFactorId, qStartDate, qEndDate);
+        factorService_->resolveDomainInstanceId(qFactorId);
 
-        const QVariantList cachedData = DataServiceCache::getInstance().getData(cacheKey);
-        if (!cachedData.isEmpty() && cachedData.first().canConvert<QVariantMap>()) {
-            const QVariantMap cachedResult = cachedData.first().toMap();
-            if (cachedResult.value("status").toString() == "success" && cachedResult.contains("data")) {
-                const QVariantMap dataMap = cachedResult.value("data").toMap();
-                for (auto it = dataMap.begin(); it != dataMap.end(); ++it) {
-                    const QVariantMap stockValuesMap = it.value().toMap();
-                    std::map<std::string, double> stockValues;
-                    for (auto stockIt = stockValuesMap.begin(); stockIt != stockValuesMap.end(); ++stockIt) {
-                        stockValues[stockIt.key().toStdString()] = stockIt.value().toDouble();
-                    }
-                    if (!stockValues.empty()) {
-                        result[it.key().toStdString()] = std::move(stockValues);
-                    }
-                }
-
-                INTERNAL_INFO_STREAM << "Retrieved factor values range from cache for factor " << factorId
-                                     << " from " << startDate << " to " << endDate
-                                     << ", got " << result.size() << " days with data";
-                return result;
-            }
+        if (rangeLoadStartedCallback_) {
+            rangeLoadStartedCallback_();
         }
 
-        QDate currentDate = start;
-        bool sawMessageWithoutValues = false;
-        std::string emptyResultMessage;
+        QStringList requestedDates;
+        for (QDate currentDate = start; currentDate <= end; currentDate = currentDate.addDays(1)) {
+            requestedDates.append(currentDate.toString("yyyy-MM-dd"));
+        }
 
-        while (currentDate <= end) {
-            const QString dateStr = currentDate.toString("yyyy-MM-dd");
-            const QVariantMap dayResult = factorService_->getFactorValues(qFactorId, dateStr);
-            const QString status = dayResult.value("status").toString();
+        INTERNAL_INFO_STREAM << "Requesting factor batch values for factor " << factorId
+                             << " from " << startDate << " to " << endDate
+                             << ", requestedDates=" << requestedDates.size();
 
-            if (status == "error") {
-                const QString error = dayResult.value("error").toString();
-                throw std::runtime_error(
-                    QString("Failed to calculate factor %1 on %2: %3")
-                        .arg(qFactorId, dateStr, error)
-                        .toStdString());
-            }
+        const QVariantMap batchResult = factorService_->getFactorValuesBatch(qFactorId, requestedDates);
+        const QString status = batchResult.value("status").toString();
+        if (status == "error") {
+            throw std::runtime_error(
+                QString("Failed to calculate factor %1 between %2 and %3: %4")
+                    .arg(qFactorId,
+                         qStartDate,
+                         qEndDate,
+                         batchResult.value("error").toString())
+                    .toStdString());
+        }
 
-            const QVariantMap stockValuesMap = dayResult.value("stockValues").toMap();
-            if (stockValuesMap.isEmpty()) {
-                const QString message = dayResult.value("message").toString();
-                if (!message.isEmpty()) {
-                    sawMessageWithoutValues = true;
-                    if (emptyResultMessage.empty()) {
-                        emptyResultMessage = message.toStdString();
-                    }
-                }
-                currentDate = currentDate.addDays(1);
-                continue;
-            }
-
+        const QVariantMap batchData = batchResult.value("data").toMap();
+        const QString batchMessage = batchResult.value("message").toString();
+        for (auto dayIt = batchData.begin(); dayIt != batchData.end(); ++dayIt) {
+            const QVariantMap stockValuesMap = dayIt.value().toMap();
             std::map<std::string, double> stockValues;
-            for (auto it = stockValuesMap.begin(); it != stockValuesMap.end(); ++it) {
-                if (it.value().canConvert<double>()) {
-                    stockValues[it.key().toStdString()] = it.value().toDouble();
+            for (auto stockIt = stockValuesMap.begin(); stockIt != stockValuesMap.end(); ++stockIt) {
+                if (stockIt.value().canConvert<double>()) {
+                    stockValues[stockIt.key().toStdString()] = stockIt.value().toDouble();
                 }
             }
 
             if (!stockValues.empty()) {
-                result[dateStr.toStdString()] = std::move(stockValues);
+                result[dayIt.key().toStdString()] = std::move(stockValues);
             }
-
-            currentDate = currentDate.addDays(1);
         }
 
-        if (result.empty() && sawMessageWithoutValues) {
+        if (result.empty() && !batchMessage.isEmpty()) {
             throw std::runtime_error(
                 QString("Factor %1 does not provide executable backtest values: %2")
-                    .arg(qFactorId,
-                         QString::fromStdString(
-                             emptyResultMessage.empty()
-                                 ? std::string("factor has no executable calculation logic")
-                                 : emptyResultMessage))
+                    .arg(qFactorId, batchMessage)
                     .toStdString());
         }
 
@@ -140,27 +109,7 @@ std::map<std::string, std::map<std::string, double>> DatabaseFactorDataProvider:
                     .toStdString());
         }
 
-        QVariantMap dataMap;
-        for (const auto& dateData : result) {
-            QVariantMap stockValuesMap;
-            for (const auto& stockValue : dateData.second) {
-                stockValuesMap[QString::fromStdString(stockValue.first)] = stockValue.second;
-            }
-            dataMap[QString::fromStdString(dateData.first)] = stockValuesMap;
-        }
-
-        QVariantMap cacheResult;
-        cacheResult["status"] = "success";
-        cacheResult["factorId"] = qFactorId;
-        cacheResult["startDate"] = qStartDate;
-        cacheResult["endDate"] = qEndDate;
-        cacheResult["data"] = dataMap;
-
-        QVariantList cacheList;
-        cacheList.append(cacheResult);
-        DataServiceCache::getInstance().storeData(cacheKey, cacheList);
-
-        INTERNAL_INFO_STREAM << "Calculated factor values range for factor " << factorId
+        INTERNAL_INFO_STREAM << "Loaded factor values range for factor " << factorId
                              << " from " << startDate << " to " << endDate
                              << ", got " << result.size() << " days with data";
     } catch (const std::exception& e) {

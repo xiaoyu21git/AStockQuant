@@ -15,7 +15,6 @@ Item {
     id: root
 
     signal analysisReportRequested(var result)
-    signal requestStrategyBacktest(string strategyId, string strategyName, var backtestConfig)
     property var previousBacktestReport: ({})
     property int factorDefinitionRevision: 0
     property var factorDisplayNameCache: ({})
@@ -473,8 +472,6 @@ Item {
                 symbols = datasetInfo.stockCodes
             } else if (datasetInfo.symbols) {
                 symbols = datasetInfo.symbols
-            } else if (datasetInfo.symbolPool) {
-                symbols = datasetInfo.symbolPool
             }
         }
 
@@ -622,90 +619,16 @@ Item {
         return lines.join("\n").trim()
     }
 
-    function resolveFactorBacktestStockPoolComparison() {
-        var previousSymbols = []
-        if (previousBacktestReport && previousBacktestReport.config) {
-            previousSymbols = normalizeStockPoolSymbols(
-                previousBacktestReport.config.symbol_pool
-                    || previousBacktestReport.config.symbolPool
-                    || previousBacktestReport.config.selectedSymbols
-                    || []
-            )
-        }
-
-        var currentSymbols = currentCacheDatasetStockCodes()
-        var previousSet = {}
-        var currentSet = {}
-        var intersectionSymbols = []
-        var previousOnlySymbols = []
-        var currentOnlySymbols = []
-
-        for (var i = 0; i < previousSymbols.length; i++) {
-            previousSet[previousSymbols[i]] = true
-        }
-        for (var j = 0; j < currentSymbols.length; j++) {
-            currentSet[currentSymbols[j]] = true
-        }
-
-        for (var previousIndex = 0; previousIndex < previousSymbols.length; previousIndex++) {
-            var previousSymbol = previousSymbols[previousIndex]
-            if (currentSet[previousSymbol] && intersectionSymbols.indexOf(previousSymbol) === -1) {
-                intersectionSymbols.push(previousSymbol)
-            }
-            if (!currentSet[previousSymbol]) {
-                previousOnlySymbols.push(previousSymbol)
-            }
-        }
-
-        for (var currentIndex = 0; currentIndex < currentSymbols.length; currentIndex++) {
-            var currentSymbol = currentSymbols[currentIndex]
-            if (!previousSet[currentSymbol]) {
-                currentOnlySymbols.push(currentSymbol)
-            }
-        }
-
-        return {
-            previousSymbols: previousSymbols,
-            currentSymbols: currentSymbols,
-            intersectionSymbols: intersectionSymbols,
-            previousOnlySymbols: previousOnlySymbols,
-            currentOnlySymbols: currentOnlySymbols
-        }
-    }
-
     function buildFactorStockPoolComparisonText() {
         if (!selectedFactorIds || selectedFactorIds.length === 0) {
             return "先选择因子后再进入回测比较。"
         }
 
-        var comparison = resolveFactorBacktestStockPoolComparison()
-        if (comparison.previousSymbols.length === 0) {
-            return "当前没有上一轮同因子回测基线，本次完成后会直接建立新的股票池基线。"
+        if (!previousBacktestReport || Object.keys(previousBacktestReport).length === 0) {
+            return "当前没有上一轮同因子回测基线，本次完成后会直接建立新的因子结果基线。"
         }
 
-        return "上一轮股票池 " + comparison.previousSymbols.length
-            + " 只，本次候选股票池 " + comparison.currentSymbols.length
-            + " 只，交集 " + comparison.intersectionSymbols.length
-            + " 只，上轮独有 " + comparison.previousOnlySymbols.length
-            + " 只，本轮新增 " + comparison.currentOnlySymbols.length + " 只。"
-    }
-
-    function normalizeStockPoolSymbols(value) {
-        var normalized = []
-        var seen = {}
-        var values = normalizeStringList(value)
-
-        for (var i = 0; i < values.length; i++) {
-            var symbol = String(values[i] || "").trim().toUpperCase()
-            if (!symbol || seen[symbol]) {
-                continue
-            }
-
-            seen[symbol] = true
-            normalized.push(symbol)
-        }
-
-        return normalized
+        return "当前比较仅关注因子指标、有效区间和预热裁剪信息，不再输出或比较股票池。"
     }
 
     function canStartSingleOrBatchBacktest() {
@@ -796,19 +719,6 @@ Item {
         return canStartSingleOrBatchBacktest()
     }
 
-    function canStartStrategyBacktestWithCurrentFactor() {
-        var factorIds = backtestEntryMode === 1
-            ? compositeChildIds()
-            : normalizeSelectedFactorIds(selectedFactorIds || [])
-        if (isBacktesting || factorIds.length === 0) {
-            return false
-        }
-        if (!hasAvailableCacheDataset() || resolvedSelectedDatasetId() <= 0) {
-            return false
-        }
-        return currentCacheDatasetStockCodes().length > 0
-    }
-
     function factorIdsForSupportCheck(includeAllFactors) {
         if (includeAllFactors === true) {
             return allFactorIdsForSupportCheck()
@@ -817,6 +727,79 @@ Item {
             return compositeChildIds()
         }
         return normalizeSelectedFactorIds(selectedFactorIds || [])
+    }
+
+    function normalizedSupportMapFactorIds(factorIds) {
+        if (!factorIds || factorIds.length === 0) {
+            return []
+        }
+
+        var seen = ({})
+        var normalized = []
+        for (var index = 0; index < factorIds.length; index++) {
+            var factorId = String(factorIds[index] === undefined || factorIds[index] === null ? "" : factorIds[index]).trim()
+            if (!factorId || seen[factorId] === true) {
+                continue
+            }
+            seen[factorId] = true
+            normalized.push(factorId)
+        }
+
+        normalized.sort()
+        return normalized
+    }
+
+    function normalizedSupportMapScopeFingerprint(cacheSnapshot) {
+        var snapshot = cacheSnapshot && typeof cacheSnapshot === "object" ? cacheSnapshot : ({})
+        var payload = {
+            dataSourceMode: String(selectedDataSourceMode || "cache"),
+            selectedDatasetId: resolvedSelectedDatasetId(),
+            startDate: String(snapshot.startDate || ""),
+            endDate: String(snapshot.endDate || ""),
+            availableFields: normalizedSupportMapFactorIds(snapshot.availableFields || []),
+            tradeDateCount: Number(snapshot.tradeDateCount || 0),
+            fieldDiagnostics: snapshot.fieldDiagnostics || ({})
+        }
+        return JSON.stringify(payload)
+    }
+
+    function factorIdListCoversFactorIds(coveredFactorIds, requestedFactorIds) {
+        var covered = normalizedSupportMapFactorIds(coveredFactorIds)
+        var requested = normalizedSupportMapFactorIds(requestedFactorIds)
+        if (requested.length === 0) {
+            return true
+        }
+        if (covered.length === 0) {
+            return false
+        }
+
+        var coveredMap = ({})
+        for (var index = 0; index < covered.length; index++) {
+            coveredMap[covered[index]] = true
+        }
+        for (var requestIndex = 0; requestIndex < requested.length; requestIndex++) {
+            if (coveredMap[requested[requestIndex]] !== true) {
+                return false
+            }
+        }
+        return true
+    }
+
+    function supportMapCoversFactorIds(supportMap, factorIds) {
+        var requested = normalizedSupportMapFactorIds(factorIds)
+        if (requested.length === 0) {
+            return true
+        }
+        if (!supportMap || typeof supportMap !== "object") {
+            return false
+        }
+
+        for (var index = 0; index < requested.length; index++) {
+            if (supportMap[requested[index]] === undefined) {
+                return false
+            }
+        }
+        return true
     }
 
     function refreshFactorSupportMap(includeAllFactors) {
@@ -863,6 +846,27 @@ Item {
             return
         }
         var cacheSnapshot = currentCacheSupportSnapshot()
+        var scopeFingerprint = normalizedSupportMapScopeFingerprint(cacheSnapshot)
+
+        if (scopeFingerprint === appliedSupportMapScopeFingerprint
+                && supportMapCoversFactorIds(root.factorSupportMapCache, factorIds)) {
+            console.log("因子支持校验命中当前缓存，跳过刷新")
+            if (factorSelectorDialog) {
+                factorSelectorDialog.supportMapLoading = false
+                factorSelectorDialog.factorSupportMap = root.factorSupportMapCache
+            }
+            return
+        }
+
+        if (pendingSupportMapRequestId > 0
+                && pendingSupportMapScopeFingerprint === scopeFingerprint
+                && factorIdListCoversFactorIds(pendingSupportMapFactorIds, factorIds)) {
+            console.log("因子支持校验请求进行中，跳过重复刷新")
+            if (factorSelectorDialog) {
+                factorSelectorDialog.supportMapLoading = true
+            }
+            return
+        }
 
         root.factorSupportMapCache = ({})
         if (factorSelectorDialog) {
@@ -870,7 +874,9 @@ Item {
             factorSelectorDialog.factorSupportMap = ({})
         }
 
-        factorBacktestController.beginFactorSupportMapRefresh(
+        pendingSupportMapScopeFingerprint = scopeFingerprint
+        pendingSupportMapFactorIds = normalizedSupportMapFactorIds(factorIds)
+        pendingSupportMapRequestId = factorBacktestController.beginFactorSupportMapRefresh(
             factorIds,
             cacheSnapshot.startDate,
             cacheSnapshot.endDate,
@@ -2008,6 +2014,10 @@ Item {
     property string compositeDraftName: ""
     property bool compositeDraftDirty: false
     property var factorSupportMapCache: ({})
+    property string appliedSupportMapScopeFingerprint: ""
+    property string pendingSupportMapScopeFingerprint: ""
+    property var pendingSupportMapFactorIds: []
+    property int pendingSupportMapRequestId: 0
     property double lastDatasetRefreshAtMs: 0
     property bool supportMapRefreshAllFactorsRequested: false
     property string lastAutoBenchmarkSymbol: ""
@@ -2108,6 +2118,7 @@ Item {
     // 回测控制器 - 使用属性绑定
     Bridge.FactorBacktestController {
         id: factorBacktestController
+        selectedStockPoolSymbols: currentCacheDatasetStockCodes()
 
         function controllerHasAggregatedResults() {
             return factorBacktestController.backtestResult
@@ -2149,6 +2160,13 @@ Item {
             if (!factorBacktestController.handleFactorSupportMapReady(requestId, supportMap || ({}))) {
                 return
             }
+
+            if (requestId === root.pendingSupportMapRequestId) {
+                root.appliedSupportMapScopeFingerprint = root.pendingSupportMapScopeFingerprint
+            }
+            root.pendingSupportMapRequestId = 0
+            root.pendingSupportMapScopeFingerprint = ""
+            root.pendingSupportMapFactorIds = []
 
             root.factorSupportMapCache = factorBacktestController.factorSupportMapCache
             if (factorSelectorDialog) {
@@ -2195,7 +2213,15 @@ Item {
             console.log("📊 最终 icMetrics:", stringifyLogValue(root.icMetrics))
             console.log("📊 最终 executionMetrics:", stringifyLogValue(root.executionMetrics))
 
-            root.analysisReportRequested(result)
+            var analysisReport = result && typeof result === "object" ? Object.assign({}, result) : ({})
+            var activeResult = currentDisplayedBacktestResult() || ({})
+            var activeConfig = activeResult.config || ({})
+            var activeFactorId = String(activeResult.factorId || activeConfig.factorId || "").trim()
+            if (activeFactorId.length > 0) {
+                analysisReport.activeAnalysisFactorId = activeFactorId
+            }
+
+            root.analysisReportRequested(analysisReport)
         }
         onBacktestFailed: function(error) {
             console.error("回测失败:", error)
@@ -2291,17 +2317,6 @@ Item {
         }
 
         factorBacktestController.dataSourceMode = normalizedMode
-
-        if (dataSourceComboBox && dataSourceComboBox.model) {
-            for (var index = 0; index < dataSourceComboBox.model.length; index++) {
-                if (dataSourceComboBox.model[index].value === normalizedMode) {
-                    if (dataSourceComboBox.currentIndex !== index) {
-                        dataSourceComboBox.currentIndex = index
-                    }
-                    break
-                }
-            }
-        }
     }
 
     function ensureUsableDataSourceMode() {
@@ -2459,42 +2474,40 @@ Item {
                 id: contentColumn
                 width: scrollView.width
                 spacing: 16
-            
-                // 标题区域
+
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 12
-                    
+
                     Text {
-                        text: "🧪 因子回测"
+                        text: "因子回测"
                         font.pixelSize: 24
                         font.weight: Font.Bold
                         color: "#F1F5F9"
                     }
-                    
+
                     Text {
                         text: "验证因子预测能力，监控回测进度"
                         font.pixelSize: 12
                         color: "#94A3B8"
                     }
-                    
+
                     Item { Layout.fillWidth: true }
                 }
-                
-                // 回测控制面板
+
                 Rectangle {
                     id: backtestControlPanel
                     Layout.fillWidth: true
                     Layout.preferredHeight: controlPanelContent.implicitHeight + 32
                     radius: 12
                     color: "#1E293B"
-                    
+
                     ColumnLayout {
                         id: controlPanelContent
                         anchors.fill: parent
                         anchors.margins: 16
                         spacing: 12
-                        
+
                         Rectangle {
                             Layout.fillWidth: true
                             radius: 10
@@ -3165,60 +3178,6 @@ Item {
                                 }
                             }
 
-                            // 数据源选择
-                            ColumnLayout {
-                                spacing: 4
-                                Layout.alignment: Qt.AlignTop
-                                Layout.preferredWidth: 128
-                                Layout.minimumWidth: 128
-                                
-                                Text {
-                                    text: "数据源"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-                                
-                                ComboBox {
-                                    id: dataSourceComboBox
-                                    Layout.preferredWidth: 128
-                                    Layout.preferredHeight: 36
-                                    model: [
-                                        { text: "缓存集", value: "cache" }
-                                    ]
-                                    textRole: "text"
-                                    enabled: !isBacktesting
-                                    opacity: enabled ? 1.0 : 0.45
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-
-                                    contentItem: Text {
-                                        text: dataSourceComboBox.displayText
-                                        font.pixelSize: 12
-                                        color: "#F1F5F9"
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-
-                                    onCurrentIndexChanged: {
-                                        if (currentIndex < 0 || currentIndex >= model.length) {
-                                            return
-                                        }
-
-                                        root.setDataSourceMode(model[currentIndex].value)
-                                    }
-                                }
-
-                                Text {
-                                    text: "仅支持缓存集回测（不提供数据库模式兜底）"
-                                    font.pixelSize: 10
-                                    color: "#64748B"
-                                }
-                            }
-
                             ColumnLayout {
                                 spacing: 4
                                 Layout.alignment: Qt.AlignTop
@@ -3329,10 +3288,16 @@ Item {
                                 }
 
                                 Text {
-                                    text: resolvedSelectedDatasetId() > 0 ? ("当前缓存: " + selectedCacheDatasetText()) : "请选择缓存集"
+                                    text: resolvedSelectedDatasetId() > 0 ? ("当前清洗缓存集: " + selectedCacheDatasetText()) : "请选择清洗缓存集"
                                     font.pixelSize: 10
                                     color: resolvedSelectedDatasetId() > 0 ? "#93C5FD" : "#64748B"
                                     wrapMode: Text.WordWrap
+                                }
+
+                                Text {
+                                    text: "因子回测仅支持清洗缓存集模式"
+                                    font.pixelSize: 10
+                                    color: "#64748B"
                                 }
                             }
 
@@ -3385,39 +3350,6 @@ Item {
                             Layout.topMargin: 2
 
                             Item { Layout.fillWidth: true }
-
-                            Rectangle {
-                                Layout.preferredWidth: 164
-                                Layout.minimumWidth: 164
-                                Layout.preferredHeight: 40
-                                radius: 8
-                                color: canStartStrategyBacktestWithCurrentFactor() ? "#0F766E" : "#334155"
-
-                                Row {
-                                    anchors.centerIn: parent
-                                    spacing: 8
-
-                                    Text {
-                                        text: "⇢"
-                                        font.pixelSize: 14
-                                        color: canStartStrategyBacktestWithCurrentFactor() ? "white" : "#94A3B8"
-                                    }
-
-                                    Text {
-                                        text: "转策略回测"
-                                        font.pixelSize: 14
-                                        font.weight: Font.Medium
-                                        color: canStartStrategyBacktestWithCurrentFactor() ? "white" : "#94A3B8"
-                                    }
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
-                                    enabled: canStartStrategyBacktestWithCurrentFactor()
-                                    onClicked: openStrategyBacktestWithCurrentFactor()
-                                }
-                            }
 
                             // 回测按钮
                             Rectangle {
@@ -3505,7 +3437,7 @@ Item {
                                     Layout.fillWidth: true
 
                                     Text {
-                                        text: "股票池覆盖与对比"
+                                        text: "因子结果对比"
                                         font.pixelSize: 14
                                         font.weight: Font.DemiBold
                                         color: "#F8FAFC"
@@ -3528,9 +3460,9 @@ Item {
 
                                     Repeater {
                                         model: [
-                                            { title: "上一轮股票池", count: root.resolveFactorBacktestStockPoolComparison().previousSymbols.length, accent: "#38BDF8" },
-                                            { title: "本次候选池", count: root.resolveFactorBacktestStockPoolComparison().currentSymbols.length, accent: "#34D399" },
-                                            { title: "交集", count: root.resolveFactorBacktestStockPoolComparison().intersectionSymbols.length, accent: "#F59E0B" }
+                                            { title: "上一轮基线", value: previousBacktestReport && Object.keys(previousBacktestReport).length > 0 ? "已存在" : "暂无", accent: "#38BDF8" },
+                                            { title: "本轮结果", value: currentDisplayedBacktestResult() ? "已生成" : "待回测", accent: "#34D399" },
+                                            { title: "比较维度", value: "指标/有效期", accent: "#F59E0B" }
                                         ]
 
                                         delegate: Rectangle {
@@ -3552,7 +3484,7 @@ Item {
                                                 }
 
                                                 Text {
-                                                    text: modelData.count + " 只"
+                                                    text: modelData.value
                                                     font.pixelSize: 13
                                                     font.weight: Font.DemiBold
                                                     color: modelData.accent
@@ -3755,7 +3687,7 @@ Item {
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: (failure && failure.reason) || "未知预检失败"
+                                                text: (failure && failure.reason) || "Preflight failed"
                                                 font.pixelSize: 11
                                                 color: "#FECACA"
                                                 elide: Text.ElideRight
@@ -3766,7 +3698,7 @@ Item {
 
                                 Text {
                                     visible: lastPreflightFailures.length > 2
-                                    text: "其余 " + (lastPreflightFailures.length - 2) + " 个失败项请在明细中查看"
+                                    text: "More failures: " + (lastPreflightFailures.length - 2)
                                     font.pixelSize: 10
                                     color: "#FCA5A5"
                                 }
@@ -5101,124 +5033,6 @@ Item {
         startSingleOrBatchBacktest()
     }
 
-    function buildCurrentFactorStrategyBacktestRequest() {
-        var factorIds = backtestEntryMode === 1
-            ? compositeChildIds().slice()
-            : normalizeSelectedFactorIds(selectedFactorIds || [])
-        var factorNames = []
-        for (var index = 0; index < factorIds.length; ++index) {
-            factorNames.push(resolveFactorDisplayName(factorIds[index]))
-        }
-
-        var factorMode = backtestEntryMode === 1
-            ? "composite"
-            : (factorIds.length > 1 ? "multi" : "single")
-        var strategyId = "factor_runtime_" + factorMode + "_" + factorIds.join("_")
-        var strategyName = factorMode === "composite"
-            ? "当前组合因子策略测试"
-            : (factorIds.length > 1
-                ? "当前多因子策略测试"
-                : (factorNames.length > 0 ? ("当前因子策略测试 · " + factorNames[0]) : "当前因子策略测试"))
-        var selectedStartDate = ""
-        var selectedEndDate = ""
-        if (cleanedDataController) {
-            if (cleanedDataController.currentStartDate && cleanedDataController.currentEndDate) {
-                selectedStartDate = cleanedDataController.currentStartDate
-                selectedEndDate = cleanedDataController.currentEndDate
-            }
-        }
-
-        var stockPool = currentCacheDatasetStockCodes()
-        var benchmarkSymbol = resolvedDatasetBenchmarkSymbol()
-        var factorAllocations = []
-        if (backtestEntryMode === 1) {
-            factorAllocations = compositeChildAllocations.map(function(item) {
-                return {
-                    factorId: String(item.factorId || ""),
-                    factorName: resolveFactorDisplayName(item.factorId),
-                    weight: Number(item.weight || 0)
-                }
-            })
-        } else {
-            var equalWeight = factorIds.length > 0 ? (1 / factorIds.length) : 0
-            factorAllocations = factorIds.map(function(factorId) {
-                return {
-                    factorId: String(factorId || ""),
-                    factorName: resolveFactorDisplayName(factorId),
-                    weight: equalWeight
-                }
-            })
-        }
-
-        var strategyData = {
-            strategy_id: strategyId,
-            strategy_name: strategyName,
-            description: "来自因子工作台的临时策略回测上下文",
-            factor_overlay: {
-                enabled: factorAllocations.length > 0,
-                targetPositionCount: 10,
-                minimumCompositeScore: 0,
-                allocations: factorAllocations.map(function(allocation) {
-                    return {
-                        factorId: String(allocation.factorId || ""),
-                        weight: Number(allocation.weight)
-                    }
-                }),
-                factorIds: factorIds.slice()
-            },
-            parameters: {
-                strategyExecutionKind: 1,
-                rebalance_days: 20,
-                momentum_period: 60,
-                positionSize: 0.1,
-                symbol_pool: stockPool.slice(),
-                factor_ids: factorIds.slice(),
-                factor_names: factorNames.slice(),
-                factor_count: factorIds.length,
-                factor_mode: factorMode,
-                portfolio_allocations_json: JSON.stringify(factorAllocations)
-            },
-            strategyScopeContext: {
-                strategyExecutionKind: 1,
-                factor_source: "factor_workbench",
-                factor_mode: factorMode,
-                factor_ids_json: JSON.stringify(factorIds),
-                factor_names_json: JSON.stringify(factorNames),
-                benchmark: benchmarkSymbol
-            }
-        }
-
-        return {
-            strategyId: strategyId,
-            strategyName: strategyName,
-            backtestConfig: {
-                startDate: selectedStartDate,
-                endDate: selectedEndDate,
-                dataSourceMode: selectedDataSourceMode,
-                benchmark: benchmarkSymbol,
-                symbol_pool: stockPool.slice(),
-                parameters: {
-                    symbol_pool: stockPool.slice()
-                },
-                transientStrategyData: strategyData
-            }
-        }
-    }
-
-    function openStrategyBacktestWithCurrentFactor() {
-        if (!canStartStrategyBacktestWithCurrentFactor()) {
-            return
-        }
-
-        applyRuntimeParamsDialog()
-        syncSelectedDatasetIndex()
-        var request = buildCurrentFactorStrategyBacktestRequest()
-        requestStrategyBacktest(
-            String(request.strategyId || ""),
-            String(request.strategyName || ""),
-            request.backtestConfig || ({}))
-    }
-    
     // 打开因子选择对话框 - 简化版本
     function openFactorSelector() {
         console.log("打开因子选择对话框")

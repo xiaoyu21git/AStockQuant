@@ -2,20 +2,23 @@ import QtQuick 2.15
 
 Rectangle {
     id: sortButton
-    implicitWidth: 80
+    implicitWidth: 92
     implicitHeight: 40
-    radius: 8  // borderRadiusMedium
-    color: "#334155"  // tertiaryBg
-    border.color: "#64748B"  // borderLight
+    radius: 8
+    color: active ? "#102033" : "#0B1220"
+    border.color: active ? "#2563EB" : "#334155"
+    border.width: 1
     
     // 属性
     property bool hovered: false
+    property bool active: false
     
     // 信号
     signal clicked()
     
     // 颜色常量
-    readonly property color textSecondary: "#94A3B8"
+    readonly property color activeText: "#DBEAFE"
+    readonly property color inactiveText: "#CBD5E1"
     
     Row {
         anchors.centerIn: parent
@@ -23,16 +26,18 @@ Rectangle {
         
         // 排序图标
         Text {
-            text: "⇅"
+            text: "序"
             font.pixelSize: 14
-            color: textSecondary
+            font.weight: Font.DemiBold
+            color: active ? activeText : inactiveText
         }
         
         // 文本
         Text {
             text: "排序"
             font.pixelSize: 14
-            color: textSecondary
+            font.weight: Font.Medium
+            color: active ? activeText : inactiveText
         }
     }
     
@@ -47,13 +52,12 @@ Rectangle {
         onClicked: sortButton.clicked()
     }
     
-    // 悬停效果
     states: State {
-        when: hovered
-        PropertyChanges { target: sortButton; scale: 1.05 }
-    }
-    
-    transitions: Transition {
-        NumberAnimation { properties: "scale"; duration: 150 }
+        when: hovered && !active
+        PropertyChanges {
+            target: sortButton
+            color: "#111C2D"
+            border.color: "#475569"
+        }
     }
 }

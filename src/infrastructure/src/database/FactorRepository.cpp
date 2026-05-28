@@ -5,9 +5,6 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QSqlRecord>
-#include <QJsonDocument>
-#include <QJsonArray>
-#include <QJsonObject>
 #include <QDebug>
 #include <QThread>
 #include <QDateTime>
@@ -16,57 +13,14 @@ using namespace astock::database;
 
 namespace {
 
-bool hasTable(QSqlDatabase& db, const QString& tableName)
+QString normalizedIsoDateText(const QVariant& value)
 {
-    const QStringList tableNames = db.tables();
-    for (const QString& existing : tableNames) {
-        if (existing.compare(tableName, Qt::CaseInsensitive) == 0) {
-            return true;
-        }
-    }
-    return false;
+    return value.toString().trimmed();
 }
 
-bool columnExists(QSqlDatabase& db, const QString& tableName, const QString& columnName)
+QVariant nullableTextValue(const QString& text)
 {
-    QSqlQuery query(db);
-    query.prepare(
-        "SELECT COUNT(*) FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name");
-    query.bindValue(":table_name", tableName);
-    query.bindValue(":column_name", columnName);
-    if (!query.exec()) {
-        qWarning() << "FactorRepository: Failed to inspect column" << tableName << columnName
-                   << query.lastError().text();
-        return false;
-    }
-
-    return query.next() && query.value(0).toInt() > 0;
-}
-
-bool ensureFactorSchema(QSqlDatabase& db)
-{
-    if (!columnExists(db, QStringLiteral("factors"), QStringLiteral("update_date"))) {
-        QSqlQuery query(db);
-        if (!query.exec(
-                "ALTER TABLE factors ADD COLUMN update_date DATETIME DEFAULT CURRENT_TIMESTAMP "
-                "ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日期' AFTER create_date")) {
-            qWarning() << "FactorRepository: Failed to add factors.update_date:" << query.lastError().text();
-            return false;
-        }
-    }
-
-    if (!columnExists(db, QStringLiteral("factors"), QStringLiteral("core_rating"))) {
-        QSqlQuery query(db);
-        if (!query.exec(
-                "ALTER TABLE factors ADD COLUMN core_rating INT NOT NULL DEFAULT 0 "
-                "COMMENT '核心评级' AFTER ir_value")) {
-            qWarning() << "FactorRepository: Failed to add factors.core_rating:" << query.lastError().text();
-            return false;
-        }
-    }
-
-    return true;
+    return text.trimmed().isEmpty() ? QVariant() : QVariant(text.trimmed());
 }
 
 }
@@ -95,32 +49,7 @@ bool FactorRepository::initialize()
         // 连接池配置应该由应用层（如 DatabaseConnectionManager）负责
         
         // 从连接池获取连接（使用 RAII 模式）
-        ScopedConnection conn;
-        if (!conn.isValid()) {
-            qCritical() << "Failed to get database connection for initialization";
-            return false;
-        }
-
-        QSqlDatabase& db = conn.get();
-        const QStringList requiredTables = {
-            QStringLiteral("factors"),
-            QStringLiteral("factor_tags")
-        };
-        for (const QString& tableName : requiredTables) {
-            if (!hasTable(db, tableName)) {
-                qCritical() << "FactorRepository::initialize: 缺少必需数据表:" << tableName;
-                return false;
-            }
-        }
-
-        if (!ensureFactorSchema(db)) {
-            qCritical() << "FactorRepository::initialize: 因子表 schema 迁移失败";
-            return false;
-        }
-        
-        // 检查表是否存在（如果需要的话）
-        // 这里可以添加表检查逻辑，但为了简化，我们只检查连接是否有效
-        
+         
         m_initialized = true;
         qDebug() << "✅ FactorRepository::initialize: 数据库初始化完成";
         return true;
@@ -189,9 +118,11 @@ std::vector<QVariantMap> FactorRepository::findAll()
         QSqlQuery query(db);
         // 排除JSON列避免复杂处理
         if (!query.exec("SELECT factor_id, factor_name, display_name, major_category, "
-                "sub_category, description, ic_value, ir_value, core_rating, validity_days, "
-                "turnover_rate, is_recommended, is_favorite, status, creator, "
-                "create_date, update_date FROM factors ORDER BY create_date DESC")) {
+            "sub_category, description, ic_value, ir_value, core_rating, validity_days, "
+            "actual_start_date, effective_start_date, effective_end_date, "
+            "warmup_trimmed_trading_days, turnover_rate, "
+            "is_recommended, is_favorite, status, creator, create_date, update_date "
+            "FROM factors ORDER BY create_date DESC")) {
             qWarning() << "Query failed:" << query.lastError().text();
             return results;
         }
@@ -493,7 +424,8 @@ bool FactorRepository::save(const QVariantMap& factor)
                 UPDATE factors SET 
                     factor_name = ?, display_name = ?, major_category = ?,
                     sub_category = ?, description = ?, ic_value = ?, ir_value = ?, core_rating = ?,
-                    validity_days = ?, turnover_rate = ?, is_recommended = ?,
+                    validity_days = ?, actual_start_date = ?, effective_start_date = ?, effective_end_date = ?,
+                    warmup_trimmed_trading_days = ?, turnover_rate = ?, is_recommended = ?,
                     is_favorite = ?, status = ?, update_date = CURRENT_TIMESTAMP
                 WHERE factor_id = ?
             )");
@@ -507,6 +439,10 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.addBindValue(factor["irValue"].toDouble());
             query.addBindValue(factor.value("coreRating").toInt());
             query.addBindValue(factor["validityDays"].toInt());
+            query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("actualStartDate"))));
+            query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveStartDate"))));
+            query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveEndDate"))));
+            query.addBindValue(factor.value("warmupTrimmedTradingDays").toInt());
             query.addBindValue(factor["turnoverRate"].toDouble());
             query.addBindValue(factor["isRecommended"].toBool());
             query.addBindValue(factor["isFavorite"].toBool());
@@ -518,9 +454,10 @@ bool FactorRepository::save(const QVariantMap& factor)
                 INSERT INTO factors (
                     factor_id, factor_name, display_name, major_category,
                     sub_category, description, ic_value, ir_value, core_rating,
-                    validity_days, turnover_rate, is_recommended, is_favorite,
-                    status, creator, create_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    validity_days, actual_start_date, effective_start_date, effective_end_date,
+                    warmup_trimmed_trading_days, turnover_rate,
+                    is_recommended, is_favorite, status, creator, create_date
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             )");
             
             query.addBindValue(factorId);
@@ -533,6 +470,10 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.addBindValue(factor["irValue"].toDouble());
             query.addBindValue(factor.value("coreRating").toInt());
             query.addBindValue(factor["validityDays"].toInt());
+            query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("actualStartDate"))));
+            query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveStartDate"))));
+            query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveEndDate"))));
+            query.addBindValue(factor.value("warmupTrimmedTradingDays").toInt());
             query.addBindValue(factor["turnoverRate"].toDouble());
             query.addBindValue(factor["isRecommended"].toBool());
             query.addBindValue(factor["isFavorite"].toBool());
@@ -820,6 +761,18 @@ QVariantMap FactorRepository::rowToFactorMap(const QSqlQuery& query)
     factor["irValue"] = query.value("ir_value").toDouble();
     factor["coreRating"] = record.contains("core_rating") ? query.value("core_rating").toInt() : 0;
     factor["validityDays"] = query.value("validity_days").toInt();
+    factor["actualStartDate"] = record.contains("actual_start_date")
+        ? normalizedIsoDateText(query.value("actual_start_date"))
+        : QString();
+    factor["effectiveStartDate"] = record.contains("effective_start_date")
+        ? normalizedIsoDateText(query.value("effective_start_date"))
+        : QString();
+    factor["effectiveEndDate"] = record.contains("effective_end_date")
+        ? normalizedIsoDateText(query.value("effective_end_date"))
+        : QString();
+    factor["warmupTrimmedTradingDays"] = record.contains("warmup_trimmed_trading_days")
+        ? query.value("warmup_trimmed_trading_days").toInt()
+        : 0;
     factor["turnoverRate"] = query.value("turnover_rate").toDouble();
     factor["isRecommended"] = query.value("is_recommended").toBool();
     factor["isFavorite"] = query.value("is_favorite").toBool();
@@ -910,7 +863,8 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
             UPDATE factors SET 
                 factor_name = ?, display_name = ?, major_category = ?,
                 sub_category = ?, description = ?, ic_value = ?, ir_value = ?, core_rating = ?,
-                validity_days = ?, turnover_rate = ?, is_recommended = ?,
+                validity_days = ?, actual_start_date = ?, effective_start_date = ?, effective_end_date = ?,
+                warmup_trimmed_trading_days = ?, turnover_rate = ?, is_recommended = ?,
                 is_favorite = ?, status = ?, update_date = CURRENT_TIMESTAMP
             WHERE factor_id = ?
         )");
@@ -924,6 +878,10 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.addBindValue(factor["irValue"].toDouble());
         query.addBindValue(factor.value("coreRating").toInt());
         query.addBindValue(factor["validityDays"].toInt());
+        query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("actualStartDate"))));
+        query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveStartDate"))));
+        query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveEndDate"))));
+        query.addBindValue(factor.value("warmupTrimmedTradingDays").toInt());
         query.addBindValue(factor["turnoverRate"].toDouble());
         query.addBindValue(factor["isRecommended"].toBool());
         query.addBindValue(factor["isFavorite"].toBool());
@@ -935,9 +893,10 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
             INSERT INTO factors (
                 factor_id, factor_name, display_name, major_category,
                 sub_category, description, ic_value, ir_value, core_rating,
-                validity_days, turnover_rate, is_recommended, is_favorite,
-                status, creator, create_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                validity_days, actual_start_date, effective_start_date, effective_end_date,
+                warmup_trimmed_trading_days, turnover_rate,
+                is_recommended, is_favorite, status, creator, create_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )");
         
         query.addBindValue(factorId);
@@ -950,6 +909,10 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.addBindValue(factor["irValue"].toDouble());
         query.addBindValue(factor.value("coreRating").toInt());
         query.addBindValue(factor["validityDays"].toInt());
+        query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("actualStartDate"))));
+        query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveStartDate"))));
+        query.addBindValue(nullableTextValue(normalizedIsoDateText(factor.value("effectiveEndDate"))));
+        query.addBindValue(factor.value("warmupTrimmedTradingDays").toInt());
         query.addBindValue(factor["turnoverRate"].toDouble());
         query.addBindValue(factor["isRecommended"].toBool());
         query.addBindValue(factor["isFavorite"].toBool());

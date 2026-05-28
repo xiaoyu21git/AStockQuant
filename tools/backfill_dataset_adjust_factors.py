@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import datetime as dt
 from pathlib import Path
 import sys
+import time
 from typing import Iterable, Optional
 
 import pandas as pd
@@ -25,11 +27,16 @@ MYSQL_CONFIG = {
     "charset": "utf8mb4",
 }
 
+MAX_FETCH_RETRIES = 3
+DEFAULT_WORKERS = 8
+PROGRESS_HEARTBEAT_SECONDS = 30
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="补齐 dataset 与 daily_bar 的日级复权因子")
     parser.add_argument("--dataset-json", required=True, help="dataset 数据文件路径，例如 bin/Debug/cache/datasets/dataset_62_data.json")
     parser.add_argument("--write-db", action="store_true", help="同时把补齐后的复权因子回写到 daily_bar")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS, help="按标的并发补齐复权因子，默认 8")
     return parser.parse_args()
 
 
@@ -117,7 +124,7 @@ def build_effective_adjust_factor_frame(symbol: str, trade_dates: Iterable[dt.da
 
     start_date = ordered_dates[0]
     end_date = ordered_dates[-1]
-    adjust_factor_by_date = _fetch_daily_adjust_factor_map(symbol, start_date, end_date)
+    adjust_factor_by_date = fetch_adjust_factor_map_with_retry(symbol, start_date, end_date)
     seed_pre_adjust_factor, seed_post_adjust_factor = fetch_previous_adjust_factors_from_db(symbol, start_date)
     expanded_adjust_factor_by_date = expand_adjust_factors_for_trade_dates(
         ordered_dates,
@@ -138,22 +145,115 @@ def build_effective_adjust_factor_frame(symbol: str, trade_dates: Iterable[dt.da
     )
 
     existing_adjust_df = fetch_existing_adjust_factors_from_db(symbol, start_date, end_date)
-    if existing_adjust_df.empty:
-        return effective_adjust_df
+    return merge_adjust_factor_frames(ordered_dates, effective_adjust_df, pd.DataFrame(columns=["trade_date", "pre_adjust_factor", "post_adjust_factor"]), existing_adjust_df)
 
-    merged = effective_adjust_df.merge(
-        existing_adjust_df.rename(
+
+def fetch_adjust_factor_map_with_retry(symbol: str, start_date: dt.date, end_date: dt.date) -> dict[dt.date, dict[str, Optional[float]]]:
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_FETCH_RETRIES + 1):
+        try:
+            adjust_factor_by_date = _fetch_daily_adjust_factor_map(symbol, start_date, end_date)
+            if adjust_factor_by_date:
+                if attempt > 1:
+                    print(
+                        f"[recover] dataset adjust factor recovered {symbol} attempt={attempt}/{MAX_FETCH_RETRIES} fetched_dates={len(adjust_factor_by_date)}",
+                        flush=True,
+                    )
+                return adjust_factor_by_date
+            last_error = RuntimeError("empty adjust factor result")
+        except Exception as exc:
+            last_error = exc
+        if attempt < MAX_FETCH_RETRIES:
+            print(
+                f"[retry] dataset adjust factor {symbol} attempt={attempt}/{MAX_FETCH_RETRIES} error={last_error}",
+                flush=True,
+            )
+            time.sleep(0.75 * attempt)
+    if last_error is not None:
+        print(f"[warn] dataset adjust factor failed {symbol}: {last_error}", flush=True)
+    return {}
+
+
+def merge_adjust_factor_frames(
+    ordered_dates: list[dt.date],
+    fetched_adjust_df: pd.DataFrame,
+    source_adjust_df: pd.DataFrame,
+    existing_adjust_df: pd.DataFrame,
+) -> pd.DataFrame:
+    merged = pd.DataFrame({"trade_date": ordered_dates})
+    sources = [
+        ("fetched", fetched_adjust_df),
+        ("source", source_adjust_df),
+        ("existing", existing_adjust_df),
+    ]
+    for prefix, source_df in sources:
+        if source_df.empty:
+            continue
+        merged = merged.merge(
+            source_df.rename(
+                columns={
+                    "pre_adjust_factor": f"{prefix}_pre_adjust_factor",
+                    "post_adjust_factor": f"{prefix}_post_adjust_factor",
+                }
+            ),
+            on="trade_date",
+            how="left",
+        )
+
+    merged["pre_adjust_factor"] = pd.Series([pd.NA] * len(merged), dtype="Float64")
+    merged["post_adjust_factor"] = pd.Series([pd.NA] * len(merged), dtype="Float64")
+    for prefix in ["fetched", "source", "existing"]:
+        pre_column = f"{prefix}_pre_adjust_factor"
+        post_column = f"{prefix}_post_adjust_factor"
+        if pre_column in merged.columns:
+            merged[pre_column] = pd.to_numeric(merged[pre_column], errors="coerce").astype("Float64")
+            merged["pre_adjust_factor"] = merged["pre_adjust_factor"].fillna(merged[pre_column])
+        if post_column in merged.columns:
+            merged[post_column] = pd.to_numeric(merged[post_column], errors="coerce").astype("Float64")
+            merged["post_adjust_factor"] = merged["post_adjust_factor"].fillna(merged[post_column])
+    return merged[["trade_date", "pre_adjust_factor", "post_adjust_factor"]]
+
+
+def process_symbol_group(symbol: str, group: pd.DataFrame, write_db: bool) -> tuple[pd.DataFrame, int, int, list[tuple[Optional[float], Optional[float], str, dt.date]]]:
+    patched = group.copy()
+    patched["__source_index"] = patched.index
+    effective_adjust_df = build_effective_adjust_factor_frame(symbol, patched["trade_date"].tolist())
+    if effective_adjust_df.empty:
+        return patched, 0, 0, []
+
+    patched = patched.merge(
+        effective_adjust_df.rename(
             columns={
-                "pre_adjust_factor": "existing_pre_adjust_factor",
-                "post_adjust_factor": "existing_post_adjust_factor",
+                "pre_adjust_factor": "resolved_pre_adjust_factor",
+                "post_adjust_factor": "resolved_post_adjust_factor",
             }
         ),
         on="trade_date",
         how="left",
     )
-    merged["pre_adjust_factor"] = merged["pre_adjust_factor"].combine_first(merged["existing_pre_adjust_factor"])
-    merged["post_adjust_factor"] = merged["post_adjust_factor"].combine_first(merged["existing_post_adjust_factor"])
-    return merged[["trade_date", "pre_adjust_factor", "post_adjust_factor"]]
+
+    pre_valid = pd.to_numeric(patched.get("pre_adjust_factor"), errors="coerce") > 0
+    post_valid = pd.to_numeric(patched.get("post_adjust_factor"), errors="coerce") > 0
+    filled_pre = int((~pre_valid & patched["resolved_pre_adjust_factor"].notna()).sum())
+    filled_post = int((~post_valid & patched["resolved_post_adjust_factor"].notna()).sum())
+
+    patched.loc[~pre_valid, "pre_adjust_factor"] = patched.loc[~pre_valid, "resolved_pre_adjust_factor"]
+    patched.loc[~post_valid, "post_adjust_factor"] = patched.loc[~post_valid, "resolved_post_adjust_factor"]
+
+    db_updates: list[tuple[Optional[float], Optional[float], str, dt.date]] = []
+    if write_db:
+        for _, row in patched.iterrows():
+            db_updates.append(
+                (
+                    normalize_factor(row.get("pre_adjust_factor")),
+                    normalize_factor(row.get("post_adjust_factor")),
+                    str(row["symbol"]),
+                    row["trade_date"],
+                )
+            )
+
+    patched = patched.drop(columns=["resolved_pre_adjust_factor", "resolved_post_adjust_factor"])
+    return patched, filled_pre, filled_post, db_updates
 
 
 def update_daily_bar_adjust_factors(rows: list[tuple[Optional[float], Optional[float], str, dt.date]]) -> int:
@@ -200,48 +300,54 @@ def main() -> None:
     total_filled_post = 0
     db_updates: list[tuple[Optional[float], Optional[float], str, dt.date]] = []
     patched_groups: list[pd.DataFrame] = []
+    grouped_items = list(df.groupby("symbol", sort=False))
+    resolved_workers = max(1, min(args.workers, len(grouped_items) or 1))
+    print(
+        f"[stage] dataset adjust factor backfill symbols={len(grouped_items)} workers={resolved_workers} write_db={args.write_db}",
+        flush=True,
+    )
 
-    for symbol, group in df.groupby("symbol", sort=False):
-        patched = group.copy()
-        effective_adjust_df = build_effective_adjust_factor_frame(symbol, patched["trade_date"].tolist())
-        if effective_adjust_df.empty:
-            patched_groups.append(patched)
-            continue
+    with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
+        future_to_symbol = {
+            executor.submit(process_symbol_group, symbol, group, args.write_db): symbol
+            for symbol, group in grouped_items
+        }
+        pending_futures = set(future_to_symbol)
+        completed_count = 0
+        while pending_futures:
+            completed_batch, pending_futures = wait(
+                pending_futures,
+                timeout=PROGRESS_HEARTBEAT_SECONDS,
+                return_when=FIRST_COMPLETED,
+            )
+            if not completed_batch:
+                print(
+                    f"[heartbeat] dataset adjust factor running completed={completed_count}/{len(future_to_symbol)} pending={len(pending_futures)} filled_pre={total_filled_pre} filled_post={total_filled_post}",
+                    flush=True,
+                )
+                continue
 
-        patched = patched.merge(
-            effective_adjust_df.rename(
-                columns={
-                    "pre_adjust_factor": "resolved_pre_adjust_factor",
-                    "post_adjust_factor": "resolved_post_adjust_factor",
-                }
-            ),
-            on="trade_date",
-            how="left",
-        )
-
-        pre_valid = pd.to_numeric(patched.get("pre_adjust_factor"), errors="coerce") > 0
-        post_valid = pd.to_numeric(patched.get("post_adjust_factor"), errors="coerce") > 0
-        total_filled_pre += int((~pre_valid & patched["resolved_pre_adjust_factor"].notna()).sum())
-        total_filled_post += int((~post_valid & patched["resolved_post_adjust_factor"].notna()).sum())
-
-        patched.loc[~pre_valid, "pre_adjust_factor"] = patched.loc[~pre_valid, "resolved_pre_adjust_factor"]
-        patched.loc[~post_valid, "post_adjust_factor"] = patched.loc[~post_valid, "resolved_post_adjust_factor"]
-
-        if args.write_db:
-            for _, row in patched.iterrows():
-                db_updates.append(
-                    (
-                        normalize_factor(row.get("pre_adjust_factor")),
-                        normalize_factor(row.get("post_adjust_factor")),
-                        str(row["symbol"]),
-                        row["trade_date"],
+            for future in completed_batch:
+                completed_count += 1
+                symbol = future_to_symbol[future]
+                patched, filled_pre, filled_post, symbol_updates = future.result()
+                total_filled_pre += filled_pre
+                total_filled_post += filled_post
+                patched_groups.append(patched)
+                db_updates.extend(symbol_updates)
+                if completed_count == 1 or completed_count % 20 == 0:
+                    print(
+                        f"[progress] dataset adjust factor completed={completed_count}/{len(future_to_symbol)} filled_pre={total_filled_pre} filled_post={total_filled_post}",
+                        flush=True,
                     )
+                print(
+                    f"[symbol] dataset adjust factor symbol={symbol} filled_pre={filled_pre} filled_post={filled_post}",
+                    flush=True,
                 )
 
-        patched = patched.drop(columns=["resolved_pre_adjust_factor", "resolved_post_adjust_factor"])
-        patched_groups.append(patched)
-
     patched_df = pd.concat(patched_groups, ignore_index=True)
+    if "__source_index" in patched_df.columns:
+        patched_df = patched_df.sort_values("__source_index").drop(columns=["__source_index"]).reset_index(drop=True)
     patched_df["trade_date"] = pd.to_datetime(patched_df["trade_date"]).dt.strftime("%Y-%m-%d")
     patched_df.to_json(dataset_path, orient="records", force_ascii=False, indent=2)
 

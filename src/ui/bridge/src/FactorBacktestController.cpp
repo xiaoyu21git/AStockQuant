@@ -1,6 +1,7 @@
 ﻿#include "FactorBacktestController.h"
 #include "AppStoragePaths.h"
 #include "DataServiceCache.h"
+#include "../../../application/trading/include/UnifiedFactorBacktestPreviewService.h"
 #include "FactorBacktestWarmupUtils.h"
 #include "FactorBacktestResultContract.h"
 #include "FactorBacktestPreflightUtils.h"
@@ -9,6 +10,7 @@
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "RiskConfigService.h"
+#include "../../../domain/backtest/include/DatabaseStockDataProvider.h"
 #include "../../../domain/factor/include/CompositeFactor.h"
 #include "../../../domain/factor/include/CustomFactor.h"
 #include "../../../domain/factor/include/DividendFactor.h"
@@ -349,29 +351,6 @@ struct HistoricalIndexConstituentRange {
     bool openEnded = false;
 };
 
-bool indexConstituentsHasAnnouncementDateColumn(
-    const std::shared_ptr<astock::database::QtMySQLDatabase>& database)
-{
-    if (!database) {
-        return false;
-    }
-
-    try {
-        const auto result = database->executeQuery(
-            QStringLiteral(
-                "SELECT 1 "
-                "FROM INFORMATION_SCHEMA.COLUMNS "
-                "WHERE TABLE_SCHEMA = DATABASE() "
-                "  AND TABLE_NAME = 'index_constituents' "
-                "  AND COLUMN_NAME = 'announcement_date' "
-                "LIMIT 1"),
-            {});
-        return result.rowCount() > 0;
-    } catch (const std::exception&) {
-        return false;
-    }
-}
-
 QDate queryNextTradingDay(
     const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
     const QDate& anchorDate)
@@ -428,19 +407,14 @@ std::vector<HistoricalIndexConstituentRange> queryHistoricalIndexConstituentRang
         return ranges;
     }
 
-    const bool hasAnnouncementDate = indexConstituentsHasAnnouncementDateColumn(database);
-
     const auto result = database->executeQuery(
         QStringLiteral(
-            "SELECT constituent_symbol, %1 start_date, end_date "
+            "SELECT constituent_symbol, announcement_date, start_date, end_date "
             "FROM index_constituents "
             "WHERE index_symbol = :index_symbol "
             "  AND start_date <= :end_date "
             "  AND (end_date IS NULL OR end_date >= :start_date) "
-            "ORDER BY constituent_symbol ASC, start_date ASC")
-            .arg(hasAnnouncementDate
-                     ? QStringLiteral("announcement_date, ")
-                     : QStringLiteral("NULL AS announcement_date, ")),
+            "ORDER BY constituent_symbol ASC, start_date ASC"),
         {{QStringLiteral(":index_symbol"), indexSymbol.trimmed()},
          {QStringLiteral(":start_date"), startDate.toString(QStringLiteral("yyyy-MM-dd"))},
          {QStringLiteral(":end_date"), endDate.toString(QStringLiteral("yyyy-MM-dd"))}});
@@ -768,8 +742,98 @@ QVariantMap buildConfigMap(const QString& requestedFactorId,
     risk::config::setSlippageRate(config, result.config.slippageRate);
     risk::config::setRiskFreeRate(config, result.config.riskFreeRate);
     risk::config::setBenchmarkSymbol(config, QString::fromStdString(result.config.benchmarkSymbol));
+    config[QStringLiteral("initialCapital")] = result.config.initialCapital;
+    config[QStringLiteral("dataSourceMode")] = QString::fromStdString(result.config.dataSourceMode);
     config[QStringLiteral("datasetId")] = result.config.datasetId;
     return config;
+}
+
+QString factorTradingPreviewStatusText(application::trading::FactorBacktestTradingPreviewSummary::Status status)
+{
+    switch (status) {
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::InvalidBacktestResult:
+        return QStringLiteral("invalid_backtest_result");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::MissingFactorSnapshot:
+        return QStringLiteral("missing_factor_snapshot");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::InvalidBatch:
+        return QStringLiteral("invalid_batch");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::InvalidContext:
+        return QStringLiteral("invalid_context");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::Warn:
+        return QStringLiteral("warn");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::Blocked:
+        return QStringLiteral("blocked");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::ForceReduce:
+        return QStringLiteral("force_reduce");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::TradingHalt:
+        return QStringLiteral("trading_halt");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::NoOrderPlan:
+        return QStringLiteral("no_order_plan");
+    case application::trading::FactorBacktestTradingPreviewSummary::Status::Pass:
+    default:
+        return QStringLiteral("pass");
+    }
+}
+
+QVariantMap buildFactorTradingPreviewDiagnostics(const factor::BacktestResult& result)
+{
+    QVariantMap diagnostics;
+    const application::trading::UnifiedFactorBacktestPreviewService previewService;
+    domain::backtest::DatabaseStockDataProvider stockDataProvider(nullptr);
+    const application::trading::FactorBacktestTradingPreviewSummary preview = previewService.preview(result, &stockDataProvider);
+
+    QVariantMap previewMap;
+    previewMap[QStringLiteral("status")] = factorTradingPreviewStatusText(preview.status);
+    previewMap[QStringLiteral("message")] = preview.message;
+    previewMap[QStringLiteral("targetPositionCount")] = preview.targetPositionCount;
+    previewMap[QStringLiteral("orderPlanCount")] = preview.orderPlanCount;
+    previewMap[QStringLiteral("acceptedOrderCount")] = preview.acceptedOrderCount;
+    previewMap[QStringLiteral("fillCount")] = preview.fillCount;
+    previewMap[QStringLiteral("riskReason")] = preview.riskReasonCode.isValid() ? preview.riskReasonCode.text() : QString();
+    diagnostics[QStringLiteral("tradingPreview")] = previewMap;
+    return diagnostics;
+}
+
+QVariantList factorBacktestStringList(const std::vector<std::string>& values)
+{
+    QVariantList list;
+    list.reserve(static_cast<int>(values.size()));
+    for (const auto& value : values) {
+        list.append(QString::fromStdString(value));
+    }
+    return list;
+}
+
+QVariantList factorBacktestDoubleList(const std::vector<double>& values)
+{
+    QVariantList list;
+    list.reserve(static_cast<int>(values.size()));
+    for (double value : values) {
+        list.append(value);
+    }
+    return list;
+}
+
+QVariantMap buildFormalTradingExecutionMap(const factor::BacktestResult& result)
+{
+    const factor::FormalTradingExecution& formalExecution = result.formalTradingExecution;
+    QVariantMap map;
+    map[QStringLiteral("status")] = QString::fromStdString(formalExecution.status);
+    map[QStringLiteral("message")] = QString::fromStdString(formalExecution.message);
+    map[QStringLiteral("executionDates")] = factorBacktestStringList(formalExecution.executionDates);
+    map[QStringLiteral("totalAssetSeries")] = factorBacktestDoubleList(formalExecution.totalAssetSeries);
+    map[QStringLiteral("cashSeries")] = factorBacktestDoubleList(formalExecution.cashSeries);
+    map[QStringLiteral("marketValueSeries")] = factorBacktestDoubleList(formalExecution.marketValueSeries);
+    map[QStringLiteral("scheduledRebalanceCount")] = formalExecution.scheduledRebalanceCount;
+    map[QStringLiteral("executedRebalanceCount")] = formalExecution.executedRebalanceCount;
+    map[QStringLiteral("blockedRebalanceCount")] = formalExecution.blockedRebalanceCount;
+    map[QStringLiteral("acceptedOrderCount")] = formalExecution.acceptedOrderCount;
+    map[QStringLiteral("fillCount")] = formalExecution.fillCount;
+    map[QStringLiteral("endingCash")] = formalExecution.endingCash;
+    map[QStringLiteral("endingMarketValue")] = formalExecution.endingMarketValue;
+    map[QStringLiteral("endingTotalAsset")] = formalExecution.endingTotalAsset;
+    map[QStringLiteral("available")] = !formalExecution.status.empty() && formalExecution.status != "NOT_RUN";
+    return map;
 }
 
 QString persistedResultFilePathForController()
@@ -833,24 +897,6 @@ QString buildSymbolInClause(const QStringList& symbols)
         escapedSymbols.append(escapeSqlLiteral(symbol));
     }
     return escapedSymbols.join(QStringLiteral(", "));
-}
-
-bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
-                    const QString& tableName,
-                    const QString& columnName)
-{
-    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const auto result = database->executeQuery(
-        QStringLiteral(
-            "SELECT COUNT(*) AS count "
-            "FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
-        {{QStringLiteral(":table_name"), tableName.trimmed()},
-         {QStringLiteral(":column_name"), columnName.trimmed()}});
-    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
 }
 
 bool isDailyBarWarmupField(const QString& rawField)
@@ -1064,20 +1110,11 @@ QVariantList queryDailyBarWarmupRows(
         return {};
     }
 
-    const bool hasIndustryCodeColumn = tableHasColumn(
-        database,
-        QStringLiteral("symbol_info"),
-        QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
-    QString sql = hasIndustryCodeColumn
-        ? QStringLiteral(
-              "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
-              "FROM daily_bar d "
-              "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
-              "WHERE d.trade_date BETWEEN :start_date AND :end_date")
-        : QStringLiteral(
-              "SELECT d.* "
-              "FROM daily_bar d "
-              "WHERE d.trade_date BETWEEN :start_date AND :end_date");
+    QString sql = QStringLiteral(
+        "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
+        "FROM daily_bar d "
+        "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
+        "WHERE d.trade_date BETWEEN :start_date AND :end_date");
     if (!symbols.isEmpty()) {
         sql += QStringLiteral(" AND d.symbol IN (%1)").arg(buildSymbolInClause(symbols));
     }
@@ -2377,9 +2414,11 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
     config.datasetId = datasetId;
     config.startDate = trimmedStartDate.toStdString();
     config.endDate = trimmedEndDate.toStdString();
+    config.dataSourceMode = normalizedDataSourceMode(dataSourceMode).toStdString();
     config.numGroups = parseGroupCount(groupText);
 
     const QVariantMap runtimeParams = backtestRuntimeParams;
+    config.initialCapital = runtimeParams.value(QStringLiteral("initialCapital")).toDouble();
     config.marketEnvironmentProfile = factor::marketEnvironmentProfileFromIndex(
         risk::config::marketEnvironmentProfile(
             runtimeParams,
@@ -2613,6 +2652,8 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     map[QStringLiteral("status")] = QString::fromStdString(result.status);
     map[QStringLiteral("config")] = buildConfigMap(requestedFactorId, result);
     map[QStringLiteral("metrics")] = buildMetricSectionsMap(result);
+    map[QStringLiteral("diagnostics")] = buildFactorTradingPreviewDiagnostics(result);
+    map[QStringLiteral("formalTrading")] = buildFormalTradingExecutionMap(result);
     map[QStringLiteral("results")] = QVariantList{};
     map[QStringLiteral("factorIds")] = QVariantList{};
     return map;

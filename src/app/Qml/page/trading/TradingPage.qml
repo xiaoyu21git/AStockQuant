@@ -2685,6 +2685,10 @@ Item {
             }
         }
 
+        if (marketBridgeReady && marketDataService && marketDataService.activateDefaultWatchlist) {
+            marketDataService.activateDefaultWatchlist()
+        }
+
         if (uiLifecycleCoordinator && typeof uiLifecycleCoordinator.activateTradingPage === "function") {
             uiLifecycleCoordinator.activateTradingPage()
         }
@@ -3427,6 +3431,20 @@ Item {
     Connections {
         target: marketDataService
         enabled: root.serviceBindingsActive && !!marketDataService
+
+        function onInitializedChanged() {
+            if (!root.visible || !root.marketBridgeReady) {
+                return
+            }
+            if (marketDataService.activateDefaultWatchlist) {
+                marketDataService.activateDefaultWatchlist()
+            }
+            if ((!root.activeSymbol || String(root.activeSymbol).trim().length === 0)
+                    && marketDataService.primarySymbol) {
+                root.activeSymbol = String(marketDataService.primarySymbol || "").trim()
+            }
+            root.scheduleMarketStateSync()
+        }
 
         function onMarketSnapshotsChanged() {
             root.scheduleMarketStateSync()

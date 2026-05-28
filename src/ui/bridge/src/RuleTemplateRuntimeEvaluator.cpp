@@ -1,5 +1,7 @@
 #include "RuleTemplateRuntimeEvaluator.h"
 
+#include "../../domain/backtest/include/ResolvedStrategyBehaviorVariant.h"
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -8,18 +10,35 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaType>
 #include <QReadWriteLock>
 #include <QStringList>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <initializer_list>
 #include <vector>
 
 #include <yaml-cpp/yaml.h>
 
+#include "../../domain/strategy/include/RuleTemplateStringConstants.h"
+#include "../../domain/strategy/include/StrategySnapshotTypes.h"
+
 namespace bridge::rules {
 namespace {
+
+namespace rule_template_strings = domain::strategy::rule_template_strings;
+
+QString ruleTemplateString(const char* literal)
+{
+    return QString::fromLatin1(literal);
+}
+
+bool matchesRuleTemplateString(const QString& value, const char* literal)
+{
+    return value == QString::fromLatin1(literal);
+}
 
 struct CachedTemplateEntry {
     qint64 lastModifiedMs = 0;
@@ -53,7 +72,7 @@ QString resolveRepositoryRoot()
 {
     QDir dir(QCoreApplication::applicationDirPath());
     while (dir.exists()) {
-        if (dir.exists(QStringLiteral("astock_engine/rules/examples"))) {
+        if (dir.exists(ruleTemplateString(rule_template_strings::kPathRulesExamples))) {
             return dir.absolutePath();
         }
         if (!dir.cdUp()) {
@@ -67,7 +86,7 @@ QString resolveTemplateFilePath(const QVariantMap& rawBinding)
 {
     const QString explicitFilePath = firstNonEmptyBindingValue(
         rawBinding,
-        {"file_path", "filePath", "template_file_path", "templateFilePath"});
+        {rule_template_strings::kBindingFilePath});
     QFileInfo fileInfo(explicitFilePath);
     if (!explicitFilePath.isEmpty() && fileInfo.exists()) {
         return fileInfo.canonicalFilePath();
@@ -75,7 +94,7 @@ QString resolveTemplateFilePath(const QVariantMap& rawBinding)
 
     const QString fileName = firstNonEmptyBindingValue(
         rawBinding,
-        {"file_name", "fileName", "template_file_name", "templateFileName"});
+        {rule_template_strings::kBindingFileName});
     if (fileName.isEmpty()) {
         return {};
     }
@@ -86,7 +105,8 @@ QString resolveTemplateFilePath(const QVariantMap& rawBinding)
     }
 
     const QFileInfo fallbackInfo(
-        QDir(repositoryRoot).filePath(QStringLiteral("astock_engine/rules/examples/%1").arg(fileName)));
+        QDir(repositoryRoot).filePath(
+            ruleTemplateString(rule_template_strings::kPathRulesExamples) + QStringLiteral("/%1").arg(fileName)));
     if (!fallbackInfo.exists()) {
         return {};
     }
@@ -147,14 +167,12 @@ QVariantMap normalizeBinding(const QVariantMap& rawBinding, const QString& resol
 {
     QVariantMap binding = rawBinding;
     if (!resolvedFilePath.isEmpty()) {
-        binding.insert(QStringLiteral("filePath"), resolvedFilePath);
-        binding.insert(QStringLiteral("file_path"), resolvedFilePath);
+        binding.insert(ruleTemplateString(rule_template_strings::kBindingFilePath), resolvedFilePath);
     }
 
     const QString fileName = QFileInfo(resolvedFilePath).fileName();
     if (!fileName.isEmpty()) {
-        binding.insert(QStringLiteral("fileName"), fileName);
-        binding.insert(QStringLiteral("file_name"), fileName);
+        binding.insert(ruleTemplateString(rule_template_strings::kBindingFileName), fileName);
     }
     return binding;
 }
@@ -165,9 +183,13 @@ QVariantMap attachResolvedBinding(const QVariantMap& compiledTemplate,
                                  qint64 lastModifiedMs)
 {
     QVariantMap hydratedTemplate = compiledTemplate;
-    hydratedTemplate.insert(QStringLiteral("_binding"), normalizeBinding(rawBinding, resolvedFilePath));
-    hydratedTemplate.insert(QStringLiteral("_filePath"), resolvedFilePath);
-    hydratedTemplate.insert(QStringLiteral("_lastModifiedMs"), lastModifiedMs);
+    hydratedTemplate.insert(
+        ruleTemplateString(rule_template_strings::kCompiledTemplateBinding),
+        normalizeBinding(rawBinding, resolvedFilePath));
+    hydratedTemplate.insert(ruleTemplateString(rule_template_strings::kCompiledTemplateFilePath), resolvedFilePath);
+    hydratedTemplate.insert(
+        ruleTemplateString(rule_template_strings::kCompiledTemplateLastModifiedMs),
+        lastModifiedMs);
     return hydratedTemplate;
 }
 
@@ -181,9 +203,159 @@ QVariantList listFromVariant(const QVariant& value)
     return value.toList();
 }
 
-QString normalizedResultType(const QVariantMap& thenBlock)
+domain::strategy::RuleTemplateResultType parseRuleTemplateResultType(const QString& resultType)
 {
-    return thenBlock.value(QStringLiteral("result")).toString().trimmed().toLower();
+    const QString normalizedResultType = resultType.trimmed().toLower();
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kResultPass)) {
+        return domain::strategy::RuleTemplateResultType::Pass;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kResultStateSwitch)) {
+        return domain::strategy::RuleTemplateResultType::StateSwitch;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kResultHalt)) {
+        return domain::strategy::RuleTemplateResultType::Halt;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kResultBlock)) {
+        return domain::strategy::RuleTemplateResultType::Block;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kActionCandidateEntry)) {
+        return domain::strategy::RuleTemplateResultType::CandidateEntry;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kActionOpen)) {
+        return domain::strategy::RuleTemplateResultType::Open;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kActionReduce)) {
+        return domain::strategy::RuleTemplateResultType::Reduce;
+    }
+    if (matchesRuleTemplateString(normalizedResultType, rule_template_strings::kActionExit)) {
+        return domain::strategy::RuleTemplateResultType::Exit;
+    }
+    return domain::strategy::RuleTemplateResultType::Unspecified;
+}
+
+QString ruleTemplateResultTypeName(domain::strategy::RuleTemplateResultType resultType)
+{
+    switch (resultType) {
+    case domain::strategy::RuleTemplateResultType::Pass:
+        return ruleTemplateString(rule_template_strings::kResultPass);
+    case domain::strategy::RuleTemplateResultType::StateSwitch:
+        return ruleTemplateString(rule_template_strings::kResultStateSwitch);
+    case domain::strategy::RuleTemplateResultType::Halt:
+        return ruleTemplateString(rule_template_strings::kResultHalt);
+    case domain::strategy::RuleTemplateResultType::Block:
+        return ruleTemplateString(rule_template_strings::kResultBlock);
+    case domain::strategy::RuleTemplateResultType::CandidateEntry:
+        return ruleTemplateString(rule_template_strings::kActionCandidateEntry);
+    case domain::strategy::RuleTemplateResultType::Open:
+        return ruleTemplateString(rule_template_strings::kActionOpen);
+    case domain::strategy::RuleTemplateResultType::Reduce:
+        return ruleTemplateString(rule_template_strings::kActionReduce);
+    case domain::strategy::RuleTemplateResultType::Exit:
+        return ruleTemplateString(rule_template_strings::kActionExit);
+    case domain::strategy::RuleTemplateResultType::Unspecified:
+        return {};
+    }
+
+    return {};
+}
+
+domain::strategy::RuleTemplateResultType normalizedResultType(const QVariantMap& thenBlock)
+{
+    return parseRuleTemplateResultType(
+        thenBlock.value(ruleTemplateString(rule_template_strings::kFieldResult)).toString());
+}
+
+domain::strategy::RuleTemplateStage parseRuleTemplateStage(const QString& stage)
+{
+    const QString normalizedStage = stage.trimmed().toLower();
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kScopeMarket)) {
+        return domain::strategy::RuleTemplateStage::Market;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageSignal)) {
+        return domain::strategy::RuleTemplateStage::Signal;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kActionEntry)) {
+        return domain::strategy::RuleTemplateStage::Entry;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageRebalance)) {
+        return domain::strategy::RuleTemplateStage::Rebalance;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kActionExit)) {
+        return domain::strategy::RuleTemplateStage::Exit;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageRisk)) {
+        return domain::strategy::RuleTemplateStage::Risk;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageWatch)) {
+        return domain::strategy::RuleTemplateStage::Watch;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageEligibility)) {
+        return domain::strategy::RuleTemplateStage::Eligibility;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStagePortfolio)) {
+        return domain::strategy::RuleTemplateStage::Portfolio;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageExecution)) {
+        return domain::strategy::RuleTemplateStage::Execution;
+    }
+    if (matchesRuleTemplateString(normalizedStage, rule_template_strings::kStageAccountRisk)) {
+        return domain::strategy::RuleTemplateStage::AccountRisk;
+    }
+    return domain::strategy::RuleTemplateStage::Unspecified;
+}
+
+QString ruleTemplateStageName(domain::strategy::RuleTemplateStage stage)
+{
+    switch (stage) {
+    case domain::strategy::RuleTemplateStage::Market:
+        return ruleTemplateString(rule_template_strings::kScopeMarket);
+    case domain::strategy::RuleTemplateStage::Signal:
+        return ruleTemplateString(rule_template_strings::kStageSignal);
+    case domain::strategy::RuleTemplateStage::Entry:
+        return ruleTemplateString(rule_template_strings::kActionEntry);
+    case domain::strategy::RuleTemplateStage::Rebalance:
+        return ruleTemplateString(rule_template_strings::kStageRebalance);
+    case domain::strategy::RuleTemplateStage::Exit:
+        return ruleTemplateString(rule_template_strings::kActionExit);
+    case domain::strategy::RuleTemplateStage::Risk:
+        return ruleTemplateString(rule_template_strings::kStageRisk);
+    case domain::strategy::RuleTemplateStage::Watch:
+        return ruleTemplateString(rule_template_strings::kStageWatch);
+    case domain::strategy::RuleTemplateStage::Eligibility:
+        return ruleTemplateString(rule_template_strings::kStageEligibility);
+    case domain::strategy::RuleTemplateStage::Portfolio:
+        return ruleTemplateString(rule_template_strings::kStagePortfolio);
+    case domain::strategy::RuleTemplateStage::Execution:
+        return ruleTemplateString(rule_template_strings::kStageExecution);
+    case domain::strategy::RuleTemplateStage::AccountRisk:
+        return ruleTemplateString(rule_template_strings::kStageAccountRisk);
+    case domain::strategy::RuleTemplateStage::Unspecified:
+        return {};
+    }
+
+    return {};
+}
+
+domain::strategy::RuleTemplateStage ruleTemplateStageFromBindingPhase(domain::strategy::RuleBindingPhase phase)
+{
+    switch (phase) {
+    case domain::strategy::RuleBindingPhase::Market:
+        return domain::strategy::RuleTemplateStage::Market;
+    case domain::strategy::RuleBindingPhase::Signal:
+        return domain::strategy::RuleTemplateStage::Signal;
+    case domain::strategy::RuleBindingPhase::Entry:
+        return domain::strategy::RuleTemplateStage::Entry;
+    case domain::strategy::RuleBindingPhase::Rebalance:
+        return domain::strategy::RuleTemplateStage::Rebalance;
+    case domain::strategy::RuleBindingPhase::Exit:
+        return domain::strategy::RuleTemplateStage::Exit;
+    case domain::strategy::RuleBindingPhase::Risk:
+        return domain::strategy::RuleTemplateStage::Risk;
+    case domain::strategy::RuleBindingPhase::Watch:
+        return domain::strategy::RuleTemplateStage::Watch;
+    }
+
+    return domain::strategy::RuleTemplateStage::Unspecified;
 }
 
 QVariant mapValueByPath(const QVariantMap& scope, const QStringList& pathParts, int startIndex = 0)
@@ -240,8 +412,8 @@ bool isTruthy(const QVariant& value)
         if (text.isEmpty()) {
             return false;
         }
-        if (text.compare(QStringLiteral("false"), Qt::CaseInsensitive) == 0
-                || text == QStringLiteral("0")) {
+        if (text.compare(ruleTemplateString(rule_template_strings::kBooleanFalse), Qt::CaseInsensitive) == 0
+                || text == ruleTemplateString(rule_template_strings::kNumericZero)) {
             return false;
         }
         return true;
@@ -261,8 +433,11 @@ bool isTruthy(const QVariant& value)
 QVariant resolveExpressionValue(const QVariant& expression, const QVariantMap& scopes)
 {
     const QVariantMap expressionMap = expression.toMap();
-    if (expressionMap.size() == 1 && expressionMap.contains(QStringLiteral("var"))) {
-        return resolveScopedValue(scopes, expressionMap.value(QStringLiteral("var")).toString().trimmed());
+    if (expressionMap.size() == 1
+            && expressionMap.contains(ruleTemplateString(rule_template_strings::kConditionVar))) {
+        return resolveScopedValue(
+            scopes,
+            expressionMap.value(ruleTemplateString(rule_template_strings::kConditionVar)).toString().trimmed());
     }
     return expression;
 }
@@ -274,44 +449,44 @@ bool compareVariantValues(const QVariant& left, const QVariant& right, const QSt
     const double leftNumber = left.toDouble(&leftOk);
     const double rightNumber = right.toDouble(&rightOk);
     if (leftOk && rightOk) {
-        if (op == QStringLiteral("eq")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kConditionEq)) {
             return std::fabs(leftNumber - rightNumber) <= 1e-12;
         }
-        if (op == QStringLiteral("ne")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kConditionNe)) {
             return std::fabs(leftNumber - rightNumber) > 1e-12;
         }
-        if (op == QStringLiteral("lt")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kConditionLt)) {
             return leftNumber < rightNumber;
         }
-        if (op == QStringLiteral("le")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kConditionLe)) {
             return leftNumber <= rightNumber;
         }
-        if (op == QStringLiteral("gt")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kConditionGt)) {
             return leftNumber > rightNumber;
         }
-        if (op == QStringLiteral("ge")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kConditionGe)) {
             return leftNumber >= rightNumber;
         }
     }
 
     const QString leftText = left.toString().trimmed();
     const QString rightText = right.toString().trimmed();
-    if (op == QStringLiteral("eq")) {
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionEq)) {
         return leftText.compare(rightText, Qt::CaseInsensitive) == 0;
     }
-    if (op == QStringLiteral("ne")) {
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionNe)) {
         return leftText.compare(rightText, Qt::CaseInsensitive) != 0;
     }
-    if (op == QStringLiteral("lt")) {
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionLt)) {
         return leftText < rightText;
     }
-    if (op == QStringLiteral("le")) {
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionLe)) {
         return leftText <= rightText;
     }
-    if (op == QStringLiteral("gt")) {
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionGt)) {
         return leftText > rightText;
     }
-    if (op == QStringLiteral("ge")) {
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionGe)) {
         return leftText >= rightText;
     }
     return false;
@@ -319,18 +494,20 @@ bool compareVariantValues(const QVariant& left, const QVariant& right, const QSt
 
 bool evaluateConditionNode(const QVariantMap& node, const QVariantMap& scopes)
 {
-    const QString op = node.value(QStringLiteral("op")).toString().trimmed().toLower();
+    const QString op = node.value(ruleTemplateString(rule_template_strings::kConditionOp)).toString().trimmed().toLower();
     if (op.isEmpty()) {
         return false;
     }
 
-    if (op == QStringLiteral("all") || op == QStringLiteral("any")) {
-        const QVariantList conditions = listFromVariant(node.value(QStringLiteral("conditions")));
+        if (matchesRuleTemplateString(op, rule_template_strings::kGroupOperatorAll)
+            || matchesRuleTemplateString(op, rule_template_strings::kGroupOperatorAny)) {
+        const QVariantList conditions = listFromVariant(
+            node.value(ruleTemplateString(rule_template_strings::kConditionConditions)));
         if (conditions.isEmpty()) {
             return false;
         }
 
-        if (op == QStringLiteral("all")) {
+        if (matchesRuleTemplateString(op, rule_template_strings::kGroupOperatorAll)) {
             for (const QVariant& condition : conditions) {
                 if (!evaluateConditionNode(condition.toMap(), scopes)) {
                     return false;
@@ -347,18 +524,27 @@ bool evaluateConditionNode(const QVariantMap& node, const QVariantMap& scopes)
         return false;
     }
 
-    if (op == QStringLiteral("truthy")) {
-        return isTruthy(resolveExpressionValue(node.value(QStringLiteral("value")), scopes));
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionTruthy)) {
+        return isTruthy(
+            resolveExpressionValue(node.value(ruleTemplateString(rule_template_strings::kConditionValue)), scopes));
     }
 
-    if (op == QStringLiteral("not")) {
-        return !evaluateConditionNode(node.value(QStringLiteral("condition")).toMap(), scopes);
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionNot)) {
+        return !evaluateConditionNode(
+            node.value(ruleTemplateString(rule_template_strings::kConditionNotCondition)).toMap(),
+            scopes);
     }
 
-    if (op == QStringLiteral("eq") || op == QStringLiteral("ne") || op == QStringLiteral("lt")
-            || op == QStringLiteral("le") || op == QStringLiteral("gt") || op == QStringLiteral("ge")) {
-        const QVariant left = resolveExpressionValue(node.value(QStringLiteral("left")), scopes);
-        const QVariant right = resolveExpressionValue(node.value(QStringLiteral("right")), scopes);
+    if (matchesRuleTemplateString(op, rule_template_strings::kConditionEq)
+            || matchesRuleTemplateString(op, rule_template_strings::kConditionNe)
+            || matchesRuleTemplateString(op, rule_template_strings::kConditionLt)
+            || matchesRuleTemplateString(op, rule_template_strings::kConditionLe)
+            || matchesRuleTemplateString(op, rule_template_strings::kConditionGt)
+            || matchesRuleTemplateString(op, rule_template_strings::kConditionGe)) {
+        const QVariant left =
+            resolveExpressionValue(node.value(ruleTemplateString(rule_template_strings::kConditionLeft)), scopes);
+        const QVariant right =
+            resolveExpressionValue(node.value(ruleTemplateString(rule_template_strings::kConditionRight)), scopes);
         return compareVariantValues(left, right, op);
     }
 
@@ -372,10 +558,10 @@ QVariant parseLooseValue(const QString& rawValue)
         return {};
     }
 
-    if (text.compare(QStringLiteral("true"), Qt::CaseInsensitive) == 0) {
+    if (text.compare(ruleTemplateString(rule_template_strings::kBooleanTrue), Qt::CaseInsensitive) == 0) {
         return true;
     }
-    if (text.compare(QStringLiteral("false"), Qt::CaseInsensitive) == 0) {
+    if (text.compare(ruleTemplateString(rule_template_strings::kBooleanFalse), Qt::CaseInsensitive) == 0) {
         return false;
     }
 
@@ -406,69 +592,90 @@ QVariant parseLooseValue(const QString& rawValue)
     return text;
 }
 
-QStringList normalizeActionAliases(const QString& candidateAction)
+domain::strategy::CandidateAction parseCandidateAction(const QString& candidateAction)
 {
     const QString normalized = candidateAction.trimmed().toLower();
-    if (normalized == QStringLiteral("buy")) {
-        return {QStringLiteral("buy"), QStringLiteral("entry"), QStringLiteral("candidate_entry"), QStringLiteral("open")};
+    if (normalized.isEmpty()) {
+        return domain::strategy::CandidateAction::None;
     }
-    if (normalized == QStringLiteral("sell")) {
-        return {QStringLiteral("sell"), QStringLiteral("reduce"), QStringLiteral("exit"), QStringLiteral("close")};
+
+    if (matchesRuleTemplateString(normalized, rule_template_strings::kActionBuy)
+            || matchesRuleTemplateString(normalized, rule_template_strings::kActionEntry)
+            || matchesRuleTemplateString(normalized, rule_template_strings::kActionCandidateEntry)
+            || matchesRuleTemplateString(normalized, rule_template_strings::kActionOpen)) {
+        return domain::strategy::CandidateAction::Buy;
     }
-    return normalized.isEmpty() ? QStringList{} : QStringList{normalized};
+
+    if (matchesRuleTemplateString(normalized, rule_template_strings::kActionSell)
+            || matchesRuleTemplateString(normalized, rule_template_strings::kActionReduce)
+            || matchesRuleTemplateString(normalized, rule_template_strings::kActionExit)
+            || matchesRuleTemplateString(normalized, rule_template_strings::kActionClose)) {
+        return domain::strategy::CandidateAction::Sell;
+    }
+
+    return domain::strategy::CandidateAction::None;
 }
 
-bool allowActionsPermitCandidate(const QVariantMap& payload, const QString& candidateAction)
+QString candidateActionName(const domain::strategy::CandidateAction candidateAction)
 {
-    const QVariantList allowActions = payload.value(QStringLiteral("allow_actions")).toList();
-    if (allowActions.isEmpty()) {
+    switch (candidateAction) {
+    case domain::strategy::CandidateAction::Buy:
+        return ruleTemplateString(rule_template_strings::kActionBuy);
+    case domain::strategy::CandidateAction::Sell:
+        return ruleTemplateString(rule_template_strings::kActionSell);
+    case domain::strategy::CandidateAction::None:
+        return {};
+    }
+
+    return {};
+}
+
+bool allowActionsPermitCandidate(const QVariantMap& payload,
+                                 domain::strategy::CandidateAction candidateAction)
+{
+    const QVariantList allowActions = payload.value(ruleTemplateString(rule_template_strings::kFieldAllowActions)).toList();
+    if (allowActions.isEmpty() || candidateAction == domain::strategy::CandidateAction::None) {
         return false;
     }
 
-    const QStringList aliases = normalizeActionAliases(candidateAction);
     for (const QVariant& action : allowActions) {
-        const QString normalizedAction = action.toString().trimmed().toLower();
-        if (aliases.contains(normalizedAction)) {
+        if (parseCandidateAction(action.toString()) == candidateAction) {
             return true;
         }
     }
     return false;
 }
 
-bool isEntryLikeCandidateAction(const QString& candidateAction)
+bool isEntryLikeCandidateAction(domain::strategy::CandidateAction candidateAction)
 {
-    const QStringList aliases = normalizeActionAliases(candidateAction);
-    return aliases.contains(QStringLiteral("buy"))
-        || aliases.contains(QStringLiteral("entry"))
-        || aliases.contains(QStringLiteral("candidate_entry"))
-        || aliases.contains(QStringLiteral("open"));
+    return candidateAction == domain::strategy::CandidateAction::Buy;
 }
 
-bool isExitLikeCandidateAction(const QString& candidateAction)
+bool isExitLikeCandidateAction(domain::strategy::CandidateAction candidateAction)
 {
-    const QStringList aliases = normalizeActionAliases(candidateAction);
-    return aliases.contains(QStringLiteral("sell"))
-        || aliases.contains(QStringLiteral("exit"))
-        || aliases.contains(QStringLiteral("reduce"))
-        || aliases.contains(QStringLiteral("close"));
+    return candidateAction == domain::strategy::CandidateAction::Sell;
 }
 
-bool isBlockingTemplateResult(const QVariantMap& thenBlock, const QString& candidateAction)
+bool isBlockingTemplateResult(const QVariantMap& thenBlock,
+                              domain::strategy::CandidateAction candidateAction)
 {
-    const QString resultType = normalizedResultType(thenBlock);
-    if (resultType.isEmpty() || resultType == QStringLiteral("pass")) {
+    const domain::strategy::RuleTemplateResultType resultType = normalizedResultType(thenBlock);
+    if (resultType == domain::strategy::RuleTemplateResultType::Unspecified
+            || resultType == domain::strategy::RuleTemplateResultType::Pass) {
         return false;
     }
 
-    if (resultType == QStringLiteral("candidate_entry")
-            || resultType == QStringLiteral("open")
-            || resultType == QStringLiteral("exit")
-            || resultType == QStringLiteral("reduce")) {
+    if (resultType == domain::strategy::RuleTemplateResultType::CandidateEntry
+            || resultType == domain::strategy::RuleTemplateResultType::Open
+            || resultType == domain::strategy::RuleTemplateResultType::Exit
+            || resultType == domain::strategy::RuleTemplateResultType::Reduce) {
         return false;
     }
 
-    if (resultType == QStringLiteral("state_switch")) {
-        return !allowActionsPermitCandidate(thenBlock.value(QStringLiteral("payload")).toMap(), candidateAction);
+    if (resultType == domain::strategy::RuleTemplateResultType::StateSwitch) {
+        return !allowActionsPermitCandidate(
+            thenBlock.value(ruleTemplateString(rule_template_strings::kFieldPayload)).toMap(),
+            candidateAction);
     }
 
     return true;
@@ -477,26 +684,20 @@ bool isBlockingTemplateResult(const QVariantMap& thenBlock, const QString& candi
 QVariantMap buildCandidateScope(const RuntimeRuleTemplateEvaluationContext& context)
 {
     QVariantMap candidate;
-    candidate.insert(QStringLiteral("symbol"), context.symbol.trimmed().toUpper());
-    candidate.insert(QStringLiteral("latest_price"), context.latestPrice);
-    candidate.insert(QStringLiteral("latestPrice"), context.latestPrice);
-    candidate.insert(QStringLiteral("reference_price"), context.referencePrice);
-    candidate.insert(QStringLiteral("referencePrice"), context.referencePrice);
-    candidate.insert(QStringLiteral("market_event_type"), context.marketEventType);
-    candidate.insert(QStringLiteral("marketEventType"), context.marketEventType);
-    candidate.insert(QStringLiteral("candidate_action"), context.candidateAction);
-    candidate.insert(QStringLiteral("candidateAction"), context.candidateAction);
-    candidate.insert(QStringLiteral("candidate_strength"), context.candidateStrength);
-    candidate.insert(QStringLiteral("candidateStrength"), context.candidateStrength);
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeSymbol), context.symbol.text().toUpper());
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeLatestPrice), context.latestPrice);
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeReferencePrice), context.referencePrice);
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeMarketEventType), context.marketEventType.text());
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeCandidateAction), candidateActionName(context.candidateAction));
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeCandidateStrength), context.candidateStrength);
     return candidate;
 }
 
 QVariantMap buildMarketScope(const RuntimeRuleTemplateEvaluationContext& context)
 {
     QVariantMap market = context.marketSessionSnapshot;
-    if (!context.marketEventType.trimmed().isEmpty()) {
-        market.insert(QStringLiteral("market_event_type"), context.marketEventType);
-        market.insert(QStringLiteral("marketEventType"), context.marketEventType);
+    if (!context.marketEventType.isEmpty()) {
+        market.insert(ruleTemplateString(rule_template_strings::kScopeMarketEventType), context.marketEventType.text());
     }
     return market;
 }
@@ -504,13 +705,25 @@ QVariantMap buildMarketScope(const RuntimeRuleTemplateEvaluationContext& context
 QVariantMap buildStrategyScope(const RuntimeRuleTemplateEvaluationContext& context)
 {
     QVariantMap strategyScope;
-    strategyScope.insert(QStringLiteral("strategy_id"), context.strategy.value(QStringLiteral("strategy_id")));
-    strategyScope.insert(QStringLiteral("strategy_type"), context.strategy.value(QStringLiteral("strategy_type")));
-    strategyScope.insert(QStringLiteral("parameters"), context.strategy.value(QStringLiteral("parameters")).toMap());
-    strategyScope.insert(QStringLiteral("rule_profile"), context.strategy.value(QStringLiteral("ruleProfileSnapshot")).toMap());
-    strategyScope.insert(QStringLiteral("execution_policy"), context.strategy.value(QStringLiteral("executionPolicySnapshot")).toMap());
-    strategyScope.insert(QStringLiteral("strategy_scope_context"), context.strategy.value(QStringLiteral("strategyScopeContextSnapshot")).toMap());
-    strategyScope.insert(QStringLiteral("runtime_session"), context.runtimeSessionSnapshot);
+    strategyScope.insert(
+        ruleTemplateString(rule_template_strings::kScopeStrategyId),
+        context.strategy.value(ruleTemplateString(rule_template_strings::kScopeStrategyId)));
+    const domain::backtest::ResolvedStrategyBehavior behavior =
+        domain::backtest::resolveStrategyBehavior(context.strategy);
+    if (behavior.valid) {
+        strategyScope.insert(ruleTemplateString(rule_template_strings::kScopeStrategyBehaviorKind), behavior.index());
+    }
+    strategyScope.insert(ruleTemplateString(rule_template_strings::kScopeParameters), context.strategy.value(ruleTemplateString(rule_template_strings::kScopeParameters)).toMap());
+    strategyScope.insert(
+        ruleTemplateString(rule_template_strings::kScopeRuleProfile),
+        context.strategy.value(ruleTemplateString(rule_template_strings::kSnapshotRuleProfile)).toMap());
+    strategyScope.insert(
+        ruleTemplateString(rule_template_strings::kScopeExecutionPolicy),
+        context.strategy.value(ruleTemplateString(rule_template_strings::kSnapshotExecutionPolicy)).toMap());
+    strategyScope.insert(
+        ruleTemplateString(rule_template_strings::kScopeStrategyScopeContext),
+        context.strategy.value(ruleTemplateString(rule_template_strings::kSnapshotStrategyScopeContext)).toMap());
+    strategyScope.insert(ruleTemplateString(rule_template_strings::kScopeRuntimeSession), context.runtimeSessionSnapshot);
     return strategyScope;
 }
 
@@ -527,7 +740,7 @@ void mergePrefixedFacts(const QVariantMap& flatFacts,
         const QString key = it.key();
         if (key.startsWith(dottedPrefix, Qt::CaseInsensitive)) {
             target->insert(key.mid(dottedPrefix.size()), it.value());
-        } else if (key.startsWith(snakePrefix, Qt::CaseInsensitive)) {
+        } else if (!snakePrefix.isEmpty() && key.startsWith(snakePrefix, Qt::CaseInsensitive)) {
             target->insert(key.mid(snakePrefix.size()), it.value());
         }
     }
@@ -539,14 +752,26 @@ QVariantMap buildScopes(const RuntimeRuleTemplateEvaluationContext& context)
     QVariantMap market = buildMarketScope(context);
     QVariantMap strategyScope = buildStrategyScope(context);
 
-    mergePrefixedFacts(context.flatEventFacts, QStringLiteral("candidate."), QStringLiteral("candidate_"), &candidate);
-    mergePrefixedFacts(context.flatEventFacts, QStringLiteral("market."), QStringLiteral("market_"), &market);
-    mergePrefixedFacts(context.flatEventFacts, QStringLiteral("strategy."), QStringLiteral("strategy_"), &strategyScope);
+    mergePrefixedFacts(
+        context.flatEventFacts,
+        ruleTemplateString(rule_template_strings::kFactPrefixCandidateDot),
+        QString(),
+        &candidate);
+    mergePrefixedFacts(
+        context.flatEventFacts,
+        ruleTemplateString(rule_template_strings::kFactPrefixMarketDot),
+        QString(),
+        &market);
+    mergePrefixedFacts(
+        context.flatEventFacts,
+        ruleTemplateString(rule_template_strings::kFactPrefixStrategyDot),
+        QString(),
+        &strategyScope);
 
     QVariantMap scopes;
-    scopes.insert(QStringLiteral("candidate"), candidate);
-    scopes.insert(QStringLiteral("market"), market);
-    scopes.insert(QStringLiteral("strategy"), strategyScope);
+    scopes.insert(ruleTemplateString(rule_template_strings::kScopeCandidate), candidate);
+    scopes.insert(ruleTemplateString(rule_template_strings::kScopeMarket), market);
+    scopes.insert(ruleTemplateString(rule_template_strings::kScopeStrategy), strategyScope);
     return scopes;
 }
 
@@ -639,24 +864,26 @@ int evaluationPriorityScore(const RuntimeRuleTemplateEvaluationResult& result)
         return -1;
     }
 
-    const QString resultType = result.resultType.trimmed().toLower();
-    const QString stage = result.stage.trimmed().toLower();
     if (result.blocked) {
-        if (stage == QStringLiteral("market") || stage == QStringLiteral("signal") || stage == QStringLiteral("entry")) {
+        if (result.stage == domain::strategy::RuleTemplateStage::Market
+            || result.stage == domain::strategy::RuleTemplateStage::Signal
+            || result.stage == domain::strategy::RuleTemplateStage::Entry) {
             return 500;
         }
         return 450;
     }
-    if (resultType == QStringLiteral("exit")) {
+    if (result.resultType == domain::strategy::RuleTemplateResultType::Exit) {
         return 400;
     }
-    if (resultType == QStringLiteral("reduce")) {
+    if (result.resultType == domain::strategy::RuleTemplateResultType::Reduce) {
         return 300;
     }
-    if (resultType == QStringLiteral("state_switch") || resultType == QStringLiteral("halt")) {
+        if (result.resultType == domain::strategy::RuleTemplateResultType::StateSwitch
+            || result.resultType == domain::strategy::RuleTemplateResultType::Halt) {
         return 250;
     }
-    if (resultType == QStringLiteral("candidate_entry") || resultType == QStringLiteral("open")) {
+        if (result.resultType == domain::strategy::RuleTemplateResultType::CandidateEntry
+            || result.resultType == domain::strategy::RuleTemplateResultType::Open) {
         return 200;
     }
     return 100;
@@ -697,47 +924,207 @@ double firstNumericMapValue(const QVariantMap& map,
     return defaultValue;
 }
 
-QString normalizedBindingGroupId(const QVariantMap& binding)
+domain::strategy::GroupId normalizedBindingGroupIdValue(const QVariantMap& binding)
 {
-    return firstNonEmptyBindingValue(binding, {"group_id", "groupId"}).trimmed();
+    return domain::strategy::GroupId(
+        firstNonEmptyBindingValue(binding, {rule_template_strings::kBindingGroupId}).trimmed());
 }
 
-QString normalizedBindingGroupOperator(const QVariantMap& binding)
+domain::strategy::RuleGroupOperator normalizedBindingGroupOperatorValue(const QVariantMap& binding)
 {
-    return firstNonEmptyBindingValue(binding, {"group_operator", "groupOperator"}).trimmed().toLower();
+    bool ok = false;
+    const int groupOperator = binding.value(ruleTemplateString(rule_template_strings::kBindingGroupOperator)).toInt(&ok);
+    if (!ok) {
+        return domain::strategy::RuleGroupOperator::Any;
+    }
+
+    switch (static_cast<domain::strategy::RuleGroupOperator>(groupOperator)) {
+    case domain::strategy::RuleGroupOperator::All:
+    case domain::strategy::RuleGroupOperator::Any:
+    case domain::strategy::RuleGroupOperator::MinimumMatch:
+    case domain::strategy::RuleGroupOperator::FirstMatch:
+    case domain::strategy::RuleGroupOperator::ScoreSum:
+        return static_cast<domain::strategy::RuleGroupOperator>(groupOperator);
+    }
+
+    return domain::strategy::RuleGroupOperator::Any;
 }
 
-QString normalizedBindingGroupRole(const QVariantMap& binding)
+domain::strategy::RuleGroupRole normalizedBindingGroupRoleValue(const QVariantMap& binding)
 {
-    return firstNonEmptyBindingValue(binding, {"group_role", "groupRole"}).trimmed().toLower();
+    bool ok = false;
+    const int groupRole = binding.value(ruleTemplateString(rule_template_strings::kBindingGroupRole)).toInt(&ok);
+    if (!ok) {
+        return domain::strategy::RuleGroupRole::Unspecified;
+    }
+
+    switch (static_cast<domain::strategy::RuleGroupRole>(groupRole)) {
+    case domain::strategy::RuleGroupRole::Unspecified:
+    case domain::strategy::RuleGroupRole::MustPass:
+    case domain::strategy::RuleGroupRole::AnyPass:
+    case domain::strategy::RuleGroupRole::Trigger:
+    case domain::strategy::RuleGroupRole::ScoreBoost:
+    case domain::strategy::RuleGroupRole::EntryGuard:
+    case domain::strategy::RuleGroupRole::ExitGuard:
+    case domain::strategy::RuleGroupRole::PositionManagement:
+        return static_cast<domain::strategy::RuleGroupRole>(groupRole);
+    }
+
+    return domain::strategy::RuleGroupRole::Unspecified;
 }
 
-QString normalizedBindingGroupTitle(const QVariantMap& binding)
+domain::strategy::GroupTitle normalizedBindingGroupTitleValue(const QVariantMap& binding)
 {
-    return firstNonEmptyBindingValue(binding, {"group_title", "groupTitle"}).trimmed();
+    return domain::strategy::GroupTitle(
+        firstNonEmptyBindingValue(binding, {rule_template_strings::kBindingGroupTitle}).trimmed());
 }
 
-QString normalizedBindingPhase(const QVariantMap& binding)
+int ruleBindingPhaseIndexFromStageName(const QString& stage)
 {
-    return firstNonEmptyBindingValue(binding, {"phase", "stage"}).trimmed().toLower();
+    switch (parseRuleTemplateStage(stage)) {
+    case domain::strategy::RuleTemplateStage::Market:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Market);
+    case domain::strategy::RuleTemplateStage::Signal:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Signal);
+    case domain::strategy::RuleTemplateStage::Entry:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Entry);
+    case domain::strategy::RuleTemplateStage::Rebalance:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Rebalance);
+    case domain::strategy::RuleTemplateStage::Exit:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Exit);
+    case domain::strategy::RuleTemplateStage::Risk:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Risk);
+    case domain::strategy::RuleTemplateStage::Watch:
+        return static_cast<int>(domain::strategy::RuleBindingPhase::Watch);
+    case domain::strategy::RuleTemplateStage::Unspecified:
+    case domain::strategy::RuleTemplateStage::Eligibility:
+    case domain::strategy::RuleTemplateStage::Portfolio:
+    case domain::strategy::RuleTemplateStage::Execution:
+    case domain::strategy::RuleTemplateStage::AccountRisk:
+        return -1;
+    }
+
+    return -1;
+}
+
+bool parseSupportedRuleBindingPhaseIndex(const QVariant& value, int* phaseIndex)
+{
+    if (!phaseIndex || !value.isValid() || value.isNull() || value.typeId() == QMetaType::QString) {
+        return false;
+    }
+
+    bool ok = false;
+    const int parsedValue = value.toInt(&ok);
+    if (!ok) {
+        return false;
+    }
+
+    switch (static_cast<domain::strategy::RuleBindingPhase>(parsedValue)) {
+    case domain::strategy::RuleBindingPhase::Market:
+        *phaseIndex = parsedValue;
+        return true;
+    case domain::strategy::RuleBindingPhase::Signal:
+        *phaseIndex = parsedValue;
+        return true;
+    case domain::strategy::RuleBindingPhase::Entry:
+        *phaseIndex = parsedValue;
+        return true;
+    case domain::strategy::RuleBindingPhase::Rebalance:
+        *phaseIndex = parsedValue;
+        return true;
+    case domain::strategy::RuleBindingPhase::Exit:
+        *phaseIndex = parsedValue;
+        return true;
+    case domain::strategy::RuleBindingPhase::Risk:
+        *phaseIndex = parsedValue;
+        return true;
+    case domain::strategy::RuleBindingPhase::Watch:
+        *phaseIndex = parsedValue;
+        return true;
+    }
+
+    return false;
+}
+
+QString ruleBindingPhaseName(domain::strategy::RuleBindingPhase phase)
+{
+    switch (phase) {
+    case domain::strategy::RuleBindingPhase::Market:
+        return ruleTemplateString(rule_template_strings::kScopeMarket);
+    case domain::strategy::RuleBindingPhase::Signal:
+        return ruleTemplateString(rule_template_strings::kStageSignal);
+    case domain::strategy::RuleBindingPhase::Entry:
+        return ruleTemplateString(rule_template_strings::kActionEntry);
+    case domain::strategy::RuleBindingPhase::Rebalance:
+        return ruleTemplateString(rule_template_strings::kStageRebalance);
+    case domain::strategy::RuleBindingPhase::Exit:
+        return ruleTemplateString(rule_template_strings::kActionExit);
+    case domain::strategy::RuleBindingPhase::Risk:
+        return ruleTemplateString(rule_template_strings::kStageRisk);
+    case domain::strategy::RuleBindingPhase::Watch:
+        return ruleTemplateString(rule_template_strings::kStageWatch);
+    }
+
+    return {};
+}
+
+domain::strategy::RuleBindingPhase normalizedBindingPhaseValue(const QVariantMap& binding)
+{
+    int phaseIndex = -1;
+    if (parseSupportedRuleBindingPhaseIndex(
+            binding.value(ruleTemplateString(rule_template_strings::kBindingPhase)),
+            &phaseIndex)) {
+        return static_cast<domain::strategy::RuleBindingPhase>(phaseIndex);
+    }
+    return domain::strategy::RuleBindingPhase::Signal;
+}
+
+QString ruleGroupOperatorName(domain::strategy::RuleGroupOperator groupOperator)
+{
+    switch (groupOperator) {
+    case domain::strategy::RuleGroupOperator::All:
+        return ruleTemplateString(rule_template_strings::kGroupOperatorAll);
+    case domain::strategy::RuleGroupOperator::MinimumMatch:
+        return ruleTemplateString(rule_template_strings::kGroupOperatorAtLeast);
+    case domain::strategy::RuleGroupOperator::FirstMatch:
+        return ruleTemplateString(rule_template_strings::kGroupOperatorFirstMatch);
+    case domain::strategy::RuleGroupOperator::ScoreSum:
+        return ruleTemplateString(rule_template_strings::kGroupOperatorScoreSum);
+    case domain::strategy::RuleGroupOperator::Any:
+        return ruleTemplateString(rule_template_strings::kGroupOperatorAny);
+    }
+
+    return ruleTemplateString(rule_template_strings::kGroupOperatorAny);
+}
+
+QString ruleGroupRoleName(domain::strategy::RuleGroupRole groupRole)
+{
+    switch (groupRole) {
+    case domain::strategy::RuleGroupRole::MustPass:
+        return ruleTemplateString(rule_template_strings::kGroupRoleMustPass);
+    case domain::strategy::RuleGroupRole::AnyPass:
+        return ruleTemplateString(rule_template_strings::kGroupRoleAnyPass);
+    case domain::strategy::RuleGroupRole::Trigger:
+        return ruleTemplateString(rule_template_strings::kGroupRoleTrigger);
+    case domain::strategy::RuleGroupRole::ScoreBoost:
+        return ruleTemplateString(rule_template_strings::kGroupRoleScoreBoost);
+    case domain::strategy::RuleGroupRole::EntryGuard:
+        return ruleTemplateString(rule_template_strings::kGroupRoleEntryGuard);
+    case domain::strategy::RuleGroupRole::ExitGuard:
+        return ruleTemplateString(rule_template_strings::kGroupRoleExitGuard);
+    case domain::strategy::RuleGroupRole::PositionManagement:
+        return ruleTemplateString(rule_template_strings::kGroupRolePositionManagement);
+    case domain::strategy::RuleGroupRole::Unspecified:
+        return {};
+    }
+
+    return {};
 }
 
 int normalizedBindingGroupMatchThreshold(const QVariantMap& binding)
 {
     static const std::initializer_list<const char*> thresholdKeys{
-        "group_min_match_count",
-        "groupMinMatchCount",
-        "min_match_count",
-        "minMatchCount",
-        "required_match_count",
-        "requiredMatchCount",
-        "minimum_matches",
-        "minimumMatches",
-        "at_least_count",
-        "atLeastCount",
-        "match_threshold",
-        "matchThreshold",
-        "threshold"
+        rule_template_strings::kBindingGroupMinMatchCount
     };
 
     for (const char* key : thresholdKeys) {
@@ -753,91 +1140,75 @@ double selectionBonusFromPayload(const QVariantMap& payload)
 {
     return firstNumericMapValue(
         payload,
-        {"group_score_sum",
-         "groupScoreSum",
-         "selection_bonus",
-         "selectionBonus",
-         "score_bonus",
-         "scoreBonus",
-         "priority_bonus",
-         "priorityBonus",
-         "boost_score",
-         "boostScore",
-         "priority_score",
-         "priorityScore",
-         "score",
-         "bonus"},
+        {rule_template_strings::kFieldScore},
         0.0);
 }
 
-bool isMandatoryGroupRole(const QString& groupRole)
+bool isMandatoryGroupRole(domain::strategy::RuleGroupRole groupRole)
 {
-    const QString normalizedRole = groupRole.trimmed().toLower();
-    return normalizedRole == QStringLiteral("must_pass")
-        || normalizedRole == QStringLiteral("entry_guard");
+    return groupRole == domain::strategy::RuleGroupRole::MustPass
+        || groupRole == domain::strategy::RuleGroupRole::EntryGuard;
 }
 
-bool isTriggerGroupRole(const QString& groupRole)
+bool isTriggerGroupRole(domain::strategy::RuleGroupRole groupRole)
 {
-    const QString normalizedRole = groupRole.trimmed().toLower();
-    return normalizedRole == QStringLiteral("any_pass")
-        || normalizedRole == QStringLiteral("trigger")
-        || normalizedRole == QStringLiteral("exit_guard");
+    return groupRole == domain::strategy::RuleGroupRole::AnyPass
+        || groupRole == domain::strategy::RuleGroupRole::Trigger
+        || groupRole == domain::strategy::RuleGroupRole::ExitGuard;
 }
 
-bool isNeutralGroupRole(const QString& groupRole)
+bool isNeutralGroupRole(domain::strategy::RuleGroupRole groupRole)
 {
-    const QString normalizedRole = groupRole.trimmed().toLower();
-    return normalizedRole == QStringLiteral("score_boost")
-        || normalizedRole == QStringLiteral("position_management");
+    return groupRole == domain::strategy::RuleGroupRole::ScoreBoost
+        || groupRole == domain::strategy::RuleGroupRole::PositionManagement;
 }
 
-bool stageAppliesToCandidateAction(const QString& stage, const QString& candidateAction)
+bool stageAppliesToCandidateAction(domain::strategy::RuleTemplateStage stage,
+                                   domain::strategy::CandidateAction candidateAction)
 {
-    const QString normalizedStage = stage.trimmed().toLower();
-    if (normalizedStage.isEmpty() || candidateAction.trimmed().isEmpty()) {
+    if (stage == domain::strategy::RuleTemplateStage::Unspecified
+            || candidateAction == domain::strategy::CandidateAction::None) {
         return true;
     }
 
     if (isEntryLikeCandidateAction(candidateAction)) {
-        return normalizedStage != QStringLiteral("rebalance")
-            && normalizedStage != QStringLiteral("exit");
+        return stage != domain::strategy::RuleTemplateStage::Rebalance
+            && stage != domain::strategy::RuleTemplateStage::Exit;
     }
 
     if (isExitLikeCandidateAction(candidateAction)) {
-        return normalizedStage != QStringLiteral("market")
-            && normalizedStage != QStringLiteral("eligibility")
-            && normalizedStage != QStringLiteral("entry");
+        return stage != domain::strategy::RuleTemplateStage::Market
+            && stage != domain::strategy::RuleTemplateStage::Eligibility
+            && stage != domain::strategy::RuleTemplateStage::Entry;
     }
 
     return true;
 }
 
-bool roleAppliesToCandidateAction(const QString& groupRole,
-                                  const QString& candidateAction,
-                                  const QString& stage)
+bool roleAppliesToCandidateAction(domain::strategy::RuleGroupRole groupRole,
+                                  domain::strategy::CandidateAction candidateAction,
+                                  domain::strategy::RuleTemplateStage stage)
 {
-    if (candidateAction.trimmed().isEmpty()) {
+    if (candidateAction == domain::strategy::CandidateAction::None) {
         return true;
     }
 
-    const QString normalizedRole = groupRole.trimmed().toLower();
-    if (normalizedRole.isEmpty()) {
+    if (groupRole == domain::strategy::RuleGroupRole::Unspecified) {
         return stageAppliesToCandidateAction(stage, candidateAction);
     }
 
-    if (normalizedRole == QStringLiteral("must_pass")
-            || normalizedRole == QStringLiteral("any_pass")) {
+    if (groupRole == domain::strategy::RuleGroupRole::MustPass
+            || groupRole == domain::strategy::RuleGroupRole::AnyPass) {
         return stageAppliesToCandidateAction(stage, candidateAction);
     }
 
-    if (normalizedRole == QStringLiteral("trigger")
-            || normalizedRole == QStringLiteral("score_boost")
-            || normalizedRole == QStringLiteral("entry_guard")) {
+    if (groupRole == domain::strategy::RuleGroupRole::Trigger
+            || groupRole == domain::strategy::RuleGroupRole::ScoreBoost
+            || groupRole == domain::strategy::RuleGroupRole::EntryGuard) {
         return isEntryLikeCandidateAction(candidateAction);
     }
 
-    if (normalizedRole == QStringLiteral("exit_guard")) {
+    if (groupRole == domain::strategy::RuleGroupRole::ExitGuard) {
         return isExitLikeCandidateAction(candidateAction);
     }
 
@@ -852,15 +1223,17 @@ struct BindingApplicability {
 BindingApplicability bindingApplicability(const QVariantMap& binding,
                                           const RuntimeRuleTemplateEvaluationContext& context)
 {
-    const QString stage = normalizedBindingPhase(binding);
-    if (!stageAppliesToCandidateAction(stage, context.candidateAction)) {
-        return {false, QStringLiteral("stage_filtered")};
+    const domain::strategy::RuleTemplateStage stage =
+        ruleTemplateStageFromBindingPhase(normalizedBindingPhaseValue(binding));
+    const domain::strategy::CandidateAction candidateAction = context.candidateAction;
+    if (!stageAppliesToCandidateAction(stage, candidateAction)) {
+        return {false, ruleTemplateString(rule_template_strings::kApplicabilityStageFiltered)};
     }
     if (!roleAppliesToCandidateAction(
-            normalizedBindingGroupRole(binding),
-            context.candidateAction,
+            normalizedBindingGroupRoleValue(binding),
+            candidateAction,
             stage)) {
-        return {false, QStringLiteral("role_filtered")};
+        return {false, ruleTemplateString(rule_template_strings::kApplicabilityRoleFiltered)};
     }
     return {};
 }
@@ -891,23 +1264,22 @@ RuntimeRuleTemplateEvaluationResult templatePresenceOnlyResult(
     fallbackResult.matched = false;
     fallbackResult.blocked = false;
     fallbackResult.actionPermitted = true;
-    fallbackResult.stage.clear();
-    fallbackResult.ruleId.clear();
-    fallbackResult.reasonCode.clear();
+    fallbackResult.stage = domain::strategy::RuleTemplateStage::Unspecified;
+    fallbackResult.ruleId = {};
+    fallbackResult.reasonCode = {};
     fallbackResult.message.clear();
-    fallbackResult.resultType.clear();
+    fallbackResult.resultType = domain::strategy::RuleTemplateResultType::Unspecified;
     fallbackResult.payload.clear();
     fallbackResult.state.clear();
     return fallbackResult;
 }
 
 struct GroupedTemplateEvaluation {
-    QString groupKey;
-    QString stage;
-    QString groupId;
-    QString groupTitle;
-    QString groupRole;
-    QString groupOperator;
+    domain::strategy::RuleBindingPhase stage{domain::strategy::RuleBindingPhase::Signal};
+    domain::strategy::GroupId groupId;
+    domain::strategy::GroupTitle groupTitle;
+    domain::strategy::RuleGroupRole groupRole{domain::strategy::RuleGroupRole::Unspecified};
+    domain::strategy::RuleGroupOperator groupOperator{domain::strategy::RuleGroupOperator::Any};
     int matchThreshold = 0;
     int totalMembers = 0;
     int applicableMembers = 0;
@@ -915,10 +1287,49 @@ struct GroupedTemplateEvaluation {
     std::vector<RuntimeRuleTemplateEvaluationResult> members;
 };
 
-QString effectiveGroupOperator(const GroupedTemplateEvaluation& groupedEvaluation)
+constexpr int kRuleTemplateStageScoreSlotCount =
+    static_cast<int>(domain::strategy::RuleTemplateStage::AccountRisk) + 1;
+
+int ruleTemplateStageScoreSlot(domain::strategy::RuleTemplateStage stage)
 {
-    const QString groupOperator = groupedEvaluation.groupOperator.trimmed().toLower();
-    return groupOperator.isEmpty() ? QStringLiteral("any") : groupOperator;
+    const int slot = static_cast<int>(stage);
+    return slot >= 0 && slot < kRuleTemplateStageScoreSlotCount ? slot : -1;
+}
+
+double stageScoreBoostAt(
+    const std::array<double, kRuleTemplateStageScoreSlotCount>& stageScoreBoosts,
+    domain::strategy::RuleTemplateStage stage)
+{
+    const int slot = ruleTemplateStageScoreSlot(stage);
+    return slot >= 0 ? stageScoreBoosts[static_cast<std::size_t>(slot)] : 0.0;
+}
+
+void addStageScoreBoost(
+    std::array<double, kRuleTemplateStageScoreSlotCount>* stageScoreBoosts,
+    domain::strategy::RuleTemplateStage stage,
+    double scoreBoost)
+{
+    if (!stageScoreBoosts) {
+        return;
+    }
+
+    const int slot = ruleTemplateStageScoreSlot(stage);
+    if (slot >= 0) {
+        (*stageScoreBoosts)[static_cast<std::size_t>(slot)] += scoreBoost;
+    }
+}
+
+int findGroupedEvaluationIndex(const std::vector<GroupedTemplateEvaluation>& groupedResults,
+                               domain::strategy::RuleBindingPhase stage,
+                               const domain::strategy::GroupId& groupId)
+{
+    for (std::size_t index = 0; index < groupedResults.size(); ++index) {
+        const GroupedTemplateEvaluation& groupedEvaluation = groupedResults[index];
+        if (groupedEvaluation.stage == stage && groupedEvaluation.groupId == groupId) {
+            return static_cast<int>(index);
+        }
+    }
+    return -1;
 }
 
 int matchedMemberCount(const GroupedTemplateEvaluation& groupedEvaluation)
@@ -957,8 +1368,7 @@ RuntimeRuleTemplateEvaluationResult selectGroupMatchedResult(
     const GroupedTemplateEvaluation& groupedEvaluation)
 {
     RuntimeRuleTemplateEvaluationResult selectedResult;
-    const QString groupOperator = effectiveGroupOperator(groupedEvaluation);
-    if (groupOperator == QStringLiteral("first_match")) {
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::FirstMatch) {
         for (const RuntimeRuleTemplateEvaluationResult& memberResult : groupedEvaluation.members) {
             if (memberResult.matched) {
                 selectedResult = memberResult;
@@ -973,162 +1383,164 @@ RuntimeRuleTemplateEvaluationResult selectGroupMatchedResult(
         return selectedResult;
     }
 
-    selectedResult.binding.insert(QStringLiteral("group_id"), groupedEvaluation.groupId);
-    selectedResult.binding.insert(QStringLiteral("group_title"), groupedEvaluation.groupTitle);
-    selectedResult.binding.insert(QStringLiteral("group_role"), groupedEvaluation.groupRole);
-    selectedResult.binding.insert(QStringLiteral("group_operator"), groupedEvaluation.groupOperator);
-    selectedResult.binding.insert(QStringLiteral("phase"), groupedEvaluation.stage);
+    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupId), groupedEvaluation.groupId.text());
+    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupTitle), groupedEvaluation.groupTitle.text());
+    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupRole), static_cast<int>(groupedEvaluation.groupRole));
+    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupOperator), static_cast<int>(groupedEvaluation.groupOperator));
+    selectedResult.binding.insert(
+        ruleTemplateString(rule_template_strings::kBindingPhase),
+        static_cast<int>(groupedEvaluation.stage));
 
-    const int threshold = resolvedGroupMatchThreshold(groupedEvaluation);
-    const int matchedCount = matchedMemberCount(groupedEvaluation);
-    selectedResult.payload.insert(QStringLiteral("groupMatchedCount"), matchedCount);
-    if (threshold > 0) {
-        selectedResult.payload.insert(QStringLiteral("groupMatchThreshold"), threshold);
-    }
-
-    if (groupOperator == QStringLiteral("score_sum")) {
-        selectedResult.payload.insert(QStringLiteral("groupScoreSum"), matchedScoreSum(groupedEvaluation));
-        selectedResult.payload.insert(QStringLiteral("groupSelectionMode"), QStringLiteral("score_sum"));
-    } else if (groupOperator == QStringLiteral("first_match")) {
-        selectedResult.payload.insert(QStringLiteral("groupSelectionMode"), QStringLiteral("first_match"));
-    } else {
-        selectedResult.payload.insert(QStringLiteral("groupSelectionMode"), QStringLiteral("priority"));
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::ScoreSum) {
+        selectedResult.payload.insert(
+            ruleTemplateString(rule_template_strings::kFieldScore),
+            matchedScoreSum(groupedEvaluation));
     }
 
     return selectedResult;
 }
 
 double candidateSelectionScore(const RuntimeRuleTemplateEvaluationResult& result,
-                               const QHash<QString, double>& stageScoreBoosts)
+                               const std::array<double, kRuleTemplateStageScoreSlotCount>& stageScoreBoosts)
 {
     if (!result.matched) {
         return -1.0;
     }
 
-    const QString stage = result.stage.trimmed().toLower();
     return static_cast<double>(evaluationPriorityScore(result))
         + selectionBonusFromPayload(result.payload)
-        + stageScoreBoosts.value(stage, 0.0);
+        + stageScoreBoostAt(stageScoreBoosts, result.stage);
 }
 
 QString groupDisplayName(const GroupedTemplateEvaluation& groupedEvaluation)
 {
-    if (!groupedEvaluation.groupTitle.isEmpty() && !groupedEvaluation.groupRole.isEmpty()) {
-        return groupedEvaluation.groupTitle + QStringLiteral(" / ") + groupedEvaluation.groupRole;
+    const QString groupTitle = groupedEvaluation.groupTitle.text();
+    const QString groupRole = ruleGroupRoleName(groupedEvaluation.groupRole);
+    if (!groupTitle.isEmpty() && !groupRole.isEmpty()) {
+        return groupTitle + ruleTemplateString(rule_template_strings::kSeparatorScopeDisplay) + groupRole;
     }
-    if (!groupedEvaluation.groupTitle.isEmpty()) {
-        return groupedEvaluation.groupTitle;
+    if (!groupTitle.isEmpty()) {
+        return groupTitle;
     }
-    if (!groupedEvaluation.groupRole.isEmpty()) {
-        return groupedEvaluation.groupRole;
+    if (!groupRole.isEmpty()) {
+        return groupRole;
     }
-    return groupedEvaluation.groupId;
+    return groupedEvaluation.groupId.text();
 }
 
 RuntimeRuleTemplateEvaluationResult adjudicationBlockedResult(
     const RuntimeRuleTemplateEvaluationResult& fallbackResult,
     const GroupedTemplateEvaluation& groupedEvaluation,
-    const QString& reasonCode,
+    const domain::strategy::ReasonCode& reasonCode,
     const QString& message)
 {
     RuntimeRuleTemplateEvaluationResult result = fallbackResult;
     if (!groupedEvaluation.members.empty()) {
         result = templatePresenceOnlyResult(groupedEvaluation.members.front());
     }
-    result.hasTemplate = result.hasTemplate || !groupedEvaluation.groupId.isEmpty();
+    result.hasTemplate = result.hasTemplate || groupedEvaluation.groupId.isValid();
     result.matched = false;
     result.blocked = false;
     result.actionPermitted = false;
-    result.stage = groupedEvaluation.stage;
+    result.stage = ruleTemplateStageFromBindingPhase(groupedEvaluation.stage);
     result.reasonCode = reasonCode;
     result.message = message;
-    result.resultType.clear();
+    result.resultType = domain::strategy::RuleTemplateResultType::Unspecified;
     result.payload.clear();
     result.state.clear();
-    result.binding.insert(QStringLiteral("group_id"), groupedEvaluation.groupId);
-    result.binding.insert(QStringLiteral("group_title"), groupedEvaluation.groupTitle);
-    result.binding.insert(QStringLiteral("group_role"), groupedEvaluation.groupRole);
-    result.binding.insert(QStringLiteral("group_operator"), groupedEvaluation.groupOperator);
-    result.binding.insert(QStringLiteral("phase"), groupedEvaluation.stage);
+    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupId), groupedEvaluation.groupId.text());
+    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupTitle), groupedEvaluation.groupTitle.text());
+    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupRole), static_cast<int>(groupedEvaluation.groupRole));
+    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupOperator), static_cast<int>(groupedEvaluation.groupOperator));
+    result.binding.insert(
+        ruleTemplateString(rule_template_strings::kBindingPhase),
+        static_cast<int>(groupedEvaluation.stage));
     return result;
 }
 
 QVariantMap buildGroupDecision(const GroupedTemplateEvaluation& groupedEvaluation)
 {
     QVariantMap decision;
-    const QString groupOperator = effectiveGroupOperator(groupedEvaluation);
     const int matchedCount = matchedMemberCount(groupedEvaluation);
     const int threshold = resolvedGroupMatchThreshold(groupedEvaluation);
     const double aggregatedScore = matchedScoreSum(groupedEvaluation);
-    decision.insert(QStringLiteral("stage"), groupedEvaluation.stage);
-    decision.insert(QStringLiteral("groupId"), groupedEvaluation.groupId);
-    if (!groupedEvaluation.groupTitle.isEmpty()) {
-        decision.insert(QStringLiteral("groupTitle"), groupedEvaluation.groupTitle);
+    decision.insert(ruleTemplateString(rule_template_strings::kFieldStage), ruleBindingPhaseName(groupedEvaluation.stage));
+    decision.insert(ruleTemplateString(rule_template_strings::kComposerGroupId), groupedEvaluation.groupId.text());
+    if (groupedEvaluation.groupTitle.isValid()) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldGroupTitle), groupedEvaluation.groupTitle.text());
     }
-    if (!groupedEvaluation.groupRole.isEmpty()) {
-        decision.insert(QStringLiteral("groupRole"), groupedEvaluation.groupRole);
+    const QString groupRole = ruleGroupRoleName(groupedEvaluation.groupRole);
+    if (!groupRole.isEmpty()) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldGroupRole), groupRole);
     }
-    if (!groupedEvaluation.groupOperator.isEmpty()) {
-        decision.insert(QStringLiteral("groupOperator"), groupedEvaluation.groupOperator);
+    const QString serializedGroupOperator = ruleGroupOperatorName(groupedEvaluation.groupOperator);
+    if (!serializedGroupOperator.isEmpty()) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldGroupOperator), serializedGroupOperator);
     }
 
     const int filteredCount = (std::max)(0, groupedEvaluation.totalMembers - groupedEvaluation.applicableMembers);
 
-    decision.insert(QStringLiteral("memberCount"), groupedEvaluation.totalMembers);
-    decision.insert(QStringLiteral("applicableCount"), groupedEvaluation.applicableMembers);
-    decision.insert(QStringLiteral("matchedCount"), matchedCount);
-    decision.insert(QStringLiteral("filteredCount"), filteredCount);
-    if (groupOperator == QStringLiteral("at_least")) {
-        decision.insert(QStringLiteral("matchThreshold"), threshold);
+    decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMemberCount), groupedEvaluation.totalMembers);
+    decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldApplicableCount), groupedEvaluation.applicableMembers);
+    decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedCount), matchedCount);
+    decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldFilteredCount), filteredCount);
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::MinimumMatch) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchThreshold), threshold);
     }
-    if (groupOperator == QStringLiteral("score_sum")) {
-        decision.insert(QStringLiteral("aggregatedScore"), aggregatedScore);
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::ScoreSum) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldAggregatedScore), aggregatedScore);
     }
 
     if (groupedEvaluation.applicableMembers <= 0) {
-        decision.insert(QStringLiteral("disposition"), QStringLiteral("skipped"));
-        decision.insert(QStringLiteral("outcome"), QStringLiteral("not_applicable"));
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldDisposition), ruleTemplateString(rule_template_strings::kDecisionDispositionSkipped));
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldOutcome), ruleTemplateString(rule_template_strings::kDecisionOutcomeNotApplicable));
         decision.insert(
-            QStringLiteral("skipReason"),
-            groupedEvaluation.skipReason.isEmpty() ? QStringLiteral("role_filtered") : groupedEvaluation.skipReason);
+            ruleTemplateString(rule_template_strings::kDecisionFieldSkipReason),
+            groupedEvaluation.skipReason.isEmpty()
+                ? ruleTemplateString(rule_template_strings::kApplicabilityRoleFiltered)
+                : groupedEvaluation.skipReason);
         return decision;
     }
 
-    decision.insert(QStringLiteral("disposition"), QStringLiteral("considered"));
+    decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldDisposition), ruleTemplateString(rule_template_strings::kDecisionDispositionConsidered));
     if (matchedCount <= 0) {
-        decision.insert(QStringLiteral("outcome"), QStringLiteral("not_matched"));
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldOutcome), ruleTemplateString(rule_template_strings::kDecisionOutcomeNotMatched));
         return decision;
     }
 
-    if (groupOperator == QStringLiteral("all") && matchedCount < groupedEvaluation.applicableMembers) {
-        decision.insert(QStringLiteral("outcome"), QStringLiteral("incomplete"));
-        decision.insert(QStringLiteral("skipReason"), QStringLiteral("group_incomplete"));
-    } else if (groupOperator == QStringLiteral("at_least") && matchedCount < threshold) {
-        decision.insert(QStringLiteral("outcome"), QStringLiteral("incomplete"));
-        decision.insert(QStringLiteral("skipReason"), QStringLiteral("group_threshold_unmet"));
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::All
+            && matchedCount < groupedEvaluation.applicableMembers) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldOutcome), ruleTemplateString(rule_template_strings::kDecisionOutcomeIncomplete));
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldSkipReason), ruleTemplateString(rule_template_strings::kDecisionReasonGroupIncomplete));
+    } else if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::MinimumMatch
+               && matchedCount < threshold) {
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldOutcome), ruleTemplateString(rule_template_strings::kDecisionOutcomeIncomplete));
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldSkipReason), ruleTemplateString(rule_template_strings::kDecisionReasonGroupThresholdUnmet));
     } else {
-        decision.insert(QStringLiteral("outcome"), QStringLiteral("matched"));
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldOutcome), ruleTemplateString(rule_template_strings::kDecisionOutcomeMatched));
     }
 
     const RuntimeRuleTemplateEvaluationResult selectedResult =
         selectGroupMatchedResult(groupedEvaluation);
     if (selectedResult.matched) {
         if (!selectedResult.ruleId.isEmpty()) {
-            decision.insert(QStringLiteral("matchedRuleId"), selectedResult.ruleId);
+            decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedRuleId), selectedResult.ruleId.text());
         }
-        if (!selectedResult.resultType.isEmpty()) {
-            decision.insert(QStringLiteral("matchedResultType"), selectedResult.resultType);
+        if (selectedResult.resultType != domain::strategy::RuleTemplateResultType::Unspecified) {
+            decision.insert(
+                ruleTemplateString(rule_template_strings::kDecisionFieldMatchedResultType),
+                ruleTemplateResultTypeName(selectedResult.resultType));
         }
         if (!selectedResult.reasonCode.isEmpty()) {
-            decision.insert(QStringLiteral("matchedReasonCode"), selectedResult.reasonCode);
+            decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedReasonCode), selectedResult.reasonCode.text());
         }
         decision.insert(
-            QStringLiteral("selectedBy"),
-            groupOperator == QStringLiteral("first_match")
-                ? QStringLiteral("first_match")
-                : (groupOperator == QStringLiteral("score_sum")
-                    ? QStringLiteral("score_sum")
-                    : QStringLiteral("priority")));
+            ruleTemplateString(rule_template_strings::kDecisionFieldSelectedBy),
+            groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::FirstMatch
+                ? ruleTemplateString(rule_template_strings::kGroupOperatorFirstMatch)
+                : (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::ScoreSum
+                    ? ruleTemplateString(rule_template_strings::kGroupOperatorScoreSum)
+                    : ruleTemplateString(rule_template_strings::kFieldPriority)));
     }
     return decision;
 }
@@ -1139,12 +1551,11 @@ bool groupSatisfied(const GroupedTemplateEvaluation& groupedEvaluation)
         return false;
     }
 
-    const QString groupOperator = effectiveGroupOperator(groupedEvaluation);
     const int matchedCount = matchedMemberCount(groupedEvaluation);
-    if (groupOperator == QStringLiteral("all")) {
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::All) {
         return matchedCount >= groupedEvaluation.applicableMembers;
     }
-    if (groupOperator == QStringLiteral("at_least")) {
+    if (groupedEvaluation.groupOperator == domain::strategy::RuleGroupOperator::MinimumMatch) {
         return matchedCount >= resolvedGroupMatchThreshold(groupedEvaluation);
     }
     return matchedCount > 0;
@@ -1162,14 +1573,17 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplate(
     }
 
     result.hasTemplate = true;
-    result.binding = compiledTemplate.value(QStringLiteral("_binding")).toMap();
-    result.templateNamespace = compiledTemplate.value(QStringLiteral("namespace")).toString().trimmed();
-    result.templateFilePath = compiledTemplate.value(QStringLiteral("_filePath")).toString().trimmed();
+    result.binding = compiledTemplate.value(ruleTemplateString(rule_template_strings::kCompiledTemplateBinding)).toMap();
+    result.templateNamespace = domain::strategy::NamespaceId(
+        compiledTemplate.value(ruleTemplateString(rule_template_strings::kFieldNamespace)).toString().trimmed());
+    result.templateFilePath = domain::strategy::FilePathToken(
+        compiledTemplate.value(ruleTemplateString(rule_template_strings::kCompiledTemplateFilePath)).toString().trimmed());
 
     const QVariantMap scopes = buildScopes(context);
-    QVariantList rules = compiledTemplate.value(QStringLiteral("rules")).toList();
+    QVariantList rules = compiledTemplate.value(ruleTemplateString(rule_template_strings::kFieldRules)).toList();
     std::stable_sort(rules.begin(), rules.end(), [](const QVariant& left, const QVariant& right) {
-        return left.toMap().value(QStringLiteral("priority")).toInt() > right.toMap().value(QStringLiteral("priority")).toInt();
+        return left.toMap().value(ruleTemplateString(rule_template_strings::kFieldPriority)).toInt()
+            > right.toMap().value(ruleTemplateString(rule_template_strings::kFieldPriority)).toInt();
     });
 
     for (const QVariant& ruleValue : rules) {
@@ -1178,30 +1592,35 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplate(
             continue;
         }
 
-        const QVariantMap whenBlock = rule.value(QStringLiteral("when")).toMap();
+        const QVariantMap whenBlock = rule.value(ruleTemplateString(rule_template_strings::kFieldWhen)).toMap();
         if (whenBlock.isEmpty() || !evaluateConditionNode(whenBlock, scopes)) {
             continue;
         }
 
-        const QVariantMap thenBlock = rule.value(QStringLiteral("then")).toMap();
+        const QVariantMap thenBlock = rule.value(ruleTemplateString(rule_template_strings::kFieldThen)).toMap();
         result.matched = true;
-        result.stage = rule.value(QStringLiteral("stage")).toString().trimmed().toLower();
-        result.ruleId = rule.value(QStringLiteral("id")).toString().trimmed();
-        result.reasonCode = thenBlock.value(QStringLiteral("reason_code")).toString().trimmed();
-        result.message = thenBlock.value(QStringLiteral("message")).toString().trimmed();
+        result.stage = parseRuleTemplateStage(
+            rule.value(ruleTemplateString(rule_template_strings::kFieldStage)).toString());
+        result.ruleId = domain::strategy::RuleTemplateId(
+            rule.value(ruleTemplateString(rule_template_strings::kFieldId)).toString().trimmed());
+        result.reasonCode = domain::strategy::ReasonCode(
+            thenBlock.value(ruleTemplateString(rule_template_strings::kFieldReasonCode)).toString().trimmed());
+        result.message = thenBlock.value(ruleTemplateString(rule_template_strings::kFieldMessage)).toString().trimmed();
         result.resultType = normalizedResultType(thenBlock);
-        result.payload = thenBlock.value(QStringLiteral("payload")).toMap();
-        if (thenBlock.contains(QStringLiteral("score"))
-                && !result.payload.contains(QStringLiteral("score"))) {
+        result.payload = thenBlock.value(ruleTemplateString(rule_template_strings::kFieldPayload)).toMap();
+        if (thenBlock.contains(ruleTemplateString(rule_template_strings::kFieldScore))
+                && !result.payload.contains(ruleTemplateString(rule_template_strings::kFieldScore))) {
             const QVariant resolvedScore = resolveExpressionValue(
-                thenBlock.value(QStringLiteral("score")),
+                thenBlock.value(ruleTemplateString(rule_template_strings::kFieldScore)),
                 scopes);
             if (resolvedScore.isValid() && !resolvedScore.isNull()) {
-                result.payload.insert(QStringLiteral("score"), resolvedScore);
+                result.payload.insert(ruleTemplateString(rule_template_strings::kFieldScore), resolvedScore);
             }
         }
-        result.state = thenBlock.value(QStringLiteral("state")).toMap();
-        result.blocked = isBlockingTemplateResult(thenBlock, context.candidateAction);
+        result.state = thenBlock.value(ruleTemplateString(rule_template_strings::kFieldState)).toMap();
+        result.blocked = isBlockingTemplateResult(
+            thenBlock,
+            context.candidateAction);
         result.actionPermitted = !result.blocked;
         return result;
     }
@@ -1216,8 +1635,7 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
     RuntimeRuleTemplateEvaluationResult fallbackResult;
     std::vector<RuntimeRuleTemplateEvaluationResult> candidateResults;
     std::vector<GroupedTemplateEvaluation> groupedResults;
-    QHash<QString, int> groupedIndexes;
-    QHash<QString, double> stageScoreBoosts;
+    std::array<double, kRuleTemplateStageScoreSlotCount> stageScoreBoosts{};
     QVariantList groupDecisions;
 
     for (const QVariant& compiledTemplateValue : compiledTemplates) {
@@ -1235,7 +1653,8 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
             fallbackResult = templatePresenceOnlyResult(currentResult);
         }
 
-        const QString groupId = normalizedBindingGroupId(currentResult.binding);
+        const domain::strategy::GroupId groupId = normalizedBindingGroupIdValue(currentResult.binding);
+        const domain::strategy::RuleBindingPhase bindingPhase = normalizedBindingPhaseValue(currentResult.binding);
         const BindingApplicability applicability = bindingApplicability(currentResult.binding, context);
         if (groupId.isEmpty()) {
             if (applicability.applies && currentResult.matched) {
@@ -1244,19 +1663,16 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
             continue;
         }
 
-        const QString groupKey = normalizedBindingPhase(currentResult.binding) + QStringLiteral("|") + groupId;
-        int groupIndex = groupedIndexes.value(groupKey, -1);
+        int groupIndex = findGroupedEvaluationIndex(groupedResults, bindingPhase, groupId);
         if (groupIndex < 0) {
             GroupedTemplateEvaluation groupedEvaluation;
-            groupedEvaluation.groupKey = groupKey;
-            groupedEvaluation.stage = normalizedBindingPhase(currentResult.binding);
+            groupedEvaluation.stage = bindingPhase;
             groupedEvaluation.groupId = groupId;
-            groupedEvaluation.groupTitle = normalizedBindingGroupTitle(currentResult.binding);
-            groupedEvaluation.groupRole = normalizedBindingGroupRole(currentResult.binding);
-            groupedEvaluation.groupOperator = normalizedBindingGroupOperator(currentResult.binding);
+            groupedEvaluation.groupTitle = normalizedBindingGroupTitleValue(currentResult.binding);
+            groupedEvaluation.groupRole = normalizedBindingGroupRoleValue(currentResult.binding);
+            groupedEvaluation.groupOperator = normalizedBindingGroupOperatorValue(currentResult.binding);
             groupedEvaluation.matchThreshold = normalizedBindingGroupMatchThreshold(currentResult.binding);
             groupIndex = static_cast<int>(groupedResults.size());
-            groupedIndexes.insert(groupKey, groupIndex);
             groupedResults.push_back(std::move(groupedEvaluation));
         }
 
@@ -1279,10 +1695,11 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
         groupDecisions.append(buildGroupDecision(groupedEvaluation));
 
         const bool groupMatched = groupSatisfied(groupedEvaluation);
-        if (groupMatched && groupedEvaluation.groupRole.trimmed().toLower() == QStringLiteral("score_boost")) {
-            stageScoreBoosts.insert(
-                groupedEvaluation.stage,
-                stageScoreBoosts.value(groupedEvaluation.stage, 0.0) + matchedScoreSum(groupedEvaluation));
+        if (groupMatched && groupedEvaluation.groupRole == domain::strategy::RuleGroupRole::ScoreBoost) {
+            addStageScoreBoost(
+                &stageScoreBoosts,
+                ruleTemplateStageFromBindingPhase(groupedEvaluation.stage),
+                matchedScoreSum(groupedEvaluation));
         }
 
         if (!groupMatched) {
@@ -1329,15 +1746,14 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
     std::vector<RuntimeRuleTemplateEvaluationResult> triggerResults;
     std::vector<RuntimeRuleTemplateEvaluationResult> nonNeutralResults;
     for (const GroupedTemplateEvaluation& groupedEvaluation : groupedResults) {
-        const QString groupRole = groupedEvaluation.groupRole.trimmed().toLower();
         const bool groupMatched = groupSatisfied(groupedEvaluation);
-        if (isMandatoryGroupRole(groupRole)
+        if (isMandatoryGroupRole(groupedEvaluation.groupRole)
                 && groupedEvaluation.applicableMembers > 0
                 && !groupMatched
                 && !firstUnmetMandatoryGroup) {
             firstUnmetMandatoryGroup = &groupedEvaluation;
         }
-        if (isTriggerGroupRole(groupRole) && groupedEvaluation.applicableMembers > 0) {
+        if (isTriggerGroupRole(groupedEvaluation.groupRole) && groupedEvaluation.applicableMembers > 0) {
             hasApplicableTriggerGroup = true;
             if (!firstTriggerGroup) {
                 firstTriggerGroup = &groupedEvaluation;
@@ -1353,7 +1769,7 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
     }
 
     for (const RuntimeRuleTemplateEvaluationResult& candidateResult : candidateResults) {
-        const QString groupRole = normalizedBindingGroupRole(candidateResult.binding);
+        const domain::strategy::RuleGroupRole groupRole = normalizedBindingGroupRoleValue(candidateResult.binding);
         if (!candidateResult.matched || isNeutralGroupRole(groupRole) || candidateResult.blocked) {
             continue;
         }
@@ -1364,7 +1780,7 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
         RuntimeRuleTemplateEvaluationResult gatedResult = adjudicationBlockedResult(
             fallbackResult,
             *firstUnmetMandatoryGroup,
-            QStringLiteral("runtime_rule_template_must_pass_unmet"),
+            domain::strategy::ReasonCode(ruleTemplateString(rule_template_strings::kRuntimeReasonMustPassUnmet)),
             QStringLiteral("必须满足组未全部通过: %1").arg(groupDisplayName(*firstUnmetMandatoryGroup)));
         gatedResult.groupDecisions = groupDecisions;
         return gatedResult;
@@ -1374,7 +1790,7 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
         RuntimeRuleTemplateEvaluationResult gatedResult = adjudicationBlockedResult(
             fallbackResult,
             *firstTriggerGroup,
-            QStringLiteral("runtime_rule_template_any_pass_unmet"),
+            domain::strategy::ReasonCode(ruleTemplateString(rule_template_strings::kRuntimeReasonAnyPassUnmet)),
             QStringLiteral("任一满足组尚未命中: %1").arg(groupDisplayName(*firstTriggerGroup)));
         gatedResult.groupDecisions = groupDecisions;
         return gatedResult;

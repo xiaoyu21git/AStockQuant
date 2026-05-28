@@ -27,6 +27,10 @@ struct EventFormat;
 class EventBus;
 }
 
+namespace application::backtest {
+class StrategyBacktestEntryService;
+}
+
 class StrategyViewModel;
 
 struct StrategySignalPublicationState {
@@ -59,8 +63,8 @@ public:
     Q_INVOKABLE QVariantMap getStrategyById(const QString& strategyId);
     Q_INVOKABLE QVariantMap getStrategyByCode(const QString& strategyCode);
     Q_INVOKABLE QVariantList getAllStrategies();
-    Q_INVOKABLE QVariantList getStrategiesByType(const QString& strategyType);
-    Q_INVOKABLE QVariantList getStrategiesByStatus(const QString& status);
+    Q_INVOKABLE QVariantList getStrategiesByType(int strategyTypeIndex);
+    Q_INVOKABLE QVariantList getStrategiesByStatus(int statusIndex);
     
     // 搜索和过滤
     Q_INVOKABLE QVariantList searchStrategies(const QString& keyword);
@@ -98,12 +102,30 @@ public:
     // 设置视图模型 - 允许QML替换ViewModel实例
     Q_INVOKABLE void setViewModel(StrategyViewModel* viewModel);
     
-    // 策略工厂方法 - 根据类型创建预定义策略
-    Q_INVOKABLE QVariantMap createDefaultStrategy(const QString& strategyType, const QString& strategyName = "");
-    Q_INVOKABLE QVariantMap getStrategyTemplate(const QString& strategyType);
-    Q_INVOKABLE QStringList getAvailableStrategyTypes();
-    Q_INVOKABLE QVariantMap getStrategyTypeDescriptions();
-
+    // 策略工厂方法 - 根据行为类型创建预定义策略
+    Q_INVOKABLE QVariantMap createDefaultStrategy(int strategyBehaviorKind, const QString& strategyName = "");
+    Q_INVOKABLE QVariantMap getStrategyTemplate(int strategyBehaviorKind);
+    Q_INVOKABLE QVariantMap buildStrategyBacktestRunContextCandidate(
+        const QVariantMap& strategyData,
+        const QVariantMap& runtimeContext = QVariantMap()) const;
+    Q_INVOKABLE QVariantMap buildStrategyBacktestRequestPreview(
+        const QVariantMap& strategyData,
+        const QVariantMap& runContext,
+        const QVariantMap& appliedRiskConfig = QVariantMap()) const;
+    Q_INVOKABLE QVariantMap launchStrategyBacktest(
+        const QVariantMap& strategyData,
+        const QVariantMap& runContext,
+        const QVariantMap& appliedRiskConfig = QVariantMap());
+    Q_INVOKABLE QVariantMap pollStrategyBacktestProgress(qulonglong handleRunId) const;
+    Q_INVOKABLE QVariantMap collectStrategyBacktestResult(qulonglong handleRunId) const;
+    Q_INVOKABLE QVariantMap cancelStrategyBacktest(qulonglong handleRunId);
+    Q_INVOKABLE QVariantMap buildStrategyBacktestPerformancePayload(
+        const QVariantMap& backtestResult,
+        const QVariantMap& backtestContext = QVariantMap()) const;
+    Q_INVOKABLE bool recordStrategyBacktestResult(
+        const QString& strategyId,
+        const QVariantMap& backtestResult,
+        const QVariantMap& backtestContext = QVariantMap());
     // 事件链路调试入口：允许人工注入一条市场事件
     Q_INVOKABLE bool publishSyntheticMarketEvent(const QVariantMap& marketEvent);
     
@@ -160,14 +182,14 @@ private:
     QString generateStrategyId(const QString& strategyName);
     
     // 生成策略代码
-    QString generateStrategyCode(const QString& strategyName, const QString& strategyType);
+    QString generateStrategyCode(const QVariantMap& strategyData);
     
     // 创建默认策略数据
     QVariantMap createTrendFollowingStrategy(const QString& name);
     QVariantMap createMeanReversionStrategy(const QString& name);
     QVariantMap createAlphaStrategy(const QString& name);
     QVariantMap createArbitrageStrategy(const QString& name);
-    QVariantMap createCustomStrategy(const QString& name, const QString& type);
+    QVariantMap createCustomStrategy(const QString& name);
     void initializeEventBusIntegration();
     void handleMarketEvent(const engine::EventFormat& event, const QString& eventType);
     QVariantMap cachedTradingConfigurationSnapshot(qint64 nowMs);
@@ -195,6 +217,7 @@ private:
     void discardRuntimeAutoExecutionTracking(const QString& trackingOrderId);
     void handleRuntimeAutoExecutionEvent(const engine::EventFormat& event,
                                          const QString& eventType);
+    [[nodiscard]] application::backtest::StrategyBacktestEntryService* strategyBacktestEntryService() const;
     
 private:
     // 单例实例
@@ -214,7 +237,7 @@ private:
     std::atomic<bool> m_isLoading;  // 防止递归加载
     
     // 内存缓存
-    QMap<QString, QVariantMap> m_memoryCache;
+    QHash<QString, QVariantMap> m_memoryCache;
     
     // 缓存是否已加载标志
     std::atomic<bool> m_cacheLoaded;

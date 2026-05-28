@@ -70,6 +70,7 @@ BaseQuantCard {
     signal stopClicked()                        // 停止策略
     signal pauseClicked()                       // 暂停策略
     signal optimizeClicked()                    // 优化策略
+    signal editClicked()                        // 编辑策略
     signal deleteClicked()                      // 删除策略
     signal startActionHintClicked()             // 打开股票池配置
     signal parameterChanged(int index, real value)  // 参数改变
@@ -288,6 +289,29 @@ BaseQuantCard {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: optimizeClicked()
+                }
+            }
+
+            Rectangle {
+                width: 88
+                height: 32
+                radius: 8
+                color: Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.32)
+                border.width: 1
+                border.color: Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.9)
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "编辑策略"
+                    font.pixelSize: 12
+                    font.weight: Font.DemiBold
+                    color: textColorEnhanced
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: editClicked()
                 }
             }
             

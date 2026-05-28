@@ -88,8 +88,8 @@ domain::trading::TradingExecutionContext DefaultFactorBacktestTradingAdapter::bu
     context.executionProfile.executionKind = domain::strategy::StrategyExecutionKind::FactorWeightedPortfolio;
     context.executionProfile.positionSizingMethod = domain::strategy::PositionSizingMethod::EqualWeight;
     context.executionProfile.priceModel = domain::trading::ExecutionPriceModel::NextSessionOpen;
-    context.executionProfile.enableShortSelling = false;
-    context.executionProfile.rebalanceFrequencyDays = config.rebalanceDays;
+    context.executionProfile.shortSellingMode = domain::strategy::ShortSellingMode::Disabled;
+    context.executionProfile.rebalanceFrequencyDays = domain::strategy::RebalanceFrequencyDays{config.rebalanceDays};
     context.runtimeOptions.maxThreads = config.enableDateParallelism ? 2 : 1;
     context.runtimeOptions.enableCache = !config.marketDataCacheKey.empty();
     context.runtimeOptions.cacheTtlSeconds = 0;

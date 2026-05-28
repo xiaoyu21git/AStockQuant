@@ -233,28 +233,8 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
                 }
             }
 
-            const std::unordered_map<std::string, double> factorValuesBySymbol(factorResult.values.begin(), factorResult.values.end());
-            const bool passesSignalThreshold = passesSignalChangeThreshold(
-                factorValuesBySymbol,
-                previousLongSymbols,
-                previousShortSymbols,
-                proposedGroupSymbols.front(),
-                proposedGroupSymbols.back(),
-                config.signalChangeThresholdStdMultiplier);
-            const bool passesMaxTurnover = passesTurnoverLimit(
-                previousLongSymbols,
-                previousShortSymbols,
-                proposedGroupSymbols.front(),
-                proposedGroupSymbols.back(),
-                config.enableTurnoverLimit,
-                config.maxRebalanceTurnover);
-
-            if (passesSignalThreshold && passesMaxTurnover) {
-                activeGroupSymbols = std::move(proposedGroupSymbols);
-                holdingDaysSinceRebalance = 1;
-            } else {
-                ++holdingDaysSinceRebalance;
-            }
+            activeGroupSymbols = std::move(proposedGroupSymbols);
+            holdingDaysSinceRebalance = 1;
         } else {
             ++holdingDaysSinceRebalance;
         }

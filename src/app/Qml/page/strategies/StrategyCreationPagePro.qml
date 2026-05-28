@@ -23,15 +23,12 @@ Page {
     
     // 信号
     signal backClicked()
-    signal requestBacktest(string strategyId, string strategyName, var backtestConfig)
     
     // 数据容器
-    property string selectedStrategyType: "trend_following"
+    property int selectedStrategyTypeIndex: 0
+    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     property string strategyName: ""
     property string strategyDescription: ""
-    property string assetType: "stock"
-    property string timeFrame: "daily"
-    property string riskLevel: "medium"
     property string optimizationMethod: "genetic"
     property var strategyTags: []
     
@@ -86,9 +83,12 @@ Page {
                             Layout.minimumWidth: step1Content.selectorPanelWidth
                             Layout.maximumWidth: step1Content.selectorPanelWidth
                             
-                            onStrategyTypeChanged: function(strategyType) {
-                                root.selectedStrategyType = strategyType
-                                strategyBasicInfo.applyStrategyTypeDefaults(strategyType, false)
+                            onStrategyTypeIndexChanged: function(strategyTypeIndex) {
+                                root.selectedStrategyTypeIndex = strategyTypeIndex
+                                if (Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
+                                        !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+                                    strategyBasicInfo.applyStrategyTypeDefaults(root.selectedStrategyTypeIndex, false)
+                                }
                             }
                         }
                         
@@ -97,7 +97,7 @@ Page {
                             id: strategyBasicInfo
                             Layout.fillHeight: true
                             Layout.fillWidth: true
-                            selectedStrategyType: root.selectedStrategyType
+                            selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
                             useWideCardLayout: step1Content.useWideBasicInfoLayout
                             
                             onValidationChanged: function(isValid) {
@@ -110,7 +110,7 @@ Page {
                 // 步骤2: 参数配置
                 StrategyComponents.StrategyParamConfig {
                     id: step2Content
-                    selectedStrategyType: root.selectedStrategyType
+                    selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
                     factorService: root.factorService
                     
                     onParametersChanged: function(newParameters) {
@@ -242,27 +242,27 @@ Page {
                                         }
 
                                         Text {
-                                            text: "类型: " + Utils.StrategyCreationUtils.getStrategyTypeName(root.selectedStrategyType)
+                                            text: "类型: " + Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "资产类型: " + (strategyBasicInfo.getAssetTypeValue ? strategyBasicInfo.getAssetTypeValue() : root.assetType)
+                                            text: "资产类型: " + Utils.StrategyCreationUtils.getAssetTypeNameFromIndex(strategyBasicInfo.getAssetTypeIndex())
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "时间周期: " + (strategyBasicInfo.getTimeFrameValue ? strategyBasicInfo.getTimeFrameValue() : root.timeFrame)
+                                            text: "时间周期: " + Utils.StrategyCreationUtils.getTimeFrameNameFromIndex(strategyBasicInfo.getTimeFrameIndex())
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "风险等级: " + Utils.StrategyCreationUtils.getRiskLevelName(strategyBasicInfo.getRiskLevelValue ? strategyBasicInfo.getRiskLevelValue() : root.riskLevel)
+                                            text: "风险等级: " + Utils.StrategyCreationUtils.getRiskLevelNameFromIndex(strategyBasicInfo.getRiskLevelIndex())
                                             font.pixelSize: 13
-                                            color: Utils.StrategyCreationUtils.getRiskLevelColor(strategyBasicInfo.getRiskLevelValue ? strategyBasicInfo.getRiskLevelValue() : root.riskLevel)
+                                            color: Utils.StrategyCreationUtils.getRiskLevelColorFromIndex(strategyBasicInfo.getRiskLevelIndex())
                                         }
 
                                         Text {
@@ -731,19 +731,26 @@ Page {
     
     // ============ 功能函数 ============
 
-    function mapBackendTypeToFrontend(strategy) {
-        var explicitSubtype = strategy ? strategy.sub_type : ""
-        if (explicitSubtype) {
-            return explicitSubtype
+    function mapBackendTypeToFrontendIndex(strategy) {
+        var parameters = toPlainJsValue((strategy && strategy.parameters) || {}) || ({})
+        var explicitTypeIndex = Number((strategy && strategy.selectedStrategyTypeIndex) !== undefined
+            ? strategy.selectedStrategyTypeIndex
+            : parameters.selectedStrategyTypeIndex)
+        if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
+            var normalizedTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(explicitTypeIndex)
+            if (normalizedTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+                return normalizedTypeIndex
+            }
         }
 
-        var backendType = String((strategy && strategy.strategy_type) || "CUSTOM")
-        if (backendType === "TREND") return "trend_following"
-        if (backendType === "MEAN_REVERSION") return "mean_reversion"
-        if (backendType === "ARBITRAGE") return "arbitrage"
-        if (backendType === "HFT") return "high_frequency"
-        if (backendType === "ALPHA") return "momentum"
-        return "custom"
+        var explicitBehaviorKind = Number((strategy && strategy.strategyBehaviorKind) !== undefined
+            ? strategy.strategyBehaviorKind
+            : parameters.strategyBehaviorKind)
+        if (isFinite(explicitBehaviorKind) && explicitBehaviorKind >= 0 && explicitBehaviorKind <= 8) {
+            return Utils.StrategyCreationUtils.strategyTypeIndexFromBehaviorKind(explicitBehaviorKind)
+        }
+
+        return Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid
     }
 
     function toPlainJsValue(rawValue) {
@@ -761,17 +768,114 @@ Page {
         return rawValue
     }
 
+    function hasImportedFactorBacktestPayload(payload) {
+        var plainPayload = toPlainJsValue(payload) || ({})
+        var parameters = toPlainJsValue(plainPayload.parameters) || ({})
+        var directImportContext = toPlainJsValue(plainPayload.factorImportContext) || ({})
+        var parameterImportContext = toPlainJsValue(parameters.factorImportContext) || ({})
+        return Object.keys(directImportContext).length > 0
+            || Object.keys(parameterImportContext).length > 0
+    }
+
+    function loadFactorBacktestImport(importPayload) {
+        var plainImport = toPlainJsValue(importPayload) || ({})
+        if (!plainImport || Object.keys(plainImport).length === 0) {
+            return
+        }
+
+        var importParameters = toPlainJsValue(plainImport.parameters) || ({})
+        var editableParameters = ({})
+        for (var key in importParameters) {
+            editableParameters[key] = importParameters[key]
+        }
+        if (editableParameters.factor_overlay === undefined) {
+            if (plainImport.factor_overlay !== undefined) {
+                editableParameters.factor_overlay = toPlainJsValue(plainImport.factor_overlay) || ({})
+            } else if (plainImport.factorOverlaySnapshot !== undefined) {
+                editableParameters.factor_overlay = toPlainJsValue(plainImport.factorOverlaySnapshot) || ({})
+            }
+        }
+        if (plainImport.factorImportContext !== undefined) {
+            editableParameters.factorImportContext = toPlainJsValue(plainImport.factorImportContext) || ({})
+        }
+
+        resetForm()
+
+        var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainImport)
+        if (frontendTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+            frontendTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
+        }
+
+        var advancedOptions = toPlainJsValue(plainImport.advanced_options || plainImport.advancedOptions || importParameters.advanced_options) || ({})
+        var strategySnapshot = {
+            strategy_id: "",
+            strategy_name: plainImport.strategy_name || plainImport.strategyName || "",
+            description: plainImport.description || importParameters.description || "",
+            parameters: editableParameters,
+            assetTypeIndex: plainImport.assetTypeIndex !== undefined ? plainImport.assetTypeIndex : importParameters.assetTypeIndex,
+            timeFrameIndex: plainImport.timeFrameIndex !== undefined ? plainImport.timeFrameIndex : importParameters.timeFrameIndex,
+            riskLevelIndex: plainImport.riskLevelIndex !== undefined ? plainImport.riskLevelIndex : importParameters.riskLevelIndex,
+            optimization_method: plainImport.optimization_method || plainImport.optimizationMethod || importParameters.optimization_method || "genetic",
+            tags: toPlainJsValue(plainImport.tags || importParameters.tags) || []
+        }
+
+        isEditMode = false
+        editingStrategyId = ""
+        selectedStrategyTypeIndex = frontendTypeIndex
+        enableAdvancedOptions = !!advancedOptions.enabled
+
+        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyTypeIndex) {
+            strategyTypeSelector.setSelectedStrategyTypeIndex(selectedStrategyTypeIndex, false)
+        }
+        if (strategyBasicInfo && strategyBasicInfo.setBasicInfo) {
+            strategyBasicInfo.setBasicInfo(strategySnapshot)
+        }
+        if (step2Content && step2Content.applyPersistedStrategy) {
+            Qt.callLater(function() {
+                if (step2Content && step2Content.applyPersistedStrategy) {
+                    step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
+                }
+            })
+        }
+
+        strategyParameters = step2Content.strategyParameters || ({})
+        parametersValid = step2Content.parametersValid
+        step1Valid = strategyBasicInfo.isValid ? strategyBasicInfo.isValid() : true
+        step2Valid = step2Content.isValid ? step2Content.isValid() : step2Content.parametersValid
+        stepIndicator.currentStep = 2
+    }
+
     function loadStrategyForEdit(strategy) {
         var plainStrategy = toPlainJsValue(strategy) || ({})
         if (!plainStrategy || Object.keys(plainStrategy).length === 0) {
             return
         }
 
-        var frontendType = mapBackendTypeToFrontend(plainStrategy)
+        if (!plainStrategy.strategy_id
+                && !plainStrategy.strategyId
+                && !plainStrategy.id
+                && hasImportedFactorBacktestPayload(plainStrategy)) {
+            loadFactorBacktestImport(plainStrategy)
+            return
+        }
+
+        var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainStrategy)
+        if (frontendTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+            console.warn("loadStrategyForEdit missing indexed strategy identity:", strategySnapshot.strategy_id)
+            showErrorDialog("策略缺少 strategyTypeIndex 或 strategyBehaviorKind 整型合同，无法继续编辑。")
+            return
+        }
         var parameters = toPlainJsValue(plainStrategy.parameters) || ({})
         var editableParameters = ({})
         for (var key in parameters) {
             editableParameters[key] = parameters[key]
+        }
+        if (editableParameters.factor_overlay === undefined) {
+            if (plainStrategy.factor_overlay !== undefined) {
+                editableParameters.factor_overlay = toPlainJsValue(plainStrategy.factor_overlay) || ({})
+            } else if (plainStrategy.factorOverlaySnapshot !== undefined) {
+                editableParameters.factor_overlay = toPlainJsValue(plainStrategy.factorOverlaySnapshot) || ({})
+            }
         }
         if (!editableParameters.rule_profile && plainStrategy.ruleProfileSnapshot) {
             editableParameters.rule_profile = toPlainJsValue(plainStrategy.ruleProfileSnapshot)
@@ -791,9 +895,9 @@ Page {
             strategy_name: plainStrategy.strategy_name || plainStrategy.strategyName || "",
             description: plainStrategy.description || parameters.description || "",
             parameters: editableParameters,
-            asset_type: plainStrategy.asset_type || plainStrategy.assetType || parameters.asset_type || "stock",
-            time_frame: plainStrategy.time_frame || plainStrategy.timeFrame || parameters.time_frame || "daily",
-            risk_level: plainStrategy.risk_level || plainStrategy.riskLevel || parameters.risk_level || "medium",
+            assetTypeIndex: plainStrategy.assetTypeIndex !== undefined ? plainStrategy.assetTypeIndex : parameters.assetTypeIndex,
+            timeFrameIndex: plainStrategy.timeFrameIndex !== undefined ? plainStrategy.timeFrameIndex : parameters.timeFrameIndex,
+            riskLevelIndex: plainStrategy.riskLevelIndex !== undefined ? plainStrategy.riskLevelIndex : parameters.riskLevelIndex,
             optimization_method: plainStrategy.optimization_method || plainStrategy.optimizationMethod || parameters.optimization_method || "genetic",
             tags: toPlainJsValue(plainStrategy.tags || parameters.tags) || []
         }
@@ -806,11 +910,11 @@ Page {
 
         isEditMode = true
         editingStrategyId = strategySnapshot.strategy_id
-        selectedStrategyType = frontendType
+        selectedStrategyTypeIndex = frontendTypeIndex
         enableAdvancedOptions = !!advancedOptions.enabled
 
-        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyType) {
-            strategyTypeSelector.setSelectedStrategyType(frontendType, false)
+        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyTypeIndex) {
+            strategyTypeSelector.setSelectedStrategyTypeIndex(selectedStrategyTypeIndex, false)
         }
         if (strategyBasicInfo && strategyBasicInfo.setBasicInfo) {
             strategyBasicInfo.setBasicInfo(strategySnapshot)
@@ -818,7 +922,7 @@ Page {
         if (step2Content && step2Content.applyPersistedStrategy) {
             Qt.callLater(function() {
                 if (step2Content && step2Content.applyPersistedStrategy) {
-                    step2Content.applyPersistedStrategy(frontendType, editableParameters, advancedOptions)
+                    step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
                 }
             })
         }
@@ -828,15 +932,6 @@ Page {
         step1Valid = strategyBasicInfo.isValid ? strategyBasicInfo.isValid() : true
         step2Valid = step2Content.isValid ? step2Content.isValid() : true
         stepIndicator.currentStep = 1
-    }
-
-    function focusSymbolPoolEditor() {
-        stepIndicator.currentStep = 1
-        if (strategyBasicInfo && strategyBasicInfo.focusSymbolPoolField) {
-            Qt.callLater(function() {
-                strategyBasicInfo.focusSymbolPoolField()
-            })
-        }
     }
 
     // 创建策略
@@ -862,12 +957,12 @@ Page {
         var context = {
             strategyName: strategyBasicInfo.strategyName,
             strategyDescription: strategyBasicInfo.strategyDescription,
-            linkedStockPool: strategyBasicInfo.getLinkedStockPoolBinding(),
-            selectedStrategyType: selectedStrategyType,
+            selectedStrategyTypeIndex: selectedStrategyTypeIndex,
+            selectedStrategyBehaviorKind: selectedStrategyBehaviorKind,
             strategyTags: strategyBasicInfo.getTagsList(),
-            assetType: strategyBasicInfo.getAssetTypeValue(),
-            timeFrame: strategyBasicInfo.getTimeFrameValue(),
-            riskLevel: strategyBasicInfo.getRiskLevelValue(),
+            assetTypeIndex: strategyBasicInfo.getAssetTypeIndex(),
+            timeFrameIndex: strategyBasicInfo.getTimeFrameIndex(),
+            riskLevelIndex: strategyBasicInfo.getRiskLevelIndex(),
             optimizationMethod: strategyBasicInfo.getOptimizationMethodValue(),
             enableAdvancedOptions: enableAdvancedOptions,
             strategyParameters: strategyParameters,
@@ -875,8 +970,15 @@ Page {
         }
         
         var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
+        if (strategyData.assetTypeIndex <= 0) {
+            showErrorDialog("当前资产类型不在策略合同支持范围内，请改用股票、期货、期权或 ETF。")
+            return
+        }
+        if (strategyData.timeFrameIndex <= 0 || strategyData.riskLevelIndex <= 0) {
+            showErrorDialog("策略运行属性必须使用受支持的索引口径，请重新选择时间周期和风险等级。")
+            return
+        }
         var advancedOptions = step2Content.getAdvancedOptions ? step2Content.getAdvancedOptions() : ({ enabled: !!enableAdvancedOptions })
-        var linkedStockPool = strategyBasicInfo.getLinkedStockPoolBinding ? strategyBasicInfo.getLinkedStockPoolBinding() : ({})
         
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
         
@@ -895,36 +997,26 @@ Page {
         // 将前端数据结构映射到后端所需格式
         var backendStrategyData = {
             "strategy_name": strategyData.name,
-            "strategy_type": mapStrategyTypeToBackend(strategyData.strategyType),
+            "strategyTypeIndex": strategyData.strategyTypeIndex,
             "description": strategyData.description,
-            "asset_type": strategyData.assetType,
-            "time_frame": strategyData.timeFrame,
-            "risk_level": strategyData.riskLevel,
+            "assetTypeIndex": strategyData.assetTypeIndex,
+            "timeFrameIndex": strategyData.timeFrameIndex,
+            "riskLevelIndex": strategyData.riskLevelIndex,
             "optimization_method": strategyData.optimizationMethod,
             "advanced_options": advancedOptions,
             "parameters": strategyData.parameters,
-            "clear_symbol_pool": true,
-            "sub_type": strategyData.strategyType,
             
             // 元数据
-            "status": "DRAFT",
+            "statusIndex": 2,
             "version": "1.0",
-            "language": "Python",
             "author": "System",
 
             // 标签
             "tags": strategyData.tags || []
         }
 
-        if (linkedStockPool && linkedStockPool.hasBinding) {
-            backendStrategyData.parameters.linked_stock_pool_id = linkedStockPool.poolId
-            backendStrategyData.parameters.linked_stock_pool_name = linkedStockPool.poolName
-            backendStrategyData.parameters.linked_stock_pool_symbols = linkedStockPool.symbols || []
-        } else {
-            delete backendStrategyData.parameters.linked_stock_pool_id
-            delete backendStrategyData.parameters.linked_stock_pool_name
-            delete backendStrategyData.parameters.linked_stock_pool_symbols
-        }
+        backendStrategyData.parameters.strategyBehaviorKind = Number(strategyData.strategyBehaviorKind)
+    backendStrategyData.parameters.selectedStrategyTypeIndex = Number(strategyData.selectedStrategyTypeIndex)
         
         console.log("调用StrategyService创建策略...", JSON.stringify(backendStrategyData, null, 2))
         
@@ -951,23 +1043,6 @@ Page {
         }
         
         isCreating = false
-    }
-    
-    // 映射策略类型到后端类型
-    function mapStrategyTypeToBackend(frontendType) {
-        var mapping = {
-            "trend_following": "TREND",
-            "trend_breakout": "TREND",
-            "mean_reversion": "MEAN_REVERSION", 
-            "momentum": "ALPHA",
-            "arbitrage": "ARBITRAGE",
-            "machine_learning": "ALPHA",
-            "multi_factor": "ALPHA",
-            "high_frequency": "HFT",
-            "event_driven": "ALPHA",
-            "custom": "CUSTOM"
-        }
-        return mapping[frontendType] || "CUSTOM"
     }
     
     // 显示成功对话框
@@ -998,23 +1073,19 @@ Page {
         // 重置各组件
         strategyTypeSelector.reset()
         strategyBasicInfo.reset()
-        strategyBasicInfo.refreshLinkedStockPools()
         
         var resetData = Utils.StrategyCreationUtils.resetFormData()
         
         // 应用重置数据
-        selectedStrategyType = resetData.selectedStrategyType
+        selectedStrategyTypeIndex = Number(resetData.selectedStrategyTypeIndex)
         strategyName = resetData.strategyName
         strategyDescription = resetData.strategyDescription
         strategyTags = resetData.strategyTags
-        assetType = resetData.assetType
-        timeFrame = resetData.timeFrame
-        riskLevel = resetData.riskLevel
         optimizationMethod = resetData.optimizationMethod
         enableAdvancedOptions = resetData.enableAdvancedOptions
         strategyParameters = resetData.strategyParameters
         parametersValid = resetData.parametersValid
-        strategyBasicInfo.applyStrategyTypeDefaults(selectedStrategyType, true)
+        strategyBasicInfo.applyStrategyTypeDefaults(selectedStrategyTypeIndex, true)
     }
     
     // ============ 定时器和动画 ============
@@ -1257,6 +1328,5 @@ Component.onCompleted: {
     strategyBasicInfo.validationChanged.connect(function(isValid) {
         step1Valid = isValid
     })
-    strategyBasicInfo.refreshLinkedStockPools()
 }
 }

@@ -22,6 +22,15 @@ qulonglong currentThreadToken() {
 
 thread_local std::map<const QtMySQLDatabase*, QString> threadConnectionNames;
 
+bool isReconnectableConnectionErrorMessage(const QString& message)
+{
+    const QString normalized = message.trimmed().toLower();
+    return normalized.contains(QStringLiteral("lost connection to mysql server during query"))
+        || normalized.contains(QStringLiteral("mysql server has gone away"))
+        || normalized.contains(QStringLiteral("server has gone away"))
+        || normalized.contains(QStringLiteral("communication link failure"));
+}
+
 } // namespace
 
 // ============================================================================
@@ -269,23 +278,79 @@ QueryResult QtMySQLDatabase::executeQuery(const QString& sql,
     if (!conn.isOpen()) {
         throw QtMySQLException("Database connection is not open");
     }
+
+    auto finalizeQuerySuccess = [&]() {
+        std::lock_guard<std::mutex> lock(statsMutex_);
+        stats_.totalQueryTimeMs += timer.elapsed();
+    };
+
+    auto discardThreadConnection = [&](const QString& connectionName) {
+        if (connectionName.isEmpty()) {
+            return;
+        }
+
+        auto it = threadConnectionNames.find(this);
+        if (it != threadConnectionNames.end() && it->second == connectionName) {
+            threadConnectionNames.erase(it);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            connectionNames_.erase(
+                std::remove(connectionNames_.begin(), connectionNames_.end(), connectionName),
+                connectionNames_.end());
+        }
+
+        if (QSqlDatabase::contains(connectionName)) {
+            QSqlDatabase::removeDatabase(connectionName);
+        }
+    };
     
     try {
         // 直接在convertToQueryResult中执行查询，避免查询对象复制问题
         QueryResult result = convertToQueryResult(conn, sql, params);
-        
-        std::lock_guard<std::mutex> lock(statsMutex_);
-        stats_.totalQueryTimeMs += timer.elapsed();
+        finalizeQuerySuccess();
         
         returnResult(conn);
         return result;
         
     } catch (const std::exception& e) {
+        const QString errorMessage = QString::fromUtf8(e.what());
+        if (isReconnectableConnectionErrorMessage(errorMessage)) {
+            const QString staleConnectionName = conn.connectionName();
+            qWarning() << "QtMySQLDatabase: reconnect retry after query failure:" << staleConnectionName;
+
+            if (conn.isOpen()) {
+                conn.close();
+            }
+            conn = QSqlDatabase();
+            discardThreadConnection(staleConnectionName);
+
+            QSqlDatabase retryConn = getConnection();
+            if (!retryConn.isOpen()) {
+                std::lock_guard<std::mutex> lock(statsMutex_);
+                stats_.failedQueries++;
+                throw QtMySQLException("Query failed: database connection is not open after reconnect retry");
+            }
+
+            try {
+                QueryResult retryResult = convertToQueryResult(retryConn, sql, params);
+                finalizeQuerySuccess();
+                returnResult(retryConn);
+                return retryResult;
+            } catch (const std::exception& retryError) {
+                std::lock_guard<std::mutex> lock(statsMutex_);
+                stats_.failedQueries++;
+                returnResult(retryConn);
+                throw QtMySQLException(QString("Query failed after reconnect retry: %1").arg(retryError.what()));
+            }
+        }
+
         std::lock_guard<std::mutex> lock(statsMutex_);
         stats_.failedQueries++;
         
         returnResult(conn);
-        throw QtMySQLException(QString("Query failed: %1").arg(e.what()));
+        throw QtMySQLException(QString("Query failed: %1").arg(errorMessage));
     }
 }
 
@@ -306,7 +371,7 @@ size_t QtMySQLDatabase::visitQuery(const QString& sql,
     }
 
     try {
-        QSqlQuery query = executeQuery(conn, sql, params);
+        QSqlQuery query = executeQuery(conn, sql, params, true);
         size_t visitedRowCount = 0;
 
         if (query.isSelect()) {
@@ -534,27 +599,6 @@ bool QtMySQLDatabase::rollbackTransaction() {
     return false;
 }
 
-bool QtMySQLDatabase::tableExists(const QString& tableName) {
-    QString sql = "SELECT COUNT(*) FROM information_schema.tables "
-                  "WHERE table_schema = DATABASE() AND table_name = ?";
-    
-    try {
-        QueryResult result = executeQuery(sql, {{"", tableName}});
-        return !result.isEmpty() && result.getSingleValue<int>() > 0;
-    } catch (const QtMySQLException&) {
-        return false;
-    }
-}
-
-QueryResult QtMySQLDatabase::getTableSchema(const QString& tableName) {
-    QString sql = "SELECT column_name, data_type, is_nullable, column_default, column_comment "
-                  "FROM information_schema.columns "
-                  "WHERE table_schema = DATABASE() AND table_name = ? "
-                  "ORDER BY ordinal_position";
-    
-    return executeQuery(sql, {{"", tableName}});
-}
-
 QString QtMySQLDatabase::getDatabaseVersion() {
     try {
         QueryResult result = executeQuery("SELECT VERSION()", {});
@@ -597,9 +641,26 @@ QSqlDatabase QtMySQLDatabase::getConnection() {
 
     auto it = threadConnectionNames.find(this);
     if (it != threadConnectionNames.end() && QSqlDatabase::contains(it->second)) {
-        QSqlDatabase conn = QSqlDatabase::database(it->second, false);
+        const QString connectionName = it->second;
+        QSqlDatabase conn = QSqlDatabase::database(connectionName, false);
         if (conn.isValid() && conn.isOpen()) {
-            return conn;
+            if (pingConnection(conn)) {
+                return conn;
+            }
+
+            qWarning() << "QtMySQLDatabase: stale connection detected, recreating:" << connectionName;
+            conn.close();
+            conn = QSqlDatabase();
+            QSqlDatabase::removeDatabase(connectionName);
+
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                connectionNames_.erase(
+                    std::remove(connectionNames_.begin(), connectionNames_.end(), connectionName),
+                    connectionNames_.end());
+            }
+
+            threadConnectionNames.erase(it);
         }
     }
 
@@ -725,18 +786,18 @@ bool isPositionalBindingKey(const QString& key)
 
 }
 
-QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn, 
+QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn,
                                        const QString& sql,
-                                       const std::map<QString, QVariant>& params) {
+                                       const std::map<QString, QVariant>& params,
+                                       const bool forwardOnly) {
     QSqlQuery query(conn);
     
     qDebug() << "=== QtMySQLDatabase::executeQuery 私有方法开始 ===";
     qDebug() << "SQL:" << sql;
     qDebug() << "参数数量:" << params.size();
     
-    // QMYSQL 在某些包含 TEXT/JSON 字段的预处理查询上，forward-only 模式会出现
-    // 能拿到列结构但 next() 读不到数据行的问题，这里优先保证正确性。
-    query.setForwardOnly(false);
+    // 默认保守关闭 forward-only，只在显式流式访问的大结果集上开启。
+    query.setForwardOnly(forwardOnly);
     
     if (!query.prepare(sql)) {
         qDebug() << "查询准备失败:" << query.lastError().text();

@@ -958,23 +958,7 @@ std::vector<std::string> DatabaseStockDataProvider::loadSymbolsFromTable(const Q
 }
 
 int DatabaseStockDataProvider::resolveDatasetId() const {
-    if (selectedDatasetId_ > 0) {
-        return selectedDatasetId_;
-    }
-
-    const auto dataSets = DataServiceCache::getInstance().getAllDataSetInfos();
-    int latestDatasetId = -1;
-    QDateTime latestCreated;
-    for (const auto& info : dataSets) {
-        if (!isBacktestReadyDataset(info)) {
-            continue;
-        }
-        if (latestDatasetId < 0 || info.createdTime > latestCreated) {
-            latestDatasetId = info.id;
-            latestCreated = info.createdTime;
-        }
-    }
-    return latestDatasetId;
+    return selectedDatasetId_ > 0 ? selectedDatasetId_ : -1;
 }
 
 QString DatabaseStockDataProvider::resolveTableName() const {

@@ -59,8 +59,10 @@ struct BacktestConfig {
     std::shared_ptr<FactorInstanceInfo> runtimeInstanceInfo;
     std::string startDate;
     std::string endDate;
+    std::string dataSourceMode;
     std::string marketDataCacheKey;
     int datasetId = -1;
+    double initialCapital = 0.0;
     MarketEnvironmentProfile marketEnvironmentProfile = MarketEnvironmentProfile::GENERIC_EQUITY;
     int forwardDays = 30;     // 执行日起算的持有交易日窗口
     int rebalanceDays = 15;   // 调仓周期（交易日）
@@ -91,8 +93,10 @@ struct BacktestConfig {
         config::setSerializedInstanceId(json, instanceId);
         json.set("start_date", detail::toJsonValue(startDate));
         json.set("end_date", detail::toJsonValue(endDate));
+        json.set("data_source_mode", detail::toJsonValue(dataSourceMode));
         json.set("market_data_cache_key", detail::toJsonValue(marketDataCacheKey));
         json.set("dataset_id", detail::toJsonValue(datasetId));
+        json.set("initial_capital", detail::toJsonValue(initialCapital));
         json.set("market_environment_profile",
              detail::toJsonValue(marketEnvironmentProfileIndex(marketEnvironmentProfile)));
         json.set("forward_days", detail::toJsonValue(forwardDays));
@@ -139,8 +143,10 @@ struct BacktestConfig {
         runtimeInstanceInfo.reset();
         if (json.has("start_date")) startDate = json.get("start_date").asString();
         if (json.has("end_date")) endDate = json.get("end_date").asString();
+        if (json.has("data_source_mode")) dataSourceMode = json.get("data_source_mode").asString();
         if (json.has("market_data_cache_key")) marketDataCacheKey = json.get("market_data_cache_key").asString();
         if (json.has("dataset_id")) datasetId = json.get("dataset_id").asInt();
+        if (json.has("initial_capital")) initialCapital = json.get("initial_capital").asDouble();
         if (json.has("market_environment_profile")) {
             marketEnvironmentProfile = marketEnvironmentProfileFromIndex(
                 json.get("market_environment_profile").asInt());
@@ -413,6 +419,106 @@ struct FactorQuality final {
     static FactorBacktestMetrics::Rating evaluate(const FactorBacktestMetrics& metrics);
 };
 
+struct FormalTradingExecution {
+    std::string status;
+    std::string message;
+    std::vector<std::string> executionDates;
+    std::vector<double> totalAssetSeries;
+    std::vector<double> cashSeries;
+    std::vector<double> marketValueSeries;
+    int scheduledRebalanceCount = 0;
+    int executedRebalanceCount = 0;
+    int blockedRebalanceCount = 0;
+    int acceptedOrderCount = 0;
+    int fillCount = 0;
+    double endingCash = 0.0;
+    double endingMarketValue = 0.0;
+    double endingTotalAsset = 0.0;
+
+    foundation::json::JsonFacade toJson() const {
+        auto json = foundation::json::JsonFacade::createObject();
+        if (!status.empty()) {
+            json.set("status", detail::toJsonValue(status));
+        }
+        if (!message.empty()) {
+            json.set("message", detail::toJsonValue(message));
+        }
+
+        auto datesArray = foundation::json::JsonFacade::createArray();
+        for (const auto& tradeDate : executionDates) {
+            datesArray.push_back(detail::toJsonValue(tradeDate));
+        }
+        json.set("execution_dates", datesArray);
+
+        auto totalAssetArray = foundation::json::JsonFacade::createArray();
+        for (double value : totalAssetSeries) {
+            totalAssetArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("total_asset_series", totalAssetArray);
+
+        auto cashArray = foundation::json::JsonFacade::createArray();
+        for (double value : cashSeries) {
+            cashArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("cash_series", cashArray);
+
+        auto marketValueArray = foundation::json::JsonFacade::createArray();
+        for (double value : marketValueSeries) {
+            marketValueArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("market_value_series", marketValueArray);
+
+        json.set("scheduled_rebalance_count", detail::toJsonValue(scheduledRebalanceCount));
+        json.set("executed_rebalance_count", detail::toJsonValue(executedRebalanceCount));
+        json.set("blocked_rebalance_count", detail::toJsonValue(blockedRebalanceCount));
+        json.set("accepted_order_count", detail::toJsonValue(acceptedOrderCount));
+        json.set("fill_count", detail::toJsonValue(fillCount));
+        json.set("ending_cash", detail::toJsonValue(endingCash));
+        json.set("ending_market_value", detail::toJsonValue(endingMarketValue));
+        json.set("ending_total_asset", detail::toJsonValue(endingTotalAsset));
+        return json;
+    }
+
+    static FormalTradingExecution fromJson(const foundation::json::JsonFacade& json) {
+        FormalTradingExecution result;
+        if (json.has("status")) result.status = json.get("status").asString();
+        if (json.has("message")) result.message = json.get("message").asString();
+        if (json.has("execution_dates")) {
+            const auto values = json.get("execution_dates");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.executionDates.push_back(values.at(index).asString());
+            }
+        }
+        if (json.has("total_asset_series")) {
+            const auto values = json.get("total_asset_series");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.totalAssetSeries.push_back(values.at(index).asDouble());
+            }
+        }
+        if (json.has("cash_series")) {
+            const auto values = json.get("cash_series");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.cashSeries.push_back(values.at(index).asDouble());
+            }
+        }
+        if (json.has("market_value_series")) {
+            const auto values = json.get("market_value_series");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.marketValueSeries.push_back(values.at(index).asDouble());
+            }
+        }
+        if (json.has("scheduled_rebalance_count")) result.scheduledRebalanceCount = json.get("scheduled_rebalance_count").asInt();
+        if (json.has("executed_rebalance_count")) result.executedRebalanceCount = json.get("executed_rebalance_count").asInt();
+        if (json.has("blocked_rebalance_count")) result.blockedRebalanceCount = json.get("blocked_rebalance_count").asInt();
+        if (json.has("accepted_order_count")) result.acceptedOrderCount = json.get("accepted_order_count").asInt();
+        if (json.has("fill_count")) result.fillCount = json.get("fill_count").asInt();
+        if (json.has("ending_cash")) result.endingCash = json.get("ending_cash").asDouble();
+        if (json.has("ending_market_value")) result.endingMarketValue = json.get("ending_market_value").asDouble();
+        if (json.has("ending_total_asset")) result.endingTotalAsset = json.get("ending_total_asset").asDouble();
+        return result;
+    }
+};
+
 // 完整回测结果
 struct BacktestResult {
     foundation::utils::Uuid resultId;
@@ -428,10 +534,12 @@ struct BacktestResult {
     ICIRResult icirResult;
     GroupBacktestResult groupResult;
     FactorBacktestMetrics factorMetrics;
+    CalculationResult latestFactorResult;
     std::vector<std::string> longShortDates;
     std::vector<double> rawLongShortSeries;
     std::vector<double> costAdjustedLongShortSeries;
     std::vector<double> riskAdjustedLongShortSeries;
+    FormalTradingExecution formalTradingExecution;
     
     // 性能指标
     double annualReturn = 0.0;
@@ -476,6 +584,9 @@ struct BacktestResult {
         json.set("icir_result", icirResult.toJson());
         json.set("group_result", groupResult.toJson());
         json.set("factor_metrics", factorMetrics.toJson());
+        if (!latestFactorResult.date.empty() || !latestFactorResult.values.empty()) {
+            json.set("latest_factor_result", latestFactorResult.toJson());
+        }
 
         auto dateSeriesArray = foundation::json::JsonFacade::createArray();
         for (const auto& tradeDate : longShortDates) {
@@ -500,6 +611,9 @@ struct BacktestResult {
             riskAdjustedSeriesArray.push_back(detail::toJsonValue(value));
         }
         json.set("risk_adjusted_long_short_series", riskAdjustedSeriesArray);
+        if (!formalTradingExecution.status.empty()) {
+            json.set("formal_trading_execution", formalTradingExecution.toJson());
+        }
 
         json.set("annual_return", detail::toJsonValue(annualReturn));
         json.set("benchmark_annual_return", detail::toJsonValue(benchmarkAnnualReturn));
@@ -549,6 +663,7 @@ struct BacktestResult {
         if (json.has("icir_result")) result.icirResult = ICIRResult::fromJson(json.get("icir_result"));
         if (json.has("group_result")) result.groupResult = GroupBacktestResult::fromJson(json.get("group_result"));
         if (json.has("factor_metrics")) result.factorMetrics = FactorBacktestMetrics::fromJson(json.get("factor_metrics"));
+        if (json.has("latest_factor_result")) result.latestFactorResult = CalculationResult::fromJson(json.get("latest_factor_result"));
         if (json.has("long_short_dates")) {
             auto values = json.get("long_short_dates");
             for (size_t index = 0; index < values.size(); ++index) {
@@ -572,6 +687,9 @@ struct BacktestResult {
             for (size_t index = 0; index < values.size(); ++index) {
                 result.riskAdjustedLongShortSeries.push_back(values.at(index).asDouble());
             }
+        }
+        if (json.has("formal_trading_execution")) {
+            result.formalTradingExecution = FormalTradingExecution::fromJson(json.get("formal_trading_execution"));
         }
         if (json.has("annual_return")) result.annualReturn = json.get("annual_return").asDouble();
         if (json.has("benchmark_annual_return")) result.benchmarkAnnualReturn = json.get("benchmark_annual_return").asDouble();

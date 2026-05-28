@@ -1,16 +1,8 @@
 file(GLOB DOMAIN_BACKTEST_SOURCES_CXX "*.cxx")
 
 target_sources(domain_backtest PRIVATE
-    BacktestDecisionRuntime.cpp
-    BacktestExecutionRuntime.cpp
-    BacktestRuntimeAssembly.cpp
-    BacktestRuleTemplateEvaluator.cpp
-    BacktestEngine.cpp
     FactorGrouper.cpp
-    GroupBacktester.cpp
     ICIRCalculator.cpp
-    FactorBacktestService.cpp
-    StrategyBacktestService.cpp
     FactorBacktestTypes.cpp
     DatabaseFactorDataProvider.cpp
     DatabaseStockDataProvider.cpp

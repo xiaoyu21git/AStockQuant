@@ -1,7 +1,7 @@
 #include "StrategyRuntimeRuleEvaluator.h"
 
-#include <QRegularExpression>
-#include <QSet>
+#include "../../domain/backtest/include/ResolvedStrategyBehaviorVariant.h"
+
 #include <QStringList>
 
 #include <cmath>
@@ -17,105 +17,6 @@ QString firstNonEmptyStrategyText(const QVariantMap& strategy, std::initializer_
         }
     }
     return {};
-}
-
-QStringList parseStrategySymbolPoolText(const QString& text)
-{
-    const QStringList rawTokens = text.split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
-    QStringList symbols;
-    QSet<QString> seen;
-    for (const QString& rawToken : rawTokens) {
-        const QString normalizedToken = StrategyRuntimeRuleEvaluator::normalizeStrategySymbol(rawToken);
-        if (normalizedToken.isEmpty() || seen.contains(normalizedToken)) {
-            continue;
-        }
-        seen.insert(normalizedToken);
-        symbols.append(normalizedToken);
-    }
-    return symbols;
-}
-
-QStringList symbolPoolFromVariant(const QVariant& value)
-{
-    if (!value.isValid() || value.isNull()) {
-        return {};
-    }
-
-    QStringList symbols;
-    if (value.canConvert<QStringList>()) {
-        symbols = value.toStringList();
-    } else {
-        const QVariantList symbolList = value.toList();
-        for (const QVariant& symbolValue : symbolList) {
-            const QString symbolText = symbolValue.toString();
-            if (!symbolText.trimmed().isEmpty()) {
-                symbols.append(symbolText);
-            }
-        }
-        if (symbols.isEmpty()) {
-            return parseStrategySymbolPoolText(value.toString());
-        }
-    }
-
-    QStringList normalizedSymbols;
-    QSet<QString> seen;
-    for (const QString& symbol : symbols) {
-        const QString normalizedSymbol = StrategyRuntimeRuleEvaluator::normalizeStrategySymbol(symbol);
-        if (normalizedSymbol.isEmpty() || seen.contains(normalizedSymbol)) {
-            continue;
-        }
-        seen.insert(normalizedSymbol);
-        normalizedSymbols.append(normalizedSymbol);
-    }
-    return normalizedSymbols;
-}
-
-QStringList strategySymbolPool(const QVariantMap& strategy)
-{
-    QStringList symbols = symbolPoolFromVariant(strategy.value(QStringLiteral("symbol_pool")));
-    if (!symbols.isEmpty()) {
-        return symbols;
-    }
-
-    symbols = symbolPoolFromVariant(strategy.value(QStringLiteral("symbolPool")));
-    if (!symbols.isEmpty()) {
-        return symbols;
-    }
-
-    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
-    symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("symbol_pool")));
-    if (!symbols.isEmpty()) {
-        return symbols;
-    }
-
-    return symbolPoolFromVariant(parameters.value(QStringLiteral("symbolPool")));
-}
-
-QStringList linkedStrategyLiveSymbolPool(const QVariantMap& strategy)
-{
-    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
-
-    QStringList symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("linked_stock_pool_symbols")));
-    if (!symbols.isEmpty()) {
-        return symbols;
-    }
-
-    symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("linkedStockPoolSymbols")));
-    if (!symbols.isEmpty()) {
-        return symbols;
-    }
-
-    return {};
-}
-
-QStringList strategyLiveSymbolPool(const QVariantMap& strategy)
-{
-    const QStringList linkedSymbols = linkedStrategyLiveSymbolPool(strategy);
-    if (!linkedSymbols.isEmpty()) {
-        return linkedSymbols;
-    }
-
-    return strategySymbolPool(strategy);
 }
 
 QString runtimeSessionBlockedReason(const QVariantMap& runtimeSessionSnapshot)
@@ -388,7 +289,11 @@ QVariantMap StrategyRuntimeRuleEvaluator::buildBaseEvaluation(const QVariantMap&
     QVariantMap evaluation;
     evaluation.insert(QStringLiteral("strategyId"), resolveStrategyIdentifier(strategy));
     evaluation.insert(QStringLiteral("strategyName"), resolveStrategyName(strategy));
-    evaluation.insert(QStringLiteral("strategyType"), normalizedStrategyType(strategy));
+    const domain::backtest::ResolvedStrategyBehavior behavior =
+        domain::backtest::resolveStrategyBehavior(strategy);
+    if (behavior.valid) {
+        evaluation.insert(QStringLiteral("strategyBehaviorKind"), behavior.index());
+    }
     evaluation.insert(QStringLiteral("symbol"), normalizeStrategySymbol(context.symbol));
     evaluation.insert(QStringLiteral("latestPrice"), context.latestPrice);
     evaluation.insert(QStringLiteral("referencePrice"), context.referencePrice);
@@ -498,6 +403,17 @@ bool StrategyRuntimeRuleEvaluator::applySignalGate(QVariantMap& evaluation,
                                                    const QVariantMap& strategy,
                                                    const MarketContext& context)
 {
+    const domain::backtest::ResolvedStrategyBehavior behavior =
+        domain::backtest::resolveStrategyBehavior(strategy);
+    if (!behavior.valid) {
+        evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
+        evaluation.insert(QStringLiteral("gate"), QStringLiteral("signal"));
+        evaluation.insert(QStringLiteral("reason"), QStringLiteral("missing_strategy_behavior_kind"));
+        evaluation.insert(QStringLiteral("signalGate"), QStringLiteral("blocked"));
+        evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("skipped"));
+        return false;
+    }
+
     const QString action = determineAction(strategy, context.latestPrice, context.referencePrice);
     if (action.isEmpty()) {
         evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
@@ -589,15 +505,17 @@ QString StrategyRuntimeRuleEvaluator::determineAction(const QVariantMap& strateg
         return {};
     }
 
-    const QString strategyType = normalizedStrategyType(strategy);
-    if (strategyType == QStringLiteral("TREND")) {
+    const domain::backtest::ResolvedStrategyBehavior behavior =
+        domain::backtest::resolveStrategyBehavior(strategy);
+    if (!behavior.valid) {
+        return {};
+    }
+
+    if (behavior.kind == domain::backtest::StrategyBehaviorKind::TrendFollowing) {
         return latestPrice >= referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
     }
-    if (strategyType == QStringLiteral("MEAN_REVERSION")) {
+    if (behavior.kind == domain::backtest::StrategyBehaviorKind::MeanReversion) {
         return latestPrice < referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
-    }
-    if (strategyType == QStringLiteral("PORTFOLIO")) {
-        return {};
     }
 
     const double delta = latestPrice - referencePrice;
@@ -626,11 +544,6 @@ QString StrategyRuntimeRuleEvaluator::resolveStrategyIdentifier(const QVariantMa
 QString StrategyRuntimeRuleEvaluator::resolveStrategyName(const QVariantMap& strategy)
 {
     return firstNonEmptyStrategyText(strategy, {"strategy_name", "strategyName"});
-}
-
-QString StrategyRuntimeRuleEvaluator::normalizedStrategyType(const QVariantMap& strategy)
-{
-    return strategy.value(QStringLiteral("strategy_type")).toString().trimmed().toUpper();
 }
 
 QString StrategyRuntimeRuleEvaluator::normalizeStrategySymbol(const QString& rawSymbol)
@@ -665,10 +578,6 @@ QString StrategyRuntimeRuleEvaluator::normalizeStrategySymbol(const QString& raw
 
 bool StrategyRuntimeRuleEvaluator::strategyAllowsMarketSymbol(const QVariantMap& strategy, const QString& marketSymbol)
 {
-    const QStringList symbolPool = strategyLiveSymbolPool(strategy);
-    if (symbolPool.isEmpty()) {
-        return false;
-    }
-
-    return symbolPool.contains(normalizeStrategySymbol(marketSymbol));
+    Q_UNUSED(strategy)
+    return !normalizeStrategySymbol(marketSymbol).isEmpty();
 }

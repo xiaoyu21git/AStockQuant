@@ -46,12 +46,12 @@ void SimProvider::register_tick_callback(TickCallback cb) {
     tick_cb_ = std::move(cb);
 }
 
-bool SimProvider::subscribe_kline(std::uint32_t /*symbol_id*/, std::uint16_t /*period*/) {
+bool SimProvider::subscribe_kline(std::uint32_t /*symbol_id*/, std::uint32_t /*period*/) {
     // 目前订阅不驱动实时推送，仅用于接口兼容
     return true;
 }
 
-bool SimProvider::unsubscribe_kline(std::uint32_t /*symbol_id*/, std::uint16_t /*period*/) {
+bool SimProvider::unsubscribe_kline(std::uint32_t /*symbol_id*/, std::uint32_t /*period*/) {
     return true;
 }
 
@@ -65,7 +65,7 @@ bool SimProvider::unsubscribe_tick(std::uint32_t /*symbol_id*/) {
 
 KLineBatch SimProvider::get_history_klines(
     std::uint32_t symbol_id,
-    std::uint16_t period,
+    std::uint32_t period,
     std::uint64_t start_time,
     std::uint64_t end_time,
     std::size_t  limit) {
@@ -111,6 +111,28 @@ KLineBatch SimProvider::get_history_klines(
 
         price = close;
         ts += interval;
+    }
+
+    return batch;
+}
+
+KLineBatch SimProvider::get_history_klines_batch(
+    const std::vector<std::uint32_t>& symbol_ids,
+    const std::uint32_t period,
+    const std::uint64_t start_time,
+    const std::uint64_t end_time,
+    const std::size_t limit_per_symbol)
+{
+    KLineBatch batch(symbol_ids.size() * (limit_per_symbol == 0U ? 1U : limit_per_symbol));
+    for (const std::uint32_t symbol_id : symbol_ids) {
+        KLineBatch symbolBatch = get_history_klines(symbol_id,
+                                                    period,
+                                                    start_time,
+                                                    end_time,
+                                                    limit_per_symbol);
+        for (const KLine& kline : symbolBatch) {
+            batch.push_back(kline);
+        }
     }
 
     return batch;

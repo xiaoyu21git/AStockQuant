@@ -1,11 +1,20 @@
 // DataRuleService.cpp - 规则服务实现
 #include "DataRuleService.h"
+#include "cleaning/CleaningEngine.h"
 #include "cleaning/CleaningRuleContract.h"
 #include "DataFetchFieldContractUtils.h"
 #include <QDebug>
 #include <QVariant>
 #include <QThread>
 #include <QDateTime>
+
+namespace factor::bridge::detail {
+
+bool configureStrictCleaningEngine(CleaningEngine& cleaningEngine,
+                                   const QVariantMap& rules,
+                                   QString* errorMessage);
+
+} // namespace factor::bridge::detail
 
 namespace {
 
@@ -63,6 +72,7 @@ public:
             {ruleKeyName(factor::bridge::CleaningRuleKey::NewStockFilter), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MinTradeDays), 60}}},
             {ruleKeyName(factor::bridge::CleaningRuleKey::STFilter), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
             {ruleKeyName(factor::bridge::CleaningRuleKey::PriceValidity), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MinPrice), 0.01}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxPrice), 10000.0}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::EnforceChain), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::AllowZeroWhenSuspended), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::VolumeFilter), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MinVolume), 0.0}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxVolume), 1000000000.0}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::AllowZeroWhenSuspended), true}}},
             {ruleKeyName(factor::bridge::CleaningRuleKey::DuplicateRemoval), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::KeyFields), defaultDuplicateRuleKeyFields()}}},
             {ruleKeyName(factor::bridge::CleaningRuleKey::SuspensionFill), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::FillFields), defaultSuspensionFillFields()}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxForwardFillDays), 10}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::DropAfterMaxDays), true}}},
             {ruleKeyName(factor::bridge::CleaningRuleKey::MissingValueFill), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::Fields), defaultMissingValueFillFields()}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxLookbackDays), 5}}},
@@ -142,34 +152,77 @@ public:
     
     void applyRules(const QVariantMap& rules, const QVariantList& data) {
         qDebug() << "应用规则到数据，规则数量:" << rules.size() << "数据条数:" << data.size();
-        
-        QVariantList result = data; // 简化的应用逻辑
-        
-        QThread::msleep(50);
-        
-        emit m_parent->rulesApplied(true, "规则应用成功", result);
+
+        if (data.isEmpty()) {
+            emit m_parent->rulesApplied(false, QStringLiteral("没有数据可清洗"), QVariantList());
+            emit m_parent->error(QStringLiteral("没有数据可清洗"));
+            return;
+        }
+
+        try {
+            factor::bridge::CleaningEngine cleaningEngine;
+            QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::progress,
+                             m_parent, [this](int progress, const QString& message) {
+                                 emit m_parent->progress(progress, message);
+                             });
+            QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::errorOccurred,
+                             m_parent, [this](const QString& errorMessage) {
+                                 emit m_parent->error(errorMessage);
+                             });
+
+            QString configurationError;
+            if (!factor::bridge::detail::configureStrictCleaningEngine(cleaningEngine,
+                                                                       rules,
+                                                                       &configurationError)) {
+                emit m_parent->rulesApplied(false, configurationError, QVariantList());
+                emit m_parent->error(configurationError);
+                return;
+            }
+
+            const QVariantList result = cleaningEngine.clean(data);
+            const QString message = QStringLiteral("规则应用成功: 原始 %1 条 -> 清洗后 %2 条")
+                .arg(data.size())
+                .arg(result.size());
+            emit m_parent->rulesApplied(true, message, result);
+        } catch (const std::exception& e) {
+            const QString errorMessage = QStringLiteral("规则应用失败: %1").arg(e.what());
+            emit m_parent->rulesApplied(false, errorMessage, QVariantList());
+            emit m_parent->error(errorMessage);
+        } catch (...) {
+            const QString errorMessage = QStringLiteral("规则应用失败: 未知错误");
+            emit m_parent->rulesApplied(false, errorMessage, QVariantList());
+            emit m_parent->error(errorMessage);
+        }
     }
     
     QVariantMap validateRules(const QVariantMap& rules) {
         qDebug() << "验证规则:" << rules.size();
 
+        factor::bridge::CleaningEngine cleaningEngine;
+        QString validationError;
+        const bool valid = factor::bridge::detail::configureStrictCleaningEngine(cleaningEngine,
+                                                                                 rules,
+                                                                                 &validationError);
+
         QVariantList errors;
-        for (auto it = rules.constBegin(); it != rules.constEnd(); ++it) {
-            if (!supportedRuleKeys().contains(it.key())) {
-                errors.append(QStringLiteral("不支持的规则: %1").arg(it.key()));
-            }
+        if (!valid && !validationError.isEmpty()) {
+            errors.append(validationError);
         }
 
         QVariantMap validationResult = {
-            {"valid", errors.isEmpty()},
-            {"message", errors.isEmpty() ? QStringLiteral("规则验证通过") : QStringLiteral("规则验证失败")},
+            {"valid", valid},
+            {"message", valid ? QStringLiteral("规则验证通过") : QStringLiteral("规则验证失败")},
             {"errors", errors},
             {"warnings", QVariantList()}
         };
+
+        const QString resultMessage = valid
+            ? QStringLiteral("规则验证通过")
+            : (validationError.isEmpty() ? QStringLiteral("规则验证失败") : validationError);
         
         QThread::msleep(30);
         
-        emit m_parent->rulesValidated(true, "规则验证成功", validationResult);
+        emit m_parent->rulesValidated(valid, resultMessage, validationResult);
         return validationResult;
     }
     

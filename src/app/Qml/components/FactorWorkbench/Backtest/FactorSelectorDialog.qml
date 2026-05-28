@@ -1,37 +1,94 @@
-// FactorSelectorDialog.qml
-// 因子选择对话框 - 简化版本
-// 设计原则：
-// 1. QML只负责显示，不操作数据
-// 2. 所有数据操作通过C++控制器完成
-// 3. 使用属性绑定更新UI状态
-
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
+import QtQml 2.15
 import AStock.Bridge 1.0 as Bridge
 
 Dialog {
     id: root
-    
-    // 属性
+
     property Bridge.FactorBacktestController factorBacktestController: null
     property Bridge.FactorService factorService: null
     property Bridge.FactorViewModel factorViewModel: null
     property var selectedFactorIds: []
     property string dataSourceMode: "cache"
+    property bool requireSupportValidation: true
     property bool supportMapRequested: false
     property bool supportMapLoading: false
     property var factorSupportMap: ({})
     property var supportMapRefreshCallback: null
-    
-    // 内部属性 - 用于UI显示
-    property var uiSelectedFactorIds: []
+
+    property var allFactors: []
+    property var filteredFactors: []
+    property string activeFactorId: ""
+    property string searchText: ""
+    property bool selectedOnlyFilter: false
+    property var factorDetailCache: ({})
+
+    readonly property var activeFactorRecord: factorRecord(activeFactorId)
+    readonly property var activeFactorDetail: factorDetail(activeFactorId)
+    readonly property int visibleSupportedFactorCount: countVisibleSupportedFactors()
+    readonly property bool allVisibleSupportedSelected: visibleSupportedFactorCount > 0
+        && countVisibleSelectedSupportedFactors() === visibleSupportedFactorCount
+
+    signal factorsSelected(var factorIds)
+    signal dialogClosed()
+
+    modal: true
+    closePolicy: Popup.NoAutoClose
+    width: 1080
+    height: 700
+    x: parent ? Math.round((parent.width - width) / 2) : 0
+    y: parent ? Math.round((parent.height - height) / 2) : 0
+    padding: 0
+
+    background: Rectangle {
+        radius: 18
+        color: "#08111f"
+        border.width: 1
+        border.color: "#1e293b"
+    }
 
     function normalizedFactorIdKey(factorId) {
-        return String(factorId === undefined || factorId === null ? "" : factorId)
+        return String(factorId === undefined || factorId === null ? "" : factorId).trim()
+    }
+
+    function isSelectedFactor(factorId) {
+        var normalizedId = normalizedFactorIdKey(factorId)
+        return !!normalizedId && selectedFactorIds.indexOf(normalizedId) !== -1
+    }
+
+    function normalizeSymbolList(source) {
+        var input = []
+        if (Array.isArray(source)) {
+            input = source
+        } else if (typeof source === "string" && String(source).trim() !== "") {
+            input = String(source).split(/[\s,;，；]+/)
+        }
+
+        var normalized = []
+        var seen = ({})
+        for (var index = 0; index < input.length; ++index) {
+            var symbol = String(input[index] === undefined || input[index] === null ? "" : input[index]).trim()
+            if (!symbol || seen[symbol]) {
+                continue
+            }
+            seen[symbol] = true
+            normalized.push(symbol)
+        }
+        return normalized
     }
 
     function supportInfoForFactor(factorId) {
+        if (!requireSupportValidation) {
+            return {
+                supported: true,
+                requiredFields: [],
+                missingFields: [],
+                reason: ""
+            }
+        }
+
         var factorKey = normalizedFactorIdKey(factorId)
         if (factorSupportMap && factorSupportMap[factorKey] !== undefined) {
             return factorSupportMap[factorKey]
@@ -60,10 +117,9 @@ Dialog {
 
     function factorUiMetaFor(typeValue) {
         var numericType = Number(typeValue)
-        if (isNaN(numericType) || numericType < 0) {
+        if (!isFinite(numericType) || numericType < 0) {
             return ({})
         }
-
         return Bridge.FactorMetaService.getFactorUiMeta(numericType) || ({})
     }
 
@@ -72,23 +128,188 @@ Dialog {
         if (meta.color !== undefined && meta.color !== null) {
             return Qt.color(String(meta.color))
         }
-
         return Qt.color("#94A3B8")
     }
 
     function factorCategoryLabel(typeValue) {
         var meta = factorUiMetaFor(typeValue)
-        return meta.displayName !== undefined && meta.displayName !== null ? String(meta.displayName) : ""
+        return meta.displayName !== undefined && meta.displayName !== null ? String(meta.displayName) : "未分类"
     }
 
-    function supportedFactorCount() {
-        if (!factorViewModel) {
-            return 0
+    function factorRecord(factorId) {
+        var normalizedId = normalizedFactorIdKey(factorId)
+        if (!normalizedId) {
+            return ({})
         }
 
+        for (var index = 0; index < allFactors.length; ++index) {
+            if (normalizedFactorIdKey(allFactors[index].factorId) === normalizedId) {
+                return allFactors[index]
+            }
+        }
+        return ({})
+    }
+
+    function factorDetail(factorId) {
+        var normalizedId = normalizedFactorIdKey(factorId)
+        if (!normalizedId || !factorService || typeof factorService.getFactorById !== "function") {
+            return ({})
+        }
+        if (factorDetailCache[normalizedId] !== undefined) {
+            return factorDetailCache[normalizedId]
+        }
+
+        var detail = factorService.getFactorById(normalizedId) || ({})
+        var nextCache = ({})
+        for (var key in factorDetailCache) {
+            nextCache[key] = factorDetailCache[key]
+        }
+        nextCache[normalizedId] = detail
+        factorDetailCache = nextCache
+        return detail
+    }
+
+    function factorDisplayName(record, detail) {
+        var result = String((detail && (detail.displayName || detail.factorName || detail.name))
+                            || (record && (record.displayName || record.factorName || record.name))
+                            || normalizedFactorIdKey(record && record.factorId)).trim()
+        return result || "未命名因子"
+    }
+
+    function factorDescription(record, detail) {
+        return String((detail && detail.description) || (record && record.description) || "暂无描述").trim()
+    }
+
+    function factorCoreRating(record, detail) {
+        var rating = Number((detail && detail.coreRating) || (record && record.coreRating) || 0)
+        return isFinite(rating) && rating > 0 ? Math.round(rating) : 0
+    }
+
+    function factorEffectiveRangeText(detail) {
+        var startDate = String((detail && (detail.actualStartDate || detail.effectiveStartDate)) || "").trim()
+        var endDate = String((detail && detail.effectiveEndDate) || "").trim()
+        if (startDate && endDate) {
+            return startDate + " 至 " + endDate
+        }
+        if (startDate || endDate) {
+            return startDate || endDate
+        }
+        return "未记录"
+    }
+
+    function factorWarmupText(detail) {
+        var days = Number(detail && detail.warmupTrimmedTradingDays)
+        if (!isFinite(days) || days < 0) {
+            return "未记录"
+        }
+        return Math.round(days) + " 天"
+    }
+
+    function factorStatusText(record, detail) {
+        var rawStatus = String((detail && detail.status) || (record && record.status) || "").trim()
+        return rawStatus || "状态未知"
+    }
+
+    function previewSymbolsText(symbols, maxCount) {
+        var list = normalizeSymbolList(symbols)
+        if (list.length === 0) {
+            return "未记录"
+        }
+
+        var limit = Math.max(1, Number(maxCount) || 6)
+        var preview = list.slice(0, limit).join("、")
+        return list.length > limit ? (preview + " 等" + list.length + "只") : preview
+    }
+
+    function strategyPoolSummaryText() {
+        return "策略回测标的在启动前由缓存数据集决定"
+    }
+
+    function strategyPoolHintText(detail) {
+        return "因子选择只影响排序/打分，不携带任何股票池信息。"
+    }
+
+    function matchesSearch(record) {
+        var keyword = String(searchText || "").trim().toLowerCase()
+        if (!keyword) {
+            return true
+        }
+
+        var haystacks = [
+            record.factorId,
+            record.factorName,
+            record.displayName,
+            record.majorCategory,
+            record.subCategory,
+            record.description
+        ]
+        for (var index = 0; index < haystacks.length; ++index) {
+            var haystack = String(haystacks[index] || "").toLowerCase()
+            if (haystack.indexOf(keyword) !== -1) {
+                return true
+            }
+        }
+        return false
+    }
+
+    function rebuildAllFactors() {
+        var nextFactors = []
+        if (factorViewModel && typeof factorViewModel.getAllFactors === "function") {
+            nextFactors = factorViewModel.getAllFactors() || []
+        } else if (factorViewModel) {
+            for (var index = 0; index < factorViewModel.rowCount(); ++index) {
+                var row = factorViewModel.getRow(index)
+                if (row) {
+                    nextFactors.push(row)
+                }
+            }
+        }
+        allFactors = nextFactors
+        rebuildFilteredFactors()
+    }
+
+    function rebuildFilteredFactors() {
+        var nextFactors = []
+        for (var index = 0; index < allFactors.length; ++index) {
+            var record = allFactors[index] || ({})
+            var factorId = normalizedFactorIdKey(record.factorId)
+            if (!factorId || !matchesSearch(record)) {
+                continue
+            }
+            if (selectedOnlyFilter && !isSelectedFactor(factorId)) {
+                continue
+            }
+            nextFactors.push(record)
+        }
+        filteredFactors = nextFactors
+        ensureActiveFactor()
+    }
+
+    function ensureActiveFactor() {
+        var desiredActiveId = normalizedFactorIdKey(activeFactorId)
+        for (var index = 0; index < filteredFactors.length; ++index) {
+            if (normalizedFactorIdKey(filteredFactors[index].factorId) === desiredActiveId) {
+                return
+            }
+        }
+
+        for (var selectedIndex = 0; selectedIndex < filteredFactors.length; ++selectedIndex) {
+            var selectedId = normalizedFactorIdKey(filteredFactors[selectedIndex].factorId)
+            if (isSelectedFactor(selectedId)) {
+                activeFactorId = selectedId
+                return
+            }
+        }
+
+        activeFactorId = filteredFactors.length > 0
+            ? normalizedFactorIdKey(filteredFactors[0].factorId)
+            : ""
+    }
+
+    function countVisibleSupportedFactors() {
         var count = 0
-        for (var i = 0; i < factorViewModel.rowCount(); i++) {
-            var factorId = factorViewModel.data(factorViewModel.index(i, 0), 257)
+        for (var index = 0; index < filteredFactors.length; ++index) {
+            var factorId = normalizedFactorIdKey(filteredFactors[index].factorId)
             if (factorId && isFactorSupported(factorId)) {
                 count++
             }
@@ -96,587 +317,784 @@ Dialog {
         return count
     }
 
+    function countVisibleSelectedSupportedFactors() {
+        var count = 0
+        for (var index = 0; index < filteredFactors.length; ++index) {
+            var factorId = normalizedFactorIdKey(filteredFactors[index].factorId)
+            if (factorId && isSelectedFactor(factorId) && isFactorSupported(factorId)) {
+                count++
+            }
+        }
+        return count
+    }
+
     function sanitizeSelectedFactors() {
-        if (!supportMapRequested || supportMapLoading) {
-            isAllSelected = false
+        var nextSelected = []
+        var seen = ({})
+        for (var index = 0; index < selectedFactorIds.length; ++index) {
+            var factorId = normalizedFactorIdKey(selectedFactorIds[index])
+            if (!factorId || seen[factorId]) {
+                continue
+            }
+            seen[factorId] = true
+            nextSelected.push(factorId)
+        }
+
+        if (JSON.stringify(nextSelected) !== JSON.stringify(selectedFactorIds)) {
+            selectedFactorIds = nextSelected
             return
         }
 
-        if (!factorViewModel) {
-            isAllSelected = false
+        ensureActiveFactor()
+    }
+
+    function toggleFactorSelection(factorId) {
+        var normalizedId = normalizedFactorIdKey(factorId)
+        if (!normalizedId) {
+            return
+        }
+        if (requireSupportValidation && (!supportMapRequested || supportMapLoading || !isFactorSupported(normalizedId))) {
             return
         }
 
-        var selectedSupportedCount = 0
-        for (var i = 0; i < selectedFactorIds.length; i++) {
-            if (isFactorSupported(selectedFactorIds[i])) {
-                selectedSupportedCount++
-            }
+        var nextSelected = selectedFactorIds.slice()
+        var existingIndex = nextSelected.indexOf(normalizedId)
+        if (existingIndex === -1) {
+            nextSelected.push(normalizedId)
+        } else {
+            nextSelected.splice(existingIndex, 1)
         }
+        selectedFactorIds = nextSelected
+        activeFactorId = normalizedId
+    }
 
-        isAllSelected = supportedFactorCount() > 0 && selectedSupportedCount === supportedFactorCount()
-    }
-    
-    // 信号
-    signal factorsSelected(var factorIds)
-    signal dialogClosed()
-    
-    // 对话框设置
-    modal: true
-    closePolicy: Popup.NoAutoClose
-    width: 850
-    height: 650
-    x: (parent.width - width) / 2
-    y: (parent.height - height) / 2
-    padding: 0
-    
-    // 背景
-    background: Rectangle {
-        radius: 12
-        color: "#121828"
-        border.width: 1
-        border.color: "#2d3748"
-    }
-    
-    // 主布局
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
-        
-        // 标题栏
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 60
-            color: "#1a2235"
-            radius: 12
-            border.width: 0
-            
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
-                
-                Text {
-                    text: "📊 选择因子"
-                    font.pixelSize: 18
-                    font.weight: Font.DemiBold
-                    color: "#f1f5f9"
-                }
-                
-                Item { Layout.fillWidth: true }
-                
-                // 关闭按钮
-                Rectangle {
-                    Layout.preferredWidth: 32
-                    Layout.preferredHeight: 32
-                    radius: 6
-                    color: "transparent"
-                    
-                    Text {
-                        anchors.centerIn: parent
-                        text: "×"
-                        font.pixelSize: 20
-                        color: "#94a3b8"
-                    }
-                    
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                // 关闭对话框
-                                root.close()
-                                dialogClosed()
-                            }
-                        }
+    function selectAllVisibleSupported() {
+        var nextSelected = []
+        var seen = ({})
+        if (!allVisibleSupportedSelected) {
+            for (var index = 0; index < selectedFactorIds.length; ++index) {
+                var existingId = normalizedFactorIdKey(selectedFactorIds[index])
+                if (existingId && !seen[existingId]) {
+                    seen[existingId] = true
+                    nextSelected.push(existingId)
                 }
             }
-        }
-        
-        // 搜索和操作区域
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 170
-            color: "#121828"
-            
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 44
-                    radius: 8
-                    color: supportMapRequested ? "#1d4ed81a" : "#0f172a"
-                    border.width: 1
-                    border.color: supportMapRequested ? "#3b82f6" : "#475569"
-                    visible: true
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 10
-
-                        BusyIndicator {
-                            Layout.alignment: Qt.AlignVCenter
-                            running: supportMapLoading
-                            visible: supportMapLoading
-                            width: 20
-                            height: 20
-                        }
-
-                        Text {
-                            Layout.alignment: Qt.AlignVCenter
-                            text: supportMapLoading
-                                  ? "正在校验可用因子，校验完成后列表会自动刷新"
-                                  : (supportMapRequested
-                                     ? "校验已完成，可继续选择因子"
-                                     : "点击开始校验，再选择因子")
-                            font.pixelSize: 13
-                            color: supportMapLoading ? "#93c5fd" : (supportMapRequested ? "#86efac" : "#cbd5e1")
-                        }
-
-                        Item {
-                            Layout.fillWidth: true
-                        }
-
-                        Rectangle {
-                            Layout.alignment: Qt.AlignVCenter
-                            Layout.preferredWidth: 120
-                            Layout.preferredHeight: 30
-                            radius: 8
-                            color: supportMapLoading ? "#475569" : "#2563eb"
-                            border.width: 1
-                            border.color: supportMapLoading ? "#64748b" : "#60a5fa"
-                            opacity: supportMapLoading ? 0.8 : 1.0
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: supportMapLoading ? "校验中" : "开始校验"
-                                font.pixelSize: 13
-                                color: "white"
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: !supportMapLoading
-                                onClicked: {
-                                    console.log("点击开始校验按钮")
-                                    startSupportMapRefresh()
-                                }
-                            }
-                        }
-                    }
+            for (var visibleIndex = 0; visibleIndex < filteredFactors.length; ++visibleIndex) {
+                var visibleId = normalizedFactorIdKey(filteredFactors[visibleIndex].factorId)
+                if (!visibleId || !isFactorSupported(visibleId) || seen[visibleId]) {
+                    continue
                 }
-                
-                // 搜索框
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 40
-                    radius: 8
-                    color: "#1a2235"
-                    border.width: 1
-                    border.color: "#475569"
-                    
-                    Row {
-                        anchors.fill: parent
-                        anchors.leftMargin: 16
-                        anchors.rightMargin: 16
-                        spacing: 10
-                        
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "🔍"
-                            font.pixelSize: 16
-                            color: "#94a3b8"
-                        }
-                        
-                        TextInput {
-                            id: searchInput
-                            anchors.verticalCenter: parent.verticalCenter
-                            width: parent.width - 100
-                            font.pixelSize: 14
-                            color: "#f1f5f9"
-                            
-                            onTextChanged: {
-                                // 搜索功能由C++控制器处理
-                                console.log("搜索文本:", text)
-                            }
-                            
-                            Text {
-                                anchors.fill: parent
-                                anchors.leftMargin: 2
-                                verticalAlignment: Text.AlignVCenter
-                                text: "搜索因子..."
-                                font: parent.font
-                                color: "#64748b"
-                                visible: !parent.text && !parent.activeFocus
-                            }
-                        }
-                    }
-                }
-                
-                // 操作按钮行
-                RowLayout {
-                    spacing: 12
-                    
-                    // 全选复选框
-                    Rectangle {
-                        Layout.preferredWidth: 100
-                        Layout.preferredHeight: 32
-                        radius: 6
-                        color: isAllSelected ? "#3b82f6" : "#1a2235"
-                        border.width: 1
-                        border.color: isAllSelected ? "#3b82f6" : "#475569"
-                        
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 6
-                            
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: isAllSelected ? "✓" : "☐"
-                                font.pixelSize: 14
-                                color: isAllSelected ? "white" : "#94a3b8"
-                            }
-                            
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: isAllSelected ? "取消全选" : "全选"
-                                font.pixelSize: 13
-                                color: isAllSelected ? "white" : "#f1f5f9"
-                            }
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            enabled: !supportMapLoading && supportMapRequested
-                            onClicked: {
-                                // 全选/取消全选逻辑
-                                console.log("点击全选按钮, 当前状态:", isAllSelected)
-                                
-                                if (isAllSelected) {
-                                    // 取消全选 - 清空选择列表
-                                    selectedFactorIds = []
-                                } else {
-                                    // 全选 - 从 factorViewModel 获取所有因子ID
-                                    var allIds = []
-                                    if (factorViewModel) {
-                                        for (var i = 0; i < factorViewModel.rowCount(); i++) {
-                                            var factorId = factorViewModel.data(factorViewModel.index(i, 0), 257) // 257 = FactorIdRole
-                                            if (factorId && isFactorSupported(factorId)) {
-                                                allIds.push(normalizedFactorIdKey(factorId))
-                                            }
-                                        }
-                                    }
-                                    selectedFactorIds = allIds
-                                }
-                                
-                                // 更新全选状态
-                                isAllSelected = !isAllSelected
-                            }
-                        }
-                    }
-                    
-                    Item { Layout.fillWidth: true }
-                    
-                    // 状态信息
-                    Text {
-                        text: `已选择: ${selectedFactorIds.length} 个`
-                        font.pixelSize: 13
-                        color: selectedFactorIds.length > 0 ? "#3b82f6" : "#94a3b8"
-                        font.weight: Font.Medium
-                    }
-                    
-                    Text {
-                        text: supportMapLoading
-                            ? " | 校验中..."
-                            : (dataSourceMode === "cache"
-                               ? ` | 可选: ${supportedFactorCount()} / ${factorViewModel ? factorViewModel.count : 0} 个`
-                               : ` | 总计: ${factorViewModel ? factorViewModel.count : 0} 个`)
-                        font.pixelSize: 13
-                        color: "#64748b"
-                    }
-                    
-                    // 清空按钮
-                    Rectangle {
-                        Layout.preferredWidth: 80
-                        Layout.preferredHeight: 32
-                        radius: 6
-                        color: selectedFactorIds.length > 0 ? "#ef4444" : "#1a2235"
-                        border.width: 1
-                        border.color: selectedFactorIds.length > 0 ? "#ef4444" : "#475569"
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "清空"
-                            font.pixelSize: 13
-                            color: selectedFactorIds.length > 0 ? "white" : "#94a3b8"
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                // 清空选择逻辑
-                                console.log("点击清空按钮")
-                                selectedFactorIds = []
-                                isAllSelected = false
-                            }
-                        }
-                    }
-                }
+                seen[visibleId] = true
+                nextSelected.push(visibleId)
             }
         }
-        
-        // 因子列表区域
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: "#121828"
-            
-            ScrollView {
-                anchors.fill: parent
-                anchors.margins: 16
-                
-                ListView {
-                    id: factorListView
-                    width: parent.width
-                    model: factorViewModel
-                    spacing: 8
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    
-                    delegate: Rectangle {
-                        id: listItem
-                        width: factorListView.width
-                        height: 60
-                        radius: 8
-                        color: !supported ? "#151b2b" : (selected ? "#3b82f620" : (mouseArea.containsMouse ? "#1a2235" : "#222c44"))
-                        border.width: 1
-                        border.color: !supported ? "#3f4c63" : (selected ? "#3b82f6" : "#2d3748")
-                        opacity: supported ? 1.0 : 0.55
-                        
-                        property bool selected: selectedFactorIds.includes(normalizedFactorIdKey(model.factorId))
-                        property var supportInfo: root.supportInfoForFactor(model.factorId)
-                        property bool supported: supportInfo.supported !== false
-                        
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: 12
-                            spacing: 12
-                            
-                            // 复选框
-                            Rectangle {
-                                width: 20
-                                height: 20
-                                radius: 4
-                                border.width: 1
-                                border.color: !supported ? "#475569" : (selected ? "#3b82f6" : "#475569")
-                                color: !supported ? "transparent" : (selected ? "#3b82f6" : "transparent")
-                                
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: "✓"
-                                    color: "white"
-                                    visible: selected
-                                    font.pixelSize: 10
-                                }
-                            }
-                            
-                            // 因子信息
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 4
-                                
-                                Text {
-                                    text: model.displayName || model.factorName
-                                    font.pixelSize: 14
-                                    color: !supported ? "#94a3b8" : (selected ? "#3b82f6" : "#f1f5f9")
-                                    elide: Text.ElideRight
-                                }
-                                
-                                Text {
-                                    text: supported
-                                          ? (model.description || "")
-                                          : (supportInfo.reason || "当前缓存不支持该因子")
-                                    font.pixelSize: 11
-                                    color: supported ? "#94a3b8" : "#f59e0b"
-                                    elide: Text.ElideRight
-                                }
-                            }
-                            
-                            // 类别标签
-                            Rectangle {
-                                id: categoryTag
-                                Layout.alignment: Qt.AlignRight
-                                width: 80
-                                height: 24
-                                radius: 12
-                                property color categoryColor: root.factorCategoryColor(model.factorType)
-                                
-                                color: categoryColor + "20"
-                                
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: root.factorCategoryLabel(model.factorType)
-                                    font.pixelSize: 10
-                                    color: categoryTag.categoryColor
-                                }
-                            }
-                        }
-                        
-                        MouseArea {
-                            id: mouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            enabled: supportMapRequested && !supportMapLoading && supported
-                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
-                            onClicked: {
-                                if (!supported) {
-                                    console.log("当前因子未通过校验，禁止选择:", model.factorId, supportInfo.reason)
-                                    return
-                                }
+        selectedFactorIds = nextSelected
+    }
 
-                                // 因子选择逻辑
-                                console.log("点击因子:", model.factorId)
-                                
-                                // 切换选择状态
-                                var currentIds = selectedFactorIds.slice() // 复制数组
-                                var normalizedId = normalizedFactorIdKey(model.factorId)
-                                var index = currentIds.indexOf(normalizedId)
-                                if (index === -1) {
-                                    // 添加到选择列表
-                                    currentIds.push(normalizedId)
-                                } else {
-                                    // 从选择列表中移除
-                                    currentIds.splice(index, 1)
-                                }
-                                
-                                // 更新选择列表（触发属性变更通知）
-                                selectedFactorIds = currentIds
-                                
-                                // 更新全选状态
-                                if (factorViewModel) {
-                                    isAllSelected = (supportedFactorCount() > 0 && selectedFactorIds.length === supportedFactorCount())
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+    function clearSelection() {
+        selectedFactorIds = []
+    }
+
+    function buildSelectedFactorPayload() {
+        return {
+            factorIds: selectedFactorIds.slice()
         }
-        
-        // 操作按钮区域
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 80
-            color: "#1a2235"
-            
-            RowLayout {
-                anchors.fill: parent
-                anchors.margins: 16
-                spacing: 12
-                
-                Item { Layout.fillWidth: true }
-                
-                // 取消按钮
-                Rectangle {
-                    Layout.preferredWidth: 100
-                    Layout.preferredHeight: 40
-                    radius: 8
-                    color: "#1a2235"
-                    border.width: 1
-                    border.color: "#475569"
-                    
-                    Text {
-                        anchors.centerIn: parent
-                        text: "取消"
-                        font.pixelSize: 14
-                        color: "#f1f5f9"
-                    }
-                    
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            root.close()
-                            dialogClosed()
-                        }
-                    }
-                }
-                
-                // 确定按钮
-                Rectangle {
-                    Layout.preferredWidth: 100
-                    Layout.preferredHeight: 40
-                    radius: 8
-                    color: selectedFactorIds.length > 0 ? "#3b82f6" : "#475569"
-                    
-                    Text {
-                        anchors.centerIn: parent
-                        text: "确定"
-                        font.pixelSize: 14
-                        color: selectedFactorIds.length > 0 ? "white" : "#64748b"
-                    }
-                    
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        enabled: selectedFactorIds.length > 0
-                        onClicked: {
-                            // 发射信号通知页面
-                            factorsSelected(selectedFactorIds)
-                            root.close()
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // 内部状态
-    property bool isAllSelected: false
-    property string searchText: ""
-    
-    // 对话框事件
-    onOpened: {
-        searchInput.text = ""
-        searchText = ""
-        sanitizeSelectedFactors()
-        console.log("因子选择对话框打开")
-    }
-
-    onFactorSupportMapChanged: {
-        sanitizeSelectedFactors()
-    }
-
-    onSelectedFactorIdsChanged: {
-        sanitizeSelectedFactors()
-    }
-    
-    onClosed: dialogClosed()
-    
-    // 初始化
-    Component.onCompleted: {
-        console.log("FactorSelectorDialog: 组件初始化完成")
     }
 
     function startSupportMapRefresh() {
-        if (supportMapLoading) {
+        if (!requireSupportValidation || supportMapLoading) {
             return
         }
-
-        console.log("开始执行因子校验")
         supportMapRequested = true
         supportMapLoading = true
-        sanitizeSelectedFactors()
         if (supportMapRefreshCallback) {
             supportMapRefreshCallback()
         }
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        Rectangle {
+            Layout.fillWidth: true
+            radius: 18
+            color: "#0f172a"
+            border.width: 0
+            implicitHeight: headerContent.implicitHeight + 24
+
+            ColumnLayout {
+                id: headerContent
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 10
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+
+                        Text {
+                            text: "选择排序因子"
+                            font.pixelSize: 20
+                            font.weight: Font.DemiBold
+                            color: "#e2e8f0"
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "直接读取因子详情和有效区间。策略回测标的在启动前由缓存数据集决定。"
+                            font.pixelSize: 12
+                            color: "#94a3b8"
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    ToolButton {
+                        implicitWidth: 36
+                        implicitHeight: 36
+                        text: "×"
+                        font.pixelSize: 22
+                        onClicked: root.close()
+
+                        background: Rectangle {
+                            radius: 10
+                            color: parent.down ? "#1e293b" : (parent.hovered ? "#172033" : "transparent")
+                        }
+
+                        contentItem: Text {
+                            text: parent.text
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        radius: 12
+                        color: "#0b1220"
+                        border.width: 1
+                        border.color: "#1d4ed8"
+                        implicitHeight: strategyPoolChip.implicitHeight + 12
+
+                        Text {
+                            id: strategyPoolChip
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            text: strategyPoolSummaryText()
+                            font.pixelSize: 11
+                            color: "#bfdbfe"
+                            wrapMode: Text.WordWrap
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    Rectangle {
+                        radius: 12
+                        color: "#111827"
+                        border.width: 1
+                        border.color: "#334155"
+                        implicitWidth: selectedCountChip.implicitWidth + 18
+                        implicitHeight: selectedCountChip.implicitHeight + 12
+
+                        Text {
+                            id: selectedCountChip
+                            anchors.centerIn: parent
+                            text: "已选 " + selectedFactorIds.length + " 个"
+                            font.pixelSize: 11
+                            color: selectedFactorIds.length > 0 ? "#60a5fa" : "#cbd5e1"
+                        }
+                    }
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.margins: 12
+            spacing: 12
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredWidth: 628
+                radius: 16
+                color: "#0b1220"
+                border.width: 1
+                border.color: "#1e293b"
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 10
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: requireSupportValidation ? 52 : 42
+                        radius: 12
+                        color: requireSupportValidation
+                            ? (supportMapRequested ? "#082f1d" : "#172033")
+                            : "#101826"
+                        border.width: 1
+                        border.color: requireSupportValidation
+                            ? (supportMapRequested ? "#22c55e" : "#334155")
+                            : "#334155"
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 12
+                            anchors.rightMargin: 12
+                            spacing: 10
+
+                            BusyIndicator {
+                                running: supportMapLoading
+                                visible: supportMapLoading
+                                width: 18
+                                height: 18
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: requireSupportValidation
+                                    ? (supportMapLoading
+                                        ? "正在校验当前数据源可用因子，完成后列表会自动刷新。"
+                                        : (supportMapRequested
+                                            ? "当前数据源可用因子已校验，可继续选择。"
+                                            : "先校验当前数据源，再选择可用因子。"))
+                                    : "策略编辑阶段直接选择排序因子，不在这里按数据源过滤。"
+                                font.pixelSize: 12
+                                color: requireSupportValidation
+                                    ? (supportMapRequested ? "#bbf7d0" : "#cbd5e1")
+                                    : "#cbd5e1"
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Button {
+                                visible: requireSupportValidation
+                                text: supportMapLoading ? "校验中" : "开始校验"
+                                enabled: !supportMapLoading
+                                onClicked: startSupportMapRefresh()
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        TextField {
+                            id: searchField
+                            Layout.fillWidth: true
+                            placeholderText: "搜索因子名称、ID、分类或描述"
+                            text: root.searchText
+                            onTextChanged: {
+                                root.searchText = text
+                                root.rebuildFilteredFactors()
+                            }
+                        }
+
+                        Button {
+                            text: root.allVisibleSupportedSelected ? "取消可见全选" : "选择可见"
+                            enabled: !supportMapLoading && (!requireSupportValidation || supportMapRequested)
+                            onClicked: root.selectAllVisibleSupported()
+                        }
+
+                        Button {
+                            text: root.selectedOnlyFilter ? "查看全部" : "只看已选"
+                            onClicked: {
+                                root.selectedOnlyFilter = !root.selectedOnlyFilter
+                                root.rebuildFilteredFactors()
+                            }
+                        }
+
+                        Button {
+                            text: "清空"
+                            enabled: root.selectedFactorIds.length > 0
+                            onClicked: root.clearSelection()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Text {
+                            text: "可见 " + filteredFactors.length + " 个"
+                            font.pixelSize: 12
+                            color: "#cbd5e1"
+                        }
+
+                        Text {
+                            text: requireSupportValidation
+                                ? ("可选 " + visibleSupportedFactorCount + " 个")
+                                : ("已选 " + selectedFactorIds.length + " 个")
+                            font.pixelSize: 12
+                            color: "#93c5fd"
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        Text {
+                            text: root.selectedOnlyFilter ? "当前仅显示已选因子" : "单击卡片查看详情，点右侧按钮加入选择"
+                            font.pixelSize: 11
+                            color: "#64748b"
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: 14
+                        color: "#08111f"
+                        border.width: 1
+                        border.color: "#172033"
+
+                        ScrollView {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            clip: true
+
+                            ListView {
+                                id: factorListView
+                                width: parent.width
+                                model: root.filteredFactors
+                                spacing: 8
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
+
+                                delegate: Rectangle {
+                                    required property int index
+                                    required property var modelData
+
+                                    width: factorListView.width
+                                    height: 74
+                                    radius: 12
+
+                                    property string factorId: root.normalizedFactorIdKey(modelData.factorId)
+                                    property bool selected: root.isSelectedFactor(factorId)
+                                    property var supportInfo: root.supportInfoForFactor(factorId)
+                                    property bool supported: supportInfo.supported !== false
+                                    property bool active: root.activeFactorId === factorId
+
+                                    color: !supported
+                                        ? "#111827"
+                                        : (active ? "#11233f" : (delegateMouseArea.containsMouse ? "#0f1b30" : "#0b1220"))
+                                    border.width: 1
+                                    border.color: selected
+                                        ? "#38bdf8"
+                                        : (active ? "#2563eb" : "#1e293b")
+                                    opacity: supported ? 1.0 : 0.62
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 4
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 8
+
+                                            Rectangle {
+                                                radius: 9
+                                                color: selected ? "#0ea5e9" : "#172033"
+                                                border.width: 1
+                                                border.color: selected ? "#38bdf8" : "#334155"
+                                                implicitWidth: 42
+                                                implicitHeight: 18
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: selected ? "已选" : "候选"
+                                                    font.pixelSize: 9
+                                                    color: selected ? "white" : "#cbd5e1"
+                                                }
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.factorDisplayName(modelData, null)
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                color: supported ? "#e2e8f0" : "#94a3b8"
+                                                elide: Text.ElideRight
+                                            }
+
+                                            Button {
+                                                text: selected ? "移除" : "加入"
+                                                enabled: supported && (!root.requireSupportValidation || root.supportMapRequested) && !root.supportMapLoading
+                                                onClicked: root.toggleFactorSelection(factorId)
+                                            }
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: supported
+                                                ? root.factorDescription(modelData, null)
+                                                : (supportInfo.reason || "当前缓存不支持该因子")
+                                            font.pixelSize: 9
+                                            color: supported ? "#94a3b8" : "#f59e0b"
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Flow {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+
+                                            Repeater {
+                                                model: [
+                                                    { label: root.factorCategoryLabel(modelData.factorType), fg: root.factorCategoryColor(modelData.factorType), bg: "#0f172a" },
+                                                    { label: "ID " + factorId, fg: "#cbd5e1", bg: "#111827" },
+                                                    { label: "评分 " + (root.factorCoreRating(modelData, null) > 0 ? root.factorCoreRating(modelData, null) : "未评"), fg: "#fde68a", bg: "#2a2110" }
+                                                ]
+
+                                                delegate: Rectangle {
+                                                    required property var modelData
+                                                    radius: 9
+                                                    color: modelData.bg
+                                                    border.width: 1
+                                                    border.color: Qt.darker(modelData.bg, 1.12)
+                                                    implicitWidth: pillText.implicitWidth + 10
+                                                    implicitHeight: pillText.implicitHeight + 6
+
+                                                    Text {
+                                                        id: pillText
+                                                        anchors.centerIn: parent
+                                                        text: modelData.label
+                                                        font.pixelSize: 8
+                                                        color: modelData.fg
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        id: delegateMouseArea
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        acceptedButtons: Qt.LeftButton
+                                        onClicked: root.activeFactorId = factorId
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.preferredWidth: 368
+                Layout.fillHeight: true
+                radius: 16
+                color: "#0b1220"
+                border.width: 1
+                border.color: "#1e293b"
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 10
+
+                    Text {
+                        text: "因子详情"
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
+                        color: "#e2e8f0"
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        radius: 14
+                        color: "#08111f"
+                        border.width: 1
+                        border.color: "#172033"
+
+                        Loader {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            sourceComponent: root.activeFactorId !== "" ? detailPaneComponent : emptyPaneComponent
+                        }
+
+                        Component {
+                            id: detailPaneComponent
+
+                            ScrollView {
+                                id: detailPaneScroll
+                                clip: true
+                                contentWidth: availableWidth
+                                ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                                ColumnLayout {
+                                    width: detailPaneScroll.availableWidth
+                                    spacing: 12
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: 14
+                                        color: "#0f172a"
+                                        border.width: 1
+                                        border.color: "#1e293b"
+                                        implicitHeight: detailHeaderColumn.implicitHeight + 20
+
+                                        ColumnLayout {
+                                            id: detailHeaderColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            spacing: 8
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.factorDisplayName(root.activeFactorRecord, root.activeFactorDetail)
+                                                font.pixelSize: 18
+                                                font.weight: Font.DemiBold
+                                                color: "#e2e8f0"
+                                                wrapMode: Text.WordWrap
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.activeFactorId
+                                                font.pixelSize: 11
+                                                color: "#60a5fa"
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.factorDescription(root.activeFactorRecord, root.activeFactorDetail)
+                                                font.pixelSize: 12
+                                                color: "#94a3b8"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 10
+
+                                        Repeater {
+                                            model: [
+                                                { title: "分类", value: root.factorCategoryLabel(root.activeFactorRecord.factorType) },
+                                                { title: "核心评分", value: root.factorCoreRating(root.activeFactorRecord, root.activeFactorDetail) > 0 ? String(root.factorCoreRating(root.activeFactorRecord, root.activeFactorDetail)) : "未评" },
+                                                { title: "回测输出", value: "仅保留因子信息" },
+                                                { title: "有效区间", value: root.factorEffectiveRangeText(root.activeFactorDetail) },
+                                                { title: "预热裁剪", value: root.factorWarmupText(root.activeFactorDetail) },
+                                                { title: "状态", value: root.factorStatusText(root.activeFactorRecord, root.activeFactorDetail) }
+                                            ]
+
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                radius: 12
+                                                color: "#0f172a"
+                                                border.width: 1
+                                                border.color: "#1e293b"
+                                                implicitHeight: metricColumn.implicitHeight + 14
+
+                                                RowLayout {
+                                                    id: metricColumn
+                                                    anchors.fill: parent
+                                                    anchors.margins: 10
+                                                    spacing: 12
+
+                                                    Text {
+                                                        Layout.preferredWidth: 72
+                                                        text: modelData.title
+                                                        font.pixelSize: 10
+                                                        color: "#64748b"
+                                                    }
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: modelData.value
+                                                        font.pixelSize: 12
+                                                        color: "#e2e8f0"
+                                                        wrapMode: Text.WordWrap
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: 12
+                                        color: "#0f172a"
+                                        border.width: 1
+                                        border.color: "#1d4ed8"
+                                        implicitHeight: strategyContextColumn.implicitHeight + 18
+
+                                        ColumnLayout {
+                                            id: strategyContextColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            spacing: 6
+
+                                            Text {
+                                                text: "当前策略上下文"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                color: "#bfdbfe"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.strategyPoolSummaryText()
+                                                font.pixelSize: 12
+                                                color: "#e2e8f0"
+                                                wrapMode: Text.WordWrap
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.strategyPoolHintText(root.activeFactorDetail)
+                                                font.pixelSize: 11
+                                                color: "#93c5fd"
+                                                wrapMode: Text.WordWrap
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "策略回测标的在启动前由缓存数据集决定，不在这里继承或展示股票池。"
+                                                font.pixelSize: 11
+                                                color: "#94a3b8"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        radius: 12
+                                        color: "#0f172a"
+                                        border.width: 1
+                                        border.color: "#1e293b"
+                                        implicitHeight: factorPoolColumn.implicitHeight + 18
+
+                                        ColumnLayout {
+                                            id: factorPoolColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            spacing: 6
+
+                                            Text {
+                                                text: "回测输出说明"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                color: "#e2e8f0"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "因子回测结果不再携带股票池明细。"
+                                                font.pixelSize: 11
+                                                color: "#94a3b8"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+
+                                    Button {
+                                        Layout.fillWidth: true
+                                        text: root.isSelectedFactor(root.activeFactorId) ? "从已选列表移除" : "加入已选因子"
+                                        enabled: !root.requireSupportValidation || (root.supportMapRequested && !root.supportMapLoading && root.isFactorSupported(root.activeFactorId))
+                                        onClicked: root.toggleFactorSelection(root.activeFactorId)
+                                    }
+                                }
+                            }
+                        }
+
+                        Component {
+                            id: emptyPaneComponent
+
+                            Item {
+                                ColumnLayout {
+                                    anchors.centerIn: parent
+                                    width: Math.min(parent.width - 32, 280)
+                                    spacing: 8
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "从左侧选择一个因子"
+                                        font.pixelSize: 16
+                                        font.weight: Font.Medium
+                                        color: "#e2e8f0"
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "这里会展示因子基本信息、有效区间和最近回测摘要，不再包含股票池关系。"
+                                        font.pixelSize: 12
+                                        color: "#94a3b8"
+                                        wrapMode: Text.WordWrap
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Item { Layout.fillWidth: true }
+
+                        Button {
+                            text: "取消"
+                            onClicked: root.close()
+                        }
+
+                        Button {
+                            text: "确认选择"
+                            enabled: root.selectedFactorIds.length > 0
+                            onClicked: {
+                                factorsSelected(root.selectedFactorIds)
+                                root.close()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Connections {
+        target: factorViewModel
+        function onDataUpdated() {
+            root.rebuildAllFactors()
+        }
+        function onCountChanged() {
+            root.rebuildAllFactors()
+        }
+    }
+
+    onOpened: {
+        selectedOnlyFilter = selectedFactorIds.length > 0
+        rebuildAllFactors()
+        sanitizeSelectedFactors()
+    }
+
+    onSearchTextChanged: rebuildFilteredFactors()
+    onSelectedOnlyFilterChanged: rebuildFilteredFactors()
+    onSelectedFactorIdsChanged: sanitizeSelectedFactors()
+    onFactorSupportMapChanged: sanitizeSelectedFactors()
+    onClosed: dialogClosed()
+
+    Component.onCompleted: {
+        rebuildAllFactors()
+        sanitizeSelectedFactors()
     }
 }

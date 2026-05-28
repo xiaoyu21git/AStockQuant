@@ -1,11 +1,10 @@
 // RiskBacktestMetaLoader.js
-// 用于动态加载和合并风险和回测参数metadata
+// 用于动态加载共享风险/回测元数据与回测页专属元数据
 // 支持缓存、错误处理和加载状态管理
 
 .pragma library
 
-var defaultMetaPath = "qrc:/config/views/risk_backtest_params.json";
-var pageOnlyBacktestMetaPath = "qrc:/config/views/strategy_backtest_page_params.json";
+var sharedMetaPath = "qrc:/config/views/risk_backtest_params.json";
 var metaCache = {};
 var loadingCallbacks = {};
 var embeddedMetaByPath = {
@@ -219,17 +218,6 @@ var embeddedMetaByPath = {
                     displayDecimals: 3,
                     displayUnit: "%",
                     group: "交易成本"
-                },
-                rebalanceDays: {
-                    label: "调仓周期",
-                    description: "策略按固定频率重新平衡仓位的交易日间隔。",
-                    type: "number",
-                    min: 1,
-                    max: 60,
-                    step: 1,
-                    default: 5,
-                    unit: "天",
-                    group: "组合执行"
                 }
             }
         },
@@ -237,7 +225,7 @@ var embeddedMetaByPath = {
             {
                 id: "backtestCore",
                 name: "回测核心参数",
-                params: ["backtestPeriod", "initialCapital", "commissionRate", "slippageRate", "rebalanceDays"]
+                params: ["backtestPeriod", "initialCapital", "commissionRate", "slippageRate"]
             },
             {
                 id: "riskCore",
@@ -260,7 +248,6 @@ var embeddedMetaByPath = {
             initialCapital: 1000000,
             commissionRate: 0.0015,
             slippageRate: 0.001,
-            rebalanceDays: 5,
             stopLossPercent: 10,
             takeProfitPercent: 20,
             maxDrawdownLimit: 20,
@@ -276,182 +263,6 @@ var embeddedMetaByPath = {
             level2Breaker: 5,
             level3Breaker: 8
         }
-    },
-    "qrc:/config/views/strategy_backtest_page_params.json": {
-        backtestSettings: {
-            properties: {
-                benchmark: {
-                    label: "基准指数",
-                    description: "本次回测用于对比的基准指数。",
-                    type: "select",
-                    default: "000300.SH",
-                    options: [
-                        { value: "000300.SH", label: "沪深300" },
-                        { value: "000001.SH", label: "上证指数" },
-                        { value: "399001.SZ", label: "深证成指" },
-                        { value: "000905.SH", label: "中证500" }
-                    ],
-                    group: "回测设置"
-                },
-                maxPositions: {
-                    label: "前N持仓",
-                    description: "从当前候选股票池中按策略评分选择前N只股票进入实际持仓；默认取前10只。",
-                    type: "number",
-                    min: 1,
-                    max: 50,
-                    step: 1,
-                    default: 10,
-                    unit: "只",
-                    decimals: 0,
-                    group: "回测设置"
-                },
-                marketFilters: {
-                    label: "市场范围",
-                    description: "在股票池基础上继续限定市场范围，可多选。留空表示不额外过滤市场。",
-                    type: "select",
-                    multiple: true,
-                    default: [],
-                    options: [
-                        { value: "SH", label: "沪市主板/科创板" },
-                        { value: "SZ", label: "深市主板/创业板" },
-                        { value: "BJ", label: "北交所" },
-                        { value: "STAR", label: "科创板" },
-                        { value: "GEM", label: "创业板" },
-                        { value: "MAIN", label: "主板" }
-                    ],
-                    group: "股票池筛选"
-                },
-                sectorFilters: {
-                    label: "行业过滤",
-                    description: "按数据库中的行业名称多选过滤；列表会在页面加载后动态填充。",
-                    type: "select",
-                    multiple: true,
-                    default: [],
-                    options: [],
-                    group: "股票池筛选"
-                },
-                excludeSt: {
-                    label: "剔除 ST/*ST",
-                    description: "启用后，会在回测前剔除状态为 ST 或 *ST 的股票。",
-                    type: "boolean",
-                    default: false,
-                    group: "股票池筛选"
-                },
-                minListingDays: {
-                    label: "最少上市天数",
-                    description: "上市未满指定天数的股票不参与回测，0 表示不限制。",
-                    type: "number",
-                    min: 0,
-                    max: 1440,
-                    step: 10,
-                    default: 0,
-                    unit: "天",
-                    group: "股票池筛选"
-                },
-                minTurnoverRate: {
-                    label: "最低换手率",
-                    description: "按快照日最近一个可用交易日的换手率过滤，低于阈值的股票会被剔除。",
-                    type: "number",
-                    min: 0,
-                    max: 20,
-                    step: 0.1,
-                    default: 0,
-                    unit: "%",
-                    group: "股票池筛选"
-                },
-                minCompositeScore: {
-                    label: "最低综合分",
-                    description: "组合/因子策略会先按标准化因子值合成综合分，低于该阈值的股票即使排名靠前也不会入选。0 表示只按前N持仓截取。",
-                    type: "number",
-                    min: -3,
-                    max: 3,
-                    step: 0.1,
-                    default: 0,
-                    unit: "分",
-                    group: "股票池筛选"
-                },
-                enableAdvancedOptions: {
-                    label: "启用高级选项",
-                    description: "是否启用滚动优化、蒙特卡洛、样本外测试等高级能力。",
-                    type: "boolean",
-                    default: false,
-                    group: "高级选项"
-                },
-                enableWalkForward: {
-                    label: "滚动窗口优化",
-                    description: "是否启用滚动窗口优化。",
-                    type: "boolean",
-                    default: false,
-                    group: "高级选项",
-                    visibleWhen: "enableAdvancedOptions == true"
-                },
-                enableMonteCarlo: {
-                    label: "蒙特卡洛模拟",
-                    description: "是否启用蒙特卡洛模拟。",
-                    type: "boolean",
-                    default: false,
-                    group: "高级选项",
-                    visibleWhen: "enableAdvancedOptions == true"
-                },
-                monteCarloSamples: {
-                    label: "蒙特卡洛样本数",
-                    description: "蒙特卡洛模拟抽样次数。",
-                    type: "number",
-                    min: 100,
-                    max: 10000,
-                    step: 100,
-                    default: 1000,
-                    unit: "次",
-                    group: "高级选项",
-                    visibleWhen: "enableMonteCarlo == true"
-                },
-                enableOutOfSample: {
-                    label: "样本外测试",
-                    description: "是否启用样本外测试。",
-                    type: "boolean",
-                    default: false,
-                    group: "高级选项",
-                    visibleWhen: "enableAdvancedOptions == true"
-                },
-                outOfSampleRatio: {
-                    label: "样本外比例",
-                    description: "样本外测试占总样本的比例。",
-                    type: "number",
-                    min: 0.1,
-                    max: 0.5,
-                    step: 0.05,
-                    default: 0.3,
-                    group: "高级选项",
-                    visibleWhen: "enableOutOfSample == true"
-                }
-            }
-        },
-        uiGroups: [
-            {
-                id: "backtestPageFilters",
-                name: "股票池筛选",
-                params: ["marketFilters", "sectorFilters", "excludeSt", "minListingDays", "minTurnoverRate"]
-            },
-            {
-                id: "backtestPageAdvanced",
-                name: "回测高级选项",
-                params: ["benchmark", "enableAdvancedOptions", "enableWalkForward", "enableMonteCarlo", "monteCarloSamples", "enableOutOfSample", "outOfSampleRatio"]
-            }
-        ],
-        defaultValues: {
-            benchmark: "000300.SH",
-            marketFilters: [],
-            sectorFilters: [],
-            excludeSt: false,
-            minListingDays: 0,
-            minTurnoverRate: 0,
-            enableAdvancedOptions: false,
-            enableWalkForward: false,
-            enableMonteCarlo: false,
-            monteCarloSamples: 1000,
-            enableOutOfSample: false,
-            outOfSampleRatio: 0.3
-        }
     }
 };
 
@@ -461,7 +272,7 @@ function cloneMeta(value) {
 
 function resolveMetaPath(path) {
     var resolvedPath = String(path || "").trim();
-    return resolvedPath.length > 0 ? resolvedPath : defaultMetaPath;
+    return resolvedPath.length > 0 ? resolvedPath : sharedMetaPath;
 }
 
 function cachedMetaForPath(path) {
@@ -507,18 +318,18 @@ function isSuccessfulResponse(xhr) {
 
 function loadMetaFile(path, callback) {
     var resolvedPath = resolveMetaPath(path);
-    console.log("开始加载风险和回测参数文件:", resolvedPath);
+    console.log("开始加载参数元数据文件:", resolvedPath);
     
     // 检查缓存
     if (cachedMetaForPath(resolvedPath)) {
-        console.log("使用缓存的风险和回测参数");
+        console.log("使用缓存的参数元数据");
         callback(cloneMeta(cachedMetaForPath(resolvedPath)));
         return;
     }
 
     var embeddedMeta = resolveEmbeddedMeta(resolvedPath);
     if (embeddedMeta) {
-        console.log("使用内置风险和回测参数:", resolvedPath);
+        console.log("使用内置参数元数据:", resolvedPath);
         metaCache[resolvedPath] = embeddedMeta;
         callback(cloneMeta(metaCache[resolvedPath]));
         return;
@@ -546,7 +357,7 @@ function loadMetaFile(path, callback) {
             if (isSuccessfulResponse(xhr)) {
                 try {
                     var meta = JSON.parse(xhr.responseText);
-                    console.log("成功加载风险和回测参数文件:", resolvedPath, "状态:", xhr.status, "大小:", xhr.responseText.length, "字节");
+                    console.log("成功加载参数元数据文件:", resolvedPath, "状态:", xhr.status, "大小:", xhr.responseText.length, "字节");
                     
                     // 缓存结果
                     metaCache[resolvedPath] = meta;
@@ -570,7 +381,7 @@ function loadMetaFile(path, callback) {
                     }
                 }
             } else {
-                console.error("加载风险和回测参数失败:", resolvedPath, "状态:", xhr.status, "响应:", xhr.statusText);
+                console.error("加载参数元数据失败:", resolvedPath, "状态:", xhr.status, "响应:", xhr.statusText);
                 for (var i = 0; i < callbacks.length; i++) {
                     try {
                         callbacks[i](null);
@@ -583,7 +394,7 @@ function loadMetaFile(path, callback) {
     };
     
     xhr.ontimeout = function() {
-        console.error("加载风险和回测参数超时:", resolvedPath);
+        console.error("加载参数元数据超时:", resolvedPath);
         var callbacks = loadingCallbacks[resolvedPath];
         delete loadingCallbacks[resolvedPath];
         
@@ -597,7 +408,7 @@ function loadMetaFile(path, callback) {
     };
     
     xhr.onerror = function() {
-        console.error("加载风险和回测参数网络错误:", resolvedPath);
+        console.error("加载参数元数据网络错误:", resolvedPath);
         var callbacks = loadingCallbacks[resolvedPath];
         delete loadingCallbacks[resolvedPath];
         
@@ -884,7 +695,7 @@ function getAllGroupedConfigs(path) {
 
 // 获取缓存的元数据
 function getCachedMeta() {
-    return cloneMeta(resolveAvailableMeta(defaultMetaPath));
+    return cloneMeta(resolveAvailableMeta(sharedMetaPath));
 }
 
 // 清除缓存

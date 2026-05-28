@@ -18,7 +18,7 @@ Rectangle {
     
     // ============ 属性 ============
     
-    property string selectedStrategyType: "trend_following"
+    property int selectedStrategyTypeIndex: 0
     property Bridge.FactorService factorService: null
     property var strategyParameters: ({})
     property var boundRuleTemplateBindings: ({})
@@ -31,11 +31,15 @@ Rectangle {
     property var ruleComposerValidation: ({ valid: true, errorCount: 0, warningCount: 0, errors: [], warnings: [], suggestions: [], groupIssues: ({}) })
     property string selectedRuleComposerStageId: "signal"
     property string selectedRuleComposerGroupId: ""
+    readonly property var currentRuleComposerGroupQuickImportEntries: root.currentRuleComposerGroupQuickImportEntries()
+    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
     readonly property bool ruleComposerConfigValid: (root.ruleComposerValidation.errorCount || 0) === 0
     readonly property bool useNarrowRulePanels: width >= 1180
     readonly property bool useWideParamGrid: width >= 1200
     readonly property int parameterPaneMaxColumns: 3
     readonly property int parameterPaneMinColumnWidth: 320
+    readonly property int factorOverlayCardMinWidth: 320
+    readonly property int factorOverlayCardMaxWidth: 420
     readonly property real rulePanelWidth: useNarrowRulePanels ? Math.min(width * 0.76, 920) : width
     readonly property bool useRuleComposerColumns: width >= 1560
     readonly property int ruleComposerMinHeight: 560
@@ -59,10 +63,23 @@ Rectangle {
         ruleComposerSuggestionMinWidth,
         ruleComposerWidthBudget * (useRuleComposerColumns ? 0.26 : 0.27),
         ruleComposerSuggestionMaxWidth)
-    readonly property bool factorOverlaySupported: false
     property var factorOverlay: ({ enabled: false, targetPositionCount: 10, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
     property var factorSelectorDialog: null
     
+    function factorOverlayCardWidth(containerWidth) {
+        var widthBudget = Math.max(0, Number(containerWidth) || 0)
+        if (widthBudget <= 0) {
+            return factorOverlayCardMinWidth
+        }
+        if (widthBudget >= factorOverlayCardMinWidth * 2 + 12) {
+            return clampWidth(
+                factorOverlayCardMinWidth,
+                (widthBudget - 12) / 2,
+                factorOverlayCardMaxWidth)
+        }
+        return Math.min(widthBudget, factorOverlayCardMaxWidth)
+    }
+
     // 信号
     signal parametersChanged(var newParameters)
     signal validationChanged(bool allValid, var errors)
@@ -274,7 +291,6 @@ Rectangle {
 
                 Rectangle {
                     Layout.fillWidth: true
-                    visible: root.factorOverlaySupported
                     radius: 10
                     color: "#0b1220"
                     border.width: 1
@@ -375,32 +391,9 @@ Rectangle {
 
                             GridLayout {
                                 Layout.fillWidth: true
-                                columns: root.useWideParamGrid ? 2 : 1
+                                columns: 1
                                 columnSpacing: 12
                                 rowSpacing: 10
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 4
-
-                                    Text {
-                                        text: "目标持仓数"
-                                        font.pixelSize: 11
-                                        color: "#cbd5e1"
-                                    }
-
-                                    SpinBox {
-                                        id: factorTargetPositionSpinBox
-                                        Layout.fillWidth: true
-                                        from: 1
-                                        to: 100
-                                        value: Number(root.factorOverlay.targetPositionCount || 10)
-                                        onValueModified: {
-                                            root.factorOverlay.targetPositionCount = value
-                                            root.syncDecoratedParameters()
-                                        }
-                                    }
-                                }
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
@@ -429,59 +422,149 @@ Rectangle {
 
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 8
+                                spacing: 6
                                 visible: (root.factorOverlay.allocations || []).length > 0
 
-                                Repeater {
-                                    model: root.factorOverlay.allocations || []
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "已选因子"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    color: "#f8fafc"
+                                }
 
-                                    delegate: Rectangle {
-                                        required property int index
-                                        required property var modelData
-                                        Layout.fillWidth: true
-                                        radius: 8
-                                        color: "#0f172a"
-                                        border.width: 1
-                                        border.color: "#1e293b"
-                                        implicitHeight: factorAllocationRow.implicitHeight + 14
+                                Item {
+                                    Layout.fillWidth: true
+                                    implicitHeight: factorAllocationFlow.implicitHeight
 
-                                        RowLayout {
-                                            id: factorAllocationRow
-                                            anchors.fill: parent
-                                            anchors.margins: 8
-                                            spacing: 8
+                                    Flow {
+                                        id: factorAllocationFlow
+                                        width: parent.width
+                                        spacing: 10
 
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 2
+                                        Repeater {
+                                            model: root.factorOverlay.allocations || []
 
-                                                Text {
-                                                    text: modelData.display_name || modelData.factor_id || "未命名因子"
-                                                    font.pixelSize: 12
-                                                    font.weight: Font.Medium
-                                                    color: "#f8fafc"
-                                                    elide: Text.ElideRight
+                                            delegate: Rectangle {
+                                                required property int index
+                                                required property var modelData
+
+                                                width: root.factorOverlayCardWidth(factorAllocationFlow.width)
+                                                radius: 12
+                                                color: "#0b1220"
+                                                border.width: 1
+                                                border.color: "#1f3b5b"
+                                                implicitHeight: factorAllocationColumn.implicitHeight + 16
+
+                                                ColumnLayout {
+                                                    id: factorAllocationColumn
+                                                    anchors.fill: parent
+                                                    anchors.margins: 8
+                                                    spacing: 6
+
+                                                    RowLayout {
+                                                        width: parent.width
+                                                        spacing: 8
+
+                                                        Rectangle {
+                                                            radius: 9
+                                                            color: "#0ea5e9"
+                                                            border.width: 1
+                                                            border.color: "#38bdf8"
+                                                            implicitWidth: 42
+                                                            implicitHeight: 18
+
+                                                            Text {
+                                                                anchors.centerIn: parent
+                                                                text: "已选"
+                                                                font.pixelSize: 9
+                                                                color: "white"
+                                                            }
+                                                        }
+
+                                                        Item { Layout.fillWidth: true }
+
+                                                        Button {
+                                                            text: "移除"
+                                                            onClicked: root.removeFactorOverlayAllocation(index)
+                                                        }
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: modelData.display_name || modelData.factor_id || "未命名因子"
+                                                        font.pixelSize: 12
+                                                        font.weight: Font.Medium
+                                                        color: "#e2e8f0"
+                                                        wrapMode: Text.WordWrap
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: modelData.factor_id || ""
+                                                        font.pixelSize: 9
+                                                        color: "#94a3b8"
+                                                        wrapMode: Text.WrapAnywhere
+                                                    }
+
+                                                    RowLayout {
+                                                        width: parent.width
+                                                        spacing: 8
+
+                                                        Rectangle {
+                                                            Layout.preferredWidth: 96
+                                                            implicitHeight: 28
+                                                            radius: 8
+                                                            color: "#111827"
+                                                            border.width: 1
+                                                            border.color: "#334155"
+
+                                                            TextField {
+                                                                anchors.fill: parent
+                                                                anchors.leftMargin: 6
+                                                                anchors.rightMargin: 6
+                                                                text: String(modelData.weight_percent !== undefined ? modelData.weight_percent : 0)
+                                                                placeholderText: "权重%"
+                                                                horizontalAlignment: Text.AlignRight
+                                                                verticalAlignment: Text.AlignVCenter
+                                                                color: "#e2e8f0"
+                                                                font.pixelSize: 10
+                                                                background: null
+                                                                onEditingFinished: root.updateFactorOverlayWeight(index, text)
+                                                            }
+                                                        }
+
+                                                        Flow {
+                                                            Layout.fillWidth: true
+                                                            spacing: 4
+
+                                                            Repeater {
+                                                                model: [
+                                                                    { label: "排序因子", fg: "#93c5fd", bg: "#0f172a" },
+                                                                    { label: "权重 " + String(modelData.weight_percent !== undefined ? modelData.weight_percent : 0) + "%", fg: "#fde68a", bg: "#2a2110" }
+                                                                ]
+
+                                                                delegate: Rectangle {
+                                                                    required property var modelData
+                                                                    radius: 9
+                                                                    color: modelData.bg
+                                                                    border.width: 1
+                                                                    border.color: Qt.darker(modelData.bg, 1.12)
+                                                                    implicitWidth: chipText.implicitWidth + 10
+                                                                    implicitHeight: chipText.implicitHeight + 6
+
+                                                                    Text {
+                                                                        id: chipText
+                                                                        anchors.centerIn: parent
+                                                                        text: modelData.label
+                                                                        font.pixelSize: 8
+                                                                        color: modelData.fg
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
                                                 }
-
-                                                Text {
-                                                    text: modelData.factor_id || ""
-                                                    font.pixelSize: 10
-                                                    color: "#94a3b8"
-                                                    elide: Text.ElideRight
-                                                }
-                                            }
-
-                                            TextField {
-                                                Layout.preferredWidth: 90
-                                                text: String(modelData.weight_percent !== undefined ? modelData.weight_percent : 0)
-                                                placeholderText: "权重%"
-                                                horizontalAlignment: Text.AlignRight
-                                                onEditingFinished: root.updateFactorOverlayWeight(index, text)
-                                            }
-
-                                            Button {
-                                                text: "移除"
-                                                onClicked: root.removeFactorOverlayAllocation(index)
                                             }
                                         }
                                     }
@@ -506,6 +589,143 @@ Rectangle {
                     Layout.alignment: Qt.AlignTop
                     spacing: root.ruleComposerSpacing
 
+                    Rectangle {
+                        Layout.fillWidth: true
+                        radius: 10
+                        color: "#0b1220"
+                        border.width: 1
+                        border.color: "#1d4ed8"
+                        implicitHeight: defaultRulePackColumn.implicitHeight + 20
+
+                        ColumnLayout {
+                            id: defaultRulePackColumn
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 8
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 3
+
+                                    Text {
+                                        text: "默认规则包入口"
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                        color: "#dbeafe"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "先加载当前策略的默认规则包，再按当前阶段和规则组做局部增删改。右侧建议栏现在只作为补充入口。"
+                                        font.pixelSize: 11
+                                        color: "#bfdbfe"
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+
+                                Button {
+                                    text: "恢复整包默认项"
+                                    onClicked: root.restoreDefaultRuleComposerPack()
+                                }
+
+                                Button {
+                                    text: "恢复当前阶段"
+                                    enabled: !!root.currentSelectedRuleComposerStage()
+                                    onClicked: root.restoreSelectedRuleComposerStageDefaults()
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                Rectangle {
+                                    radius: 8
+                                    color: "#111827"
+                                    border.width: 1
+                                    border.color: "#334155"
+                                    implicitWidth: currentStageChipText.implicitWidth + 16
+                                    implicitHeight: currentStageChipText.implicitHeight + 10
+
+                                    Text {
+                                        id: currentStageChipText
+                                        anchors.centerIn: parent
+                                        text: ((root.currentSelectedRuleComposerStage() && root.currentSelectedRuleComposerStage().title) || "未选择阶段")
+                                        font.pixelSize: 11
+                                        color: "#e2e8f0"
+                                    }
+                                }
+
+                                Rectangle {
+                                    radius: 8
+                                    color: "#111827"
+                                    border.width: 1
+                                    border.color: "#334155"
+                                    implicitWidth: currentGroupChipText.implicitWidth + 16
+                                    implicitHeight: currentGroupChipText.implicitHeight + 10
+
+                                    Text {
+                                        id: currentGroupChipText
+                                        anchors.centerIn: parent
+                                        text: ((root.currentSelectedRuleComposerGroup() && root.currentSelectedRuleComposerGroup().title) || "未选择规则组")
+                                        font.pixelSize: 11
+                                        color: "#e2e8f0"
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "当前阶段已放入 " + root.selectedRuleComposerStageRuleCount()
+                                          + " 条规则，可快捷引入 " + root.currentRuleComposerGroupQuickImportEntries.length + " 个默认项。"
+                                    font.pixelSize: 11
+                                    color: "#93c5fd"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Text {
+                                    text: "当前组快捷引入"
+                                    font.pixelSize: 12
+                                    font.weight: Font.Medium
+                                    color: "#f8fafc"
+                                }
+
+                                Flow {
+                                    width: parent.width
+                                    spacing: 8
+                                    visible: root.currentRuleComposerGroupQuickImportEntries.length > 0
+
+                                    Repeater {
+                                        model: root.currentRuleComposerGroupQuickImportEntries
+
+                                        delegate: Button {
+                                            required property var modelData
+                                            text: modelData.termDisplayName || modelData.templateDisplayName || modelData.templateId || "未命名默认项"
+                                            onClicked: root.applyDefaultRulePackEntryToCurrentGroup(modelData)
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    visible: root.currentRuleComposerGroupQuickImportEntries.length === 0
+                                    text: "当前组没有剩余的默认快捷项。可以先恢复当前阶段默认规则，或者再用右侧建议栏补充非默认模板。"
+                                    font.pixelSize: 11
+                                    color: "#94a3b8"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+                    }
+
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.minimumHeight: root.ruleComposerMinHeight
@@ -517,7 +737,7 @@ Rectangle {
                             Layout.minimumWidth: root.ruleComposerProfileMinWidth
                             Layout.maximumWidth: root.ruleComposerProfileMaxWidth
                             Layout.fillHeight: true
-                            selectedStrategyType: root.selectedStrategyType
+                            selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
                             strategyProfile: root.strategyProfile
                             onProfileEdited: function(profile) {
                                 root.strategyProfile = profile
@@ -596,11 +816,11 @@ Rectangle {
                             Layout.minimumWidth: root.ruleComposerSuggestionMinWidth
                             Layout.maximumWidth: root.ruleComposerSuggestionMaxWidth
                             Layout.fillHeight: true
-                            panelTitle: "规则建议与应用"
-                            hintMessage: "先选阶段和规则组，再输入交易术语；点击“加入当前规则组”会把模板放进当前规则组。"
+                            panelTitle: "补充模板建议"
+                            hintMessage: "默认规则包和当前组快捷引入是主入口；这里仅用于补充非默认模板。先选阶段和规则组，再把模板加入当前规则组。"
                             showInlinePhaseInputs: !root.useRuleComposerColumns
                             phaseLockValue: root.currentSuggestionPhaseLock()
-                            selectedStrategyType: root.selectedStrategyType
+                            selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
                             strategyProfile: root.strategyProfile
                             selectedStageId: root.selectedRuleComposerStageId
                             selectedStageTitle: (root.currentSelectedRuleComposerStage() && root.currentSelectedRuleComposerStage().title) || ""
@@ -621,11 +841,11 @@ Rectangle {
                         visible: !root.useRuleComposerColumns
                         Layout.fillWidth: true
                         Layout.alignment: Qt.AlignTop
-                        panelTitle: "规则建议与应用"
-                        hintMessage: "先选阶段和规则组，再输入交易术语；点击“加入当前规则组”会把模板放进当前规则组。"
+                        panelTitle: "补充模板建议"
+                        hintMessage: "默认规则包和当前组快捷引入是主入口；这里仅用于补充非默认模板。先选阶段和规则组，再把模板加入当前规则组。"
                         showInlinePhaseInputs: true
                         phaseLockValue: root.currentSuggestionPhaseLock()
-                        selectedStrategyType: root.selectedStrategyType
+                        selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
                         strategyProfile: root.strategyProfile
                         selectedStageId: root.selectedRuleComposerStageId
                         selectedStageTitle: (root.currentSelectedRuleComposerStage() && root.currentSelectedRuleComposerStage().title) || ""
@@ -1318,7 +1538,7 @@ Rectangle {
     
     // 加载参数配置
     function loadParamConfigs() {
-        var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyType)
+        var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyTypeIndex)
         if (dynamicGenerator) {
             dynamicGenerator.reloadConfigs(paramConfigs, [])
         }
@@ -1335,33 +1555,83 @@ Rectangle {
         }
     }
 
+    function importedFactorContextPayload(sourceParameters) {
+        var source = sourceParameters && typeof sourceParameters === "object" ? sourceParameters : ({})
+        var payload = ({})
+        var factorImportContext = normalizeStructuredValue(source.factorImportContext) || ({})
+
+        if (Object.keys(factorImportContext).length > 0) {
+            payload.factorImportContext = factorImportContext
+        }
+
+        return payload
+    }
+
+    function mergeImportedFactorContext(targetParameters, sourceParameters) {
+        var target = targetParameters && typeof targetParameters === "object" ? targetParameters : ({})
+        var payload = importedFactorContextPayload(sourceParameters)
+
+        if (payload.factorImportContext && Object.keys(payload.factorImportContext).length > 0) {
+            target.factorImportContext = payload.factorImportContext
+        }
+
+        return target
+    }
+
     function cloneValue(value) {
         return JSON.parse(JSON.stringify(value))
     }
 
-    function normalizeFactorOverlay(rawOverlay) {
-        var overlay = rawOverlay && typeof rawOverlay === "object" ? cloneValue(rawOverlay) : defaultFactorOverlay()
+    function firstOverlayValue(source, keys, fallbackValue) {
+        var container = source && typeof source === "object" ? source : ({})
+        var aliasKeys = Array.isArray(keys) ? keys : []
+        for (var index = 0; index < aliasKeys.length; ++index) {
+            var key = aliasKeys[index]
+            if (container[key] !== undefined && container[key] !== null && String(container[key]).trim() !== "") {
+                return container[key]
+            }
+        }
+        return fallbackValue
+    }
+
+    function normalizedOverlayAllocation(rawAllocation) {
+        var item = rawAllocation && typeof rawAllocation === "object" ? rawAllocation : ({})
+        var factorId = String(firstOverlayValue(item, ["factor_id", "factorId"], "")).trim()
+        if (!factorId) {
+            return null
+        }
+
+        return {
+            factor_id: factorId,
+            display_name: String(firstOverlayValue(item, ["display_name", "displayName", "factor_name", "factorName", "name"], root.factorDisplayName(factorId) || factorId)),
+            weight_percent: Number(firstOverlayValue(item, ["weight_percent", "weightPercent", "weight"], 0)) || 0
+        }
+    }
+
+    function normalizeFactorOverlay(rawOverlay, sourceParameters) {
+        var overlay = normalizeStructuredValue(rawOverlay)
+        overlay = overlay && typeof overlay === "object" ? cloneValue(overlay) : defaultFactorOverlay()
         var normalized = defaultFactorOverlay()
-        normalized.enabled = !!overlay.enabled
-        normalized.targetPositionCount = Math.max(1, Number(overlay.targetPositionCount || normalized.targetPositionCount) || normalized.targetPositionCount)
-        normalized.minimumCompositeScore = Number(overlay.minimumCompositeScore || normalized.minimumCompositeScore) || 0
-        normalized.combineMode = String(overlay.combineMode || normalized.combineMode)
-        normalized.selectionScope = String(overlay.selectionScope || normalized.selectionScope)
+        normalized.targetPositionCount = Math.max(1, Number(firstOverlayValue(overlay, ["targetPositionCount", "target_position_count"], normalized.targetPositionCount)) || normalized.targetPositionCount)
+        normalized.minimumCompositeScore = Number(firstOverlayValue(overlay, ["minimumCompositeScore", "minimum_composite_score"], normalized.minimumCompositeScore)) || 0
+        normalized.combineMode = String(firstOverlayValue(overlay, ["combineMode", "combine_mode"], normalized.combineMode))
+        normalized.selectionScope = String(firstOverlayValue(overlay, ["selectionScope", "selection_scope"], normalized.selectionScope))
 
         var allocations = Array.isArray(overlay.allocations) ? overlay.allocations : []
         var seenFactorIds = ({})
         for (var index = 0; index < allocations.length; ++index) {
-            var item = allocations[index] || ({})
-            var factorId = String(item.factor_id || "").trim()
-            if (!factorId || seenFactorIds[factorId]) {
+            var normalizedAllocation = normalizedOverlayAllocation(allocations[index])
+            if (!normalizedAllocation || seenFactorIds[normalizedAllocation.factor_id]) {
                 continue
             }
-            seenFactorIds[factorId] = true
-            normalized.allocations.push({
-                factor_id: factorId,
-                display_name: String(item.display_name || root.factorDisplayName(factorId) || factorId),
-                weight_percent: Number(item.weight_percent !== undefined ? item.weight_percent : 0) || 0
-            })
+            seenFactorIds[normalizedAllocation.factor_id] = true
+            normalized.allocations.push(normalizedAllocation)
+        }
+
+        if (overlay.enabled !== undefined && overlay.enabled !== null) {
+            normalized.enabled = !!overlay.enabled
+        } else {
+            normalized.enabled = normalized.allocations.length > 0
         }
 
         return normalized
@@ -1377,7 +1647,7 @@ Rectangle {
 
     function factorOverlayErrors() {
         var errors = []
-        if (!root.factorOverlaySupported || !root.factorOverlay.enabled) {
+        if (!root.factorOverlay.enabled) {
             return errors
         }
 
@@ -1427,6 +1697,7 @@ Rectangle {
         factorSelectorDialog = component.createObject(root, {
             factorService: factorService,
             factorViewModel: factorService.getViewModel ? factorService.getViewModel() : null,
+            requireSupportValidation: false,
             selectedFactorIds: (root.factorOverlay.allocations || []).map(function(item) { return item.factor_id || "" })
         })
         if (!factorSelectorDialog) {
@@ -1457,7 +1728,11 @@ Rectangle {
         root.syncDecoratedParameters()
     }
 
-    function applySelectedFactors(factorIds) {
+    function applySelectedFactors(selectionPayload) {
+        var factorIds = Array.isArray(selectionPayload)
+            ? selectionPayload
+            : (Array.isArray(selectionPayload && selectionPayload.factorIds) ? selectionPayload.factorIds : [])
+
         var existing = root.factorOverlay.allocations || []
         var existingById = ({})
         for (var index = 0; index < existing.length; ++index) {
@@ -1484,8 +1759,11 @@ Rectangle {
         root.factorOverlay.enabled = nextAllocations.length > 0
         root.factorOverlay.allocations = nextAllocations
         if (nextAllocations.some(function(item) { return !(Number(item.weight_percent) > 0) })) {
-            root.rebalanceFactorOverlayWeights()
-            return
+            var equalWeight = nextAllocations.length > 0 ? 100 / nextAllocations.length : 0
+            for (var allocationIndex = 0; allocationIndex < nextAllocations.length; ++allocationIndex) {
+                nextAllocations[allocationIndex].weight_percent = Number(equalWeight.toFixed(4))
+            }
+            root.factorOverlay.allocations = nextAllocations
         }
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         root.syncDecoratedParameters()
@@ -1516,80 +1794,264 @@ Rectangle {
             root.rebalanceFactorOverlayWeights()
             return
         }
+
         root.syncDecoratedParameters()
     }
 
     function clearFactorOverlayAllocations() {
-        root.factorOverlay = defaultFactorOverlay()
+        root.factorOverlay.allocations = []
+        root.factorOverlay.enabled = false
+        root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         root.syncDecoratedParameters()
     }
 
     function currentSuggestionPhaseLock() {
-        var stageId = String(root.selectedRuleComposerStageId || "").trim().toLowerCase()
-        return ["market", "signal", "rebalance"].indexOf(stageId) >= 0 ? stageId : ""
+        var stage = currentSelectedRuleComposerStage()
+        return normalizedRuleTemplatePhase((stage && stage.stageId) || root.selectedRuleComposerStageId || "")
     }
 
     function currentSelectedRuleComposerStage() {
-        for (var stageIndex = 0; stageIndex < root.ruleComposerStages.length; ++stageIndex) {
-            if (root.ruleComposerStages[stageIndex].stageId === root.selectedRuleComposerStageId) {
-                return root.ruleComposerStages[stageIndex]
+        var selectedStageId = String(root.selectedRuleComposerStageId || "").trim()
+        if (!selectedStageId) {
+            return null
+        }
+
+        for (var index = 0; index < root.ruleComposerStages.length; ++index) {
+            var stage = root.ruleComposerStages[index]
+            if (String(stage && stage.stageId || "").trim() === selectedStageId) {
+                return stage
             }
         }
+
         return null
     }
 
     function currentSelectedRuleComposerGroup() {
         var stage = currentSelectedRuleComposerStage()
-        var groups = stage && Array.isArray(stage.groups) ? stage.groups : []
-        for (var groupIndex = 0; groupIndex < groups.length; ++groupIndex) {
-            if (groups[groupIndex].groupId === root.selectedRuleComposerGroupId) {
-                return groups[groupIndex]
-            }
-        }
-        return groups.length > 0 ? groups[0] : null
-    }
+        var groups = Array.isArray(stage && stage.groups) ? stage.groups : []
+        var selectedGroupId = String(root.selectedRuleComposerGroupId || "").trim()
 
-    function ensureSelectedRuleComposerGroup() {
-        var stage = currentSelectedRuleComposerStage()
-        var groups = stage && Array.isArray(stage.groups) ? stage.groups : []
-        if (groups.length === 0) {
-            root.selectedRuleComposerGroupId = ""
-            return
-        }
-        for (var groupIndex = 0; groupIndex < groups.length; ++groupIndex) {
-            if (groups[groupIndex].groupId === root.selectedRuleComposerGroupId) {
-                return
-            }
-        }
-        root.selectedRuleComposerGroupId = groups[0].groupId || ""
-    }
-
-    function populatedRuleComposerGroups(stage) {
-        var groups = stage && Array.isArray(stage.groups) ? stage.groups : []
-        return groups.filter(function(group) {
-            return Array.isArray(group.rules) && group.rules.length > 0
-        })
-    }
-
-    function firstPopulatedRuleComposerSelection(stages, fallbackStageId, fallbackGroupId) {
-        var stageList = Array.isArray(stages) ? stages : []
-        var fallbackStage = String(fallbackStageId || "").trim()
-        var fallbackGroup = String(fallbackGroupId || "").trim()
-
-        for (var stageIndex = 0; stageIndex < stageList.length; ++stageIndex) {
-            var stage = stageList[stageIndex] || ({})
-            var groups = populatedRuleComposerGroups(stage)
-            if (groups.length > 0) {
-                return {
-                    stageId: String(stage.stageId || "").trim(),
-                    groupId: String(groups[0].groupId || "").trim()
+        if (selectedGroupId) {
+            for (var index = 0; index < groups.length; ++index) {
+                var group = groups[index]
+                if (String(group && group.groupId || "").trim() === selectedGroupId) {
+                    return group
                 }
             }
         }
 
+        return groups.length > 0 ? groups[0] : null
+    }
+
+    function firstPopulatedRuleComposerSelection(stages, preferredStageId, preferredGroupId) {
+        var normalizedStages = Array.isArray(stages) ? stages : []
+        var preferredStageKey = String(preferredStageId || "").trim().toLowerCase()
+        var preferredGroupKey = String(preferredGroupId || "").trim()
+        var fallbackStage = ""
+        var fallbackGroup = ""
+
+        function firstGroupId(stage) {
+            var stageGroups = Array.isArray(stage && stage.groups) ? stage.groups : []
+            for (var groupIndex = 0; groupIndex < stageGroups.length; ++groupIndex) {
+                var candidateGroupId = String(stageGroups[groupIndex] && stageGroups[groupIndex].groupId || "").trim()
+                if (candidateGroupId) {
+                    return candidateGroupId
+                }
+            }
+            return ""
+        }
+
+        var preferredStage = null
+        for (var stageIndex = 0; stageIndex < normalizedStages.length; ++stageIndex) {
+            var stage = normalizedStages[stageIndex]
+            var stageId = String(stage && stage.stageId || "").trim()
+            var normalizedStageId = stageId.toLowerCase()
+            if (!fallbackStage && stageId) {
+                fallbackStage = stageId
+                fallbackGroup = firstGroupId(stage)
+            }
+            if (preferredStageKey && normalizedStageId === preferredStageKey) {
+                preferredStage = stage
+            }
+        }
+
+        if (preferredStage) {
+            var preferredResolvedStageId = String(preferredStage.stageId || "").trim()
+            var preferredResolvedGroupId = firstGroupId(preferredStage)
+            var preferredGroups = Array.isArray(preferredStage.groups) ? preferredStage.groups : []
+            if (preferredGroupKey) {
+                for (var preferredGroupIndex = 0; preferredGroupIndex < preferredGroups.length; ++preferredGroupIndex) {
+                    var preferredGroup = preferredGroups[preferredGroupIndex]
+                    var candidatePreferredGroupId = String(preferredGroup && preferredGroup.groupId || "").trim()
+                    if (candidatePreferredGroupId === preferredGroupKey) {
+                        preferredResolvedGroupId = candidatePreferredGroupId
+                        break
+                    }
+                }
+            }
+
+            return {
+                stageId: preferredResolvedStageId,
+                groupId: preferredResolvedGroupId
+            }
+        }
+
         return {
-            stageId: fallbackStage,
-            groupId: fallbackGroup
+            stageId: fallbackStage || preferredStageId || "signal",
+            groupId: fallbackGroup || preferredGroupId || ""
+        }
+    }
+
+    function defaultRuleComposerStages() {
+        var profile = root.strategyProfile
+        if (!profile || Object.keys(profile).length === 0) {
+            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        }
+        return Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, [])
+    }
+
+    function defaultRulePackEntries() {
+        var profile = root.strategyProfile
+        if (!profile || Object.keys(profile).length === 0) {
+            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        }
+        return Utils.StrategyCreationUtils.buildDefaultMarketRuleBindings(profile)
+            .concat(Utils.StrategyCreationUtils.buildDefaultBaseRuleBindings(profile))
+    }
+
+    function selectedRuleComposerStageRuleCount() {
+        var stage = currentSelectedRuleComposerStage()
+        var groups = Array.isArray(stage && stage.groups) ? stage.groups : []
+        var total = 0
+        for (var groupIndex = 0; groupIndex < groups.length; ++groupIndex) {
+            var rules = Array.isArray(groups[groupIndex].rules) ? groups[groupIndex].rules : []
+            total += rules.length
+        }
+        return total
+    }
+
+    function currentRuleComposerGroupQuickImportEntries() {
+        var stage = currentSelectedRuleComposerStage()
+        var group = currentSelectedRuleComposerGroup()
+        if (!stage || !group) {
+            return []
+        }
+
+        var stageId = String(stage.stageId || "").trim().toLowerCase()
+        var groupId = String(group.groupId || "").trim().toLowerCase()
+        var groupRole = String(group.role || "").trim().toLowerCase()
+        var existingTemplates = ({})
+        var groupRules = Array.isArray(group.rules) ? group.rules : []
+        for (var ruleIndex = 0; ruleIndex < groupRules.length; ++ruleIndex) {
+            var templateId = String(groupRules[ruleIndex].templateId || "").trim()
+            if (templateId) {
+                existingTemplates[templateId] = true
+            }
+        }
+
+        var exactMatches = []
+        var roleMatches = []
+        var stageMatches = []
+        var defaults = defaultRulePackEntries()
+        for (var index = 0; index < defaults.length; ++index) {
+            var entry = defaults[index] || ({})
+            var entryStageId = String(entry.stageId || "").trim().toLowerCase()
+            var entryGroupId = String(entry.groupId || "").trim().toLowerCase()
+            var entryGroupRole = String(entry.groupRole || "").trim().toLowerCase()
+            var entryTemplateId = String(entry.templateId || "").trim()
+            if (!entryTemplateId || existingTemplates[entryTemplateId] || entryStageId !== stageId) {
+                continue
+            }
+            if (entryGroupId === groupId) {
+                exactMatches.push(entry)
+            } else if (groupRole && entryGroupRole === groupRole) {
+                roleMatches.push(entry)
+            } else {
+                stageMatches.push(entry)
+            }
+        }
+
+        if (exactMatches.length > 0) {
+            return exactMatches
+        }
+        if (roleMatches.length > 0) {
+            return roleMatches
+        }
+        return stageMatches
+    }
+
+    function applyDefaultRulePackEntryToCurrentGroup(entry) {
+        var currentStage = currentSelectedRuleComposerStage()
+        var currentGroup = currentSelectedRuleComposerGroup()
+        if (!entry || !currentStage || !currentGroup) {
+            return
+        }
+
+        upsertRuleComposerSuggestion({
+            template_id: entry.templateId || "",
+            template_display_name: entry.templateDisplayName || entry.templateId || "",
+            term_id: entry.termId || "",
+            term_display_name: entry.termDisplayName || "",
+            file_name: entry.fileName || "",
+            phase: currentStage.stageId || "signal",
+            category: entry.category || "",
+            summary: entry.summary || "",
+            is_ready: true
+        })
+        syncDecoratedParameters()
+    }
+
+    function restoreDefaultRuleComposerPack() {
+        if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
+            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        }
+
+        var defaultStages = defaultRuleComposerStages()
+        var selection = firstPopulatedRuleComposerSelection(
+            defaultStages,
+            root.selectedRuleComposerStageId || "signal",
+            root.selectedRuleComposerGroupId || "")
+
+        root.ruleComposerStages = defaultStages
+        root.selectedRuleComposerStageId = selection.stageId || "signal"
+        root.selectedRuleComposerGroupId = selection.groupId || ""
+        ensureSelectedRuleComposerGroup()
+        syncRuleTemplateBindingPreviewState()
+        syncDecoratedParameters()
+    }
+
+    function restoreSelectedRuleComposerStageDefaults() {
+        var stageId = String(root.selectedRuleComposerStageId || "").trim().toLowerCase()
+        var previousGroupId = String(root.selectedRuleComposerGroupId || "").trim()
+        if (!stageId) {
+            return
+        }
+
+        var defaults = defaultRuleComposerStages()
+        var defaultStage = null
+        for (var defaultIndex = 0; defaultIndex < defaults.length; ++defaultIndex) {
+            if (String(defaults[defaultIndex].stageId || "").trim().toLowerCase() === stageId) {
+                defaultStage = defaults[defaultIndex]
+                break
+            }
+        }
+        if (!defaultStage) {
+            return
+        }
+
+        var nextStages = cloneRuleComposerStages()
+        for (var stageIndex = 0; stageIndex < nextStages.length; ++stageIndex) {
+            if (String(nextStages[stageIndex].stageId || "").trim().toLowerCase() !== stageId) {
+                continue
+            }
+            nextStages[stageIndex] = defaultStage
+            root.ruleComposerStages = nextStages
+            root.selectedRuleComposerStageId = defaultStage.stageId || stageId
+            root.selectedRuleComposerGroupId = previousGroupId
+            ensureSelectedRuleComposerGroup()
+            syncRuleTemplateBindingPreviewState()
+            syncDecoratedParameters()
+            return
         }
     }
 
@@ -1670,7 +2132,7 @@ Rectangle {
 
     function rebuildRuleComposerState(resetProfile) {
         if (resetProfile || !root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyType)
+            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
         root.ruleComposerStages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(
             root.strategyProfile,
@@ -1705,7 +2167,7 @@ Rectangle {
     function defaultMarketRuleComposerStage() {
         var profile = root.strategyProfile
         if (!profile || Object.keys(profile).length === 0) {
-            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyType)
+            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
         var defaultStages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, [])
         for (var index = 0; index < defaultStages.length; ++index) {
@@ -1803,7 +2265,7 @@ Rectangle {
 
     function restoreDefaultMarketRuleComposerStage() {
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyType)
+            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
 
         var nextStages = cloneRuleComposerStages()
@@ -1840,6 +2302,8 @@ Rectangle {
             if (key === "rule_template_bindings"
                     || key === "rule_template_binding"
                     || key === "rule_profile"
+                    || key === "execution_policy"
+                    || key === "backtest_assumptions"
                     || key === "rule_composer_state"
                     || key === "factor_overlay") {
                 continue
@@ -1851,7 +2315,12 @@ Rectangle {
 
     function currentEditableParameterValues() {
         if (dynamicGenerator && typeof dynamicGenerator.getValues === "function") {
-            return dynamicGenerator.getValues() || ({})
+            var preservedValues = extractEditableParameterValues(root.strategyParameters)
+            var dynamicValues = dynamicGenerator.getValues() || ({})
+            for (var key in dynamicValues) {
+                preservedValues[key] = dynamicValues[key]
+            }
+            return preservedValues
         }
         return extractEditableParameterValues(root.strategyParameters)
     }
@@ -1866,16 +2335,89 @@ Rectangle {
         )
     }
 
+    function supportedRuleBindingPhaseIndex(value) {
+        var parsed = Number(value)
+        if (!isFinite(parsed)) {
+            return -1
+        }
+        parsed = Math.floor(parsed)
+        return parsed >= 0 && parsed <= 6 ? parsed : -1
+    }
+
+    function composerStagePhaseIndex(stageId) {
+        var normalizedStageId = String(stageId || "").trim().toLowerCase()
+        var mapping = {
+            market: 0,
+            eligibility: 1,
+            signal: 1,
+            portfolio: 5,
+            rebalance: 3,
+            execution: 5,
+            account_risk: 5
+        }
+        return mapping.hasOwnProperty(normalizedStageId) ? mapping[normalizedStageId] : -1
+    }
+
+    function composerRulePhaseIndex(rule, stageId) {
+        var configured = supportedRuleBindingPhaseIndex(rule && (rule.bindingPhase !== undefined ? rule.bindingPhase : rule.phase))
+        if (configured >= 0) {
+            return configured
+        }
+
+        var tokens = [
+            rule && rule.templateId,
+            rule && rule.template_id,
+            rule && rule.fileName,
+            rule && rule.file_name,
+            rule && rule.category,
+            rule && rule.termId,
+            rule && rule.term_id,
+            rule && rule.termName,
+            rule && rule.term_display_name,
+            rule && rule.summary
+        ].map(function(item) {
+            return String(item || "").trim().toLowerCase()
+        }).join(" ")
+
+        if (tokens.indexOf("watch_") >= 0 || tokens.indexOf("watch") >= 0 || tokens.indexOf("invalid") >= 0) {
+            return 6
+        }
+        if (tokens.indexOf("exit_") >= 0 || tokens.indexOf(" exit") >= 0 || tokens.indexOf("exit_management") >= 0) {
+            return 4
+        }
+        if (tokens.indexOf("entry_") >= 0 || tokens.indexOf(" entry") >= 0 || tokens.indexOf("entry_pattern") >= 0) {
+            return 2
+        }
+
+        return composerStagePhaseIndex(stageId)
+    }
+
     function normalizedRuleComposerStagesForPersistence() {
         var stages = cloneRuleComposerStages()
         for (var stageIndex = 0; stageIndex < stages.length; ++stageIndex) {
             var stage = stages[stageIndex] || ({})
+            var stagePhaseIndex = composerStagePhaseIndex(stage.stageId)
+            if (stagePhaseIndex >= 0) {
+                stage.phase = stagePhaseIndex
+                stage.bindingPhase = stagePhaseIndex
+            } else {
+                delete stage.phase
+                delete stage.bindingPhase
+            }
             var groups = Array.isArray(stage.groups) ? stage.groups : []
             for (var groupIndex = 0; groupIndex < groups.length; ++groupIndex) {
                 var group = groups[groupIndex] || ({})
                 var rules = Array.isArray(group.rules) ? group.rules : []
                 for (var ruleIndex = 0; ruleIndex < rules.length; ++ruleIndex) {
                     var rule = rules[ruleIndex] || ({})
+                    var rulePhaseIndex = composerRulePhaseIndex(rule, stage.stageId)
+                    if (rulePhaseIndex >= 0) {
+                        rule.phase = rulePhaseIndex
+                        rule.bindingPhase = rulePhaseIndex
+                    } else {
+                        delete rule.phase
+                        delete rule.bindingPhase
+                    }
                     var resolvedFileName = resolvedRuleTemplateFileName(rule)
                     if (resolvedFileName) {
                         rule.fileName = resolvedFileName
@@ -1895,12 +2437,51 @@ Rectangle {
         }
     }
 
-    function buildRuleProfilePayload() {
+    function buildRuleProfileFieldPayload(sourceParameters) {
+        var source = sourceParameters || ({})
+        var payload = ({})
+
+        if (source.stopLoss !== undefined && source.stopLoss !== null && source.stopLoss !== "") {
+            payload.stopLossPercent = Number(source.stopLoss)
+        }
+        if (source.takeProfit !== undefined && source.takeProfit !== null && source.takeProfit !== "") {
+            payload.takeProfitPercent = Number(source.takeProfit)
+        }
+        if (source.rebalanceDays !== undefined && source.rebalanceDays !== null && source.rebalanceDays !== "") {
+            payload.rebalanceDays = Number(source.rebalanceDays)
+        }
+        if (source.maxDrawdownLimit !== undefined && source.maxDrawdownLimit !== null && source.maxDrawdownLimit !== "") {
+            payload.maxDrawdownLimit = Number(source.maxDrawdownLimit)
+        }
+
+        return payload
+    }
+
+    function buildExecutionPolicyPayload(sourceParameters) {
         return {
+            version: 1
+        }
+    }
+
+    function buildBacktestAssumptionsPayload(sourceParameters) {
+        return {
+            version: 1
+        }
+    }
+
+    function buildRuleProfilePayload(sourceParameters) {
+        var payload = {
             version: 1,
             strategyProfile: root.strategyProfile || ({}),
             ruleComposerState: buildRuleComposerStatePayload()
         }
+
+        var fieldPayload = buildRuleProfileFieldPayload(sourceParameters)
+        for (var key in fieldPayload) {
+            payload[key] = fieldPayload[key]
+        }
+
+        return payload
     }
 
     function syncDecoratedParameters(sourceValues) {
@@ -1961,34 +2542,54 @@ Rectangle {
         for (var key in source) {
             merged[key] = source[key]
         }
-        var bindingList = buildRuleTemplateBindingsPayload()
-        if (bindingList.length > 0) {
-            merged.rule_template_bindings = bindingList
-            merged.rule_template_binding = primaryRuleTemplateBinding(bindingList)
-        } else {
-            delete merged.rule_template_bindings
-            delete merged.rule_template_binding
-        }
+        mergeImportedFactorContext(merged, root.strategyParameters)
+        mergeImportedFactorContext(merged, source)
+        delete merged.rule_template_bindings
+        delete merged.rule_template_binding
         merged.rule_composer_state = buildRuleComposerStatePayload()
-        merged.rule_profile = buildRuleProfilePayload()
-        if (root.factorOverlaySupported) {
-            var normalizedFactorOverlay = normalizeFactorOverlay(root.factorOverlay)
-            if (normalizedFactorOverlay.enabled && normalizedFactorOverlay.allocations.length > 0) {
-                merged.factor_overlay = normalizedFactorOverlay
-            } else {
-                delete merged.factor_overlay
-            }
-            delete merged.factor_allocations
-            delete merged.allocations
-            delete merged.portfolio_allocations_json
-            delete merged.portfolio_factor_ids
-            delete merged.portfolio_factor_count
+        merged.rule_profile = buildRuleProfilePayload(source)
+        merged.execution_policy = buildExecutionPolicyPayload(source)
+        merged.backtest_assumptions = buildBacktestAssumptionsPayload(source)
+        var normalizedFactorOverlay = normalizeFactorOverlay(root.factorOverlay, merged)
+        if (normalizedFactorOverlay.enabled && normalizedFactorOverlay.allocations.length > 0) {
+            merged.factor_overlay = normalizedFactorOverlay
+        } else {
+            delete merged.factor_overlay
         }
+        delete merged.stopLoss
+        delete merged.takeProfit
+        delete merged.rebalanceDays
+        delete merged.maxDrawdownLimit
+        delete merged.turnoverLimit
+        delete merged.slippageLimit
+        delete merged.level1Breaker
+        delete merged.level2Breaker
+        delete merged.level3Breaker
+        delete merged.factor_allocations
+        delete merged.allocations
+        delete merged.portfolio_allocations_json
+        delete merged.portfolio_factor_ids
+        delete merged.portfolio_factor_count
         return merged
     }
 
     function normalizedRuleTemplatePhase(phase) {
-        return PreviewUtils.normalizePhaseKey(phase || "signal") || "signal"
+        var rawPhase = phase === undefined || phase === null ? "" : String(phase).trim().toLowerCase()
+        if (!rawPhase) {
+            return "signal"
+        }
+
+        var normalized = PreviewUtils.normalizePhaseKey(rawPhase)
+        var validPhases = {
+            market: true,
+            eligibility: true,
+            signal: true,
+            portfolio: true,
+            rebalance: true,
+            execution: true,
+            account_risk: true
+        }
+        return validPhases[normalized] ? normalized : ""
     }
 
     function roleDisplayName(role) {
@@ -2076,6 +2677,9 @@ Rectangle {
                 if (!entry || typeof entry !== "object") {
                     continue
                 }
+                if (!entry.phase && entry.stageId) {
+                    entry.phase = entry.stageId
+                }
                 if (!entry.phase) {
                     entry.phase = key
                 }
@@ -2092,7 +2696,7 @@ Rectangle {
         if (entries.length > 0) {
             for (var index = 0; index < entries.length; ++index) {
                 var item = entries[index] || ({})
-                var phase = normalizedRuleTemplatePhase(item.phase)
+                var phase = normalizedRuleTemplatePhase(item.phase || item.stageId)
                 if (!phase) {
                     continue
                 }
@@ -2227,7 +2831,7 @@ Rectangle {
         }
 
         var bindings = []
-        var phases = ["market", "signal", "rebalance", "watch"]
+        var phases = ["market", "eligibility", "signal", "portfolio", "rebalance", "execution", "account_risk"]
         for (var index = 0; index < phases.length; ++index) {
             var phase = phases[index]
             var binding = (boundRuleTemplateBindings || ({}))[phase]
@@ -2537,17 +3141,40 @@ Rectangle {
         }
     }
 
-    function applyPersistedStrategy(strategyType, parameters, advancedOptions) {
+    function applyPersistedStrategy(strategyTypeIndex, parameters, advancedOptions) {
         var sourceParams = parameters || ({})
-        var mappedValues = ({})
+        var mappedValues = importedFactorContextPayload(sourceParams)
+        var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
+        var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
+        var persistedExecutionPolicy = normalizeStructuredValue(sourceParams.execution_policy) || ({})
+        var persistedBacktestAssumptions = normalizeStructuredValue(sourceParams.backtest_assumptions) || ({})
 
         function assignIfPresent(targetKey, sourceKeys, transform) {
             for (var index = 0; index < sourceKeys.length; ++index) {
                 var key = sourceKeys[index]
-                if (sourceParams[key] === undefined || sourceParams[key] === null || sourceParams[key] === "") {
+                var resolvedValue = sourceParams[key]
+                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
+                    resolvedValue = persistedRuleProfile[key]
+                }
+                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
+                    resolvedValue = persistedExecutionPolicy[key]
+                }
+                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
+                    resolvedValue = persistedBacktestAssumptions[key]
+                }
+                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
+                    if (key === "stopLoss") {
+                        resolvedValue = persistedRuleProfile.stopLossPercent
+                    } else if (key === "takeProfit") {
+                        resolvedValue = persistedRuleProfile.takeProfitPercent
+                    } else if (key === "rebalanceDays") {
+                        resolvedValue = persistedRuleProfile.rebalanceDays
+                    }
+                }
+                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
                     continue
                 }
-                mappedValues[targetKey] = transform ? transform(sourceParams[key]) : sourceParams[key]
+                mappedValues[targetKey] = transform ? transform(resolvedValue) : resolvedValue
                 return
             }
         }
@@ -2565,16 +3192,11 @@ Rectangle {
         assignIfPresent("takeProfit", ["takeProfit"], ratioToPercent)
         assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
         assignIfPresent("rebalanceDays", ["rebalanceDays"], Number)
-        assignIfPresent("turnoverLimit", ["turnoverLimit"], Number)
-        assignIfPresent("slippageLimit", ["slippageLimit"], Number)
-        assignIfPresent("level1Breaker", ["level1Breaker"], Number)
-        assignIfPresent("level2Breaker", ["level2Breaker"], Number)
-        assignIfPresent("level3Breaker", ["level3Breaker"], Number)
 
-        if (strategyType === "trend_following") {
+        if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TrendFollowing) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
             assignIfPresent("slowPeriod", ["slowPeriod"], Number)
-        } else if (strategyType === "trend_breakout") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TrendBreakout) {
             assignIfPresent("longTrendPeriod", ["longTrendPeriod"], Number)
             assignIfPresent("breakoutLookbackPeriod", ["breakoutLookbackPeriod"], Number)
             assignIfPresent("breakoutThreshold", ["breakoutThreshold"], ratioToPercent)
@@ -2583,36 +3205,35 @@ Rectangle {
             assignIfPresent("exitMaPeriod", ["exitMaPeriod"], Number)
             assignIfPresent("atrPeriod", ["atrPeriod"], Number)
             assignIfPresent("atrMultiplier", ["atrMultiplier"], Number)
-        } else if (strategyType === "mean_reversion") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MeanReversion) {
             assignIfPresent("bollPeriod", ["bollPeriod"], Number)
             assignIfPresent("bollStd", ["bollStd"], Number)
             assignIfPresent("reversionThreshold", ["reversionThreshold"], Number)
-        } else if (strategyType === "momentum") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Momentum) {
             assignIfPresent("momentumPeriod", ["momentumPeriod"], Number)
             assignIfPresent("topN", ["topN"], Number)
-        } else if (strategyType === "arbitrage") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Arbitrage) {
             assignIfPresent("spreadThreshold", ["spreadThreshold"], Number)
             assignIfPresent("entryZScore", ["entryZScore"], Number)
             assignIfPresent("exitZScore", ["exitZScore"], Number)
-        } else if (strategyType === "machine_learning") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearning) {
             assignIfPresent("featureWindow", ["featureWindow"], Number)
             assignIfPresent("predictionDays", ["predictionDays"], Number)
             assignIfPresent("trainingDays", ["trainingDays"], Number)
             assignIfPresent("confidenceThreshold", ["confidenceThreshold"], ratioToPercent)
-        } else if (strategyType === "multi_factor") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor) {
             assignIfPresent("factorTypes", ["factorTypes"])
-        } else if (strategyType === "high_frequency") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.HighFrequency) {
             assignIfPresent("timeframe", ["timeframe"])
-        } else if (strategyType === "event_driven") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.EventDriven) {
             assignIfPresent("eventTypes", ["eventTypes"])
-        } else if (strategyType === "custom") {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Custom) {
             assignIfPresent("customCode", ["customCode"])
         }
 
         root.suppressRuleComposerReset = true
-        root.selectedStrategyType = strategyType || root.selectedStrategyType
+        root.selectedStrategyTypeIndex = normalizedStrategyTypeIndex
         loadParamConfigs()
-        var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
         var persistedFactorOverlay = normalizeStructuredValue(sourceParams.factor_overlay) || ({})
         var persistedComposerState = normalizeStructuredValue(
             sourceParams.rule_composer_state
@@ -2633,17 +3254,17 @@ Rectangle {
             || ({})
 
         console.log("applyPersistedStrategy:",
-                    "strategyType=", strategyType,
-                    "bindingCount=", persistedBindingEntries.length,
-                    "hasComposerStages=", !!(persistedComposerState && persistedComposerState.stages),
-                    "composerStageCount=", (persistedComposerState && persistedComposerState.stages && persistedComposerState.stages.length) || 0)
+                "strategyTypeIndex=", normalizedStrategyTypeIndex,
+                "bindingCount=", persistedBindingEntries.length,
+                "hasComposerStages=", !!(persistedComposerState && persistedComposerState.stages),
+                "composerStageCount=", (persistedComposerState && persistedComposerState.stages && persistedComposerState.stages.length) || 0,
+                "overlayEnabled=", !!persistedFactorOverlay.enabled,
+                "overlayAllocCount=", Array.isArray(persistedFactorOverlay.allocations) ? persistedFactorOverlay.allocations.length : 0)
 
         root.strategyProfile = Object.keys(persistedStrategyProfile).length > 0
             ? persistedStrategyProfile
-            : Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyType)
-        root.factorOverlay = root.factorOverlaySupported
-            ? normalizeFactorOverlay(persistedFactorOverlay)
-            : defaultFactorOverlay()
+            : Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        root.factorOverlay = normalizeFactorOverlay(persistedFactorOverlay, sourceParams)
 
         if (persistedComposerState && Array.isArray(persistedComposerState.stages) && persistedComposerState.stages.length > 0) {
             root.ruleComposerStages = normalizeStructuredValue(persistedComposerState.stages) || []
@@ -2667,12 +3288,15 @@ Rectangle {
             ensureSelectedRuleComposerGroup()
         }
 
-            console.log("applyPersistedStrategy resolved:",
+                console.log("applyPersistedStrategy resolved:",
                     "stageCount=", root.ruleComposerStages.length,
                     "selectedStageId=", root.selectedRuleComposerStageId,
-                    "selectedGroupId=", root.selectedRuleComposerGroupId)
+                    "selectedGroupId=", root.selectedRuleComposerGroupId,
+                    "resolvedOverlayEnabled=", !!root.factorOverlay.enabled,
+                    "resolvedOverlayAllocCount=", Array.isArray(root.factorOverlay.allocations) ? root.factorOverlay.allocations.length : 0)
 
         root.strategyParameters = decorateParameters(mappedValues)
+        root.parametersChanged(root.strategyParameters)
         if (dynamicGenerator) {
             dynamicGenerator.setValues(mappedValues)
             root.parametersValid = dynamicGenerator.validateAll()
@@ -2714,7 +3338,7 @@ Rectangle {
         if (customParameterScriptTextArea) customParameterScriptTextArea.text = ""
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
-        root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyType)
+        root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         root.factorOverlay = defaultFactorOverlay()
         rebuildRuleComposerState(false)
         root.strategyParameters = decorateParameters({})
@@ -2735,7 +3359,7 @@ Rectangle {
         paramComponents.registerAllComponents()
 
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyType)
+            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         if (!Array.isArray(root.ruleComposerStages) || root.ruleComposerStages.length === 0) {
@@ -2746,14 +3370,13 @@ Rectangle {
         loadParamConfigs()
     }
     
-    onSelectedStrategyTypeChanged: {
+    onSelectedStrategyTypeIndexChanged: {
         loadParamConfigs()
-        root.factorOverlay = root.factorOverlaySupported
-            ? normalizeFactorOverlay(root.factorOverlay)
-            : defaultFactorOverlay()
-        if (!root.suppressRuleComposerReset) {
-            rebuildRuleComposerState(true)
+        if (root.suppressRuleComposerReset) {
+            return
         }
+        root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
+        rebuildRuleComposerState(true)
         syncDecoratedParameters()
     }
 

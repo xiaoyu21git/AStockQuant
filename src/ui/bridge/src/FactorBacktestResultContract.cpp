@@ -230,7 +230,7 @@ QVariantList FactorBacktestResultContract::buildCoreMetrics(const factor::Factor
 
 QVariantList FactorBacktestResultContract::buildOptionalMetrics(const factor::BacktestResult& result,
                                                                 double documentedLongShortAnnualReturn,
-                                                                double documentedLongShortMaxDrawdown,
+                                                                double documentedExecutionMaxDrawdown,
                                                                 double documentedAnnualTurnover)
 {
     const auto& metrics = result.factorMetrics;
@@ -265,10 +265,10 @@ QVariantList FactorBacktestResultContract::buildOptionalMetrics(const factor::Ba
                                  QStringLiteral("参考 >= 5.0%，良好 >= 10.0%，优秀 >= 20.0%"),
                                  QStringLiteral("optional"),
                                  1));
-    cards.append(buildMetricCard(QStringLiteral("longShortMaxDrawdown"),
-                                 QStringLiteral("执行多空最大回撤"),
+    cards.append(buildMetricCard(QStringLiteral("executionMaxDrawdown"),
+                                 QStringLiteral("执行最大回撤"),
                                  QStringLiteral("重要参考：看风控后执行序列的路径风险，对应执行复合年化那条净值路径"),
-                                 documentedLongShortMaxDrawdown,
+                                 documentedExecutionMaxDrawdown,
                                  QStringLiteral("percent2"),
                                  QStringLiteral("low"),
                                  0.15,
@@ -413,7 +413,7 @@ QVariantMap FactorBacktestResultContract::buildFactorQualityMetrics(const factor
     const auto& metrics = result.factorMetrics;
     const double canonicalMonotonicity = monotonicity(result);
     const double canonicalLongShortAnnualReturn = longShortAnnualReturn(result);
-    const double canonicalLongShortMaxDrawdown = maxDrawdown(result);
+    const double canonicalExecutionMaxDrawdown = maxDrawdown(result);
     const double canonicalAnnualTurnover = turnoverRate(result);
 
     QVariantMap quality;
@@ -425,7 +425,6 @@ QVariantMap FactorBacktestResultContract::buildFactorQualityMetrics(const factor
     quality[QStringLiteral("monotonicityScore")] = canonicalMonotonicity;
     quality[QStringLiteral("longShortSharpe")] = metrics.longShortSharpe;
     quality[QStringLiteral("longShortAnnualReturn")] = canonicalLongShortAnnualReturn;
-    quality[QStringLiteral("longShortMaxDrawdown")] = canonicalLongShortMaxDrawdown;
     quality[QStringLiteral("icHalfLife")] = metrics.icHalfLife;
     quality[QStringLiteral("annualTurnover")] = canonicalAnnualTurnover;
     quality[QStringLiteral("costAdjustedSharpe")] = metrics.costAdjustedSharpe;
@@ -449,7 +448,7 @@ QVariantMap FactorBacktestResultContract::buildFactorQualityMetrics(const factor
     quality[QStringLiteral("coreMetrics")] = buildCoreMetrics(metrics);
     quality[QStringLiteral("optionalMetrics")] = buildOptionalMetrics(result,
                                                                        canonicalLongShortAnnualReturn,
-                                                                       canonicalLongShortMaxDrawdown,
+                                                                       canonicalExecutionMaxDrawdown,
                                                                        canonicalAnnualTurnover);
     quality[QStringLiteral("auxiliaryMetrics")] = buildAuxiliaryMetrics(metrics);
     quality[QStringLiteral("groupCharts")] = buildGroupCharts(metrics);

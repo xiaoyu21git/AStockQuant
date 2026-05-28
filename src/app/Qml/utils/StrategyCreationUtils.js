@@ -20,16 +20,294 @@ function getTranslation(key, language) {
 // ============ 策略类型相关 ============
 
 function normalizeStrategyTypeId(typeId) {
-    return String(typeId || "").trim();
+    return String(typeId || "").trim().toLowerCase();
+}
+
+var StrategyTypeIndex = {
+    Invalid: -1,
+    TrendFollowing: 0,
+    TrendBreakout: 1,
+    MeanReversion: 2,
+    Momentum: 3,
+    Arbitrage: 4,
+    MachineLearning: 5,
+    MultiFactor: 6,
+    HighFrequency: 7,
+    EventDriven: 8,
+    Custom: 9,
+    Common: 100
+};
+
+var StrategyBehaviorKind = {
+    Invalid: -1,
+    TrendFollowing: 0,
+    MeanReversion: 1,
+    Momentum: 2,
+    Arbitrage: 3,
+    MultiFactor: 4,
+    MachineLearning: 5,
+    EventDriven: 6,
+    HighFrequency: 7,
+    Custom: 8
+};
+
+var StrategyStoredTypeIndex = {
+    Unknown: -1,
+    TrendFollowing: 0,
+    MeanReversion: 1,
+    Alpha: 2,
+    Arbitrage: 3,
+    HighFrequency: 4,
+    Portfolio: 5,
+    Custom: 6
+};
+
+function normalizeStrategyTypeIndex(strategyTypeIndex) {
+    switch (Math.floor(Number(strategyTypeIndex))) {
+        case StrategyTypeIndex.TrendFollowing:
+        case StrategyTypeIndex.TrendBreakout:
+        case StrategyTypeIndex.MeanReversion:
+        case StrategyTypeIndex.Momentum:
+        case StrategyTypeIndex.Arbitrage:
+        case StrategyTypeIndex.MachineLearning:
+        case StrategyTypeIndex.MultiFactor:
+        case StrategyTypeIndex.HighFrequency:
+        case StrategyTypeIndex.EventDriven:
+        case StrategyTypeIndex.Custom:
+        case StrategyTypeIndex.Common:
+            return Math.floor(Number(strategyTypeIndex));
+        default:
+            return StrategyTypeIndex.Invalid;
+    }
+}
+
+function strategyTypeIndexFromBehaviorKind(behaviorKind) {
+    switch (Math.floor(Number(behaviorKind))) {
+        case StrategyBehaviorKind.TrendFollowing:
+            return StrategyTypeIndex.TrendFollowing;
+        case StrategyBehaviorKind.MeanReversion:
+            return StrategyTypeIndex.MeanReversion;
+        case StrategyBehaviorKind.Momentum:
+            return StrategyTypeIndex.Momentum;
+        case StrategyBehaviorKind.Arbitrage:
+            return StrategyTypeIndex.Arbitrage;
+        case StrategyBehaviorKind.MultiFactor:
+            return StrategyTypeIndex.MultiFactor;
+        case StrategyBehaviorKind.MachineLearning:
+            return StrategyTypeIndex.MachineLearning;
+        case StrategyBehaviorKind.EventDriven:
+            return StrategyTypeIndex.EventDriven;
+        case StrategyBehaviorKind.HighFrequency:
+            return StrategyTypeIndex.HighFrequency;
+        case StrategyBehaviorKind.Custom:
+            return StrategyTypeIndex.Custom;
+        default:
+            return StrategyTypeIndex.Invalid;
+    }
+}
+
+function resolveProfileStrategyTypeIndex(strategyProfile) {
+    var explicitTypeIndex = normalizeStrategyTypeIndex(strategyProfile && strategyProfile.strategyTypeIndex)
+    if (explicitTypeIndex !== StrategyTypeIndex.Invalid) {
+        return explicitTypeIndex
+    }
+
+    var behaviorKind = Math.floor(Number(strategyProfile && strategyProfile.strategyBehaviorKind))
+    var behaviorTypeIndex = strategyTypeIndexFromBehaviorKind(behaviorKind)
+    if (behaviorTypeIndex !== StrategyTypeIndex.Invalid) {
+        return behaviorTypeIndex
+    }
+
+    return StrategyTypeIndex.TrendFollowing
+}
+
+function isTrendStrategyTypeIndex(strategyTypeIndex) {
+    var normalizedTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
+    return normalizedTypeIndex === StrategyTypeIndex.TrendFollowing
+        || normalizedTypeIndex === StrategyTypeIndex.TrendBreakout
+}
+
+function strategyTypeIndexFromTypeId(typeId) {
+    var normalizedTypeId = normalizeStrategyTypeId(typeId);
+    switch (normalizedTypeId) {
+        case "trend_following":
+            return StrategyTypeIndex.TrendFollowing;
+        case "trend_breakout":
+            return StrategyTypeIndex.TrendBreakout;
+        case "mean_reversion":
+            return StrategyTypeIndex.MeanReversion;
+        case "momentum":
+        case "alpha":
+            return StrategyTypeIndex.Momentum;
+        case "arbitrage":
+            return StrategyTypeIndex.Arbitrage;
+        case "machine_learning":
+            return StrategyTypeIndex.MachineLearning;
+        case "multi_factor":
+            return StrategyTypeIndex.MultiFactor;
+        case "high_frequency":
+            return StrategyTypeIndex.HighFrequency;
+        case "event_driven":
+            return StrategyTypeIndex.EventDriven;
+        case "custom":
+            return StrategyTypeIndex.Custom;
+        default:
+            return StrategyTypeIndex.Invalid;
+    }
+}
+
+function strategyTypeIdFromIndex(strategyTypeIndex) {
+    switch (normalizeStrategyTypeIndex(strategyTypeIndex)) {
+        case StrategyTypeIndex.TrendFollowing:
+            return "trend_following";
+        case StrategyTypeIndex.TrendBreakout:
+            return "trend_breakout";
+        case StrategyTypeIndex.MeanReversion:
+            return "mean_reversion";
+        case StrategyTypeIndex.Momentum:
+            return "momentum";
+        case StrategyTypeIndex.Arbitrage:
+            return "arbitrage";
+        case StrategyTypeIndex.MachineLearning:
+            return "machine_learning";
+        case StrategyTypeIndex.MultiFactor:
+            return "multi_factor";
+        case StrategyTypeIndex.HighFrequency:
+            return "high_frequency";
+        case StrategyTypeIndex.EventDriven:
+            return "event_driven";
+        case StrategyTypeIndex.Custom:
+            return "custom";
+        default:
+            return "";
+    }
+}
+
+function strategyBehaviorKindFromTypeId(typeId) {
+    var normalizedTypeId = normalizeStrategyTypeId(typeId);
+    switch (normalizedTypeId) {
+        case "mean_reversion":
+            return StrategyBehaviorKind.MeanReversion;
+        case "momentum":
+        case "alpha":
+            return StrategyBehaviorKind.Momentum;
+        case "arbitrage":
+            return StrategyBehaviorKind.Arbitrage;
+        case "multi_factor":
+            return StrategyBehaviorKind.MultiFactor;
+        case "machine_learning":
+            return StrategyBehaviorKind.MachineLearning;
+        case "event_driven":
+            return StrategyBehaviorKind.EventDriven;
+        case "high_frequency":
+            return StrategyBehaviorKind.HighFrequency;
+        case "custom":
+            return StrategyBehaviorKind.Custom;
+        case "trend_breakout":
+        case "trend_following":
+        default:
+            return StrategyBehaviorKind.TrendFollowing;
+    }
+}
+
+function strategyBehaviorKindFromTypeIndex(strategyTypeIndex) {
+    switch (normalizeStrategyTypeIndex(strategyTypeIndex)) {
+        case StrategyTypeIndex.TrendFollowing:
+        case StrategyTypeIndex.TrendBreakout:
+            return StrategyBehaviorKind.TrendFollowing;
+        case StrategyTypeIndex.MeanReversion:
+            return StrategyBehaviorKind.MeanReversion;
+        case StrategyTypeIndex.Momentum:
+            return StrategyBehaviorKind.Momentum;
+        case StrategyTypeIndex.Arbitrage:
+            return StrategyBehaviorKind.Arbitrage;
+        case StrategyTypeIndex.MultiFactor:
+            return StrategyBehaviorKind.MultiFactor;
+        case StrategyTypeIndex.MachineLearning:
+            return StrategyBehaviorKind.MachineLearning;
+        case StrategyTypeIndex.EventDriven:
+            return StrategyBehaviorKind.EventDriven;
+        case StrategyTypeIndex.HighFrequency:
+            return StrategyBehaviorKind.HighFrequency;
+        case StrategyTypeIndex.Custom:
+            return StrategyBehaviorKind.Custom;
+        default:
+            return StrategyBehaviorKind.Invalid;
+    }
+}
+
+function strategyTypeIdFromBehaviorKind(behaviorKind) {
+    return strategyTypeIdFromIndex(strategyTypeIndexFromBehaviorKind(behaviorKind));
+}
+
+function strategyBehaviorKindLabel(behaviorKind) {
+    switch (Math.floor(Number(behaviorKind))) {
+        case StrategyBehaviorKind.MeanReversion:
+            return "均值回归";
+        case StrategyBehaviorKind.Momentum:
+            return "动量";
+        case StrategyBehaviorKind.Arbitrage:
+            return "套利";
+        case StrategyBehaviorKind.MultiFactor:
+            return "多因子";
+        case StrategyBehaviorKind.MachineLearning:
+            return "机器学习";
+        case StrategyBehaviorKind.EventDriven:
+            return "事件驱动";
+        case StrategyBehaviorKind.HighFrequency:
+            return "高频";
+        case StrategyBehaviorKind.Custom:
+            return "自定义";
+        case StrategyBehaviorKind.TrendFollowing:
+        default:
+            return "趋势跟随";
+    }
+}
+
+function strategyStoredTypeIndexFromBehaviorKind(behaviorKind) {
+    switch (Math.floor(Number(behaviorKind))) {
+        case StrategyBehaviorKind.TrendFollowing:
+            return StrategyStoredTypeIndex.TrendFollowing;
+        case StrategyBehaviorKind.MeanReversion:
+            return StrategyStoredTypeIndex.MeanReversion;
+        case StrategyBehaviorKind.Momentum:
+        case StrategyBehaviorKind.MultiFactor:
+        case StrategyBehaviorKind.MachineLearning:
+            return StrategyStoredTypeIndex.Alpha;
+        case StrategyBehaviorKind.Arbitrage:
+            return StrategyStoredTypeIndex.Arbitrage;
+        case StrategyBehaviorKind.HighFrequency:
+            return StrategyStoredTypeIndex.HighFrequency;
+        case StrategyBehaviorKind.EventDriven:
+        case StrategyBehaviorKind.Custom:
+            return StrategyStoredTypeIndex.Custom;
+        default:
+            return StrategyStoredTypeIndex.Unknown;
+    }
+}
+
+function strategyStoredTypeIndexFromTypeIndex(strategyTypeIndex) {
+    return strategyStoredTypeIndexFromBehaviorKind(strategyBehaviorKindFromTypeIndex(strategyTypeIndex));
+}
+
+function strategySupportsFactorOverlay(strategyTypeIndex) {
+    return normalizeStrategyTypeIndex(strategyTypeIndex) !== StrategyTypeIndex.Invalid;
 }
 
 // 获取策略类型名称
 function getStrategyTypeName(typeId) {
     var normalizedTypeId = normalizeStrategyTypeId(typeId);
+    if (normalizedTypeId === "alpha") {
+        normalizedTypeId = "momentum";
+    }
     if (!normalizedTypeId) {
         return "";
     }
     return tr('strategyCreation.strategyTypes.' + normalizedTypeId) || normalizedTypeId;
+}
+
+function getStrategyTypeNameFromIndex(strategyTypeIndex) {
+    return getStrategyTypeName(strategyTypeIdFromIndex(strategyTypeIndex));
 }
 
 // 获取策略类型描述
@@ -39,6 +317,10 @@ function getStrategyTypeDescription(typeId) {
         return "";
     }
     return tr('strategyCreation.strategyTypeDescriptions.' + normalizedTypeId) || tr('strategyCreation.strategyTypeDescriptions.custom');
+}
+
+function getStrategyTypeDescriptionFromIndex(strategyTypeIndex) {
+    return getStrategyTypeDescription(strategyTypeIdFromIndex(strategyTypeIndex));
 }
 
 // 获取策略类型图标
@@ -58,6 +340,10 @@ function getStrategyIcon(typeId) {
     }
 }
 
+function getStrategyIconFromIndex(strategyTypeIndex) {
+    return getStrategyIcon(strategyTypeIdFromIndex(strategyTypeIndex));
+}
+
 // 获取策略类型简要描述
 function getBriefDescription(typeId) {
     var descriptions = {
@@ -75,7 +361,12 @@ function getBriefDescription(typeId) {
     return descriptions[typeId] || "策略类型";
 }
 
-function getDefaultStrategyDescription(typeId) {
+function getBriefDescriptionFromIndex(strategyTypeIndex) {
+    return getBriefDescription(strategyTypeIdFromIndex(strategyTypeIndex));
+}
+
+function getDefaultStrategyDescription(strategyTypeIndex) {
+    var typeId = strategyTypeIdFromIndex(strategyTypeIndex)
     var descriptions = {
         "trend_following": "基于趋势识别与顺势持仓的交易策略，结合信号确认、仓位控制与止盈止损规则，在日线级别捕捉中期趋势。",
         "trend_breakout": "基于长期均线、近高突破与趋势强度确认的交易策略，在价格接近阶段新高且趋势明确时入场，并结合均线失守与 ATR 跟踪止损退出。",
@@ -91,7 +382,8 @@ function getDefaultStrategyDescription(typeId) {
     return descriptions[typeId] || descriptions.custom;
 }
 
-function getDefaultStrategyTags(typeId) {
+function getDefaultStrategyTags(strategyTypeIndex) {
+    var typeId = strategyTypeIdFromIndex(strategyTypeIndex)
     var tags = {
         "trend_following": ["趋势", "顺势", "技术分析"],
         "trend_breakout": ["趋势突破", "年线", "ATR止损"],
@@ -123,6 +415,109 @@ function getRiskLevelColor(level) {
         "aggressive": "#ef4444"
     };
     return colors[level] || "#94a3b8";
+}
+
+var AssetTypeIndex = {
+    Invalid: 0,
+    Stock: 1,
+    Futures: 2,
+    Options: 3,
+    Etf: 4,
+    Index: 5,
+    MultiAsset: 6
+};
+
+var TimeFrameIndex = {
+    Invalid: 0,
+    Tick: 1,
+    OneMinute: 2,
+    FiveMinutes: 3,
+    FifteenMinutes: 4,
+    ThirtyMinutes: 5,
+    OneHour: 6,
+    Daily: 7,
+    Weekly: 8,
+    Monthly: 9,
+    Custom: 10
+};
+
+var RiskLevelIndex = {
+    Invalid: 0,
+    Low: 1,
+    Medium: 2,
+    High: 3,
+    Aggressive: 4
+};
+
+function getAssetTypeNameFromIndex(assetTypeIndex) {
+    switch (Math.floor(Number(assetTypeIndex))) {
+        case AssetTypeIndex.Stock:
+            return "股票";
+        case AssetTypeIndex.Futures:
+            return "期货";
+        case AssetTypeIndex.Options:
+            return "期权";
+        case AssetTypeIndex.Etf:
+            return "ETF";
+        case AssetTypeIndex.Index:
+            return "指数";
+        case AssetTypeIndex.MultiAsset:
+            return "多资产";
+        default:
+            return "未设置";
+    }
+}
+
+function getTimeFrameNameFromIndex(timeFrameIndex) {
+    switch (Math.floor(Number(timeFrameIndex))) {
+        case TimeFrameIndex.Tick:
+            return "Tick";
+        case TimeFrameIndex.OneMinute:
+            return "1 分钟";
+        case TimeFrameIndex.FiveMinutes:
+            return "5 分钟";
+        case TimeFrameIndex.FifteenMinutes:
+            return "15 分钟";
+        case TimeFrameIndex.ThirtyMinutes:
+            return "30 分钟";
+        case TimeFrameIndex.OneHour:
+            return "1 小时";
+        case TimeFrameIndex.Daily:
+            return "日线";
+        case TimeFrameIndex.Weekly:
+            return "周线";
+        case TimeFrameIndex.Monthly:
+            return "月线";
+        case TimeFrameIndex.Custom:
+            return "自定义";
+        default:
+            return "未设置";
+    }
+}
+
+function riskLevelKeyFromIndex(riskLevelIndex) {
+    switch (Math.floor(Number(riskLevelIndex))) {
+        case RiskLevelIndex.Low:
+            return "low";
+        case RiskLevelIndex.Medium:
+            return "medium";
+        case RiskLevelIndex.High:
+            return "high";
+        case RiskLevelIndex.Aggressive:
+            return "aggressive";
+        default:
+            return "";
+    }
+}
+
+function getRiskLevelNameFromIndex(riskLevelIndex) {
+    var levelKey = riskLevelKeyFromIndex(riskLevelIndex)
+    return levelKey ? getRiskLevelName(levelKey) : "未设置"
+}
+
+function getRiskLevelColorFromIndex(riskLevelIndex) {
+    var levelKey = riskLevelKeyFromIndex(riskLevelIndex)
+    return levelKey ? getRiskLevelColor(levelKey) : "#94a3b8"
 }
 
 // ============ 步骤相关 ============
@@ -163,7 +558,7 @@ function getStepDescription(step) {
 function isStepValid(step, context) {
     switch(step) {
         case 1:
-            return context.selectedStrategyType !== "" && 
+            return Number(context.selectedStrategyTypeIndex) >= 0 && 
                    context.strategyName.trim() !== "" && 
                    context.strategyDescription.trim() !== "";
         case 2:
@@ -180,7 +575,7 @@ function isStepValid(step, context) {
 function validateCurrentStep(step, context) {
     switch(step) {
         case 1:
-            if (!context.selectedStrategyType || context.selectedStrategyType === "") {
+            if (Number(context.selectedStrategyTypeIndex) < 0) {
                 return {
                     valid: false,
                     message: tr('strategyCreation.selectStrategyTypeError')
@@ -225,27 +620,33 @@ function validateCurrentStep(step, context) {
 function buildCompleteStrategyData(context) {
     var currentDate = new Date();
     var dateStr = currentDate.toISOString().split('T')[0];
-    var normalizedParameters = normalizeStrategyParameters(context.selectedStrategyType, context.strategyParameters);
+    var selectedStrategyTypeIndex = normalizeStrategyTypeIndex(context.selectedStrategyTypeIndex);
+    var strategyBehaviorKind = strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex);
+    var strategyTypeId = strategyTypeIdFromIndex(selectedStrategyTypeIndex);
+    var normalizedParameters = normalizeStrategyParameters(selectedStrategyTypeIndex, context.strategyParameters);
+    normalizedParameters.selectedStrategyTypeIndex = selectedStrategyTypeIndex;
     
     var strategyData = {
         // 基本信息
         name: context.strategyName,
         displayName: context.strategyName,
-        strategyType: context.selectedStrategyType,
-        typeName: getStrategyTypeName(context.selectedStrategyType),
+        selectedStrategyTypeIndex: selectedStrategyTypeIndex,
+        strategyBehaviorKind: strategyBehaviorKind,
+        strategyTypeIndex: strategyStoredTypeIndexFromTypeIndex(selectedStrategyTypeIndex),
+        typeName: getStrategyTypeName(strategyTypeId),
         description: context.strategyDescription,
         
         // 基本属性
-        assetType: context.assetType,
-        timeFrame: context.timeFrame,
-        riskLevel: context.riskLevel,
+        assetTypeIndex: context.assetTypeIndex,
+        timeFrameIndex: context.timeFrameIndex,
+        riskLevelIndex: context.riskLevelIndex,
         optimizationMethod: context.optimizationMethod,
         
         // 高级选项
         enableAdvancedOptions: context.enableAdvancedOptions,
         
         // 元数据
-        status: "stopped",
+        statusIndex: 2,
         createdDate: dateStr,
         returns: "+0.0%",
         maxDrawdown: "-0.0%",
@@ -269,9 +670,10 @@ function normalizePercentageToRatio(value) {
     return numericValue > 1 ? numericValue / 100 : numericValue
 }
 
-function normalizeStrategyParameters(strategyType, rawParameters) {
+function normalizeStrategyParameters(strategyTypeIndex, rawParameters) {
     var source = rawParameters || ({})
     var normalized = ({})
+    var normalizedStrategyTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
 
     function assignIfPresent(targetKey, sourceKeys, transform) {
         for (var index = 0; index < sourceKeys.length; ++index) {
@@ -289,16 +691,11 @@ function normalizeStrategyParameters(strategyType, rawParameters) {
     assignIfPresent("takeProfit", ["takeProfit"], normalizePercentageToRatio)
     assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
     assignIfPresent("rebalanceDays", ["rebalanceDays"], Number)
-    assignIfPresent("turnoverLimit", ["turnoverLimit"], Number)
-    assignIfPresent("slippageLimit", ["slippageLimit"], Number)
-    assignIfPresent("level1Breaker", ["level1Breaker"], Number)
-    assignIfPresent("level2Breaker", ["level2Breaker"], Number)
-    assignIfPresent("level3Breaker", ["level3Breaker"], Number)
 
-    if (strategyType === "trend_following") {
+    if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendFollowing) {
         assignIfPresent("fastPeriod", ["fastPeriod"], Number)
         assignIfPresent("slowPeriod", ["slowPeriod"], Number)
-    } else if (strategyType === "trend_breakout") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
         assignIfPresent("longTrendPeriod", ["longTrendPeriod"], Number)
         assignIfPresent("breakoutLookbackPeriod", ["breakoutLookbackPeriod"], Number)
         assignIfPresent("breakoutThreshold", ["breakoutThreshold"], normalizePercentageToRatio)
@@ -307,29 +704,29 @@ function normalizeStrategyParameters(strategyType, rawParameters) {
         assignIfPresent("exitMaPeriod", ["exitMaPeriod"], Number)
         assignIfPresent("atrPeriod", ["atrPeriod"], Number)
         assignIfPresent("atrMultiplier", ["atrMultiplier"], Number)
-    } else if (strategyType === "mean_reversion") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MeanReversion) {
         assignIfPresent("bollPeriod", ["bollPeriod"], Number)
         assignIfPresent("bollStd", ["bollStd"], Number)
         assignIfPresent("reversionThreshold", ["reversionThreshold"], Number)
-    } else if (strategyType === "momentum") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Momentum) {
         assignIfPresent("topN", ["topN"], Number)
         assignIfPresent("momentumPeriod", ["momentumPeriod"], Number)
-    } else if (strategyType === "arbitrage") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Arbitrage) {
         assignIfPresent("spreadThreshold", ["spreadThreshold"], Number)
         assignIfPresent("entryZScore", ["entryZScore"], Number)
         assignIfPresent("exitZScore", ["exitZScore"], Number)
-    } else if (strategyType === "machine_learning") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MachineLearning) {
         assignIfPresent("featureWindow", ["featureWindow"], Number)
         assignIfPresent("predictionDays", ["predictionDays"], Number)
         assignIfPresent("trainingDays", ["trainingDays"], Number)
         assignIfPresent("confidenceThreshold", ["confidenceThreshold"], normalizePercentageToRatio)
-    } else if (strategyType === "multi_factor") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactor) {
         assignIfPresent("factorTypes", ["factorTypes"])
-    } else if (strategyType === "high_frequency") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.HighFrequency) {
         assignIfPresent("timeframe", ["timeframe"])
-    } else if (strategyType === "event_driven") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EventDriven) {
         assignIfPresent("eventTypes", ["eventTypes"])
-    } else if (strategyType === "custom") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Custom) {
         assignIfPresent("customCode", ["customCode"])
     }
 
@@ -357,8 +754,9 @@ function getPositionSizingDescription(method) {
     // ============ 参数配置相关 ============
 
     // 构建参数配置
-    function buildParamConfigs(strategyType) {
+    function buildParamConfigs(strategyTypeIndex) {
         var configs = [];
+        var normalizedStrategyTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
         
         // ============ 通用策略参数 ============
         configs.push({
@@ -425,80 +823,14 @@ function getPositionSizingDescription(method) {
             unit: tr('strategyCreation.daysUnit'),
             category: tr('strategyCreation.commonParameters')
         });
-
-        configs.push({
-            id: "turnoverLimit",
-            type: "slider",
-            label: tr('strategyCreation.turnoverLimit'),
-            description: tr('strategyCreation.turnoverLimitDescription'),
-            default: 5000,
-            min: 100,
-            max: 20000,
-            step: 100,
-            unit: "万",
-            category: tr('strategyCreation.advancedParameters')
-        });
-
-        configs.push({
-            id: "slippageLimit",
-            type: "slider",
-            label: tr('strategyCreation.slippageLimit'),
-            description: tr('strategyCreation.slippageLimitDescription'),
-            default: 0.2,
-            min: 0.05,
-            max: 1,
-            step: 0.05,
-            decimals: 2,
-            unit: "%",
-            category: tr('strategyCreation.advancedParameters')
-        });
-
-        configs.push({
-            id: "level1Breaker",
-            type: "slider",
-            label: tr('strategyCreation.level1Breaker'),
-            description: tr('strategyCreation.level1BreakerDescription'),
-            default: 2,
-            min: 1,
-            max: 5,
-            step: 0.5,
-            unit: "%",
-            category: tr('strategyCreation.advancedParameters')
-        });
-
-        configs.push({
-            id: "level2Breaker",
-            type: "slider",
-            label: tr('strategyCreation.level2Breaker'),
-            description: tr('strategyCreation.level2BreakerDescription'),
-            default: 5,
-            min: 3,
-            max: 10,
-            step: 0.5,
-            unit: "%",
-            category: tr('strategyCreation.advancedParameters')
-        });
-
-        configs.push({
-            id: "level3Breaker",
-            type: "slider",
-            label: tr('strategyCreation.level3Breaker'),
-            description: tr('strategyCreation.level3BreakerDescription'),
-            default: 8,
-            min: 6,
-            max: 15,
-            step: 0.5,
-            unit: "%",
-            category: tr('strategyCreation.advancedParameters')
-        });
     
     // 如果请求的是通用参数，直接返回
-    if (strategyType === "common") {
+    if (normalizedStrategyTypeIndex === StrategyTypeIndex.Common) {
         return configs;
     }
     
     // ============ 策略特定参数 ============
-    if (strategyType === "trend_following") {
+    if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendFollowing) {
         configs.push({
             id: "fastPeriod",
             type: "slider",
@@ -524,7 +856,7 @@ function getPositionSizingDescription(method) {
             unit: tr('strategyCreation.daysUnit'),
             category: tr('strategyCreation.personalizedParameters')
         });
-    } else if (strategyType === "trend_breakout") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
         configs.push({
             id: "longTrendPeriod",
             type: "slider",
@@ -629,7 +961,7 @@ function getPositionSizingDescription(method) {
             unit: "xATR",
             category: tr('strategyCreation.personalizedParameters')
         });
-    } else if (strategyType === "mean_reversion") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MeanReversion) {
         configs.push({
             id: "bollPeriod",
             type: "slider",
@@ -668,7 +1000,7 @@ function getPositionSizingDescription(method) {
             unit: "",
             category: tr('strategyCreation.personalizedParameters')
         });
-    } else if (strategyType === "momentum") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Momentum) {
         configs.push({
             id: "momentumPeriod",
             type: "slider",
@@ -695,7 +1027,7 @@ function getPositionSizingDescription(method) {
             category: tr('strategyCreation.personalizedParameters')
         });
         
-    } else if (strategyType === "arbitrage") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Arbitrage) {
         configs.push({
             id: "spreadThreshold",
             type: "slider",
@@ -736,7 +1068,7 @@ function getPositionSizingDescription(method) {
             category: tr('strategyCreation.personalizedParameters')
         });
         
-    } else if (strategyType === "machine_learning") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MachineLearning) {
         configs.push({
             id: "featureWindow",
             type: "slider",
@@ -788,7 +1120,7 @@ function getPositionSizingDescription(method) {
             unit: "%",
             category: tr('strategyCreation.personalizedParameters')
         });
-    } else if (strategyType === "multi_factor") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactor) {
         configs.push({
             id: "factorTypes",
             type: "multiselect",
@@ -802,7 +1134,7 @@ function getPositionSizingDescription(method) {
             category: tr('strategyCreation.personalizedParameters')
         });
         
-    } else if (strategyType === "high_frequency") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.HighFrequency) {
         configs.push({
             id: "timeframe",
             type: "select",
@@ -814,7 +1146,7 @@ function getPositionSizingDescription(method) {
             default: tr('strategyCreation.fiveMinutes'),
             category: tr('strategyCreation.personalizedParameters')
         });
-    } else if (strategyType === "event_driven") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EventDriven) {
         configs.push({
             id: "eventTypes",
             type: "multiselect",
@@ -827,7 +1159,7 @@ function getPositionSizingDescription(method) {
             multiple: true,
             category: tr('strategyCreation.personalizedParameters')
         });
-    } else if (strategyType === "custom") {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Custom) {
         // 自定义策略不需要特殊参数，用户自己定义代码
         configs.push({
             id: "customCode",
@@ -844,33 +1176,37 @@ function getPositionSizingDescription(method) {
     return configs;
 }
 
-function buildDefaultStrategyProfile(strategyType) {
-    var normalizedType = normalizeStrategyTypeId(strategyType) || "trend_following";
+function buildDefaultStrategyProfile(strategyTypeIndex) {
+    var normalizedTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
+    if (normalizedTypeIndex === StrategyTypeIndex.Invalid) {
+        normalizedTypeIndex = StrategyTypeIndex.TrendFollowing
+    }
     var profile = {
-        strategyType: normalizedType,
+        strategyTypeIndex: normalizedTypeIndex,
+        strategyBehaviorKind: strategyBehaviorKindFromTypeIndex(normalizedTypeIndex),
         horizon: "swing",
         tradingFrequency: "low_frequency",
         marketScope: "a_share",
         executionStyle: "close_confirmed"
     };
 
-    if (normalizedType === "trend_following" || normalizedType === "trend_breakout") {
+    if (isTrendStrategyTypeIndex(normalizedTypeIndex)) {
         profile.horizon = "swing";
         profile.tradingFrequency = "low_frequency";
         profile.executionStyle = "close_confirmed";
-    } else if (normalizedType === "mean_reversion") {
+    } else if (normalizedTypeIndex === StrategyTypeIndex.MeanReversion) {
         profile.horizon = "swing";
         profile.tradingFrequency = "medium_frequency";
         profile.executionStyle = "intraday_confirmed";
-    } else if (normalizedType === "momentum") {
+    } else if (normalizedTypeIndex === StrategyTypeIndex.Momentum) {
         profile.horizon = "short_term";
         profile.tradingFrequency = "medium_frequency";
         profile.executionStyle = "open_followup";
-    } else if (normalizedType === "high_frequency") {
+    } else if (normalizedTypeIndex === StrategyTypeIndex.HighFrequency) {
         profile.horizon = "intraday";
         profile.tradingFrequency = "high_frequency";
         profile.executionStyle = "tick_driven";
-    } else if (normalizedType === "event_driven") {
+    } else if (normalizedTypeIndex === StrategyTypeIndex.EventDriven) {
         profile.horizon = "short_term";
         profile.tradingFrequency = "event_driven";
         profile.executionStyle = "event_confirmed";
@@ -938,8 +1274,11 @@ function resolveRuleTemplateFileName(templateId) {
         template_entry_pullback_ma20_support_v1: "entry_pullback_ma20_support.yaml",
         template_entry_pullback_ma60_support_v1: "entry_pullback_ma60_support.yaml",
         template_entry_midterm_platform_breakout_v1: "entry_midterm_platform_breakout.yaml",
+        template_entry_long_term_yearline_reclaim_v1: "entry_long_term_yearline_reclaim.yaml",
         template_entry_catch_up_breakout_v1: "entry_catch_up_breakout.yaml",
         template_entry_event_earnings_surprise_breakout_v1: "entry_event_earnings_surprise_breakout.yaml",
+        template_entry_hft_orderflow_reclaim_v1: "entry_hft_orderflow_reclaim.yaml",
+        template_entry_emotion_reflow_repair_v1: "entry_emotion_reflow_repair.yaml",
         template_exit_scale_out_take_profit_v1: "exit_scale_out_take_profit.yaml",
         template_exit_acceptance_breakdown_v1: "exit_acceptance_breakdown.yaml",
         template_risk_market_bull_trend_allow_entry_v1: "risk_market_bull_trend_allow_entry.yaml",
@@ -950,33 +1289,52 @@ function resolveRuleTemplateFileName(templateId) {
     return mapping[key] || "";
 }
 
-function buildDefaultBaseRuleBindings(strategyProfile) {
-    var profile = strategyProfile || buildDefaultStrategyProfile("trend_following");
-    var strategyType = normalizeStrategyTypeId(profile.strategyType) || "trend_following";
+function canonicalRulePackStageId(value) {
+    var key = String(value || "").trim().toLowerCase();
+    var validStages = {
+        market: true,
+        eligibility: true,
+        signal: true,
+        portfolio: true,
+        rebalance: true,
+        execution: true,
+        account_risk: true
+    };
+    return validStages[key] ? key : "";
+}
 
-    function createBinding(spec) {
-        return {
-            phase: spec.phase,
-            group_id: spec.groupId,
-            group_title: spec.groupTitle,
-            group_role: spec.groupRole,
-            group_operator: spec.groupOperator,
-            template_id: spec.templateId,
-            template_display_name: spec.templateDisplayName,
-            file_name: spec.fileName || resolveRuleTemplateFileName(spec.templateId),
-            summary: spec.summary,
-            category: spec.category,
-            term_id: spec.termId,
-            term_display_name: spec.termDisplayName,
-            default_injected: true
-        };
+function createDefaultRulePackEntry(spec) {
+    var stageId = canonicalRulePackStageId(spec && spec.stageId);
+    if (stageId === "") {
+        throw new Error("默认规则包缺少合法 stageId");
     }
 
+    return {
+        stageId: stageId,
+        groupId: String((spec && spec.groupId) || "").trim(),
+        groupTitle: String((spec && spec.groupTitle) || "").trim(),
+        groupRole: String((spec && spec.groupRole) || "").trim().toLowerCase(),
+        groupOperator: String((spec && spec.groupOperator) || "").trim().toLowerCase(),
+        templateId: String((spec && spec.templateId) || "").trim(),
+        templateDisplayName: String((spec && spec.templateDisplayName) || "").trim(),
+        fileName: String((spec && spec.fileName) || resolveRuleTemplateFileName(spec && spec.templateId)).trim(),
+        summary: String((spec && spec.summary) || "").trim(),
+        category: String((spec && spec.category) || "").trim(),
+        termId: String((spec && spec.termId) || "").trim(),
+        termDisplayName: String((spec && spec.termDisplayName) || "").trim(),
+        defaultInjected: true
+    };
+}
+
+function buildDefaultBaseRuleBindings(strategyProfile) {
+    var profile = strategyProfile || buildDefaultStrategyProfile(StrategyTypeIndex.TrendFollowing);
+    var strategyTypeIndex = resolveProfileStrategyTypeIndex(profile);
+
     var specs = [];
-    if (strategyType === "trend_following") {
+    if (strategyTypeIndex === StrategyTypeIndex.TrendFollowing) {
         specs = [
             {
-                phase: "eligibility",
+                stageId: "eligibility",
                 groupId: "eligibility_core",
                 groupTitle: "基础过滤组",
                 groupRole: "must_pass",
@@ -989,7 +1347,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "趋势参与资格过滤"
             },
             {
-                phase: "signal",
+                stageId: "signal",
                 groupId: "signal_core",
                 groupTitle: "核心确认组",
                 groupRole: "must_pass",
@@ -1002,7 +1360,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "趋势支撑邻近候选"
             },
             {
-                phase: "signal",
+                stageId: "signal",
                 groupId: "signal_veto",
                 groupTitle: "信号否决组",
                 groupRole: "veto",
@@ -1015,7 +1373,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "趋势结构破坏阻断"
             },
             {
-                phase: "rebalance",
+                stageId: "rebalance",
                 groupId: "rebalance_exit",
                 groupTitle: "退出触发组",
                 groupRole: "any_pass",
@@ -1028,7 +1386,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "承接走弱退出"
             },
             {
-                phase: "rebalance",
+                stageId: "rebalance",
                 groupId: "rebalance_scale",
                 groupTitle: "分批管理组",
                 groupRole: "position_management",
@@ -1041,10 +1399,10 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "分批止盈"
             }
         ];
-    } else if (strategyType === "trend_breakout") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
         specs = [
             {
-                phase: "eligibility",
+                stageId: "eligibility",
                 groupId: "eligibility_core",
                 groupTitle: "基础过滤组",
                 groupRole: "must_pass",
@@ -1057,7 +1415,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "趋势参与资格过滤"
             },
             {
-                phase: "signal",
+                stageId: "signal",
                 groupId: "signal_core",
                 groupTitle: "核心确认组",
                 groupRole: "must_pass",
@@ -1070,7 +1428,20 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "中期平台突破"
             },
             {
-                phase: "signal",
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_long_term_yearline_reclaim_v1",
+                templateDisplayName: "年线收复回踩确认模板",
+                summary: "用于识别年线收复后的回踩确认。",
+                category: "entry_pattern",
+                termId: "entry_long_term_yearline_reclaim",
+                termDisplayName: "年线收复回踩确认"
+            },
+            {
+                stageId: "signal",
                 groupId: "signal_veto",
                 groupTitle: "信号否决组",
                 groupRole: "veto",
@@ -1083,7 +1454,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "趋势结构破坏阻断"
             },
             {
-                phase: "rebalance",
+                stageId: "rebalance",
                 groupId: "rebalance_exit",
                 groupTitle: "退出触发组",
                 groupRole: "any_pass",
@@ -1096,7 +1467,7 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "承接走弱退出"
             },
             {
-                phase: "rebalance",
+                stageId: "rebalance",
                 groupId: "rebalance_scale",
                 groupTitle: "分批管理组",
                 groupRole: "position_management",
@@ -1109,10 +1480,10 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "分批止盈"
             }
         ];
-    } else if (strategyType === "momentum") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.Momentum) {
         specs = [
             {
-                phase: "signal",
+                stageId: "signal",
                 groupId: "signal_core",
                 groupTitle: "核心确认组",
                 groupRole: "must_pass",
@@ -1125,7 +1496,20 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "补涨突破"
             },
             {
-                phase: "rebalance",
+                stageId: "signal",
+                groupId: "signal_boost",
+                groupTitle: "评分增强组",
+                groupRole: "score_boost",
+                groupOperator: "score_sum",
+                templateId: "template_entry_emotion_reflow_repair_v1",
+                templateDisplayName: "情绪修复回流模板",
+                summary: "用于识别市场情绪修复后的主线回流确认。",
+                category: "entry_pattern",
+                termId: "entry_emotion_reflow_repair",
+                termDisplayName: "情绪修复回流"
+            },
+            {
+                stageId: "rebalance",
                 groupId: "rebalance_exit",
                 groupTitle: "退出触发组",
                 groupRole: "any_pass",
@@ -1136,12 +1520,106 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 category: "exit_pattern",
                 termId: "exit_acceptance_breakdown",
                 termDisplayName: "承接走弱退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_scale",
+                groupTitle: "分批管理组",
+                groupRole: "position_management",
+                groupOperator: "all",
+                templateId: "template_exit_scale_out_take_profit_v1",
+                templateDisplayName: "分批止盈模板",
+                summary: "动量延续仍在时先分段兑现利润。",
+                category: "exit_management",
+                termId: "exit_scale_out_take_profit",
+                termDisplayName: "分批止盈"
             }
         ];
-    } else if (strategyType === "event_driven") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.MeanReversion) {
         specs = [
             {
-                phase: "signal",
+                stageId: "eligibility",
+                groupId: "eligibility_core",
+                groupTitle: "基础过滤组",
+                groupRole: "must_pass",
+                groupOperator: "all",
+                templateId: "template_eligibility_trend_participation_guard_v1",
+                templateDisplayName: "趋势参与资格过滤模板",
+                summary: "先过滤流动性不足、趋势过度恶化或偏离均线过大的候选。",
+                category: "eligibility_filter",
+                termId: "trend_participation_guard",
+                termDisplayName: "趋势参与资格过滤"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_pullback_ma20_support_v1",
+                templateDisplayName: "回踩 20 日线确认模板",
+                summary: "用于识别回踩 20 日线后的企稳确认。",
+                category: "entry_pattern",
+                termId: "entry_pullback_ma20_support",
+                termDisplayName: "回踩20日线"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_pullback_ma60_support_v1",
+                templateDisplayName: "回踩 60 日线确认模板",
+                summary: "用于识别回踩 60 日线后的企稳确认。",
+                category: "entry_pattern",
+                termId: "entry_pullback_ma60_support",
+                termDisplayName: "回踩60日线"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_veto",
+                groupTitle: "信号否决组",
+                groupRole: "veto",
+                groupOperator: "any",
+                templateId: "template_watch_trend_structure_breakdown_v1",
+                templateDisplayName: "趋势结构破坏阻断模板",
+                summary: "价格持续失守支撑时阻断继续做均值回归。",
+                category: "watch_invalidation",
+                termId: "trend_structure_breakdown_watch",
+                termDisplayName: "趋势结构破坏阻断"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_acceptance_breakdown_v1",
+                templateDisplayName: "承接走弱退出模板",
+                summary: "反弹承接明显走弱后执行保护性退出。",
+                category: "exit_pattern",
+                termId: "exit_acceptance_breakdown",
+                termDisplayName: "承接走弱退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_scale",
+                groupTitle: "分批管理组",
+                groupRole: "position_management",
+                groupOperator: "all",
+                templateId: "template_exit_scale_out_take_profit_v1",
+                templateDisplayName: "分批止盈模板",
+                summary: "均值回归修复后采用分批兑现利润。",
+                category: "exit_management",
+                termId: "exit_scale_out_take_profit",
+                termDisplayName: "分批止盈"
+            }
+        ];
+    } else if (strategyTypeIndex === StrategyTypeIndex.EventDriven) {
+        specs = [
+            {
+                stageId: "signal",
                 groupId: "signal_core",
                 groupTitle: "核心确认组",
                 groupRole: "must_pass",
@@ -1154,7 +1632,20 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "业绩超预期突破"
             },
             {
-                phase: "rebalance",
+                stageId: "signal",
+                groupId: "signal_boost",
+                groupTitle: "评分增强组",
+                groupRole: "score_boost",
+                groupOperator: "score_sum",
+                templateId: "template_entry_emotion_reflow_repair_v1",
+                templateDisplayName: "情绪修复回流模板",
+                summary: "情绪修复与主线回流时增强事件驱动候选优先级。",
+                category: "entry_pattern",
+                termId: "entry_emotion_reflow_repair",
+                termDisplayName: "情绪修复回流"
+            },
+            {
+                stageId: "rebalance",
                 groupId: "rebalance_exit",
                 groupTitle: "退出触发组",
                 groupRole: "any_pass",
@@ -1167,17 +1658,142 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 termDisplayName: "承接走弱退出"
             }
         ];
+    } else if (strategyTypeIndex === StrategyTypeIndex.HighFrequency) {
+        specs = [
+            {
+                stageId: "eligibility",
+                groupId: "eligibility_core",
+                groupTitle: "基础过滤组",
+                groupRole: "must_pass",
+                groupOperator: "all",
+                templateId: "template_eligibility_trend_participation_guard_v1",
+                templateDisplayName: "趋势参与资格过滤模板",
+                summary: "先过滤流动性和参与资格明显不足的候选。",
+                category: "eligibility_filter",
+                termId: "trend_participation_guard",
+                termDisplayName: "趋势参与资格过滤"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_hft_orderflow_reclaim_v1",
+                templateDisplayName: "盘口扫单回补确认模板",
+                summary: "用于识别盘口回补和订单流重新占优的短线确认。",
+                category: "entry_pattern",
+                termId: "entry_hft_orderflow_reclaim",
+                termDisplayName: "盘口扫单回补确认"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_acceptance_breakdown_v1",
+                templateDisplayName: "承接走弱退出模板",
+                summary: "盘口承接明显衰减后执行保护性退出。",
+                category: "exit_pattern",
+                termId: "exit_acceptance_breakdown",
+                termDisplayName: "承接走弱退出"
+            }
+        ];
+    } else if (strategyTypeIndex === StrategyTypeIndex.MultiFactor
+               || strategyTypeIndex === StrategyTypeIndex.MachineLearning
+               || strategyTypeIndex === StrategyTypeIndex.Arbitrage) {
+        specs = [
+            {
+                stageId: "eligibility",
+                groupId: "eligibility_core",
+                groupTitle: "基础过滤组",
+                groupRole: "must_pass",
+                groupOperator: "all",
+                templateId: "template_eligibility_trend_participation_guard_v1",
+                templateDisplayName: "趋势参与资格过滤模板",
+                summary: "作为模型或组合策略的外层准入过滤，先挡掉明显不该参与的样本。",
+                category: "eligibility_filter",
+                termId: "trend_participation_guard",
+                termDisplayName: "趋势参与资格过滤"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_acceptance_breakdown_v1",
+                templateDisplayName: "承接走弱退出模板",
+                summary: "外层门禁发现承接明显恶化时执行保护性退出。",
+                category: "exit_pattern",
+                termId: "exit_acceptance_breakdown",
+                termDisplayName: "承接走弱退出"
+            }
+        ];
+    } else {
+        specs = [
+            {
+                stageId: "eligibility",
+                groupId: "eligibility_core",
+                groupTitle: "基础过滤组",
+                groupRole: "must_pass",
+                groupOperator: "all",
+                templateId: "template_eligibility_trend_participation_guard_v1",
+                templateDisplayName: "趋势参与资格过滤模板",
+                summary: "默认先过滤明显不满足参与条件的候选。",
+                category: "eligibility_filter",
+                termId: "trend_participation_guard",
+                termDisplayName: "趋势参与资格过滤"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_trend_support_near_ma_v1",
+                templateDisplayName: "趋势支撑邻近候选模板",
+                summary: "作为自定义策略的通用趋势型默认入场候选。",
+                category: "entry_pattern",
+                termId: "entry_trend_support_near_ma",
+                termDisplayName: "趋势支撑邻近候选"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_veto",
+                groupTitle: "信号否决组",
+                groupRole: "veto",
+                groupOperator: "any",
+                templateId: "template_watch_trend_structure_breakdown_v1",
+                templateDisplayName: "趋势结构破坏阻断模板",
+                summary: "默认阻断明显走坏的趋势样本。",
+                category: "watch_invalidation",
+                termId: "trend_structure_breakdown_watch",
+                termDisplayName: "趋势结构破坏阻断"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_acceptance_breakdown_v1",
+                templateDisplayName: "承接走弱退出模板",
+                summary: "默认在承接明显走弱时执行保护性退出。",
+                category: "exit_pattern",
+                termId: "exit_acceptance_breakdown",
+                termDisplayName: "承接走弱退出"
+            }
+        ];
     }
 
-    return specs.map(createBinding);
+    return specs.map(createDefaultRulePackEntry);
 }
 
 function normalizeRuleComposerBindingStage(binding) {
-    var phase = String((binding && binding.phase) || "signal").trim().toLowerCase();
-    if (phase === "watch" || phase === "entry") {
-        return "signal";
-    }
-    return phase;
+    var stageId = String((binding && (binding.stageId || binding.phase)) || "signal").trim().toLowerCase();
+    return canonicalRulePackStageId(stageId);
 }
 
 function injectRecommendedBaseBindings(bindings, recommendedBindings) {
@@ -1188,7 +1804,7 @@ function injectRecommendedBaseBindings(bindings, recommendedBindings) {
 
     for (var index = 0; index < existingBindings.length; ++index) {
         var binding = existingBindings[index] || {};
-        var templateId = String(binding.template_id || binding.templateId || "").trim();
+        var templateId = String(binding.templateId || binding.template_id || "").trim();
         var groupKey = normalizeRuleComposerBindingStage(binding)
             + "::" + String(binding.group_id || binding.groupId || "").trim().toLowerCase();
         existingGroupCounts[groupKey] = (existingGroupCounts[groupKey] || 0) + 1;
@@ -1199,7 +1815,7 @@ function injectRecommendedBaseBindings(bindings, recommendedBindings) {
 
     for (var recommendedIndex = 0; recommendedIndex < recommended.length; ++recommendedIndex) {
         var recommendedBinding = recommended[recommendedIndex] || {};
-        var recommendedTemplateId = String(recommendedBinding.template_id || recommendedBinding.templateId || "").trim();
+        var recommendedTemplateId = String(recommendedBinding.templateId || recommendedBinding.template_id || "").trim();
         var recommendedGroupKey = normalizeRuleComposerBindingStage(recommendedBinding)
             + "::" + String(recommendedBinding.group_id || recommendedBinding.groupId || "").trim().toLowerCase();
         if (recommendedTemplateId && existingTemplates[recommendedTemplateId]) {
@@ -1215,26 +1831,8 @@ function injectRecommendedBaseBindings(bindings, recommendedBindings) {
 }
 
 function buildDefaultMarketRuleBindings(strategyProfile) {
-    var profile = strategyProfile || buildDefaultStrategyProfile("trend_following");
-    var strategyType = normalizeStrategyTypeId(profile.strategyType) || "trend_following";
-
-    function createBinding(spec) {
-        return {
-            phase: "market",
-            group_id: spec.groupId,
-            group_title: spec.groupTitle,
-            group_role: spec.groupRole,
-            group_operator: spec.groupOperator,
-            template_id: spec.templateId,
-            template_display_name: spec.templateDisplayName,
-            file_name: spec.fileName || resolveRuleTemplateFileName(spec.templateId),
-            summary: spec.summary,
-            category: spec.category,
-            term_id: spec.termId,
-            term_display_name: spec.termDisplayName,
-            default_injected: true
-        };
-    }
+    var profile = strategyProfile || buildDefaultStrategyProfile(StrategyTypeIndex.TrendFollowing);
+    var strategyTypeIndex = resolveProfileStrategyTypeIndex(profile);
 
     var gateSpecs = [];
     var vetoSpec = {
@@ -1251,7 +1849,7 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
         termDisplayName: "熊市冻结新开仓"
     };
 
-    if (strategyType === "trend_following" || strategyType === "trend_breakout" || strategyType === "momentum") {
+    if (isTrendStrategyTypeIndex(strategyTypeIndex) || strategyTypeIndex === StrategyTypeIndex.Momentum) {
         gateSpecs = [
             {
                 groupId: "market_gate",
@@ -1293,7 +1891,7 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
                 termDisplayName: "震荡市精选放行"
             }
         ];
-    } else if (strategyType === "mean_reversion" || strategyType === "high_frequency") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.MeanReversion || strategyTypeIndex === StrategyTypeIndex.HighFrequency) {
         gateSpecs = [{
             groupId: "market_gate",
             groupTitle: "市场放行组",
@@ -1307,7 +1905,7 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
             termId: "market_sideways_selective_entry",
             termDisplayName: "震荡市精选放行"
         }];
-    } else if (strategyType === "event_driven") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.EventDriven) {
         gateSpecs = [{
             groupId: "market_gate",
             groupTitle: "市场放行组",
@@ -1321,7 +1919,7 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
             termId: "market_bull_trend_allow_entry",
             termDisplayName: "牛市趋势放行新开仓"
         }];
-    } else if (strategyType === "multi_factor" || strategyType === "machine_learning" || strategyType === "arbitrage") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.MultiFactor || strategyTypeIndex === StrategyTypeIndex.MachineLearning || strategyTypeIndex === StrategyTypeIndex.Arbitrage) {
         gateSpecs = [{
             groupId: "market_gate",
             groupTitle: "市场放行组",
@@ -1353,14 +1951,15 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
 
     var bindings = [];
     for (var gateIndex = 0; gateIndex < gateSpecs.length; ++gateIndex) {
-        bindings.push(createBinding(gateSpecs[gateIndex]));
+        bindings.push(createDefaultRulePackEntry(Object.assign({ stageId: "market" }, gateSpecs[gateIndex])));
     }
-    bindings.push(createBinding(vetoSpec));
+    bindings.push(createDefaultRulePackEntry(Object.assign({ stageId: "market" }, vetoSpec)));
     return bindings;
 }
 
 function buildDefaultRuleComposerSkeleton(strategyProfile, rawBindings) {
-    var profile = strategyProfile || buildDefaultStrategyProfile("trend_following");
+    var profile = strategyProfile || buildDefaultStrategyProfile(StrategyTypeIndex.TrendFollowing);
+    var strategyTypeIndex = resolveProfileStrategyTypeIndex(profile);
     var stageDefinitions = getRuleComposerStageDefinitions();
     var groupsByStage = {
         market: [
@@ -1390,23 +1989,23 @@ function buildDefaultRuleComposerSkeleton(strategyProfile, rawBindings) {
         ]
     };
 
-    if (profile.strategyType === "trend_following" || profile.strategyType === "trend_breakout") {
+    if (isTrendStrategyTypeIndex(strategyTypeIndex)) {
         groupsByStage.market[0].description = "优先确认牛市趋势放行，其次看震荡市是否只允许精选参与。";
         groupsByStage.market[1].description = "优先把熊市冻结和系统性退潮放到这里，避免在弱市里追趋势。";
         groupsByStage.market[0].role = "any_pass";
         groupsByStage.market[0].operator = "at_least";
         groupsByStage.signal[0].operator = "any";
         groupsByStage.signal[0].description = "回踩、突破等主信号命中任一条即可继续推进，避免多个入场模板被要求同时成立。";
-    } else if (profile.strategyType === "mean_reversion") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.MeanReversion) {
         groupsByStage.market[0].description = "优先确认震荡市精选放行，再决定是否参与回踩修复和均值回归。";
         groupsByStage.market[1].description = "把熊市冻结和单边失配环境放到这里，避免逆势抄底。";
-    } else if (profile.strategyType === "event_driven") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.EventDriven) {
         groupsByStage.market[0].description = "先确认牛市或震荡市仍允许参与，再按催化强度放行事件驱动候选。";
         groupsByStage.market[1].description = "把熊市冻结和系统性退潮放到这里，避免催化失效时继续开仓。";
-    } else if (profile.strategyType === "high_frequency") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.HighFrequency) {
         groupsByStage.market[0].description = "优先确认震荡市精选放行与微结构稳定，再决定是否进行日内试单。";
         groupsByStage.market[1].description = "把熊市冻结和波动冲击过高的时段放到这里，避免噪音市里高频误触发。";
-    } else if (profile.strategyType === "multi_factor" || profile.strategyType === "machine_learning" || profile.strategyType === "arbitrage") {
+    } else if (strategyTypeIndex === StrategyTypeIndex.MultiFactor || strategyTypeIndex === StrategyTypeIndex.MachineLearning || strategyTypeIndex === StrategyTypeIndex.Arbitrage) {
         groupsByStage.market[0].description = "先看市场是否允许组合继续承担新增风险，再决定是否恢复候选与调仓。";
         groupsByStage.market[1].description = "优先把熊市冻结、系统性回撤和风险扩散放到这里。";
     }
@@ -1422,7 +2021,7 @@ function buildDefaultRuleComposerSkeleton(strategyProfile, rawBindings) {
         });
     }
 
-    if (profile.strategyType === "momentum" || profile.strategyType === "event_driven") {
+    if (strategyTypeIndex === StrategyTypeIndex.Momentum || strategyTypeIndex === StrategyTypeIndex.EventDriven) {
         groupsByStage.signal[0].operator = "any";
         groupsByStage.signal[0].description = "短线或事件驱动策略常由多个信号中的任一触发。";
     }
@@ -1618,7 +2217,8 @@ function isEventDrivenRule(rule) {
 }
 
 function validateRuleComposerConfiguration(strategyProfile, stages) {
-    var profile = strategyProfile || buildDefaultStrategyProfile("trend_following");
+    var profile = strategyProfile || buildDefaultStrategyProfile(StrategyTypeIndex.TrendFollowing);
+    var strategyTypeIndex = resolveProfileStrategyTypeIndex(profile);
     var stageList = Array.isArray(stages) ? stages : [];
     var errors = [];
     var warnings = [];
@@ -1754,7 +2354,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
                     );
                 }
 
-                if ((profile.strategyType === "trend_following" || profile.strategyType === "trend_breakout")
+                if (isTrendStrategyTypeIndex(strategyTypeIndex)
                         && profile.horizon !== "intraday"
                         && (stageId === "signal" || stageId === "eligibility")
                         && (isIntradayOrSpeculativeRule(rule) || isEventDrivenRule(rule))) {
@@ -1790,7 +2390,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
         }
     }
 
-    var trendStrategy = profile.strategyType === "trend_following" || profile.strategyType === "trend_breakout";
+    var trendStrategy = isTrendStrategyTypeIndex(strategyTypeIndex);
     if (trendStrategy) {
         var positiveSignalRules = countPositiveRules("signal", "signal_core") + countPositiveRules("eligibility", "eligibility_core");
         if (positiveSignalRules === 0) {
@@ -1814,7 +2414,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
         }
     }
 
-    if ((trendStrategy || profile.strategyType === "momentum" || profile.strategyType === "event_driven")
+    if ((trendStrategy || strategyTypeIndex === StrategyTypeIndex.Momentum || strategyTypeIndex === StrategyTypeIndex.EventDriven)
             && groupRules("eligibility", "eligibility_core").length === 0) {
         pushIssue(
             "warning",
@@ -1825,7 +2425,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
         );
     }
 
-    if ((trendStrategy || profile.strategyType === "momentum" || profile.strategyType === "event_driven")
+    if ((trendStrategy || strategyTypeIndex === StrategyTypeIndex.Momentum || strategyTypeIndex === StrategyTypeIndex.EventDriven)
             && groupRules("signal", "signal_veto").length === 0) {
         pushIssue(
             "warning",
@@ -1836,7 +2436,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
         );
     }
 
-    if ((trendStrategy || profile.strategyType === "momentum" || profile.strategyType === "event_driven")
+    if ((trendStrategy || strategyTypeIndex === StrategyTypeIndex.Momentum || strategyTypeIndex === StrategyTypeIndex.EventDriven)
             && countPositiveRules("signal", "signal_core") > 0
             && groupRules("eligibility", "eligibility_core").length === 0
             && groupRules("signal", "signal_veto").length === 0) {
@@ -1925,7 +2525,7 @@ function resetFormData() {
     return {
         strategyName: "",
         strategyDescription: "",
-        selectedStrategyType: "trend_following",
+        selectedStrategyTypeIndex: 0,
         strategyTags: [],
         assetType: "stock",
         timeFrame: "daily",
@@ -1945,16 +2545,32 @@ var StrategyCreationUtils = {
     getTranslation: getTranslation,
     
     // 策略类型相关
-    getStrategyTypeName: getStrategyTypeName,
-    getStrategyTypeDescription: getStrategyTypeDescription,
-    getStrategyIcon: getStrategyIcon,
-    getBriefDescription: getBriefDescription,
+    StrategyTypeIndex: StrategyTypeIndex,
+    StrategyBehaviorKind: StrategyBehaviorKind,
+    StrategyStoredTypeIndex: StrategyStoredTypeIndex,
+    normalizeStrategyTypeIndex: normalizeStrategyTypeIndex,
+    strategyTypeIndexFromBehaviorKind: strategyTypeIndexFromBehaviorKind,
+    strategyBehaviorKindFromTypeIndex: strategyBehaviorKindFromTypeIndex,
+    strategyBehaviorKindLabel: strategyBehaviorKindLabel,
+    strategyStoredTypeIndexFromBehaviorKind: strategyStoredTypeIndexFromBehaviorKind,
+    strategyStoredTypeIndexFromTypeIndex: strategyStoredTypeIndexFromTypeIndex,
+    getStrategyTypeNameFromIndex: getStrategyTypeNameFromIndex,
+    getStrategyTypeDescriptionFromIndex: getStrategyTypeDescriptionFromIndex,
+    getStrategyIconFromIndex: getStrategyIconFromIndex,
+    getBriefDescriptionFromIndex: getBriefDescriptionFromIndex,
     getDefaultStrategyDescription: getDefaultStrategyDescription,
     getDefaultStrategyTags: getDefaultStrategyTags,
     
     // 风险等级相关
+    AssetTypeIndex: AssetTypeIndex,
+    TimeFrameIndex: TimeFrameIndex,
+    RiskLevelIndex: RiskLevelIndex,
+    getAssetTypeNameFromIndex: getAssetTypeNameFromIndex,
+    getTimeFrameNameFromIndex: getTimeFrameNameFromIndex,
     getRiskLevelName: getRiskLevelName,
+    getRiskLevelNameFromIndex: getRiskLevelNameFromIndex,
     getRiskLevelColor: getRiskLevelColor,
+    getRiskLevelColorFromIndex: getRiskLevelColorFromIndex,
     
     // 步骤相关
     getStepLabel: getStepLabel,

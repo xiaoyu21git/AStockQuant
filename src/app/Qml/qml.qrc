@@ -135,7 +135,6 @@
         <file>components/Strategy/Creation/RuleTemplateStructureView.qml</file>
         <file>components/Strategy/Creation/RuleTemplateSuggestionPanel.qml</file>
         <file>components/Strategy/Creation/StrategyTypeSelector.qml</file>
-        <file>components/StockPools/LinkedStockPoolSelector.qml</file>
         <file>components/Strategy/StrategyChart.qml</file>
         <file>components/Strategy/StrategyControls.qml</file>
         <file>components/Strategy/StrategyDetailCard.qml</file>
@@ -159,7 +158,6 @@
         <file>page/DataAnalysis/CacheManagementPage.qml</file>
         <file>page/FactorWorkbench.qml</file>
         <file>page/Sidebar.qml</file>
-        <file>page/backtest/StrategyBacktestPage.qml</file>
         <file>page/dashboard/ChartArea.qml</file>
         <file>page/dashboard/MainContent.qml</file>
         <file>page/dashboard/MarketGrid.qml</file>
@@ -177,25 +175,21 @@
         <file>page/leftSidebar/PrimaryMenu.qml</file>
         <file>page/leftSidebar/SecondaryMenu.qml</file>
         <file>page/risk/RiskConfigurationPage.qml</file>
-        <file>page/stockpools/CustomStockPoolPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
+        <file>page/strategies/StrategyBacktestPage.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
         <file>config/views/risk_backtest_params.json</file>
-        <file>config/views/strategy_backtest_page_params.json</file>
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorMetaLoader.js</file>
         <file>utils/I18n.js</file>
-        <file>utils/BacktestPerformanceAdapter.js</file>
-        <file>utils/BacktestResultAdapter.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StartupGateFormatter.js</file>
         <file>utils/StrategyStructureAdapter.js</file>
         <file>utils/TradingPageAdapter.js</file>
         <file>utils/TradeTestingPageAdapter.js</file>
-        <file>utils/CustomStockPoolStore.js</file>
         <file>utils/StrategyCreationUtils.js</file>
         <file>utils/StrategyDataAdapter.js</file>
         <file>utils/StrategyMetaLoader.js</file>

@@ -36,6 +36,8 @@ public:
         const std::vector<double>& turnoverSeries;
         const std::vector<std::string>& longShortDates;
         const std::vector<std::vector<double>>& groupReturnSeriesByGroup;
+        const std::vector<double>* executionPeriodicReturns = nullptr;
+        const std::vector<std::string>* executionDates = nullptr;
         double alpha = 0.0;
         const BenchmarkComparisonSummary* benchmarkSummary = nullptr;
         int riskTriggeredCount = 0;
@@ -101,6 +103,8 @@ private:
     static double regularizedIncompleteBeta(double a, double b, double x);
     static double calculateCompoundedAnnualReturn(const std::vector<double>& periodicReturns,
                                                   int forwardDays);
+    static const std::vector<double>& resolveExecutionPeriodicReturns(const Inputs& inputs);
+    static const std::vector<std::string>& resolveExecutionDates(const Inputs& inputs);
     static double calculateIcTStatFromSeries(double icMean, double icStd, size_t sampleCount);
     static double calculateTwoSidedStudentTPValue(double tStat, size_t sampleCount);
     static bool hasPositiveTopBottomSpread(const std::vector<double>& groupReturns);

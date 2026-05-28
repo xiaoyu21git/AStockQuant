@@ -7,8 +7,6 @@ import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
 import ConsoleUi 1.0
 import "../../Factor" as FactorComponents
-import "../../StockPools" as StockPoolComponents
-import "../../../utils/CustomStockPoolStore.js" as CustomStockPoolStore
 import "./components" as PluginComponents
 
 Rectangle {
@@ -37,9 +35,6 @@ Rectangle {
     property string factorDescription: ""
     property var factorParameters: ({})
     property var factorTags: []
-    property string linkedStockPoolId: ""
-    property string linkedStockPoolName: ""
-    property var linkedStockPoolSymbols: []
     
     // 插件化组件注册表（静态声明，替代动态创建）
     PluginComponents.ParamComponents {
@@ -369,17 +364,6 @@ Rectangle {
                                 }
                             }
 
-                            StockPoolComponents.LinkedStockPoolSelector {
-                                width: parent.width
-                                title: "关联自选股票池"
-                                helperText: "只写入因子关联引用和标的快照，不会干扰回测页面单独选择的数据集或股票池。"
-
-                                onBindingChanged: function(binding) {
-                                    contentColumn.rootRef.linkedStockPoolId = binding.poolId || ""
-                                    contentColumn.rootRef.linkedStockPoolName = binding.poolName || ""
-                                    contentColumn.rootRef.linkedStockPoolSymbols = binding.symbols || []
-                                }
-                            }
                         }
                     }
                     
@@ -1281,12 +1265,6 @@ Rectangle {
         var existingParameters = cloneEditableValue(factorData.parameters || ({}))
         existingParameters = normalizeEditableParameterValues(existingParameters, rawFactorType)
         root.factorParameters = existingParameters || {}
-        root.linkedStockPoolId = String((existingParameters && existingParameters.linked_stock_pool_id) || "")
-        root.linkedStockPoolName = String((existingParameters && existingParameters.linked_stock_pool_name) || "")
-        root.linkedStockPoolSymbols = Array.isArray(existingParameters && existingParameters.linked_stock_pool_symbols)
-            ? existingParameters.linked_stock_pool_symbols.slice()
-            : []
-
         if (nextType >= 0) {
             root.selectedType = -1
             root.selectedType = nextType
@@ -1457,16 +1435,6 @@ Rectangle {
         var normalizedFactorTypeId = factorTypeEnumId(root.selectedType)
         var typeDisplayTag = normalizedTypeName
 
-        if (root.linkedStockPoolId) {
-            submittedParameters.linked_stock_pool_id = root.linkedStockPoolId
-            submittedParameters.linked_stock_pool_name = root.linkedStockPoolName
-            submittedParameters.linked_stock_pool_symbols = CustomStockPoolStore.CustomStockPoolStore.normalizeSymbolList(root.linkedStockPoolSymbols || [])
-        } else {
-            delete submittedParameters.linked_stock_pool_id
-            delete submittedParameters.linked_stock_pool_name
-            delete submittedParameters.linked_stock_pool_symbols
-        }
-
         // 构建完整的因子数据 - 与数据库表结构匹配
         var factorData = {
             factorName: root.factorName.toLowerCase().replace(/\s+/g, '_'),
@@ -1511,9 +1479,6 @@ Rectangle {
             root.factorDescription = ""
             root.factorParameters = {}
             root.factorTags = []
-            root.linkedStockPoolId = ""
-            root.linkedStockPoolName = ""
-            root.linkedStockPoolSymbols = []
             root.generatorValidationPassed = true
             root.generatorValidationErrorCount = 0
             root.updateValidationState()
@@ -1527,9 +1492,6 @@ Rectangle {
         root.selectedType = -1
         root.factorParameters = {}
         root.factorTags = []
-        root.linkedStockPoolId = ""
-        root.linkedStockPoolName = ""
-        root.linkedStockPoolSymbols = []
         root.currentStep = 0
         root.currentParamConfigs = []
         root.generatorValidationPassed = true

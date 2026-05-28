@@ -162,6 +162,8 @@ public:
     inline static const FieldKey INDEX_IN_DATE{"index_in_date"};
     inline static const FieldKey INDEX_OUT_DATE{"index_out_date"};
     inline static const FieldKey WEIGHT{"weight"};
+    inline static const FieldKey ANNOUNCEMENT_DATE{"announcement_date"};
+    inline static const FieldKey WINDOW_START_DATE{"window_start_date"};
     inline static const FieldKey START_DATE{"start_date"};
     inline static const FieldKey END_DATE{"end_date"};
 
@@ -180,6 +182,8 @@ public:
             INDEX_IN_DATE,
             INDEX_OUT_DATE,
             WEIGHT,
+            ANNOUNCEMENT_DATE,
+            WINDOW_START_DATE,
             START_DATE,
             END_DATE
         };

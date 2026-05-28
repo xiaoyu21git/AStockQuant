@@ -17,6 +17,7 @@
 #include "cleaning/rules/SurvivorBiasRule.h"
 #include "cleaning/rules/SuspensionFillRule.h"
 #include "cleaning/rules/ValuationSanitizeRule.h"
+#include "cleaning/rules/VolumeFilterRule.h"
 #include "DataFetchFieldContractUtils.h"
 #include "database/QueryBuilder.h"
 #include "database/QtMySQLDatabase.h"
@@ -41,11 +42,66 @@
 
 using namespace astock::database;
 
+namespace factor::bridge::detail {
+
+bool configureStrictCleaningEngine(CleaningEngine& cleaningEngine,
+                                   const QVariantMap& rules,
+                                   QString* errorMessage);
+
+} // namespace factor::bridge::detail
+
 namespace {
 
 QStringList fullDailyBarFields()
 {
     return factor::bridge::MarketBarFieldKeys::backtestReady().orderedValues();
+}
+
+QDate nextTradingDayAfter(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                          const QDate& anchorDate)
+{
+    if (!database || !anchorDate.isValid()) {
+        return {};
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT MIN(trade_date) AS trade_date "
+            "FROM daily_bar "
+            "WHERE trade_date > :anchor_date"),
+        {{QStringLiteral(":anchor_date"), anchorDate.toString(QStringLiteral("yyyy-MM-dd"))}});
+    if (result.rowCount() == 0) {
+        return {};
+    }
+
+    const QString nextTradeDate = result.getRow(0).getString(QStringLiteral("trade_date")).trimmed();
+    if (nextTradeDate.isEmpty()) {
+        return {};
+    }
+    return QDate::fromString(nextTradeDate.left(10), Qt::ISODate);
+}
+
+QString resolveIndexConstituentWindowStartDateText(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QString& announcementDateText,
+    const QString& effectiveStartDateText)
+{
+    const QDate effectiveStartDate = QDate::fromString(effectiveStartDateText.trimmed().left(10), Qt::ISODate);
+    if (!effectiveStartDate.isValid()) {
+        return {};
+    }
+
+    const QDate announcementDate = QDate::fromString(announcementDateText.trimmed().left(10), Qt::ISODate);
+    if (!announcementDate.isValid()) {
+        return effectiveStartDate.toString(QStringLiteral("yyyy-MM-dd"));
+    }
+
+    const QDate nextTradingDay = nextTradingDayAfter(database, announcementDate);
+    if (!nextTradingDay.isValid() || nextTradingDay >= effectiveStartDate) {
+        return effectiveStartDate.toString(QStringLiteral("yyyy-MM-dd"));
+    }
+
+    return nextTradingDay.toString(QStringLiteral("yyyy-MM-dd"));
 }
 
 QStringList unsupportedCleaningRuleKeys(const QVariantMap& rules)
@@ -171,6 +227,17 @@ QStringList readStringListRuleParameter(const QVariantMap& ruleConfig,
     return values.isEmpty() ? defaultValue : values;
 }
 
+bool explicitlyEmptyStringListRuleParameter(const QVariantMap& ruleConfig,
+                                            factor::bridge::CleaningRuleConfigField key)
+{
+    const QString fieldName = factor::bridge::cleaningRuleFieldName(key);
+    if (!ruleConfig.contains(fieldName)) {
+        return false;
+    }
+
+    return ruleConfig.value(fieldName).toStringList().isEmpty();
+}
+
 template<typename Func>
 void invokeOnMainThread(DataService* service, Func&& func);
 
@@ -180,9 +247,11 @@ QString ruleFieldText(factor::bridge::CleaningRuleKey ruleKey,
     return factor::bridge::cleaningRuleConfigPath(ruleKey, field);
 }
 
-bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngine,
-                                   const QVariantMap& rules,
-                                   QString* errorMessage)
+} // namespace
+
+bool factor::bridge::detail::configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngine,
+                                                           const QVariantMap& rules,
+                                                           QString* errorMessage)
 {
     const QStringList unsupportedRules = unsupportedCleaningRuleKeys(rules);
     if (!unsupportedRules.isEmpty()) {
@@ -214,6 +283,14 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
             continue;
         }
         if (ruleKey == factor::bridge::CleaningRuleKey::DuplicateRemoval) {
+            if (explicitlyEmptyStringListRuleParameter(ruleConfig,
+                                                       factor::bridge::CleaningRuleConfigField::KeyFields)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 不能为空")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::KeyFields));
+                }
+                return false;
+            }
             const QStringList keyFields = readStringListRuleParameter(
                 ruleConfig,
                 factor::bridge::CleaningRuleConfigField::KeyFields,
@@ -268,6 +345,14 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
                 }
                 return false;
             }
+            if (explicitlyEmptyStringListRuleParameter(ruleConfig,
+                                                       factor::bridge::CleaningRuleConfigField::FillFields)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 不能为空")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::FillFields));
+                }
+                return false;
+            }
             const QStringList fillFields = readStringListRuleParameter(
                 ruleConfig,
                 factor::bridge::CleaningRuleConfigField::FillFields,
@@ -306,6 +391,14 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
                 if (errorMessage) {
                     *errorMessage = QStringLiteral("规则 %1 必须为正整数")
                         .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxLookbackDays));
+                }
+                return false;
+            }
+            if (explicitlyEmptyStringListRuleParameter(ruleConfig,
+                                                       factor::bridge::CleaningRuleConfigField::Fields)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 不能为空")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::Fields));
                 }
                 return false;
             }
@@ -402,6 +495,45 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
                                                                                         allowZeroWhenSuspended));
             continue;
         }
+        if (ruleKey == factor::bridge::CleaningRuleKey::VolumeFilter) {
+            double minVolume = 0.0;
+            if (!readNonNegativeDoubleRuleParameter(ruleConfig,
+                                                    factor::bridge::CleaningRuleConfigField::MinVolume,
+                                                    0.0,
+                                                    &minVolume)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 必须是非负数值")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MinVolume));
+                }
+                return false;
+            }
+            double maxVolume = 1000000000.0;
+            if (!readNonNegativeDoubleRuleParameter(ruleConfig,
+                                                    factor::bridge::CleaningRuleConfigField::MaxVolume,
+                                                    1000000000.0,
+                                                    &maxVolume)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 必须是非负数值")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxVolume));
+                }
+                return false;
+            }
+            if (maxVolume < minVolume) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 不能小于 %2")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxVolume),
+                             ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MinVolume));
+                }
+                return false;
+            }
+            const bool allowZeroWhenSuspended = readBoolRuleParameter(ruleConfig,
+                                                                      factor::bridge::CleaningRuleConfigField::AllowZeroWhenSuspended,
+                                                                      true);
+            cleaningEngine.addRule(std::make_unique<factor::bridge::VolumeFilterRule>(minVolume,
+                                                                                       maxVolume,
+                                                                                       allowZeroWhenSuspended));
+            continue;
+        }
         if (ruleKey == factor::bridge::CleaningRuleKey::LimitMoveTag) {
             double upThreshold = 9.5;
             if (!readFiniteDoubleRuleParameter(ruleConfig,
@@ -445,6 +577,8 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
 
     return true;
 }
+
+namespace {
 
 void wireCleaningEngineSignals(factor::bridge::CleaningEngine& cleaningEngine,
                                DataService* service)
@@ -610,33 +744,12 @@ QString resolveIndexDisplayName(const std::shared_ptr<QtMySQLDatabase>& database
     return normalizedSymbol;
 }
 
-bool databaseTableHasColumn(const std::shared_ptr<QtMySQLDatabase>& database,
-                            const QString& tableName,
-                            const QString& columnName)
-{
-    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const auto result = database->executeQuery(
-        QStringLiteral(
-            "SELECT COUNT(*) AS count FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
-        {{QStringLiteral(":table_name"), tableName.trimmed()},
-         {QStringLiteral(":column_name"), columnName.trimmed()}});
-
-    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
-}
-
 QString symbolInfoIndustrySelect(const std::shared_ptr<QtMySQLDatabase>& database,
                                  const QString& alias)
 {
+    Q_UNUSED(database)
     const QString normalizedAlias = alias.trimmed().isEmpty() ? QStringLiteral("si") : alias.trimmed();
-    if (databaseTableHasColumn(database, QStringLiteral("symbol_info"), QStringLiteral("industry_code"))) {
-        return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code ").arg(normalizedAlias);
-    }
-
-    return QStringLiteral("'' AS industry_code ");
+    return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code ").arg(normalizedAlias);
 }
 
 QVariantMap buildConstituentMetadata(const QVariantMap& constituent)
@@ -756,13 +869,15 @@ QVariantList getHistoricalIndexConstituentUnion(const std::shared_ptr<QtMySQLDat
         QStringLiteral(
             "SELECT DISTINCT constituent_symbol AS symbol, "
             "       COALESCE(si.name, constituent_symbol) AS name, "
+            "       ic.announcement_date AS announcement_date, "
             "       %1"
             "FROM index_constituents ic "
             "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
             "WHERE ic.index_symbol = :index_symbol "
             "  AND ic.start_date <= :end_date "
             "  AND (ic.end_date IS NULL OR ic.end_date >= :start_date) "
-            "ORDER BY constituent_symbol ASC").arg(industrySelect),
+            "ORDER BY constituent_symbol ASC")
+            .arg(industrySelect),
         {{QStringLiteral(":index_symbol"), normalizedIndexSymbol},
          {QStringLiteral(":start_date"), normalizedStartDate.toString(QStringLiteral("yyyy-MM-dd"))},
          {QStringLiteral(":end_date"), normalizedEndDate.toString(QStringLiteral("yyyy-MM-dd"))}});
@@ -776,6 +891,10 @@ QVariantList getHistoricalIndexConstituentUnion(const std::shared_ptr<QtMySQLDat
         const QString industryCode = row.getString(QStringLiteral("industry_code")).trimmed();
         if (!industryCode.isEmpty()) {
             constituent[QStringLiteral("industry_code")] = industryCode;
+        }
+        const QString announcementDate = row.getString(QStringLiteral("announcement_date")).trimmed();
+        if (!announcementDate.isEmpty()) {
+            constituent[QStringLiteral("announcement_date")] = announcementDate;
         }
         constituent[QStringLiteral("index_symbol")] = normalizedIndexSymbol;
         constituent[QStringLiteral("index_name")] = indexDisplayName;
@@ -1198,7 +1317,7 @@ void DataService::cleanDataAsync(const QVariantList& data,
 
             factor::bridge::CleaningEngine cleaningEngine;
             QString configurationError;
-            if (!configureStrictCleaningEngine(cleaningEngine, rules, &configurationError)) {
+            if (!factor::bridge::detail::configureStrictCleaningEngine(cleaningEngine, rules, &configurationError)) {
                 invokeOnMainThread(service, [configurationError](DataService* service) {
                     service->error(configurationError);
                 });
@@ -1240,7 +1359,7 @@ bool DataService::cleanDataSyncForTests(const QVariantList& data,
 {
     factor::bridge::CleaningEngine cleaningEngine;
     QString configurationError;
-    if (!configureStrictCleaningEngine(cleaningEngine, rules, &configurationError)) {
+    if (!factor::bridge::detail::configureStrictCleaningEngine(cleaningEngine, rules, &configurationError)) {
         if (errorMessage) {
             *errorMessage = configurationError;
         }
@@ -1298,10 +1417,10 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
 
                     const QString normalizedIndexSymbol = indexSymbol.trimmed();
                     const QString indexDisplayName = resolveIndexDisplayName(service->m_impl->database, normalizedIndexSymbol);
-                                        const QString industrySelect = symbolInfoIndustrySelect(service->m_impl->database, QStringLiteral("si"));
+                    const QString industrySelect = symbolInfoIndustrySelect(service->m_impl->database, QStringLiteral("si"));
 
                     QString sql;
-                std::map<QString, QVariant> params;
+                    std::map<QString, QVariant> params;
 
                     if (normalizedIndexSymbol == "BIG_CAP" || normalizedIndexSymbol == "SMALL_CAP") {
                       sql = "SELECT d.symbol, COALESCE(si.name, d.symbol) AS name, "
@@ -1317,6 +1436,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                       effectiveSnapshotDate = resolveIndexSnapshotDate(service->m_impl->database, normalizedIndexSymbol, effectiveSnapshotDate);
                     sql = "SELECT ic.constituent_symbol as symbol, "
                           "COALESCE(si.name, ic.constituent_symbol) as name, "
+                                                    + QStringLiteral("ic.announcement_date AS announcement_date, ")
                           + industrySelect +
                           "ic.weight, ic.start_date "
                           "FROM index_constituents ic "
@@ -1345,7 +1465,19 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                     formattedRecord["index_name"] = indexDisplayName;
                     formattedRecord["index_snapshot_date"] = effectiveSnapshotDate;
                     formattedRecord["weight"] = row.getDouble("weight");
-                    formattedRecord["start_date"] = row.getString("start_date");
+                    const QString effectiveStartDate = row.getString("start_date").trimmed();
+                    const QString announcementDate = row.getString("announcement_date").trimmed();
+                    formattedRecord["start_date"] = effectiveStartDate;
+                    if (!announcementDate.isEmpty()) {
+                        formattedRecord["announcement_date"] = announcementDate;
+                    }
+                    const QString windowStartDate = resolveIndexConstituentWindowStartDateText(
+                        service->m_impl->database,
+                        announcementDate,
+                        effectiveStartDate);
+                    if (!windowStartDate.isEmpty()) {
+                        formattedRecord["window_start_date"] = windowStartDate;
+                    }
                     formattedData.append(formattedRecord);
 
                     const int progress = 2 + ((rowIndex + 1) * 96) / qMax(1, totalRows);
@@ -1918,17 +2050,11 @@ QVariantList DataService::fetchConstituentKlineData(const QVariantList& constitu
     }
 
     if (dataType == "kline_weekly") {
-        if (tableExists("weekly_bar")) {
-            return fetchPriceTableDataForSymbols("weekly_bar", extractSymbols(constituents), startDate, endDate, progressStart, progressSpan, progressLabel);
-        }
-        return fetchAggregatedKlineDataForSymbols("weekly", extractSymbols(constituents), startDate, endDate, progressStart, progressSpan, progressLabel);
+        return fetchPriceTableDataForSymbols("weekly_bar", extractSymbols(constituents), startDate, endDate, progressStart, progressSpan, progressLabel);
     }
 
     if (dataType == "kline_monthly") {
-        if (tableExists("monthly_bar")) {
-            return fetchPriceTableDataForSymbols("monthly_bar", extractSymbols(constituents), startDate, endDate, progressStart, progressSpan, progressLabel);
-        }
-        return fetchAggregatedKlineDataForSymbols("monthly", extractSymbols(constituents), startDate, endDate, progressStart, progressSpan, progressLabel);
+        return fetchPriceTableDataForSymbols("monthly_bar", extractSymbols(constituents), startDate, endDate, progressStart, progressSpan, progressLabel);
     }
 
     if (dataType == "minute_data") {
@@ -1995,9 +2121,6 @@ QVariantList DataService::fetchPriceTableData(const QString& tableName,
     if (!m_impl->checkDatabaseConnection()) {
         return QVariantList();
     }
-    if (!tableExists(tableName)) {
-        throw std::runtime_error(QString("数据表不存在: %1").arg(tableName).toStdString());
-    }
 
     try {
         const bool includeIndustryCode = tableName == QStringLiteral("daily_bar");
@@ -2039,9 +2162,6 @@ QVariantList DataService::fetchPriceTableDataForSymbols(const QString& tableName
                                                        const QString& progressLabel) {
     if (!m_impl->checkDatabaseConnection()) {
         return QVariantList();
-    }
-    if (!tableExists(tableName)) {
-        throw std::runtime_error(QString("数据表不存在: %1").arg(tableName).toStdString());
     }
 
     try {
@@ -2187,9 +2307,6 @@ QVariantList DataService::fetchMinuteDataForSymbols(const QStringList& symbols,
     if (!m_impl->checkDatabaseConnection()) {
         return QVariantList();
     }
-    if (!tableExists("minute_bar")) {
-        throw std::runtime_error("数据表不存在: minute_bar");
-    }
 
     QString symbolFilter;
     if (!symbols.isEmpty()) {
@@ -2228,17 +2345,11 @@ QVariantList DataService::fetchKlineData(const QString& symbol,
     }
 
     if (dataType == "kline_weekly") {
-        if (tableExists("weekly_bar")) {
-            return fetchPriceTableDataForSymbols("weekly_bar", symbol.trimmed().isEmpty() ? QStringList() : QStringList{symbol.trimmed()}, startDate, endDate, progressStart, progressSpan, progressLabel);
-        }
-        return fetchAggregatedKlineDataForSymbols("weekly", symbol.trimmed().isEmpty() ? QStringList() : QStringList{symbol.trimmed()}, startDate, endDate, progressStart, progressSpan, progressLabel);
+        return fetchPriceTableDataForSymbols("weekly_bar", symbol.trimmed().isEmpty() ? QStringList() : QStringList{symbol.trimmed()}, startDate, endDate, progressStart, progressSpan, progressLabel);
     }
 
     if (dataType == "kline_monthly") {
-        if (tableExists("monthly_bar")) {
-            return fetchPriceTableDataForSymbols("monthly_bar", symbol.trimmed().isEmpty() ? QStringList() : QStringList{symbol.trimmed()}, startDate, endDate, progressStart, progressSpan, progressLabel);
-        }
-        return fetchAggregatedKlineDataForSymbols("monthly", symbol.trimmed().isEmpty() ? QStringList() : QStringList{symbol.trimmed()}, startDate, endDate, progressStart, progressSpan, progressLabel);
+        return fetchPriceTableDataForSymbols("monthly_bar", symbol.trimmed().isEmpty() ? QStringList() : QStringList{symbol.trimmed()}, startDate, endDate, progressStart, progressSpan, progressLabel);
     }
 
     if (dataType == "minute_data") {
@@ -2262,17 +2373,11 @@ QVariantList DataService::fetchAllMarketKlineData(const QString& dataType,
     }
 
     if (dataType == "kline_weekly") {
-        if (tableExists("weekly_bar")) {
-            return fetchPriceTableDataForSymbols("weekly_bar", QStringList(), startDate, endDate, progressStart, progressSpan, progressLabel);
-        }
-        return fetchAggregatedKlineDataForSymbols("weekly", QStringList(), startDate, endDate, progressStart, progressSpan, progressLabel);
+        return fetchPriceTableDataForSymbols("weekly_bar", QStringList(), startDate, endDate, progressStart, progressSpan, progressLabel);
     }
 
     if (dataType == "kline_monthly") {
-        if (tableExists("monthly_bar")) {
-            return fetchPriceTableDataForSymbols("monthly_bar", QStringList(), startDate, endDate, progressStart, progressSpan, progressLabel);
-        }
-        return fetchAggregatedKlineDataForSymbols("monthly", QStringList(), startDate, endDate, progressStart, progressSpan, progressLabel);
+        return fetchPriceTableDataForSymbols("monthly_bar", QStringList(), startDate, endDate, progressStart, progressSpan, progressLabel);
     }
 
     if (dataType == "minute_data") {
@@ -2302,9 +2407,6 @@ QVariantList DataService::fetchFinancialDataForSymbols(const QStringList& symbol
                                                       const QString& progressLabel) {
     if (!m_impl->checkDatabaseConnection()) {
         return QVariantList();
-    }
-    if (!tableExists("financial_indicator")) {
-        throw std::runtime_error("数据表不存在: financial_indicator");
     }
 
     try {
@@ -2362,9 +2464,6 @@ QVariantList DataService::fetchRealtimeDataForSymbols(const QStringList& symbols
                                                      const QString& progressLabel) {
     if (!m_impl->checkDatabaseConnection()) {
         return QVariantList();
-    }
-    if (!tableExists("daily_bar")) {
-        throw std::runtime_error("数据表不存在: daily_bar");
     }
 
     try {
@@ -2541,16 +2640,16 @@ QVariantList DataService::fetchGenericTimeSeriesData(const QString& tableName,
     }
 
     const QString normalizedTable = tableName.trimmed();
-    if (normalizedTable.isEmpty() || !tableExists(normalizedTable)) {
+    if (normalizedTable.isEmpty()) {
         return QVariantList();
     }
 
-    const QString dateColumn = resolveFirstExistingColumn(normalizedTable, dateColumns);
+    const QString dateColumn = dateColumns.isEmpty() ? QString() : dateColumns.constFirst().trimmed();
     if (dateColumn.isEmpty()) {
         throw std::runtime_error(QString("数据表 %1 缺少时间列").arg(normalizedTable).toStdString());
     }
 
-    const QString symbolColumn = resolveFirstExistingColumn(normalizedTable, symbolColumns);
+    const QString symbolColumn = symbolColumns.isEmpty() ? QString() : symbolColumns.constFirst().trimmed();
     auto normalizeFetchedRows = [&dateColumn, &symbolColumn](QVariantList rows) -> QVariantList {
         if (dateColumn.isEmpty() && symbolColumn.isEmpty()) {
             return rows;
@@ -2666,62 +2765,7 @@ QVariantList DataService::executeVariantQueryForFetch(const QString& sql,
     return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
 }
 
-bool DataService::tableExists(const QString& tableName) const {
-    if (m_tableExistsOverrideForTests) {
-        return m_tableExistsOverrideForTests(tableName);
-    }
-
-    if (!m_impl || !m_impl->database || tableName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const auto result = m_impl->database->executeQuery(
-        "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name",
-        {{":table_name", tableName}});
-
-    return !result.isEmpty() && result.getRow(0).getInt("count") > 0;
-}
-
-bool DataService::tableHasColumn(const QString& tableName, const QString& columnName) const {
-    if (m_tableHasColumnOverrideForTests) {
-        return m_tableHasColumnOverrideForTests(tableName, columnName);
-    }
-
-    if (!m_impl || !m_impl->database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const auto result = m_impl->database->executeQuery(
-        "SELECT COUNT(*) AS count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name",
-        {{":table_name", tableName}, {":column_name", columnName}});
-
-    return !result.isEmpty() && result.getRow(0).getInt("count") > 0;
-}
-
-QString DataService::resolveFirstExistingColumn(const QString& tableName, const QStringList& candidates) const {
-    for (const QString& candidate : candidates) {
-        if (tableHasColumn(tableName, candidate)) {
-            return candidate;
-        }
-    }
-
-    return QString();
-}
-
 QString DataService::resolveNewsTable() const {
-    static const QStringList newsTableCandidates{
-        QStringLiteral("news_sentiment"),
-        QStringLiteral("stock_news"),
-        QStringLiteral("news_data"),
-        QStringLiteral("news")
-    };
-
-    for (const QString& candidate : newsTableCandidates) {
-        if (tableExists(candidate)) {
-            return candidate;
-        }
-    }
-
-    return QString();
+    return QStringLiteral("news_sentiment");
 }
    

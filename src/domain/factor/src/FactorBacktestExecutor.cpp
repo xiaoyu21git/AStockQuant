@@ -4,6 +4,8 @@
 #include "domain/factor/include/FactorBacktestGroupingUtils.h"
 #include "domain/factor/include/FactorBacktestIcUtils.h"
 #include "domain/factor/include/FactorBacktestMetricsCalculator.h"
+#include "domain/trading/include/DefaultTradingCore.h"
+#include "domain/trading/include/InMemoryTradingLedger.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 #include "ui/bridge/include/DataServiceCache.h"
 
@@ -52,6 +54,396 @@ struct GroupReturnContributor {
 };
 
 constexpr int kDiagnosticMaxContributors = 20;
+
+int resolveExecutionTradeDateIndex(const std::vector<std::string>& tradeDates,
+                                   const std::string& signalDate,
+                                   const factor::BacktestConfig& config);
+
+domain::trading::TradingSnapshot buildInitialFormalTradingSnapshot(double initialCapital)
+{
+    domain::trading::TradingSnapshot snapshot;
+    snapshot.account.availableCash.value = initialCapital;
+    snapshot.account.marketValue.value = 0.0;
+    snapshot.account.totalAsset.value = initialCapital;
+    snapshot.account.realizedPnl.value = 0.0;
+    snapshot.account.unrealizedPnl.value = 0.0;
+    return snapshot;
+}
+
+double normalizedTradingRatio(double value, double fallback)
+{
+    if (!std::isfinite(value)) {
+        return fallback;
+    }
+    if (value > 1.0) {
+        value /= 100.0;
+    }
+    return (std::max)(0.0, (std::min)(1.0, value));
+}
+
+std::pair<std::vector<double>, std::vector<std::string>> buildFormalExecutionPeriodicSeries(
+    const factor::FormalTradingExecution& formalExecution)
+{
+    std::pair<std::vector<double>, std::vector<std::string>> series;
+
+    const size_t equityCount = formalExecution.totalAssetSeries.size();
+    const size_t dateCount = formalExecution.executionDates.size();
+    const size_t count = (std::min)(equityCount, dateCount);
+    if (count < 2) {
+        return series;
+    }
+
+    series.first.reserve(count - 1);
+    series.second.reserve(count - 1);
+    for (size_t index = 1; index < count; ++index) {
+        const double previousAsset = formalExecution.totalAssetSeries[index - 1];
+        const double currentAsset = formalExecution.totalAssetSeries[index];
+        if (!std::isfinite(previousAsset) || !std::isfinite(currentAsset) || previousAsset <= 0.0) {
+            continue;
+        }
+
+        series.first.push_back(currentAsset / previousAsset - 1.0);
+        series.second.push_back(formalExecution.executionDates[index]);
+    }
+
+    return series;
+}
+
+double resolveCloseForTradeDateIndex(const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex,
+                                     const std::string& symbol,
+                                     int tradeDateIndex,
+                                     bool allowCarryForward)
+{
+    const auto symbolIt = cachedMarketIndex.closeSeriesBySymbol.find(symbol);
+    if (symbolIt == cachedMarketIndex.closeSeriesBySymbol.end()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const auto& series = symbolIt->second;
+    const auto tradeDateIt = std::lower_bound(series.tradeDateIndices.begin(),
+                                              series.tradeDateIndices.end(),
+                                              tradeDateIndex);
+    if (tradeDateIt != series.tradeDateIndices.end() && *tradeDateIt == tradeDateIndex) {
+        const size_t index = static_cast<size_t>(std::distance(series.tradeDateIndices.begin(), tradeDateIt));
+        return index < series.closes.size() ? series.closes[index] : std::numeric_limits<double>::quiet_NaN();
+    }
+
+    if (!allowCarryForward || tradeDateIt == series.tradeDateIndices.begin()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const size_t index = static_cast<size_t>(std::distance(series.tradeDateIndices.begin(), std::prev(tradeDateIt)));
+    return index < series.closes.size() ? series.closes[index] : std::numeric_limits<double>::quiet_NaN();
+}
+
+QDate factorTradingDate(const std::string& tradeDate)
+{
+    return QDate::fromString(QString::fromStdString(tradeDate), QStringLiteral("yyyy-MM-dd"));
+}
+
+domain::trading::TradingExecutionContext buildFormalTradingContext(const BacktestConfig& config,
+                                                                   const std::string& executionTradeDate)
+{
+    domain::trading::TradingExecutionContext context;
+    context.mode = domain::trading::TradingMode::Backtest;
+    context.marketProfile = config.marketEnvironmentProfile;
+    context.window.startDate = factorTradingDate(executionTradeDate);
+    context.window.endDate = context.window.startDate;
+    context.costProfile.initialCapital.value = config.initialCapital;
+    context.costProfile.commissionRate.value = normalizedTradingRatio(config.transactionCost, 0.0);
+    context.costProfile.slippageRate.value = normalizedTradingRatio(config.slippageRate, 0.0);
+    context.costProfile.taxRate.value = 0.0;
+    context.riskProfile.maxPositionRatio.value = normalizedTradingRatio(config.maxTotalExposure, 1.0);
+    context.riskProfile.maxSinglePositionRatio.value = normalizedTradingRatio(config.maxPositionPercent, normalizedTradingRatio(config.maxTotalExposure, 1.0));
+    context.riskProfile.maxDrawdownLimit.value = normalizedTradingRatio(config.maxDrawdownLimit, 0.12);
+    context.riskProfile.stopLossRate.value = normalizedTradingRatio(config.stopLossRate, 0.10);
+    context.executionProfile.executionKind = domain::strategy::StrategyExecutionKind::FactorWeightedPortfolio;
+    context.executionProfile.positionSizingMethod = domain::strategy::PositionSizingMethod::EqualWeight;
+    context.executionProfile.priceModel = domain::trading::ExecutionPriceModel::NextSessionOpen;
+    context.executionProfile.shortSellingMode = domain::strategy::ShortSellingMode::Disabled;
+    context.executionProfile.rebalanceFrequencyDays = domain::strategy::RebalanceFrequencyDays{(std::max)(1, config.rebalanceDays)};
+    context.runtimeOptions.maxThreads = config.enableDateParallelism ? 2 : 1;
+    context.runtimeOptions.enableCache = !config.marketDataCacheKey.empty();
+    context.runtimeOptions.cacheTtlSeconds = 0;
+    context.metadata.insert(QStringLiteral("formalExecution"), QStringLiteral("factor_unified_trading"));
+    return context;
+}
+
+domain::trading::TradeIntentBatch buildFormalTargetBatch(const CalculationResult& factorResult,
+                                                         const BacktestConfig& config,
+                                                         const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex,
+                                                         int executionTradeDateIndex,
+                                                         double totalAsset)
+{
+    domain::trading::TradeIntentBatch batch;
+    if (!(totalAsset > 0.0)) {
+        return batch;
+    }
+
+    batch.batchId = foundation::utils::Uuid::generate_v4();
+    batch.mode = domain::trading::TradingMode::Backtest;
+    batch.source = domain::trading::IntentSource::FactorBacktest;
+
+    double positiveSum = 0.0;
+    int finiteCount = 0;
+    for (const auto& [symbol, value] : factorResult.values) {
+        Q_UNUSED(symbol);
+        if (!std::isfinite(value)) {
+            continue;
+        }
+        ++finiteCount;
+        if (value > 0.0) {
+            positiveSum += value;
+        }
+    }
+
+    for (const auto& [symbol, value] : factorResult.values) {
+        if (!std::isfinite(value)) {
+            continue;
+        }
+
+        double targetWeight = 0.0;
+        if (positiveSum > 0.0 && value > 0.0) {
+            targetWeight = value / positiveSum;
+        } else if (positiveSum <= 0.0 && finiteCount > 0) {
+            targetWeight = 1.0 / static_cast<double>(finiteCount);
+        }
+        if (!(targetWeight > 0.0)) {
+            continue;
+        }
+
+        const double referencePrice = resolveCloseForTradeDateIndex(cachedMarketIndex, symbol, executionTradeDateIndex, false);
+        if (!std::isfinite(referencePrice) || referencePrice <= 0.0) {
+            continue;
+        }
+
+        const qint64 quantity = static_cast<qint64>(std::floor((totalAsset * targetWeight) / referencePrice));
+        if (quantity <= 0) {
+            continue;
+        }
+
+        domain::trading::TargetPosition position;
+        position.symbol = domain::strategy::SymbolCode(QString::fromStdString(symbol));
+        position.targetWeight.value = targetWeight;
+        position.targetQuantity.value = quantity;
+        position.referencePrice.value = referencePrice;
+        batch.targetPositions.append(position);
+    }
+
+    return batch;
+}
+
+domain::trading::TradeIntentBatch buildFormalLiquidationBatch(
+    const domain::trading::TradingSnapshot& snapshot,
+    const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex,
+    int tradeDateIndex)
+{
+    domain::trading::TradeIntentBatch batch;
+    batch.batchId = foundation::utils::Uuid::generate_v4();
+    batch.mode = domain::trading::TradingMode::Backtest;
+    batch.source = domain::trading::IntentSource::FactorBacktest;
+
+    const std::string tradeDate = cachedMarketIndex.tradeDates[static_cast<size_t>(tradeDateIndex)];
+    const QDate qTradeDate = factorTradingDate(tradeDate);
+    for (const domain::trading::TradingPositionSnapshot& position : snapshot.positions) {
+        if (!position.symbol.isValid() || !position.quantity.isPositive()) {
+            continue;
+        }
+
+        const std::string symbol = position.symbol.text().trimmed().toStdString();
+        double referencePrice = resolveCloseForTradeDateIndex(cachedMarketIndex, symbol, tradeDateIndex, true);
+        if (!std::isfinite(referencePrice) || referencePrice <= 0.0) {
+            referencePrice = position.lastPrice.value;
+        }
+        if (!std::isfinite(referencePrice) || referencePrice <= 0.0) {
+            continue;
+        }
+
+        domain::trading::TradeIntent intent;
+        intent.intentId = foundation::utils::Uuid::generate_v4();
+        intent.source = domain::trading::IntentSource::FactorBacktest;
+        intent.strategyIdentity.strategyId = domain::strategy::StrategyId(QStringLiteral("factor_unified_trading"));
+        intent.strategyIdentity.strategyCode = domain::strategy::StrategyCode(QStringLiteral("factor_unified_trading"));
+        intent.strategyIdentity.strategyName = domain::strategy::StrategyName(QStringLiteral("Factor Unified Trading"));
+        intent.strategyIdentity.storedType = domain::backtest::StrategyStoredType::Portfolio;
+        intent.strategyIdentity.behaviorKind = domain::backtest::StrategyBehaviorKind::MultiFactor;
+        intent.strategyIdentity.executionKind = domain::strategy::StrategyExecutionKind::FactorWeightedPortfolio;
+        intent.side = domain::trading::OrderSide::Sell;
+        intent.orderType = domain::trading::OrderType::Limit;
+        intent.symbol = position.symbol;
+        intent.quantity = position.quantity;
+        intent.referencePrice.value = referencePrice;
+        intent.signalDate = qTradeDate;
+        intent.effectiveDate = qTradeDate;
+        batch.intents.append(intent);
+    }
+
+    return batch;
+}
+
+void markFormalTradingPositions(domain::trading::TradingCore* tradingCore,
+                                const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex,
+                                int tradeDateIndex)
+{
+    if (!tradingCore || tradeDateIndex < 0 || tradeDateIndex >= static_cast<int>(cachedMarketIndex.tradeDates.size())) {
+        return;
+    }
+
+    const std::string tradeDate = cachedMarketIndex.tradeDates[static_cast<size_t>(tradeDateIndex)];
+    const QDate qTradeDate = factorTradingDate(tradeDate);
+    const domain::trading::TradingSnapshot snapshot = tradingCore->snapshot();
+    for (const domain::trading::TradingPositionSnapshot& position : snapshot.positions) {
+        if (!position.symbol.isValid() || !position.quantity.isPositive()) {
+            continue;
+        }
+
+        const std::string symbol = position.symbol.text().trimmed().toStdString();
+        const double close = resolveCloseForTradeDateIndex(cachedMarketIndex, symbol, tradeDateIndex, true);
+        if (!std::isfinite(close) || close <= 0.0) {
+            continue;
+        }
+
+        domain::trading::MarketPriceMark mark;
+        mark.symbol = position.symbol;
+        mark.price.value = close;
+        mark.tradingDate = qTradeDate;
+        tradingCore->markToMarket(mark);
+    }
+}
+
+void appendFormalTradingSnapshot(FormalTradingExecution* formalExecution,
+                                 const std::string& executionTradeDate,
+                                 const domain::trading::TradingSnapshot& snapshot)
+{
+    if (!formalExecution) {
+        return;
+    }
+
+    const bool replaceLast = !formalExecution->executionDates.empty()
+        && formalExecution->executionDates.back() == executionTradeDate;
+    if (replaceLast) {
+        formalExecution->totalAssetSeries.back() = snapshot.account.totalAsset.value;
+        formalExecution->cashSeries.back() = snapshot.account.availableCash.value;
+        formalExecution->marketValueSeries.back() = snapshot.account.marketValue.value;
+        return;
+    }
+
+    formalExecution->executionDates.push_back(executionTradeDate);
+    formalExecution->totalAssetSeries.push_back(snapshot.account.totalAsset.value);
+    formalExecution->cashSeries.push_back(snapshot.account.availableCash.value);
+    formalExecution->marketValueSeries.push_back(snapshot.account.marketValue.value);
+}
+
+FormalTradingExecution simulateFormalTradingExecution(const BacktestConfig& config,
+                                                      std::vector<CalculationResult> factorResults,
+                                                      const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex)
+{
+    FormalTradingExecution formalExecution;
+    formalExecution.status = "NOT_RUN";
+    formalExecution.message = "未执行因子正式统一交易回测";
+
+    if (!(config.initialCapital > 0.0)) {
+        formalExecution.status = "FAILED";
+        formalExecution.message = "因子正式统一交易执行缺少初始资金";
+        return formalExecution;
+    }
+    if (factorResults.empty() || cachedMarketIndex.tradeDates.empty()) {
+        formalExecution.message = "未生成可用于正式执行的因子截面";
+        return formalExecution;
+    }
+
+    std::sort(factorResults.begin(), factorResults.end(), [](const CalculationResult& lhs, const CalculationResult& rhs) {
+        return lhs.date < rhs.date;
+    });
+
+    auto tradingLedger = std::make_shared<domain::trading::InMemoryTradingLedger>(
+        buildInitialFormalTradingSnapshot(config.initialCapital));
+    domain::trading::DefaultTradingCore tradingCore({}, tradingLedger, {}, {});
+
+    const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
+    int holdingDaysSinceRebalance = rebalanceInterval;
+    bool processedAnyTradeDate = false;
+
+    for (const CalculationResult& factorResult : factorResults) {
+        if (factorResult.isEmpty()) {
+            continue;
+        }
+
+        const int executionTradeDateIndex = resolveExecutionTradeDateIndex(cachedMarketIndex.tradeDates,
+                                                                           factorResult.date,
+                                                                           config);
+        if (executionTradeDateIndex < 0) {
+            continue;
+        }
+
+        const std::string& executionTradeDate = cachedMarketIndex.tradeDates[static_cast<size_t>(executionTradeDateIndex)];
+        markFormalTradingPositions(&tradingCore, cachedMarketIndex, executionTradeDateIndex);
+        processedAnyTradeDate = true;
+
+        const bool shouldRebalance = formalExecution.executedRebalanceCount == 0
+            || holdingDaysSinceRebalance >= rebalanceInterval;
+        if (shouldRebalance) {
+            ++formalExecution.scheduledRebalanceCount;
+            const double totalAsset = tradingCore.snapshot().account.totalAsset.value;
+            const domain::trading::TradeIntentBatch batch = buildFormalTargetBatch(
+                factorResult,
+                config,
+                cachedMarketIndex,
+                executionTradeDateIndex,
+                totalAsset);
+            const domain::trading::TradingExecutionContext context = buildFormalTradingContext(config, executionTradeDate);
+            if (batch.isValid() && context.isValid()) {
+                const domain::trading::ExecutionResult executionResult = tradingCore.execute(batch, context);
+                ++formalExecution.executedRebalanceCount;
+                if (executionResult.isBlocked()) {
+                    ++formalExecution.blockedRebalanceCount;
+                    ++holdingDaysSinceRebalance;
+                } else {
+                    holdingDaysSinceRebalance = 1;
+                }
+                formalExecution.acceptedOrderCount += executionResult.acceptedOrders.size();
+                formalExecution.fillCount += executionResult.fills.size();
+            } else {
+                ++holdingDaysSinceRebalance;
+            }
+        } else {
+            ++holdingDaysSinceRebalance;
+        }
+
+        appendFormalTradingSnapshot(&formalExecution, executionTradeDate, tradingCore.snapshot());
+    }
+
+    if (!processedAnyTradeDate) {
+        formalExecution.message = "因子正式统一交易未找到可执行交易日";
+        return formalExecution;
+    }
+
+    const int finalTradeDateIndex = static_cast<int>(cachedMarketIndex.tradeDates.size()) - 1;
+    markFormalTradingPositions(&tradingCore, cachedMarketIndex, finalTradeDateIndex);
+    const std::string& finalTradeDate = cachedMarketIndex.tradeDates[static_cast<size_t>(finalTradeDateIndex)];
+    const domain::trading::TradeIntentBatch liquidationBatch = buildFormalLiquidationBatch(
+        tradingCore.snapshot(),
+        cachedMarketIndex,
+        finalTradeDateIndex);
+    if (liquidationBatch.isValid()) {
+        const domain::trading::ExecutionResult liquidationResult = tradingCore.execute(
+            liquidationBatch,
+            buildFormalTradingContext(config, finalTradeDate));
+        formalExecution.acceptedOrderCount += liquidationResult.acceptedOrders.size();
+        formalExecution.fillCount += liquidationResult.fills.size();
+    }
+
+    const domain::trading::TradingSnapshot finalSnapshot = tradingCore.snapshot();
+    appendFormalTradingSnapshot(&formalExecution, finalTradeDate, finalSnapshot);
+    formalExecution.endingCash = finalSnapshot.account.availableCash.value;
+    formalExecution.endingMarketValue = finalSnapshot.account.marketValue.value;
+    formalExecution.endingTotalAsset = finalSnapshot.account.totalAsset.value;
+    formalExecution.status = formalExecution.blockedRebalanceCount > 0 ? "PARTIAL" : "SUCCESS";
+    formalExecution.message = formalExecution.blockedRebalanceCount > 0
+        ? "因子正式统一交易执行完成，部分调仓被风险规则阻断"
+        : "因子正式统一交易执行完成";
+    return formalExecution;
+}
 
 QString factorBacktestGroupDiagnosticLogFilePath()
 {
@@ -1988,13 +2380,18 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
 
         CachedReturnAggregationState aggregationState;
         initializeCachedReturnAggregationState(effectiveConfig, aggregationState);
-        std::vector<CalculationResult> unusedFactorResults;
+        std::vector<CalculationResult> streamedFactorResults;
+        CalculationResult latestFactorResult;
+        bool hasLatestFactorResult = false;
         std::string factorFailureReason;
         size_t streamedFactorWorkUnits = 0;
         std::function<bool(CalculationResult&&)> consumeCachedFactorResult = [&effectiveConfig,
                                                                                &factor,
                                                                                &aggregationState,
                                                                                &cachedMarketIndex,
+                                                                               &streamedFactorResults,
+                                               &latestFactorResult,
+                                               &hasLatestFactorResult,
                                                                                &factorFailureReason,
                                                                                &progress,
                                                                                this](CalculationResult&& factorResult) {
@@ -2013,13 +2410,18 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                 }
                 return false;
             }
+            if (!factorResult.isEmpty()) {
+                streamedFactorResults.push_back(factorResult);
+                latestFactorResult = factorResult;
+                hasLatestFactorResult = true;
+            }
             return true;
         };
         if (!calculateFactorSeries(effectiveConfig,
                                    marketContext,
                                    factor,
                                    progress,
-                                   unusedFactorResults,
+                                   streamedFactorResults,
                                    &consumeCachedFactorResult,
                                    &factorFailureReason,
                                    completedWorkUnits,
@@ -2034,6 +2436,9 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         }
 
         completedWorkUnits += streamedFactorWorkUnits;
+        if (hasLatestFactorResult) {
+            result.latestFactorResult = std::move(latestFactorResult);
+        }
         if (!populateBacktestResultFromAggregationState(effectiveConfig, aggregationState, result)) {
             result.status = "PARTIAL";
         }
@@ -2063,14 +2468,18 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         result.rawLongShortSeries = rawLongShortSeries;
         result.costAdjustedLongShortSeries = costAdjustedLongShortSeries;
         result.riskAdjustedLongShortSeries = longShortSeries;
+        result.formalTradingExecution = simulateFormalTradingExecution(effectiveConfig,
+                                           std::move(streamedFactorResults),
+                                           cachedMarketIndex);
+        const auto executionPeriodicSeries = buildFormalExecutionPeriodicSeries(result.formalTradingExecution);
 
         ++completedWorkUnits;
         updateProgress(progress,
                        progressPercentFromWork(completedWorkUnits, totalWorkUnits),
                        "汇总结果：计算年化收益、夏普、回撤、胜率和换手率");
 
-        const auto benchmarkSummary = FactorBacktestMetricsCalculator::calculateBenchmarkComparison(longShortSeries,
-                                                                                                    longShortDates,
+        const auto benchmarkSummary = FactorBacktestMetricsCalculator::calculateBenchmarkComparison(executionPeriodicSeries.first,
+                                                        executionPeriodicSeries.second,
                                                                                                     config.forwardDays,
                                                                                                     config.riskFreeRate,
                                                                                                     benchmarkLookup);
@@ -2091,6 +2500,8 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                                                     turnoverSeries,
                                                     longShortDates,
                                                     aggregationState.groupReturnSeriesByGroup,
+                                                    &executionPeriodicSeries.first,
+                                                    &executionPeriodicSeries.second,
                                                     result.alpha,
                                                     &benchmarkSummary,
                                                     riskResult.triggeredCount});

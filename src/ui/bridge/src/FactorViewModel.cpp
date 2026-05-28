@@ -212,10 +212,18 @@ QVariantMap FactorViewModel::getFactorById(const QString& factorId) const
 
 QVariantList FactorViewModel::getAllFactors() const
 {
-    if (FactorService* service = FactorService::instance()) {
-        return service->getAllFactors();
+    if (m_factors.isEmpty()) {
+        if (FactorService* service = FactorService::instance()) {
+            return service->getAllFactors();
+        }
     }
-    return {};
+
+    QVariantList factors;
+    factors.reserve(m_factors.size());
+    for (const FactorViewData& factor : m_factors) {
+        factors.append(factor.toVariantMap());
+    }
+    return factors;
 }
 
 QVariantList FactorViewModel::searchFactors(const QString& keyword) const

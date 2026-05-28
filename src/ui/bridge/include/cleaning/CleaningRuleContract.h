@@ -21,6 +21,7 @@ enum class CleaningRuleKey : std::uint8_t {
     NewStockFilter,
     STFilter,
     PriceValidity,
+    VolumeFilter,
     LimitMoveTag,
     ValuationSanitize
 };
@@ -57,6 +58,8 @@ enum class CleaningRuleConfigField : std::uint8_t {
     MinTradeDays,
     MinPrice,
     MaxPrice,
+    MinVolume,
+    MaxVolume,
     EnforceChain,
     AllowZeroWhenSuspended,
     UpThreshold,
@@ -90,6 +93,8 @@ inline QString cleaningRuleKeyName(CleaningRuleKey key)
         return QStringLiteral("stFilter");
     case CleaningRuleKey::PriceValidity:
         return QStringLiteral("priceValidity");
+    case CleaningRuleKey::VolumeFilter:
+        return QStringLiteral("volumeFilter");
     case CleaningRuleKey::LimitMoveTag:
         return QStringLiteral("limitMoveTag");
     case CleaningRuleKey::ValuationSanitize:
@@ -166,6 +171,10 @@ inline QString cleaningRuleFieldName(CleaningRuleConfigField field)
         return QStringLiteral("minPrice");
     case CleaningRuleConfigField::MaxPrice:
         return QStringLiteral("maxPrice");
+    case CleaningRuleConfigField::MinVolume:
+        return QStringLiteral("minVolume");
+    case CleaningRuleConfigField::MaxVolume:
+        return QStringLiteral("maxVolume");
     case CleaningRuleConfigField::EnforceChain:
         return QStringLiteral("enforceChain");
     case CleaningRuleConfigField::AllowZeroWhenSuspended:
@@ -185,9 +194,9 @@ inline QString cleaningRuleConfigPath(CleaningRuleKey key, CleaningRuleConfigFie
         .arg(cleaningRuleKeyName(key), cleaningRuleFieldName(field));
 }
 
-inline const std::array<CleaningRuleKey, 14>& supportedStrictCleaningRuleKeys()
+inline const std::array<CleaningRuleKey, 15>& supportedStrictCleaningRuleKeys()
 {
-    static const std::array<CleaningRuleKey, 14> keys{
+    static const std::array<CleaningRuleKey, 15> keys{
         CleaningRuleKey::Completeness,
         CleaningRuleKey::DuplicateRemoval,
         CleaningRuleKey::FinancialDateValidity,
@@ -200,6 +209,7 @@ inline const std::array<CleaningRuleKey, 14>& supportedStrictCleaningRuleKeys()
         CleaningRuleKey::NewStockFilter,
         CleaningRuleKey::STFilter,
         CleaningRuleKey::PriceValidity,
+        CleaningRuleKey::VolumeFilter,
         CleaningRuleKey::LimitMoveTag,
         CleaningRuleKey::ValuationSanitize
     };

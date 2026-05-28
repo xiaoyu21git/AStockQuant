@@ -1,15 +1,43 @@
 // engine/src/BacktestResult.cpp
 #include "BacktestResult.h"
+#include "../../domain/strategy/include/RuleTemplateStringConstants.h"
 #include "foundation/log/logger.hpp"
 #include <foundation/json/json_facade.h>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 namespace {
 
+namespace rule_template_strings = domain::strategy::rule_template_strings;
+
 constexpr std::size_t kMaxStoredRuleTemplateEvents = 8;
+
+const char* serializeTradeSide(const engine::BacktestResult::TradeSide side)
+{
+    switch (side) {
+    case engine::BacktestResult::TradeSide::Buy:
+        return "BUY";
+    case engine::BacktestResult::TradeSide::Sell:
+        return "SELL";
+    }
+
+    throw std::logic_error("unsupported trade side");
+}
+
+const char* serializeTradePositionEffect(const engine::BacktestResult::TradePositionEffect positionEffect)
+{
+    switch (positionEffect) {
+    case engine::BacktestResult::TradePositionEffect::Open:
+        return "OPEN";
+    case engine::BacktestResult::TradePositionEffect::Close:
+        return "CLOSE";
+    }
+
+    throw std::logic_error("unsupported trade position effect");
+}
 
 std::string extractTemplateFileName(const std::string& templateFilePath) {
     if (templateFilePath.empty()) {
@@ -118,9 +146,9 @@ void BacktestResult::record_rule_template_event(const RuleTemplateEvent& event) 
     rule_template_summary_.has_template = true;
     ++rule_template_summary_.triggered_count;
 
-    if (event.event_type == "entry_block") {
+    if (event.event_type == rule_template_strings::kRuleTemplateEventTypeEntryBlock) {
         ++rule_template_summary_.entry_block_count;
-    } else if (event.event_type == "forced_exit") {
+    } else if (event.event_type == rule_template_strings::kRuleTemplateEventTypeForcedExit) {
         ++rule_template_summary_.forced_exit_count;
     }
 
@@ -300,7 +328,7 @@ std::string BacktestResult::generate_report() const {
         int count = 0;
         for (const auto& trade : trades_) {
             if (count++ >= 10) break;
-            report += trade.symbol + " " + trade.direction + " 盈亏: " 
+            report += trade.symbol + " " + serializeTradeSide(trade.side) + "/" + serializeTradePositionEffect(trade.position_effect) + " 盈亏: " 
                     + std::to_string(trade.profit) + "\n";
         }
     }

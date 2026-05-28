@@ -334,7 +334,7 @@ size_t CacheUtils::predictOptimalSize(
 
 std::vector<std::string> CacheUtils::analyzeHotspots(
     const std::vector<std::string>& access_log,
-    size_t top_n) {
+    size_t topCount) {
     
     std::unordered_map<std::string, size_t> access_counts;
     
@@ -355,9 +355,9 @@ std::vector<std::string> CacheUtils::analyzeHotspots(
     
     // 提取前N个热点
     std::vector<std::string> hotspots;
-    hotspots.reserve(std::min(top_n, sorted_counts.size()));
+    hotspots.reserve(std::min(topCount, sorted_counts.size()));
     
-    for (size_t i = 0; i < std::min(top_n, sorted_counts.size()); ++i) {
+    for (size_t i = 0; i < std::min(topCount, sorted_counts.size()); ++i) {
         hotspots.push_back(sorted_counts[i].first);
     }
     

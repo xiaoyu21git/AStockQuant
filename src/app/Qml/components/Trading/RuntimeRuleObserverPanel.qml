@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import AStock.Bridge 1.0 as Bridge
+import "../../utils/StrategyCreationUtils.js" as Utils
 
 Rectangle {
     id: root
@@ -237,12 +238,22 @@ Rectangle {
             return "组内任一满足"
         }
         if (operator === "at_least") {
-            var threshold = Number((evaluation || {}).templateRulePayload && (evaluation || {}).templateRulePayload.groupMatchThreshold || 0)
+            var groupId = String((evaluation || {}).templateRuleGroupId || "").trim()
+            var decisions = runtimeTemplateGroupDecisions(evaluation)
+            var threshold = 0
+            for (var index = 0; index < decisions.length; ++index) {
+                var decision = decisions[index] || {}
+                if (String(decision.groupId || "").trim() === groupId) {
+                    threshold = Number(decision.matchThreshold || 0)
+                    break
+                }
+            }
             return threshold > 0 ? ("组内至少命中 " + threshold + " 条") : "组内至少命中"
         }
         if (operator === "score_sum") {
             return "组内累计评分"
         }
+            EXPECT_FALSE(firstMatchResult.payload.contains(QStringLiteral("groupSelectionMode")));
         if (operator === "first_match") {
             return "按首个命中裁决"
         }
@@ -499,7 +510,7 @@ Rectangle {
         var payload = source || ({})
         return "执行周期: " + String(payload.executionTimeframe || payload.execution_timeframe || "--")
             + "\n策略类型: " + String(payload.selectedStrategyType || "--")
-            + "\n兜底标的池: " + symbolListText(payload.symbol_pool !== undefined ? payload.symbol_pool : payload.symbolPool)
+            + "\n行为类型: " + Utils.StrategyCreationUtils.strategyBehaviorKindLabel(payload.strategyBehaviorKind !== undefined ? payload.strategyBehaviorKind : payload.strategy_behavior_kind)
     }
 
     function hasConfiguredDefaults() {
@@ -578,8 +589,8 @@ Rectangle {
                 fields: [
                     { key: "executionTimeframe", aliases: ["execution_timeframe"], fallbackKeys: ["execution_timeframe", "time_frame", "timeFrame"], label: "执行周期", format: "text" },
                     { key: "selectedStrategyType", fallbackKeys: ["strategy_type", "strategyType"], label: "策略类型", format: "text" },
-                    { key: "selectedStrategySubtype", fallbackKeys: ["sub_type", "subType"], label: "策略子类", format: "text" },
-                    { key: "symbol_pool", aliases: ["symbolPool"], fallbackKeys: ["symbol_pool", "symbolPool"], label: "兜底标的池", format: "symbols" }
+                    { key: "strategyBehaviorKind", aliases: ["strategy_behavior_kind"], fallbackKeys: ["strategyBehaviorKind", "strategy_behavior_kind"], label: "行为类型", format: "strategyBehaviorKind" },
+                    { key: "selectedStrategySubtype", fallbackKeys: ["sub_type", "subType"], label: "策略子类", format: "text" }
                 ]
             }
         default:
@@ -641,6 +652,8 @@ Rectangle {
 
     function formatFieldValue(fieldSpec, value) {
         switch (fieldSpec.format) {
+        case "strategyBehaviorKind":
+            return Utils.StrategyCreationUtils.strategyBehaviorKindLabel(value)
         case "percent":
             return formatPercent(value, 2)
         case "percent3":
@@ -685,8 +698,7 @@ Rectangle {
         }
 
         if (!hasValue(effectiveValue)) {
-            if (sectionKey === "strategyScopeContext"
-                    || fieldSpec.key === "symbol_pool"
+                if (sectionKey === "strategyScopeContext"
                     || fieldSpec.key === "executionTimeframe"
                     || latestRuntimeRuleEvaluation.reason === "symbol_outside_scope"
                     || latestRuntimeRuleEvaluation.scopeGate === "blocked") {

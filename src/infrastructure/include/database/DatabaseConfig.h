@@ -30,8 +30,8 @@ struct DatabaseConfig {
     // 连接选项
     bool auto_reconnect{true};            // 自动重连
     std::chrono::seconds connect_timeout{10}; // 连接超时
-    std::chrono::seconds read_timeout{30};    // 读超时
-    std::chrono::seconds write_timeout{30};   // 写超时
+    std::chrono::seconds read_timeout{300};   // 读超时，覆盖长区间回测查询
+    std::chrono::seconds write_timeout{300};  // 写超时，避免大结果集/批量写入过早断开
     
     // SSL配置
     bool use_ssl{false};                  // 是否使用SSL

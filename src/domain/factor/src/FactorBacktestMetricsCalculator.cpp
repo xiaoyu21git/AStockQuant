@@ -395,29 +395,29 @@ void FactorBacktestMetricsCalculator::populateResultMetrics(BacktestResult& resu
 
 double FactorBacktestMetricsCalculator::calculateExecutionAnnualReturn(const Inputs& inputs)
 {
-    return calculateCompoundedAnnualReturn(inputs.adjustedLongShortSeries, inputs.config.forwardDays);
+    return calculateCompoundedAnnualReturn(resolveExecutionPeriodicReturns(inputs), inputs.config.forwardDays);
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionSharpeRatio(const Inputs& inputs)
 {
-    return calculateSharpeFromPeriodicReturns(inputs.adjustedLongShortSeries,
+    return calculateSharpeFromPeriodicReturns(resolveExecutionPeriodicReturns(inputs),
                                              inputs.config.forwardDays,
                                              inputs.config.riskFreeRate);
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionMaxDrawdown(const Inputs& inputs)
 {
-    return calculateMaxDrawdown(inputs.adjustedLongShortSeries);
+    return calculateMaxDrawdown(resolveExecutionPeriodicReturns(inputs));
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionWinRate(const Inputs& inputs)
 {
-    return calculateWinRate(inputs.adjustedLongShortSeries);
+    return calculateWinRate(resolveExecutionPeriodicReturns(inputs));
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionProfitFactor(const Inputs& inputs)
 {
-    return calculateProfitFactor(inputs.adjustedLongShortSeries);
+    return calculateProfitFactor(resolveExecutionPeriodicReturns(inputs));
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionTurnoverRate(const Inputs& inputs)
@@ -427,14 +427,15 @@ double FactorBacktestMetricsCalculator::calculateExecutionTurnoverRate(const Inp
 
 double FactorBacktestMetricsCalculator::calculateExecutionVolatility(const Inputs& inputs)
 {
-    const double meanReturn = calculateAveragePeriodicReturn(inputs.adjustedLongShortSeries);
-    const double stdReturn = calculatePeriodicReturnStdDev(inputs.adjustedLongShortSeries, meanReturn);
+    const auto& executionReturns = resolveExecutionPeriodicReturns(inputs);
+    const double meanReturn = calculateAveragePeriodicReturn(executionReturns);
+    const double stdReturn = calculatePeriodicReturnStdDev(executionReturns, meanReturn);
     return stdReturn * std::sqrt(annualizationFactorForPeriods(inputs.config.forwardDays));
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionDownsideDeviation(const Inputs& inputs)
 {
-    return calculateDownsideDeviation(inputs.adjustedLongShortSeries)
+    return calculateDownsideDeviation(resolveExecutionPeriodicReturns(inputs))
         * std::sqrt(annualizationFactorForPeriods(inputs.config.forwardDays));
 }
 
@@ -445,7 +446,7 @@ double FactorBacktestMetricsCalculator::calculateExecutionSortinoRatio(const Inp
         return 0.0;
     }
 
-    const double averageReturn = calculateAveragePeriodicReturn(inputs.adjustedLongShortSeries);
+    const double averageReturn = calculateAveragePeriodicReturn(resolveExecutionPeriodicReturns(inputs));
     const double averageExcessReturn = averageReturn - calculatePeriodRiskFreeRate(inputs.config.forwardDays,
                                                                                    inputs.config.riskFreeRate);
     return (averageExcessReturn / downsideDeviation)
@@ -460,12 +461,12 @@ double FactorBacktestMetricsCalculator::calculateExecutionCalmarRatio(const Inpu
 
 double FactorBacktestMetricsCalculator::calculateExecutionValueAtRisk(const Inputs& inputs, double confidenceLevel)
 {
-    return calculateValueAtRisk(inputs.adjustedLongShortSeries, confidenceLevel);
+    return calculateValueAtRisk(resolveExecutionPeriodicReturns(inputs), confidenceLevel);
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionConditionalVaR(const Inputs& inputs, double confidenceLevel)
 {
-    return calculateConditionalVaR(inputs.adjustedLongShortSeries, confidenceLevel);
+    return calculateConditionalVaR(resolveExecutionPeriodicReturns(inputs), confidenceLevel);
 }
 
 FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetricsCalculator::calculateBenchmarkComparison(
@@ -657,6 +658,22 @@ double FactorBacktestMetricsCalculator::calculateCompoundedAnnualReturn(const st
                                                    annualizationFactor / static_cast<double>(validPeriodCount))
         - 1.0;
     return std::isfinite(compoundedAnnualReturn) ? compoundedAnnualReturn : -1.0;
+}
+
+const std::vector<double>& FactorBacktestMetricsCalculator::resolveExecutionPeriodicReturns(const Inputs& inputs)
+{
+    if (inputs.executionPeriodicReturns != nullptr) {
+        return *inputs.executionPeriodicReturns;
+    }
+    return inputs.adjustedLongShortSeries;
+}
+
+const std::vector<std::string>& FactorBacktestMetricsCalculator::resolveExecutionDates(const Inputs& inputs)
+{
+    if (inputs.executionDates != nullptr) {
+        return *inputs.executionDates;
+    }
+    return inputs.longShortDates;
 }
 
 double FactorBacktestMetricsCalculator::calculateIcTStatFromSeries(double icMean,

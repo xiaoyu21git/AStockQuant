@@ -3,8 +3,9 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <functional>
 #include <memory>
-#include "FactorBacktestService.h"
+#include "StockDataProvider.h"
 
 // 前向声明
 class FactorService;
@@ -13,7 +14,8 @@ namespace domain::backtest {
 
 class DatabaseFactorDataProvider : public FactorDataProvider {
 public:
-    explicit DatabaseFactorDataProvider(std::shared_ptr<FactorService> factorService);
+    explicit DatabaseFactorDataProvider(std::shared_ptr<FactorService> factorService,
+                                        std::function<void()> rangeLoadStartedCallback = {});
     virtual ~DatabaseFactorDataProvider();
     
     // FactorDataProvider接口实现
@@ -24,6 +26,7 @@ public:
     
 private:
     std::shared_ptr<FactorService> factorService_;
+    std::function<void()> rangeLoadStartedCallback_;
 };
 
 } // namespace domain::backtest

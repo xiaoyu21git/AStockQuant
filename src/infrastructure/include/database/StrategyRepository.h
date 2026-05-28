@@ -2,15 +2,59 @@
 #define ASTOCK_INFRASTRUCTURE_DATABASE_STRATEGYREPOSITORY_H
 
 #include "database/ConnectionPool.h"
+#include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
+#include "../../../domain/backtest/include/ResolvedStrategyBehavior.h"
+#include <QDateTime>
 #include <QString>
 #include <QVariantMap>
 #include <QMutex>
 #include <QSqlDatabase>
 #include <vector>
 #include <memory>
+#include <optional>
 
 namespace astock {
 namespace database {
+
+enum class StrategyLanguageCode {
+    Python = 0,
+    Cpp,
+    Julia,
+    R,
+};
+
+struct StrategyRuntimeProperties {
+    int assetTypeIndex{0};
+    int timeFrameIndex{0};
+    int riskLevelIndex{0};
+
+    bool hasAny() const
+    {
+        return assetTypeIndex > 0 || timeFrameIndex > 0 || riskLevelIndex > 0;
+    }
+};
+
+struct StrategyData {
+    QString strategyId;
+    qulonglong engineStrategyId{0};
+    QString strategyCode;
+    QString strategyName;
+    domain::backtest::ResolvedStrategyIdentity strategyIdentity;
+    QString description;
+    QString version;
+    QString author;
+    StrategyLanguageCode language{StrategyLanguageCode::Python};
+    strategy_view::StrategyLifecycleStatus status{strategy_view::StrategyLifecycleStatus::Unknown};
+    QDateTime createdAt;
+    QDateTime updatedAt;
+    QVariantMap parameters;
+    QVariantMap performanceMetrics;
+    StrategyRuntimeProperties runtime;
+
+    bool isValid() const;
+    QVariantMap toVariantMap() const;
+    static StrategyData fromVariantMap(const QVariantMap& strategyMap);
+};
 
 /**
  * @brief 策略仓储接口
@@ -21,14 +65,17 @@ class IStrategyRepository {
 public:
     virtual ~IStrategyRepository() = default;
     
-    virtual QVariantMap findById(const QString& strategyId) = 0;
-    virtual QVariantMap findByCode(const QString& strategyCode) = 0;
-    virtual std::vector<QVariantMap> findAll() = 0;
-    virtual std::vector<QVariantMap> findByType(const QString& strategyType) = 0;
-    virtual std::vector<QVariantMap> findByStatus(const QString& status) = 0;
-    virtual std::vector<QVariantMap> search(const QString& keyword) = 0;
-    virtual QString save(const QVariantMap& strategy) = 0;
-    virtual bool update(const QString& strategyId, const QVariantMap& strategy) = 0;
+    virtual std::optional<StrategyData> findById(const QString& strategyId) = 0;
+    virtual std::optional<StrategyData> findByCode(const QString& strategyCode) = 0;
+    virtual std::vector<StrategyData> findAll() = 0;
+    virtual std::vector<StrategyData> findByType(domain::backtest::StrategyStoredType strategyType) = 0;
+    virtual std::vector<StrategyData> findByStatus(strategy_view::StrategyLifecycleStatus status) = 0;
+    virtual std::vector<StrategyData> search(const QString& keyword) = 0;
+    virtual QString save(const StrategyData& strategy) = 0;
+    virtual bool update(const QString& strategyId, const StrategyData& strategy) = 0;
+    virtual bool updateStatus(const QString& strategyId, strategy_view::StrategyLifecycleStatus status) = 0;
+    virtual bool updateParameters(const QString& strategyId, const QVariantMap& parameters) = 0;
+    virtual bool updatePerformance(const QString& strategyId, const QVariantMap& performance) = 0;
     virtual bool remove(const QString& strategyId) = 0;
     virtual size_t count() = 0;
     virtual bool exists(const QString& strategyId) = 0;
@@ -48,14 +95,14 @@ public:
     virtual ~StrategyRepository();
     
     // IStrategyRepository接口实现
-    QVariantMap findById(const QString& strategyId) override;
-    QVariantMap findByCode(const QString& strategyCode) override;
-    std::vector<QVariantMap> findAll() override;
-    std::vector<QVariantMap> findByType(const QString& strategyType) override;
-    std::vector<QVariantMap> findByStatus(const QString& status) override;
-    std::vector<QVariantMap> search(const QString& keyword) override;
-    QString save(const QVariantMap& strategy) override;
-    bool update(const QString& strategyId, const QVariantMap& strategy) override;
+    std::optional<StrategyData> findById(const QString& strategyId) override;
+    std::optional<StrategyData> findByCode(const QString& strategyCode) override;
+    std::vector<StrategyData> findAll() override;
+    std::vector<StrategyData> findByType(domain::backtest::StrategyStoredType strategyType) override;
+    std::vector<StrategyData> findByStatus(strategy_view::StrategyLifecycleStatus status) override;
+    std::vector<StrategyData> search(const QString& keyword) override;
+    QString save(const StrategyData& strategy) override;
+    bool update(const QString& strategyId, const StrategyData& strategy) override;
     bool remove(const QString& strategyId) override;
     size_t count() override;
     bool exists(const QString& strategyId) override;
@@ -64,11 +111,11 @@ public:
     bool clearAll() override;
     
     // 扩展方法
-    virtual bool updateStatus(const QString& strategyId, const QString& status);
-    virtual bool updateParameters(const QString& strategyId, const QVariantMap& parameters);
-    virtual bool updatePerformance(const QString& strategyId, const QVariantMap& performance);
-    virtual std::vector<QVariantMap> findActiveStrategies();
-    virtual std::vector<QVariantMap> findDraftStrategies();
+    bool updateStatus(const QString& strategyId, strategy_view::StrategyLifecycleStatus status) override;
+    bool updateParameters(const QString& strategyId, const QVariantMap& parameters) override;
+    bool updatePerformance(const QString& strategyId, const QVariantMap& performance) override;
+    virtual std::vector<StrategyData> findActiveStrategies();
+    virtual std::vector<StrategyData> findDraftStrategies();
     
 private:
     /**
@@ -121,7 +168,7 @@ private:
     };
     
     // 辅助方法
-    QVariantMap rowToStrategyMap(const QSqlQuery& query);
+    StrategyData rowToStrategyData(const QSqlQuery& query);
     QVariantMap loadStrategyParameters(const QString& strategyId, QSqlDatabase& db);
     bool saveStrategyParameters(const QString& strategyId, const QVariantMap& parameters, QSqlDatabase& db);
     bool deleteStrategyParameters(const QString& strategyId, QSqlDatabase& db);
@@ -132,17 +179,17 @@ private:
      * 被 save() 和 update() 复用，确保事务中使用同一连接
      * @return 保存成功的策略ID，失败返回空字符串
      */
-    QString saveStrategyInternal(const QVariantMap& strategy, QSqlDatabase& db, bool isUpdate = false);
+    QString saveStrategyInternal(const StrategyData& strategy, QSqlDatabase& db, bool isUpdate = false);
     
     /**
      * @brief 验证策略数据
      */
-    bool validateStrategy(const QVariantMap& strategy) const;
+    bool validateStrategy(const StrategyData& strategy) const;
     
     /**
      * @brief 生成策略代码（如果未提供）
      */
-    QString generateStrategyCode(const QVariantMap& strategy) const;
+    QString generateStrategyCode(const StrategyData& strategy) const;
     
 private:
     bool m_initialized;

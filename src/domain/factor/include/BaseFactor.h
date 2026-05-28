@@ -174,6 +174,29 @@ struct CalculationResult {
         
         return json;
     }
+
+    static CalculationResult fromJson(const foundation::json::JsonFacade& json) {
+        CalculationResult result;
+        if (json.has("calculation_id")) {
+            result.calculationId = foundation::utils::Uuid::from_string(json.get("calculation_id").asString());
+        }
+        if (json.has("trade_date")) {
+            result.date = json.get("trade_date").asString();
+        }
+        if (json.has("data_status")) {
+            result.dataStatus = DataStatus::fromJson(json.get("data_status"));
+        }
+        if (json.has("metadata")) {
+            result.metadata = json.get("metadata");
+        }
+        if (json.has("values")) {
+            const auto valuesJson = json.get("values");
+            for (const std::string& key : valuesJson.keys()) {
+                result.values.emplace(key, valuesJson.get(key).asDouble());
+            }
+        }
+        return result;
+    }
 };
 
 struct CommonRuntimeState {

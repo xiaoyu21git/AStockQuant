@@ -112,6 +112,7 @@ if(ENABLE_JUJIN_MARKET)
         endif()
     endforeach()
 endif()
+
 # 鍒涘缓QML妯″潡
 qt_add_qml_module(astockquantapp
     URI ConsoleUi
@@ -129,7 +130,6 @@ qt_add_qml_module(astockquantapp
         Qml/dialogs/WithdrawDialog.qml
         Qml/dialogs/UserProfileDialog.qml
         Qml/page/Sidebar.qml
-        Qml/page/backtest/StrategyBacktestPage.qml
         Qml/page/dashboard/ChartArea.qml
         Qml/page/dashboard/MainContent.qml
         Qml/page/dashboard/MarketGrid.qml
@@ -150,7 +150,6 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
         Qml/page/strategies/StrategyCreationPagePro.qml
-        Qml/page/stockpools/CustomStockPoolPage.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/DataAnalysis/CacheManagementPage.qml
             Qml/page/risk/RiskConfigurationPage.qml
@@ -215,7 +214,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/RuleTemplateStructureView.qml
         Qml/components/Strategy/Creation/RuleTemplateSuggestionPanel.qml
         Qml/components/Strategy/Creation/StrategyProfilePanel.qml
-        Qml/components/StockPools/LinkedStockPoolSelector.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
@@ -259,15 +257,12 @@ qt_add_qml_module(astockquantapp
         Qml/utils/StrategyCreationUtils.js
         Qml/utils/RuleTemplatePreviewUtils.js
         Qml/utils/I18n.js
-        Qml/utils/BacktestPerformanceAdapter.js
-        Qml/utils/BacktestResultAdapter.js
         Qml/utils/StrategyStructureAdapter.js
         Qml/utils/RiskBacktestMetaLoader.js
         Qml/utils/StrategyDataAdapter.js
         Qml/utils/FactorDataAdapter.js
         Qml/utils/TradingPageAdapter.js
         Qml/utils/TradeTestingPageAdapter.js
-        Qml/utils/CustomStockPoolStore.js
         Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
@@ -286,10 +281,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/qmldir
         Qml/components/DataAnalysis/CacheManagementPanel.qml
         Qml/components/FactorWorkbench/Creation/components/qmldir
-        Qml/page/backtest/qmldir
         Qml/page/risk/qmldir
         Qml/page/settings/qmldir
-        Qml/page/stockpools/qmldir
         Qml/page/strategies/qmldir
         Qml/page/trading/qmldir
 
@@ -321,6 +314,12 @@ add_executable(astockquantapp-exe
 target_link_libraries(astockquantapp-exe
     PRIVATE
     astockquantapp
+)
+
+add_custom_command(TARGET astockquantapp-exe POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:astockquantapp>
+        $<TARGET_FILE_DIR:astockquantapp-exe>
 )
 
 if(ENABLE_JUJIN_MARKET)

@@ -200,10 +200,6 @@ std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
     return normalizeUniqueFields(fields);
 }
 
-bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                    const QString& tableName,
-                    const QString& columnName);
-
 QString positionalParamKey(int index)
 {
     return QStringLiteral("__pos_%1").arg(index, 6, 10, QLatin1Char('0'));
@@ -351,18 +347,6 @@ bool fieldRequiresPositiveValues(const QString& rawField)
         QString(factor::bridge::DerivativesFieldKeys::OPEN_INTEREST)
     };
     return positiveFields.contains(normalizeFieldName(rawField));
-}
-
-bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                    const QString& tableName,
-                    const QString& columnName)
-{
-    if (!db || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const QSet<QString> columns = loadTableColumns(db, tableName);
-    return columns.contains(columnName.trimmed().toLower());
 }
 
 QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,

@@ -20,6 +20,16 @@
 
 namespace factor::cached_bars {
 
+inline bool rowOwnsMarketBarFields(const QVariantMap& row)
+{
+    const QString normalizedDataType = factor::bridge::normalizeSelectedDataType(
+        row.value(factor::bridge::CleaningInternalFieldKeys::DATA_TYPE,
+                  row.value(QStringLiteral("dataType"))).toString());
+    return normalizedDataType.isEmpty()
+        || normalizedDataType == factor::bridge::normalizedSelectedDataTypeName(
+            factor::bridge::CleanedDataFieldGroup::MarketBar);
+}
+
 inline std::string normalizeTradeDate(const std::string& rawDate)
 {
     const QString trimmed = QString::fromStdString(rawDate).trimmed();
@@ -172,6 +182,7 @@ inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& 
 
     for (const QVariant& rowValue : rows) {
         const QVariantMap row = rowValue.toMap();
+        const bool marketBarOwner = rowOwnsMarketBarFields(row);
         const QString symbol = row.value(factor::bridge::CommonFieldKeys::SYMBOL).toString().trimmed();
         QString effectiveDate = row.value(
             factor::bridge::CommonFieldKeys::TRADE_DATE,
@@ -179,7 +190,8 @@ inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& 
         if (effectiveDate.isEmpty()) {
             effectiveDate = row.value(QStringLiteral("disclosure_date")).toString().trimmed();
         }
-        const double close = row.value(factor::bridge::MarketBarFieldKeys::CLOSE).toDouble();
+        bool closeOk = false;
+        const double close = row.value(factor::bridge::MarketBarFieldKeys::CLOSE).toDouble(&closeOk);
         if (symbol.isEmpty() || effectiveDate.isEmpty()) {
             continue;
         }
@@ -200,7 +212,7 @@ inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& 
         }
         bar = &cachedBars[rowIndexIt->second];
 
-        if (std::isfinite(close)) {
+        if (marketBarOwner && closeOk && std::isfinite(close)) {
             bar->close = close;
             bar->numericFields[factor::bridge::MarketBarFieldKeys::CLOSE.c_str()] = close;
         }
@@ -236,6 +248,10 @@ inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& 
                 continue;
             }
 
+            if (!marketBarOwner && factor::bridge::marketBarFields().contains(normalizedField)) {
+                continue;
+            }
+
             bool ok = false;
             const double numericValue = it.value().toDouble(&ok);
             if (!ok || !std::isfinite(numericValue)) {
@@ -245,12 +261,14 @@ inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& 
             bar->numericFields[normalizedField.toStdString()] = numericValue;
         }
 
-        const QVariant adjFactorValue = row.contains(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
-            ? row.value(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
-            : row.value(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR, 1.0);
-        const double adjFactor = adjFactorValue.toDouble();
-        if (std::isfinite(adjFactor)) {
-            bar->numericFields[factor::bridge::LegacyCleaningFieldKeys::ADJ_FACTOR.c_str()] = adjFactor;
+        if (marketBarOwner) {
+            const QVariant adjFactorValue = row.contains(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
+                ? row.value(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
+                : row.value(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR, 1.0);
+            const double adjFactor = adjFactorValue.toDouble();
+            if (std::isfinite(adjFactor)) {
+                bar->numericFields[factor::bridge::LegacyCleaningFieldKeys::ADJ_FACTOR.c_str()] = adjFactor;
+            }
         }
     }
 

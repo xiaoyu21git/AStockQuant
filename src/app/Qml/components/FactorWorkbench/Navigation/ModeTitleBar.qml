@@ -15,6 +15,12 @@ Rectangle {
     
     property string currentMode: "home"
     property bool showBackButton: currentMode !== "home"
+    property var modeOptions: ["library", "debug", "analyze", "backtest"]
+    property var modeTitleMap: ({})
+    property var modeSubtitleMap: ({})
+    property int modeButtonMinWidth: 80
+
+    default property alias trailingActions: actionSlot.data
     
     signal modeSelected(string mode)
     signal backClicked()
@@ -58,58 +64,72 @@ Rectangle {
             spacing: 4
             
             Text {
-                text: getModeTitle(currentMode)
+                text: resolveModeTitle(currentMode)
                 font.pixelSize: 20
                 font.weight: Font.DemiBold
                 color: "#F1F5F9"
             }
             
             Text {
-                text: "一站式因子创建、调试、分析和回测平台"
+                text: resolveModeSubtitle(currentMode)
                 font.pixelSize: 12
                 color: "#94A3B8"
-                visible: currentMode === "home"
+                visible: text.length > 0
             }
         }
         
         Item { Layout.fillWidth: true }
-        
+
         // 模式切换按钮
         Row {
             spacing: 8
             
             Repeater {
-                model: ["library", "debug", "analyze", "backtest"]
+                model: root.modeOptions
                 
                 delegate: Rectangle {
-                    width: 80
+                    readonly property string modeValue: root.resolveModeValue(modelData)
+                    readonly property string modeLabel: root.resolveModeLabel(modelData)
+
+                    width: Math.max(root.modeButtonMinWidth, modeLabelText.implicitWidth + 24)
                     height: 36
                     radius: 8
-                    color: currentMode === modelData ? "#3B82F6" : "transparent"
-                    border.width: currentMode === modelData ? 0 : 1
+                    color: currentMode === modeValue ? "#3B82F6" : "transparent"
+                    border.width: currentMode === modeValue ? 0 : 1
                     border.color: "#334155"
                     
                     Text {
+                        id: modeLabelText
                         anchors.centerIn: parent
-                        text: getModeLabel(modelData)
+                        text: modeLabel
                         font.pixelSize: 14
-                        color: currentMode === modelData ? "white" : "#F1F5F9"
+                        color: currentMode === modeValue ? "white" : "#F1F5F9"
                     }
                     
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.modeSelected(modelData)
+                        onClicked: root.modeSelected(modeValue)
                     }
                 }
             }
+        }
+
+        RowLayout {
+            id: actionSlot
+            spacing: 8
         }
     }
     
     // ============ 函数 ============
     
     // 获取模式标题
-    function getModeTitle(mode) {
+    function resolveModeTitle(mode) {
+        var customTitle = modeTitleMap && modeTitleMap[mode] !== undefined ? modeTitleMap[mode] : ""
+        if (String(customTitle || "").length > 0) {
+            return String(customTitle)
+        }
+
         switch(mode) {
             case "home": return "🏠 因子分析工作台"
             case "library": return "📚 因子库浏览"
@@ -122,7 +142,22 @@ Rectangle {
     }
     
     // 获取模式标签
-    function getModeLabel(mode) {
+    function resolveModeValue(modeItem) {
+        if (modeItem && typeof modeItem === "object") {
+            return String(modeItem.value || "")
+        }
+        return String(modeItem || "")
+    }
+
+    function resolveModeLabel(modeItem) {
+        if (modeItem && typeof modeItem === "object") {
+            var explicitLabel = String(modeItem.label || "")
+            if (explicitLabel.length > 0) {
+                return explicitLabel
+            }
+        }
+
+        var mode = resolveModeValue(modeItem)
         switch(mode) {
             case "home": return "首页"
             case "library": return "因子库"
@@ -132,5 +167,18 @@ Rectangle {
             case "backtest": return "回测"
             default: return mode
         }
+    }
+
+    function resolveModeSubtitle(mode) {
+        var customSubtitle = modeSubtitleMap && modeSubtitleMap[mode] !== undefined ? modeSubtitleMap[mode] : ""
+        if (String(customSubtitle || "").length > 0) {
+            return String(customSubtitle)
+        }
+
+        if (mode === "home") {
+            return "一站式因子创建、调试、分析和回测平台"
+        }
+
+        return ""
     }
 }

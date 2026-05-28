@@ -59,7 +59,14 @@ public:
     
     // 因子值获取方法（用于回测）
     Q_INVOKABLE QVariantMap getFactorValues(const QString& factorId, const QString& date);
+    Q_INVOKABLE QVariantMap getFactorValuesForSymbols(const QString& factorId,
+                                                      const QString& date,
+                                                      const QStringList& symbols);
+    QVariantMap getFactorValuesForSymbolsBatch(const QStringList& factorIds,
+                                               const QString& date,
+                                               const QStringList& symbols);
     Q_INVOKABLE QVariantMap getFactorValuesBatch(const QString& factorId, const QStringList& dates);
+    Q_INVOKABLE QString resolveDomainInstanceId(const QString& factorId) const;
     Q_INVOKABLE QString getLatestAvailableTradeDate();
     Q_INVOKABLE QVariantMap getUnifiedParameterSchema() const;
     
@@ -123,10 +130,12 @@ private:
     
     // 查询数据库数据（私有辅助方法）
     QVariantList queryDatabaseData(const QString& minDate, const QString& maxDate);
+    QVariantList queryDatabaseDataForSymbols(const QString& minDate,
+                                            const QString& maxDate,
+                                            const QStringList& requestedSymbols);
 
     // 新 domain/factor 接口适配
     bool initializeFactorDomainRuntime();
-    QString resolveDomainInstanceId(const QString& factorId) const;
     QString determineDomainInstanceId(const QVariantMap& factorData) const;
     QString resolveRepositoryFactorId(const QString& factorId) const;
     QVariantMap getFactorDefinitionFromDomain(const QString& factorId) const;
@@ -136,7 +145,8 @@ private:
     bool removeFactorDefinitionFromDomain(const QString& factorId);
     QVariantMap getFactorValuesFromDomain(const QString& factorId,
                                           const QString& resolvedInstanceId,
-                                          const QString& date);
+                                          const QString& date,
+                                          const QStringList& requestedSymbols = {});
     QVariantMap getFactorValuesBatchFromDomain(const QString& factorId,
                                                const QString& resolvedInstanceId,
                                                const QStringList& dates);
@@ -177,6 +187,7 @@ private:
     mutable QMutex m_initMutex;
     mutable QMutex m_mutationMutex;
     mutable QMutex m_observabilityMutex;
+    mutable QMutex m_queryWindowCacheMutex;
     
     // 原子标志位
     std::atomic<bool> m_initialized;
@@ -196,6 +207,8 @@ private:
     bool m_mutationInProgress;
     QVariantMap m_lastOperationReport;
     QVariantList m_recentOperationReports;
+    QMap<QString, QVariantList> m_queryWindowCache;
+    QStringList m_queryWindowCacheOrder;
 
     std::function<bool(const QVariantMap&)> m_syncFactorDefinitionOverrideForTests;
     std::function<bool(const QString&)> m_removeFactorDefinitionOverrideForTests;

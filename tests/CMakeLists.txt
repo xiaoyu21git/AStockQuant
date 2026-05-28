@@ -99,14 +99,16 @@ function(copy_benchmark_qt_sql_plugins target_name)
     if(qt_core_debug_location)
         get_filename_component(qt_core_debug_bin_dir "${qt_core_debug_location}" DIRECTORY)
         list(APPEND qt_sql_plugin_sources
-            "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlmysqld.dll")
+            "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlmysqld.dll"
+            "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlited.dll")
     endif()
 
     get_target_property(qt_core_release_location Qt6::Core IMPORTED_LOCATION_RELEASE)
     if(qt_core_release_location)
         get_filename_component(qt_core_release_bin_dir "${qt_core_release_location}" DIRECTORY)
         list(APPEND qt_sql_plugin_sources
-            "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlmysql.dll")
+            "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlmysql.dll"
+            "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlite.dll")
     endif()
 
     list(REMOVE_DUPLICATES qt_sql_plugin_sources)
@@ -165,11 +167,53 @@ else()
     message(WARNING "[TESTS] test_factor_custom_expression.cpp not found!")
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_backtest_regression.cpp")
-    list(APPEND TEST_SOURCES "test_factor_backtest_regression.cpp")
-    message(STATUS "[TESTS] Found: test_factor_backtest_regression.cpp")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_engine.cpp")
+    list(APPEND TEST_SOURCES "test_strategy_backtest_engine.cpp")
+    message(STATUS "[TESTS] Found: test_strategy_backtest_engine.cpp")
 else()
-    message(WARNING "[TESTS] test_factor_backtest_regression.cpp not found!")
+    message(WARNING "[TESTS] test_strategy_backtest_engine.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_backtest_application_service.cpp")
+    list(APPEND TEST_SOURCES "test_backtest_application_service.cpp")
+    message(STATUS "[TESTS] Found: test_backtest_application_service.cpp")
+else()
+    message(WARNING "[TESTS] test_backtest_application_service.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_entry_service.cpp")
+    list(APPEND TEST_SOURCES "test_strategy_backtest_entry_service.cpp")
+    message(STATUS "[TESTS] Found: test_strategy_backtest_entry_service.cpp")
+else()
+    message(WARNING "[TESTS] test_strategy_backtest_entry_service.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_engine_gateway.cpp")
+    list(APPEND TEST_SOURCES "test_strategy_backtest_engine_gateway.cpp")
+    message(STATUS "[TESTS] Found: test_strategy_backtest_engine_gateway.cpp")
+else()
+    message(WARNING "[TESTS] test_strategy_backtest_engine_gateway.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_backtest_request_factory.cpp")
+    list(APPEND TEST_SOURCES "test_backtest_request_factory.cpp")
+    message(STATUS "[TESTS] Found: test_backtest_request_factory.cpp")
+else()
+    message(WARNING "[TESTS] test_backtest_request_factory.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_request_adapter.cpp")
+    list(APPEND TEST_SOURCES "test_strategy_backtest_request_adapter.cpp")
+    message(STATUS "[TESTS] Found: test_strategy_backtest_request_adapter.cpp")
+else()
+    message(WARNING "[TESTS] test_strategy_backtest_request_adapter.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_runtime_overlay.cpp")
+    list(APPEND TEST_SOURCES "test_strategy_backtest_runtime_overlay.cpp")
+    message(STATUS "[TESTS] Found: test_strategy_backtest_runtime_overlay.cpp")
+else()
+    message(WARNING "[TESTS] test_strategy_backtest_runtime_overlay.cpp not found!")
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_crosscheck_export.cpp")
@@ -191,13 +235,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strict_cleaning_regression.cpp")
     message(STATUS "[TESTS] Found: test_strict_cleaning_regression.cpp")
 else()
     message(WARNING "[TESTS] test_strict_cleaning_regression.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_regression.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_backtest_regression.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_backtest_regression.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_backtest_regression.cpp not found!")
 endif()
 
 if(NOT TEST_SOURCES)
@@ -231,7 +268,9 @@ target_link_libraries(test_eventsystem
         Qt6::Core
         engine          # Engine 库（包含 Event）
         domain          # Domain 库
-        bridge          # StrategyBacktestController 回归测试
+        domain_backtest
+        application_backtest
+        bridge
         factor_system   # ConfigurableFactor/Factor runtime symbols
         infrastructure  # MarketDataRepository 回归测试
         foundation      # Foundation 库
@@ -269,13 +308,17 @@ copy_benchmark_qt_sql_plugins(test_eventsystem)
 if(ENABLE_JUJIN_MARKET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
     message(STATUS "[TESTS] Found: test_trading_strategy_binding_regression.cpp")
 
-    add_executable(test_trading_strategy_binding_regression
+    add_executable(test_trading_strategy_binding_regression EXCLUDE_FROM_ALL
         test_trading_strategy_binding_regression.cpp
     )
 
     set_target_properties(test_trading_strategy_binding_regression PROPERTIES
         MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
     )
+
+    if(MSVC)
+        target_compile_options(test_trading_strategy_binding_regression PRIVATE /FS /bigobj /Zm300)
+    endif()
 
     target_include_directories(test_trading_strategy_binding_regression
         PRIVATE
@@ -320,44 +363,6 @@ if(ENABLE_JUJIN_MARKET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_stra
     message(STATUS "[TESTS] Configured test_trading_strategy_binding_regression executable")
 elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
     message(STATUS "[TESTS] Skipping test_trading_strategy_binding_regression because ENABLE_JUJIN_MARKET is OFF")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")
-    message(STATUS "[TESTS] Found: run_strategy_backtest_once.cpp")
-
-    add_executable(run_strategy_backtest_once
-        run_strategy_backtest_once.cpp
-    )
-
-    set_target_properties(run_strategy_backtest_once PROPERTIES
-        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
-    )
-
-    target_include_directories(run_strategy_backtest_once
-        PRIVATE
-            ${CMAKE_SOURCE_DIR}/src/engine/include
-            ${CMAKE_SOURCE_DIR}/src/domain/include
-            ${CMAKE_SOURCE_DIR}/src/foundation/include
-            ${CMAKE_SOURCE_DIR}/src/infrastructure/include
-            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
-            ${CMAKE_SOURCE_DIR}/astock_engine
-            ${CMAKE_SOURCE_DIR}/src
-    )
-
-    target_link_libraries(run_strategy_backtest_once
-        PRIVATE
-            engine
-            domain
-            bridge
-            infrastructure
-            foundation
-    )
-
-    set_target_properties(run_strategy_backtest_once PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
-    )
-
-    message(STATUS "[TESTS] Configured run_strategy_backtest_once executable")
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")

@@ -40,6 +40,7 @@ from astock_engine.broker.myquant_broker import (
 )
 from tools.a_share_symbol_utils import classify_mainland_stock_symbol
 from tools.daily_bar_quality import format_invalid_samples, sanitize_valuation_record
+from tools.history_start_policy import clamp_history_start_date
 
 
 # =============== 配置区域（按需修改）================
@@ -286,7 +287,7 @@ def _fetch_share_change_events(symbol: str, start: dt.date, end: dt.date) -> Lis
     gm_symbol = MyQuantBroker._to_gm_symbol(symbol)  # type: ignore[attr-defined]
     rows = stk_get_share_change(
         gm_symbol,
-        start_date="1990-01-01",
+        start_date=clamp_history_start_date(start).strftime("%Y-%m-%d"),
         end_date=end.strftime("%Y-%m-%d"),
     )
 

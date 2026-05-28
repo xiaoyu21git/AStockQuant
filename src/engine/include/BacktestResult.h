@@ -8,6 +8,16 @@ using Duration = foundation::Duration;
 
 class BacktestResult {
 public:
+    enum class TradeSide : int {
+        Buy = 0,
+        Sell = 1,
+    };
+
+    enum class TradePositionEffect : int {
+        Open = 0,
+        Close = 1,
+    };
+
     // 基础信息
     struct RunInfo {
         foundation::Uuid backtest_id;
@@ -63,7 +73,8 @@ public:
         foundation::Timestamp entry_time;
         foundation::Timestamp exit_time;
         std::string symbol;
-        std::string direction;     // "BUY" / "SELL"
+        TradeSide side{TradeSide::Buy};
+        TradePositionEffect position_effect{TradePositionEffect::Open};
         double entry_price;
         double exit_price;
         double quantity;

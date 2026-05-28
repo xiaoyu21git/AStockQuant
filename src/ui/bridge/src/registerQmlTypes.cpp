@@ -3,7 +3,6 @@
 #include <QQmlEngine>
 #include <QStringList>
 #include <QTimer>
-//#include "BacktestController.h"
 #include "DataService.h"
 #include "DataRuleService.h"
 #include "CacheDetailPreviewModel.h"
@@ -28,7 +27,6 @@
 #include "RuleTemplateSuggestionService.h" // 新增：规则模板建议桥接服务
 #include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
 #include "UiLifecycleCoordinator.h"
-#include "StrategyBacktestController.h" // 新增：策略回测控制器
 #include "StrategyService.h"           // 新增：策略服务
 #include "StrategyViewModel.h"        // 新增：策略视图模型
 
@@ -38,7 +36,6 @@ namespace wang{
    {
       static const char* url = "AStock.Bridge";
 
-    // qmlRegisterType<BacktestController>(url, 1, 0, "BacktestController");
       // 预览数据模型 - 专为预览窗口设计
       qmlRegisterType<PreviewDataModel>(url, 1, 0, "PreviewDataModel");
       qmlRegisterType<CacheDetailPreviewModel>(url, 1, 0, "CacheDetailPreviewModel");
@@ -215,9 +212,6 @@ namespace wang{
             return UiLifecycleCoordinator::instance();
          }
       );
-      
-      // StrategyBacktestController - 策略回测控制器
-      qmlRegisterType<StrategyBacktestController>(url, 1, 0, "StrategyBacktestController");
       
       // StrategyService - 策略服务（单例模式）
       qmlRegisterSingletonType<StrategyService>(

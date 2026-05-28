@@ -42,7 +42,7 @@ private:
     static QVariantList buildCoreMetrics(const factor::FactorBacktestMetrics& metrics);
     static QVariantList buildOptionalMetrics(const factor::BacktestResult& result,
                                              double documentedLongShortAnnualReturn,
-                                             double documentedLongShortMaxDrawdown,
+                                             double documentedExecutionMaxDrawdown,
                                              double documentedAnnualTurnover);
     static QVariantList buildAuxiliaryMetrics(const factor::FactorBacktestMetrics& metrics);
     static QVariantList buildRatingGates(const factor::FactorBacktestMetrics& metrics);

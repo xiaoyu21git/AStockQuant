@@ -11,13 +11,25 @@ Rectangle {
     
     // ============ 属性 ============
     
-    property string selectedStrategyType: ""
-    property string selectedStrategyName: Utils.StrategyCreationUtils.getStrategyTypeName(selectedStrategyType)
+    property int selectedStrategyTypeIndex: 0
+    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     readonly property int compactSelectorColumns: width >= 280 ? 2 : 1
     readonly property int strategyCardHeight: compactSelectorColumns > 1 ? 44 : 50
+    readonly property var strategyTypeIndices: [
+        Utils.StrategyCreationUtils.StrategyTypeIndex.TrendFollowing,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.TrendBreakout,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.MeanReversion,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.Momentum,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.Arbitrage,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearning,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.HighFrequency,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.EventDriven,
+        Utils.StrategyCreationUtils.StrategyTypeIndex.Custom
+    ]
     
     // 信号
-    signal strategyTypeChanged(string strategyType)
+    signal strategyTypeIndexChanged(int strategyTypeIndex)
     
     // ============ 主布局 ============
     
@@ -67,10 +79,8 @@ Rectangle {
                         
                         Rectangle {
                             id: cardRoot
-                            property string typeId: ""
-                            property string displayName: ""
-                            property string description: ""
-                            property bool isSelected: root.selectedStrategyType === typeId
+                            property int strategyTypeIndex: -1
+                            property bool isSelected: root.selectedStrategyTypeIndex === strategyTypeIndex
                             
                             Layout.fillWidth: true
                             height: root.strategyCardHeight
@@ -95,7 +105,7 @@ Rectangle {
                                     
                                     Text {
                                         anchors.centerIn: parent
-                                        text: Utils.StrategyCreationUtils.getStrategyIcon(cardRoot.typeId)
+                                        text: Utils.StrategyCreationUtils.getStrategyIconFromIndex(cardRoot.strategyTypeIndex)
                                         font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 14
                                         color: isSelected ? "white" : "#cbd5e1"
                                     }
@@ -108,7 +118,7 @@ Rectangle {
                                     spacing: root.compactSelectorColumns > 1 ? 0 : 2
                                     
                                     Text {
-                                        text: cardRoot.displayName
+                                        text: Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(cardRoot.strategyTypeIndex)
                                         font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 13
                                         font.weight: isSelected ? Font.DemiBold : Font.Medium
                                         color: isSelected ? "white" : "#f1f5f9"
@@ -117,7 +127,7 @@ Rectangle {
                                     }
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.getBriefDescription(cardRoot.typeId)
+                                        text: Utils.StrategyCreationUtils.getBriefDescriptionFromIndex(cardRoot.strategyTypeIndex)
                                         font.pixelSize: 10
                                         color: isSelected ? "#dbeafe" : "#94a3b8"
                                         elide: Text.ElideRight
@@ -139,264 +149,30 @@ Rectangle {
                             }
                         }
                     }
-                    
-                    // 趋势跟踪策略
-                    Loader {
-                        id: trendCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "trend_following"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("trend_following")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("trend_following")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "trend_following") {
-                                    // 如果已经选中，取消选择
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    // 否则选择该类型
-                                    root.selectedStrategyType = "trend_following"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
 
-                    Loader {
-                        id: trendBreakoutCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "trend_breakout"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("trend_breakout")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("trend_breakout")
-                        }
+                    Repeater {
+                        model: root.strategyTypeIndices
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "trend_breakout") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "trend_breakout"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
+                        delegate: Loader {
+                            required property var modelData
+
+                            readonly property int strategyTypeIndex: Number(modelData)
+
+                            sourceComponent: strategyTypeCard
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: root.strategyCardHeight
+
+                            onLoaded: {
+                                item.strategyTypeIndex = strategyTypeIndex
                             }
-                        }
-                    }
-                    
-                    // 均值回归策略
-                    Loader {
-                        id: meanReversionCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "mean_reversion"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("mean_reversion")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("mean_reversion")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "mean_reversion") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "mean_reversion"
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+
+                                onClicked: {
+                                    root.toggleStrategyType(parent.strategyTypeIndex)
                                 }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 动量策略
-                    Loader {
-                        id: momentumCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "momentum"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("momentum")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("momentum")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "momentum") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "momentum"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 套利策略
-                    Loader {
-                        id: arbitrageCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "arbitrage"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("arbitrage")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("arbitrage")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "arbitrage") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "arbitrage"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 机器学习策略
-                    Loader {
-                        id: mlCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "machine_learning"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("machine_learning")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("machine_learning")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "machine_learning") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "machine_learning"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 多因子策略
-                    Loader {
-                        id: multiFactorCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "multi_factor"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("multi_factor")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("multi_factor")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "multi_factor") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "multi_factor"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 高频策略
-                    Loader {
-                        id: hfCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "high_frequency"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("high_frequency")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("high_frequency")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "high_frequency") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "high_frequency"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 事件驱动策略
-                    Loader {
-                        id: eventCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "event_driven"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("event_driven")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("event_driven")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "event_driven") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "event_driven"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
-                            }
-                        }
-                    }
-                    
-                    // 自定义策略
-                    Loader {
-                        id: customCard
-                        sourceComponent: strategyTypeCard
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: root.strategyCardHeight
-                        onLoaded: {
-                            item.typeId = "custom"
-                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("custom")
-                            item.description = Utils.StrategyCreationUtils.getBriefDescription("custom")
-                        }
-                        
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.selectedStrategyType === "custom") {
-                                    root.selectedStrategyType = ""
-                                } else {
-                                    root.selectedStrategyType = "custom"
-                                }
-                                root.strategyTypeChanged(root.selectedStrategyType)
                             }
                         }
                     }
@@ -420,7 +196,7 @@ Rectangle {
                     
                     Text {
                         id: strategyTypeDesc
-                        text: Utils.StrategyCreationUtils.getStrategyTypeDescription(root.selectedStrategyType)
+                        text: Utils.StrategyCreationUtils.getStrategyTypeDescriptionFromIndex(root.selectedStrategyTypeIndex)
                         font.pixelSize: 12
                         color: "#94a3b8"
                         wrapMode: Text.WordWrap
@@ -436,18 +212,23 @@ Rectangle {
     
     // 重置选择
     function reset() {
-        root.selectedStrategyType = "trend_following"
+        root.selectedStrategyTypeIndex = Utils.StrategyCreationUtils.StrategyTypeIndex.TrendFollowing
     }
 
-    function setSelectedStrategyType(strategyType, emitSignal) {
-        root.selectedStrategyType = strategyType || "trend_following"
+    function toggleStrategyType(strategyTypeIndex) {
+        root.selectedStrategyTypeIndex = root.selectedStrategyTypeIndex === strategyTypeIndex ? -1 : strategyTypeIndex
+        root.strategyTypeIndexChanged(root.selectedStrategyTypeIndex)
+    }
+
+    function setSelectedStrategyTypeIndex(strategyTypeIndex, emitSignal) {
+        root.selectedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
         if (emitSignal === undefined || emitSignal) {
-            root.strategyTypeChanged(root.selectedStrategyType)
+            root.strategyTypeIndexChanged(root.selectedStrategyTypeIndex)
         }
     }
     
     // 验证
     function isValid() {
-        return root.selectedStrategyType !== ""
+        return root.selectedStrategyTypeIndex >= 0
     }
 }

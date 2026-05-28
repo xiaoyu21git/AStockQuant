@@ -61,8 +61,9 @@ set(BRIDGE_HEADERS
     include/TradingFormPanelHelper.h
     include/TradingRuntimeStatusService.h
     include/UiLifecycleCoordinator.h
-    include/StrategyBacktestController.h
+    include/StrategyBacktestRuntimeAccess.h
     include/StrategyRuntimeRuleEvaluator.h
+    include/StrategyBacktestRequestAdapter.h
     include/StrategyStructureResolvers.h
     include/StrategyService.h
     include/StrategyViewModel.h
@@ -73,8 +74,6 @@ add_library(bridge STATIC
 )
 
 add_subdirectory(src)
-
-target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 
 target_compile_definitions(bridge PRIVATE
     BUILD_DLL
@@ -103,6 +102,8 @@ target_link_libraries(bridge
         Qt6::QuickWidgets
         Qt6::Concurrent
     PRIVATE
+        application_contracts
+        application_backtest
         engine
         domain
         astock_market

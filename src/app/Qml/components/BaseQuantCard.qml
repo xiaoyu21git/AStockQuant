@@ -367,7 +367,7 @@ Rectangle {
             delegate: PerformanceMetric {
                 Layout.fillWidth: true
                 label: modelData.label || ""
-                value: modelData.value || 0
+                value: modelData.value !== undefined && modelData.value !== null ? modelData.value : 0
                 format: modelData.format || "%.2f"
                 unit: modelData.unit || ""
                 metricColor: modelData.color || categoryColor
@@ -381,7 +381,7 @@ Rectangle {
     // 性能指标组件
     component PerformanceMetric: Rectangle {
         property string label: ""
-        property real value: 0
+        property var value: 0
         property string format: "%.2f"
         property string unit: ""
         property color metricColor: categoryColor
@@ -406,10 +406,7 @@ Rectangle {
             }
             
             Text {
-                text: {
-                    var formatted = format.replace("%d", Math.round(value)).replace("%.2f", value.toFixed(2)).replace("%.3f", value.toFixed(3))
-                    return formatted + (unit ? " " + unit : "")
-                }
+                text: root.formatMetricValue(value, format, unit)
                 font.pixelSize: baseConstants.fontSizeSmall + 1
                 font.weight: Font.DemiBold
                 color: metricColor
@@ -610,6 +607,36 @@ Rectangle {
             return fallback
         }
         return candidate
+    }
+
+    function formatMetricValue(value, format, unit) {
+        var formatString = format === undefined || format === null || format === ""
+            ? "%s"
+            : String(format)
+        var suffix = unit ? " " + unit : ""
+
+        if (formatString.indexOf("%s") >= 0) {
+            var textValue = value === undefined || value === null ? "" : String(value)
+            return formatString.replace("%s", textValue) + suffix
+        }
+
+        var numericValue = Number(value)
+        if (isNaN(numericValue)) {
+            var fallbackText = value === undefined || value === null ? "" : String(value)
+            return fallbackText + suffix
+        }
+
+        if (formatString.indexOf("%d") >= 0) {
+            return formatString.replace("%d", String(Math.round(numericValue))) + suffix
+        }
+
+        var floatMatch = /%(?:\.([0-9]+))?f/.exec(formatString)
+        if (floatMatch) {
+            var precision = floatMatch[1] !== undefined ? Number(floatMatch[1]) : 6
+            return formatString.replace(floatMatch[0], numericValue.toFixed(precision)) + suffix
+        }
+
+        return String(numericValue) + suffix
     }
     
     // 根据状态获取文本

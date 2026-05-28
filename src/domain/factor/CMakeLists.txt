@@ -215,6 +215,7 @@ target_link_libraries(factor_system
     Qt6::Sql
         foundation
         infrastructure
+    domain_trading
         astock_ta_lib
 )
 

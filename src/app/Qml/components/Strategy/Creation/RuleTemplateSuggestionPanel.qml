@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
+import "../../../utils/StrategyCreationUtils.js" as Utils
 import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
 import "../../Base" as BaseComponents
 
@@ -12,7 +13,8 @@ Rectangle {
     property string phaseLockValue: ""
     property string queryPlaceholderText: ""
     property bool showInlinePhaseInputs: false
-    property string selectedStrategyType: ""
+    property int selectedStrategyTypeIndex: -1
+    property int selectedStrategyBehaviorKind: -1
     property var strategyProfile: ({})
     property string selectedStageId: ""
     property string selectedStageTitle: ""
@@ -36,6 +38,7 @@ Rectangle {
     readonly property string contextualPhaseValue: suggestionPhaseForStage(selectedStageId)
     readonly property bool compactInlineLayout: showInlinePhaseInputs && width >= 520
     readonly property bool compactSuggestionActionRow: width < 360
+    readonly property int currentStrategyBehaviorKind: resolveCurrentStrategyBehaviorKind()
     readonly property var currentStepTypeSpec: resolveCurrentStepTypeSpec()
     readonly property var currentStrategyTypeSpec: resolveCurrentStrategyTypeSpec()
     readonly property var stepTypeMatchedSuggestionItems: filterSuggestionsByCurrentStepType(suggestionItems)
@@ -190,21 +193,33 @@ Rectangle {
         return mapping[role] || role || "未指定"
     }
 
-    function strategyTypeDisplayName(strategyType) {
-        var mapping = {
-            trend_following: "趋势跟随",
-            trend_breakout: "趋势突破",
-            mean_reversion: "均值回归",
-            momentum: "动量",
-            arbitrage: "套利",
-            machine_learning: "机器学习",
-            multi_factor: "多因子",
-            high_frequency: "高频",
-            event_driven: "事件驱动",
-            custom: "自定义"
+    function resolvedStrategyLabel() {
+        var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
+        if (normalizedStrategyTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+            return Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(normalizedStrategyTypeIndex) || "当前策略"
         }
-        var key = String(strategyType || "").trim().toLowerCase()
-        return mapping[key] || key || "当前策略"
+        return Utils.StrategyCreationUtils.strategyBehaviorKindLabel(currentStrategyBehaviorKind)
+    }
+
+    function resolveCurrentStrategyBehaviorKind() {
+        var explicitKind = Number(selectedStrategyBehaviorKind)
+        if (isFinite(explicitKind) && explicitKind >= 0 && explicitKind <= 8) {
+            return Math.floor(explicitKind)
+        }
+
+        var profile = strategyProfile || ({})
+        var parameters = profile.parameters || ({})
+        explicitKind = Number(profile.strategyBehaviorKind !== undefined ? profile.strategyBehaviorKind : parameters.strategyBehaviorKind)
+        if (isFinite(explicitKind) && explicitKind >= 0 && explicitKind <= 8) {
+            return Math.floor(explicitKind)
+        }
+
+        explicitKind = Number(profile.strategy_behavior_kind !== undefined ? profile.strategy_behavior_kind : parameters.strategy_behavior_kind)
+        if (isFinite(explicitKind) && explicitKind >= 0 && explicitKind <= 8) {
+            return Math.floor(explicitKind)
+        }
+
+        return Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     }
 
     function suggestionPhaseForStage(stageId) {
@@ -327,10 +342,10 @@ Rectangle {
     }
 
     function resolveCurrentStrategyTypeSpec() {
-        var typeKey = String(selectedStrategyType || "").trim().toLowerCase()
-        if (typeKey === "trend_following" || typeKey === "trend_breakout") {
+        var behaviorKind = currentStrategyBehaviorKind
+        if (behaviorKind === 0) {
             return {
-                label: strategyTypeDisplayName(typeKey),
+                label: resolvedStrategyLabel(),
                 preferredTags: ["pullback", "ma20", "ma60", "breakout", "platform_breakout", "yearline", "long_term", "mid_term", "ma120", "take_profit", "scale_out", "acceptance", "breakdown", "market_state", "market_gate", "market_risk", "bull_market", "sideways_market", "bear_market", "eligibility", "liquidity", "trend", "veto"],
                 preferredKeywords: ["回踩", "突破", "平台突破", "年线", "120日线", "趋势", "止盈", "承接走弱", "分批止盈", "市场", "风控", "放行", "牛市", "震荡市", "熊市冻结", "过滤", "资格", "流动性", "否决", "失守"],
                 blockedTags: ["board", "reseal", "rotation", "overtake", "catch_up", "tail_ramp", "afternoon_chase", "counter_nuke", "afternoon_reseal", "first_board", "one_word_board", "spike_fail", "floor_to_limit", "afternoon_reversal_kill", "open_board"],
@@ -339,9 +354,9 @@ Rectangle {
                 marketBiasHint: "牛市趋势放行，其次展示震荡市精选放行，并保留熊市冻结"
             }
         }
-        if (typeKey === "mean_reversion") {
+        if (behaviorKind === 1) {
             return {
-                label: strategyTypeDisplayName(typeKey),
+                label: resolvedStrategyLabel(),
                 preferredTags: ["pullback", "ma20", "ma60", "rebound", "engulfing", "false_repair", "rebound_failed", "failed_rebound", "thin_volume", "acceptance", "breakdown", "market_gate", "market_risk", "sideways_market", "bear_market"],
                 preferredKeywords: ["反包", "反抽", "修复", "回踩", "均线", "地量", "回归", "承接", "震荡市", "精选放行", "熊市冻结"],
                 blockedTags: ["board", "reseal", "rotation", "overtake", "catch_up", "tail_ramp", "afternoon_chase", "counter_nuke", "afternoon_reseal", "first_board", "one_word_board", "spike_fail", "floor_to_limit", "open_board"],
@@ -350,9 +365,9 @@ Rectangle {
                 marketBiasHint: "震荡市精选放行，其次保留熊市冻结，再补充牛市放行"
             }
         }
-        if (typeKey === "multi_factor" || typeKey === "machine_learning" || typeKey === "arbitrage") {
+        if (behaviorKind === 3 || behaviorKind === 4 || behaviorKind === 5) {
             return {
-                label: strategyTypeDisplayName(typeKey),
+                label: resolvedStrategyLabel(),
                 preferredTags: ["take_profit", "scale_out", "market_state", "market_gate", "market_risk", "breakdown", "acceptance", "long_term", "ma120", "bull_market", "sideways_market", "bear_market"],
                 preferredKeywords: ["止盈", "风控", "冻结", "放行", "回撤", "流动性", "交易资格", "池子", "120日线", "牛市", "震荡市", "熊市"],
                 blockedTags: ["board", "reseal", "rotation", "overtake", "catch_up", "tail_ramp", "afternoon_chase", "counter_nuke", "afternoon_reseal", "first_board", "one_word_board", "spike_fail", "floor_to_limit", "open_board", "emotion_repair"],
@@ -361,9 +376,9 @@ Rectangle {
                 marketBiasHint: "先看熊市冻结，再看震荡市精选放行和牛市放行"
             }
         }
-        if (typeKey === "event_driven") {
+        if (behaviorKind === 6) {
             return {
-                label: strategyTypeDisplayName(typeKey),
+                label: resolvedStrategyLabel(),
                 preferredTags: ["event_driven", "earnings", "breakout", "market_gate", "market_risk", "bull_market", "sideways_market", "bear_market"],
                 preferredKeywords: ["业绩", "公告", "催化", "事件", "放量突破", "放行", "牛市", "震荡市", "熊市冻结"],
                 blockedTags: ["ma20", "ma60", "yearline", "ma120", "tail_ramp", "counter_nuke"],
@@ -372,9 +387,9 @@ Rectangle {
                 marketBiasHint: "牛市放行优先，其次展示震荡市精选放行，并保留熊市冻结"
             }
         }
-        if (typeKey === "high_frequency") {
+        if (behaviorKind === 7) {
             return {
-                label: strategyTypeDisplayName(typeKey),
+                label: resolvedStrategyLabel(),
                 preferredTags: ["high_frequency", "orderflow", "microstructure", "market_gate", "market_risk", "sideways_market", "bull_market", "bear_market"],
                 preferredKeywords: ["盘口", "扫单", "回补", "微结构", "震荡市", "精选放行", "熊市冻结"],
                 blockedTags: ["ma20", "ma60", "yearline", "ma120", "platform_breakout", "long_term"],
@@ -384,7 +399,7 @@ Rectangle {
             }
         }
         return {
-            label: strategyTypeDisplayName(typeKey),
+            label: resolvedStrategyLabel(),
             preferredTags: [],
             preferredKeywords: [],
             blockedTags: [],
@@ -535,7 +550,7 @@ Rectangle {
         var matchedCount = normalizeList(stepTypeMatchedSuggestionItems).length
         var strategyMatchedCount = normalizeList(strategyTypeMatchedSuggestionItems).length
         var stepLabel = String((currentStepTypeSpec && currentStepTypeSpec.label) || selectedGroupTitle || "当前步骤")
-        var strategyLabel = String((currentStrategyTypeSpec && currentStrategyTypeSpec.label) || strategyTypeDisplayName(selectedStrategyType))
+        var strategyLabel = String((currentStrategyTypeSpec && currentStrategyTypeSpec.label) || resolvedStrategyLabel())
         var marketBiasHint = String((currentStrategyTypeSpec && currentStrategyTypeSpec.marketBiasHint) || "")
 
         if (totalCount > 0) {
@@ -642,18 +657,31 @@ Rectangle {
             }
         }
 
-        var type = String(selectedStrategyType || "").trim().toLowerCase()
-        if (type === "trend_following") {
-            return "趋势策略建议至少分别绑定一条入场/观察信号和一条持仓管理/退出模板；市场/风控模板按需补充。"
-        }
-        if (type === "trend_breakout") {
+        var behaviorKind = currentStrategyBehaviorKind
+        var strategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.TrendFollowing
+                && strategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TrendBreakout) {
             return "趋势突破策略建议绑定突破确认类入场模板，并搭配趋势衰减退出与市场风控模板。"
         }
-        if (type === "mean_reversion") {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.TrendFollowing) {
+            return "趋势策略建议至少分别绑定一条入场/观察信号和一条持仓管理/退出模板；市场/风控模板按需补充。"
+        }
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.MeanReversion) {
             return "均值回归策略更适合绑定回归入场与失败退出模板，市场风控通常只做过滤。"
         }
-        if (type === "momentum") {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.Momentum) {
             return "动量策略通常需要入场信号和趋势衰减退出，市场风控用于过滤退潮时段。"
+        }
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.Arbitrage
+                || behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.MultiFactor
+                || behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.MachineLearning) {
+            return "组合与模型类策略通常优先补持仓管理和市场风控模板，入场确认更多依赖评分与池内排序。"
+        }
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.EventDriven) {
+            return "事件驱动策略建议优先绑定事件确认入场和事件失效退出模板，再补市场风控。"
+        }
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.HighFrequency) {
+            return "高频策略建议优先绑定微结构入场与执行约束模板，市场风控更多负责交易时段和流动性限制。"
         }
         return "可以同时为不同阶段绑定模板；同一阶段再次应用会替换该阶段当前模板。"
     }

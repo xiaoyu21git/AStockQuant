@@ -83,60 +83,6 @@ Module {
     }
     Component {
         file: "Bridge"
-        name: "AStock.Bridge/StrategyBacktestController"
-        accessSemantics: "reference"
-        prototype: "QObject"
-        exports: ["AStock.Bridge/StrategyBacktestController 1.0"]
-        exportMetaObjectRevisions: [256]
-        isCreatable: true
-        isSingleton: false
-        Property { name: "isRunning"; type: "bool" }
-        Property { name: "progress"; type: "int" }
-        Property { name: "status"; type: "QString" }
-        Property { name: "selectedStrategyId"; type: "QString" }
-        Property { name: "strategyParams"; type: "QVariantMap" }
-        Property { name: "initialCapital"; type: "double" }
-        Property { name: "startDate"; type: "QString" }
-        Property { name: "endDate"; type: "QString" }
-        Property { name: "selectedSymbols"; type: "QVariantList" }
-        Property { name: "dataSourceMode"; type: "QString" }
-        Property { name: "selectedDatasetId"; type: "int" }
-        Property { name: "backtestResult"; type: "QVariantMap" }
-        Property { name: "optimizationHistory"; type: "QVariantList" }
-        Property { name: "comparisonResult"; type: "QVariantMap" }
-        Signal {
-            name: "isRunningChanged"
-            Parameter { name: "isRunning"; type: "bool" }
-        }
-        Signal {
-            name: "progressChanged"
-            Parameter { name: "progress"; type: "int" }
-        }
-        Signal {
-            name: "statusChanged"
-            Parameter { name: "status"; type: "QString" }
-        }
-        Signal {
-            name: "backtestStarted"
-            Parameter { name: "strategyId"; type: "QString" }
-        }
-        Signal {
-            name: "backtestProgress"
-            Parameter { name: "progress"; type: "int" }
-            Parameter { name: "status"; type: "QString" }
-        }
-        Signal {
-            name: "backtestCompleted"
-            Parameter { name: "result"; type: "QVariantMap" }
-        }
-        Signal {
-            name: "backtestFailed"
-            Parameter { name: "error"; type: "QString" }
-        }
-        Signal { name: "backtestCancelled" }
-    }
-    Component {
-        file: "Bridge"
         name: "AStock.Bridge/StrategyViewModel"
         accessSemantics: "reference"
         prototype: "QObject"

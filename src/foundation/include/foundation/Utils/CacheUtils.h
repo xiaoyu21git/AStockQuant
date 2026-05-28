@@ -207,12 +207,12 @@ public:
     /**
      * @brief 分析缓存热点
      * @param access_log 访问日志
-     * @param top_n 返回前N个热点
+     * @param topCount 返回前N个热点
      * @return 热点键列表
      */
     static std::vector<std::string> analyzeHotspots(
         const std::vector<std::string>& access_log,
-        size_t top_n = 10);
+        size_t topCount = 10);
     
     // ============ 序列化辅助 ============
     

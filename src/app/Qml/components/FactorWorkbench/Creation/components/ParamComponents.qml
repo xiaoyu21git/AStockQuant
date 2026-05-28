@@ -396,8 +396,7 @@ Item {
                 console.error("[ParamComponents] 组件创建失败:", type)
                 return null
             }
-            
-            console.log("[ParamComponents] 已创建参数组件:", type, "ID:", config.id || "unknown")
+
             return instance
             
         } catch (e) {
@@ -624,7 +623,6 @@ Item {
             defaults: multiselectDefaults()
         })
         
-        console.log("类型别名注册完成")
     }
     
     // 注销所有组件
@@ -633,7 +631,6 @@ Item {
         for (var i = 0; i < types.length; i++) {
             unregisterParam(types[i])
         }
-        console.log("已注销所有参数组件")
     }
     
     // 获取组件注册状态
@@ -732,11 +729,6 @@ Item {
     // ============ 初始化 ============
     
     Component.onCompleted: {
-        console.log("ParamComponents 初始化")
         registerAllComponents()
-    }
-    
-    Component.onDestruction: {
-        console.log("ParamComponents 销毁")
     }
 }

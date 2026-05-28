@@ -228,9 +228,10 @@ CREATE TABLE IF NOT EXISTS `financial_indicator_daily` (
 -- 策略定义表
 CREATE TABLE IF NOT EXISTS `strategy` (
     `strategy_id` VARCHAR(100) NOT NULL COMMENT '策略ID',
+    `engine_strategy_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '策略引擎数值ID',
     `strategy_code` VARCHAR(100) NOT NULL COMMENT '策略代码(唯一标识)',
     `strategy_name` VARCHAR(200) NOT NULL COMMENT '策略名称',
-    `strategy_type` ENUM('ALPHA', 'ARBITRAGE', 'TREND', 'MEAN_REVERSION', 'HFT', 'PORTFOLIO') DEFAULT 'ALPHA' COMMENT '策略类型',
+    `strategy_type` ENUM('ALPHA', 'ARBITRAGE', 'TREND', 'MEAN_REVERSION', 'HFT', 'PORTFOLIO', 'CUSTOM') DEFAULT 'ALPHA' COMMENT '策略类型',
     `description` TEXT COMMENT '策略描述',
     `version` VARCHAR(20) DEFAULT '1.0.0' COMMENT '策略版本',
     `author` VARCHAR(100) DEFAULT NULL COMMENT '作者',
@@ -240,6 +241,7 @@ CREATE TABLE IF NOT EXISTS `strategy` (
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`strategy_id`),
+    UNIQUE KEY `uk_engine_strategy_id` (`engine_strategy_id`),
     UNIQUE KEY `uk_strategy_code` (`strategy_code`),
     KEY `idx_strategy_type` (`strategy_type`),
     KEY `idx_status` (`status`)
@@ -464,8 +466,8 @@ INSERT IGNORE INTO `symbol_info` (`symbol`, `name`, `exchange`, `industry_code`,
 -- 插入示例策略
 INSERT IGNORE INTO `strategy` (`strategy_code`, `strategy_name`, `strategy_type`, `description`, `author`, `parameters`) VALUES
 ('MA_CROSS_V1', '双均线交叉策略', 'TREND', '基于快慢均线交叉的趋势跟踪策略', 'ASTOCK Team', '{"fast_period": 10, "slow_period": 30, "take_profit": 0.15, "stop_loss": 0.05}'),
-('MEAN_REVERT_V1', '均值回归策略', 'MEAN_REVERSION', '基于布林带的均值回归策略', 'ASTOCK Team', '{"boll_period": 20, "boll_std": 2.0, "position_size": 0.1}'),
-('ALPHA_MOMENTUM_V1', '动量Alpha策略', 'ALPHA', '基于动量因子的选股策略', 'ASTOCK Team', '{"momentum_period": 60, "top_n": 10, "rebalance_days": 20}');
+('MEAN_REVERT_V1', '均值回归策略', 'MEAN_REVERSION', '基于布林带的均值回归策略', 'ASTOCK Team', '{"boll_period": 20, "boll_std": 2.0, "positionSize": 0.1}'),
+('ALPHA_MOMENTUM_V1', '动量Alpha策略', 'ALPHA', '基于动量因子的选股策略', 'ASTOCK Team', '{"momentum_period": 60, "topN": 10, "rebalance_days": 20}');
 
 -- ============================================
 -- 9. 恢复外键检查
@@ -488,6 +490,10 @@ CREATE TABLE IF NOT EXISTS `factors` (
     `ic_value` DECIMAL(8, 4) DEFAULT 0.0 COMMENT 'IC值(-1到1)',
     `ir_value` DECIMAL(8, 4) DEFAULT 0.0 COMMENT 'IR值(信息比率)',
     `validity_days` INT UNSIGNED DEFAULT 30 COMMENT '有效天数(1-365)',
+    `actual_start_date` DATE DEFAULT NULL COMMENT '回测实际起始日',
+    `effective_start_date` DATE DEFAULT NULL COMMENT '有效期起始日',
+    `effective_end_date` DATE DEFAULT NULL COMMENT '有效期结束日',
+    `warmup_trimmed_trading_days` INT UNSIGNED DEFAULT 0 COMMENT '预热裁剪交易日数',
     `turnover_rate` DECIMAL(8, 4) DEFAULT 0.25 COMMENT '换手率(0-1)',
     `is_recommended` TINYINT(1) DEFAULT 0 COMMENT '是否推荐(0否1是)',
     `is_favorite` TINYINT(1) DEFAULT 0 COMMENT '是否收藏(0否1是)',

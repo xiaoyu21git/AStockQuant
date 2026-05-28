@@ -181,7 +181,6 @@ var translations = {
             'strategyCreatedSuccess': '✅ 策略创建成功！正在保存...',
             'strategyCreatedBacktest': '✅ 策略创建成功！',
             'backtestStarted': '策略创建成功，请前往回测页面启动回测。',
-            'backtestControllerError': '⚠️ 回测控制器未初始化或策略名称为空',
             'immediateBacktest': '前往回测',
             
             // 对话框消息
@@ -203,8 +202,8 @@ var translations = {
             },
             
             // 资产类型
-            'assetTypes': ['股票', '期货', '加密货币', '外汇', '期权', 'ETF', '债券', '商品'],
-            'assetTypeValues': ['stock', 'futures', 'crypto', 'forex', 'options', 'etf', 'bond', 'commodity'],
+            'assetTypes': ['股票', '期货', '期权', 'ETF', '指数', '多资产'],
+            'assetTypeValues': ['stock', 'futures', 'options', 'etf', 'index', 'multi_asset'],
             
             // 时间框架
             'timeFrames': ['高频(1分钟)', '日内(5分钟)', '短期(15分钟)', '中期(1小时)', '长期(日线)', '超长期(周线)'],
@@ -510,7 +509,6 @@ var translations = {
             'strategyCreatedSuccess': '✅ Strategy created successfully! Saving...',
             'strategyCreatedBacktest': '✅ Strategy created successfully!',
             'backtestStarted': 'Strategy created successfully. Open the backtest page when you are ready to run it.',
-            'backtestControllerError': '⚠️ Backtest controller not initialized or strategy name empty',
             'immediateBacktest': 'Open Backtest',
             
             'create': 'Create Strategy',
@@ -524,8 +522,8 @@ var translations = {
                 'aggressive': 'Very Aggressive'
             },
             
-            'assetTypes': ['Stock', 'Futures', 'Cryptocurrency', 'Forex', 'Options', 'ETF', 'Bond', 'Commodity'],
-            'assetTypeValues': ['stock', 'futures', 'crypto', 'forex', 'options', 'etf', 'bond', 'commodity'],
+            'assetTypes': ['Stock', 'Futures', 'Options', 'ETF', 'Index', 'Multi-Asset'],
+            'assetTypeValues': ['stock', 'futures', 'options', 'etf', 'index', 'multi_asset'],
             
             'timeFrames': ['High-Frequency(1min)', 'Intraday(5min)', 'Short-Term(15min)', 'Medium-Term(1hour)', 'Long-Term(Daily)', 'Very Long-Term(Weekly)'],
             'timeFrameValues': ['1min', '5min', '15min', '1hour', 'daily', 'weekly'],

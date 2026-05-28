@@ -4,9 +4,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../../components/StockPools" as StockPoolComponents
 import "../../../utils/StrategyCreationUtils.js" as Utils
-import "../../../utils/CustomStockPoolStore.js" as CustomStockPoolStore
 
 Rectangle {
     id: root
@@ -21,13 +19,32 @@ Rectangle {
     property alias riskLevel: riskLevelCombo.currentIndex
     property alias optimizationMethod: optimizationCombo.currentIndex
     property alias strategyTags: tagsField.text
-    property string selectedStrategyType: ""
+    property int selectedStrategyTypeIndex: 0
     property bool useWideCardLayout: true
     property bool descriptionRecentlyUpdated: false
     property bool tagsRecentlyUpdated: false
-    property string linkedStockPoolId: ""
-    property string linkedStockPoolName: ""
-    property var linkedStockPoolSymbols: []
+    readonly property var assetTypeIndexOptions: [
+        Utils.StrategyCreationUtils.AssetTypeIndex.Stock,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Futures,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Options,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Etf,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Index,
+        Utils.StrategyCreationUtils.AssetTypeIndex.MultiAsset
+    ]
+    readonly property var timeFrameIndexOptions: [
+        Utils.StrategyCreationUtils.TimeFrameIndex.OneMinute,
+        Utils.StrategyCreationUtils.TimeFrameIndex.FiveMinutes,
+        Utils.StrategyCreationUtils.TimeFrameIndex.FifteenMinutes,
+        Utils.StrategyCreationUtils.TimeFrameIndex.OneHour,
+        Utils.StrategyCreationUtils.TimeFrameIndex.Daily,
+        Utils.StrategyCreationUtils.TimeFrameIndex.Weekly
+    ]
+    readonly property var riskLevelIndexOptions: [
+        Utils.StrategyCreationUtils.RiskLevelIndex.Low,
+        Utils.StrategyCreationUtils.RiskLevelIndex.Medium,
+        Utils.StrategyCreationUtils.RiskLevelIndex.High,
+        Utils.StrategyCreationUtils.RiskLevelIndex.Aggressive
+    ]
 
     // 信号
     signal tagsChanged(var tagsList)
@@ -414,42 +431,6 @@ Rectangle {
                     color: "#111827"
                     border.width: 1
                     border.color: "#334155"
-                    implicitHeight: poolColumn.implicitHeight + 24
-
-                    ColumnLayout {
-                        id: poolColumn
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
-
-                        Text {
-                            text: "联动池"
-                            font.pixelSize: 15
-                            font.weight: Font.DemiBold
-                            color: "#f1f5f9"
-                        }
-
-                        StockPoolComponents.LinkedStockPoolSelector {
-                            id: linkedStockPoolSelector
-                            Layout.fillWidth: true
-                            title: "关联自选股票池"
-                            helperText: "关联后仅用于策略联动与实盘候选，不会在创建时绑定策略股票池。"
-
-                            onBindingChanged: function(binding) {
-                                root.linkedStockPoolId = binding.poolId || ""
-                                root.linkedStockPoolName = binding.poolName || ""
-                                root.linkedStockPoolSymbols = binding.symbols || []
-                            }
-                        }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    radius: 10
-                    color: "#111827"
-                    border.width: 1
-                    border.color: "#334155"
                     implicitHeight: tagsColumn.implicitHeight + 24
 
                     ColumnLayout {
@@ -569,11 +550,6 @@ Rectangle {
         timeFrameCombo.currentIndex = 4
         riskLevelCombo.currentIndex = 1
         optimizationCombo.currentIndex = 0
-        linkedStockPoolId = ""
-        linkedStockPoolName = ""
-        linkedStockPoolSymbols = []
-        linkedStockPoolSelector.refreshPools()
-        linkedStockPoolSelector.clearBinding()
         tagsField.text = ""
         tagsRepeater.model = []
         lastAutoDescription = ""
@@ -672,7 +648,9 @@ Rectangle {
 
         return mergeTags(
             getTagsList(),
-            [termName, root.selectedStrategyType].concat(recommendedActions).concat(matchedAliases)
+            [termName, Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)]
+                .concat(recommendedActions)
+                .concat(matchedAliases)
         )
     }
 
@@ -711,9 +689,9 @@ Rectangle {
         validateForm()
     }
 
-    function applyStrategyTypeDefaults(strategyType, forceOverwrite) {
-        var defaultDescription = Utils.StrategyCreationUtils.getDefaultStrategyDescription(strategyType)
-        var defaultTags = Utils.StrategyCreationUtils.getDefaultStrategyTags(strategyType)
+    function applyStrategyTypeDefaults(strategyTypeIndex, forceOverwrite) {
+        var defaultDescription = Utils.StrategyCreationUtils.getDefaultStrategyDescription(strategyTypeIndex)
+        var defaultTags = Utils.StrategyCreationUtils.getDefaultStrategyTags(strategyTypeIndex)
         var defaultTagsText = defaultTags.join(', ')
 
         if (forceOverwrite || strategyDescField.text.trim() === "" || strategyDescField.text === lastAutoDescription) {
@@ -742,47 +720,16 @@ Rectangle {
         return validateForm()
     }
 
-    function getSymbolPoolList() {
-        return []
-    }
-
-    function getLinkedStockPoolBinding() {
-        return {
-            poolId: linkedStockPoolId,
-            poolName: linkedStockPoolName,
-            symbols: CustomStockPoolStore.CustomStockPoolStore.normalizeSymbolList(linkedStockPoolSymbols || []),
-            hasBinding: !!String(linkedStockPoolId || "").trim()
-        }
-    }
-
-    function refreshLinkedStockPools() {
-        linkedStockPoolSelector.refreshPools()
-    }
-
-    function focusSymbolPoolField() {
-        if (linkedStockPoolSelector && linkedStockPoolSelector.focusSelector) {
-            linkedStockPoolSelector.focusSelector()
-            return
-        }
-        root.forceActiveFocus()
+    function getAssetTypeIndex() {
+        return assetTypeIndexOptions[assetTypeCombo.currentIndex] || Utils.StrategyCreationUtils.AssetTypeIndex.Invalid
     }
     
-    // 获取资产类型值
-    function getAssetTypeValue() {
-        var values = Utils.StrategyCreationUtils.tr('strategyCreation.assetTypeValues')
-        return values[assetTypeCombo.currentIndex] || "stock"
+    function getTimeFrameIndex() {
+        return timeFrameIndexOptions[timeFrameCombo.currentIndex] || Utils.StrategyCreationUtils.TimeFrameIndex.Invalid
     }
     
-    // 获取时间框架值
-    function getTimeFrameValue() {
-        var values = Utils.StrategyCreationUtils.tr('strategyCreation.timeFrameValues')
-        return values[timeFrameCombo.currentIndex] || "daily"
-    }
-    
-    // 获取风险等级值
-    function getRiskLevelValue() {
-        var values = ["low", "medium", "high", "aggressive"]
-        return values[riskLevelCombo.currentIndex] || "medium"
+    function getRiskLevelIndex() {
+        return riskLevelIndexOptions[riskLevelCombo.currentIndex] || Utils.StrategyCreationUtils.RiskLevelIndex.Invalid
     }
     
     // 获取优化方法值
@@ -801,29 +748,17 @@ Rectangle {
     }
 
     function setBasicInfo(strategyData) {
-        var values
-
         strategyNameField.text = strategyData.strategy_name || strategyData.strategyName || ""
         strategyDescField.text = strategyData.description || ""
 
-        values = Utils.StrategyCreationUtils.tr('strategyCreation.assetTypeValues')
-        assetTypeCombo.currentIndex = Math.max(0, values.indexOf(strategyData.asset_type || strategyData.assetType || "stock"))
+        assetTypeCombo.currentIndex = Math.max(0, assetTypeIndexOptions.indexOf(Number(strategyData.assetTypeIndex)))
 
-        values = Utils.StrategyCreationUtils.tr('strategyCreation.timeFrameValues')
-        timeFrameCombo.currentIndex = Math.max(0, values.indexOf(strategyData.time_frame || strategyData.timeFrame || "daily"))
+        timeFrameCombo.currentIndex = Math.max(0, timeFrameIndexOptions.indexOf(Number(strategyData.timeFrameIndex)))
 
-        values = ["low", "medium", "high", "aggressive"]
-        riskLevelCombo.currentIndex = Math.max(0, values.indexOf(strategyData.risk_level || strategyData.riskLevel || "medium"))
+        riskLevelCombo.currentIndex = Math.max(0, riskLevelIndexOptions.indexOf(Number(strategyData.riskLevelIndex)))
 
-        values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
+        var values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
         optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || strategyData.optimizationMethod || "genetic"))
-
-        var linkedPoolBinding = CustomStockPoolStore.CustomStockPoolStore.extractLinkedStockPool(strategyData)
-        linkedStockPoolId = linkedPoolBinding.poolId
-        linkedStockPoolName = linkedPoolBinding.poolName
-        linkedStockPoolSymbols = linkedPoolBinding.symbols
-        linkedStockPoolSelector.refreshPools()
-        linkedStockPoolSelector.setBinding(linkedStockPoolId, linkedStockPoolName, linkedStockPoolSymbols)
 
         var tags = strategyData.tags || []
         tagsField.text = typeof tags === "string" ? tags : (tags || []).join(', ')

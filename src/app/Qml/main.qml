@@ -31,12 +31,40 @@ ApplicationWindow {
     readonly property string factorWorkbenchRouteMode: window.currentMenuCode === "factor_analysis" ? "analyze" : "library"
     readonly property var strategyDevelopmentPage: strategyDevelopmentPageLoader.item
     readonly property var strategyCreationProPage: strategyCreationProPageLoader.item
-    readonly property var strategyBacktestPage: strategyBacktestPageLoader.item
     readonly property var factorWorkbenchPage: factorWorkbenchPageLoader.item
     readonly property var riskManagementPage: riskManagementPageLoader.item
-    property var pendingBacktestRequest: ({})
     property var pendingRiskNavigationPayload: ({})
     property var pendingFactorWorkbenchRequest: ({})
+    property var pendingStrategyImportRequest: ({})
+    property var pendingStrategyBacktestRequest: ({})
+
+    function openStrategyCreationFromFactorImport(importPayload) {
+        var payload = importPayload && typeof importPayload === "object" ? importPayload : ({})
+        if (Object.keys(payload).length === 0) {
+            return
+        }
+
+        pendingStrategyImportRequest = payload
+        window.switchPage("strategy_factor", "策略开发")
+
+        if (strategyDevelopmentPage && typeof strategyDevelopmentPage.openStrategyCreation === "function") {
+            strategyDevelopmentPage.openStrategyCreation(payload)
+            pendingStrategyImportRequest = ({})
+        }
+    }
+
+    function openStrategyBacktest(preferredStrategyId) {
+        pendingStrategyBacktestRequest = {
+            requested: true,
+            strategyId: String(preferredStrategyId || "")
+        }
+        window.switchPage("strategy_library", "回测验证")
+
+        if (strategyDevelopmentPage && typeof strategyDevelopmentPage.openStrategyBacktest === "function") {
+            strategyDevelopmentPage.openStrategyBacktest(pendingStrategyBacktestRequest.strategyId)
+            pendingStrategyBacktestRequest = ({})
+        }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -121,7 +149,7 @@ ApplicationWindow {
                                 sidebar.setCurrentMenu("strategy_factor")
                                 break
                             case 3: // 回测验证
-                                sidebar.setCurrentMenu("strategy_backtest")
+                                window.openStrategyBacktest("")
                                 break
                             case 4: // 风险管理
                                 sidebar.setCurrentMenu("risk_management")
@@ -151,8 +179,8 @@ ApplicationWindow {
                                 }
                                 break
                             case 3: // 回测验证
-                                if (actionType === "inline") {
-                                    window.switchPage("strategy_backtest", "回测验证")
+                                if (actionType === "page") {
+                                    window.openStrategyBacktest("")
                                 }
                                 break
                             case 4: // 风险管理
@@ -202,6 +230,20 @@ ApplicationWindow {
                             if (item && typeof item.warmupPage === "function") {
                                 item.warmupPage()
                             }
+                            if (item
+                                    && pendingStrategyImportRequest
+                                    && Object.keys(pendingStrategyImportRequest).length > 0
+                                    && typeof item.openStrategyCreation === "function") {
+                                item.openStrategyCreation(pendingStrategyImportRequest)
+                                pendingStrategyImportRequest = ({})
+                            }
+                            if (item
+                                    && pendingStrategyBacktestRequest
+                                    && pendingStrategyBacktestRequest.requested
+                                    && typeof item.openStrategyBacktest === "function") {
+                                item.openStrategyBacktest(pendingStrategyBacktestRequest.strategyId || "")
+                                pendingStrategyBacktestRequest = ({})
+                            }
                         }
                     }
                     
@@ -215,33 +257,14 @@ ApplicationWindow {
                         sourceComponent: strategyCreationProPageComponent
                     }
                     
-                    // 策略回测页面
-                    Loader {
-                        id: strategyBacktestPageLoader
+                    Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 3 || item !== null
-                        asynchronous: true
-                        sourceComponent: strategyBacktestPageComponent
-                        onLoaded: {
-                            if (item && pendingBacktestRequest && pendingBacktestRequest.strategyId
-                                    && typeof item.setSelectedStrategy === "function") {
-                                item.setSelectedStrategy(
-                                    pendingBacktestRequest.strategyId,
-                                    pendingBacktestRequest.strategyName,
-                                    pendingBacktestRequest.backtestConfig)
-                                pendingBacktestRequest = ({})
-                            }
-                        }
                     }
                     
-                    Loader {
-                        id: customStockPoolPageLoader
+                    Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 4 || item !== null
-                        asynchronous: true
-                        sourceComponent: customStockPoolPageComponent
                     }
                     
                     // 因子工作台页面 - 仅承载分析/创建/调试/回测等重模式
@@ -361,7 +384,33 @@ ApplicationWindow {
     Component {
         id: strategyDevelopmentPageComponent
 
-        StrategyLibraryPage {
+        Item {
+            id: strategyWorkbenchHost
+
+            function warmupPage() {
+                if (pageLoader.item && typeof pageLoader.item.warmupPage === "function") {
+                    pageLoader.item.warmupPage()
+                }
+            }
+
+            function openStrategyCreation(strategyDetail) {
+                if (pageLoader.item && typeof pageLoader.item.openStrategyCreation === "function") {
+                    pageLoader.item.openStrategyCreation(strategyDetail)
+                }
+            }
+
+            function openStrategyBacktest(strategyId) {
+                if (pageLoader.item && typeof pageLoader.item.openBacktestWorkbench === "function") {
+                    pageLoader.item.openBacktestWorkbench(strategyId)
+                }
+            }
+
+            Loader {
+                id: pageLoader
+                anchors.fill: parent
+                asynchronous: true
+                source: "page/strategies/StrategyLibraryPage.qml"
+            }
         }
     }
 
@@ -373,23 +422,13 @@ ApplicationWindow {
     }
 
     Component {
-        id: strategyBacktestPageComponent
-
-        StrategyBacktestPage {}
-    }
-
-    Component {
-        id: customStockPoolPageComponent
-
-        CustomStockPoolPage {
-        }
-    }
-
-    Component {
         id: factorWorkbenchPageComponent
 
         FactorWorkbench {
             requestedRouteMode: window.factorWorkbenchRouteMode
+            onRequestOpenStrategyCreation: function(importPayload) {
+                window.openStrategyCreationFromFactorImport(importPayload || ({}))
+            }
         }
     }
 
@@ -522,9 +561,6 @@ ApplicationWindow {
             "strategy_creation_pro": 2,
             "factor_library": 2,
             "factor_analysis": 2,
-            "custom_stock_pools": 2,
-            "strategy_backtest": 3,
-            "strategy_optimization": 3,
             "risk_management": 4,
             "risk_configuration": 4,
             "risk_monitoring": 4,
@@ -568,9 +604,7 @@ ApplicationWindow {
         var menuToIndex = {
             "data_management": 0,      // 数据管理 -> Datamain (索引0)
             "strategy_factor": 1,      // 策略与因子 -> StrategyLibraryPage (索引1)
-            "strategy_backtest": 3,    // 策略回测 -> StrategyBacktestPage (索引3)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
-            "custom_stock_pools": 4,   // 自选股票池 -> 自选股票池页 (索引4)
             "risk_management": 6,      // 风险管理 -> riskManagementPage (索引6)
             "live_trading": 7,         // 实盘交易 -> TradingPage (索引7)
             "monitoring": 9,           // 监控面板 -> monitoringPage (索引9)
@@ -585,11 +619,8 @@ ApplicationWindow {
             "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
             "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)
             "strategy_creation": 1,           // 策略创建 -> 策略与因子 (索引1)
-            "strategy_optimization": 3,       // 策略优化 -> 策略回测 (索引3)
             "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
-            "strategy_backtest": 3,           // 策略回测 -> StrategyBacktestPage (索引3)
             "factor_library": 5,              // 因子库 -> FactorWorkbench (索引5)
-            "custom_stock_pools": 4,          // 自选股票池 -> 自选股票池页 (索引4)
             "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
             "risk_configuration": 6,          // 风险配置 -> 风险管理 (索引6)
             "risk_monitoring": 6,             // 风险监控 -> 风险管理 (索引6)
@@ -633,47 +664,35 @@ ApplicationWindow {
          if (menuCode === "trade_execution") {
             return "qrc:/page/trading/TradingPage.qml";
         }
-        if (menuCode === "strategy_backtest" || menuCode === "strategy_optimization") {
-            return "qrc:/ConsoleUi/Qml/page/backtest/StrategyBacktestPage.qml";
-        }
         if (menuCode === "strategy_library" || menuCode === "strategy_creation") {
-            return "qrc:/ConsoleUi/Qml/page/strategies/StrategyLibraryPage.qml";
+            return "qrc:/page/strategies/StrategyLibraryPage.qml";
         }
         if (menuCode === "factor_analysis" || menuCode === "factor_library") {
             return "qrc:/ConsoleUi/Qml/page/FactorWorkbench.qml";
         }
-        if (menuCode === "custom_stock_pools") {
-            return "qrc:/ConsoleUi/Qml/page/stockpools/CustomStockPoolPage.qml";
-        }
-            return "qrc:/page/dashboard/MainContent.qml";
+        return "qrc:/page/dashboard/MainContent.qml";
     }
-    // === 业务功能函数 ===
-    
+
     function showDepositDialog() {
-        console.log("显示入金对话框")
         depositDialog.open()
     }
-     function showWithdrawDialog() {
-        console.log("显示出金对话框")
+
+    function showWithdrawDialog() {
         withdrawDialog.open()
     }
-     function refreshAccountData() {
-        console.log("刷新账户数据")
-        // 模拟API调用
-        var mockValue = 1500000 + Math.random() * 100000
-        var mockChange = Math.random() * 20000 - 10000
-        var mockPercent = (mockChange / mockValue) * 100
 
-        window.accountValue = mockValue
-        window.accountChange = mockChange
-        window.accountChangePercent = mockPercent
-        
+    function refreshAccountData() {
+        var mockValue = window.accountValue
+        var mockChange = window.accountChange
+        var mockPercent = window.accountChangePercent
+
         sidebar.updateAccountData(mockValue, mockChange, mockPercent)
-        
+
         // 显示刷新提示
         showToast("账户数据已更新")
     }
-     function showUserProfile() {
+
+    function showUserProfile() {
         console.log("显示用户资料")
         userProfileDialog.open()
     }
@@ -694,27 +713,6 @@ ApplicationWindow {
         // 暂时使用简单的日志记录
     }
     
-    // === 处理策略回测请求 ===
-    function handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig) {
-        console.log("处理策略回测请求，策略ID:", strategyId, "策略名称:", strategyName)
-        pendingBacktestRequest = {
-            strategyId: strategyId,
-            strategyName: strategyName,
-            backtestConfig: backtestConfig
-        }
-        
-        // 切换到策略回测页面
-        window.switchPage("strategy_backtest", "策略回测")
-        
-        // 将策略ID传递给回测页面
-        if (strategyBacktestPage && typeof strategyBacktestPage.setSelectedStrategy === 'function') {
-            strategyBacktestPage.setSelectedStrategy(strategyId, strategyName, backtestConfig)
-        }
-        
-        // 显示通知
-        window.showNotification("正在切换到策略回测页面，准备测试策略: " + strategyName)
-    }
-
     function openFactorWorkbench(mode, factorId, menuTitle) {
         var normalizedMode = String(mode || "analyze")
         var normalizedFactorId = String(factorId || "").trim()

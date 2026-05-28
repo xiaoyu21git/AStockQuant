@@ -26,59 +26,6 @@ function appendMap(target, candidate) {
     target.push(candidate)
 }
 
-function appendSymbolCollection(target, seenSymbols, rawCollection) {
-    var appendSymbol = function(rawSymbol) {
-        var symbol = String(rawSymbol || "").trim().toUpperCase()
-        if (!symbol || seenSymbols[symbol]) {
-            return
-        }
-        seenSymbols[symbol] = true
-        target.push(symbol)
-    }
-
-    if (rawCollection === undefined || rawCollection === null) {
-        return
-    }
-
-    if (Array.isArray(rawCollection)) {
-        for (var index = 0; index < rawCollection.length; ++index) {
-            appendSymbol(rawCollection[index])
-        }
-        return
-    }
-
-    if (typeof rawCollection === "string") {
-        var rawText = String(rawCollection).trim()
-        if (!rawText) {
-            return
-        }
-
-        if (rawText.charAt(0) === "[") {
-            try {
-                var parsed = JSON.parse(rawText)
-                if (Array.isArray(parsed)) {
-                    for (var parsedIndex = 0; parsedIndex < parsed.length; ++parsedIndex) {
-                        appendSymbol(parsed[parsedIndex])
-                    }
-                    return
-                }
-            } catch (error) {
-            }
-        }
-
-        rawText.split(/[,;\s，；]+/).forEach(appendSymbol)
-        return
-    }
-
-    appendSymbol(rawCollection)
-}
-
-function normalizeSymbolPool(source) {
-    var normalized = []
-    appendSymbolCollection(normalized, ({}), source)
-    return normalized
-}
-
 function parseAllocations(rawAllocations) {
     if (!hasValue(rawAllocations)) {
         return []
@@ -231,13 +178,13 @@ function resolveBacktestAssumptions(source) {
         { canonicalKey: "benchmark", aliases: [] },
         { canonicalKey: "commissionRate", aliases: [] },
         { canonicalKey: "slippageRate", aliases: [] },
-        { canonicalKey: "dataSourceMode", aliases: [] }
+        { canonicalKey: "dataSourceMode", aliases: [] },
+        { canonicalKey: "dataSourceDatasetId", aliases: [] }
     ])
 }
 
 function resolveStrategyScopeContext(source) {
     return resolveStructuredValues(source, "strategyScopeContextSnapshot", [
-        { canonicalKey: "symbol_pool", aliases: [] },
         { canonicalKey: "universeType", aliases: [] },
         { canonicalKey: "universeId", aliases: [] },
         { canonicalKey: "selectedStrategyType", aliases: [] },
@@ -288,74 +235,6 @@ function resolvePortfolioAllocations(source, fallbackSource) {
     return parseAllocations(rawAllocations)
 }
 
-function resolveLinkedStockPoolSymbols(source) {
-    var root = isObject(source) ? source : ({})
-    var parameters = isObject(root.parameters) ? root.parameters : ({})
-    var resolved = []
-    var seen = ({})
-    appendSymbolCollection(resolved, seen, root.linked_stock_pool_symbols)
-    appendSymbolCollection(resolved, seen, root.linkedStockPoolSymbols)
-    appendSymbolCollection(resolved, seen, parameters.linked_stock_pool_symbols)
-    appendSymbolCollection(resolved, seen, parameters.linkedStockPoolSymbols)
-    return resolved
-}
-
-function resolvePersistedStrategySymbolPool(source) {
-    var root = isObject(source) ? source : ({})
-    var parameters = isObject(root.parameters) ? root.parameters : ({})
-    var resolved = []
-    var seen = ({})
-    appendSymbolCollection(resolved, seen, root.symbol_pool)
-    appendSymbolCollection(resolved, seen, root.symbolPool)
-    appendSymbolCollection(resolved, seen, parameters.symbol_pool)
-    appendSymbolCollection(resolved, seen, parameters.symbolPool)
-    if (resolved.length > 0) {
-        return resolved
-    }
-
-    if (resolveLinkedStockPoolSymbols(source).length > 0) {
-        return []
-    }
-
-    var scopeContext = resolveStrategyScopeContext(source)
-    return normalizeSymbolPool(firstDefinedValue(scopeContext, ["symbol_pool"]))
-}
-
-function resolvePersistedBacktestSymbolPool(source) {
-    var root = isObject(source) ? source : ({})
-    var parameters = isObject(root.parameters) ? root.parameters : ({})
-    var resolved = []
-    var seen = ({})
-
-    appendSymbolCollection(resolved, seen, root.backtest_symbol_pool)
-    appendSymbolCollection(resolved, seen, parameters.backtest_symbol_pool)
-    if (resolved.length > 0) {
-        return resolved
-    }
-
-    return resolvePersistedStrategySymbolPool(source)
-}
-
-function resolveSymbolPool(source) {
-    var resolved = []
-    var seen = ({})
-    var scopeContext = resolveStrategyScopeContext(source)
-    appendSymbolCollection(resolved, seen, firstDefinedValue(scopeContext, ["symbol_pool"]))
-
-    var candidates = collectSourceMaps(source)
-    for (var index = 0; index < candidates.length; ++index) {
-        appendSymbolCollection(resolved, seen, candidates[index].selectedSymbols)
-        appendSymbolCollection(resolved, seen, candidates[index].symbols)
-        appendSymbolCollection(resolved, seen, candidates[index].symbol_pool)
-    }
-
-    return resolved
-}
-
-function resolveBacktestRecordSymbolPool(source) {
-    return resolveSymbolPool(source)
-}
-
 function resolveUniverseContext(source) {
     var scopeContext = resolveStrategyScopeContext(source)
     var merged = resolveBacktestSessionView(source)
@@ -376,10 +255,5 @@ var StrategyStructureAdapter = {
     resolveFactorOverlay: resolveFactorOverlay,
     resolveBacktestSessionView: resolveBacktestSessionView,
     resolvePortfolioAllocations: resolvePortfolioAllocations,
-    resolveLinkedStockPoolSymbols: resolveLinkedStockPoolSymbols,
-    resolvePersistedStrategySymbolPool: resolvePersistedStrategySymbolPool,
-    resolvePersistedBacktestSymbolPool: resolvePersistedBacktestSymbolPool,
-    resolveSymbolPool: resolveSymbolPool,
-    resolveBacktestRecordSymbolPool: resolveBacktestRecordSymbolPool,
     resolveUniverseContext: resolveUniverseContext
 }

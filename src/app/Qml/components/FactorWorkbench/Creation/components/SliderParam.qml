@@ -497,13 +497,7 @@ Rectangle {
         
         if (valueChanged) {
             applyState(resolvedState, false)
-            
-            // 记录调试信息（显示正确处理后的值）
-            console.log("滑块值更新:", root.paramId, 
-                       "整数值:", resolvedState.valueInt,
-                       "浮点值:", resolvedState.valueFloat,
-                       "显示值:", root.formatDisplayValue(resolvedState.valueFloat))
-            
+
             // 发出信号，传递格式化的值
             root.paramValueChanged(root.paramId, resolvedState.valueFloat)
         } else {
@@ -555,11 +549,6 @@ Rectangle {
     
     Component.onCompleted: {
         applyResolvedValue(config.default, false)
-        
-        console.log("滑块组件初始化完成:", root.paramId, 
-                   "浮点值:", root.value, 
-                   "整数值:", root._intValue,
-                   "小数位数:", root.decimals)
     }
     
     onConfigChanged: {

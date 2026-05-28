@@ -47,24 +47,24 @@ public:
     bool initialize(DataProviderFactory::ProviderType type,
                     const std::string& config);
 
-    bool subscribe_kline(std::uint32_t symbol_id, std::uint16_t period);
+    bool subscribe_kline(std::uint32_t symbol_id, std::uint32_t period);
     bool subscribe_tick(std::uint32_t symbol_id);
-    bool unsubscribe_kline(std::uint32_t symbol_id, std::uint16_t period);
+    bool unsubscribe_kline(std::uint32_t symbol_id, std::uint32_t period);
     bool unsubscribe_tick(std::uint32_t symbol_id);
 
     KLineBatch get_history_klines(
         std::uint32_t symbol_id,
-        std::uint16_t period,
+        std::uint32_t period,
         std::uint64_t start_time,
         std::uint64_t end_time,
         std::size_t  limit);
 
-    std::optional<KLine>    get_latest_kline(std::uint32_t symbol_id, std::uint16_t period);
+    std::optional<KLine>    get_latest_kline(std::uint32_t symbol_id, std::uint32_t period);
     std::optional<TickData> get_latest_tick(std::uint32_t symbol_id);
 
     std::vector<KLine> get_latest_klines(
         const std::vector<std::uint32_t>& symbol_ids,
-        std::uint16_t period);
+        std::uint32_t period);
 
     CallbackId register_kline_callback(KLineCallback callback);
     CallbackId register_tick_callback(TickCallback callback);
@@ -80,14 +80,14 @@ private:
     // ======== 订阅管理 ========
     struct Subscription {
         std::uint32_t symbol_id{0};
-        std::uint16_t period{0};
+        std::uint32_t period{0};
         std::size_t   ref_count{0};
     };
 
     class SubscriptionManager {
     public:
-        bool add_subscription(std::uint32_t symbol_id, std::uint16_t period);
-        bool remove_subscription(std::uint32_t symbol_id, std::uint16_t period);
+        bool add_subscription(std::uint32_t symbol_id, std::uint32_t period);
+        bool remove_subscription(std::uint32_t symbol_id, std::uint32_t period);
         std::vector<Subscription> get_subscriptions() const;
 
     private:
@@ -104,10 +104,10 @@ private:
             KLine                      data{};
         };
 
-        void update_kline(std::uint32_t symbol_id, std::uint16_t period, const KLine& kline);
+        void update_kline(std::uint32_t symbol_id, std::uint32_t period, const KLine& kline);
         void update_tick(std::uint32_t symbol_id, const TickData& tick);
 
-        std::optional<KLine>    get_kline(std::uint32_t symbol_id, std::uint16_t period) const;
+        std::optional<KLine>    get_kline(std::uint32_t symbol_id, std::uint32_t period) const;
         std::optional<TickData> get_tick(std::uint32_t symbol_id) const;
 
     private:

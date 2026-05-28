@@ -56,6 +56,37 @@ function normalizeStrategyStatus(status) {
     return status ? status.toString().trim().toUpperCase() : "";
 }
 
+function strategyStatusFromIndex(statusIndex) {
+    switch (Number(statusIndex)) {
+    case 0:
+        return "DRAFT";
+    case 1:
+        return "ACTIVE";
+    case 2:
+        return "INACTIVE";
+    case 3:
+        return "TESTING";
+    case 4:
+        return "ARCHIVED";
+    case 5:
+        return "RUNNING";
+    case 6:
+        return "PAUSED";
+    case 7:
+        return "STOPPED";
+    default:
+        return "";
+    }
+}
+
+function resolveStrategyBusinessStatus(strategy) {
+    if (!strategy) {
+        return "";
+    }
+
+    return strategyStatusFromIndex(strategy.statusIndex)
+}
+
 function resolveStrategyIdentifier(strategy) {
     if (!strategy) {
         return "";
@@ -165,7 +196,7 @@ function resolveRuntimeSnapshotStatus(runtimeSnapshot) {
 }
 
 function resolveStrategyRuntimeStatus(strategy, tradingConfiguration, runtimeSnapshot, marketCalendarSnapshot, nowDate) {
-    var businessStatus = normalizeStrategyStatus(strategy && strategy.status);
+    var businessStatus = resolveStrategyBusinessStatus(strategy);
     if (!businessStatus) {
         return "STOPPED";
     }
@@ -237,7 +268,7 @@ function mapStrategyToCardData(strategy) {
         createDate: strategy.createDate || new Date().toISOString().split('T')[0],
         
         // 状态和标签
-        status: strategy.status || (strategy.isRunning ? "RUNNING" : "STOPPED"),
+        status: resolveStrategyBusinessStatus(strategy) || (strategy.isRunning ? "RUNNING" : "STOPPED"),
         isFavorite: !!strategy.isFavorite,
         isRecommended: !!strategy.isRecommended,
         tags: strategy.tags || getDefaultTags(strategy.strategyType),

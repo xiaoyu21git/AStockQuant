@@ -12,10 +12,12 @@
 #include <QDate>
 #include <QDateTime>
 #include <QMetaObject>
-#include <QPointer>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QDebug>
 
+#include <cmath>
+#include <optional>
 #include <thread>
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
@@ -190,7 +192,8 @@ QVariantMap defaultAccountSnapshot()
     accountSnapshot.insert(QStringLiteral("unrealizedPnl"), 0.0);
     accountSnapshot.insert(QStringLiteral("totalAsset"), 1000000.0);
     ensureDailyTurnoverSnapshot(&accountSnapshot, QString());
-    accountSnapshot.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
+    accountSnapshot.insert(QStringLiteral("updatedAt"),
+                           QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
     return accountSnapshot;
 }
 
@@ -219,121 +222,262 @@ QString normalizeOrderSymbol(QString symbol)
     return symbol;
 }
 
-QString normalizeOrderSide(QString side)
+enum class CanonicalOrderSide {
+    Buy,
+    Sell,
+};
+
+enum class CanonicalPositionSide {
+    Long,
+    Short,
+};
+
+enum class CanonicalPositionEffect {
+    Open,
+    Close,
+};
+
+enum class CanonicalPositionType {
+    Stock,
+    MarginBuy,
+    MarginSell,
+    Futures,
+    Options,
+};
+
+enum class CanonicalTradeAction {
+    MarginSell,
+    CloseShort,
+};
+
+QString serializeOrderSide(CanonicalOrderSide side)
 {
-    side = side.trimmed().toUpper();
-    if (side == QStringLiteral("1") || side == QStringLiteral("BUY") || side == QStringLiteral("LONG")) {
+    switch (side) {
+    case CanonicalOrderSide::Buy:
         return QStringLiteral("BUY");
-    }
-    if (side == QStringLiteral("2") || side == QStringLiteral("SELL") || side == QStringLiteral("SHORT")) {
+    case CanonicalOrderSide::Sell:
         return QStringLiteral("SELL");
     }
-    return side;
+
+    return {};
+}
+
+QString serializePositionSide(CanonicalPositionSide side)
+{
+    switch (side) {
+    case CanonicalPositionSide::Long:
+        return QStringLiteral("LONG");
+    case CanonicalPositionSide::Short:
+        return QStringLiteral("SHORT");
+    }
+
+    return {};
+}
+
+QString serializePositionEffect(CanonicalPositionEffect effect)
+{
+    switch (effect) {
+    case CanonicalPositionEffect::Open:
+        return QStringLiteral("OPEN");
+    case CanonicalPositionEffect::Close:
+        return QStringLiteral("CLOSE");
+    }
+
+    return {};
+}
+
+QString serializePositionType(CanonicalPositionType type)
+{
+    switch (type) {
+    case CanonicalPositionType::Stock:
+        return QStringLiteral("stock");
+    case CanonicalPositionType::MarginBuy:
+        return QStringLiteral("margin_buy");
+    case CanonicalPositionType::MarginSell:
+        return QStringLiteral("margin_sell");
+    case CanonicalPositionType::Futures:
+        return QStringLiteral("futures");
+    case CanonicalPositionType::Options:
+        return QStringLiteral("options");
+    }
+
+    return {};
+}
+
+QString serializeTradeAction(CanonicalTradeAction action)
+{
+    switch (action) {
+    case CanonicalTradeAction::MarginSell:
+        return QStringLiteral("marginSell");
+    case CanonicalTradeAction::CloseShort:
+        return QStringLiteral("closeShort");
+    }
+
+    return {};
+}
+
+std::optional<CanonicalOrderSide> parseCanonicalOrderSide(QString side)
+{
+    side = side.trimmed().toUpper();
+    if (side == QStringLiteral("BUY")) {
+        return CanonicalOrderSide::Buy;
+    }
+    if (side == QStringLiteral("SELL")) {
+        return CanonicalOrderSide::Sell;
+    }
+    return std::nullopt;
+}
+
+std::optional<CanonicalPositionSide> parseCanonicalPositionSide(QString side)
+{
+    side = side.trimmed().toUpper();
+    if (side == QStringLiteral("LONG")) {
+        return CanonicalPositionSide::Long;
+    }
+    if (side == QStringLiteral("SHORT")) {
+        return CanonicalPositionSide::Short;
+    }
+    return std::nullopt;
+}
+
+std::optional<CanonicalPositionEffect> parseCanonicalPositionEffect(QString effect)
+{
+    effect = effect.trimmed().toUpper();
+    if (effect == QStringLiteral("OPEN")) {
+        return CanonicalPositionEffect::Open;
+    }
+    if (effect == QStringLiteral("CLOSE")) {
+        return CanonicalPositionEffect::Close;
+    }
+    return std::nullopt;
+}
+
+std::optional<CanonicalPositionType> parseCanonicalPositionType(QString type)
+{
+    type = type.trimmed().toLower();
+    if (type == QStringLiteral("stock")) {
+        return CanonicalPositionType::Stock;
+    }
+    if (type == QStringLiteral("margin_buy")) {
+        return CanonicalPositionType::MarginBuy;
+    }
+    if (type == QStringLiteral("margin_sell")) {
+        return CanonicalPositionType::MarginSell;
+    }
+    if (type == QStringLiteral("futures")) {
+        return CanonicalPositionType::Futures;
+    }
+    if (type == QStringLiteral("options")) {
+        return CanonicalPositionType::Options;
+    }
+    return std::nullopt;
+}
+
+std::optional<CanonicalTradeAction> parseCanonicalTradeAction(QString action)
+{
+    action = action.trimmed();
+    if (action == QStringLiteral("marginSell")) {
+        return CanonicalTradeAction::MarginSell;
+    }
+    if (action == QStringLiteral("closeShort")) {
+        return CanonicalTradeAction::CloseShort;
+    }
+    return std::nullopt;
+}
+
+QString normalizeOrderSide(QString side)
+{
+    const std::optional<CanonicalOrderSide> normalizedSide = parseCanonicalOrderSide(side);
+    return normalizedSide.has_value() ? serializeOrderSide(*normalizedSide) : QString{};
 }
 
 QString normalizePositionSide(QString side)
 {
-    side = side.trimmed().toUpper();
-    if (side == QStringLiteral("BUY") || side == QStringLiteral("LONG") || side == QStringLiteral("多")) {
-        return QStringLiteral("LONG");
-    }
-    if (side == QStringLiteral("SELL") || side == QStringLiteral("SHORT") || side == QStringLiteral("空")) {
-        return QStringLiteral("SHORT");
-    }
-    return {};
+    const std::optional<CanonicalPositionSide> normalizedSide = parseCanonicalPositionSide(side);
+    return normalizedSide.has_value() ? serializePositionSide(*normalizedSide) : QString{};
 }
 
-QString normalizePositionMode(QString rawType,
-                              QString exchange,
-                              QString optionType,
-                              QString underlying,
-                              QString accountType,
-                              QString positionSide)
+QString normalizePositionEffect(QString effect)
 {
-    const QString normalizedType = rawType.trimmed().toLower();
+    const std::optional<CanonicalPositionEffect> normalizedEffect = parseCanonicalPositionEffect(effect);
+    return normalizedEffect.has_value() ? serializePositionEffect(*normalizedEffect) : QString{};
+}
+
+CanonicalPositionType resolvePositionType(QString rawType,
+                                          QString exchange,
+                                          QString optionType,
+                                          QString underlying,
+                                          QString accountType,
+                                          std::optional<CanonicalPositionSide> positionSide)
+{
     const QString normalizedExchange = exchange.trimmed().toUpper();
     const QString normalizedOptionType = optionType.trimmed().toLower();
     const QString normalizedUnderlying = underlying.trimmed().toUpper();
     const QString normalizedAccountType = accountType.trimmed().toLower();
-    const QString normalizedPositionSide = positionSide.trimmed().toUpper();
+    const std::optional<CanonicalPositionType> explicitType = parseCanonicalPositionType(rawType);
 
-    if (normalizedType == QStringLiteral("margin_buy") || normalizedType == QStringLiteral("marginbuy")
-        || normalizedType.contains(QStringLiteral("融资"))) {
-        return QStringLiteral("margin_buy");
-    }
-    if (normalizedType == QStringLiteral("margin_sell") || normalizedType == QStringLiteral("marginsell")
-        || normalizedType.contains(QStringLiteral("融券"))) {
-        return QStringLiteral("margin_sell");
-    }
-    if (normalizedType == QStringLiteral("futures") || normalizedType == QStringLiteral("future")
-        || normalizedType.contains(QStringLiteral("期货"))) {
-        return QStringLiteral("futures");
-    }
-    if (normalizedType == QStringLiteral("options") || normalizedType == QStringLiteral("option")
-        || normalizedType.contains(QStringLiteral("期权"))) {
-        return QStringLiteral("options");
-    }
-    if (normalizedType == QStringLiteral("stock") || normalizedType == QStringLiteral("equity")
-        || normalizedType.contains(QStringLiteral("股票"))) {
-        return QStringLiteral("stock");
+    if (explicitType.has_value()) {
+        return *explicitType;
     }
 
     if (!normalizedOptionType.isEmpty() || !normalizedUnderlying.isEmpty()) {
-        return QStringLiteral("options");
+        return CanonicalPositionType::Options;
     }
 
     if (normalizedExchange == QStringLiteral("CFFEX") || normalizedExchange == QStringLiteral("SHFE")
         || normalizedExchange == QStringLiteral("DCE") || normalizedExchange == QStringLiteral("CZCE")
         || normalizedExchange == QStringLiteral("INE") || normalizedExchange == QStringLiteral("GFEX")) {
-        return QStringLiteral("futures");
+        return CanonicalPositionType::Futures;
     }
 
     if (normalizedAccountType.contains(QStringLiteral("margin"))
         || normalizedAccountType.contains(QStringLiteral("credit"))
         || normalizedAccountType.contains(QStringLiteral("融资"))
         || normalizedAccountType.contains(QStringLiteral("融券"))) {
-        return normalizedPositionSide == QStringLiteral("SHORT")
-            ? QStringLiteral("margin_sell")
-            : QStringLiteral("margin_buy");
+        return positionSide.has_value() && *positionSide == CanonicalPositionSide::Short
+            ? CanonicalPositionType::MarginSell
+            : CanonicalPositionType::MarginBuy;
     }
 
-    if (normalizedPositionSide == QStringLiteral("SHORT")) {
-        return QStringLiteral("margin_sell");
+    if (positionSide.has_value() && *positionSide == CanonicalPositionSide::Short) {
+        return CanonicalPositionType::MarginSell;
     }
 
-    return QStringLiteral("stock");
+    return CanonicalPositionType::Stock;
 }
 
-bool isMarginShortOpenFill(const QString& resolvedType,
-                          const QString& side,
-                          const QString& positionEffect,
-                          const QString& action)
+bool isMarginShortOpenFill(CanonicalPositionType resolvedType,
+                           CanonicalOrderSide side,
+                           const std::optional<CanonicalPositionEffect>& positionEffect,
+                           const std::optional<CanonicalTradeAction>& action)
 {
-    return resolvedType == QStringLiteral("margin_sell")
-        && side == QStringLiteral("SELL")
-        && (positionEffect == QStringLiteral("OPEN") || action == QStringLiteral("marginSell"));
+    return resolvedType == CanonicalPositionType::MarginSell
+        && side == CanonicalOrderSide::Sell
+        && ((positionEffect.has_value() && *positionEffect == CanonicalPositionEffect::Open)
+            || (action.has_value() && *action == CanonicalTradeAction::MarginSell));
 }
 
-bool isMarginShortCoverFill(const QString& resolvedType,
-                           const QString& side,
-                           const QString& positionEffect,
-                           const QString& action)
+bool isMarginShortCoverFill(CanonicalPositionType resolvedType,
+                            CanonicalOrderSide side,
+                            const std::optional<CanonicalPositionEffect>& positionEffect,
+                            const std::optional<CanonicalTradeAction>& action)
 {
-    return resolvedType == QStringLiteral("margin_sell")
-        && side == QStringLiteral("BUY")
-        && (positionEffect == QStringLiteral("CLOSE") || action == QStringLiteral("closeShort"));
+    return resolvedType == CanonicalPositionType::MarginSell
+        && side == CanonicalOrderSide::Buy
+        && ((positionEffect.has_value() && *positionEffect == CanonicalPositionEffect::Close)
+            || (action.has_value() && *action == CanonicalTradeAction::CloseShort));
 }
 
-double unrealizedPnlForPosition(const QString& positionSide,
-                               double costBasis,
-                               double lastPrice,
-                               qint64 quantity)
+double unrealizedPnlForPosition(std::optional<CanonicalPositionSide> positionSide,
+                                double costBasis,
+                                double lastPrice,
+                                qint64 quantity)
 {
     if (quantity <= 0 || !std::isfinite(costBasis) || !std::isfinite(lastPrice)) {
         return 0.0;
     }
 
-    if (normalizePositionSide(positionSide) == QStringLiteral("SHORT")) {
+    if (positionSide.has_value() && *positionSide == CanonicalPositionSide::Short) {
         return (costBasis - lastPrice) * static_cast<double>(quantity);
     }
 
@@ -343,7 +487,9 @@ double unrealizedPnlForPosition(const QString& positionSide,
 double netMarketValueContribution(const QVariantMap& position)
 {
     const double marketValue = std::abs(position.value(QStringLiteral("marketValue")).toDouble());
-    return normalizePositionSide(position.value(QStringLiteral("positionSide")).toString()) == QStringLiteral("SHORT")
+    const std::optional<CanonicalPositionSide> positionSide = parseCanonicalPositionSide(
+        position.value(QStringLiteral("positionSide")).toString());
+    return positionSide.has_value() && *positionSide == CanonicalPositionSide::Short
         ? -marketValue
         : marketValue;
 }
@@ -453,14 +599,21 @@ void PositionAccountService::requestInitialSnapshot()
                 const QVariantMap instrumentInfo = MarketDataService::instance()
                     ? MarketDataService::instance()->resolveInstrument(symbol)
                     : QVariantMap{};
-                const QString positionSide = normalizePositionSide(QString::fromStdString(rawPosition.direction));
+                const std::optional<CanonicalPositionSide> positionSide = parseCanonicalPositionSide(
+                    QString::fromStdString(rawPosition.direction));
+                if (!positionSide.has_value()) {
+                    qWarning() << "PositionAccountService: unsupported broker position side"
+                               << symbol
+                               << QString::fromStdString(rawPosition.direction);
+                    continue;
+                }
                 const QString exchange = instrumentInfo.value(QStringLiteral("exchange")).toString();
-                const QString positionType = normalizePositionMode(QString(),
-                                                                  exchange,
-                                                                  QString(),
-                                                                  QString(),
-                                                                  QString(),
-                                                                  positionSide);
+                const CanonicalPositionType positionType = resolvePositionType(QString(),
+                                                                               exchange,
+                                                                               QString(),
+                                                                               QString(),
+                                                                               QString(),
+                                                                               positionSide);
                 const double quantity = static_cast<double>(rawPosition.quantity);
                 const double positionMarketValue = rawPosition.market_value;
                 const double lastPrice = rawPosition.price > 0.0
@@ -473,8 +626,8 @@ void PositionAccountService::requestInitialSnapshot()
                     ? instrumentInfo.value(QStringLiteral("name")).toString()
                     : QString::fromStdString(rawPosition.name).trimmed());
                 position.insert(QStringLiteral("exchange"), exchange);
-                position.insert(QStringLiteral("type"), positionType);
-                position.insert(QStringLiteral("positionSide"), positionSide.isEmpty() ? QStringLiteral("LONG") : positionSide);
+                position.insert(QStringLiteral("type"), serializePositionType(positionType));
+                position.insert(QStringLiteral("positionSide"), serializePositionSide(*positionSide));
                 position.insert(QStringLiteral("quantity"), rawPosition.quantity);
                 position.insert(QStringLiteral("availableQuantity"), rawPosition.quantity);
                 position.insert(QStringLiteral("closeableQuantity"), rawPosition.quantity);
@@ -751,7 +904,13 @@ void PositionAccountService::handleOrderStatus(const engine::EventFormat& event)
     orderStatus.insert("symbol", symbol);
     orderStatus.insert("name", eventStringValue(event, "name").isEmpty() ? instrumentInfo.value(QStringLiteral("name")).toString() : eventStringValue(event, "name"));
     orderStatus.insert("exchange", eventStringValue(event, "exchange").isEmpty() ? instrumentInfo.value(QStringLiteral("exchange")).toString() : eventStringValue(event, "exchange"));
-    orderStatus.insert("side", normalizeOrderSide(eventStringValue(event, "side")));
+    const QString side = normalizeOrderSide(eventStringValue(event, "side"));
+    if (!side.isEmpty()) {
+        orderStatus.insert("side", side);
+    } else if (!eventStringValue(event, "side").trimmed().isEmpty()) {
+        qWarning() << "PositionAccountService: unsupported order side"
+                   << eventStringValue(event, "side");
+    }
     const QString orderType = eventStringValue(event, "type").trimmed().toLower();
     if (!orderType.isEmpty()) {
         orderStatus.insert("type", orderType);
@@ -760,9 +919,12 @@ void PositionAccountService::handleOrderStatus(const engine::EventFormat& event)
     if (!action.isEmpty()) {
         orderStatus.insert("action", action);
     }
-    const QString positionEffect = eventStringValue(event, "position_effect_text").trimmed().toUpper();
+    const QString positionEffect = normalizePositionEffect(eventStringValue(event, "position_effect_text"));
     if (!positionEffect.isEmpty()) {
         orderStatus.insert("positionEffect", positionEffect);
+    } else if (!eventStringValue(event, "position_effect_text").trimmed().isEmpty()) {
+        qWarning() << "PositionAccountService: unsupported position effect"
+                   << eventStringValue(event, "position_effect_text");
     }
     const QString underlying = eventStringValue(event, "underlying").trimmed().toUpper();
     if (!underlying.isEmpty()) {
@@ -839,6 +1001,13 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
     }
     if (side.isEmpty()) {
         side = normalizeOrderSide(existingOrderStatus.value("side").toString());
+    }
+    if (side.isEmpty()) {
+        qWarning() << "PositionAccountService: trade fill missing canonical side"
+                   << orderId
+                   << eventStringValue(event, "side")
+                   << existingOrderStatus.value("side").toString();
+        return;
     }
     if (fillPrice <= 0.0) {
         fillPrice = existingOrderStatus.value("price").toDouble();
@@ -953,31 +1122,35 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         QVariantMap position = m_positionsBySymbol.value(symbol);
         const qint64 previousQuantity = position.value("quantity").toLongLong();
         const double previousCostBasis = position.value("costBasis").toDouble();
-        const QString storedType = position.value("type").toString();
         const QString storedPositionSide = position.value("positionSide").toString();
-        const QString resolvedType = normalizePositionMode(
+        const std::optional<CanonicalPositionSide> storedPositionSideValue = parseCanonicalPositionSide(storedPositionSide);
+        const CanonicalPositionType resolvedType = resolvePositionType(
             existingOrderStatus.value("type").toString(),
             existingOrderStatus.value("exchange").toString(),
             existingOrderStatus.value("optionType").toString(),
             existingOrderStatus.value("underlying").toString(),
             existingOrderStatus.value("accountType").toString(),
-            storedPositionSide);
+            storedPositionSideValue);
         const QString fillAction = existingOrderStatus.value("action").toString().trimmed();
-        const QString fillPositionEffect = existingOrderStatus.value("positionEffect").toString().trimmed().toUpper();
-        const bool shortOpenFill = isMarginShortOpenFill(resolvedType, side, fillPositionEffect, fillAction);
-        const bool shortCoverFill = isMarginShortCoverFill(resolvedType, side, fillPositionEffect, fillAction);
+        const std::optional<CanonicalTradeAction> fillActionValue = parseCanonicalTradeAction(fillAction);
+        const std::optional<CanonicalOrderSide> fillSide = parseCanonicalOrderSide(side);
+        const QString fillPositionEffectText = normalizePositionEffect(existingOrderStatus.value("positionEffect").toString());
+        const std::optional<CanonicalPositionEffect> fillPositionEffect = parseCanonicalPositionEffect(
+            fillPositionEffectText);
+        const bool shortOpenFill = isMarginShortOpenFill(resolvedType, *fillSide, fillPositionEffect, fillActionValue);
+        const bool shortCoverFill = isMarginShortCoverFill(resolvedType, *fillSide, fillPositionEffect, fillActionValue);
         const qint64 signedDelta = shortOpenFill
             ? fillQuantity
             : shortCoverFill
                 ? -fillQuantity
-                : side == QStringLiteral("SELL")
+                : *fillSide == CanonicalOrderSide::Sell
                     ? -fillQuantity
                     : fillQuantity;
         const qint64 newQuantity = previousQuantity + signedDelta;
         const qint64 normalizedQuantity = newQuantity > 0 ? newQuantity : 0;
 
         double newCostBasis = previousCostBasis;
-        const bool openingExposureFill = shortOpenFill || (side == QStringLiteral("BUY") && !shortCoverFill);
+        const bool openingExposureFill = shortOpenFill || (*fillSide == CanonicalOrderSide::Buy && !shortCoverFill);
         if (openingExposureFill) {
             const double previousNotional = previousCostBasis * static_cast<double>(previousQuantity);
             const double newNotional = previousNotional + filledNotional;
@@ -987,25 +1160,24 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         }
 
         position.insert("symbol", symbol);
-        if (!resolvedType.isEmpty()) {
-            position.insert("type", resolvedType);
-        } else if (!storedType.isEmpty()) {
-            position.insert("type", storedType);
+        position.insert("type", serializePositionType(resolvedType));
+        std::optional<CanonicalPositionSide> nextPositionSide = storedPositionSideValue;
+        if ((resolvedType == CanonicalPositionType::Futures || resolvedType == CanonicalPositionType::Options)
+            && fillPositionEffect.has_value() && *fillPositionEffect == CanonicalPositionEffect::Open) {
+            nextPositionSide = *fillSide == CanonicalOrderSide::Buy
+                ? CanonicalPositionSide::Long
+                : CanonicalPositionSide::Short;
         }
-        QString nextPositionSide = normalizePositionSide(storedPositionSide);
-        if ((resolvedType == QStringLiteral("futures") || resolvedType == QStringLiteral("options"))
-            && fillPositionEffect == QStringLiteral("OPEN")) {
-            nextPositionSide = side == QStringLiteral("BUY") ? QStringLiteral("LONG") : QStringLiteral("SHORT");
+        if (resolvedType == CanonicalPositionType::MarginSell
+            && (shortOpenFill || (nextPositionSide.has_value() && *nextPositionSide == CanonicalPositionSide::Short))) {
+            nextPositionSide = CanonicalPositionSide::Short;
         }
-        if (resolvedType == QStringLiteral("margin_sell") && (shortOpenFill || nextPositionSide == QStringLiteral("SHORT"))) {
-            nextPositionSide = QStringLiteral("SHORT");
+        if (!nextPositionSide.has_value()) {
+            nextPositionSide = *fillSide == CanonicalOrderSide::Sell && resolvedType == CanonicalPositionType::MarginSell
+                ? CanonicalPositionSide::Short
+                : CanonicalPositionSide::Long;
         }
-        if (nextPositionSide.isEmpty()) {
-            nextPositionSide = side == QStringLiteral("SELL") && resolvedType == QStringLiteral("margin_sell")
-                ? QStringLiteral("SHORT")
-                : QStringLiteral("LONG");
-        }
-        position.insert("positionSide", nextPositionSide);
+        position.insert("positionSide", serializePositionSide(*nextPositionSide));
         position.insert("quantity", normalizedQuantity);
         position.insert("availableQuantity", normalizedQuantity);
         position.insert("closeableQuantity", normalizedQuantity);
@@ -1019,8 +1191,8 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         if (!existingOrderStatus.value("exchange").toString().isEmpty()) {
             position.insert("exchange", existingOrderStatus.value("exchange").toString());
         }
-        if (!fillPositionEffect.isEmpty()) {
-            position.insert("positionEffect", fillPositionEffect);
+        if (fillPositionEffect.has_value()) {
+            position.insert("positionEffect", serializePositionEffect(*fillPositionEffect));
         }
         if (!existingOrderStatus.value("underlying").toString().isEmpty()) {
             position.insert("underlying", existingOrderStatus.value("underlying").toString());
@@ -1037,14 +1209,14 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
 
         double availableCash = m_accountSnapshot.value("availableCash").toDouble();
         double realizedPnl = m_accountSnapshot.value("realizedPnl").toDouble();
-        if (side == QStringLiteral("BUY")) {
+        if (*fillSide == CanonicalOrderSide::Buy) {
             availableCash -= filledNotional;
         } else {
             availableCash += filledNotional;
         }
         if (shortCoverFill) {
             realizedPnl += (previousCostBasis - fillPrice) * static_cast<double>(fillQuantity);
-        } else if (side == QStringLiteral("SELL") && !shortOpenFill) {
+        } else if (*fillSide == CanonicalOrderSide::Sell && !shortOpenFill) {
             realizedPnl += (fillPrice - previousCostBasis) * static_cast<double>(fillQuantity);
         }
         const double nextDailyTurnoverNotional = m_accountSnapshot.value("dailyTurnoverNotional").toDouble()
@@ -1114,21 +1286,27 @@ void PositionAccountService::handlePositionEvent(const engine::EventFormat& even
         const QString underlying = eventStringValue(event, "underlying").trimmed().toUpper();
         const QString expiry = eventStringValue(event, "expiry").trimmed();
         const QString eventPositionSide = normalizePositionSide(eventStringValue(event, "position_side"));
-        const QString resolvedType = normalizePositionMode(
+        if (eventPositionSide.isEmpty() && !eventStringValue(event, "position_side").trimmed().isEmpty()) {
+            qWarning() << "PositionAccountService: unsupported position side"
+                       << symbol
+                       << eventStringValue(event, "position_side");
+        }
+        const std::optional<CanonicalPositionSide> eventPositionSideValue = parseCanonicalPositionSide(eventPositionSide);
+        const CanonicalPositionType resolvedType = resolvePositionType(
             eventStringValue(event, "type"),
             eventStringValue(event, "exchange"),
             optionType,
             underlying,
             eventStringValue(event, "account_type"),
-            eventPositionSide.isEmpty() ? position.value("positionSide").toString() : eventPositionSide);
+            eventPositionSide.isEmpty()
+                ? parseCanonicalPositionSide(position.value("positionSide").toString())
+                : eventPositionSideValue);
 
         position.insert("symbol", symbol);
         const QVariantMap instrumentInfo = MarketDataService::instance() ? MarketDataService::instance()->resolveInstrument(symbol) : QVariantMap{};
         position.insert("name", eventStringValue(event, "name").isEmpty() ? instrumentInfo.value(QStringLiteral("name")).toString() : eventStringValue(event, "name"));
         position.insert("exchange", eventStringValue(event, "exchange").isEmpty() ? instrumentInfo.value(QStringLiteral("exchange")).toString() : eventStringValue(event, "exchange"));
-        if (!resolvedType.isEmpty()) {
-            position.insert("type", resolvedType);
-        }
+        position.insert("type", serializePositionType(resolvedType));
         if (!eventPositionSide.isEmpty()) {
             position.insert("positionSide", eventPositionSide);
         } else if (!position.value("positionSide").toString().isEmpty()) {
@@ -1141,9 +1319,13 @@ void PositionAccountService::handlePositionEvent(const engine::EventFormat& even
         position.insert("lastPrice", lastPrice);
         position.insert("marketValue", marketValue);
         position.insert("unrealizedPnl", unrealizedPnl);
-        const QString eventPositionEffect = eventStringValue(event, "position_effect_text").trimmed().toUpper();
+        const QString eventPositionEffect = normalizePositionEffect(eventStringValue(event, "position_effect_text"));
         if (!eventPositionEffect.isEmpty()) {
             position.insert("positionEffect", eventPositionEffect);
+        } else if (!eventStringValue(event, "position_effect_text").trimmed().isEmpty()) {
+            qWarning() << "PositionAccountService: unsupported position effect"
+                       << symbol
+                       << eventStringValue(event, "position_effect_text");
         }
         if (!underlying.isEmpty()) {
             position.insert("underlying", underlying);

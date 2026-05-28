@@ -188,9 +188,6 @@ private:
     bool checkDatabaseConnectionForFetch() const;
     QVariantList executeVariantQueryForFetch(const QString& sql,
                                             const std::map<QString, QVariant>& params) const;
-    bool tableExists(const QString& tableName) const;
-    bool tableHasColumn(const QString& tableName, const QString& columnName) const;
-    QString resolveFirstExistingColumn(const QString& tableName, const QStringList& candidates) const;
     QString resolveNewsTable() const;
 
     class Impl;
@@ -198,6 +195,4 @@ private:
     QVariantList m_fetchedData;
     std::function<bool()> m_checkDatabaseConnectionOverrideForTests;
     std::function<QVariantList(const QString&, const std::map<QString, QVariant>&)> m_executeVariantQueryOverrideForTests;
-    std::function<bool(const QString&)> m_tableExistsOverrideForTests;
-    std::function<bool(const QString&, const QString&)> m_tableHasColumnOverrideForTests;
 };

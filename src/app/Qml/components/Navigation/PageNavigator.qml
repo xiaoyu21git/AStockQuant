@@ -17,9 +17,7 @@ QtObject {
         "strategy_creation_pro": { stackIndex: 2, pageName: "专业策略创建", moduleId: "factor-analysis" },
         "strategy_creation": { stackIndex: 1, pageName: "策略创建", moduleId: "factor-analysis" },
         "factor_analysis": { stackIndex: 5, pageName: "因子分析", moduleId: "factor-analysis" },
-        "strategy_backtest": { stackIndex: 3, pageName: "策略回测", moduleId: "backtesting" },
-        "strategy_optimization": { stackIndex: 3, pageName: "策略优化", moduleId: "backtesting" },
-        "strategy_library": { stackIndex: 1, pageName: "策略库", moduleId: "backtesting" },
+        "strategy_library": { stackIndex: 1, pageName: "策略库", moduleId: "factor-analysis" },
         
         // 风险管理相关页面
         "risk_configuration": { stackIndex: 7, pageName: "风险配置", moduleId: "risk-management" },
@@ -55,10 +53,7 @@ QtObject {
             "data_dashboard", "cache_management", "rule_management", "data_export"
         ],
         "factor-analysis": [
-            "strategy_creation_pro", "strategy_creation", "factor_analysis"
-        ],
-        "backtesting": [
-            "strategy_backtest", "strategy_optimization", "strategy_library"
+            "strategy_creation_pro", "strategy_creation", "factor_analysis", "strategy_library"
         ],
         "risk-management": [
             "risk_configuration", "risk_monitoring", "stress_testing",

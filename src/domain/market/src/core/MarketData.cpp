@@ -37,7 +37,7 @@ bool MarketDataManager::initialize(DataProviderFactory::ProviderType type,
     return ok;
 }
 
-bool MarketDataManager::subscribe_kline(uint32_t symbol_id, uint16_t period) {
+bool MarketDataManager::subscribe_kline(uint32_t symbol_id, uint32_t period) {
     if (!data_provider_) return false;
     
     // 先添加到订阅管理器
@@ -54,7 +54,7 @@ bool MarketDataManager::subscribe_tick(uint32_t symbol_id) {
     return data_provider_->subscribe_tick(symbol_id);
 }
 
-bool MarketDataManager::unsubscribe_kline(uint32_t symbol_id, uint16_t period) {
+bool MarketDataManager::unsubscribe_kline(uint32_t symbol_id, uint32_t period) {
     if (!data_provider_) return false;
     
     if (!subscription_manager_.remove_subscription(symbol_id, period)) {
@@ -71,7 +71,7 @@ bool MarketDataManager::unsubscribe_tick(uint32_t symbol_id) {
 
 KLineBatch MarketDataManager::get_history_klines(
     uint32_t symbol_id,
-    uint16_t period,
+    uint32_t period,
     uint64_t start_time,
     uint64_t end_time,
     size_t limit) {
@@ -101,7 +101,7 @@ MarketDataManager& MarketDataManager::instance() {
     return inst;
 }
 
-std::optional<KLine> MarketDataManager::get_latest_kline(uint32_t symbol_id, uint16_t period) {
+std::optional<KLine> MarketDataManager::get_latest_kline(uint32_t symbol_id, uint32_t period) {
     return data_cache_.get_kline(symbol_id, period);
 }
 
@@ -111,7 +111,7 @@ std::optional<TickData> MarketDataManager::get_latest_tick(uint32_t symbol_id) {
 
 std::vector<KLine> MarketDataManager::get_latest_klines(
     const std::vector<uint32_t>& symbol_ids,
-    uint16_t period) {
+    uint32_t period) {
     
     std::vector<KLine> result;
     result.reserve(symbol_ids.size());
@@ -171,7 +171,7 @@ void MarketDataManager::on_tick_received(const TickData& tick) {
 
 // ============== SubscriptionManager 实现 ==============
 
-bool MarketDataManager::SubscriptionManager::add_subscription(uint32_t symbol_id, uint16_t period) {
+bool MarketDataManager::SubscriptionManager::add_subscription(uint32_t symbol_id, uint32_t period) {
     std::unique_lock lock(mutex_);
     uint64_t key = (static_cast<uint64_t>(symbol_id) << 16) | period;
     
@@ -190,7 +190,7 @@ bool MarketDataManager::SubscriptionManager::add_subscription(uint32_t symbol_id
     return true;
 }
 
-bool MarketDataManager::SubscriptionManager::remove_subscription(uint32_t symbol_id, uint16_t period) {
+bool MarketDataManager::SubscriptionManager::remove_subscription(uint32_t symbol_id, uint32_t period) {
     std::unique_lock lock(mutex_);
     uint64_t key = (static_cast<uint64_t>(symbol_id) << 16) | period;
     
@@ -221,7 +221,7 @@ MarketDataManager::SubscriptionManager::get_subscriptions() const {
 
 // ============== LatestDataCache 实现 ==============
 
-void MarketDataManager::LatestDataCache::update_kline(uint32_t symbol_id, uint16_t period, const KLine& kline) {
+void MarketDataManager::LatestDataCache::update_kline(uint32_t symbol_id, uint32_t period, const KLine& kline) {
     std::unique_lock lock(mutex_);
     uint64_t key = (static_cast<uint64_t>(symbol_id) << 16) | period;
     
@@ -236,7 +236,7 @@ void MarketDataManager::LatestDataCache::update_tick(uint32_t symbol_id, const T
     tick_cache_[symbol_id] = tick;
 }
 
-std::optional<KLine> MarketDataManager::LatestDataCache::get_kline(uint32_t symbol_id, uint16_t period) const {
+std::optional<KLine> MarketDataManager::LatestDataCache::get_kline(uint32_t symbol_id, uint32_t period) const {
     std::shared_lock lock(mutex_);
     uint64_t key = (static_cast<uint64_t>(symbol_id) << 16) | period;
     

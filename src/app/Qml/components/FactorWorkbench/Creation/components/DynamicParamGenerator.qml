@@ -49,7 +49,7 @@ Item {
     property int minColumnWidth: 320
     property int maxColumns: 3
     readonly property int responsiveColumns: {
-        return root.calculateResponsiveColumns(flickable.width, root.maxColumns)
+        return root.calculateResponsiveColumns(flickable.width, root.maxColumns, root.minColumnWidth)
     }
     
     // 参数组件注册表实例（使用 var 类型避免绑定循环）
@@ -270,8 +270,6 @@ Item {
             onLoaded: {
                 if (!item || !currentConfig) return
 
-                console.log("加载参数组件:", currentConfig.id, "类型:", paramType)
-
                 // 设置配置
                 item.config = currentConfig
 
@@ -337,19 +335,17 @@ Item {
         // 实际实现可能需要一个可见配置的子集
     }
 
-    function calculateResponsiveColumns(availableWidth, maxAllowedColumns) {
+    function calculateResponsiveColumns(availableWidth, maxAllowedColumns, minAllowedColumnWidth) {
         var resolvedWidth = Math.max(0, availableWidth)
         if (resolvedWidth <= 0) {
             return 1
         }
 
         var resolvedMaxColumns = Math.max(1, Number(maxAllowedColumns) || root.maxColumns)
-        var estimatedColumns = 1
-        if (resolvedWidth >= 1180) {
-            estimatedColumns = 3
-        } else if (resolvedWidth >= 760) {
-            estimatedColumns = 2
-        }
+        var resolvedMinColumnWidth = Math.max(260, Number(minAllowedColumnWidth) || root.minColumnWidth)
+        var spacing = 16
+        var estimatedColumns = Math.floor((resolvedWidth + spacing) / (resolvedMinColumnWidth + spacing))
+        estimatedColumns = Math.max(1, estimatedColumns)
         return Math.min(resolvedMaxColumns, estimatedColumns)
     }
 
@@ -377,7 +373,8 @@ Item {
     function resolveGroupColumns(group) {
         return calculateResponsiveColumns(
             flickable.width,
-            resolveGroupMaxColumns(group))
+            resolveGroupMaxColumns(group),
+            resolveGroupMinColumnWidth(group))
     }
     
     // 获取参数配置
@@ -713,8 +710,6 @@ Item {
     
     // 处理参数值变化
     function handleParamValueChanged(paramId, newValue) {
-        console.log("参数值变化:", paramId, "=", newValue)
-
         if (paramId === "components" || paramId === "growthMetrics" || paramId === "valuationMetrics") {
             var previousValues = {}
             for (var previousKey in root.values) {

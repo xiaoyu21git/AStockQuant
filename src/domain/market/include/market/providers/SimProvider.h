@@ -21,18 +21,25 @@ public:
     void register_kline_callback(KLineCallback cb) override;
     void register_tick_callback(TickCallback cb) override;
 
-    bool subscribe_kline(std::uint32_t symbol_id, std::uint16_t period) override;
-    bool unsubscribe_kline(std::uint32_t symbol_id, std::uint16_t period) override;
+    bool subscribe_kline(std::uint32_t symbol_id, std::uint32_t period) override;
+    bool unsubscribe_kline(std::uint32_t symbol_id, std::uint32_t period) override;
 
     bool subscribe_tick(std::uint32_t symbol_id) override;
     bool unsubscribe_tick(std::uint32_t symbol_id) override;
 
     KLineBatch get_history_klines(
         std::uint32_t symbol_id,
-        std::uint16_t period,
+        std::uint32_t period,
         std::uint64_t start_time,
         std::uint64_t end_time,
         std::size_t  limit) override;
+
+    KLineBatch get_history_klines_batch(
+        const std::vector<std::uint32_t>& symbol_ids,
+        std::uint32_t period,
+        std::uint64_t start_time,
+        std::uint64_t end_time,
+        std::size_t limit_per_symbol) override;
 
 private:
     mutable std::mutex   mutex_;

@@ -21,6 +21,8 @@ import "../utils/StrategyStructureAdapter.js" as StructureAdapter
 Item {
     id: root
 
+    signal requestOpenStrategyCreation(var importPayload)
+
     // ============ 页面属性 ============
     
     property string currentMode: "library"  // library, create, debug, analyze, backtest
@@ -267,6 +269,10 @@ Item {
                 root.handleWriteBacktestMetrics(report || ({}))
             }
 
+            onRequestImportToStrategy: function(report) {
+                root.handleImportBacktestToStrategy(report || ({}))
+            }
+
             Component.onCompleted: {
                 console.log("AnalysisPage 初始化完成")
             }
@@ -300,8 +306,10 @@ Item {
                 root.suppressAnalyzeAutoRun = true
                 var report = result || ({})
                 root.latestBacktestReport = report
-                if (report.config && report.config.factorId) {
-                    root.selectedFactorId = String(report.config.factorId)
+                var reportConfig = report.config || ({})
+                var activeFactorId = String(report.activeAnalysisFactorId || reportConfig.factorId || "").trim()
+                if (activeFactorId.length > 0) {
+                    root.selectedFactorId = activeFactorId
                 }
                 root.showToast("📈 回测完成，已切换到分析报告")
                 Qt.callLater(function() {
@@ -649,12 +657,23 @@ Item {
         var icMetrics = metrics.ic || ({})
         var factorQuality = metrics.factorQuality || ({})
         var executionMetrics = metrics.execution || ({})
-
+        var config = activeReport.config || ({})
+        var actualStartDate = String(config.actualStartDate || "").trim()
+        var effectiveStartDate = actualStartDate || String(config.startDate || "").trim()
+        var effectiveEndDate = String(config.endDate || "").trim()
+        var warmupTrimmedTradingDays = Number(config.warmupTrimmedTradingDays || 0)
+        if (!isFinite(warmupTrimmedTradingDays) || warmupTrimmedTradingDays < 0) {
+            warmupTrimmedTradingDays = 0
+        }
         var factorData = Object.assign({}, factorDetail, {
             icValue: icMetrics.value !== undefined ? icMetrics.value : 0,
             irValue: icMetrics.ir !== undefined ? icMetrics.ir : 0,
             coreRating: factorQuality.coreRating !== undefined ? factorQuality.coreRating : 0,
-            turnoverRate: executionMetrics.turnoverRate !== undefined ? executionMetrics.turnoverRate : 0
+            turnoverRate: executionMetrics.turnoverRate !== undefined ? executionMetrics.turnoverRate : 0,
+            actualStartDate: actualStartDate,
+            effectiveStartDate: effectiveStartDate,
+            effectiveEndDate: effectiveEndDate,
+            warmupTrimmedTradingDays: Math.floor(warmupTrimmedTradingDays)
         })
 
         if (!factorData.factorId) {
@@ -673,6 +692,62 @@ Item {
             showToast("写入回测指标失败: " + factorId)
         }
         return updateSuccess
+    }
+
+    function buildStrategyImportPayload(report) {
+        var activeReport = report || ({})
+        var config = activeReport.config || ({})
+        var factorId = String(activeReport.factorId || config.factorId || selectedFactorId || "").trim()
+        var factorDetail = factorId && factorService && typeof factorService.getFactorById === "function"
+            ? (factorService.getFactorById(factorId) || ({}))
+            : ({})
+        var factorName = String(config.factorName || activeReport.factorName || factorDetail.factorName || factorDetail.displayName || factorId).trim()
+        var actualStartDate = String(config.actualStartDate || "").trim()
+        var effectiveStartDate = actualStartDate || String(config.startDate || "").trim()
+        var effectiveEndDate = String(config.endDate || "").trim()
+        var warmupTrimmedTradingDays = Number(config.warmupTrimmedTradingDays || 0)
+
+        if (!isFinite(warmupTrimmedTradingDays) || warmupTrimmedTradingDays < 0) {
+            warmupTrimmedTradingDays = 0
+        }
+
+        return {
+            parameters: {
+                factorImportContext: {
+                    importSource: "factorBacktest",
+                    factorId: factorId,
+                    factorName: factorName,
+                    actualStartDate: actualStartDate,
+                    effectiveStartDate: effectiveStartDate,
+                    effectiveEndDate: effectiveEndDate,
+                    warmupTrimmedTradingDays: Math.floor(warmupTrimmedTradingDays)
+                },
+                factor_overlay: {
+                    enabled: factorId.length > 0,
+                    targetPositionCount: 10,
+                    minimumCompositeScore: 0,
+                    combineMode: "rank_only",
+                    selectionScope: "rule_eligible",
+                    allocations: factorId.length > 0 ? [{
+                        factor_id: factorId,
+                        display_name: factorName || factorId,
+                        weight_percent: 100
+                    }] : []
+                }
+            }
+        }
+    }
+
+    function handleImportBacktestToStrategy(report) {
+        var importPayload = buildStrategyImportPayload(report)
+        if (!importPayload || Object.keys(importPayload).length === 0) {
+            showToast("当前因子回测结果缺少可导入的因子信息")
+            return false
+        }
+
+        root.requestOpenStrategyCreation(importPayload)
+        showToast("已携带因子回测上下文跳转到策略创建")
+        return true
     }
 
     function factorBacktestBaselineFor(factorId) {
@@ -703,6 +778,8 @@ Item {
         if (latestBacktestReport.results && Array.isArray(latestBacktestReport.results)) {
             var filteredResults = []
             var removedCount = 0
+            var currentActiveFactorId = String(latestBacktestReport.activeAnalysisFactorId || "")
+            var activeFactorStillExists = false
             for (var resultIndex = 0; resultIndex < latestBacktestReport.results.length; resultIndex++) {
                 var resultItem = latestBacktestReport.results[resultIndex] || ({})
                 var resultConfig = resultItem.config || ({})
@@ -711,13 +788,40 @@ Item {
                     removedCount++
                     continue
                 }
+                if (resultFactorId === currentActiveFactorId) {
+                    activeFactorStillExists = true
+                }
                 filteredResults.push(resultItem)
             }
 
             if (removedCount > 0) {
-                latestBacktestReport = filteredResults.length > 0
-                    ? Object.assign({}, latestBacktestReport, { results: filteredResults })
-                    : ({})
+                if (filteredResults.length > 0) {
+                    var nextActiveFactorId = currentActiveFactorId
+                    if (!nextActiveFactorId || !activeFactorStillExists) {
+                        var firstRemainingResult = filteredResults[0] || ({})
+                        var firstRemainingConfig = firstRemainingResult.config || ({})
+                        nextActiveFactorId = String(firstRemainingResult.factorId || firstRemainingConfig.factorId || "")
+                    }
+
+                    var nextFactorIds = []
+                    for (var factorIndex = 0; factorIndex < filteredResults.length; factorIndex++) {
+                        var factorResult = filteredResults[factorIndex] || ({})
+                        var factorConfig = factorResult.config || ({})
+                        var factorResultId = String(factorResult.factorId || factorConfig.factorId || "")
+                        if (factorResultId.length > 0) {
+                            nextFactorIds.push(factorResultId)
+                        }
+                    }
+
+                    latestBacktestReport = Object.assign({}, latestBacktestReport, {
+                        results: filteredResults,
+                        factorIds: nextFactorIds,
+                        factorCount: filteredResults.length,
+                        activeAnalysisFactorId: nextActiveFactorId
+                    })
+                } else {
+                    latestBacktestReport = ({})
+                }
                 return
             }
         }
@@ -755,13 +859,6 @@ Item {
                 editingFactorData = ({})
             }
         }
-    }
-
-    function resolveFactorBacktestSymbolPool(report) {
-        if (!report || Object.keys(report).length === 0) {
-            return []
-        }
-        return StructureAdapter.resolveBacktestRecordSymbolPool(report)
     }
 
     function compareFactorBacktestCoverage(previousReport, currentReport) {
@@ -819,16 +916,7 @@ Item {
             detailParts.push("多空收益差 " + (spreadDiff * 100).toFixed(2) + "%")
         }
 
-        var previousPool = resolveFactorBacktestSymbolPool(previousReport)
-        var currentPool = resolveFactorBacktestSymbolPool(currentReport)
-        var overlapCount = 0
-        for (var poolIndex = 0; poolIndex < currentPool.length; poolIndex++) {
-            if (previousPool.indexOf(currentPool[poolIndex]) !== -1) {
-                overlapCount++
-            }
-        }
-
-        var summaryPrefix = "上次股票池 " + previousPool.length + " 只，本次股票池 " + currentPool.length + " 只，重合 " + overlapCount + " 只。"
+        var summaryPrefix = "本次比较仅基于因子指标与有效期，不再携带或比较股票池信息。"
         var detailSummary = detailParts.length > 0 ? ("关键差异: " + detailParts.join("，") + "。") : "两次关键指标接近。"
 
         if (betterSignals >= 2 && worseSignals === 0) {

@@ -6,7 +6,7 @@ import "../../../utils/StrategyCreationUtils.js" as Utils
 Rectangle {
     id: root
 
-    property string selectedStrategyType: "trend_following"
+    property int selectedStrategyTypeIndex: 0
     property var strategyProfile: ({})
 
     signal profileEdited(var profile)
@@ -55,7 +55,7 @@ Rectangle {
         for (var field in source) {
             nextProfile[field] = source[field]
         }
-        nextProfile.strategyType = selectedStrategyType || nextProfile.strategyType || "trend_following"
+        nextProfile.strategyTypeIndex = selectedStrategyTypeIndex
         nextProfile[key] = value
         profileEdited(nextProfile)
     }
@@ -110,7 +110,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: Utils.StrategyCreationUtils.getStrategyTypeName(root.selectedStrategyType)
+                    text: Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
                     font.pixelSize: 13
                     font.weight: Font.Medium
                     color: "#dbeafe"

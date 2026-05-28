@@ -1,0 +1,695 @@
+#pragma once
+
+#include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
+#include "../../backtest/include/ResolvedStrategyBehavior.h"
+#include "../../factor/include/factor_enums.h"
+
+#include <QDate>
+#include <QDateTime>
+#include <QList>
+#include <QString>
+#include <QStringView>
+#include <QVector>
+
+#include <cmath>
+
+namespace domain::strategy {
+
+template <typename Tag>
+class StrongText final {
+public:
+    StrongText() = default;
+    explicit StrongText(const QString& value)
+        : value_(value.trimmed())
+    {
+    }
+
+    explicit StrongText(QString&& value)
+        : value_(value.trimmed())
+    {
+    }
+
+    [[nodiscard]] bool isEmpty() const
+    {
+        return value_.isEmpty();
+    }
+
+    [[nodiscard]] bool isValid() const
+    {
+        return !value_.isEmpty();
+    }
+
+    [[nodiscard]] bool equalsText(QStringView value) const
+    {
+        return value_ == value;
+    }
+
+    [[nodiscard]] const QString& text() const
+    {
+        return value_;
+    }
+
+    [[nodiscard]] friend bool operator==(const StrongText& left, const StrongText& right)
+    {
+        return left.value_ == right.value_;
+    }
+
+    [[nodiscard]] friend bool operator!=(const StrongText& left, const StrongText& right)
+    {
+        return !(left == right);
+    }
+
+private:
+    QString value_;
+};
+
+struct StrategyIdTag;
+struct StrategyCodeTag;
+struct StrategyNameTag;
+struct DescriptionTextTag;
+struct VersionTag;
+struct AuthorNameTag;
+struct StrategyTagTag;
+struct SymbolCodeTag;
+struct MarketEventTypeTag;
+struct UniverseSourceIdTag;
+struct FactorIdTag;
+struct RuleTemplateIdTag;
+struct FilePathTag;
+struct NamespaceIdTag;
+struct GroupIdTag;
+struct GroupTitleTag;
+struct ReasonCodeTag;
+struct BacktestTaskIdTag;
+struct OrderIdTag;
+struct RuntimeStrategyIdTag;
+struct BatchIdTag;
+struct ExecutionScopeIdTag;
+
+using StrategyId = StrongText<StrategyIdTag>;
+using StrategyCode = StrongText<StrategyCodeTag>;
+using StrategyName = StrongText<StrategyNameTag>;
+using DescriptionText = StrongText<DescriptionTextTag>;
+using VersionText = StrongText<VersionTag>;
+using AuthorName = StrongText<AuthorNameTag>;
+using StrategyTag = StrongText<StrategyTagTag>;
+using SymbolCode = StrongText<SymbolCodeTag>;
+using MarketEventTypeId = StrongText<MarketEventTypeTag>;
+using UniverseSourceId = StrongText<UniverseSourceIdTag>;
+using FactorId = StrongText<FactorIdTag>;
+using RuleTemplateId = StrongText<RuleTemplateIdTag>;
+using FilePathToken = StrongText<FilePathTag>;
+using NamespaceId = StrongText<NamespaceIdTag>;
+using GroupId = StrongText<GroupIdTag>;
+using GroupTitle = StrongText<GroupTitleTag>;
+using ReasonCode = StrongText<ReasonCodeTag>;
+using BacktestTaskId = StrongText<BacktestTaskIdTag>;
+using OrderId = StrongText<OrderIdTag>;
+using RuntimeStrategyId = StrongText<RuntimeStrategyIdTag>;
+using BatchId = StrongText<BatchIdTag>;
+using ExecutionScopeId = StrongText<ExecutionScopeIdTag>;
+
+struct DatasetId final {
+    int value{-1};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return value >= 0;
+    }
+};
+
+struct Quantity final {
+    qint64 value{0};
+
+    [[nodiscard]] bool isPositive() const
+    {
+        return value > 0;
+    }
+};
+
+struct Money final {
+    double value{0.0};
+
+    [[nodiscard]] bool isFinite() const
+    {
+        return std::isfinite(value);
+    }
+
+    [[nodiscard]] bool isPositive() const
+    {
+        return isFinite() && value > 0.0;
+    }
+};
+
+struct Ratio final {
+    double value{0.0};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return std::isfinite(value) && value >= 0.0 && value <= 1.0;
+    }
+};
+
+struct RebalanceFrequencyDays final {
+    int value{1};
+
+    [[nodiscard]] bool isPositive() const
+    {
+        return value > 0;
+    }
+};
+
+enum class StrategyLanguage : int {
+    Python = 0,
+    Cpp = 1,
+    Julia = 2,
+    R = 3,
+};
+
+enum class StrategyExecutionKind : int {
+    Standard = 0,
+    FactorWeightedPortfolio = 1,
+};
+
+enum class UniverseMode : int {
+    ExplicitSymbols = 0,
+    SavedUniverse = 1,
+    LinkedWatchlist = 2,
+    IndexConstituents = 3,
+};
+
+enum class UniverseType : int {
+    Equity = 0,
+    Index = 1,
+    Basket = 2,
+};
+
+enum class DataSourceMode : int {
+    Raw = 0,
+    Cleaned = 1,
+    CacheDataset = 2,
+};
+
+enum class PositionSizingMethod : int {
+    FixedFraction = 0,
+    EqualWeight = 1,
+    SpreadNeutral = 2,
+    Discretionary = 3,
+};
+
+enum class DefaultOrderType : int {
+    Market = 0,
+    MarketOnClose = 1,
+};
+
+enum class ShortSellingMode : int {
+    Disabled = 0,
+    Enabled = 1,
+};
+
+enum class RuleBindingPhase : int {
+    Market = 0,
+    Signal = 1,
+    Entry = 2,
+    Rebalance = 3,
+    Exit = 4,
+    Risk = 5,
+    Watch = 6,
+};
+
+enum class RuleTemplateStage : int {
+    Unspecified = -1,
+    Market = 0,
+    Signal = 1,
+    Entry = 2,
+    Rebalance = 3,
+    Exit = 4,
+    Risk = 5,
+    Watch = 6,
+    Eligibility = 7,
+    Portfolio = 8,
+    Execution = 9,
+    AccountRisk = 10,
+};
+
+enum class RuleTemplateResultType : int {
+    Unspecified = -1,
+    Pass = 0,
+    StateSwitch = 1,
+    Halt = 2,
+    Block = 3,
+    CandidateEntry = 4,
+    Open = 5,
+    Reduce = 6,
+    Exit = 7,
+};
+
+enum class RuleGroupOperator : int {
+    All = 0,
+    Any = 1,
+    MinimumMatch = 2,
+    FirstMatch = 3,
+    ScoreSum = 4,
+};
+
+enum class RuleGroupRole : int {
+    Unspecified = 0,
+    MustPass = 1,
+    AnyPass = 2,
+    Trigger = 3,
+    ScoreBoost = 4,
+    EntryGuard = 5,
+    ExitGuard = 6,
+    PositionManagement = 7,
+};
+
+enum class RuntimeDecision : int {
+    CandidateReady = 0,
+    Blocked = 1,
+    Suppressed = 2,
+    Disabled = 3,
+};
+
+enum class RuntimeGate : int {
+    None = 0,
+    MarketEnvironment = 1,
+    RuleTemplate = 2,
+    Execution = 3,
+    Risk = 4,
+};
+
+enum class CandidateAction : int {
+    None = 0,
+    Buy = 1,
+    Sell = 2,
+};
+
+enum class AutoExecutionStatus : int {
+    Disabled = 0,
+    Blocked = 1,
+    Submitted = 2,
+    RiskPending = 3,
+    BrokerPending = 4,
+    Filled = 5,
+    PartialFilled = 6,
+    Cancelled = 7,
+    Rejected = 8,
+};
+
+enum class AutoExecutionStage : int {
+    Submit = 0,
+    Queue = 1,
+    Runtime = 2,
+    RuleTemplate = 3,
+    Risk = 4,
+    Broker = 5,
+    Fill = 6,
+};
+
+enum class RuntimeOrderMode : int {
+    Limit = 0,
+    Market = 1,
+};
+
+enum class RuntimeOrderSide : int {
+    Buy = 0,
+    Sell = 1,
+};
+
+enum class RuntimePositionEffect : int {
+    Open = 0,
+    Close = 1,
+};
+
+enum class BacktestRunStatus : int {
+    Succeeded = 0,
+    Failed = 1,
+};
+
+enum class DiagnosticCode : int {
+    None = 0,
+    ValidationFailed = 1,
+    InvalidUniverse = 2,
+    InvalidExecutionKind = 3,
+    InvalidTemplateBinding = 4,
+    RuntimeRuleBlocked = 5,
+    AutoOrderRejected = 6,
+};
+
+struct StrategyIdentity final {
+    StrategyId strategyId;
+    StrategyCode strategyCode;
+    StrategyName strategyName;
+    domain::backtest::StrategyStoredType storedType{domain::backtest::StrategyStoredType::Unknown};
+    domain::backtest::StrategyBehaviorKind behaviorKind{domain::backtest::StrategyBehaviorKind::Custom};
+    StrategyExecutionKind executionKind{StrategyExecutionKind::Standard};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return strategyId.isValid()
+            && strategyCode.isValid()
+            && strategyName.isValid()
+            && storedType != domain::backtest::StrategyStoredType::Unknown;
+    }
+};
+
+struct StrategyMetadata final {
+    DescriptionText description;
+    VersionText version;
+    AuthorName author;
+    StrategyLanguage language{StrategyLanguage::Python};
+    QVector<StrategyTag> tags;
+    QDateTime createdAt;
+    QDateTime updatedAt;
+};
+
+struct StrategyLifecycle final {
+    strategy_view::StrategyLifecycleStatus status{strategy_view::StrategyLifecycleStatus::Unknown};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return strategy_view::isKnownStrategyLifecycleStatus(status);
+    }
+
+    [[nodiscard]] bool allowsSignalEmission() const
+    {
+        return status == strategy_view::StrategyLifecycleStatus::Active
+            || status == strategy_view::StrategyLifecycleStatus::Testing;
+    }
+};
+
+struct StrategyRuntimeProfile final {
+    int assetTypeIndex{0};
+    int timeFrameIndex{0};
+    int riskLevelIndex{0};
+
+    [[nodiscard]] bool hasAny() const
+    {
+        return assetTypeIndex > 0 || timeFrameIndex > 0 || riskLevelIndex > 0;
+    }
+};
+
+struct RuleTemplateBinding final {
+    RuleBindingPhase phase{RuleBindingPhase::Signal};
+    RuleTemplateId templateId;
+    FilePathToken filePath;
+    NamespaceId namespaceId;
+    GroupId groupId;
+    GroupTitle groupTitle;
+    RuleGroupRole groupRole{RuleGroupRole::Unspecified};
+    RuleGroupOperator groupOperator{RuleGroupOperator::All};
+    int groupMinMatchCount{0};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return templateId.isValid() || filePath.isValid();
+    }
+};
+
+struct RuleComposerRule final {
+    RuleTemplateBinding binding;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return binding.isValid();
+    }
+};
+
+struct RuleComposerGroup final {
+    GroupId groupId;
+    GroupTitle title;
+    RuleGroupRole groupRole{RuleGroupRole::Unspecified};
+    RuleGroupOperator groupOperator{RuleGroupOperator::All};
+    int minimumMatchCount{0};
+    QVector<RuleComposerRule> rules;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return !rules.isEmpty();
+    }
+};
+
+struct RuleComposerStage final {
+    RuleBindingPhase phase{RuleBindingPhase::Signal};
+    QVector<RuleComposerGroup> groups;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return !groups.isEmpty();
+    }
+};
+
+struct RuleComposerState final {
+    QVector<RuleComposerStage> stages;
+
+    [[nodiscard]] bool isEmpty() const
+    {
+        return stages.isEmpty();
+    }
+};
+
+struct FactorOverlayAllocation final {
+    FactorId factorId;
+    double weightPercent{0.0};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return factorId.isValid() && std::isfinite(weightPercent) && weightPercent > 0.0;
+    }
+};
+
+struct RuleProfileSnapshot final {
+    Ratio maxPositionRatio;
+    Ratio maxTotalExposureRatio;
+    Ratio stopLossRatio;
+    Ratio takeProfitRatio;
+    int rebalanceDays{0};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return maxPositionRatio.isValid()
+            && maxTotalExposureRatio.isValid()
+            && stopLossRatio.isValid()
+            && takeProfitRatio.isValid();
+    }
+};
+
+struct BatchExecutionPolicy final {
+    int maxBatchOrders{0};
+    Money maxBatchNotional;
+    bool waitPreviousBatchFilled{true};
+    bool pauseOnConflict{false};
+    bool pauseOnAbnormalReject{false};
+    bool requireManualCheckpoint{false};
+    int manualCheckpointBatchIndex{0};
+};
+
+struct ExecutionPolicySnapshot final {
+    PositionSizingMethod positionSizingMethod{PositionSizingMethod::FixedFraction};
+    RebalanceFrequencyDays rebalanceFrequencyDays;
+    DefaultOrderType defaultOrderType{DefaultOrderType::MarketOnClose};
+    ShortSellingMode shortSellingMode{ShortSellingMode::Disabled};
+    BatchExecutionPolicy batchExecution;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return rebalanceFrequencyDays.isPositive();
+    }
+};
+
+struct BacktestAssumptionsSnapshot final {
+    Money initialCapital;
+    Ratio commissionRate;
+    Ratio slippageRate;
+    Ratio taxRate;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return initialCapital.isPositive()
+            && commissionRate.isValid()
+            && slippageRate.isValid()
+            && taxRate.isValid();
+    }
+};
+
+struct UniverseSpec final {
+    UniverseMode universeMode{UniverseMode::ExplicitSymbols};
+    UniverseType universeType{UniverseType::Equity};
+    UniverseSourceId sourceId;
+    QVector<SymbolCode> explicitSymbols;
+    QVector<SymbolCode> resolvedSymbols;
+
+    [[nodiscard]] bool isValid() const
+    {
+        switch (universeMode) {
+        case UniverseMode::ExplicitSymbols:
+            return !explicitSymbols.isEmpty();
+        case UniverseMode::SavedUniverse:
+        case UniverseMode::LinkedWatchlist:
+        case UniverseMode::IndexConstituents:
+            return sourceId.isValid() || !resolvedSymbols.isEmpty();
+        default:
+            return false;
+        }
+    }
+};
+
+struct FactorOverlaySpec final {
+    bool enabled{false};
+    int targetPositionCount{10};
+    double minimumCompositeScore{0.0};
+    QVector<FactorOverlayAllocation> allocations;
+    QVector<FactorId> selectedFactors;
+
+    [[nodiscard]] bool isValid() const
+    {
+        if (!enabled) {
+            return true;
+        }
+
+        if (selectedFactors.isEmpty()) {
+            return false;
+        }
+
+        for (const FactorOverlayAllocation& allocation : allocations) {
+            if (!allocation.isValid()) {
+                return false;
+            }
+        }
+
+        return targetPositionCount > 0 && std::isfinite(minimumCompositeScore);
+    }
+};
+
+struct StrategyScopeContextSnapshot final {
+    factor::MarketEnvironmentProfile marketEnvironmentProfile{factor::MarketEnvironmentProfile::GENERIC_EQUITY};
+    UniverseSpec universe;
+    StrategyName selectedStrategyName;
+    int executionTimeFrameIndex{0};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return universe.isValid();
+    }
+};
+
+struct StrategySpec final {
+    RuleProfileSnapshot ruleProfile;
+    ExecutionPolicySnapshot executionPolicy;
+    BacktestAssumptionsSnapshot backtestAssumptions;
+    StrategyScopeContextSnapshot strategyScopeContext;
+    FactorOverlaySpec factorOverlay;
+    QVector<RuleTemplateBinding> ruleTemplateBindings;
+    RuleComposerState ruleComposerState;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return ruleProfile.isValid()
+            && executionPolicy.isValid()
+            && backtestAssumptions.isValid()
+            && strategyScopeContext.isValid()
+            && factorOverlay.isValid();
+    }
+};
+
+struct PerformanceSummaryMetrics final {
+    double totalReturn{0.0};
+    double annualizedReturn{0.0};
+    double volatility{0.0};
+    double sharpeRatio{0.0};
+    double sortinoRatio{0.0};
+    double calmarRatio{0.0};
+    double maxDrawdown{0.0};
+    double winRate{0.0};
+    double profitFactor{0.0};
+    double averageWin{0.0};
+    double averageLoss{0.0};
+    double alpha{0.0};
+    double beta{0.0};
+    double informationRatio{0.0};
+    double trackingError{0.0};
+};
+
+struct TradeStatistics final {
+    int totalTrades{0};
+    int winningTrades{0};
+    int losingTrades{0};
+    Money totalProfit;
+    Money totalLoss;
+    Money largestWin;
+    Money largestLoss;
+    double averageHoldingPeriodDays{0.0};
+};
+
+struct RiskMetrics final {
+    double var95{0.0};
+    double cvar95{0.0};
+    double downsideDeviation{0.0};
+    double upsideDeviation{0.0};
+    double skewness{0.0};
+    double kurtosis{0.0};
+};
+
+struct TimeSeriesSnapshot final {
+    QVector<QDate> dates;
+    QVector<double> portfolioValues;
+    QVector<double> returns;
+    QVector<double> drawdowns;
+    QVector<double> positions;
+    QVector<double> cash;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return dates.size() == portfolioValues.size()
+            && dates.size() == returns.size()
+            && dates.size() == drawdowns.size();
+    }
+};
+
+struct UniverseResolutionSummary final {
+    UniverseMode universeMode{UniverseMode::ExplicitSymbols};
+    int requestedSymbolCount{0};
+    int resolvedSymbolCount{0};
+};
+
+struct RuleTemplateSummary final {
+    int boundTemplateCount{0};
+    int matchedTemplateCount{0};
+    int blockedTemplateCount{0};
+};
+
+struct DiagnosticMessage final {
+    DiagnosticCode code{DiagnosticCode::None};
+    ReasonCode reasonCode;
+};
+
+struct BacktestSnapshot final {
+    QDateTime recordedAt;
+    StrategyExecutionKind executionKind{StrategyExecutionKind::Standard};
+    StrategySpec strategySpec;
+    PerformanceSummaryMetrics performanceSummary;
+    UniverseResolutionSummary universeResolutionSummary;
+    RuleTemplateSummary ruleTemplateSummary;
+
+    [[nodiscard]] bool isValid() const
+    {
+        return recordedAt.isValid() && strategySpec.isValid();
+    }
+};
+
+struct BacktestHistoryEntry final {
+    BacktestSnapshot snapshot;
+    bool replaceBaselineUniverse{false};
+
+    [[nodiscard]] bool isValid() const
+    {
+        return snapshot.isValid();
+    }
+};
+
+struct StrategyPerformanceSummary final {
+    QDateTime lastBacktestAt;
+    PerformanceSummaryMetrics latestMetrics;
+};
+
+} // namespace domain::strategy

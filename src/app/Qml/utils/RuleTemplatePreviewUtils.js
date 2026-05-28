@@ -1220,10 +1220,6 @@ var SPECIFIC_INSIGHTS = {
 
 function normalizePhaseKey(phase) {
     var key = stringValue(phase).toLowerCase()
-    if (key === "entry") return "signal"
-    if (key === "exit") return "rebalance"
-    if (key === "risk") return "market"
-    if (key === "watch") return "signal"
     return key
 }
 
@@ -1231,17 +1227,23 @@ function phaseDisplayName(phase, style) {
     var key = normalizePhaseKey(phase)
     var variant = stringValue(style).toLowerCase()
     if (variant === "short") {
+        if (key === "market") return "市场"
+        if (key === "eligibility") return "准入"
         if (key === "signal") return "入场/信号"
+        if (key === "portfolio") return "组合"
         if (key === "rebalance") return "减仓/退出"
-        if (key === "market") return "市场/风控"
-        if (key === "watch") return "观察"
+        if (key === "execution") return "执行"
+        if (key === "account_risk") return "账户风控"
         return key === "" ? "未分类" : key
     }
 
+    if (key === "market") return "市场环境"
+    if (key === "eligibility") return "标的准入"
     if (key === "signal") return "入场/观察信号"
+    if (key === "portfolio") return "仓位与组合"
     if (key === "rebalance") return "持仓管理/退出"
-    if (key === "market") return "市场/风控"
-    if (key === "watch") return "观察"
+    if (key === "execution") return "执行约束"
+    if (key === "account_risk") return "账户风控"
     return key === "" ? "未分类" : key
 }
 

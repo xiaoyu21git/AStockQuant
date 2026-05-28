@@ -16,11 +16,22 @@ Rectangle {
     property string paramId: config.id || ""
     property string label: config.label || config.displayName || paramId
     property string description: config.description || ""
-    property var options: normalizeOptions(config.options || [])
+    property var options: []
     property bool required: config.required || false
+    property bool queryListMode: String(config.presentation || "").toLowerCase() === "query_list"
+    property bool searchable: config.searchable !== false
+    property string placeholderText: config.placeholder || (queryListMode ? "点击查询并选择" : "")
+    property string popupTitle: config.queryTitle || label
+    property bool optionsLoaded: false
+    property bool optionsLoading: false
+    property string queryText: ""
+    readonly property var filteredOptions: buildFilteredOptions(queryText, options)
 
     signal paramValueChanged(string id, var newValue)
     signal validationChanged(string id, bool valid, string message)
+
+    Component.onCompleted: syncOptionsFromConfig()
+    onConfigChanged: syncOptionsFromConfig()
 
     implicitWidth: parent ? parent.width : 400
     implicitHeight: contentLayout.implicitHeight + 16
@@ -72,6 +83,7 @@ Rectangle {
         Flow {
             Layout.fillWidth: true
             spacing: 8
+            visible: !root.queryListMode
 
             Repeater {
                 model: root.options
@@ -114,6 +126,85 @@ Rectangle {
             }
         }
 
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 8
+            visible: root.queryListMode
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 40
+                radius: 8
+                color: "#0F172A"
+                border.color: popupTriggerArea.containsMouse ? "#3B82F6" : "#334155"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 10
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.selectedSummaryText()
+                        font.pixelSize: 12
+                        color: Array.isArray(root.value) && root.value.length > 0 ? "#E2E8F0" : "#94A3B8"
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        text: root.optionsLoading ? "加载中" : "查询"
+                        font.pixelSize: 12
+                        color: "#60A5FA"
+                    }
+                }
+
+                MouseArea {
+                    id: popupTriggerArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: {
+                        root.ensureOptionsLoaded()
+                        optionsPopup.open()
+                    }
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: 8
+                visible: root.normalizeSelectedValues(root.value).length > 0
+
+                Repeater {
+                    model: root.normalizeSelectedValues(root.value)
+
+                    Rectangle {
+                        radius: 14
+                        height: 28
+                        width: selectedOptionLabel.implicitWidth + 34
+                        color: "#1D4ED8"
+                        border.width: 1
+                        border.color: "#60A5FA"
+
+                        Text {
+                            id: selectedOptionLabel
+                            anchors.centerIn: parent
+                            text: root.labelForValue(modelData)
+                            font.pixelSize: 12
+                            color: "#FFFFFF"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleOption(modelData)
+                        }
+                    }
+                }
+            }
+        }
+
         Text {
             text: root.description
             font.pixelSize: 12
@@ -133,6 +224,152 @@ Rectangle {
         }
     }
 
+    Popup {
+        id: optionsPopup
+        modal: true
+        focus: true
+        width: Math.min(460, root.width > 0 ? root.width : 460)
+        height: 420
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        parent: Overlay.overlay
+
+        onOpened: {
+            root.ensureOptionsLoaded()
+            root.queryText = ""
+            if (root.searchable) {
+                searchField.forceActiveFocus()
+            }
+        }
+
+        background: Rectangle {
+            radius: 12
+            color: "#0F172A"
+            border.width: 1
+            border.color: "#334155"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Text {
+                    text: root.popupTitle
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    color: "#F8FAFC"
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Text {
+                    text: "已选 " + root.normalizeSelectedValues(root.value).length
+                    font.pixelSize: 12
+                    color: "#94A3B8"
+                }
+            }
+
+            TextField {
+                id: searchField
+                Layout.fillWidth: true
+                visible: root.searchable
+                placeholderText: "输入关键字筛选"
+                color: "#E2E8F0"
+                selectByMouse: true
+                text: root.queryText
+                onTextChanged: root.queryText = text
+
+                background: Rectangle {
+                    radius: 8
+                    color: "#111827"
+                    border.width: 1
+                    border.color: searchField.activeFocus ? "#3B82F6" : "#334155"
+                }
+            }
+
+            BusyIndicator {
+                Layout.alignment: Qt.AlignHCenter
+                running: root.optionsLoading
+                visible: running
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                radius: 8
+                color: "#111827"
+                border.width: 1
+                border.color: "#1F2937"
+
+                ListView {
+                    id: optionsList
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    clip: true
+                    spacing: 4
+                    model: root.filteredOptions
+
+                    delegate: Rectangle {
+                        width: optionsList.width
+                        height: 36
+                        radius: 8
+                        color: optionMouseArea.containsMouse ? "#1E293B" : "transparent"
+                        border.width: selected ? 1 : 0
+                        border.color: "#3B82F6"
+                        property bool selected: root.containsValue(modelData.value)
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 10
+
+                            Rectangle {
+                                width: 18
+                                height: 18
+                                radius: 4
+                                color: parent.parent.selected ? "#2563EB" : "transparent"
+                                border.width: 1
+                                border.color: parent.parent.selected ? "#60A5FA" : "#475569"
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: parent.parent.selected ? "✓" : ""
+                                    font.pixelSize: 11
+                                    color: "#FFFFFF"
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.label
+                                font.pixelSize: 12
+                                color: "#E2E8F0"
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        MouseArea {
+                            id: optionMouseArea
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.toggleOption(modelData.value)
+                        }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: !root.optionsLoading && optionsList.count === 0
+                        text: root.optionsLoaded ? "没有匹配项" : "点击上方查询加载选项"
+                        font.pixelSize: 12
+                        color: "#64748B"
+                    }
+                }
+            }
+        }
+    }
+
     function normalizeOptions(opts) {
         if (!opts || !Array.isArray(opts)) return []
 
@@ -148,6 +385,86 @@ Rectangle {
                 label: String(opt)
             }
         })
+    }
+
+    function syncOptionsFromConfig() {
+        var nextOptions = normalizeOptions(config.options || [])
+        if (nextOptions.length > 0) {
+            root.options = nextOptions
+            root.optionsLoaded = true
+        } else if (!root.queryListMode) {
+            root.options = []
+            root.optionsLoaded = false
+        }
+        validate()
+    }
+
+    function ensureOptionsLoaded() {
+        if (!root.queryListMode || root.optionsLoading || root.optionsLoaded) {
+            return
+        }
+
+        var provider = config.optionsProvider
+        if (typeof provider !== "function") {
+            root.optionsLoaded = true
+            return
+        }
+
+        root.optionsLoading = true
+        try {
+            root.options = normalizeOptions(provider() || [])
+            root.optionsLoaded = true
+            validate()
+        } finally {
+            root.optionsLoading = false
+        }
+    }
+
+    function buildFilteredOptions(searchText, opts) {
+        var normalizedOptions = Array.isArray(opts) ? opts : []
+        var keyword = String(searchText || "").trim().toLowerCase()
+        if (!keyword) {
+            return normalizedOptions
+        }
+
+        return normalizedOptions.filter(function(option) {
+            if (!option) {
+                return false
+            }
+            return String(option.label || "").toLowerCase().indexOf(keyword) >= 0
+                || String(option.value || "").toLowerCase().indexOf(keyword) >= 0
+        })
+    }
+
+    function labelForValue(optionValue) {
+        for (var i = 0; i < root.options.length; ++i) {
+            var option = root.options[i]
+            if (option && option.value === optionValue) {
+                return option.label
+            }
+        }
+        return String(optionValue)
+    }
+
+    function selectedSummaryText() {
+        var values = normalizeSelectedValues(root.value)
+        if (values.length === 0) {
+            return root.placeholderText
+        }
+
+        if (root.options.length === 0) {
+            return "已选 " + values.length + " 项"
+        }
+
+        if (values.length <= 2) {
+            return values.map(function(optionValue) {
+                return root.labelForValue(optionValue)
+            }).join("、")
+        }
+
+        return values.slice(0, 2).map(function(optionValue) {
+            return root.labelForValue(optionValue)
+        }).join("、") + " 等 " + values.length + " 项"
     }
 
     function normalizeSelectedValues(sourceValue) {
@@ -277,21 +594,6 @@ Rectangle {
 
     function reset() {
         setValue(config.default !== undefined ? config.default : [])
-    }
-
-    Component.onCompleted: {
-        setValue(root.value && normalizedValueList(root.value).length > 0
-            ? root.value
-            : (config.default !== undefined ? config.default : []))
-    }
-
-    onConfigChanged: {
-        root.options = normalizeOptions(config.options || [])
-        if (root.value !== undefined && root.value !== null && normalizedValueList(root.value).length > 0) {
-            setValue(root.value)
-        } else if (config.default !== undefined) {
-            setValue(config.default)
-        }
     }
 
     onOptionsChanged: {

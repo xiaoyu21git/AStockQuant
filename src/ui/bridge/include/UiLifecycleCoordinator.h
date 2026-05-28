@@ -7,7 +7,6 @@
 
 #include "MarketDataService.h"
 #include "PositionAccountService.h"
-#include "RiskConfigService.h"
 #include "StrategyService.h"
 #include "TradeExecutionService.h"
 #include "TradingConnectionConfigService.h"
@@ -18,7 +17,6 @@ class UiLifecycleCoordinator : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool tradingPageActivated READ tradingPageActivated NOTIFY tradingPageActivatedChanged)
     Q_PROPERTY(bool strategyLibraryPageActivated READ strategyLibraryPageActivated NOTIFY strategyLibraryPageActivatedChanged)
-    Q_PROPERTY(bool strategyBacktestPageActivated READ strategyBacktestPageActivated NOTIFY strategyBacktestPageActivatedChanged)
 
 public:
     static UiLifecycleCoordinator* instance();
@@ -28,16 +26,13 @@ public:
 
     Q_INVOKABLE void activateTradingPage();
     Q_INVOKABLE void activateStrategyLibraryPage();
-    Q_INVOKABLE void activateStrategyBacktestPage();
 
     bool tradingPageActivated() const;
     bool strategyLibraryPageActivated() const;
-    bool strategyBacktestPageActivated() const;
 
 signals:
     void tradingPageActivatedChanged();
     void strategyLibraryPageActivatedChanged();
-    void strategyBacktestPageActivatedChanged();
 
 private:
     explicit UiLifecycleCoordinator(QObject* parent = nullptr);
@@ -55,7 +50,6 @@ private:
     bool m_tradingHoldingsStageScheduled;
     bool m_tradingHoldingsStageInitialized;
     bool m_strategyLibraryPageActivated;
-    bool m_strategyBacktestPageActivated;
 };
 
 inline UiLifecycleCoordinator* UiLifecycleCoordinator::instance()
@@ -75,7 +69,6 @@ inline UiLifecycleCoordinator::UiLifecycleCoordinator(QObject* parent)
     , m_tradingHoldingsStageScheduled(false)
     , m_tradingHoldingsStageInitialized(false)
     , m_strategyLibraryPageActivated(false)
-    , m_strategyBacktestPageActivated(false)
 {
 }
 
@@ -152,30 +145,6 @@ inline void UiLifecycleCoordinator::activateStrategyLibraryPage()
     }
 }
 
-inline void UiLifecycleCoordinator::activateStrategyBacktestPage()
-{
-    bool activatedChanged = false;
-    {
-        QMutexLocker locker(&m_mutex);
-        if (m_strategyBacktestPageActivated) {
-            return;
-        }
-        m_strategyBacktestPageActivated = true;
-        activatedChanged = true;
-    }
-
-    if (StrategyService* strategyService = StrategyService::instance()) {
-        strategyService->initializeAsync();
-    }
-    if (RiskConfigService* riskConfigService = RiskConfigService::instance()) {
-        riskConfigService->initialize();
-    }
-
-    if (activatedChanged) {
-        emit strategyBacktestPageActivatedChanged();
-    }
-}
-
 inline bool UiLifecycleCoordinator::tradingPageActivated() const
 {
     QMutexLocker locker(&m_mutex);
@@ -186,12 +155,6 @@ inline bool UiLifecycleCoordinator::strategyLibraryPageActivated() const
 {
     QMutexLocker locker(&m_mutex);
     return m_strategyLibraryPageActivated;
-}
-
-inline bool UiLifecycleCoordinator::strategyBacktestPageActivated() const
-{
-    QMutexLocker locker(&m_mutex);
-    return m_strategyBacktestPageActivated;
 }
 
 inline void UiLifecycleCoordinator::initializeTradingRuntimeStage()

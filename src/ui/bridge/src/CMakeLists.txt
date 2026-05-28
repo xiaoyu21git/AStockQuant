@@ -39,7 +39,8 @@ set(BRIDGE_SOURCES
     TradingRuntimeStatusService.cpp # 新增：交易运行时状态桥接服务
     UiLifecycleCoordinator.cpp
     RuleTemplateSuggestionService.cpp # 新增：规则模板建议桥接服务
-    StrategyBacktestController.cpp # 新增：策略回测控制器
+    StrategyBacktestRuntimeAccess.cpp
+    StrategyBacktestRequestAdapter.cpp
     StrategyRuntimeRuleEvaluator.cpp
     StrategyStructureResolvers.cpp
     StrategyService.cpp       # 新增：策略服务
@@ -57,7 +58,7 @@ endif()
 
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 
-set(BRIDGE_SOURCES ${BRIDGE_SOURCES} PARENT_SCOPE)
+target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 
 # 添加包含目录
 target_include_directories(bridge PRIVATE

@@ -21,6 +21,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tools.a_share_symbol_utils import is_supported_akshare_stock_symbol
+from tools.history_start_policy import clamp_history_start_date
 from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calendar, parse_time_text, resolve_latest_closed_trade_date
 
 
@@ -263,7 +264,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
                         start_dates.append(target_date)
                     continue
 
-                expected_start_date = list_date or earliest_trade_date
+                expected_start_date = clamp_history_start_date(list_date or earliest_trade_date)
                 if expected_start_date > target_date:
                     continue
 

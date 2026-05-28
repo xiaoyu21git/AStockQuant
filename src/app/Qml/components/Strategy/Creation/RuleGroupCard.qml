@@ -296,6 +296,7 @@ Rectangle {
                 model: Array.isArray(groupData && groupData.rules) ? groupData.rules : []
 
                 delegate: Rectangle {
+                    id: ruleCard
                     required property var modelData
                     readonly property int ruleIndex: index
                     readonly property var bindingData: ({
@@ -396,7 +397,7 @@ Rectangle {
 
                         RuleTemplateStructureView {
                             Layout.fillWidth: true
-                            bindingData: bindingData
+                            bindingData: ruleCard.bindingData
                             compact: true
                         }
                     }
@@ -416,7 +417,7 @@ Rectangle {
             Text {
                 anchors.fill: parent
                 anchors.margins: 10
-                text: "当前组还没有放入规则。可以从右侧建议栏添加模板。"
+                text: "当前组还没有放入规则。优先从上方默认规则包快捷引入，右侧建议栏只用于补充非默认模板。"
                 font.pixelSize: 11
                 color: "#64748b"
                 verticalAlignment: Text.AlignVCenter
@@ -425,7 +426,7 @@ Rectangle {
         }
 
         Button {
-            text: "添加规则"
+            text: "引入规则"
             onClicked: root.addRuleRequested(root.stageId, (groupData && groupData.groupId) || "")
         }
     }

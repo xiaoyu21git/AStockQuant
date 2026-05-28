@@ -5,6 +5,7 @@
 #include "FactorViewModel.h"
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
+#include "FactorBacktestWarmupUtils.h"
 #include "FactorRequirementInferenceUtils.h"
 #include "../../../infrastructure/include/database/FactorRepository.h"
 #include "../../../infrastructure/include/database/QtMySQLDatabase.h"
@@ -32,12 +33,121 @@
 namespace {
 
 constexpr int kMaxRecentFactorOperationReports = 8;
+constexpr int kMaxQueryWindowCacheEntries = 16;
 constexpr const char* kEarliestHistoricalDate = "1900-01-01";
 constexpr const char* kActiveInstanceStatus = "ACTIVE";
+
+int requiredHistoricalTradingDays(const std::shared_ptr<factor::BaseFactor>& factorInstance)
+{
+    if (!factorInstance) {
+        return 1;
+    }
+
+    return (std::max)(1, factorInstance->getBoundaryRules().minDataPoints);
+}
+
+QDate resolveHistoricalQueryStartDate(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QDate& anchorDate,
+    const int requiredTradingDays)
+{
+    if (!database || !anchorDate.isValid()) {
+        return {};
+    }
+
+    const int normalizedTradingDays = (std::max)(1, requiredTradingDays);
+    if (normalizedTradingDays == 1) {
+        return anchorDate;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT DISTINCT trade_date "
+            "FROM daily_bar "
+            "WHERE trade_date <= :anchor_date "
+            "ORDER BY trade_date ASC"),
+        {{QStringLiteral(":anchor_date"), anchorDate.toString("yyyy-MM-dd")}});
+
+    QStringList ascendingTradeDates;
+    ascendingTradeDates.reserve(static_cast<int>(result.rowCount()));
+    for (const auto& row : result.getRows()) {
+        const QString tradeDate = row.getString(QStringLiteral("trade_date")).trimmed();
+        if (!tradeDate.isEmpty()) {
+            ascendingTradeDates.append(tradeDate);
+        }
+    }
+
+    return factor::warmup::resolveWarmupHistoryStartDate(
+        anchorDate.addDays(1),
+        ascendingTradeDates,
+        normalizedTradingDays);
+}
 
 QString removedReason()
 {
     return QStringLiteral("因子引擎侧业务代码已删除");
+}
+
+std::vector<std::string> normalizeRequestedSymbols(const QStringList& rawSymbols)
+{
+    std::vector<std::string> symbols;
+    QSet<QString> seenSymbols;
+    for (const QString& rawSymbol : rawSymbols) {
+        const QString normalizedSymbol = rawSymbol.trimmed().toUpper();
+        if (normalizedSymbol.isEmpty() || seenSymbols.contains(normalizedSymbol)) {
+            continue;
+        }
+
+        seenSymbols.insert(normalizedSymbol);
+        symbols.push_back(normalizedSymbol.toStdString());
+    }
+
+    return symbols;
+}
+
+QStringList normalizeRequestedSymbolList(const QStringList& rawSymbols)
+{
+    QStringList symbols;
+    QSet<QString> seenSymbols;
+    for (const QString& rawSymbol : rawSymbols) {
+        const QString normalizedSymbol = rawSymbol.trimmed().toUpper();
+        if (normalizedSymbol.isEmpty() || seenSymbols.contains(normalizedSymbol)) {
+            continue;
+        }
+
+        seenSymbols.insert(normalizedSymbol);
+        symbols.append(normalizedSymbol);
+    }
+
+    return symbols;
+}
+
+QStringList normalizeRequestedFactorIdList(const QStringList& rawFactorIds)
+{
+    QStringList factorIds;
+    QSet<QString> seenFactorIds;
+    for (const QString& rawFactorId : rawFactorIds) {
+        const QString normalizedFactorId = rawFactorId.trimmed();
+        if (normalizedFactorId.isEmpty() || seenFactorIds.contains(normalizedFactorId)) {
+            continue;
+        }
+
+        seenFactorIds.insert(normalizedFactorId);
+        factorIds.append(normalizedFactorId);
+    }
+
+    return factorIds;
+}
+
+QString buildQueryWindowCacheKey(const QString& minDate,
+                                 const QString& maxDate,
+                                 const QStringList& normalizedSymbols)
+{
+    return minDate.trimmed()
+        + QStringLiteral("|")
+        + maxDate.trimmed()
+        + QStringLiteral("|")
+        + normalizedSymbols.join(QStringLiteral(","));
 }
 
 QString positionalParamKey(int index)
@@ -55,33 +165,12 @@ std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant>
     return params;
 }
 
-bool databaseTableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
-                            const QString& tableName,
-                            const QString& columnName)
-{
-    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const auto result = database->executeQuery(
-        QStringLiteral(
-            "SELECT COUNT(*) AS count FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
-        {{QStringLiteral(":table_name"), tableName.trimmed()},
-         {QStringLiteral(":column_name"), columnName.trimmed()}});
-
-    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
-}
-
 QString symbolInfoIndustrySelect(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
                                  const QString& alias)
 {
+    Q_UNUSED(database)
     const QString normalizedAlias = alias.trimmed().isEmpty() ? QStringLiteral("s") : alias.trimmed();
-    if (databaseTableHasColumn(database, QStringLiteral("symbol_info"), QStringLiteral("industry_code"))) {
-        return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code ").arg(normalizedAlias);
-    }
-
-    return QStringLiteral("'' AS industry_code ");
+    return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code ").arg(normalizedAlias);
 }
 
 std::optional<factor::FactorType> factorTypeFromVariant(const QVariant& rawValue)
@@ -775,16 +864,11 @@ void FactorService::initialize()
 
     try {
         initializeRepository();
-        const QVariantList factors = loadFactorsFromDatabase();
-
-        m_cacheLoaded = true;
         m_initialized = true;
         m_isLoading = false;
 
-        emit factorsLoaded(factors);
         emit initializedChanged();
         emit isLoadingChanged();
-        emit cacheLoadedChanged();
     } catch (const std::exception& e) {
         {
             QWriteLocker cacheLocker(&m_rwLock);
@@ -1151,20 +1235,6 @@ QString FactorService::resolveDomainInstanceId(const QString& factorId) const
         }
     }
 
-    if (m_repository) {
-        const QVariantMap factorData = m_repository->findById(normalizedFactorId);
-        const QString instanceId = factorData.value(QStringLiteral("instanceId")).toString().trimmed();
-        if (!instanceId.isEmpty()) {
-            return instanceId;
-        }
-    }
-
-    if (m_factorInstanceManager) {
-        if (m_factorInstanceManager->createInstance(normalizedFactorId.toStdString())) {
-            return normalizedFactorId;
-        }
-    }
-
     if (!m_database) {
         return {};
     }
@@ -1206,7 +1276,7 @@ QString FactorService::resolveDomainInstanceId(const QString& factorId) const
 
 QVariantList FactorService::getAllFactors()
 {
-    if (m_repository) {
+    if (!m_cacheLoaded.load() && m_repository) {
         const QVariantList factors = loadFactorsFromDatabase();
         emit factorsLoaded(factors);
         return factors;
@@ -1231,7 +1301,6 @@ QVariantList FactorService::searchFactors(const QString& keyword)
 
 QVariantList FactorService::filterFactorsByCategory(const QString& category)
 {
-    emit factorsLoaded(loadFactorsFromDatabase());
     const QVariantList factors = getAllFactors();
     return filterFactorList(factors, [&](const QVariantMap& factor) {
         return factorMatchesCategory(factor, category);
@@ -1248,7 +1317,6 @@ QVariantList FactorService::filterFactorsByTags(const QStringList& tags)
 
 QVariantList FactorService::queryDatabaseData(const QString& minDate, const QString& maxDate)
 {
-    emit factorsLoaded(loadFactorsFromDatabase());
     if (m_queryDatabaseDataOverrideForTests) {
         return m_queryDatabaseDataOverrideForTests(minDate.trimmed(), maxDate.trimmed());
     }
@@ -1258,7 +1326,8 @@ QVariantList FactorService::queryDatabaseData(const QString& minDate, const QStr
 
     const QString industrySelect = symbolInfoIndustrySelect(m_database, QStringLiteral("s"));
 
-    const astock::database::QueryResult result = m_database->executeQuery(
+    QVariantList rows;
+    m_database->visitQuery(
         QStringLiteral(
             "SELECT d.*, %1"
             "FROM daily_bar d "
@@ -1268,20 +1337,100 @@ QVariantList FactorService::queryDatabaseData(const QString& minDate, const QStr
         {
             {QStringLiteral(":min_date"), minDate.trimmed()},
             {QStringLiteral(":max_date"), maxDate.trimmed()}
+        },
+        [&rows](const astock::database::QueryResultRow& row) {
+            rows.append(convertRowToVariantMap(row));
+            return true;
         });
+    return rows;
+}
+
+QVariantList FactorService::queryDatabaseDataForSymbols(const QString& minDate,
+                                                        const QString& maxDate,
+                                                        const QStringList& requestedSymbols)
+{
+    const QStringList normalizedSymbols = normalizeRequestedSymbolList(requestedSymbols);
+    if (normalizedSymbols.isEmpty()) {
+        return queryDatabaseData(minDate, maxDate);
+    }
+
+    if (m_queryDatabaseDataOverrideForTests) {
+        return m_queryDatabaseDataOverrideForTests(minDate.trimmed(), maxDate.trimmed());
+    }
+    if (!m_database) {
+        return {};
+    }
+
+    const QString cacheKey = buildQueryWindowCacheKey(minDate, maxDate, normalizedSymbols);
+    {
+        QMutexLocker locker(&m_queryWindowCacheMutex);
+        const auto iterator = m_queryWindowCache.constFind(cacheKey);
+        if (iterator != m_queryWindowCache.cend()) {
+            INTERNAL_INFO_STREAM << "FactorService::queryDatabaseDataForSymbols cache hit"
+                                 << " symbolCount=" << normalizedSymbols.size()
+                                 << " minDate=" << minDate.toStdString()
+                                 << " maxDate=" << maxDate.toStdString()
+                                 << " rows=" << iterator.value().size();
+            return iterator.value();
+        }
+    }
+
+    const QString industrySelect = symbolInfoIndustrySelect(m_database, QStringLiteral("s"));
+
+    std::map<QString, QVariant> params{
+        {QStringLiteral(":min_date"), minDate.trimmed()},
+        {QStringLiteral(":max_date"), maxDate.trimmed()}
+    };
+    QStringList symbolPlaceholders;
+    symbolPlaceholders.reserve(normalizedSymbols.size());
+    for (int index = 0; index < normalizedSymbols.size(); ++index) {
+        const QString placeholder = QStringLiteral(":symbol_%1").arg(index);
+        symbolPlaceholders.append(placeholder);
+        params.emplace(placeholder, normalizedSymbols.at(index));
+    }
+
+    INTERNAL_INFO_STREAM << "FactorService::queryDatabaseDataForSymbols loading rows"
+                         << " symbolCount=" << normalizedSymbols.size()
+                         << " minDate=" << minDate.toStdString()
+                         << " maxDate=" << maxDate.toStdString();
 
     QVariantList rows;
-    rows.reserve(static_cast<int>(result.rowCount()));
-    for (const auto& row : result.getRows()) {
-        emit factorsLoaded(loadFactorsFromDatabase());
-        rows.append(convertRowToVariantMap(row));
+    m_database->visitQuery(
+        QStringLiteral(
+            "SELECT d.*, %1"
+            "FROM daily_bar d "
+            "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
+            "WHERE d.trade_date >= :min_date AND d.trade_date <= :max_date "
+            "AND d.symbol IN (%2) "
+            "ORDER BY d.trade_date, d.symbol /* symbol-filtered */")
+            .arg(industrySelect, symbolPlaceholders.join(QStringLiteral(", "))),
+        params,
+        [&rows](const astock::database::QueryResultRow& row) {
+            rows.append(convertRowToVariantMap(row));
+            return true;
+        });
+
+    INTERNAL_INFO_STREAM << "FactorService::queryDatabaseDataForSymbols loaded rows=" << rows.size();
+
+    {
+        QMutexLocker locker(&m_queryWindowCacheMutex);
+        if (!m_queryWindowCache.contains(cacheKey)) {
+            if (m_queryWindowCacheOrder.size() >= kMaxQueryWindowCacheEntries) {
+                const QString evictedKey = m_queryWindowCacheOrder.takeFirst();
+                m_queryWindowCache.remove(evictedKey);
+            }
+            m_queryWindowCache.insert(cacheKey, rows);
+            m_queryWindowCacheOrder.append(cacheKey);
+        }
     }
+
     return rows;
 }
 
 QVariantMap FactorService::getFactorValuesFromDomain(const QString& factorId,
                                                      const QString& resolvedInstanceId,
-                                                     const QString& date)
+                                                     const QString& date,
+                                                     const QStringList& requestedSymbols)
 {
     if (!m_factorInstanceManager) {
         return buildFactorValueErrorResult(
@@ -1300,7 +1449,24 @@ QVariantMap FactorService::getFactorValuesFromDomain(const QString& factorId,
             QStringLiteral("未找到对应的因子实例"));
     }
 
-    const QVariantList rows = queryDatabaseData(QString::fromUtf8(kEarliestHistoricalDate), date.trimmed());
+    const QDate anchorDate = QDate::fromString(date.trimmed(), QStringLiteral("yyyy-MM-dd"));
+    if (!anchorDate.isValid()) {
+        return buildFactorValueErrorResult(
+            factorId,
+            resolvedInstanceId,
+            date,
+            QStringLiteral("因子查询日期非法"));
+    }
+
+    const QDate historyStartDate = resolveHistoricalQueryStartDate(
+        m_database,
+        anchorDate,
+        requiredHistoricalTradingDays(factor));
+    const QVariantList rows = historyStartDate.isValid()
+        ? queryDatabaseDataForSymbols(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")),
+                                      date.trimmed(),
+                                      requestedSymbols)
+        : QVariantList{};
     if (rows.isEmpty()) {
         QVariantMap result;
         result[QStringLiteral("status")] = QStringLiteral("success");
@@ -1327,7 +1493,10 @@ QVariantMap FactorService::getFactorValuesFromDomain(const QString& factorId,
 
         const auto arrowData = factor::ArrowMarketData::fromCachedBars(cachedBars);
         auto historicalView = std::make_shared<FactorServiceHistoricalView>(arrowData);
-        const std::vector<std::string> symbols = historicalView->getAvailableSymbols(date.trimmed().toStdString());
+        std::vector<std::string> symbols = normalizeRequestedSymbols(requestedSymbols);
+        if (symbols.empty()) {
+            symbols = historicalView->getAvailableSymbols(date.trimmed().toStdString());
+        }
 
         factor::CalculationContext context;
         context.date = date.trimmed().toStdString();
@@ -1402,7 +1571,28 @@ QVariantMap FactorService::getFactorValuesBatchFromDomain(const QString& factorI
             QStringLiteral("未找到对应的因子实例"));
     }
 
-    const QVariantList rows = queryDatabaseData(QString::fromUtf8(kEarliestHistoricalDate), normalizedDates.constLast());
+    INTERNAL_INFO_STREAM << "FactorService::getFactorValuesBatchFromDomain loading rows for factor "
+                         << factorId.toStdString()
+                         << ", instance=" << resolvedInstanceId.toStdString()
+                         << ", requestedDates=" << normalizedDates.size()
+                         << ", queryEndDate=" << normalizedDates.constLast().toStdString();
+
+    const QDate anchorDate = QDate::fromString(normalizedDates.constFirst(), QStringLiteral("yyyy-MM-dd"));
+    if (!anchorDate.isValid()) {
+        return buildFactorValueErrorResult(
+            factorId,
+            resolvedInstanceId,
+            normalizedDates.constFirst(),
+            QStringLiteral("因子批量查询起始日期非法"));
+    }
+
+    const QDate historyStartDate = resolveHistoricalQueryStartDate(
+        m_database,
+        anchorDate,
+        requiredHistoricalTradingDays(factor));
+    const QVariantList rows = historyStartDate.isValid()
+        ? queryDatabaseData(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")), normalizedDates.constLast())
+        : QVariantList{};
     if (rows.isEmpty()) {
         QVariantMap result;
         result[QStringLiteral("status")] = QStringLiteral("success");
@@ -1425,11 +1615,18 @@ QVariantMap FactorService::getFactorValuesBatchFromDomain(const QString& factorI
             return result;
         }
 
+        INTERNAL_INFO_STREAM << "FactorService::getFactorValuesBatchFromDomain queried rows="
+                             << rows.size()
+                             << " for factor " << factorId.toStdString();
+
         const auto arrowData = factor::ArrowMarketData::fromCachedBars(cachedBars);
         auto historicalView = std::make_shared<FactorServiceHistoricalView>(arrowData);
 
         QVariantMap data;
         QString firstMessage;
+        INTERNAL_INFO_STREAM << "FactorService::getFactorValuesBatchFromDomain calculating dates="
+                             << normalizedDates.size()
+                             << " for factor " << factorId.toStdString();
         for (const QString& date : normalizedDates) {
             factor::CalculationContext context;
             context.date = date.toStdString();
@@ -1468,6 +1665,9 @@ QVariantMap FactorService::getFactorValuesBatchFromDomain(const QString& factorI
         if (!firstMessage.isEmpty()) {
             result[QStringLiteral("message")] = firstMessage;
         }
+        INTERNAL_INFO_STREAM << "FactorService::getFactorValuesBatchFromDomain finished factor "
+                             << factorId.toStdString()
+                             << ", producedDates=" << data.size();
         return result;
     } catch (const std::exception& e) {
         return buildFactorValueErrorResult(
@@ -1508,6 +1708,230 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
     }
 
     return getFactorValuesFromDomain(normalizedFactorId, resolvedInstanceId, normalizedDate);
+}
+
+QVariantMap FactorService::getFactorValuesForSymbols(const QString& factorId,
+                                                     const QString& date,
+                                                     const QStringList& symbols)
+{
+    const QString normalizedFactorId = factorId.trimmed();
+    const QString normalizedDate = date.trimmed();
+    if (normalizedFactorId.isEmpty() || normalizedDate.isEmpty()) {
+        return buildFactorValueErrorResult(
+            normalizedFactorId,
+            {},
+            normalizedDate,
+            QStringLiteral("缺少因子 ID 或日期"));
+    }
+
+    if (!initializeFactorDomainRuntime()) {
+        return buildFactorValueErrorResult(
+            normalizedFactorId,
+            {},
+            normalizedDate,
+            QStringLiteral("因子运行时初始化失败"));
+    }
+
+    const QString resolvedInstanceId = resolveDomainInstanceId(normalizedFactorId);
+    if (resolvedInstanceId.isEmpty()) {
+        return buildFactorValueErrorResult(
+            normalizedFactorId,
+            {},
+            normalizedDate,
+            QStringLiteral("未找到对应的因子实例 ID"));
+    }
+
+    return getFactorValuesFromDomain(normalizedFactorId,
+                                     resolvedInstanceId,
+                                     normalizedDate,
+                                     symbols);
+}
+
+QVariantMap FactorService::getFactorValuesForSymbolsBatch(const QStringList& factorIds,
+                                                          const QString& date,
+                                                          const QStringList& symbols)
+{
+    const QStringList normalizedFactorIds = normalizeRequestedFactorIdList(factorIds);
+    const QString normalizedDate = date.trimmed();
+    if (normalizedFactorIds.isEmpty() || normalizedDate.isEmpty()) {
+        return buildFactorValueErrorResult(
+            normalizedFactorIds.isEmpty() ? QString{} : normalizedFactorIds.constFirst(),
+            {},
+            normalizedDate,
+            QStringLiteral("缺少因子 ID 或日期"));
+    }
+
+    if (!initializeFactorDomainRuntime()) {
+        return buildFactorValueErrorResult(
+            normalizedFactorIds.constFirst(),
+            {},
+            normalizedDate,
+            QStringLiteral("因子运行时初始化失败"));
+    }
+
+    const QDate anchorDate = QDate::fromString(normalizedDate, QStringLiteral("yyyy-MM-dd"));
+    if (!anchorDate.isValid()) {
+        return buildFactorValueErrorResult(
+            normalizedFactorIds.constFirst(),
+            {},
+            normalizedDate,
+            QStringLiteral("因子查询日期非法"));
+    }
+
+    struct PreparedFactorRequest final {
+        QString factorId;
+        QString resolvedInstanceId;
+        std::shared_ptr<factor::BaseFactor> factor;
+    };
+
+    QVector<PreparedFactorRequest> preparedFactors;
+    preparedFactors.reserve(normalizedFactorIds.size());
+
+    int maxRequiredTradingDays = 1;
+    for (const QString& factorId : normalizedFactorIds) {
+        const QString resolvedInstanceId = resolveDomainInstanceId(factorId);
+        if (resolvedInstanceId.isEmpty()) {
+            return buildFactorValueErrorResult(
+                factorId,
+                {},
+                normalizedDate,
+                QStringLiteral("未找到对应的因子实例 ID"));
+        }
+
+        auto factor = m_factorInstanceManager->createInstance(resolvedInstanceId.toStdString());
+        if (!factor) {
+            return buildFactorValueErrorResult(
+                factorId,
+                resolvedInstanceId,
+                normalizedDate,
+                QStringLiteral("未找到对应的因子实例"));
+        }
+
+        maxRequiredTradingDays = (std::max)(maxRequiredTradingDays, requiredHistoricalTradingDays(factor));
+        preparedFactors.push_back(PreparedFactorRequest{factorId, resolvedInstanceId, std::move(factor)});
+    }
+
+    INTERNAL_INFO_STREAM << "FactorService::getFactorValuesForSymbolsBatch loading factors="
+                         << normalizedFactorIds.size()
+                         << " symbolCount=" << symbols.size()
+                         << " date=" << normalizedDate.toStdString();
+
+    const QDate historyStartDate = resolveHistoricalQueryStartDate(
+        m_database,
+        anchorDate,
+        maxRequiredTradingDays);
+    const QVariantList rows = historyStartDate.isValid()
+        ? queryDatabaseDataForSymbols(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")),
+                                      normalizedDate,
+                                      symbols)
+        : QVariantList{};
+
+    QVariantMap factorResults;
+    const auto buildEmptySuccessResult = [&normalizedDate](const QString& factorId,
+                                                           const QString& resolvedInstanceId,
+                                                           const QString& message) {
+        QVariantMap result;
+        result[QStringLiteral("status")] = QStringLiteral("success");
+        result[QStringLiteral("factorId")] = factorId;
+        result[QStringLiteral("instanceId")] = resolvedInstanceId;
+        result[QStringLiteral("date")] = normalizedDate;
+        result[QStringLiteral("stockValues")] = QVariantMap{};
+        if (!message.isEmpty()) {
+            result[QStringLiteral("message")] = message;
+        }
+        return result;
+    };
+
+    if (rows.isEmpty()) {
+        for (const PreparedFactorRequest& preparedFactor : preparedFactors) {
+            factorResults.insert(preparedFactor.factorId,
+                                 buildEmptySuccessResult(preparedFactor.factorId,
+                                                         preparedFactor.resolvedInstanceId,
+                                                         QStringLiteral("指定日期前未查询到可用行情数据")));
+        }
+
+        QVariantMap result;
+        result[QStringLiteral("status")] = QStringLiteral("success");
+        result[QStringLiteral("date")] = normalizedDate;
+        result[QStringLiteral("factorValues")] = factorResults;
+        return result;
+    }
+
+    try {
+        const std::vector<factor::CachedMarketBar> cachedBars = buildCachedBarsFromRows(rows);
+        if (cachedBars.empty()) {
+            for (const PreparedFactorRequest& preparedFactor : preparedFactors) {
+                factorResults.insert(preparedFactor.factorId,
+                                     buildEmptySuccessResult(preparedFactor.factorId,
+                                                             preparedFactor.resolvedInstanceId,
+                                                             QStringLiteral("可用行情数据为空，无法生成因子横截面")));
+            }
+
+            QVariantMap result;
+            result[QStringLiteral("status")] = QStringLiteral("success");
+            result[QStringLiteral("date")] = normalizedDate;
+            result[QStringLiteral("factorValues")] = factorResults;
+            return result;
+        }
+
+        const auto arrowData = factor::ArrowMarketData::fromCachedBars(cachedBars);
+        auto historicalView = std::make_shared<FactorServiceHistoricalView>(arrowData);
+
+        std::vector<std::string> contextSymbols = normalizeRequestedSymbols(symbols);
+        if (contextSymbols.empty()) {
+            contextSymbols = historicalView->getAvailableSymbols(normalizedDate.toStdString());
+        }
+
+        for (const PreparedFactorRequest& preparedFactor : preparedFactors) {
+            factor::CalculationContext context;
+            context.date = normalizedDate.toStdString();
+            context.symbols = contextSymbols;
+            context.historicalView = historicalView;
+
+            const factor::CalculationResult calculation = preparedFactor.factor->calculate(context);
+            if (!calculation.dataStatus.isValid()) {
+                return buildFactorValueErrorResult(
+                    preparedFactor.factorId,
+                    preparedFactor.resolvedInstanceId,
+                    normalizedDate,
+                    QString::fromStdString(calculation.dataStatus.message).trimmed().isEmpty()
+                        ? QStringLiteral("批量因子值计算失败")
+                        : QString::fromStdString(calculation.dataStatus.message).trimmed());
+            }
+
+            QVariantMap stockValues;
+            for (const auto& [symbol, value] : calculation.values) {
+                if (std::isfinite(value)) {
+                    stockValues.insert(QString::fromStdString(symbol), value);
+                }
+            }
+
+            QVariantMap factorResult;
+            factorResult[QStringLiteral("status")] = QStringLiteral("success");
+            factorResult[QStringLiteral("factorId")] = preparedFactor.factorId;
+            factorResult[QStringLiteral("instanceId")] = preparedFactor.resolvedInstanceId;
+            factorResult[QStringLiteral("date")] = normalizedDate;
+            factorResult[QStringLiteral("stockValues")] = stockValues;
+            const QString message = calculationMessage(calculation);
+            if (!message.isEmpty()) {
+                factorResult[QStringLiteral("message")] = message;
+            }
+
+            factorResults.insert(preparedFactor.factorId, factorResult);
+        }
+
+        QVariantMap result;
+        result[QStringLiteral("status")] = QStringLiteral("success");
+        result[QStringLiteral("date")] = normalizedDate;
+        result[QStringLiteral("factorValues")] = factorResults;
+        return result;
+    } catch (const std::exception& e) {
+        return buildFactorValueErrorResult(
+            normalizedFactorIds.constFirst(),
+            {},
+            normalizedDate,
+            QString::fromUtf8(e.what()));
+    }
 }
 
 QVariantMap FactorService::getFactorValuesBatch(const QString& factorId, const QStringList& dates)

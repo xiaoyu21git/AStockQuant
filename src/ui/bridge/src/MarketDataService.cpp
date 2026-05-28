@@ -141,33 +141,12 @@ QString canonicalSymbolCode(const QString& symbol)
     return prefixedExchanges.contains(firstPart) ? secondPart : firstPart;
 }
 
-bool databaseTableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
-                            const QString& tableName,
-                            const QString& columnName)
-{
-    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const auto result = database->executeQuery(
-        QStringLiteral(
-            "SELECT COUNT(*) AS count FROM information_schema.COLUMNS "
-            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
-        {{QStringLiteral(":table_name"), tableName.trimmed()},
-         {QStringLiteral(":column_name"), columnName.trimmed()}});
-
-    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
-}
-
 QString symbolInfoIndustrySelect(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
                                  const QString& alias)
 {
+    Q_UNUSED(database)
     const QString normalizedAlias = alias.trimmed().isEmpty() ? QStringLiteral("si") : alias.trimmed();
-    if (databaseTableHasColumn(database, QStringLiteral("symbol_info"), QStringLiteral("industry_code"))) {
-        return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code, ").arg(normalizedAlias);
-    }
-
-    return QStringLiteral("'' AS industry_code, ");
+    return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code, ").arg(normalizedAlias);
 }
 
 QString preferredEventTimestamp(const engine::EventFormat& event)
@@ -595,10 +574,8 @@ MarketDataService::MarketDataService(QObject* parent)
     , m_runtimeSubscriptionLimit(0)
     , m_lastWatchRequestLogAtMs(0)
     , m_suppressedWatchRequestLogs(0)
-    , m_primarySymbol(QStringLiteral("000001.SH"))
+    , m_primarySymbol()
 {
-    m_watchlist = defaultWatchSymbols();
-    m_snapshotsBySymbol = defaultSnapshotMap();
 }
 
 void MarketDataService::initialize()
@@ -625,13 +602,12 @@ void MarketDataService::initialize()
             snapshot.insert(QStringLiteral("source"), QStringLiteral("watchlist"));
             snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
         }
-        m_snapshotsBySymbol.insert(symbol, hydrateDisplaySnapshot(snapshot));
+        m_snapshotsBySymbol.insert(symbol, snapshot);
     }
 
     initializeEventBusIntegration();
     m_initialized = true;
     emit initializedChanged();
-    emit marketSnapshotsChanged();
 }
 
 void MarketDataService::initializeAsync()
@@ -678,6 +654,60 @@ int MarketDataService::runtimeSubscriptionLimit() const
 {
     QMutexLocker locker(&m_mutex);
     return m_runtimeSubscriptionLimit;
+}
+
+void MarketDataService::activateDefaultWatchlist()
+{
+    QStringList symbolsToWatch;
+    bool primaryChanged = false;
+
+    {
+        QMutexLocker locker(&m_mutex);
+        if (!m_initialized || !m_watchlist.isEmpty()) {
+            return;
+        }
+
+        symbolsToWatch = defaultWatchSymbols();
+        if (symbolsToWatch.isEmpty()) {
+            return;
+        }
+
+        m_watchlist = symbolsToWatch;
+        if (m_primarySymbol != symbolsToWatch.front()) {
+            m_primarySymbol = symbolsToWatch.front();
+            primaryChanged = true;
+        }
+
+        for (const QString& symbol : symbolsToWatch) {
+            QVariantMap snapshot = m_snapshotsBySymbol.value(symbol);
+            if (snapshot.isEmpty()) {
+                snapshot = defaultSnapshotMap().value(symbol);
+            }
+            if (snapshot.isEmpty()) {
+                snapshot.insert(QStringLiteral("symbol"), symbol);
+                snapshot.insert(QStringLiteral("name"), defaultNameMap().value(symbol, symbol));
+                snapshot.insert(QStringLiteral("price"), 0.0);
+                snapshot.insert(QStringLiteral("change"), 0.0);
+                snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
+                snapshot.insert(QStringLiteral("source"), QStringLiteral("watchlist"));
+                snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+            }
+            m_snapshotsBySymbol.insert(symbol, snapshot);
+        }
+    }
+
+    if (primaryChanged) {
+        emit primarySymbolChanged();
+    }
+    emit marketSnapshotsChanged();
+
+    qInfo() << "MarketDataService: activateDefaultWatchlist"
+            << "size=" << symbolsToWatch.size()
+            << "primary=" << symbolsToWatch.front();
+
+    for (const QString& symbol : symbolsToWatch) {
+        publishWatchRequest(symbol);
+    }
 }
 
 QVariantMap MarketDataService::resolveInstrument(const QString& query) const

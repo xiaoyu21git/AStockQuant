@@ -10,8 +10,7 @@ namespace astock::market {
 // K 线结构，按 64 字节对齐以提升缓存友好性
 struct alignas(64) KLine {
     std::uint32_t symbol_id{0};
-    std::uint16_t period{0};
-    std::uint16_t _padding{0}; // 保持 8 字节对齐
+    std::uint32_t period{0};
 
     std::uint64_t timestamp{0};
 

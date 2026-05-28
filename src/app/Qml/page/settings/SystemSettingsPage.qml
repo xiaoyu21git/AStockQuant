@@ -2,7 +2,6 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import AStock.Bridge 1.0 as Bridge
-import "../../utils/StrategyStructureAdapter.js" as StructureAdapter
 import "../../utils/StartupGateFormatter.js" as StartupGateFormatter
 
 Item {
@@ -34,19 +33,12 @@ Item {
             executionPolicy: {
                 rebalanceDays: 5
             },
-            backtestAssumptions: {
-                initialCapital: 1000000,
-                commissionRate: 0.0015,
-                slippageRate: 0.001
-            },
             strategyScopeContext: {
-                executionTimeframe: "5min",
-                symbol_pool: []
+                executionTimeframe: "5min"
             },
             validation: {
                 maxSlippagePercent: 0.005,
                 requireBoundStrategy: true,
-                requireSymbolPool: true,
                 requireClientProcess: true,
                 requireTradingSessionOpen: true,
                 requireRuntimeReady: true
@@ -59,7 +51,6 @@ Item {
         var raw = source || ({})
         var ruleProfile = raw.ruleProfile || ({})
         var executionPolicy = raw.executionPolicy || ({})
-        var backtestAssumptions = raw.backtestAssumptions || ({})
         var strategyScopeContext = raw.strategyScopeContext || ({})
         var validation = raw.validation || ({})
         return {
@@ -72,23 +63,14 @@ Item {
             executionPolicy: {
                 rebalanceDays: executionPolicy.rebalanceDays !== undefined ? Number(executionPolicy.rebalanceDays) : defaults.executionPolicy.rebalanceDays
             },
-            backtestAssumptions: {
-                initialCapital: backtestAssumptions.initialCapital !== undefined ? Number(backtestAssumptions.initialCapital) : defaults.backtestAssumptions.initialCapital,
-                commissionRate: backtestAssumptions.commissionRate !== undefined ? Number(backtestAssumptions.commissionRate) : defaults.backtestAssumptions.commissionRate,
-                slippageRate: backtestAssumptions.slippageRate !== undefined ? Number(backtestAssumptions.slippageRate) : defaults.backtestAssumptions.slippageRate
-            },
             strategyScopeContext: {
                 executionTimeframe: strategyScopeContext.executionTimeframe !== undefined
                     ? String(strategyScopeContext.executionTimeframe).trim()
-                    : defaults.strategyScopeContext.executionTimeframe,
-                symbol_pool: normalizeSymbolPool(strategyScopeContext.symbol_pool !== undefined
-                    ? strategyScopeContext.symbol_pool
-                    : (strategyScopeContext.symbolPool !== undefined ? strategyScopeContext.symbolPool : defaults.strategyScopeContext.symbol_pool))
+                    : defaults.strategyScopeContext.executionTimeframe
             },
             validation: {
                 maxSlippagePercent: validation.maxSlippagePercent !== undefined ? Number(validation.maxSlippagePercent) : defaults.validation.maxSlippagePercent,
                 requireBoundStrategy: validation.requireBoundStrategy !== undefined ? !!validation.requireBoundStrategy : defaults.validation.requireBoundStrategy,
-                requireSymbolPool: validation.requireSymbolPool !== undefined ? !!validation.requireSymbolPool : defaults.validation.requireSymbolPool,
                 requireClientProcess: validation.requireClientProcess !== undefined ? !!validation.requireClientProcess : defaults.validation.requireClientProcess,
                 requireTradingSessionOpen: validation.requireTradingSessionOpen !== undefined ? !!validation.requireTradingSessionOpen : defaults.validation.requireTradingSessionOpen,
                 requireRuntimeReady: validation.requireRuntimeReady !== undefined ? !!validation.requireRuntimeReady : defaults.validation.requireRuntimeReady
@@ -112,14 +94,45 @@ Item {
         return numericValue / 100.0
     }
 
-    function currentRuntimeSymbols() {
-        var fallbackScopeSymbols = normalizeSymbolPool(scopeSymbolPoolField ? scopeSymbolPoolField.text : "")
-        if (selectedBoundStrategyId) {
-            var boundSymbols = normalizeSymbolPool(boundStrategySymbolsPreview)
-            return boundSymbols.length > 0 ? boundSymbols : fallbackScopeSymbols
+    function normalizeRuntimeSymbols(source) {
+        var normalized = []
+        var seen = ({})
+        var appendSymbol = function(rawSymbol) {
+            var symbol = String(rawSymbol || "").trim().toUpperCase()
+            if (!symbol || seen[symbol]) {
+                return
+            }
+            seen[symbol] = true
+            normalized.push(symbol)
         }
-        var runtimeSymbols = normalizeSymbolPool(symbolsField ? symbolsField.text : "")
-        return runtimeSymbols.length > 0 ? runtimeSymbols : fallbackScopeSymbols
+
+        if (source === undefined || source === null) {
+            return normalized
+        }
+
+        if (Array.isArray(source)) {
+            for (var index = 0; index < source.length; ++index) {
+                appendSymbol(source[index])
+            }
+            return normalized
+        }
+
+        var rawText = String(source).trim()
+        if (!rawText) {
+            return normalized
+        }
+
+        rawText.split(/[,;\s，；]+/).forEach(appendSymbol)
+        return normalized
+    }
+
+    function currentRuntimeSymbols() {
+        var runtimeSymbols = normalizeRuntimeSymbols(symbolsField ? symbolsField.text : "")
+        if (runtimeSymbols.length > 0) {
+            return runtimeSymbols
+        }
+
+        return normalizeRuntimeSymbols(boundStrategySymbolsPreview)
     }
 
     function resolveCurrentRuntimeSessionSnapshot() {
@@ -142,10 +155,9 @@ Item {
 
     function syncRuntimeRuleFieldsFromDraft() {
         if (!maxPositionField || !stopLossField || !takeProfitField || !maxDrawdownField
-                || !rebalanceDaysField || !initialCapitalField || !commissionRateField
-                || !backtestSlippageField || !executionTimeframeField || !scopeSymbolPoolField
-                || !slippageLimitField || !requireBoundStrategySwitch
-                || !requireSymbolPoolSwitch || !requireClientProcessSwitch
+                || !rebalanceDaysField || !executionTimeframeField
+            || !slippageLimitField || !requireBoundStrategySwitch
+            || !requireClientProcessSwitch
                 || !requireTradingSessionSwitch || !requireRuntimeReadySwitch) {
             Qt.callLater(syncRuntimeRuleFieldsFromDraft)
             return
@@ -157,14 +169,9 @@ Item {
         takeProfitField.text = percentTextFromRatio(runtimeRuleDefaults.ruleProfile.takeProfitPercent, 2)
         maxDrawdownField.text = percentTextFromRatio(runtimeRuleDefaults.ruleProfile.maxDrawdownLimit, 2)
         rebalanceDaysField.text = String(runtimeRuleDefaults.executionPolicy.rebalanceDays)
-        initialCapitalField.text = String(runtimeRuleDefaults.backtestAssumptions.initialCapital)
-        commissionRateField.text = percentTextFromRatio(runtimeRuleDefaults.backtestAssumptions.commissionRate, 3)
-        backtestSlippageField.text = percentTextFromRatio(runtimeRuleDefaults.backtestAssumptions.slippageRate, 3)
         executionTimeframeField.text = runtimeRuleDefaults.strategyScopeContext.executionTimeframe
-        scopeSymbolPoolField.text = runtimeRuleDefaults.strategyScopeContext.symbol_pool.join(",")
         slippageLimitField.text = percentTextFromRatio(runtimeRuleDefaults.validation.maxSlippagePercent, 2)
         requireBoundStrategySwitch.checked = runtimeRuleDefaults.validation.requireBoundStrategy
-        requireSymbolPoolSwitch.checked = runtimeRuleDefaults.validation.requireSymbolPool
         requireClientProcessSwitch.checked = runtimeRuleDefaults.validation.requireClientProcess
         requireTradingSessionSwitch.checked = runtimeRuleDefaults.validation.requireTradingSessionOpen
         requireRuntimeReadySwitch.checked = runtimeRuleDefaults.validation.requireRuntimeReady
@@ -181,19 +188,12 @@ Item {
             executionPolicy: {
                 rebalanceDays: Number(String(rebalanceDaysField.text || "").trim())
             },
-            backtestAssumptions: {
-                initialCapital: Number(String(initialCapitalField.text || "").trim()),
-                commissionRate: ratioFromPercentText(commissionRateField.text),
-                slippageRate: ratioFromPercentText(backtestSlippageField.text)
-            },
             strategyScopeContext: {
-                executionTimeframe: String(executionTimeframeField.text || "").trim(),
-                symbol_pool: normalizeSymbolPool(scopeSymbolPoolField.text)
+                executionTimeframe: String(executionTimeframeField.text || "").trim()
             },
             validation: {
                 maxSlippagePercent: ratioFromPercentText(slippageLimitField.text),
                 requireBoundStrategy: requireBoundStrategySwitch.checked,
-                requireSymbolPool: requireSymbolPoolSwitch.checked,
                 requireClientProcess: requireClientProcessSwitch.checked,
                 requireTradingSessionOpen: requireTradingSessionSwitch.checked,
                 requireRuntimeReady: requireRuntimeReadySwitch.checked
@@ -224,12 +224,6 @@ Item {
             }
         }
 
-        if (isNaN(runtimeRuleDefaults.backtestAssumptions.initialCapital)
-                || runtimeRuleDefaults.backtestAssumptions.initialCapital <= 0) {
-            errors.push("默认初始资金必须大于 0")
-        }
-        validateRatio("默认佣金率", runtimeRuleDefaults.backtestAssumptions.commissionRate, true)
-        validateRatio("默认回测滑点", runtimeRuleDefaults.backtestAssumptions.slippageRate, true)
         validateRatio("单策略最大仓位", runtimeRuleDefaults.ruleProfile.maxPositionPercent, false)
         validateRatio("止损比例", runtimeRuleDefaults.ruleProfile.stopLossPercent, false)
         validateRatio("止盈比例", runtimeRuleDefaults.ruleProfile.takeProfitPercent, false)
@@ -272,9 +266,6 @@ Item {
 
         if (runtimeRuleDefaults.validation.requireBoundStrategy && !String(selectedBoundStrategyId || "").trim()) {
             errors.push("规则校验要求必须绑定业务策略")
-        }
-        if (runtimeRuleDefaults.validation.requireSymbolPool && runtimeSymbols.length === 0) {
-            errors.push("规则校验要求必须存在运行时标的池")
         }
         if (runtimeRuleDefaults.validation.requireClientProcess && configService && !configService.clientProcessRunning) {
             errors.push("规则校验要求检测到掘金客户端进程")
@@ -355,35 +346,8 @@ Item {
         return StartupGateFormatter.checkSummaryText(latestStartupGate)
     }
 
-    function normalizeSymbolPool(source) {
-        return StructureAdapter.normalizeSymbolPool(source)
-    }
-
     function loadBoundStrategySymbols(strategyId) {
-        var resolvedStrategyId = String(strategyId || "").trim()
-        if (!resolvedStrategyId || !strategyService || !strategyService.getStrategyById) {
-            return []
-        }
-
-        try {
-            if (strategyService.initialize) {
-                strategyService.initialize()
-            }
-            var strategy = strategyService.getStrategyById(resolvedStrategyId) || ({})
-            var linkedSymbols = StructureAdapter.resolveLinkedStockPoolSymbols(strategy)
-            if (linkedSymbols.length > 0) {
-                return linkedSymbols
-            }
-
-            var persistedSymbols = StructureAdapter.resolvePersistedStrategySymbolPool(strategy)
-            if (persistedSymbols.length > 0) {
-                return persistedSymbols
-            }
-
-            return StructureAdapter.resolveSymbolPool(strategy)
-        } catch (error) {
-            return []
-        }
+        return []
     }
 
     function resolveRuntimeSymbolsFallback() {
@@ -396,42 +360,17 @@ Item {
             source = configService.currentConfiguration.symbols || ""
         }
 
-        return normalizeSymbolPool(source)
+        return normalizeRuntimeSymbols(source)
     }
 
-    function ensureBoundStrategySymbolPoolFromRuntime() {
-        if (!selectedBoundStrategyId) {
-            return ({ synced: false, usedFallback: false, symbolCount: 0 })
-        }
-
-        var existingSymbols = loadBoundStrategySymbols(selectedBoundStrategyId)
-        if (existingSymbols.length > 0) {
-            boundStrategySymbolsPreview = existingSymbols.join(",")
-            if (symbolsField) {
-                symbolsField.text = boundStrategySymbolsPreview
-            }
-            return ({ synced: true, usedFallback: false, symbolCount: existingSymbols.length })
-        }
-
+    function syncBoundStrategyRuntimeSymbols() {
         var fallbackSymbols = resolveRuntimeSymbolsFallback()
-        if (fallbackSymbols.length === 0) {
-            return ({ synced: false, usedFallback: false, symbolCount: 0 })
-        }
-
         boundStrategySymbolsPreview = fallbackSymbols.join(",")
-        if (symbolsField) {
-            symbolsField.text = boundStrategySymbolsPreview
-        }
-
-        return ({ synced: false, usedFallback: true, previewOnly: true, symbolCount: fallbackSymbols.length })
+        return ({ synced: false, usedFallback: false, symbolCount: fallbackSymbols.length })
     }
 
     function syncSymbolsPreviewFromBoundStrategy() {
-        var symbols = loadBoundStrategySymbols(selectedBoundStrategyId)
-        boundStrategySymbolsPreview = symbols.join(",")
-        if (selectedBoundStrategyId && symbolsField && symbols.length > 0) {
-            symbolsField.text = boundStrategySymbolsPreview
-        }
+        boundStrategySymbolsPreview = resolveRuntimeSymbolsFallback().join(",")
     }
 
     function accountProfileValue() {
@@ -630,18 +569,6 @@ Item {
         }
 
         var saveOptions = options || ({})
-        if (selectedBoundStrategyId && !saveOptions.skipStrategySymbolPoolSync) {
-            var syncResult = ensureBoundStrategySymbolPoolFromRuntime()
-            if (syncResult.failed) {
-                feedbackError = true
-                feedbackMessage = syncResult.message || "策略标的池回写失败"
-                if (!saveOptions.suppressToast) {
-                    showMessageRequested(feedbackMessage)
-                }
-                return false
-            }
-        }
-
         var validationReport = buildLiveValidationReport()
         if (!validationReport.passed) {
             feedbackError = true
@@ -673,23 +600,12 @@ Item {
     }
 
     function persistBoundStrategySelection() {
-        var syncResult = ensureBoundStrategySymbolPoolFromRuntime()
-        if (syncResult.failed) {
-            feedbackError = true
-            feedbackMessage = syncResult.message || "策略标的池回写失败"
-            showMessageRequested(feedbackMessage)
-            return
-        }
-
+        var syncResult = syncBoundStrategyRuntimeSymbols()
         saveConfiguration({
             successMessage: selectedBoundStrategyId
-                ? (syncResult.usedFallback && syncResult.synced
-                    ? ("已同步交易绑定到策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，并立即刷新运行时订阅标的")
-                    : (syncResult.previewOnly
-                    ? ("已同步交易绑定到策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，当前仅预览运行时订阅，不再回写回测股票池")
-                    : (boundStrategySymbolsPreview
-                    ? ("已同步交易绑定到策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，并立即刷新运行时订阅标的")
-                    : ("已同步交易绑定到策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，当前沿用既有订阅标的"))))
+                ? (boundStrategySymbolsPreview
+                    ? ("已同步交易绑定到策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，并刷新当前运行时订阅标的")
+                    : ("已同步交易绑定到策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”"))
                 : "已取消业务策略绑定，当前可手动维护运行时行情订阅列表"
         })
     }
@@ -1268,8 +1184,8 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: boundStrategySymbolsPreview
-                                        ? ("策略股票池: " + normalizeSymbolPool(boundStrategySymbolsPreview).length + " 个标的")
-                                        : "当前策略暂无股票池"
+                                        ? ("当前运行时订阅预览: " + normalizeRuntimeSymbols(boundStrategySymbolsPreview).length + " 个标的")
+                                        : "当前未生成额外订阅预览"
                                     font.pixelSize: 13
                                     font.weight: Font.Medium
                                     color: "#E2E8F0"
@@ -1285,7 +1201,7 @@ Item {
                                                              ? marketDataService.runtimeSubscriptionLimit
                                                              : 0)
                                                          + " 个")
-                                        : "未绑定策略时不显示策略股票池同步状态"
+                                        : "未绑定策略时不显示绑定策略订阅状态"
                                     font.pixelSize: 13
                                     color: "#FCD34D"
                                 }
@@ -1294,8 +1210,8 @@ Item {
                                     Layout.fillWidth: true
                                     wrapMode: Text.WordWrap
                                     text: boundStrategySymbolsPreview
-                                        ? ("上面第一行是绑定策略自带的股票池数量；第二行分别显示当前已订阅数量和订阅上限。两者不是同一个概念。")
-                                        : "切换绑定后会立即保存；若当前策略没有标的池，系统将保留现有运行时订阅列表。"
+                                        ? ("上面第一行显示当前页面预览到的运行时订阅数量；第二行显示真实已订阅数量和订阅上限。")
+                                        : "切换绑定后会立即保存；若当前没有额外订阅预览，系统将保留现有运行时订阅列表。"
                                     font.pixelSize: 13
                                     color: "#BAE6FD"
                                 }
@@ -1307,8 +1223,8 @@ Item {
                             wrapMode: Text.WordWrap
                             text: selectedBoundStrategyId
                                 ? (boundStrategySymbolsPreview
-                                    ? ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”。页面显示的策略股票池来自策略配置；真实订阅数以上面的实时订阅统计为准。")
-                                    : ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，该策略当前没有标的池，系统将继续沿用现有订阅列表"))
+                                    ? ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”。页面显示的是当前运行时订阅预览；真实订阅数以上面的实时订阅统计为准。")
+                                    : ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，当前将继续沿用现有订阅列表"))
                                 : "未绑定业务策略时，可在这里手动维护运行时行情订阅列表；也可以直接回到策略卡片点击启动实盘，系统会自动绑定当前策略。"
                             font.pixelSize: 12
                             color: selectedBoundStrategyId ? "#BAE6FD" : "#94A3B8"
@@ -1469,55 +1385,6 @@ Item {
                                 color: "#E2E8F0"
                             }
 
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: root.width > 1200 ? 3 : 2
-                                columnSpacing: 16
-                                rowSpacing: 12
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Text { text: "默认初始资金"; font.pixelSize: 13; color: "#E2E8F0" }
-                                    TextField {
-                                        id: initialCapitalField
-                                        Layout.fillWidth: true
-                                        color: "#F8FAFC"
-                                        placeholderText: "1000000"
-                                        placeholderTextColor: "#64748B"
-                                        background: Rectangle { radius: 12; color: "#111827"; border.color: initialCapitalField.activeFocus ? "#38BDF8" : "#334155"; border.width: 1 }
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Text { text: "默认佣金率 (%)"; font.pixelSize: 13; color: "#E2E8F0" }
-                                    TextField {
-                                        id: commissionRateField
-                                        Layout.fillWidth: true
-                                        color: "#F8FAFC"
-                                        placeholderText: "0.15"
-                                        placeholderTextColor: "#64748B"
-                                        background: Rectangle { radius: 12; color: "#111827"; border.color: commissionRateField.activeFocus ? "#38BDF8" : "#334155"; border.width: 1 }
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 6
-                                    Text { text: "默认回测滑点 (%)"; font.pixelSize: 13; color: "#E2E8F0" }
-                                    TextField {
-                                        id: backtestSlippageField
-                                        Layout.fillWidth: true
-                                        color: "#F8FAFC"
-                                        placeholderText: "0.10"
-                                        placeholderTextColor: "#64748B"
-                                        background: Rectangle { radius: 12; color: "#111827"; border.color: backtestSlippageField.activeFocus ? "#38BDF8" : "#334155"; border.width: 1 }
-                                    }
-                                }
-                            }
-
                             Text {
                                 text: "默认作用域上下文"
                                 font.pixelSize: 15
@@ -1545,21 +1412,6 @@ Item {
                                     }
                                 }
 
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.width > 1200 ? 2 : 1
-                                    spacing: 6
-                                    Text { text: "默认兜底标的池"; font.pixelSize: 13; color: "#E2E8F0" }
-                                    TextField {
-                                        id: scopeSymbolPoolField
-                                        Layout.fillWidth: true
-                                        color: "#F8FAFC"
-                                        placeholderText: "当绑定策略自身没有标的池时，用这个兜底，例如 600000.SH,000001.SZ"
-                                        placeholderTextColor: "#64748B"
-                                        selectByMouse: true
-                                        background: Rectangle { radius: 12; color: "#111827"; border.color: scopeSymbolPoolField.activeFocus ? "#38BDF8" : "#334155"; border.width: 1 }
-                                    }
-                                }
                             }
 
                             Text {
@@ -1576,7 +1428,6 @@ Item {
                                 rowSpacing: 8
 
                                 Switch { id: requireBoundStrategySwitch; text: "必须绑定业务策略" }
-                                Switch { id: requireSymbolPoolSwitch; text: "必须存在标的池" }
                                 Switch {
                                     id: requireClientProcessSwitch
                                     text: "必须检测到客户端"

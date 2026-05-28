@@ -25,7 +25,10 @@ endif()
 target_link_libraries(domain_backtest
     PUBLIC
     domain_types
+    domain_strategy
         domain_strategies
+    domain_trading
+        astock_market
         engine
         foundation
 )
@@ -33,9 +36,25 @@ target_link_libraries(domain_backtest
 target_include_directories(domain_backtest
     PUBLIC
         include
+        strategy_engine/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../market/include
         ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/include
     PRIVATE
         src
+        strategy_engine/src
+)
+
+target_sources(domain_backtest
+    PRIVATE
+    src/HistoricalMarketDataCache.cpp
+    strategy_engine/src/CanonicalRuntimeStrategies.cpp
+    strategy_engine/src/BacktestRequestValidator.cpp
+    strategy_engine/src/BacktestRuntimeSession.cpp
+    strategy_engine/src/DiagnosticsRecorder.cpp
+    strategy_engine/src/LayerExecutionPipeline.cpp
+    strategy_engine/src/ResultAssembler.cpp
+    strategy_engine/src/StrategyBacktestEngine.cpp
+        strategy_engine/src/StrategyBacktestEngineTypeAnchors.cpp
 )
 
 # 添加测试可执行文件

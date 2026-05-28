@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import datetime as dt
 import os
+import sys
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import akshare as ak
 import jqdatasdk as jq
 import pymysql
 import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tools.history_start_policy import resolve_history_date_bounds
 
 
 MYSQL_CONFIG = {
@@ -24,11 +33,12 @@ MYSQL_CONFIG = {
 
 DEFAULT_JQ_USER = os.getenv("JQ_USERNAME") or "13552314165"
 DEFAULT_JQ_PASS = os.getenv("JQ_PASSWORD") or "xiaoyu21A"
+PROGRESS_HEARTBEAT_SECONDS = 30
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="按 AkShare 历史报表增量回填财务数据到 financial_indicator")
-    parser.add_argument("--start-year", type=int, default=None, help="回填起始年份，默认与 daily_bar 最早日期对齐")
+    parser.add_argument("--start-year", type=int, default=None, help="回填起始年份，默认与统一历史起点 2015-01-01 对齐")
     parser.add_argument("--end-year", type=int, default=None, help="回填结束年份，默认与 daily_bar 最晚日期对齐")
     parser.add_argument("--limit", type=int, default=10000, help="单次聚宽查询返回上限")
     parser.add_argument("--workers", type=int, default=8, help="财报抓取并发线程数，默认 8")
@@ -120,7 +130,7 @@ def load_daily_trade_date_bounds(cursor) -> Tuple[dt.date, dt.date]:
     row = cursor.fetchone()
     if not row or row[0] is None or row[1] is None:
         raise RuntimeError("daily_bar 为空，无法对齐财报起止日期")
-    return row[0], row[1]
+    return resolve_history_date_bounds(row[0], row[1], "daily_bar")
 
 
 def local_to_akshare_symbol(symbol: str) -> Optional[str]:
@@ -1092,6 +1102,10 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
             )
             missing_rows, first_missing_date, last_missing_date = cursor.fetchone()
             missing_rows = int(missing_rows or 0)
+            print(
+                f"[align] begin target_date={target_date} missing_rows={missing_rows} first_missing_date={first_missing_date} last_missing_date={last_missing_date}",
+                flush=True,
+            )
 
             cursor.execute(
                 """
@@ -1361,7 +1375,12 @@ def backfill_dividend_metrics(cursor, target_date: dt.date) -> int:
     symbols = [(int(symbol_id), str(symbol)) for symbol_id, symbol in cursor.fetchall()]
     total_updates = 0
 
-    for symbol_id, symbol in symbols:
+    for index, (symbol_id, symbol) in enumerate(symbols, start=1):
+        if index == 1 or index % 100 == 0:
+            print(
+                f"[dividend-progress] daily completed={index - 1}/{len(symbols)} total_updates={total_updates}",
+                flush=True,
+            )
         try:
             dividend_events = fetch_akshare_dividend_events(symbol)
         except Exception as exc:
@@ -1478,7 +1497,12 @@ def backfill_report_dividend_metrics(cursor, target_date: dt.date) -> int:
     symbols = [(int(symbol_id), str(symbol)) for symbol_id, symbol in cursor.fetchall()]
     total_updates = 0
 
-    for symbol_id, symbol in symbols:
+    for index, (symbol_id, symbol) in enumerate(symbols, start=1):
+        if index == 1 or index % 100 == 0:
+            print(
+                f"[dividend-progress] report completed={index - 1}/{len(symbols)} total_updates={total_updates}",
+                flush=True,
+            )
         try:
             dividend_events = fetch_akshare_dividend_events(symbol)
         except Exception as exc:
@@ -1635,21 +1659,37 @@ def fetch_financial_history(start_year: int, end_year: int, limit: int, workers:
             )
             future_to_meta[future] = symbol
 
+        pending_futures = set(future_to_meta)
+        completed_count = 0
         try:
-            for completed_count, future in enumerate(as_completed(future_to_meta), start=1):
-                symbol = future_to_meta[future]
-                try:
-                    completed_symbol, fetched_rows, affected = future.result()
-                    total_upserts += affected
-                    period_results.append((completed_symbol, fetched_rows, affected))
-                    if completed_count == 1 or completed_count % 50 == 0:
-                        print(
-                            f"[progress] completed={completed_count}/{len(future_to_meta)} total_upserts={total_upserts}",
-                            flush=True,
-                        )
-                    print(f"[upsert] symbol={completed_symbol} rows={affected}")
-                except Exception as exc:
-                    print(f"[skip] symbol={symbol}: {exc}")
+            while pending_futures:
+                completed_batch, pending_futures = wait(
+                    pending_futures,
+                    timeout=PROGRESS_HEARTBEAT_SECONDS,
+                    return_when=FIRST_COMPLETED,
+                )
+                if not completed_batch:
+                    print(
+                        f"[heartbeat] financial fetch running completed={completed_count}/{len(future_to_meta)} pending={len(pending_futures)} total_upserts={total_upserts}",
+                        flush=True,
+                    )
+                    continue
+
+                for future in completed_batch:
+                    completed_count += 1
+                    symbol = future_to_meta[future]
+                    try:
+                        completed_symbol, fetched_rows, affected = future.result()
+                        total_upserts += affected
+                        period_results.append((completed_symbol, fetched_rows, affected))
+                        if completed_count == 1 or completed_count % 50 == 0:
+                            print(
+                                f"[progress] completed={completed_count}/{len(future_to_meta)} total_upserts={total_upserts}",
+                                flush=True,
+                            )
+                        print(f"[upsert] symbol={completed_symbol} rows={affected}")
+                    except Exception as exc:
+                        print(f"[skip] symbol={symbol}: {exc}")
         except KeyboardInterrupt:
             for future in future_to_meta:
                 future.cancel()

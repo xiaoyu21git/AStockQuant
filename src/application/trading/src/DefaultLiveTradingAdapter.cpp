@@ -1,7 +1,5 @@
 #include "../include/DefaultLiveTradingAdapter.h"
 
-#include "../../../domain/backtest/include/ResolvedStrategyBehavior.h"
-
 #include <QDate>
 
 namespace application::trading {
@@ -101,8 +99,10 @@ domain::trading::TradingExecutionContext DefaultLiveTradingAdapter::buildExecuti
     context.executionProfile.priceModel = tradingConfiguration.value(QStringLiteral("useMarketOnClose")).toBool()
         ? domain::trading::ExecutionPriceModel::MarketOnClose
         : domain::trading::ExecutionPriceModel::Custom;
-    context.executionProfile.enableShortSelling = tradingConfiguration.value(QStringLiteral("enableShortSelling")).toBool();
-    context.executionProfile.rebalanceFrequencyDays = 1;
+    context.executionProfile.shortSellingMode = tradingConfiguration.value(QStringLiteral("enableShortSelling")).toBool()
+        ? domain::strategy::ShortSellingMode::Enabled
+        : domain::strategy::ShortSellingMode::Disabled;
+    context.executionProfile.rebalanceFrequencyDays = domain::strategy::RebalanceFrequencyDays{1};
     context.runtimeOptions.maxThreads = 1;
     context.runtimeOptions.enableCache = false;
     context.runtimeOptions.cacheTtlSeconds = 0;

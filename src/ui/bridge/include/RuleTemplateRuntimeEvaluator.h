@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../../domain/strategy/include/StrategySnapshotTypes.h"
+
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
@@ -7,11 +9,11 @@
 namespace bridge::rules {
 
 struct RuntimeRuleTemplateEvaluationContext {
-    QString symbol;
+    domain::strategy::SymbolCode symbol;
     double latestPrice = 0.0;
     double referencePrice = 0.0;
-    QString marketEventType;
-    QString candidateAction;
+    domain::strategy::MarketEventTypeId marketEventType;
+    domain::strategy::CandidateAction candidateAction{domain::strategy::CandidateAction::None};
     double candidateStrength = 0.0;
     QVariantMap strategy;
     QVariantMap flatEventFacts;
@@ -24,16 +26,16 @@ struct RuntimeRuleTemplateEvaluationResult {
     bool matched = false;
     bool blocked = false;
     bool actionPermitted = true;
-    QString stage;
-    QString ruleId;
-    QString reasonCode;
+    domain::strategy::RuleTemplateStage stage{domain::strategy::RuleTemplateStage::Unspecified};
+    domain::strategy::RuleTemplateId ruleId;
+    domain::strategy::ReasonCode reasonCode;
     QString message;
-    QString resultType;
+    domain::strategy::RuleTemplateResultType resultType{domain::strategy::RuleTemplateResultType::Unspecified};
     QVariantMap payload;
     QVariantMap state;
     QVariantMap binding;
-    QString templateNamespace;
-    QString templateFilePath;
+    domain::strategy::NamespaceId templateNamespace;
+    domain::strategy::FilePathToken templateFilePath;
     QVariantList groupDecisions;
 };
 

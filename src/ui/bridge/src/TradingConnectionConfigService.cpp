@@ -253,6 +253,40 @@ QString normalizedSymbolText(const QVariant& value)
     return normalizedSymbolList(value).join(QStringLiteral(","));
 }
 
+QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        if (!map.contains(key)) {
+            continue;
+        }
+
+        const QVariant value = map.value(key);
+        if (!value.isValid() || value.isNull()) {
+            continue;
+        }
+
+        if (value.typeId() == QMetaType::QString && value.toString().trimmed().isEmpty()) {
+            continue;
+        }
+
+        return value;
+    }
+
+    return {};
+}
+
+int enumParam(const QVariantMap& map, const QStringList& keys, int fallback)
+{
+    const QVariant rawValue = firstConfiguredValue(map, keys);
+    if (!rawValue.isValid()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    const int numericValue = rawValue.toInt(&ok);
+    return ok ? numericValue : fallback;
+}
+
 QString strategyIdFromBindingEntry(const QVariantMap& entry)
 {
     return entry.value(QStringLiteral("strategyId"),
@@ -395,24 +429,46 @@ QVariantMap strategyLatestBacktest(const QVariantMap& strategy)
     return performance.value(QStringLiteral("latestBacktest")).toMap();
 }
 
-bool isPortfolioBuilderStrategy(const QVariantMap& strategy)
+int resolveStrategyExecutionKind(const QVariantMap& strategy, const QVariantMap& latestBacktest)
 {
-    if (strategy.value(QStringLiteral("strategy_type")).toString().trimmed().toUpper() != QStringLiteral("PORTFOLIO")) {
-        return false;
-    }
-
     const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
-    const QString optimizationMethod = parameters.value(QStringLiteral("optimization_method"),
-        parameters.value(QStringLiteral("optimizationMethod"))).toString().trimmed().toLower();
-    if (optimizationMethod == QStringLiteral("portfolio_builder")) {
-        return true;
+    const QVariantMap runtimeParameters = latestBacktest.value(QStringLiteral("runtimeParameters")).toMap().isEmpty()
+        ? latestBacktest.value(QStringLiteral("runtime_parameters")).toMap()
+        : latestBacktest.value(QStringLiteral("runtimeParameters")).toMap();
+
+    int executionKind = enumParam(
+        runtimeParameters,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        -1);
+    if (executionKind >= 0) {
+        return executionKind;
     }
 
-    const QVariantMap advancedOptions = strategy.value(QStringLiteral("advanced_options"),
-        parameters.value(QStringLiteral("advanced_options"))).toMap();
-    const QString source = advancedOptions.value(QStringLiteral("source")).toString().trimmed();
-    return source == QStringLiteral("PortfolioBuilderPage")
-        || strategy.value(QStringLiteral("sub_type")).toString().trimmed().toLower() == QStringLiteral("portfolio_builder");
+    executionKind = enumParam(
+        latestBacktest,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        -1);
+    if (executionKind >= 0) {
+        return executionKind;
+    }
+
+    executionKind = enumParam(
+        parameters,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        -1);
+    if (executionKind >= 0) {
+        return executionKind;
+    }
+
+    return enumParam(
+        strategy,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        0);
+}
+
+bool usesFactorWeightedPortfolioExecution(const QVariantMap& strategy)
+{
+    return resolveStrategyExecutionKind(strategy, strategyLatestBacktest(strategy)) == 1;
 }
 
 int latestBacktestTargetPositionCount(const QVariantMap& latestBacktest)
@@ -421,13 +477,8 @@ int latestBacktestTargetPositionCount(const QVariantMap& latestBacktest)
         ? latestBacktest.value(QStringLiteral("runtime_parameters")).toMap()
         : latestBacktest.value(QStringLiteral("runtimeParameters")).toMap();
     bool ok = false;
-    int maxPositions = runtimeParameters.value(QStringLiteral("maxPositions")).toInt(&ok);
-    if (ok && maxPositions > 0) {
-        return maxPositions;
-    }
-
-    maxPositions = runtimeParameters.value(QStringLiteral("top_n")).toInt(&ok);
-    return ok && maxPositions > 0 ? maxPositions : 0;
+    const int targetPositionCount = runtimeParameters.value(QStringLiteral("targetPositionCount")).toInt(&ok);
+    return ok && targetPositionCount > 0 ? targetPositionCount : 0;
 }
 
 QVariantMap strategyWithRepairSnapshotParameters(const QVariantMap& strategy,
@@ -443,12 +494,10 @@ QVariantMap strategyWithRepairSnapshotParameters(const QVariantMap& strategy,
         : latest.value(QStringLiteral("runtimeParameters")).toMap();
     const int targetPositions = latestBacktestTargetPositionCount(latestBacktest);
     if (targetPositions > 0) {
-        parameters.insert(QStringLiteral("maxPositions"), targetPositions);
-        parameters.insert(QStringLiteral("top_n"), targetPositions);
+        parameters.insert(QStringLiteral("targetPositionCount"), targetPositions);
 
         QVariantMap mergedRuntimeParameters = runtimeParameters;
-        mergedRuntimeParameters.insert(QStringLiteral("maxPositions"), targetPositions);
-        mergedRuntimeParameters.insert(QStringLiteral("top_n"), targetPositions);
+        mergedRuntimeParameters.insert(QStringLiteral("targetPositionCount"), targetPositions);
         latest.insert(QStringLiteral("runtimeParameters"), mergedRuntimeParameters);
     }
 
@@ -457,219 +506,6 @@ QVariantMap strategyWithRepairSnapshotParameters(const QVariantMap& strategy,
     repairedStrategy.insert(QStringLiteral("parameters"), parameters);
     repairedStrategy.insert(QStringLiteral("performance_metrics"), performance);
     return repairedStrategy;
-}
-
-bool shouldRepairPersistedSymbolPool(const QVariantMap& strategy, const QStringList& symbols)
-{
-    if (!isPortfolioBuilderStrategy(strategy)) {
-        return false;
-    }
-
-    const QVariantMap latestBacktest = strategyLatestBacktest(strategy);
-    if (latestBacktest.isEmpty()) {
-        return false;
-    }
-
-    const QString universeType = latestBacktest.value(QStringLiteral("universeType")).toString().trimmed().toLower();
-    const QString indexSymbol = latestBacktest.value(QStringLiteral("indexSymbol")).toString().trimmed();
-    if (universeType != QStringLiteral("index") || indexSymbol.isEmpty()) {
-        return false;
-    }
-
-    const int targetPositionCount = latestBacktestTargetPositionCount(latestBacktest);
-    if (targetPositionCount <= 0) {
-        return symbols.size() <= 1;
-    }
-
-    if (symbols.isEmpty()) {
-        return true;
-    }
-
-    if (symbols.size() <= 1) {
-        return true;
-    }
-
-    return symbols.size() > targetPositionCount;
-}
-
-QStringList snapshotPositionSymbols(const QVariantMap& snapshot)
-{
-    QStringList symbols;
-    const QVariantList positions = snapshot.value(QStringLiteral("positions")).toList();
-    for (const QVariant& rawPosition : positions) {
-        const QString symbol = rawPosition.toMap().value(QStringLiteral("symbol")).toString().trimmed().toUpper();
-        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
-            symbols.append(symbol);
-        }
-    }
-    return symbols;
-}
-
-bool persistStrategySymbolPoolRepair(const QString& strategyId,
-                                     const QVariantMap& strategy,
-                                     const QStringList& symbols,
-                                     const QString& sourceTag = QStringLiteral("symbol pool repair"))
-{
-    if (strategyId.trimmed().isEmpty() || symbols.isEmpty()) {
-        return false;
-    }
-
-    QVariantMap updatedStrategy = strategy;
-    QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
-    parameters.insert(QStringLiteral("symbol_pool"), symbols);
-    parameters.insert(QStringLiteral("symbolPool"), symbols);
-
-    updatedStrategy.insert(QStringLiteral("parameters"), parameters);
-    updatedStrategy.insert(QStringLiteral("symbol_pool"), symbols);
-    updatedStrategy.remove(QStringLiteral("symbolPool"));
-
-    if (StrategyService* strategyService = StrategyService::instance()) {
-        if (strategyService->isInitialized()) {
-            const bool updated = strategyService->updateStrategy(strategyId, updatedStrategy);
-            if (updated) {
-                qInfo() << "TradingConnectionConfigService:" << sourceTag << "persisted for" << strategyId
-                        << "with" << symbols.size() << "symbols via StrategyService";
-            } else {
-                qWarning() << "TradingConnectionConfigService: failed to persist" << sourceTag
-                           << "for" << strategyId << "via StrategyService";
-            }
-            return updated;
-        }
-    }
-
-    QVariantMap updateData;
-    updateData.insert(QStringLiteral("symbol_pool"), symbols);
-    updateData.insert(QStringLiteral("parameters"), parameters);
-
-    StrategyRepository repository;
-    if (!repository.initialize()) {
-        qWarning() << "TradingConnectionConfigService: failed to initialize repository for symbol pool repair";
-        return false;
-    }
-
-    const bool updated = repository.update(strategyId, updateData);
-    if (updated) {
-        qInfo() << "TradingConnectionConfigService:" << sourceTag << "persisted for" << strategyId
-                << "with" << symbols.size() << "symbols via repository";
-    }
-    return updated;
-}
-
-QStringList repairStrategySymbolPoolFromSnapshot(const QString& strategyId, const QVariantMap& strategy)
-{
-    const QVariantMap latestBacktest = strategyLatestBacktest(strategy);
-    if (latestBacktest.isEmpty()) {
-        return {};
-    }
-
-    RiskMonitorService* riskMonitorService = RiskMonitorService::instance();
-    if (!riskMonitorService) {
-        return {};
-    }
-
-    const QVariantMap repairedStrategy = strategyWithRepairSnapshotParameters(strategy, latestBacktest);
-    const QVariantMap snapshot = riskMonitorService->buildPortfolioSnapshot(repairedStrategy, latestBacktest);
-    const QStringList repairedSymbols = snapshotPositionSymbols(snapshot);
-    if (repairedSymbols.size() <= 1) {
-        qWarning() << "TradingConnectionConfigService: snapshot symbol pool repair produced insufficient symbols for"
-                   << strategyId
-                   << "status=" << snapshot.value(QStringLiteral("status")).toString()
-                   << "error=" << snapshot.value(QStringLiteral("error")).toString()
-                   << "diagnostics=" << snapshot.value(QStringLiteral("diagnostics")).toMap();
-        return {};
-    }
-
-    persistStrategySymbolPoolRepair(strategyId, strategy, repairedSymbols, QStringLiteral("snapshot symbol pool repair"));
-    return repairedSymbols;
-}
-
-QVariantMap loadStrategyForSymbolPool(const QString& strategyId)
-{
-    const QString normalizedStrategyId = strategyId.trimmed();
-    if (normalizedStrategyId.isEmpty()) {
-        return {};
-    }
-
-    if (auto* strategyService = StrategyService::instance()) {
-        if (strategyService->isInitialized()) {
-            const QVariantMap strategy = strategyService->getStrategyById(normalizedStrategyId);
-            if (!strategy.isEmpty()) {
-                return strategy;
-            }
-        }
-    }
-
-    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
-    if (!dbManager.initialize()) {
-        qWarning() << "TradingConnectionConfigService: failed to initialize database manager for symbol pool sync";
-        return {};
-    }
-
-    StrategyRepository repository;
-    if (!repository.initialize()) {
-        qWarning() << "TradingConnectionConfigService: failed to initialize strategy repository for symbol pool sync";
-        return {};
-    }
-
-    return repository.findById(normalizedStrategyId);
-}
-
-QStringList loadBoundStrategySymbolPool(const QString& strategyId)
-{
-    const QString normalizedStrategyId = strategyId.trimmed();
-    if (normalizedStrategyId.isEmpty()) {
-        return {};
-    }
-
-    const QVariantMap strategy = loadStrategyForSymbolPool(normalizedStrategyId);
-    if (strategy.isEmpty()) {
-        return {};
-    }
-
-    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
-    QStringList linkedSymbols = normalizedSymbolList(parameters.value(QStringLiteral("linked_stock_pool_symbols")));
-    if (linkedSymbols.isEmpty()) {
-        linkedSymbols = normalizedSymbolList(parameters.value(QStringLiteral("linkedStockPoolSymbols")));
-    }
-    if (!linkedSymbols.isEmpty()) {
-        return linkedSymbols;
-    }
-
-    QStringList symbols = normalizedSymbolList(strategy.value(QStringLiteral("symbol_pool")));
-    if (symbols.isEmpty()) {
-        symbols = normalizedSymbolList(parameters.value(QStringLiteral("symbol_pool")));
-    }
-
-    if (shouldRepairPersistedSymbolPool(strategy, symbols)) {
-        qInfo() << "TradingConnectionConfigService: repairing persisted symbol pool for" << normalizedStrategyId
-                << "currentCount=" << symbols.size();
-        const QStringList repairedSymbols = repairStrategySymbolPoolFromSnapshot(normalizedStrategyId, strategy);
-        if (!repairedSymbols.isEmpty()) {
-            return repairedSymbols;
-        }
-
-        qWarning() << "TradingConnectionConfigService: no valid selected symbol pool available for"
-                   << normalizedStrategyId
-                   << "after snapshot repair; suppressing stale persisted pool";
-        return {};
-    }
-
-    return symbols;
-}
-
-QStringList loadBoundStrategySymbolPoolUnion(const QVariantList& boundStrategies)
-{
-    QStringList symbols;
-    for (const QVariant& rawEntry : boundStrategies) {
-        const QString strategyId = strategyIdFromBindingEntry(rawEntry.toMap());
-        const QStringList strategySymbols = loadBoundStrategySymbolPool(strategyId);
-        for (const QString& symbol : strategySymbols) {
-            if (!symbol.isEmpty() && !symbols.contains(symbol)) {
-                symbols.append(symbol);
-            }
-        }
-    }
-    return symbols;
 }
 
 QStringList loadCurrentHoldingSymbols()

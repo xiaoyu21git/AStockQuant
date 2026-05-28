@@ -1,5 +1,6 @@
 # domain/CMakeLists.txt
 add_subdirectory(types)
+add_subdirectory(strategy)
 add_subdirectory(indicators)
 add_subdirectory(signals)
 add_subdirectory(strategies)
@@ -7,6 +8,7 @@ add_subdirectory(data)
 add_subdirectory(market)
 add_subdirectory(backtest)
 add_subdirectory(factor)
+add_subdirectory(trading)
 
 set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
 
@@ -27,11 +29,13 @@ target_link_libraries(domain
         engine
         foundation
         domain_types
+        domain_strategy
         domain_indicators
         domain_signals
         domain_strategies
         domain_data
         domain_backtest
+        domain_trading
         factor_system
 )
 
@@ -39,6 +43,7 @@ target_link_libraries(domain
 target_include_directories(domain
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/types/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategy/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/indicators/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/signals/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategies/include>
@@ -46,6 +51,7 @@ target_include_directories(domain
          $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backtest/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/market/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/factor/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/trading/include>
         $<INSTALL_INTERFACE:include>   # 安装时路径
 )
 

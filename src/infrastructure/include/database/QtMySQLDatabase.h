@@ -309,16 +309,6 @@ public:
     bool rollbackTransaction();
     
     /**
-     * @brief 检查表是否存在
-     */
-    bool tableExists(const QString& tableName);
-    
-    /**
-     * @brief 获取表结构信息
-     */
-    QueryResult getTableSchema(const QString& tableName);
-    
-    /**
      * @brief 获取数据库版本
      */
     QString getDatabaseVersion();
@@ -380,7 +370,8 @@ private:
      */
     QSqlQuery executeQuery(QSqlDatabase& connection, 
                           const QString& sql, 
-                          const std::map<QString, QVariant>& params);
+                          const std::map<QString, QVariant>& params,
+                          bool forwardOnly = false);
     
     /**
      * @brief 将QSqlQuery转换为QueryResult

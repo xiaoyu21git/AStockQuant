@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import argparse
 import bisect
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 import datetime as dt
 import os
 import subprocess
@@ -73,6 +73,7 @@ from tools.import_from_juejin import (
 )
 from tools import import_financial_from_jq as financial_import
 from tools.daily_bar_quality import detect_daily_price_anomalies, filter_valid_records, format_invalid_samples, sanitize_valuation_record
+from tools.history_start_policy import UNIFIED_HISTORY_START_DATE, clamp_history_start_date, resolve_history_date_bounds
 from tools.symbol_status_utils import TRACKED_SYMBOL_STATUSES, infer_special_symbol_state, resolve_effective_target_date
 from tools.trading_day_utils import (
     DEFAULT_MARKET_CLOSE_TIME,
@@ -86,6 +87,7 @@ from tools.trading_day_utils import (
 MAX_FETCH_RETRIES = 3
 INVALID_SAMPLE_LIMIT = 3
 DEFAULT_MARKET_WORKERS = 8
+PROGRESS_HEARTBEAT_SECONDS = 30
 DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ = "AKSHARE_STOCK_DAILY_GM_ADJ"
 DATA_SOURCE_JUEJIN_STOCK_DAILY = "JUEJIN_GM_STOCK_DAILY"
 DATA_SOURCE_JUEJIN_BENCHMARK_DAILY = "JUEJIN_GM_BENCHMARK_INDEX_DAILY"
@@ -152,7 +154,7 @@ def load_daily_trade_date_bounds() -> tuple[dt.date, dt.date]:
             row = cursor.fetchone()
             if not row or row[0] is None or row[1] is None:
                 raise RuntimeError("daily_bar 为空，无法对齐财报起止日期")
-            return row[0], row[1]
+            return resolve_history_date_bounds(row[0], row[1], "daily_bar")
     finally:
         conn.close()
 
@@ -204,10 +206,10 @@ def resolve_backfill_date_range(start_date_text: Optional[str], end_date_text: O
     start_date = dt.date.fromisoformat(start_date_text) if start_date_text else None
     end_date = dt.date.fromisoformat(end_date_text) if end_date_text else None
     if start_date is not None and end_date is not None:
-        return start_date, end_date
+        return resolve_history_date_bounds(start_date, end_date, "backfill range")
 
     daily_start_date, daily_end_date = load_daily_trade_date_bounds()
-    return start_date or daily_start_date, end_date or daily_end_date
+    return resolve_history_date_bounds(start_date or daily_start_date, end_date or daily_end_date, "backfill range")
 
 
 def run_command(step_name: str, command: list[str]) -> None:
@@ -338,7 +340,7 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
                     targets[symbol] = effective_target_date
                     continue
 
-                expected_start_date = list_date or earliest_trade_date
+                expected_start_date = clamp_history_start_date(list_date or earliest_trade_date)
                 if expected_start_date > effective_target_date:
                     continue
 
@@ -498,16 +500,13 @@ def enrich_stock_frame_with_adjust_factors(symbol: str,
     if enriched.empty:
         return enriched
 
-    try:
-        adjust_factor_by_date = _fetch_daily_adjust_factor_map(symbol, start_date, end_date)
-    except Exception as exc:
-        print(f"[warn] adjust factor 拉取失败 {symbol}: {exc}", flush=True)
-        adjust_factor_by_date = {}
-
     if "date" in enriched.columns:
         enriched["trade_date"] = pd.to_datetime(enriched["date"]).dt.date
     else:
         enriched["trade_date"] = pd.to_datetime(enriched["trade_date"]).dt.date
+
+    source_adjust_df = extract_adjust_factors_from_frame(enriched)
+    adjust_factor_by_date = fetch_adjust_factor_map_with_retry(symbol, start_date, end_date)
 
     adjust_df = build_effective_adjust_factor_frame(
         symbol,
@@ -515,13 +514,128 @@ def enrich_stock_frame_with_adjust_factors(symbol: str,
         start_date,
         end_date,
         adjust_factor_by_date,
+        source_adjust_df=source_adjust_df,
     )
     if adjust_df.empty:
-        return merge_existing_adjust_factors(symbol, enriched, start_date, end_date)
+        return enriched
+
+    missing_pre = int(adjust_df["pre_adjust_factor"].isna().sum())
+    missing_post = int(adjust_df["post_adjust_factor"].isna().sum())
+    if missing_pre or missing_post:
+        print(
+            f"[warn] adjust factor incomplete {symbol}: trade_dates={len(adjust_df)} fetched_dates={len(adjust_factor_by_date)} source_dates={len(source_adjust_df)} missing_pre={missing_pre} missing_post={missing_post}",
+            flush=True,
+        )
 
     enriched = enriched.drop(columns=[column for column in ["pre_adjust_factor", "post_adjust_factor"] if column in enriched.columns])
     enriched = enriched.merge(adjust_df, on="trade_date", how="left")
     return enriched
+
+
+def normalize_adjust_factor(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        numeric = float(value)
+    except Exception:
+        return None
+    if not pd.notna(numeric) or numeric <= 0:
+        return None
+    return numeric
+
+
+def extract_adjust_factors_from_frame(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "pre_adjust_factor" not in df.columns and "post_adjust_factor" not in df.columns:
+        return pd.DataFrame(columns=["trade_date", "pre_adjust_factor", "post_adjust_factor"])
+
+    if "date" in df.columns:
+        trade_dates = pd.to_datetime(df["date"], errors="coerce").dt.date
+    else:
+        trade_dates = pd.to_datetime(df["trade_date"], errors="coerce").dt.date
+
+    adjust_df = pd.DataFrame({
+        "trade_date": trade_dates,
+        "pre_adjust_factor": df["pre_adjust_factor"] if "pre_adjust_factor" in df.columns else None,
+        "post_adjust_factor": df["post_adjust_factor"] if "post_adjust_factor" in df.columns else None,
+    })
+    adjust_df["pre_adjust_factor"] = adjust_df["pre_adjust_factor"].apply(normalize_adjust_factor)
+    adjust_df["post_adjust_factor"] = adjust_df["post_adjust_factor"].apply(normalize_adjust_factor)
+    adjust_df = adjust_df.dropna(subset=["trade_date"])
+    adjust_df = adjust_df[
+        adjust_df["pre_adjust_factor"].notna() | adjust_df["post_adjust_factor"].notna()
+    ]
+    return adjust_df.drop_duplicates(subset=["trade_date"]).sort_values("trade_date").reset_index(drop=True)
+
+
+def merge_adjust_factor_frames(
+    ordered_dates: list[dt.date],
+    fetched_adjust_df: pd.DataFrame,
+    source_adjust_df: pd.DataFrame,
+    existing_adjust_df: pd.DataFrame,
+) -> pd.DataFrame:
+    merged = pd.DataFrame({"trade_date": ordered_dates})
+    sources = [
+        ("fetched", fetched_adjust_df),
+        ("source", source_adjust_df),
+        ("existing", existing_adjust_df),
+    ]
+    for prefix, source_df in sources:
+        if source_df.empty:
+            continue
+        merged = merged.merge(
+            source_df.rename(
+                columns={
+                    "pre_adjust_factor": f"{prefix}_pre_adjust_factor",
+                    "post_adjust_factor": f"{prefix}_post_adjust_factor",
+                }
+            ),
+            on="trade_date",
+            how="left",
+        )
+
+    merged["pre_adjust_factor"] = pd.Series([pd.NA] * len(merged), dtype="Float64")
+    merged["post_adjust_factor"] = pd.Series([pd.NA] * len(merged), dtype="Float64")
+    for prefix in ["fetched", "source", "existing"]:
+        pre_column = f"{prefix}_pre_adjust_factor"
+        post_column = f"{prefix}_post_adjust_factor"
+        if pre_column in merged.columns:
+            merged[pre_column] = pd.to_numeric(merged[pre_column], errors="coerce").astype("Float64")
+            merged["pre_adjust_factor"] = merged["pre_adjust_factor"].fillna(merged[pre_column])
+        if post_column in merged.columns:
+            merged[post_column] = pd.to_numeric(merged[post_column], errors="coerce").astype("Float64")
+            merged["post_adjust_factor"] = merged["post_adjust_factor"].fillna(merged[post_column])
+    return merged[["trade_date", "pre_adjust_factor", "post_adjust_factor"]]
+
+
+def fetch_adjust_factor_map_with_retry(
+    symbol: str,
+    start_date: dt.date,
+    end_date: dt.date,
+) -> dict[dt.date, dict[str, Optional[float]]]:
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_FETCH_RETRIES + 1):
+        try:
+            adjust_factor_by_date = _fetch_daily_adjust_factor_map(symbol, start_date, end_date)
+            if adjust_factor_by_date:
+                if attempt > 1:
+                    print(
+                        f"[recover] adjust factor recovered {symbol} attempt={attempt}/{MAX_FETCH_RETRIES} fetched_dates={len(adjust_factor_by_date)}",
+                        flush=True,
+                    )
+                return adjust_factor_by_date
+            last_error = RuntimeError("empty adjust factor result")
+        except Exception as exc:
+            last_error = exc
+        if attempt < MAX_FETCH_RETRIES:
+            print(
+                f"[retry] adjust factor {symbol} attempt={attempt}/{MAX_FETCH_RETRIES} error={last_error}",
+                flush=True,
+            )
+            time.sleep(0.75 * attempt)
+
+    if last_error is not None:
+        print(f"[warn] adjust factor 拉取失败 {symbol}: {last_error}", flush=True)
+    return {}
 
 
 def validate_market_records(symbol: str, fetcher_name: str, result_df: pd.DataFrame) -> pd.DataFrame:
@@ -611,7 +725,7 @@ def fetch_symbol_daily_from_juejin(symbol: str, start_date: dt.date, end_date: d
 
 
 def symbol_has_no_new_juejin_rows(symbol: str, start_date: dt.date, end_date: dt.date) -> bool:
-    probe_start = max(start_date - dt.timedelta(days=30), dt.date(1990, 1, 1))
+    probe_start = clamp_history_start_date(start_date - dt.timedelta(days=30))
     probe_rows = fetch_daily_bars_from_juejin(symbol, probe_start, end_date)
     if not probe_rows:
         return False
@@ -756,7 +870,8 @@ def build_effective_adjust_factor_frame(symbol: str,
                                         trade_dates: Iterable[dt.date],
                                         start_date: dt.date,
                                         end_date: dt.date,
-                                        adjust_factor_by_date: dict[dt.date, dict[str, Optional[float]]]) -> pd.DataFrame:
+                                        adjust_factor_by_date: dict[dt.date, dict[str, Optional[float]]],
+                                        source_adjust_df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     ordered_dates = sorted({trade_date for trade_date in trade_dates if trade_date is not None})
     if not ordered_dates:
         return pd.DataFrame(columns=["trade_date", "pre_adjust_factor", "post_adjust_factor"])
@@ -778,23 +893,10 @@ def build_effective_adjust_factor_frame(symbol: str,
             for trade_date, values in expanded_adjust_factor_by_date.items()
         ]
     )
+    if source_adjust_df is None:
+        source_adjust_df = pd.DataFrame(columns=["trade_date", "pre_adjust_factor", "post_adjust_factor"])
     existing_adjust_df = fetch_existing_adjust_factors_from_db(symbol, start_date, end_date)
-    if existing_adjust_df.empty:
-        return effective_adjust_df
-
-    merged = effective_adjust_df.merge(
-        existing_adjust_df.rename(
-            columns={
-                "pre_adjust_factor": "existing_pre_adjust_factor",
-                "post_adjust_factor": "existing_post_adjust_factor",
-            }
-        ),
-        on="trade_date",
-        how="left",
-    )
-    merged["pre_adjust_factor"] = merged["pre_adjust_factor"].combine_first(merged["existing_pre_adjust_factor"])
-    merged["post_adjust_factor"] = merged["post_adjust_factor"].combine_first(merged["existing_post_adjust_factor"])
-    return merged[["trade_date", "pre_adjust_factor", "post_adjust_factor"]]
+    return merge_adjust_factor_frames(ordered_dates, effective_adjust_df, source_adjust_df, existing_adjust_df)
 
 
 def normalize_ak_hist_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -1370,37 +1472,51 @@ def main() -> None:
                 executor.submit(process_market_update_task, task, target_date): task
                 for task in market_tasks
             }
-            for completed_count, future in enumerate(as_completed(future_to_task), start=1):
-                task = future_to_task[future]
-                symbol = task["symbol"]
-                try:
-                    task_result = future.result()
-                    if task_result["status"] == "empty":
-                        incomplete_symbols.append(f"{symbol}:empty")
-                    else:
-                        total_fetched_rows += int(task_result["fetched_rows"])
-                        total_written_rows += int(task_result["written_rows"])
-                        success_symbols += 1
-                        latest_symbol_date = task_result["latest_symbol_date"]
-                        if latest_symbol_date is not None and latest_symbol_date < target_date:
-                            incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
-                        failed_write_rows = task_result["failed_write_rows"]
-                        if failed_write_rows:
-                            partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
+            pending_futures = set(future_to_task)
+            completed_count = 0
+            while pending_futures:
+                completed_batch, pending_futures = wait(
+                    pending_futures,
+                    timeout=PROGRESS_HEARTBEAT_SECONDS,
+                    return_when=FIRST_COMPLETED,
+                )
+                if not completed_batch:
+                    print(
+                        f"[heartbeat] market update running completed={completed_count}/{len(market_tasks)} pending={len(pending_futures)} success_symbols={success_symbols} failed_symbols={len(failed_symbols)} fetched_rows={total_fetched_rows} written_rows={total_written_rows}",
+                        flush=True,
+                    )
+                    continue
 
-                    if completed_count == 1 or completed_count % 20 == 0:
-                        print(
-                            f"[progress] completed={completed_count}/{len(market_tasks)} success_symbols={success_symbols} "
-                            f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
-                            f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}",
-                            flush=True,
-                        )
-                except MarketDataUnavailableError as exc:
-                    skipped_unavailable_symbols.append(symbol)
-                    print(f"[skip] unavailable data for {symbol}: {exc}", flush=True)
-                except Exception as exc:
-                    failed_symbols.append(symbol)
-                    print(f"Failed to get data for {symbol}: {exc}", flush=True)
+                for future in completed_batch:
+                    completed_count += 1
+                    task = future_to_task[future]
+                    symbol = task["symbol"]
+                    try:
+                        task_result = future.result()
+                        if task_result["status"] == "empty":
+                            incomplete_symbols.append(f"{symbol}:empty")
+                        else:
+                            total_fetched_rows += int(task_result["fetched_rows"])
+                            total_written_rows += int(task_result["written_rows"])
+                            success_symbols += 1
+                            latest_symbol_date = task_result["latest_symbol_date"]
+                            if latest_symbol_date is not None and latest_symbol_date < target_date:
+                                incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
+                            failed_write_rows = task_result["failed_write_rows"]
+                            if failed_write_rows:
+                                partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
+
+                        if completed_count == 1 or completed_count % 20 == 0:
+                            print(
+                                f"[progress] completed={completed_count}/{len(market_tasks)} success_symbols={success_symbols} failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} fetched_rows={total_fetched_rows} written_rows={total_written_rows}",
+                                flush=True,
+                            )
+                    except MarketDataUnavailableError as exc:
+                        skipped_unavailable_symbols.append(symbol)
+                        print(f"[skip] unavailable data for {symbol}: {exc}", flush=True)
+                    except Exception as exc:
+                        failed_symbols.append(symbol)
+                        print(f"Failed to get data for {symbol}: {exc}", flush=True)
     else:
         print("当前模式无需更新股票、基准指数和行业指数", flush=True)
 

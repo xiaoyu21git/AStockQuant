@@ -2,9 +2,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from typing import Optional, Tuple
 
 import pymysql
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from tools.history_start_policy import resolve_history_date_bounds
 
 
 MYSQL_CONFIG = {
@@ -20,7 +28,7 @@ MYSQL_CONFIG = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="回填 daily_bar.change_pct/change_amt/amplitude")
-    parser.add_argument("--start-date", help="开始日期，格式 yyyy-mm-dd；默认取 daily_bar 最早日期")
+    parser.add_argument("--start-date", help="开始日期，格式 yyyy-mm-dd；默认取统一历史起点 2015-01-01")
     parser.add_argument("--end-date", help="结束日期，格式 yyyy-mm-dd；默认取 daily_bar 最晚日期")
     parser.add_argument("--dry-run", action="store_true", help="仅输出统计与示例，不执行更新")
     parser.add_argument("--limit-sample", type=int, default=10, help="输出示例记录数")
@@ -36,7 +44,12 @@ def resolve_date_range(cursor, start_date: Optional[str], end_date: Optional[str
     row = cursor.fetchone()
     if not row or row[0] is None or row[1] is None:
         raise RuntimeError("daily_bar 无数据，无法回填派生字段")
-    return start_date or row[0].isoformat(), end_date or row[1].isoformat()
+    resolved_start, resolved_end = resolve_history_date_bounds(
+        dt.date.fromisoformat(start_date) if start_date else row[0],
+        dt.date.fromisoformat(end_date) if end_date else row[1],
+        "daily_bar",
+    )
+    return resolved_start.isoformat(), resolved_end.isoformat()
 
 
 def print_summary(cursor, start_date: str, end_date: str) -> None:

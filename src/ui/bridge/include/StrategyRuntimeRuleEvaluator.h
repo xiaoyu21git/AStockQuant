@@ -50,6 +50,5 @@ private:
                                    const MarketContext& context);
     static QString resolveStrategyIdentifier(const QVariantMap& strategy);
     static QString resolveStrategyName(const QVariantMap& strategy);
-    static QString normalizedStrategyType(const QVariantMap& strategy);
     static bool strategyAllowsMarketSymbol(const QVariantMap& strategy, const QString& marketSymbol);
 };

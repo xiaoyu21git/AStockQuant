@@ -74,22 +74,8 @@ public:
 
     struct MacroParams {
         std::string benchmarkSymbol = "000300.SH";
-        std::vector<MacroDimension> macroDimensions = {
-            MacroDimension::GROWTH,
-            MacroDimension::INFLATION,
-            MacroDimension::CREDIT,
-            MacroDimension::RATES,
-            MacroDimension::POLICY,
-            MacroDimension::RISK_APPETITE
-        };
-        std::vector<MacroIndicator> macroIndicators = {
-            MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY,
-            MacroIndicator::CPI_YOY,
-            MacroIndicator::M2_YOY,
-            MacroIndicator::TEN_YEAR_BOND_YIELD,
-            MacroIndicator::LPR_1Y,
-            MacroIndicator::AA_CREDIT_SPREAD
-        };
+        std::vector<MacroDimension> macroDimensions;
+        std::vector<MacroIndicator> macroIndicators;
         DataFrequency macroFrequency{DataFrequency::Daily};
         int macroWindow = 12;
         TechnicalPriceType priceType{TechnicalPriceType::CLOSE};

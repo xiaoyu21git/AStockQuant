@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstddef>
+#include <unordered_map>
 #include <sstream>
 #include <string>
 #include <iostream>
@@ -60,7 +61,11 @@ void DatabaseProvider::parse_config(const std::string& config_str) {
     }
 }
 
-std::string DatabaseProvider::period_to_timeframe(std::uint16_t period) {
+bool DatabaseProvider::is_daily_period(std::uint32_t period) {
+    return period == 86400U;
+}
+
+std::string DatabaseProvider::period_to_timeframe(std::uint32_t period) {
     switch (period) {
         case 60:   return "1min";
         case 300:  return "5min";
@@ -142,11 +147,11 @@ void DatabaseProvider::register_tick_callback(TickCallback cb) {
     tick_cb_ = std::move(cb);
 }
 
-bool DatabaseProvider::subscribe_kline(std::uint32_t /*symbol_id*/, std::uint16_t /*period*/) {
+bool DatabaseProvider::subscribe_kline(std::uint32_t /*symbol_id*/, std::uint32_t /*period*/) {
     return true;
 }
 
-bool DatabaseProvider::unsubscribe_kline(std::uint32_t /*symbol_id*/, std::uint16_t /*period*/) {
+bool DatabaseProvider::unsubscribe_kline(std::uint32_t /*symbol_id*/, std::uint32_t /*period*/) {
     return true;
 }
 
@@ -160,20 +165,35 @@ bool DatabaseProvider::unsubscribe_tick(std::uint32_t /*symbol_id*/) {
 
 KLineBatch DatabaseProvider::get_history_klines(
     std::uint32_t symbol_id,
-    std::uint16_t period,
+    std::uint32_t period,
     std::uint64_t start_time,
     std::uint64_t end_time,
     std::size_t  limit) {
 
+    const std::vector<std::uint32_t> symbol_ids{symbol_id};
+    return get_history_klines_batch(symbol_ids, period, start_time, end_time, limit);
+}
+
+KLineBatch DatabaseProvider::get_history_klines_batch(
+    const std::vector<std::uint32_t>& symbol_ids,
+    std::uint32_t period,
+    std::uint64_t start_time,
+    std::uint64_t end_time,
+    std::size_t limit_per_symbol) {
+
+    if (symbol_ids.empty()) {
+        return KLineBatch{};
+    }
+
     if (status_ != ProviderStatus::CONNECTED) {
         if (!connect()) {
-            return KLineBatch(limit ? limit : 1);
+            return KLineBatch(limit_per_symbol ? symbol_ids.size() * limit_per_symbol : symbol_ids.size());
         }
     }
 
     MYSQL* conn = mysql_init(nullptr);
     if (!conn) {
-        return KLineBatch(limit ? limit : 1);
+        return KLineBatch(limit_per_symbol ? symbol_ids.size() * limit_per_symbol : symbol_ids.size());
     }
 
     unsigned int port = static_cast<unsigned int>(port_);
@@ -189,31 +209,54 @@ KLineBatch DatabaseProvider::get_history_klines(
             0u)) {
         mysql_close(conn);
         status_ = ProviderStatus::ERROR;
-        return KLineBatch(limit ? limit : 1);
+        return KLineBatch(limit_per_symbol ? symbol_ids.size() * limit_per_symbol : symbol_ids.size());
     }
 
-    if (limit == 0) {
-        limit = 1000;
+    if (limit_per_symbol == 0U) {
+        limit_per_symbol = 1000U;
     }
 
-    KLineBatch batch(limit);
+    KLineBatch batch(symbol_ids.size() * limit_per_symbol);
 
-    const std::string timeframe = period_to_timeframe(period);
+    std::ostringstream inClause;
+    for (std::size_t index = 0; index < symbol_ids.size(); ++index) {
+        if (index > 0U) {
+            inClause << ", ";
+        }
+        inClause << symbol_ids[index];
+    }
 
     std::ostringstream sql;
-    sql << "SELECT UNIX_TIMESTAMP(bar_time) AS ts, open, high, low, close, volume, turnover "
-        << "FROM minute_bar "
-        << "WHERE symbol_id = " << symbol_id << " "
-        << "AND timeframe = '" << timeframe << "' ";
+    if (is_daily_period(period)) {
+        sql << "SELECT s.symbol_id, UNIX_TIMESTAMP(d.trade_date) AS ts, d.open, d.high, d.low, d.close, d.volume, d.turnover "
+            << "FROM daily_bar d "
+            << "INNER JOIN symbol_info s ON s.symbol = d.symbol "
+            << "WHERE s.symbol_id IN (" << inClause.str() << ") ";
 
-    if (start_time > 0) {
-        sql << "AND bar_time >= FROM_UNIXTIME(" << start_time << ") ";
-    }
-    if (end_time > 0) {
-        sql << "AND bar_time <= FROM_UNIXTIME(" << end_time << ") ";
-    }
+        if (start_time > 0) {
+            sql << "AND d.trade_date >= DATE(FROM_UNIXTIME(" << start_time << ")) ";
+        }
+        if (end_time > 0) {
+            sql << "AND d.trade_date <= DATE(FROM_UNIXTIME(" << end_time << ")) ";
+        }
 
-    sql << "ORDER BY bar_time ASC LIMIT " << limit;
+        sql << "ORDER BY s.symbol_id ASC, d.trade_date ASC";
+    } else {
+        const std::string timeframe = period_to_timeframe(period);
+        sql << "SELECT symbol_id, UNIX_TIMESTAMP(bar_time) AS ts, open, high, low, close, volume, turnover "
+            << "FROM minute_bar "
+            << "WHERE symbol_id IN (" << inClause.str() << ") "
+            << "AND timeframe = '" << timeframe << "' ";
+
+        if (start_time > 0) {
+            sql << "AND bar_time >= FROM_UNIXTIME(" << start_time << ") ";
+        }
+        if (end_time > 0) {
+            sql << "AND bar_time <= FROM_UNIXTIME(" << end_time << ") ";
+        }
+
+        sql << "ORDER BY symbol_id ASC, bar_time ASC";
+    }
 
     std::cout << "[DatabaseProvider] executing SQL: " << sql.str() << std::endl;
 
@@ -229,24 +272,33 @@ KLineBatch DatabaseProvider::get_history_klines(
     }
 
     MYSQL_ROW row;
+    std::unordered_map<std::uint32_t, std::size_t> rowCountBySymbol;
+    rowCountBySymbol.reserve(symbol_ids.size());
     while ((row = mysql_fetch_row(result))) {
         if (!row[0] || !row[1] || !row[2] || !row[3] || !row[4] || !row[5] || !row[6]) {
             continue;
         }
 
+        const std::uint32_t currentSymbolId = static_cast<std::uint32_t>(std::strtoul(row[0], nullptr, 10));
+        std::size_t& emittedRows = rowCountBySymbol[currentSymbolId];
+        if (emittedRows >= limit_per_symbol) {
+            continue;
+        }
+
         KLine k{};
-        k.symbol_id = symbol_id;
+        k.symbol_id = currentSymbolId;
         k.period    = period;
-        k.timestamp = static_cast<uint64_t>(std::strtoull(row[0], nullptr, 10));
-        k.open      = std::strtod(row[1], nullptr);
-        k.high      = std::strtod(row[2], nullptr);
-        k.low       = std::strtod(row[3], nullptr);
-        k.close     = std::strtod(row[4], nullptr);
-        k.volume    = static_cast<float>(std::strtod(row[5], nullptr));
-        k.amount    = static_cast<float>(std::strtod(row[6], nullptr));
+        k.timestamp = static_cast<uint64_t>(std::strtoull(row[1], nullptr, 10));
+        k.open      = std::strtod(row[2], nullptr);
+        k.high      = std::strtod(row[3], nullptr);
+        k.low       = std::strtod(row[4], nullptr);
+        k.close     = std::strtod(row[5], nullptr);
+        k.volume    = static_cast<float>(std::strtod(row[6], nullptr));
+        k.amount    = static_cast<float>(std::strtod(row[7], nullptr));
         k.turnover  = k.amount;
 
         batch.push_back(k);
+        ++emittedRows;
     }
 
     mysql_free_result(result);

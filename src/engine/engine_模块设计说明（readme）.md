@@ -1,5 +1,7 @@
 # Engine 模块设计说明
 
+> 说明：本文早期版本使用过 `BacktestEngine` 命名，但当前 `src/engine` 目录已不包含该头/源文件。策略/因子回测执行器不再位于 engine 模块内，本文以下目录结构与接口说明已按当前目录修正。
+
 ## 1. 模块定位
 Engine 是系统的运行内核（Runtime Kernel）。
 **职责**：组织时间推进、数据分发、事件调度与模块协作，完成一次可重复执行的运行过程。
@@ -30,16 +32,26 @@ Engine 是系统的运行内核（Runtime Kernel）。
 engine/
 ├─ include/engine/
 │  ├─ Engine.h
-│  ├─ BacktestEngine.h
 │  ├─ EngineConfig.h
 │  ├─ EngineContext.h
-│  ├─ Event.h
-│  ├─ EventBus.h
+│  ├─ EngineImpl.h
+│  ├─ BaseInterface.h
+│  ├─ CommonTypes.h
+│  ├─ IClock.h
+│  ├─ IDataSource.h
+│  ├─ IMarketDataProvider.h
+│  ├─ ITrigger.h
+│  ├─ TriggerBusBridge.h
+│  ├─ GlobalEventBusRegistry.h
+│  ├─ Event/
 │  └─ BacktestResult.h
 ├─ src/
-│  ├─ BacktestEngine.cpp
-│  ├─ EventBus.cpp
-│  └─ EngineContext.cpp
+│  ├─ EngineContext.cpp
+│  ├─ EngineImpl.cpp
+│  ├─ DataSource.cpp
+│  ├─ Trigger.cpp
+│  ├─ GlobalEventBusRegistry.cpp
+│  └─ Event/
 └─ CMakeLists.txt
 ```
 
@@ -56,9 +68,12 @@ engine/
 - 描述“发生了什么”
 - 解耦模块通信
 
-### BacktestEngine
-- 执行循环：Clock → Data → Event → Strategy
-- 不处理业务含义
+### BacktestResult
+- 只承载运行期原始事实结果，不负责策略/因子回测业务装配
+
+### 回测执行器边界
+- 策略/因子回测执行器不属于 engine 模块目录结构
+- engine 只提供运行时内核与事实结果承载
 
 ---
 ## 6. 配置策略

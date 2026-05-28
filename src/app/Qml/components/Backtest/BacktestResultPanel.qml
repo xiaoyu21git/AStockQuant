@@ -78,44 +78,44 @@ Rectangle {
 
             BacktestMetricCard {
                 title: "总收益"
-                value: root.formatPercent(root.backtestResult.totalReturn, 1)
+                value: root.formatPercent(root.performanceSummary().totalReturn, 1)
                 description: "Total Return"
-                trend: root.backtestResult.totalReturn > 0 ? "up" : (root.backtestResult.totalReturn < 0 ? "down" : "neutral")
+                trend: root.performanceSummary().totalReturn > 0 ? "up" : (root.performanceSummary().totalReturn < 0 ? "down" : "neutral")
             }
 
             BacktestMetricCard {
                 title: "年化收益"
-                value: root.formatPercent(root.backtestResult.annualReturn, 1)
+                value: root.formatPercent(root.performanceSummary().annualizedReturn, 1)
                 description: "Annual Return"
-                trend: root.backtestResult.annualReturn > 0 ? "up" : (root.backtestResult.annualReturn < 0 ? "down" : "neutral")
+                trend: root.performanceSummary().annualizedReturn > 0 ? "up" : (root.performanceSummary().annualizedReturn < 0 ? "down" : "neutral")
             }
 
             BacktestMetricCard {
                 title: "夏普比率"
-                value: root.formatNumber(root.backtestResult.sharpeRatio, 2)
+                value: root.formatNumber(root.performanceSummary().sharpeRatio, 2)
                 description: "Sharpe Ratio"
-                trend: root.backtestResult.sharpeRatio > 0 ? "up" : (root.backtestResult.sharpeRatio < 0 ? "down" : "neutral")
+                trend: root.performanceSummary().sharpeRatio > 0 ? "up" : (root.performanceSummary().sharpeRatio < 0 ? "down" : "neutral")
             }
 
             BacktestMetricCard {
                 title: "最大回撤"
-                value: root.formatPercent(root.backtestResult.maxDrawdown, 1)
+                value: root.formatPercent(root.performanceSummary().maxDrawdown, 1)
                 description: "Max Drawdown"
                 trend: "down"
             }
 
             BacktestMetricCard {
                 title: "胜率"
-                value: root.formatPercent(root.backtestResult.winRate, 1)
+                value: root.formatPercent(root.performanceSummary().winRate, 1)
                 description: "Win Rate"
-                trend: root.backtestResult.winRate > 0.5 ? "up" : (root.backtestResult.winRate < 0.5 ? "down" : "neutral")
+                trend: root.performanceSummary().winRate > 0.5 ? "up" : (root.performanceSummary().winRate < 0.5 ? "down" : "neutral")
             }
 
             BacktestMetricCard {
                 title: "盈亏比"
-                value: root.formatNumber(root.backtestResult.profitLossRatio, 2)
+                value: root.formatNumber(root.performanceSummary().profitFactor, 2)
                 description: "Profit/Loss Ratio"
-                trend: root.backtestResult.profitLossRatio > 1 ? "up" : (root.backtestResult.profitLossRatio < 1 ? "down" : "neutral")
+                trend: root.performanceSummary().profitFactor > 1 ? "up" : (root.performanceSummary().profitFactor < 1 ? "down" : "neutral")
             }
         }
 
@@ -145,23 +145,23 @@ Rectangle {
                     rowSpacing: 8
 
                     BacktestStatItem {
-                        label: "组合名称"
-                        value: root.backtestResult.portfolioName || root.strategyDisplayName || "--"
+                        label: "执行类型"
+                        value: root.backtestResult.executionKindLabel || "--"
                     }
 
                     BacktestStatItem {
                         label: "因子数量"
-                        value: root.backtestResult.portfolioFactorCount || "--"
+                        value: root.formatInteger(root.factorOverlaySelectedFactors().length)
                     }
 
                     BacktestStatItem {
-                        label: "来源"
-                        value: root.backtestResult.portfolioSource || "--"
+                        label: "数据源"
+                        value: root.backtestResult.dataSourceModeLabel || "--"
                     }
 
                     BacktestStatItem {
                         label: "因子列表"
-                        value: root.backtestResult.portfolioFactorIds || "--"
+                        value: root.factorOverlayFactorIdsText()
                     }
                 }
             }
@@ -194,22 +194,22 @@ Rectangle {
 
                     BacktestStatItem {
                         label: "止损"
-                        value: root.formatPercent(root.backtestResult.executionStopLossRate, 1)
+                        value: root.formatPercent(root.ruleProfileSnapshot().stopLossRatio, 1)
                     }
 
                     BacktestStatItem {
                         label: "止盈"
-                        value: root.formatPercent(root.backtestResult.executionTakeProfitRate, 1)
+                        value: root.formatPercent(root.ruleProfileSnapshot().takeProfitRatio, 1)
                     }
 
                     BacktestStatItem {
                         label: "最大回撤限制"
-                        value: root.formatPercent(root.backtestResult.executionMaxDrawdownLimit, 1)
+                        value: root.formatPercent(root.riskSpecSnapshot().maxDrawdownLimit, 1)
                     }
 
                     BacktestStatItem {
                         label: "调仓周期"
-                        value: root.formatInteger(root.backtestResult.executionRebalanceFrequency)
+                        value: root.formatInteger(root.executionPolicySnapshot().rebalanceFrequencyDays)
                     }
                 }
             }
@@ -217,12 +217,7 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: root.hasRuleTemplateSummary()
-                ? (132
-                    + Math.min(root.ruleTemplateGroupDecisions().length, 4) * 26
-                    + (root.ruleTemplateGroupDecisions().length > 0 ? 38 : 0)
-                    + Math.min(root.ruleTemplateRecentEvents().length, 3) * 24)
-                : 0
+            Layout.preferredHeight: root.hasRuleTemplateSummary() ? 132 : 0
             radius: 8
             color: "#0F172A"
             visible: root.hasRuleTemplateSummary()
@@ -259,7 +254,7 @@ Rectangle {
 
                     BacktestStatItem {
                         label: "规则文件"
-                        value: root.backtestResult.ruleTemplateFileName || "--"
+                        value: (root.backtestResult.ruleTemplateSummary || {}).templateFileName || "--"
                     }
 
                     BacktestStatItem {
@@ -279,48 +274,15 @@ Rectangle {
 
                     BacktestStatItem {
                         label: "开仓阻断"
-                        value: root.formatInteger(root.backtestResult.ruleTemplateEntryBlockCount)
+                        value: root.formatInteger((root.backtestResult.ruleTemplateSummary || {}).entryBlockCount)
                     }
 
                     BacktestStatItem {
                         label: "规则退出"
-                        value: root.formatInteger(root.backtestResult.ruleTemplateForcedExitCount)
+                        value: root.formatInteger((root.backtestResult.ruleTemplateSummary || {}).forcedExitCount)
                     }
                 }
 
-                Repeater {
-                    model: root.ruleTemplateGroupDecisions().slice(0, 4)
-
-                    delegate: Text {
-                        Layout.fillWidth: true
-                        text: root.ruleTemplateGroupDecisionText(modelData)
-                        font.pixelSize: 11
-                        color: "#FDE68A"
-                        wrapMode: Text.WordWrap
-                        visible: text.length > 0
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    visible: root.ruleTemplateGroupDecisions().length > 0
-                    text: "最近命中事件"
-                    font.pixelSize: 11
-                    font.weight: Font.DemiBold
-                    color: "#94A3B8"
-                }
-
-                Repeater {
-                    model: root.ruleTemplateRecentEvents().slice(-3)
-
-                    delegate: Text {
-                        Layout.fillWidth: true
-                        text: root.ruleTemplateEventText(modelData)
-                        font.pixelSize: 11
-                        color: "#CBD5E1"
-                        elide: Text.ElideRight
-                    }
-                }
             }
         }
 
@@ -351,36 +313,36 @@ Rectangle {
 
                     BacktestStatItem {
                         label: "总交易次数"
-                        value: root.backtestResult.totalTrades || 0
+                        value: (root.tradeSummary().totalTrades || 0)
                     }
 
                     BacktestStatItem {
                         label: "盈利交易"
-                        value: root.backtestResult.winningTrades || 0
+                        value: (root.tradeSummary().winningTrades || 0)
                         valueColor: "#EF4444"
                     }
 
                     BacktestStatItem {
                         label: "亏损交易"
-                        value: root.backtestResult.losingTrades || 0
+                        value: (root.tradeSummary().losingTrades || 0)
                         valueColor: "#10B981"
                     }
 
                     BacktestStatItem {
                         label: "平均盈利"
-                        value: root.formatPercent(root.backtestResult.averageWin, 2)
+                        value: root.formatPercent(root.performanceSummary().averageWin, 2)
                         valueColor: "#EF4444"
                     }
 
                     BacktestStatItem {
                         label: "平均亏损"
-                        value: root.formatPercent(root.backtestResult.averageLoss, 2)
+                        value: root.formatPercent(root.performanceSummary().averageLoss, 2)
                         valueColor: "#10B981"
                     }
 
                     BacktestStatItem {
                         label: "交易天数"
-                        value: root.backtestResult.tradingDays || 0
+                        value: ((root.backtestResult.timeSeries || {}).dates || []).length
                     }
                 }
             }
@@ -942,17 +904,46 @@ Rectangle {
         return value !== undefined && value !== null && value !== ""
     }
 
+    function performanceSummary() {
+        return root.backtestResult.performance || ({})
+    }
+
+    function tradeSummary() {
+        return root.backtestResult.trades || ({})
+    }
+
+    function ruleProfileSnapshot() {
+        return root.backtestResult.ruleProfileSnapshot || ({})
+    }
+
+    function executionPolicySnapshot() {
+        return root.backtestResult.executionPolicySnapshot || ({})
+    }
+
+    function riskSpecSnapshot() {
+        return root.backtestResult.riskSpecSnapshot || ({})
+    }
+
+    function factorOverlaySelectedFactors() {
+        var snapshot = root.backtestResult.factorOverlaySnapshot || ({})
+        return snapshot.selectedFactors instanceof Array ? snapshot.selectedFactors : []
+    }
+
+    function factorOverlayFactorIdsText() {
+        var factors = root.factorOverlaySelectedFactors()
+        return factors.length > 0 ? factors.join(", ") : "--"
+    }
+
     function hasPortfolioContext() {
-        return hasValue(root.backtestResult.portfolioSource)
-            || Number(root.backtestResult.portfolioFactorCount || 0) > 0
-            || hasValue(root.backtestResult.portfolioFactorIds)
+        return hasValue(root.backtestResult.executionKindLabel)
+            || root.factorOverlaySelectedFactors().length > 0
     }
 
     function hasExecutionRiskContext() {
-        return hasValue(root.backtestResult.executionStopLossRate)
-            || hasValue(root.backtestResult.executionTakeProfitRate)
-            || hasValue(root.backtestResult.executionMaxDrawdownLimit)
-            || hasValue(root.backtestResult.executionRebalanceFrequency)
+        return hasValue(root.ruleProfileSnapshot().stopLossRatio)
+            || hasValue(root.ruleProfileSnapshot().takeProfitRatio)
+            || hasValue(root.riskSpecSnapshot().maxDrawdownLimit)
+            || hasValue(root.executionPolicySnapshot().rebalanceFrequencyDays)
     }
 
     function hasRuleTemplateSummary() {
@@ -960,22 +951,12 @@ Rectangle {
         return !!summary.hasTemplate || Number(summary.triggeredCount || 0) > 0
     }
 
-    function ruleTemplateGroupDecisions() {
-        var summary = root.backtestResult.ruleTemplateSummary || {}
-        return summary.latestGroupDecisions instanceof Array ? summary.latestGroupDecisions : []
-    }
-
-    function ruleTemplateRecentEvents() {
-        var summary = root.backtestResult.ruleTemplateSummary || {}
-        return summary.recentEvents instanceof Array ? summary.recentEvents : []
-    }
-
     function resultStatusText() {
         if (root.isBacktesting) {
             return "回测中..."
         }
         if (hasBacktestResult()) {
-            return "策略: " + (root.strategyDisplayName || "未命名策略")
+            return root.backtestResult.resultStatusLabel || ("策略: " + (root.strategyDisplayName || "未命名策略"))
         }
         return "请配置策略进行回测"
     }
@@ -1014,159 +995,20 @@ Rectangle {
         return Math.round(Number(value)).toString()
     }
 
-    function ruleTemplateEventText(event) {
-        if (!event) {
-            return ""
-        }
-
-        var fragments = []
-        if (hasValue(event.timestamp)) {
-            fragments.push(String(event.timestamp))
-        }
-        if (hasValue(event.symbol)) {
-            fragments.push(String(event.symbol))
-        }
-        var groupText = ruleTemplateGroupText(event)
-        if (groupText !== "--") {
-            fragments.push("规则组 " + groupText)
-        }
-
-        var actionText = event.eventType === "forced_exit" ? "触发退出" : "阻断开仓"
-        if (hasValue(event.ruleId)) {
-            actionText += " · " + String(event.ruleId)
-        }
-        if (hasValue(event.reasonCode)) {
-            actionText += " · " + String(event.reasonCode)
-        } else if (hasValue(event.message)) {
-            actionText += " · " + String(event.message)
-        }
-        fragments.push(actionText)
-        return fragments.join("  ")
-    }
-
     function ruleTemplateGroupText(source) {
         var payload = source || {}
-        var title = String(payload.groupTitle || payload.group_title || "").trim()
-        var role = String(payload.groupRole || payload.group_role || "").trim()
-        if (title.length > 0 && role.length > 0) {
-            return title + " / " + role
-        }
+        var title = String(payload.groupTitle || "").trim()
         if (title.length > 0) {
             return title
         }
-        if (role.length > 0) {
-            return role
-        }
-        var groupId = String(payload.groupId || payload.group_id || "").trim()
+        var groupId = String(payload.groupId || "").trim()
         return groupId.length > 0 ? groupId : "--"
     }
 
     function ruleTemplateGroupLogicText(source) {
         var payload = source || {}
-        var operator = String(payload.groupOperator || payload.group_operator || "").trim().toLowerCase()
-        if (operator === "all") {
-            return "组内全部满足"
-        }
-        if (operator === "any") {
-            return "组内任一满足"
-        }
-        if (operator === "at_least") {
-            var threshold = Number(payload.matchThreshold || payload.groupMatchThreshold || 0)
-            return threshold > 0 ? ("组内至少命中 " + threshold + " 条") : "组内至少命中"
-        }
-        if (operator === "score_sum") {
-            return "组内累计评分"
-        }
-        if (operator === "first_match") {
-            return "按首个命中裁决"
-        }
+        var operator = String(payload.groupOperatorLabel || "").trim()
         return operator.length > 0 ? operator : "--"
-    }
-
-    function ruleTemplateGroupDecisionStatusText(decision) {
-        var payload = decision || {}
-        var disposition = String(payload.disposition || "").trim().toLowerCase()
-        var outcome = String(payload.outcome || "").trim().toLowerCase()
-        if (disposition === "skipped") {
-            return "本轮跳过"
-        }
-        if (outcome === "matched") {
-            return "纳入并命中"
-        }
-        if (outcome === "incomplete") {
-            return "纳入但未齐"
-        }
-        return "纳入未命中"
-    }
-
-    function ruleTemplateGroupDecisionReasonText(decision) {
-        var skipReason = String((decision || {}).skipReason || "").trim().toLowerCase()
-        if (skipReason === "role_filtered") {
-            return "role 与当前动作不匹配"
-        }
-        if (skipReason === "stage_filtered") {
-            return "阶段与当前动作不匹配"
-        }
-        if (skipReason === "group_incomplete") {
-            return "all 组未全部满足"
-        }
-        if (skipReason === "group_threshold_unmet") {
-            var threshold = Number((decision || {}).matchThreshold || 0)
-            return threshold > 0 ? ("at_least 组未达到 " + threshold + " 条") : "at_least 组未达阈值"
-        }
-        return skipReason.length > 0 ? skipReason : ""
-    }
-
-    function ruleTemplateGroupDecisionText(decision) {
-        var payload = decision || {}
-        var fragments = []
-        if (hasValue(payload.stage)) {
-            fragments.push("阶段 " + String(payload.stage))
-        }
-        var groupText = ruleTemplateGroupText(payload)
-        if (groupText !== "--") {
-            fragments.push("规则组 " + groupText)
-        }
-        var logicText = ruleTemplateGroupLogicText(payload)
-        if (logicText !== "--") {
-            fragments.push(logicText)
-        }
-        fragments.push(ruleTemplateGroupDecisionStatusText(payload))
-
-        var applicableCount = Number(payload.applicableCount || 0)
-        var memberCount = Number(payload.memberCount || 0)
-        var matchedCount = Number(payload.matchedCount || 0)
-        var filteredCount = Number(payload.filteredCount || 0)
-        if (memberCount > 0) {
-            fragments.push("纳入 " + applicableCount + "/" + memberCount)
-        }
-        if (matchedCount > 0) {
-            fragments.push("命中 " + matchedCount)
-        }
-        if (filteredCount > 0) {
-            fragments.push("过滤 " + filteredCount)
-        }
-        var threshold = Number(payload.matchThreshold || 0)
-        if (threshold > 0) {
-            fragments.push("阈值 " + threshold)
-        }
-        if (hasValue(payload.matchedRuleId)) {
-            fragments.push("命中规则 " + String(payload.matchedRuleId))
-        }
-        if (hasValue(payload.matchedReasonCode)) {
-            fragments.push("原因码 " + String(payload.matchedReasonCode))
-        }
-        if (payload.aggregatedScore !== undefined && payload.aggregatedScore !== null) {
-            fragments.push("累计分 " + Number(payload.aggregatedScore).toFixed(2))
-        }
-        if (hasValue(payload.selectedBy)) {
-            fragments.push("选取方式 " + String(payload.selectedBy))
-        }
-        var reasonText = ruleTemplateGroupDecisionReasonText(payload)
-        if (reasonText.length > 0) {
-            fragments.push(reasonText)
-        }
-        return fragments.join("  ")
     }
 
     function buildDetailedResultSections() {
@@ -1179,6 +1021,12 @@ Rectangle {
         var trades = result.trades || {}
         var risk = result.risk || {}
         var timeSeries = result.timeSeries || {}
+        var ruleProfile = result.ruleProfileSnapshot || {}
+        var executionPolicy = result.executionPolicySnapshot || {}
+        var riskSpec = result.riskSpecSnapshot || {}
+        var factorIds = (result.factorOverlaySnapshot && result.factorOverlaySnapshot.selectedFactors instanceof Array)
+            ? result.factorOverlaySnapshot.selectedFactors
+            : []
         var dates = timeSeries.dates || []
         var portfolioValues = timeSeries.portfolioValues || []
 
@@ -1186,22 +1034,22 @@ Rectangle {
             {
                 title: "组合上下文",
                 items: [
-                    { label: "组合名称", value: result.portfolioName || root.strategyDisplayName || "--" },
-                    { label: "组合来源", value: result.portfolioSource || "--" },
-                    { label: "因子数量", value: formatInteger(result.portfolioFactorCount) },
-                    { label: "执行子类型", value: result.portfolioStrategySubtype || "--" },
-                    { label: "因子列表", value: result.portfolioFactorIds || "--" }
+                    { label: "策略名称", value: result.strategyName || root.strategyDisplayName || "--" },
+                    { label: "执行类型", value: result.executionKindLabel || "--" },
+                    { label: "数据源", value: result.dataSourceModeLabel || "--" },
+                    { label: "因子数量", value: formatInteger(factorIds.length) },
+                    { label: "因子列表", value: factorIds.length > 0 ? factorIds.join(", ") : "--" }
                 ]
             },
             {
                 title: "执行参数",
                 items: [
-                    { label: "止损", value: formatPercent(result.executionStopLossRate, 2) },
-                    { label: "止盈", value: formatPercent(result.executionTakeProfitRate, 2) },
-                    { label: "最大回撤限制", value: formatPercent(result.executionMaxDrawdownLimit, 2) },
-                    { label: "调仓周期", value: formatInteger(result.executionRebalanceFrequency) },
-                    { label: "最大总仓位", value: formatPercent(result.executionMaxPositionRatio, 2) },
-                    { label: "单标的仓位上限", value: formatPercent(result.executionMaxSinglePositionRatio, 2) }
+                    { label: "止损", value: formatPercent(ruleProfile.stopLossRatio, 2) },
+                    { label: "止盈", value: formatPercent(ruleProfile.takeProfitRatio, 2) },
+                    { label: "最大回撤限制", value: formatPercent(riskSpec.maxDrawdownLimit, 2) },
+                    { label: "调仓周期", value: formatInteger(executionPolicy.rebalanceFrequencyDays) },
+                    { label: "最大总仓位", value: formatPercent(ruleProfile.maxTotalExposureRatio, 2) },
+                    { label: "单标的仓位上限", value: formatPercent(ruleProfile.maxPositionRatio, 2) }
                 ]
             },
             {
@@ -1265,15 +1113,13 @@ Rectangle {
             sections.splice(2, 0, {
                 title: "规则模板",
                 items: [
-                    { label: "规则文件", value: result.ruleTemplateFileName || "--" },
+                    { label: "规则文件", value: (result.ruleTemplateSummary || {}).templateFileName || "--" },
                     { label: "命名空间", value: (result.ruleTemplateSummary || {}).templateNamespace || "--" },
                     { label: "所属规则组", value: ruleTemplateGroupText(result.ruleTemplateSummary || {}) },
                     { label: "组合语义", value: ruleTemplateGroupLogicText(result.ruleTemplateSummary || {}) },
-                    { label: "最近裁决", value: ruleTemplateGroupDecisions().length > 0 ? ruleTemplateGroupDecisionText(ruleTemplateGroupDecisions()[0]) : "--" },
-                    { label: "触发次数", value: formatInteger(result.ruleTemplateTriggeredCount) },
-                    { label: "开仓阻断", value: formatInteger(result.ruleTemplateEntryBlockCount) },
-                    { label: "规则退出", value: formatInteger(result.ruleTemplateForcedExitCount) },
-                    { label: "最近命中", value: ruleTemplateEventText(result.ruleTemplateLatestEvent) || "--" }
+                    { label: "触发次数", value: formatInteger((result.ruleTemplateSummary || {}).triggeredCount) },
+                    { label: "开仓阻断", value: formatInteger((result.ruleTemplateSummary || {}).entryBlockCount) },
+                    { label: "规则退出", value: formatInteger((result.ruleTemplateSummary || {}).forcedExitCount) }
                 ]
             })
         }

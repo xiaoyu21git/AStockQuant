@@ -1,5 +1,7 @@
 #pragma once
 
+#include "../../../domain/strategy/include/StrategyAggregate.h"
+
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -111,5 +113,9 @@ private:
 
     std::vector<std::unique_ptr<AbstractStrategyStructureResolver>> m_resolvers;
 };
+
+[[nodiscard]] domain::strategy::StrategyAggregate buildStrategyAggregate(
+    const QVariantMap& strategy,
+    const QVariantMap& appliedRiskConfig = QVariantMap());
 
 } // namespace bridge::config

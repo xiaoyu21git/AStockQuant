@@ -38,6 +38,7 @@ public:
     Q_INVOKABLE bool hasLiveData() const;
     Q_INVOKABLE int runtimeSubscriptionCount() const;
     Q_INVOKABLE int runtimeSubscriptionLimit() const;
+    Q_INVOKABLE void activateDefaultWatchlist();
     Q_INVOKABLE void setWatchlist(const QStringList& symbols);
     Q_INVOKABLE void ensureWatchSymbol(const QString& symbol);
     Q_INVOKABLE QVariantMap resolveInstrument(const QString& query) const;

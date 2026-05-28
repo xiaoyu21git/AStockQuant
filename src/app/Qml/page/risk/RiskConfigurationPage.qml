@@ -5,6 +5,7 @@ import ConsoleUi 1.0 as ConsoleUiComponents
 import AStock.Bridge 1.0 as Bridge
 import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
+import "../../utils/StrategyCreationUtils.js" as StrategyCreationUtils
 
 Item {
     id: riskConfigPage
@@ -88,7 +89,6 @@ Item {
         takeProfitPercent: 20.0,
         maxDrawdownLimit: 12.0,
         maxPositionPercent: 15.0,
-        maxPositions: 10,
         maxTotalExposure: 67.0,
         maxIndustryExposure: 30.0,
         maxThemeExposure: 25.0,
@@ -942,7 +942,7 @@ Item {
 
                                 Text {
                                     text: "已展示权重 " + displayedWeightTotal().toFixed(1)
-                                        + "% · 最大持仓数配置 " + getConfigValue("maxPositions", 10).toFixed(0) + " 个"
+                                        + "%"
                                     font.pixelSize: 12
                                     color: secondaryText
                                 }
@@ -1267,7 +1267,7 @@ Item {
                 description: "集中处理仓位分配、总暴露、集中度和持仓数量限制。",
                 minColumnWidth: 620,
                 maxColumns: 2,
-                params: ["positionSizingMethod", "maxTotalExposure", "maxPositionPercent", "maxIndustryExposure", "maxThemeExposure", "maxPositions"]
+                params: ["positionSizingMethod", "maxTotalExposure", "maxPositionPercent", "maxIndustryExposure", "maxThemeExposure"]
             },
             {
                 id: "executionLimits",
@@ -1441,10 +1441,6 @@ Item {
             return ["maxPositionPercent"]
         case "maxTotalExposure":
             return ["maxTotalExposure"]
-        case "maxPositions":
-            return ["maxPositions"]
-        case "rebalanceDays":
-            return ["rebalanceDays"]
         default:
             return [key]
         }
@@ -1453,7 +1449,7 @@ Item {
     function resolveFocusedStrategyConfigValue(key) {
         var strategy = activeRiskStrategy && Object.keys(activeRiskStrategy).length > 0
             ? activeRiskStrategy
-            : ((externalRiskContext && externalRiskContext.strategy) ? externalRiskContext.strategy : ({}))
+            : resolveExternalPortfolioStrategy()
         if (!strategy || Object.keys(strategy).length === 0) {
             return undefined
         }
@@ -1514,24 +1510,36 @@ Item {
         return latest && Object.keys(latest).length > 0
     }
 
+    function isPortfolioStrategy(strategy) {
+        var storedTypeIndex = Number(strategy && strategy.strategyTypeIndex)
+        return Number.isFinite(storedTypeIndex)
+            && Math.floor(storedTypeIndex) === StrategyCreationUtils.StrategyStoredTypeIndex.Portfolio
+    }
+
+    function resolveExternalPortfolioStrategy() {
+        var strategy = externalRiskContext && externalRiskContext.strategy
+            ? externalRiskContext.strategy
+            : ({})
+        return isPortfolioStrategy(strategy) ? strategy : ({})
+    }
+
     function selectActiveRiskStrategy(strategies) {
         if (focusedStrategyId) {
             for (var focusedIndex = 0; focusedIndex < strategies.length; ++focusedIndex) {
                 var focusedStrategy = strategies[focusedIndex] || ({})
                 if (String(resolveStrategyId(focusedStrategy)) === String(focusedStrategyId)) {
-                    return focusedStrategy
+                    return isPortfolioStrategy(focusedStrategy) ? focusedStrategy : ({})
                 }
             }
         }
 
-        if (externalRiskContext && externalRiskContext.strategy && Object.keys(externalRiskContext.strategy).length > 0) {
-            return externalRiskContext.strategy
+        var externalStrategy = resolveExternalPortfolioStrategy()
+        if (Object.keys(externalStrategy).length > 0) {
+            return externalStrategy
         }
 
         var bestPortfolio = null
-        var bestStrategy = null
         var bestPortfolioTs = -1
-        var bestStrategyTs = -1
 
         for (var index = 0; index < strategies.length; ++index) {
             var strategy = strategies[index]
@@ -1540,31 +1548,23 @@ Item {
             }
 
             var timestamp = resolveStrategySortTimestamp(strategy)
-            var typeValue = String(strategy.strategy_type || "").toUpperCase()
-            if (typeValue === "PORTFOLIO" && hasBacktestRecord(strategy) && timestamp >= bestPortfolioTs) {
+            if (isPortfolioStrategy(strategy) && hasBacktestRecord(strategy) && timestamp >= bestPortfolioTs) {
                 bestPortfolio = strategy
                 bestPortfolioTs = timestamp
-            }
-            if (hasBacktestRecord(strategy) && timestamp >= bestStrategyTs) {
-                bestStrategy = strategy
-                bestStrategyTs = timestamp
             }
         }
 
         if (bestPortfolio) {
             return bestPortfolio
         }
-        if (bestStrategy) {
-            return bestStrategy
-        }
 
         for (var fallbackIndex = 0; fallbackIndex < strategies.length; ++fallbackIndex) {
             var fallback = strategies[fallbackIndex]
-            if (String(fallback.strategy_type || "").toUpperCase() === "PORTFOLIO") {
+            if (isPortfolioStrategy(fallback)) {
                 return fallback
             }
         }
-        return strategies.length > 0 ? strategies[0] : ({})
+        return ({})
     }
 
     function parseAllocationList(rawValue) {
@@ -1833,7 +1833,7 @@ Item {
 
         var portfolioCount = 0
         for (var index = 0; index < strategySnapshots.length; ++index) {
-            if (String(strategySnapshots[index].strategy_type || "").toUpperCase() === "PORTFOLIO") {
+            if (isPortfolioStrategy(strategySnapshots[index])) {
                 portfolioCount += 1
             }
         }
@@ -2045,10 +2045,6 @@ Item {
             return fallback
         }
 
-        if (key === "maxPositions" || key === "rebalanceDays") {
-            return numericValue
-        }
-
         return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue
     }
 
@@ -2230,7 +2226,6 @@ Item {
             { id: "maxIndustryExposure", type: "slider", label: "单行业集中度上限", description: "同一行业总持仓比例限制", min: 15, max: 50, step: 5, default: 30, unit: "%", category: "industry", group: "持仓层风险" },
             { id: "maxDailyLoss", type: "slider", label: "单日最大亏损", description: "日内净值最大亏损限制", min: -15, max: -2, step: 1, default: -5, unit: "%", category: "account", group: "熔断机制" },
             { id: "maxTotalExposure", type: "slider", label: "最大总仓位", description: "所有持仓总市值占资金比例", min: 10, max: 100, step: 1, default: 67, unit: "%", category: "position", group: "组合层风险" },
-            { id: "maxPositions", type: "slider", label: "最大持仓数", description: "同时持有的最大股票数量", min: 1, max: 50, step: 1, default: 10, unit: "只", category: "position", group: "持仓层风险" },
             { id: "maxCorrelation", type: "slider", label: "最大持仓相关性", description: "持仓股票间最大允许相关性", min: 0, max: 100, step: 1, default: 70, unit: "%", category: "other", group: "其他配置" }
         ]
 
@@ -2297,25 +2292,6 @@ Item {
         return Math.floor(numericValue)
     }
 
-    function backtestAssumptionsConfiguration(values) {
-        var sourceValues = values || ({})
-        var benchmark = String(sourceValues.benchmarkSymbol || sourceValues.benchmark || "000300.SH").trim().toUpperCase()
-        if (!benchmark) {
-            benchmark = "000300.SH"
-        }
-
-        var assumptions = {
-            commissionRate: numberOrDefault(sourceValues.commissionRate, 0.0015),
-            slippageRate: numberOrDefault(sourceValues.slippageRate, 0.001),
-            riskFreeRate: numberOrDefault(sourceValues.riskFreeRate, 0.0),
-            forwardDays: normalizePositiveIntOrDefault(sourceValues.forwardDays, 1),
-            rebalanceDays: normalizePositiveIntOrDefault(sourceValues.rebalanceDays, 5),
-            benchmarkSymbol: benchmark
-        }
-
-        return assumptions
-    }
-
     function buildPersistedConfiguration() {
         var merged = cloneObject(dynamicParamValues)
         var auxiliaryValues = auxiliaryRiskConfiguration()
@@ -2323,22 +2299,6 @@ Item {
             if (Object.prototype.hasOwnProperty.call(auxiliaryValues, key)) {
                 merged[key] = auxiliaryValues[key]
             }
-        }
-
-        var backtestAssumptions = backtestAssumptionsConfiguration(merged)
-        for (var assumptionKey in backtestAssumptions) {
-            if (Object.prototype.hasOwnProperty.call(backtestAssumptions, assumptionKey)) {
-                merged[assumptionKey] = backtestAssumptions[assumptionKey]
-            }
-        }
-
-        merged.backtestAssumptions = backtestAssumptions
-        merged.backtest_assumptions = backtestAssumptions
-        merged.executionPolicy = {
-            rebalanceDays: backtestAssumptions.rebalanceDays
-        }
-        merged.execution_policy = {
-            rebalanceDays: backtestAssumptions.rebalanceDays
         }
         return merged
     }
@@ -2432,7 +2392,6 @@ Item {
             takeProfitPercent: normalizePercentValue(values.takeProfitPercent, 20.0),
             maxDrawdownLimit: normalizePercentValue(values.maxDrawdownLimit, 12.0),
             maxPositionPercent: normalizePercentValue(values.maxPositionPercent, 15.0),
-            maxPositions: values.maxPositions || 10,
             maxTotalExposure: normalizePercentValue(values.maxTotalExposure, 67.0),
             maxIndustryExposure: normalizePercentValue(values.maxIndustryExposure, 30.0),
             maxThemeExposure: normalizePercentValue(values.maxThemeExposure, 25.0),

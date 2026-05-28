@@ -142,6 +142,18 @@ int integerParam(const QVariantMap& map, const QStringList& keys, int fallback)
     return ok && numericValue > 0 ? numericValue : fallback;
 }
 
+int enumParam(const QVariantMap& map, const QStringList& keys, int fallback)
+{
+    const QVariant rawValue = firstConfiguredValue(map, keys);
+    if (!rawValue.isValid()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    const int numericValue = rawValue.toInt(&ok);
+    return ok ? numericValue : fallback;
+}
+
 double numericParam(const QVariantMap& map, const QStringList& keys, double fallback)
 {
     const QVariant rawValue = firstConfiguredValue(map, keys);
@@ -265,14 +277,6 @@ QVariantMap resolveStrategyParameters(const QVariantMap& strategy, const QVarian
     const QVariantMap runtimeParameters = latestBacktest.value("runtimeParameters").toMap();
     mergeConfiguredMap(parameters, runtimeParameters);
 
-    const QVariant preferredSymbolPool = firstConfiguredValue(
-        resolution.strategyScopeContext,
-        {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")});
-    if (preferredSymbolPool.isValid() && !preferredSymbolPool.isNull()) {
-        parameters.insert(QStringLiteral("symbol_pool"), preferredSymbolPool);
-        parameters.insert(QStringLiteral("symbolPool"), preferredSymbolPool);
-    }
-
     return parameters;
 }
 
@@ -302,7 +306,7 @@ int resolveSnapshotTargetPositionCount(const QVariantMap& parameters,
 
     const int runtimeTargetCount = integerParam(
         runtimeParameters,
-        {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN")},
+        {QStringLiteral("targetPositionCount")},
         0);
     if (runtimeTargetCount > 0) {
         return runtimeTargetCount;
@@ -310,70 +314,60 @@ int resolveSnapshotTargetPositionCount(const QVariantMap& parameters,
 
     const int backtestTargetCount = integerParam(
         latestBacktest,
-        {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN"), QStringLiteral("targetPositionCount")},
+        {QStringLiteral("targetPositionCount")},
         0);
     if (backtestTargetCount > 0) {
         return backtestTargetCount;
     }
 
     return integerParam(parameters,
-                        {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN")},
+                        {QStringLiteral("targetPositionCount")},
                         10);
 }
 
-bool isPortfolioBuilderStrategy(const QVariantMap& strategy, const QVariantMap& parameters)
+int resolveStrategyExecutionKind(const QVariantMap& strategy,
+                                 const QVariantMap& parameters,
+                                 const QVariantMap& latestBacktest)
 {
-    if (strategy.value(QStringLiteral("strategy_type")).toString().trimmed().toUpper() != QStringLiteral("PORTFOLIO")) {
-        return false;
-    }
-
-    const QString optimizationMethod = firstConfiguredValue(
-        parameters,
-        {QStringLiteral("optimization_method"), QStringLiteral("optimizationMethod")}).toString().trimmed().toLower();
-    if (optimizationMethod == QStringLiteral("portfolio_builder")) {
-        return true;
-    }
-
-    const QVariantMap advancedOptions = variantMapValue(
-        firstConfiguredValue(strategy, {QStringLiteral("advanced_options"), QStringLiteral("advancedOptions")})
-    );
-    const QString advancedSource = firstConfiguredValue(
-        advancedOptions,
-        {QStringLiteral("source")}).toString().trimmed();
-    return advancedSource == QStringLiteral("PortfolioBuilderPage")
-        || strategy.value(QStringLiteral("sub_type")).toString().trimmed().toLower() == QStringLiteral("portfolio_builder");
-}
-
-bool shouldIgnorePersistedSymbolPool(const QSet<QString>& persistedSymbolPool,
-                                    const QVariantMap& strategy,
-                                    const QVariantMap& parameters,
-                                    const QVariantMap& latestBacktest)
-{
-    if (persistedSymbolPool.size() > 1) {
-        return false;
-    }
-
-    if (!isPortfolioBuilderStrategy(strategy, parameters)) {
-        return false;
-    }
-
-    const QString universeType = firstConfiguredValue(latestBacktest, {QStringLiteral("universeType")})
-        .toString().trimmed().toLower();
-    if (universeType != QStringLiteral("index")) {
-        return false;
-    }
-
-    const QString indexSymbol = firstConfiguredValue(latestBacktest, {QStringLiteral("indexSymbol")})
-        .toString().trimmed();
-    if (indexSymbol.isEmpty()) {
-        return false;
-    }
-
     const QVariantMap runtimeParameters = variantMapValue(
         firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
     );
-    const int runtimeMaxPositions = integerParam(runtimeParameters, {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN")}, 0);
-    return runtimeMaxPositions > persistedSymbolPool.size();
+
+    int executionKind = enumParam(
+        runtimeParameters,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        -1);
+    if (executionKind >= 0) {
+        return executionKind;
+    }
+
+    executionKind = enumParam(
+        latestBacktest,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        -1);
+    if (executionKind >= 0) {
+        return executionKind;
+    }
+
+    executionKind = enumParam(
+        parameters,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        -1);
+    if (executionKind >= 0) {
+        return executionKind;
+    }
+
+    return enumParam(
+        strategy,
+        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
+        0);
+}
+
+bool usesFactorWeightedPortfolioExecution(const QVariantMap& strategy,
+                                         const QVariantMap& parameters,
+                                         const QVariantMap& latestBacktest)
+{
+    return resolveStrategyExecutionKind(strategy, parameters, latestBacktest) == 1;
 }
 
 std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(const QVariantMap& strategy,
@@ -482,35 +476,9 @@ UniverseResolutionState resolveUniverseSymbolsState(domain::backtest::DatabaseSt
         }
     };
 
-    QSet<QString> persistedSymbolPool;
-    appendSymbols(persistedSymbolPool, firstConfiguredValue(parameters, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
-    appendSymbols(persistedSymbolPool, firstConfiguredValue(strategy, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
-
     const QVariantMap runtimeParameters = variantMapValue(
         firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
     );
-
-    QSet<QString> latestBacktestSymbolPool;
-    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(runtimeParameters, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
-    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(latestBacktest, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
-    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(runtimeParameters, {QStringLiteral("selectedSymbols"), QStringLiteral("symbols")}));
-    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(latestBacktest, {QStringLiteral("selectedSymbols"), QStringLiteral("symbols")}));
-    if (!latestBacktestSymbolPool.isEmpty()) {
-        return buildUniverseResolution(latestBacktestSymbolPool, QStringLiteral("latestBacktestSymbolPool"), QStringLiteral("最近回测股票池"));
-    }
-
-    if (!persistedSymbolPool.isEmpty()
-        && !shouldIgnorePersistedSymbolPool(persistedSymbolPool, strategy, parameters, latestBacktest)) {
-        const QVariant topLevelSymbolPool = firstConfiguredValue(strategy, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")});
-        if (topLevelSymbolPool.isValid()) {
-            return buildUniverseResolution(persistedSymbolPool, QStringLiteral("strategySymbolPool"), QStringLiteral("已保存策略股票池"));
-        }
-
-        const QVariant parameterSymbolPool = firstConfiguredValue(parameters, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")});
-        if (parameterSymbolPool.isValid()) {
-            return buildUniverseResolution(persistedSymbolPool, QStringLiteral("parameterSymbolPool"), QStringLiteral("策略参数股票池"));
-        }
-    }
 
     const QString universeType = firstConfiguredValue(latestBacktest, {"universeType"}).toString().trimmed().toLower();
     const QString indexSymbol = firstConfiguredValue(latestBacktest, {"indexSymbol"}).toString().trimmed();
@@ -1919,10 +1887,9 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
 
         const double orderSizeLimitWan = risk::config::orderSizeLimit(executionPolicy, 100.0);
         const double turnoverLimitWan = risk::config::turnoverLimit(executionPolicy, 0.0);
-        const double explicitSlippageLimit = risk::config::slippageLimit(backtestAssumptions, 0.0);
-        const double slippageLimitPercent = explicitSlippageLimit > 0.0
-            ? explicitSlippageLimit
-            : normalizedPercentValue(risk::config::slippageRate(backtestAssumptions, 0.0), 0.0);
+        const double slippageLimitPercent = normalizedPercentValue(
+            risk::config::slippageLimit(riskConfiguration, 0.0),
+            0.0);
         double requestedNotional = signalData.value(QStringLiteral("requestedNotional")).toDouble();
         if (requestedNotional <= 0.0) {
             requestedNotional = cashAmount > 0.0
