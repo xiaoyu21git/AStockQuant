@@ -37,7 +37,7 @@ Page {
     property bool enableAdvancedOptions: false
     
     // C++服务引用
-    property var strategyService: StrategyService
+    property var strategyService: null
     property var factorService: FactorService
     
     // ============ 主布局 ============
@@ -158,6 +158,99 @@ Page {
                         }
                         summary += " / " + ((Array.isArray(group.rules) ? group.rules.length : 0) + " 条规则")
                         return summary
+                    }
+
+                    function resolvedFactorOverlay() {
+                        var fromStep = step2Content && step2Content.factorOverlay ? step2Content.factorOverlay : ({})
+                        if (fromStep && typeof fromStep === "object") {
+                            return fromStep
+                        }
+                        var fromParameters = root.strategyParameters && root.strategyParameters.factor_overlay
+                            ? root.strategyParameters.factor_overlay
+                            : ({})
+                        return fromParameters && typeof fromParameters === "object" ? fromParameters : ({})
+                    }
+
+                    function resolvedFactorImportContext() {
+                        var context = root.strategyParameters && root.strategyParameters.factorImportContext
+                            ? root.strategyParameters.factorImportContext
+                            : ({})
+                        return context && typeof context === "object" ? context : ({})
+                    }
+
+                    function hasFactorSummary() {
+                        var overlay = resolvedFactorOverlay()
+                        var allocations = Array.isArray(overlay.allocations) ? overlay.allocations : []
+                        if (!!overlay.enabled || allocations.length > 0) {
+                            return true
+                        }
+
+                        var importContext = resolvedFactorImportContext()
+                        var importedCount = Number(importContext.selectedFactorCount || importContext.factorCount || 0)
+                        if (importedCount > 0) {
+                            return true
+                        }
+
+                        var importedIds = Array.isArray(importContext.selectedFactorIds) ? importContext.selectedFactorIds : []
+                        return importedIds.length > 0
+                    }
+
+                    function factorSummaryItems() {
+                        var items = []
+                        var overlay = resolvedFactorOverlay()
+                        var allocations = Array.isArray(overlay.allocations) ? overlay.allocations : []
+                        var enabledText = !!overlay.enabled ? "已启用" : "未启用"
+                        items.push({
+                            label: "因子排序层",
+                            value: enabledText
+                        })
+
+                        if (allocations.length > 0) {
+                            items.push({
+                                label: "已选因子",
+                                value: String(allocations.length) + " 个"
+                            })
+                            items.push({
+                                label: "组合模式",
+                                value: String(overlay.combineMode || "rank_only")
+                            })
+                            items.push({
+                                label: "目标持仓",
+                                value: String(Number(overlay.targetPositionCount) || 0)
+                            })
+                            items.push({
+                                label: "最低综合分",
+                                value: String(Number(overlay.minimumCompositeScore) || 0)
+                            })
+                        }
+
+                        var importContext = resolvedFactorImportContext()
+                        var importedCount = Number(importContext.selectedFactorCount || importContext.factorCount || 0)
+                        if (importedCount > 0) {
+                            items.push({
+                                label: "导入因子",
+                                value: String(importedCount) + " 个"
+                            })
+                        }
+
+                        return items
+                    }
+
+                    function factorTopPreviewText() {
+                        var overlay = resolvedFactorOverlay()
+                        var allocations = Array.isArray(overlay.allocations) ? overlay.allocations : []
+                        if (allocations.length === 0) {
+                            return ""
+                        }
+                        var preview = allocations.slice(0, 3).map(function(item) {
+                            var name = String(item.display_name || item.factor_id || "未命名因子")
+                            var weight = Number(item.weight_percent)
+                            if (isFinite(weight) && weight > 0) {
+                                return name + " (" + weight + "%)"
+                            }
+                            return name
+                        })
+                        return preview.join("，")
                     }
 
                     ScrollView {
@@ -320,6 +413,60 @@ Page {
                                             wrapMode: Text.WordWrap
                                             Layout.fillWidth: true
                                         }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                visible: step3Content.hasFactorSummary()
+                                implicitHeight: factorSummaryColumn.implicitHeight + 30
+                                radius: 12
+                                color: "#1e293b"
+                                border.width: 1
+                                border.color: "#0ea5e9"
+
+                                ColumnLayout {
+                                    id: factorSummaryColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 8
+
+                                    Text {
+                                        text: "因子摘要"
+                                        font.pixelSize: 16
+                                        font.weight: Font.DemiBold
+                                        color: "#e0f2fe"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "仅在检测到已启用因子排序层、已选因子或导入因子上下文时展示。"
+                                        font.pixelSize: 12
+                                        color: "#7dd3fc"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Repeater {
+                                        model: step3Content.factorSummaryItems()
+
+                                        delegate: Text {
+                                            required property var modelData
+                                            Layout.fillWidth: true
+                                            text: modelData.label + ": " + modelData.value
+                                            font.pixelSize: 12
+                                            color: "#cbd5e1"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: step3Content.factorTopPreviewText().length > 0
+                                        text: "Top 预览: " + step3Content.factorTopPreviewText()
+                                        font.pixelSize: 12
+                                        color: "#bae6fd"
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }
@@ -731,31 +878,15 @@ Page {
     
     // ============ 功能函数 ============
 
-    function mapBackendTypeToFrontendIndex(strategy) {
-        var parameters = toPlainJsValue((strategy && strategy.parameters) || {}) || ({})
-        var explicitTypeIndex = Number((strategy && strategy.selectedStrategyTypeIndex) !== undefined
-            ? strategy.selectedStrategyTypeIndex
-            : parameters.selectedStrategyTypeIndex)
-        if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
-            var normalizedTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(explicitTypeIndex)
-            if (normalizedTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
-                return normalizedTypeIndex
-            }
-        }
-
-        var explicitBehaviorKind = Number((strategy && strategy.strategyBehaviorKind) !== undefined
-            ? strategy.strategyBehaviorKind
-            : parameters.strategyBehaviorKind)
-        if (isFinite(explicitBehaviorKind) && explicitBehaviorKind >= 0 && explicitBehaviorKind <= 8) {
-            return Utils.StrategyCreationUtils.strategyTypeIndexFromBehaviorKind(explicitBehaviorKind)
-        }
-
-        return Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid
-    }
-
     function toPlainJsValue(rawValue) {
-        if (rawValue === undefined || rawValue === null) {
+        if (rawValue === null || rawValue === undefined) {
             return rawValue
+        }
+
+        if (Array.isArray(rawValue)) {
+            return rawValue.map(function(item) {
+                return toPlainJsValue(item)
+            })
         }
 
         if (typeof rawValue === "object") {
@@ -768,81 +899,16 @@ Page {
         return rawValue
     }
 
-    function hasImportedFactorBacktestPayload(payload) {
-        var plainPayload = toPlainJsValue(payload) || ({})
-        var parameters = toPlainJsValue(plainPayload.parameters) || ({})
-        var directImportContext = toPlainJsValue(plainPayload.factorImportContext) || ({})
-        var parameterImportContext = toPlainJsValue(parameters.factorImportContext) || ({})
-        return Object.keys(directImportContext).length > 0
-            || Object.keys(parameterImportContext).length > 0
-    }
-
-    function loadFactorBacktestImport(importPayload) {
-        var plainImport = toPlainJsValue(importPayload) || ({})
-        if (!plainImport || Object.keys(plainImport).length === 0) {
-            return
-        }
-
-        var importParameters = toPlainJsValue(plainImport.parameters) || ({})
-        var editableParameters = ({})
-        for (var key in importParameters) {
-            editableParameters[key] = importParameters[key]
-        }
-        if (editableParameters.factor_overlay === undefined) {
-            if (plainImport.factor_overlay !== undefined) {
-                editableParameters.factor_overlay = toPlainJsValue(plainImport.factor_overlay) || ({})
-            } else if (plainImport.factorOverlaySnapshot !== undefined) {
-                editableParameters.factor_overlay = toPlainJsValue(plainImport.factorOverlaySnapshot) || ({})
+    function mapBackendTypeToFrontendIndex(strategy) {
+        var explicitTypeIndex = Number(strategy && strategy.strategyTypeIndex)
+        if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
+            var normalizedTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(explicitTypeIndex)
+            if (normalizedTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+                return normalizedTypeIndex
             }
         }
-        if (plainImport.factorImportContext !== undefined) {
-            editableParameters.factorImportContext = toPlainJsValue(plainImport.factorImportContext) || ({})
-        }
 
-        resetForm()
-
-        var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainImport)
-        if (frontendTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
-            frontendTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
-        }
-
-        var advancedOptions = toPlainJsValue(plainImport.advanced_options || plainImport.advancedOptions || importParameters.advanced_options) || ({})
-        var strategySnapshot = {
-            strategy_id: "",
-            strategy_name: plainImport.strategy_name || plainImport.strategyName || "",
-            description: plainImport.description || importParameters.description || "",
-            parameters: editableParameters,
-            assetTypeIndex: plainImport.assetTypeIndex !== undefined ? plainImport.assetTypeIndex : importParameters.assetTypeIndex,
-            timeFrameIndex: plainImport.timeFrameIndex !== undefined ? plainImport.timeFrameIndex : importParameters.timeFrameIndex,
-            riskLevelIndex: plainImport.riskLevelIndex !== undefined ? plainImport.riskLevelIndex : importParameters.riskLevelIndex,
-            optimization_method: plainImport.optimization_method || plainImport.optimizationMethod || importParameters.optimization_method || "genetic",
-            tags: toPlainJsValue(plainImport.tags || importParameters.tags) || []
-        }
-
-        isEditMode = false
-        editingStrategyId = ""
-        selectedStrategyTypeIndex = frontendTypeIndex
-        enableAdvancedOptions = !!advancedOptions.enabled
-
-        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyTypeIndex) {
-            strategyTypeSelector.setSelectedStrategyTypeIndex(selectedStrategyTypeIndex, false)
-        }
-        if (strategyBasicInfo && strategyBasicInfo.setBasicInfo) {
-            strategyBasicInfo.setBasicInfo(strategySnapshot)
-        }
-        if (step2Content && step2Content.applyPersistedStrategy) {
-            Qt.callLater(function() {
-                if (step2Content && step2Content.applyPersistedStrategy) {
-                    step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
-                }
-            })
-        }
-
-        strategyParameters = step2Content.strategyParameters || ({})
-        parametersValid = step2Content.parametersValid
-        step1Valid = strategyBasicInfo.isValid ? strategyBasicInfo.isValid() : true
-        step2Valid = step2Content.isValid ? step2Content.isValid() : step2Content.parametersValid
-        stepIndicator.currentStep = 2
+        return Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid
     }
 
     function loadStrategyForEdit(strategy) {
@@ -851,65 +917,56 @@ Page {
             return
         }
 
-        if (!plainStrategy.strategy_id
-                && !plainStrategy.strategyId
-                && !plainStrategy.id
-                && hasImportedFactorBacktestPayload(plainStrategy)) {
-            loadFactorBacktestImport(plainStrategy)
+        var resolvedStrategyId = String(plainStrategy.strategyId || "").trim()
+        var resolvedStrategyName = String(plainStrategy.strategyName || "").trim()
+        var resolvedDescription = String(plainStrategy.description || "").trim()
+
+        if (!resolvedStrategyId) {
+            showErrorDialog("策略缺少 strategyId，无法继续编辑。")
+            return
+        }
+        if (!resolvedStrategyName) {
+            showErrorDialog("策略缺少 strategyName，无法继续编辑。")
             return
         }
 
         var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainStrategy)
         if (frontendTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
-            console.warn("loadStrategyForEdit missing indexed strategy identity:", strategySnapshot.strategy_id)
-            showErrorDialog("策略缺少 strategyTypeIndex 或 strategyBehaviorKind 整型合同，无法继续编辑。")
+            showErrorDialog("策略缺少合法 strategyTypeIndex，无法继续编辑。")
             return
         }
+
         var parameters = toPlainJsValue(plainStrategy.parameters) || ({})
+        if (Object.keys(parameters).length === 0) {
+            showErrorDialog("策略缺少 parameters，无法继续编辑。")
+            return
+        }
+        if (parameters.rule_template_bindings !== undefined && parameters.rule_template_bindings !== null) {
+            showErrorDialog("检测到旧字段 rule_template_bindings，当前编辑流程仅支持 rule_composer_state。")
+            return
+        }
+
         var editableParameters = ({})
         for (var key in parameters) {
             editableParameters[key] = parameters[key]
         }
-        if (editableParameters.factor_overlay === undefined) {
-            if (plainStrategy.factor_overlay !== undefined) {
-                editableParameters.factor_overlay = toPlainJsValue(plainStrategy.factor_overlay) || ({})
-            } else if (plainStrategy.factorOverlaySnapshot !== undefined) {
-                editableParameters.factor_overlay = toPlainJsValue(plainStrategy.factorOverlaySnapshot) || ({})
-            }
-        }
-        if (!editableParameters.rule_profile && plainStrategy.ruleProfileSnapshot) {
-            editableParameters.rule_profile = toPlainJsValue(plainStrategy.ruleProfileSnapshot)
-        }
-        if (!editableParameters.execution_policy && plainStrategy.executionPolicySnapshot) {
-            editableParameters.execution_policy = toPlainJsValue(plainStrategy.executionPolicySnapshot)
-        }
-        if (!editableParameters.backtest_assumptions && plainStrategy.backtestAssumptionsSnapshot) {
-            editableParameters.backtest_assumptions = toPlainJsValue(plainStrategy.backtestAssumptionsSnapshot)
-        }
-        if (!editableParameters.strategy_scope_context && plainStrategy.strategyScopeContextSnapshot) {
-            editableParameters.strategy_scope_context = toPlainJsValue(plainStrategy.strategyScopeContextSnapshot)
-        }
-        var advancedOptions = toPlainJsValue(plainStrategy.advanced_options || plainStrategy.advancedOptions || parameters.advanced_options) || ({})
+
+        var advancedOptions = ({})
         var strategySnapshot = {
-            strategy_id: plainStrategy.strategy_id || plainStrategy.strategyId || plainStrategy.id || "",
-            strategy_name: plainStrategy.strategy_name || plainStrategy.strategyName || "",
-            description: plainStrategy.description || parameters.description || "",
+            strategyId: resolvedStrategyId,
+            strategyName: resolvedStrategyName,
+            description: resolvedDescription,
             parameters: editableParameters,
-            assetTypeIndex: plainStrategy.assetTypeIndex !== undefined ? plainStrategy.assetTypeIndex : parameters.assetTypeIndex,
-            timeFrameIndex: plainStrategy.timeFrameIndex !== undefined ? plainStrategy.timeFrameIndex : parameters.timeFrameIndex,
-            riskLevelIndex: plainStrategy.riskLevelIndex !== undefined ? plainStrategy.riskLevelIndex : parameters.riskLevelIndex,
-            optimization_method: plainStrategy.optimization_method || plainStrategy.optimizationMethod || parameters.optimization_method || "genetic",
-            tags: toPlainJsValue(plainStrategy.tags || parameters.tags) || []
+            assetTypeIndex: plainStrategy.assetTypeIndex,
+            timeFrameIndex: plainStrategy.timeFrameIndex,
+            riskLevelIndex: plainStrategy.riskLevelIndex,
+            optimization_method: plainStrategy.optimization_method,
+            tags: toPlainJsValue(plainStrategy.tags) || []
         }
 
-            console.log("loadStrategyForEdit:", strategySnapshot.strategy_id,
-                    "parameterKeys=", Object.keys(editableParameters).length,
-                    "hasRuleProfile=", !!editableParameters.rule_profile,
-                    "hasComposerState=", !!editableParameters.rule_composer_state,
-                    "hasRuleBindings=", !!editableParameters.rule_template_bindings)
-
+        resetForm()
         isEditMode = true
-        editingStrategyId = strategySnapshot.strategy_id
+        editingStrategyId = strategySnapshot.strategyId
         selectedStrategyTypeIndex = frontendTypeIndex
         enableAdvancedOptions = !!advancedOptions.enabled
 
@@ -922,7 +979,13 @@ Page {
         if (step2Content && step2Content.applyPersistedStrategy) {
             Qt.callLater(function() {
                 if (step2Content && step2Content.applyPersistedStrategy) {
-                    step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
+                    try {
+                        step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
+                    } catch (error) {
+                        isEditMode = false
+                        editingStrategyId = ""
+                        showErrorDialog("当前策略不符合新字段合同，无法进入编辑态: " + error)
+                    }
                 }
             })
         }
@@ -952,8 +1015,7 @@ Page {
             showErrorDialog(blockedMessage)
             return
         }
-        
-        // 构建完整的策略数据
+
         var context = {
             strategyName: strategyBasicInfo.strategyName,
             strategyDescription: strategyBasicInfo.strategyDescription,
@@ -968,7 +1030,7 @@ Page {
             strategyParameters: strategyParameters,
             parametersValid: step2Content && step2Content.isValid ? step2Content.isValid() : parametersValid
         }
-        
+
         var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
         if (strategyData.assetTypeIndex <= 0) {
             showErrorDialog("当前资产类型不在策略合同支持范围内，请改用股票、期货、期权或 ETF。")
@@ -978,70 +1040,62 @@ Page {
             showErrorDialog("策略运行属性必须使用受支持的索引口径，请重新选择时间周期和风险等级。")
             return
         }
-        var advancedOptions = step2Content.getAdvancedOptions ? step2Content.getAdvancedOptions() : ({ enabled: !!enableAdvancedOptions })
-        
+        if (strategyData.strategyBehaviorKind === undefined || strategyData.strategyBehaviorKind === null || Number(strategyData.strategyBehaviorKind) < 0) {
+            showErrorDialog("策略行为类型无效，无法提交。")
+            return
+        }
+
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
-        
-        // 设置创建状态
+
         isCreating = true
-        creationStatus = Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreatedSuccess')
-        
-        // 检查StrategyService是否可用
+        creationStatus = Utils.StrategyCreationUtils.tr("strategyCreation.strategyCreatedSuccess")
+
         if (!strategyService) {
             console.error("StrategyService 未初始化，无法创建策略")
             showErrorDialog("策略服务未初始化，请重启应用程序")
             isCreating = false
             return
         }
-        
-        // 将前端数据结构映射到后端所需格式
-        var backendStrategyData = {
-            "strategy_name": strategyData.name,
-            "strategyTypeIndex": strategyData.strategyTypeIndex,
-            "description": strategyData.description,
-            "assetTypeIndex": strategyData.assetTypeIndex,
-            "timeFrameIndex": strategyData.timeFrameIndex,
-            "riskLevelIndex": strategyData.riskLevelIndex,
-            "optimization_method": strategyData.optimizationMethod,
-            "advanced_options": advancedOptions,
-            "parameters": strategyData.parameters,
-            
-            // 元数据
-            "statusIndex": 2,
-            "version": "1.0",
-            "author": "System",
 
-            // 标签
-            "tags": strategyData.tags || []
+        var backendStrategyData = {
+            strategyName: strategyData.name,
+            strategyTypeIndex: strategyData.strategyTypeIndex,
+            strategyBehaviorKind: strategyData.strategyBehaviorKind,
+            description: strategyData.description,
+            assetTypeIndex: strategyData.assetTypeIndex,
+            timeFrameIndex: strategyData.timeFrameIndex,
+            riskLevelIndex: strategyData.riskLevelIndex,
+            optimization_method: strategyData.optimizationMethod,
+            parameters: strategyData.parameters,
+            status: true,
+            tags: strategyData.tags || []
         }
 
-        backendStrategyData.parameters.strategyBehaviorKind = Number(strategyData.strategyBehaviorKind)
-    backendStrategyData.parameters.selectedStrategyTypeIndex = Number(strategyData.selectedStrategyTypeIndex)
-        
         console.log("调用StrategyService创建策略...", JSON.stringify(backendStrategyData, null, 2))
-        
+
         var strategyId = editingStrategyId
         var success = false
         if (isEditMode && editingStrategyId) {
-            success = strategyService.updateStrategy(editingStrategyId, backendStrategyData)
+            backendStrategyData.strategyId = editingStrategyId
+            success = strategyService.update(backendStrategyData)
         } else {
-            strategyId = strategyService.createStrategy(backendStrategyData)
+            strategyId = strategyService.add(backendStrategyData)
             success = !!strategyId
         }
-        
+
         if (success) {
             console.log(isEditMode ? "策略更新成功，ID:" : "策略创建成功，ID:", strategyId)
-            
-            // 注意：不需要手动调用syncWithDatabase，因为StrategyService.createStrategy()方法
-            // 内部已经会发送dataChanged信号，StrategyLibraryPage会监听这个信号并自动更新
-
-            // 显示成功消息
             showSuccessDialog(strategyId)
         } else {
-            console.error(isEditMode ? "策略更新失败" : "策略创建失败")
-            showErrorDialog(isEditMode ? "策略更新失败，请检查参数" : "策略创建失败，请检查参数")
+            var bridgeErr = strategyService && strategyService.errMsg ? String(strategyService.errMsg) : ""
+            console.error(isEditMode ? "策略更新失败" : "策略创建失败", bridgeErr)
+            if (bridgeErr && bridgeErr.length > 0) {
+                showErrorDialog((isEditMode ? "策略更新失败: " : "策略创建失败: ") + bridgeErr)
+            } else {
+                showErrorDialog(isEditMode ? "策略更新失败，请检查参数" : "策略创建失败，请检查参数")
+            }
         }
-        
+
         isCreating = false
     }
     
@@ -1086,69 +1140,6 @@ Page {
         strategyParameters = resetData.strategyParameters
         parametersValid = resetData.parametersValid
         strategyBasicInfo.applyStrategyTypeDefaults(selectedStrategyTypeIndex, true)
-    }
-    
-    // ============ 定时器和动画 ============
-    
-    Timer {
-        id: creationTimer
-        interval: 2000
-        onTriggered: {
-            isCreating = false
-            creationStatus = ""
-            console.log("策略创建完成")
-            
-            // 显示成功消息
-            createSuccessDialog.open()
-        }
-    }
-    
-    // 创建成功对话框 (旧版本，保留兼容性)
-    Dialog {
-        id: createSuccessDialog
-        title: Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreationSuccessDialogTitle')
-        standardButtons: Dialog.Ok
-        modal: true
-        
-        width: 400
-        height: 200
-        
-        contentItem: ColumnLayout {
-            spacing: 16
-            
-            Rectangle {
-                Layout.preferredWidth: 60
-                Layout.preferredHeight: 60
-                radius: 30
-                color: "#10b981"
-                
-                Text {
-                    anchors.centerIn: parent
-                    text: "✓"
-                    font.pixelSize: 28
-                    font.weight: Font.Bold
-                    color: "white"
-                }
-            }
-            
-            Text {
-                Layout.fillWidth: true
-                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreatedSuccessDialogMessage')
-                font.pixelSize: 16
-                font.weight: Font.Medium
-                color: "#f1f5f9"
-                horizontalAlignment: Text.AlignHCenter
-            }
-            
-            Text {
-                Layout.fillWidth: true
-                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreatedSuccessDialogSubtitle')
-                font.pixelSize: 13
-                color: "#94a3b8"
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
-        }
     }
     
     // 策略创建成功对话框 (集成C++服务后使用)

@@ -21,23 +21,34 @@ Rectangle {
     property int selectedStrategyTypeIndex: 0
     property Bridge.FactorService factorService: null
     property var strategyParameters: ({})
+    property var commonStrategyParameters: ({})
+    property var personalizedStrategyParameters: ({})
+    property var commonParameterConfigs: []
+    property var personalizedParameterConfigs: []
     property var boundRuleTemplateBindings: ({})
     property var boundRuleTemplateBindingEntries: []
     property bool suppressRuleComposerReset: false
     property bool parametersValid: false
+    property bool commonParametersValid: true
+    property bool personalizedParametersValid: true
+    property bool personalizedCardExpanded: true
     property bool enableAdvancedOptions: false
     property var strategyProfile: ({})
     property var ruleComposerStages: []
+    property bool forbidDefaultRuleBuildInEdit: false
     property var ruleComposerValidation: ({ valid: true, errorCount: 0, warningCount: 0, errors: [], warnings: [], suggestions: [], groupIssues: ({}) })
     property string selectedRuleComposerStageId: "signal"
     property string selectedRuleComposerGroupId: ""
-    readonly property var currentRuleComposerGroupQuickImportEntries: root.currentRuleComposerGroupQuickImportEntries()
+    readonly property var currentRuleComposerGroupQuickImportList: (
+        typeof root.computeCurrentRuleComposerGroupQuickImportEntries === "function"
+            ? (root.computeCurrentRuleComposerGroupQuickImportEntries() || [])
+            : [])
     readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
     readonly property bool ruleComposerConfigValid: (root.ruleComposerValidation.errorCount || 0) === 0
     readonly property bool useNarrowRulePanels: width >= 1180
     readonly property bool useWideParamGrid: width >= 1200
     readonly property int parameterPaneMaxColumns: 3
-    readonly property int parameterPaneMinColumnWidth: 320
+    readonly property int parameterPaneMinColumnWidth: 260
     readonly property int factorOverlayCardMinWidth: 320
     readonly property int factorOverlayCardMaxWidth: 420
     readonly property real rulePanelWidth: useNarrowRulePanels ? Math.min(width * 0.76, 920) : width
@@ -63,6 +74,7 @@ Rectangle {
         ruleComposerSuggestionMinWidth,
         ruleComposerWidthBudget * (useRuleComposerColumns ? 0.26 : 0.27),
         ruleComposerSuggestionMaxWidth)
+    readonly property bool hasPersonalizedParameterConfigs: (root.personalizedParameterConfigs || []).length > 0
     property var factorOverlay: ({ enabled: false, targetPositionCount: 10, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
     property var factorSelectorDialog: null
     
@@ -115,30 +127,30 @@ Rectangle {
         ColumnLayout {
             width: paramConfigScrollView.availableWidth
             spacing: 12
-            anchors.margins: 10
+            anchors.margins: 8
             
             // 参数配置标题
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 5
+                spacing: 4
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Title')
-                    font.pixelSize: 18
+                    font.pixelSize: 16
                     font.weight: Font.DemiBold
                     color: "#f1f5f9"
                 }
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Description')
-                    font.pixelSize: 13
+                    font.pixelSize: 12
                     color: "#94a3b8"
                     wrapMode: Text.WordWrap
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    spacing: 8
+                    spacing: 6
 
                     Repeater {
                         model: [
@@ -147,18 +159,18 @@ Rectangle {
                         ]
 
                         delegate: Rectangle {
-                            radius: 10
+                            radius: 8
                             color: "#172554"
                             border.width: 1
                             border.color: "#2563eb"
-                            implicitHeight: 28
-                            implicitWidth: tagLabel.implicitWidth + 18
+                            implicitHeight: 24
+                            implicitWidth: tagLabel.implicitWidth + 14
 
                             Text {
                                 id: tagLabel
                                 anchors.centerIn: parent
                                 text: modelData
-                                font.pixelSize: 12
+                                font.pixelSize: 11
                                 font.weight: Font.Medium
                                 color: "#dbeafe"
                             }
@@ -171,64 +183,38 @@ Rectangle {
             
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 14
+                spacing: 10
 
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
-                    radius: 10
+                    radius: 8
                     color: "#0f172a"
                     border.width: 1
                     border.color: "#334155"
-                    implicitHeight: parameterPanelLayout.implicitHeight + 24
+                    implicitHeight: parameterPanelLayout.implicitHeight + 18
 
                     ColumnLayout {
                         id: parameterPanelLayout
                         anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 10
+                        anchors.margins: 10
+                        spacing: 8
 
                         Text {
                             text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConfigPanel')
-                            font.pixelSize: 16
+                            font.pixelSize: 14
                             font.weight: Font.Medium
                             color: "#f1f5f9"
                         }
 
-                        PluginComponents.DynamicParamGenerator {
-                            id: dynamicGenerator
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: Math.max(260, implicitHeight)
-                            minColumnWidth: root.parameterPaneMinColumnWidth
-                            maxColumns: root.parameterPaneMaxColumns
-                            showGroups: false
-
-                            paramRegistry: paramComponents
-
-                            onParamsChanged: function(newValues) {
-                                var mergedValues = root.decorateParameters(newValues)
-                                root.strategyParameters = mergedValues
-                                root.parametersChanged(mergedValues)
-                            }
-
-                            onValidationChanged: function(allValid, errors) {
-                                root.parametersValid = allValid
-                                root.emitValidationState(errors)
-                            }
-
-                            Component.onCompleted: {
-                                loadParamConfigs()
-                            }
-                        }
-
                         RowLayout {
                             Layout.fillWidth: true
-                            spacing: 10
+                            spacing: 8
 
                             Text {
                                 text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
-                                      (dynamicGenerator ? dynamicGenerator.configsList.length : 0)
-                                font.pixelSize: 12
+                                      root.totalConfiguredParameterCount()
+                                font.pixelSize: 11
                                 color: "#94a3b8"
                             }
 
@@ -238,10 +224,179 @@ Rectangle {
                                 text: root.parametersValid ?
                                       Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
                                       Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
-                                font.pixelSize: 12
+                                font.pixelSize: 11
                                 font.weight: Font.Medium
                                 color: root.parametersValid ? "#10b981" : "#ef4444"
                             }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    radius: 8
+                    color: "#0b1427"
+                    border.width: 1
+                    border.color: "#1e40af"
+                    implicitHeight: commonParameterCardLayout.implicitHeight + 14
+
+                    ColumnLayout {
+                        id: commonParameterCardLayout
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 6
+
+                        Text {
+                            text: Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                            color: "#dbeafe"
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                      (commonDynamicGenerator && commonDynamicGenerator.configsList ? commonDynamicGenerator.configsList.length : 0)
+                                font.pixelSize: 10
+                                color: "#93c5fd"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: root.commonParametersValid ?
+                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
+                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                font.pixelSize: 10
+                                font.weight: Font.Medium
+                                color: root.commonParametersValid ? "#10b981" : "#ef4444"
+                            }
+                        }
+
+                        PluginComponents.DynamicParamGenerator {
+                            id: commonDynamicGenerator
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: Math.max(132, implicitHeight)
+                            minColumnWidth: root.parameterPaneMinColumnWidth
+                            maxColumns: root.parameterPaneMaxColumns
+                            showGroups: false
+
+                            paramRegistry: paramComponents
+
+                            onParamsChanged: function() {
+                                root.syncDecoratedParameters()
+                            }
+
+                            onValidationChanged: function(allValid) {
+                                root.commonParametersValid = !!allValid
+                                root.updateParameterValidationState()
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    radius: 8
+                    color: "#111827"
+                    border.width: 1
+                    border.color: "#334155"
+                    implicitHeight: personalizedParameterCardLayout.implicitHeight + 14
+
+                    ColumnLayout {
+                        id: personalizedParameterCardLayout
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                                font.pixelSize: 12
+                                font.weight: Font.Medium
+                                color: "#e2e8f0"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: root.hasPersonalizedParameterConfigs
+                                      ? (root.personalizedCardExpanded ? "收起" : "展开")
+                                      : "自动收起"
+                                font.pixelSize: 9
+                                font.weight: Font.Medium
+                                color: root.hasPersonalizedParameterConfigs ? "#93c5fd" : "#64748b"
+                            }
+
+                            MouseArea {
+                                Layout.preferredWidth: 30
+                                Layout.preferredHeight: 18
+                                enabled: root.hasPersonalizedParameterConfigs
+                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: root.personalizedCardExpanded = !root.personalizedCardExpanded
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Text {
+                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                      (personalizedDynamicGenerator && personalizedDynamicGenerator.configsList ? personalizedDynamicGenerator.configsList.length : 0)
+                                font.pixelSize: 10
+                                color: "#94a3b8"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: root.personalizedParametersValid ?
+                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
+                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                font.pixelSize: 10
+                                font.weight: Font.Medium
+                                color: root.personalizedParametersValid ? "#10b981" : "#ef4444"
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !root.hasPersonalizedParameterConfigs
+                            text: "当前策略类型无个性化参数，卡片已自动收起。"
+                            font.pixelSize: 9
+                            color: "#94a3b8"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        PluginComponents.DynamicParamGenerator {
+                            id: personalizedDynamicGenerator
+                            visible: root.hasPersonalizedParameterConfigs && root.personalizedCardExpanded
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: visible ? Math.max(150, implicitHeight) : 0
+                            minColumnWidth: root.parameterPaneMinColumnWidth
+                            maxColumns: root.parameterPaneMaxColumns
+                            showGroups: false
+
+                            paramRegistry: paramComponents
+
+                            onParamsChanged: function() {
+                                root.syncDecoratedParameters()
+                            }
+
+                            onValidationChanged: function(allValid) {
+                                root.personalizedParametersValid = !!allValid
+                                root.updateParameterValidationState()
+                            }
+
                         }
                     }
                 }
@@ -680,7 +835,7 @@ Rectangle {
                                 Text {
                                     Layout.fillWidth: true
                                     text: "当前阶段已放入 " + root.selectedRuleComposerStageRuleCount()
-                                          + " 条规则，可快捷引入 " + root.currentRuleComposerGroupQuickImportEntries.length + " 个默认项。"
+                                        + " 条规则，可快捷引入 " + root.currentRuleComposerGroupQuickImportList.length + " 个默认项。"
                                     font.pixelSize: 11
                                     color: "#93c5fd"
                                     wrapMode: Text.WordWrap
@@ -701,10 +856,10 @@ Rectangle {
                                 Flow {
                                     width: parent.width
                                     spacing: 8
-                                    visible: root.currentRuleComposerGroupQuickImportEntries.length > 0
+                                    visible: root.currentRuleComposerGroupQuickImportList.length > 0
 
                                     Repeater {
-                                        model: root.currentRuleComposerGroupQuickImportEntries
+                                        model: root.currentRuleComposerGroupQuickImportList
 
                                         delegate: Button {
                                             required property var modelData
@@ -716,7 +871,7 @@ Rectangle {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    visible: root.currentRuleComposerGroupQuickImportEntries.length === 0
+                                    visible: root.currentRuleComposerGroupQuickImportList.length === 0
                                     text: "当前组没有剩余的默认快捷项。可以先恢复当前阶段默认规则，或者再用右侧建议栏补充非默认模板。"
                                     font.pixelSize: 11
                                     color: "#94a3b8"
@@ -1296,7 +1451,7 @@ Rectangle {
                                                         property var groupData: groupPreviewCard.modelData
                                                         property var bindingData: root.ruleComposerPreviewBinding(stageData, groupData, modelData)
                                                         property var insight: PreviewUtils.getTemplateInsight(bindingData)
-                                                        property bool secondaryCollapsible: PreviewUtils.normalizePhaseKey(bindingData.phase) === "market"
+                                                        property bool secondaryCollapsible: PreviewUtils.normalizePhaseKey(bindingData.stageId) === "market"
                                                         property bool secondaryExpanded: !secondaryCollapsible
                                                         Layout.fillWidth: true
                                                         radius: 8
@@ -1326,7 +1481,7 @@ Rectangle {
                                                                     Text {
                                                                         id: rulePhaseText
                                                                         anchors.centerIn: parent
-                                                                        text: PreviewUtils.phaseDisplayName(bindingData.phase, "short")
+                                                                        text: PreviewUtils.phaseDisplayName(bindingData.stageId, "short")
                                                                         font.pixelSize: 11
                                                                         color: "#cbd5e1"
                                                                     }
@@ -1334,7 +1489,7 @@ Rectangle {
 
                                                                 Text {
                                                                     Layout.fillWidth: true
-                                                                    text: bindingData.template_display_name || bindingData.template_id || "未命名模板"
+                                                                    text: bindingData.templateDisplayName || bindingData.templateId || "未命名模板"
                                                                     font.pixelSize: 12
                                                                     font.weight: Font.Medium
                                                                     color: "#e2e8f0"
@@ -1342,7 +1497,7 @@ Rectangle {
                                                                 }
 
                                                                 Rectangle {
-                                                                    visible: !!bindingData.default_injected
+                                                                    visible: !!bindingData.defaultInjected
                                                                     radius: 9
                                                                     color: "#3f2d16"
                                                                     border.width: 1
@@ -1377,8 +1532,8 @@ Rectangle {
 
                                                             Text {
                                                                 Layout.fillWidth: true
-                                                                visible: !!(bindingData.term_display_name || bindingData.term_id)
-                                                                text: "绑定术语: " + (bindingData.term_display_name || bindingData.term_id || "")
+                                                                visible: !!(bindingData.termDisplayName || bindingData.termId)
+                                                                text: "绑定术语: " + (bindingData.termDisplayName || bindingData.termId || "")
                                                                 font.pixelSize: 11
                                                                 color: "#7dd3fc"
                                                                 wrapMode: Text.WordWrap
@@ -1408,7 +1563,7 @@ Rectangle {
 
                                                                     Text {
                                                                         Layout.fillWidth: true
-                                                                        text: PreviewUtils.insightSectionTitle(bindingData.phase, true)
+                                                                        text: PreviewUtils.insightSectionTitle(bindingData.stageId, true)
                                                                         font.pixelSize: 12
                                                                         font.weight: Font.DemiBold
                                                                         color: "#f8fafc"
@@ -1539,9 +1694,80 @@ Rectangle {
     // 加载参数配置
     function loadParamConfigs() {
         var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyTypeIndex)
-        if (dynamicGenerator) {
-            dynamicGenerator.reloadConfigs(paramConfigs, [])
+        var separatedConfigs = splitParameterConfigs(paramConfigs)
+        root.commonParameterConfigs = separatedConfigs.common
+        root.personalizedParameterConfigs = separatedConfigs.personalized
+        if (commonDynamicGenerator) {
+            commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [])
         }
+        if (personalizedDynamicGenerator) {
+            personalizedDynamicGenerator.reloadConfigs(root.personalizedParameterConfigs, [])
+        }
+        root.personalizedCardExpanded = root.hasPersonalizedParameterConfigs
+        root.commonParametersValid = true
+        root.personalizedParametersValid = true
+        updateParameterValidationState()
+    }
+
+    function splitParameterConfigs(paramConfigs) {
+        var source = Array.isArray(paramConfigs) ? paramConfigs : []
+        var common = []
+        var personalized = []
+        var commonCategory = Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
+        var personalizedCategory = Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+
+        for (var index = 0; index < source.length; ++index) {
+            var config = source[index]
+            if (!config || typeof config !== "object") {
+                continue
+            }
+            var category = String(config.category || "")
+            if (category === commonCategory) {
+                common.push(config)
+            } else if (category === personalizedCategory) {
+                personalized.push(config)
+            } else {
+                personalized.push(config)
+            }
+        }
+
+        return {
+            common: common,
+            personalized: personalized
+        }
+    }
+
+    function parameterValuesFromGenerator(generatorLike) {
+        if (!generatorLike || typeof generatorLike.getValues !== "function") {
+            return ({})
+        }
+        return generatorLike.getValues() || ({})
+    }
+
+    function totalConfiguredParameterCount() {
+        var commonCount = commonDynamicGenerator && commonDynamicGenerator.configsList ? commonDynamicGenerator.configsList.length : 0
+        var personalizedCount = personalizedDynamicGenerator && personalizedDynamicGenerator.configsList ? personalizedDynamicGenerator.configsList.length : 0
+        return commonCount + personalizedCount
+    }
+
+    function extractValuesByConfigs(sourceValues, configs) {
+        var source = sourceValues || ({})
+        var extracted = ({})
+        var configList = Array.isArray(configs) ? configs : []
+        for (var index = 0; index < configList.length; ++index) {
+            var config = configList[index]
+            var key = String((config && config.id) || "").trim()
+            if (!key || source[key] === undefined) {
+                continue
+            }
+            extracted[key] = source[key]
+        }
+        return extracted
+    }
+
+    function updateParameterValidationState() {
+        root.parametersValid = !!root.commonParametersValid && !!root.personalizedParametersValid
+        emitValidationState(currentParameterValidationErrors())
     }
 
     function defaultFactorOverlay() {
@@ -1582,29 +1808,17 @@ Rectangle {
         return JSON.parse(JSON.stringify(value))
     }
 
-    function firstOverlayValue(source, keys, fallbackValue) {
-        var container = source && typeof source === "object" ? source : ({})
-        var aliasKeys = Array.isArray(keys) ? keys : []
-        for (var index = 0; index < aliasKeys.length; ++index) {
-            var key = aliasKeys[index]
-            if (container[key] !== undefined && container[key] !== null && String(container[key]).trim() !== "") {
-                return container[key]
-            }
-        }
-        return fallbackValue
-    }
-
     function normalizedOverlayAllocation(rawAllocation) {
         var item = rawAllocation && typeof rawAllocation === "object" ? rawAllocation : ({})
-        var factorId = String(firstOverlayValue(item, ["factor_id", "factorId"], "")).trim()
+        var factorId = String(item.factor_id || "").trim()
         if (!factorId) {
             return null
         }
 
         return {
             factor_id: factorId,
-            display_name: String(firstOverlayValue(item, ["display_name", "displayName", "factor_name", "factorName", "name"], root.factorDisplayName(factorId) || factorId)),
-            weight_percent: Number(firstOverlayValue(item, ["weight_percent", "weightPercent", "weight"], 0)) || 0
+            display_name: String(item.display_name || root.factorDisplayName(factorId) || factorId),
+            weight_percent: Number(item.weight_percent) || 0
         }
     }
 
@@ -1612,10 +1826,10 @@ Rectangle {
         var overlay = normalizeStructuredValue(rawOverlay)
         overlay = overlay && typeof overlay === "object" ? cloneValue(overlay) : defaultFactorOverlay()
         var normalized = defaultFactorOverlay()
-        normalized.targetPositionCount = Math.max(1, Number(firstOverlayValue(overlay, ["targetPositionCount", "target_position_count"], normalized.targetPositionCount)) || normalized.targetPositionCount)
-        normalized.minimumCompositeScore = Number(firstOverlayValue(overlay, ["minimumCompositeScore", "minimum_composite_score"], normalized.minimumCompositeScore)) || 0
-        normalized.combineMode = String(firstOverlayValue(overlay, ["combineMode", "combine_mode"], normalized.combineMode))
-        normalized.selectionScope = String(firstOverlayValue(overlay, ["selectionScope", "selection_scope"], normalized.selectionScope))
+        normalized.targetPositionCount = Math.max(1, Number(overlay.targetPositionCount) || normalized.targetPositionCount)
+        normalized.minimumCompositeScore = Number(overlay.minimumCompositeScore) || 0
+        normalized.combineMode = String(overlay.combineMode || normalized.combineMode)
+        normalized.selectionScope = String(overlay.selectionScope || normalized.selectionScope)
 
         var allocations = Array.isArray(overlay.allocations) ? overlay.allocations : []
         var seenFactorIds = ({})
@@ -1843,6 +2057,32 @@ Rectangle {
         return groups.length > 0 ? groups[0] : null
     }
 
+    function populatedRuleComposerGroups(stage) {
+        var groups = Array.isArray(stage && stage.groups) ? stage.groups : []
+        return groups.filter(function(group) {
+            return Array.isArray(group && group.rules) && group.rules.length > 0
+        })
+    }
+
+    function ensureSelectedRuleComposerGroup() {
+        var stage = currentSelectedRuleComposerStage()
+        var groups = Array.isArray(stage && stage.groups) ? stage.groups : []
+        if (groups.length === 0) {
+            root.selectedRuleComposerGroupId = ""
+            return
+        }
+
+        var selectedGroupId = String(root.selectedRuleComposerGroupId || "").trim()
+        for (var index = 0; index < groups.length; ++index) {
+            var candidateId = String(groups[index] && groups[index].groupId || "").trim()
+            if (candidateId && candidateId === selectedGroupId) {
+                return
+            }
+        }
+
+        root.selectedRuleComposerGroupId = String(groups[0] && groups[0].groupId || "").trim()
+    }
+
     function firstPopulatedRuleComposerSelection(stages, preferredStageId, preferredGroupId) {
         var normalizedStages = Array.isArray(stages) ? stages : []
         var preferredStageKey = String(preferredStageId || "").trim().toLowerCase()
@@ -1902,21 +2142,73 @@ Rectangle {
         }
     }
 
-    function defaultRuleComposerStages() {
-        var profile = root.strategyProfile
-        if (!profile || Object.keys(profile).length === 0) {
-            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
-        }
-        return Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, [])
+    function isPlainObject(value) {
+        return !!value && typeof value === "object" && !Array.isArray(value)
     }
 
-    function defaultRulePackEntries() {
-        var profile = root.strategyProfile
-        if (!profile || Object.keys(profile).length === 0) {
-            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+    function ensureStrategyProfile(profileCandidate) {
+        if (isPlainObject(profileCandidate) && Object.keys(profileCandidate).length > 0) {
+            return profileCandidate
         }
-        return Utils.StrategyCreationUtils.buildDefaultMarketRuleBindings(profile)
-            .concat(Utils.StrategyCreationUtils.buildDefaultBaseRuleBindings(profile))
+
+        try {
+            var builtProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            return isPlainObject(builtProfile) ? builtProfile : ({})
+        } catch (error) {
+            console.warn("buildDefaultStrategyProfile failed:", error)
+            return ({})
+        }
+    }
+
+    function safeBuildDefaultRuleComposerSkeleton(profile, bindings) {
+        try {
+            var stages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, bindings || [])
+            return Array.isArray(stages) ? stages : []
+        } catch (error) {
+            return []
+        }
+    }
+
+    function safeBuildDefaultMarketRuleBindings(profile) {
+        try {
+            var entries = Utils.StrategyCreationUtils.buildDefaultMarketRuleBindings(profile)
+            return Array.isArray(entries) ? entries : []
+        } catch (error) {
+            return []
+        }
+    }
+
+    function safeBuildDefaultBaseRuleBindings(profile) {
+        try {
+            var entries = Utils.StrategyCreationUtils.buildDefaultBaseRuleBindings(profile)
+            return Array.isArray(entries) ? entries : []
+        } catch (error) {
+            return []
+        }
+    }
+
+    function defaultRuleComposerStages(forceBuild) {
+        if (root.forbidDefaultRuleBuildInEdit && !forceBuild) {
+            return []
+        }
+        var profile = ensureStrategyProfile(root.strategyProfile)
+        return safeBuildDefaultRuleComposerSkeleton(profile, [])
+    }
+
+    function defaultRulePackEntries(forceBuild) {
+        if (root.forbidDefaultRuleBuildInEdit && !forceBuild) {
+            return []
+        }
+        var profile = ensureStrategyProfile(root.strategyProfile)
+        var marketDefaults = safeBuildDefaultMarketRuleBindings(profile)
+        var baseDefaults = safeBuildDefaultBaseRuleBindings(profile)
+        if (!Array.isArray(marketDefaults)) {
+            marketDefaults = []
+        }
+        if (!Array.isArray(baseDefaults)) {
+            baseDefaults = []
+        }
+        return marketDefaults.concat(baseDefaults)
     }
 
     function selectedRuleComposerStageRuleCount() {
@@ -1930,7 +2222,7 @@ Rectangle {
         return total
     }
 
-    function currentRuleComposerGroupQuickImportEntries() {
+    function computeCurrentRuleComposerGroupQuickImportEntries() {
         var stage = currentSelectedRuleComposerStage()
         var group = currentSelectedRuleComposerGroup()
         if (!stage || !group) {
@@ -1952,7 +2244,7 @@ Rectangle {
         var exactMatches = []
         var roleMatches = []
         var stageMatches = []
-        var defaults = defaultRulePackEntries()
+        var defaults = defaultRulePackEntries(false)
         for (var index = 0; index < defaults.length; ++index) {
             var entry = defaults[index] || ({})
             var entryStageId = String(entry.stageId || "").trim().toLowerCase()
@@ -1988,25 +2280,23 @@ Rectangle {
         }
 
         upsertRuleComposerSuggestion({
-            template_id: entry.templateId || "",
-            template_display_name: entry.templateDisplayName || entry.templateId || "",
-            term_id: entry.termId || "",
-            term_display_name: entry.termDisplayName || "",
-            file_name: entry.fileName || "",
-            phase: currentStage.stageId || "signal",
+            templateId: entry.templateId || "",
+            templateDisplayName: entry.templateDisplayName || entry.templateId || "",
+            termId: entry.termId || "",
+            termDisplayName: entry.termDisplayName || "",
+            fileName: entry.fileName || "",
+            stageId: currentStage.stageId || "signal",
             category: entry.category || "",
             summary: entry.summary || "",
-            is_ready: true
+            isReady: true
         })
         syncDecoratedParameters()
     }
 
     function restoreDefaultRuleComposerPack() {
-        if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
-        }
+        root.strategyProfile = ensureStrategyProfile(root.strategyProfile)
 
-        var defaultStages = defaultRuleComposerStages()
+        var defaultStages = defaultRuleComposerStages(true)
         var selection = firstPopulatedRuleComposerSelection(
             defaultStages,
             root.selectedRuleComposerStageId || "signal",
@@ -2027,7 +2317,7 @@ Rectangle {
             return
         }
 
-        var defaults = defaultRuleComposerStages()
+        var defaults = defaultRuleComposerStages(true)
         var defaultStage = null
         for (var defaultIndex = 0; defaultIndex < defaults.length; ++defaultIndex) {
             if (String(defaults[defaultIndex].stageId || "").trim().toLowerCase() === stageId) {
@@ -2081,20 +2371,20 @@ Rectangle {
 
     function ruleComposerPreviewBinding(stageData, groupData, ruleData) {
         var binding = {
-            phase: normalizedRuleTemplatePhase((ruleData && ruleData.phase) || (stageData && stageData.stageId) || "signal")
+            stageId: normalizedRuleTemplatePhase((ruleData && ruleData.stageId) || (stageData && stageData.stageId) || "signal")
         }
 
         if (ruleData && ruleData.fileName) {
-            binding.file_name = ruleData.fileName
+            binding.fileName = ruleData.fileName
         }
         if (ruleData && ruleData.filePath) {
-            binding.file_path = ruleData.filePath
+            binding.filePath = ruleData.filePath
         }
         if (ruleData && ruleData.templateId) {
-            binding.template_id = ruleData.templateId
+            binding.templateId = ruleData.templateId
         }
         if (ruleData && ruleData.templateName) {
-            binding.template_display_name = ruleData.templateName
+            binding.templateDisplayName = ruleData.templateName
         }
         if (ruleData && ruleData.summary) {
             binding.summary = ruleData.summary
@@ -2103,41 +2393,42 @@ Rectangle {
             binding.category = ruleData.category
         }
         if (ruleData && ruleData.termId) {
-            binding.term_id = ruleData.termId
+            binding.termId = ruleData.termId
         }
         if (ruleData && ruleData.termName) {
-            binding.term_display_name = ruleData.termName
+            binding.termDisplayName = ruleData.termName
         }
         if (ruleData && ruleData.defaultInjected) {
-            binding.default_injected = true
+            binding.defaultInjected = true
         }
         if (groupData && groupData.groupId) {
-            binding.group_id = groupData.groupId
+            binding.groupId = groupData.groupId
         }
         if (groupData && groupData.title) {
-            binding.group_title = groupData.title
+            binding.groupTitle = groupData.title
         }
         if (groupData && groupData.role) {
-            binding.group_role = groupData.role
+            binding.groupRole = groupData.role
         }
         if (groupData && groupData.operator) {
-            binding.group_operator = groupData.operator
+            binding.groupOperator = groupData.operator
         }
         var groupMinMatchCount = Number(groupData && (groupData.groupMinMatchCount || groupData.matchThreshold || 0))
         if (groupMinMatchCount > 0) {
-            binding.group_min_match_count = groupMinMatchCount
+            binding.groupMinMatchCount = groupMinMatchCount
         }
         return binding
     }
 
     function rebuildRuleComposerState(resetProfile) {
-        if (resetProfile || !root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        if (resetProfile) {
+            root.strategyProfile = ensureStrategyProfile(null)
+        } else {
+            root.strategyProfile = ensureStrategyProfile(root.strategyProfile)
         }
-        root.ruleComposerStages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(
+        root.ruleComposerStages = safeBuildDefaultRuleComposerSkeleton(
             root.strategyProfile,
-            root.boundRuleTemplateBindingList()
-        )
+            root.boundRuleTemplateBindingList())
         if (!root.selectedRuleComposerStageId) {
             root.selectedRuleComposerStageId = "signal"
         }
@@ -2164,12 +2455,12 @@ Rectangle {
         return null
     }
 
-    function defaultMarketRuleComposerStage() {
-        var profile = root.strategyProfile
-        if (!profile || Object.keys(profile).length === 0) {
-            profile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+    function defaultMarketRuleComposerStage(forceBuild) {
+        if (root.forbidDefaultRuleBuildInEdit && !forceBuild) {
+            return null
         }
-        var defaultStages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, [])
+        var profile = ensureStrategyProfile(root.strategyProfile)
+        var defaultStages = safeBuildDefaultRuleComposerSkeleton(profile, [])
         for (var index = 0; index < defaultStages.length; ++index) {
             if ((defaultStages[index].stageId || "") === "market") {
                 return defaultStages[index]
@@ -2210,7 +2501,7 @@ Rectangle {
 
     function hasCustomizedMarketRuleComposerStage() {
         var currentStage = currentMarketRuleComposerStage()
-        var defaultStage = defaultMarketRuleComposerStage()
+        var defaultStage = defaultMarketRuleComposerStage(false)
         if (!currentStage && !defaultStage) {
             return false
         }
@@ -2243,7 +2534,7 @@ Rectangle {
         }
 
         if (!targetStage) {
-            targetStage = defaultMarketRuleComposerStage()
+            targetStage = defaultMarketRuleComposerStage(false)
             if (!targetStage) {
                 return
             }
@@ -2264,12 +2555,10 @@ Rectangle {
     }
 
     function restoreDefaultMarketRuleComposerStage() {
-        if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
-        }
+        root.strategyProfile = ensureStrategyProfile(root.strategyProfile)
 
         var nextStages = cloneRuleComposerStages()
-        var defaultMarketStage = defaultMarketRuleComposerStage()
+        var defaultMarketStage = defaultMarketRuleComposerStage(true)
         if (!defaultMarketStage) {
             return
         }
@@ -2299,9 +2588,7 @@ Rectangle {
         var extracted = ({})
         var source = sourceParameters || ({})
         for (var key in source) {
-            if (key === "rule_template_bindings"
-                    || key === "rule_template_binding"
-                    || key === "rule_profile"
+            if (key === "rule_profile"
                     || key === "execution_policy"
                     || key === "backtest_assumptions"
                     || key === "rule_composer_state"
@@ -2314,24 +2601,26 @@ Rectangle {
     }
 
     function currentEditableParameterValues() {
-        if (dynamicGenerator && typeof dynamicGenerator.getValues === "function") {
-            var preservedValues = extractEditableParameterValues(root.strategyParameters)
-            var dynamicValues = dynamicGenerator.getValues() || ({})
-            for (var key in dynamicValues) {
-                preservedValues[key] = dynamicValues[key]
-            }
-            return preservedValues
+        var preservedValues = extractEditableParameterValues(root.strategyParameters)
+        var commonValues = parameterValuesFromGenerator(commonDynamicGenerator)
+        var personalizedValues = parameterValuesFromGenerator(personalizedDynamicGenerator)
+
+        for (var commonKey in commonValues) {
+            preservedValues[commonKey] = commonValues[commonKey]
         }
-        return extractEditableParameterValues(root.strategyParameters)
+        for (var personalizedKey in personalizedValues) {
+            preservedValues[personalizedKey] = personalizedValues[personalizedKey]
+        }
+        return preservedValues
     }
 
     function resolvedRuleTemplateFileName(ruleLike) {
-        var directFileName = String((ruleLike && (ruleLike.file_name || ruleLike.fileName)) || "").trim()
+        var directFileName = String((ruleLike && ruleLike.fileName) || "").trim()
         if (directFileName) {
             return directFileName
         }
         return Utils.StrategyCreationUtils.resolveRuleTemplateFileName(
-            ruleLike && (ruleLike.template_id || ruleLike.templateId || "")
+            ruleLike && (ruleLike.templateId || "")
         )
     }
 
@@ -2366,14 +2655,10 @@ Rectangle {
 
         var tokens = [
             rule && rule.templateId,
-            rule && rule.template_id,
             rule && rule.fileName,
-            rule && rule.file_name,
             rule && rule.category,
             rule && rule.termId,
-            rule && rule.term_id,
             rule && rule.termName,
-            rule && rule.term_display_name,
             rule && rule.summary
         ].map(function(item) {
             return String(item || "").trim().toLowerCase()
@@ -2441,11 +2726,11 @@ Rectangle {
         var source = sourceParameters || ({})
         var payload = ({})
 
-        if (source.stopLoss !== undefined && source.stopLoss !== null && source.stopLoss !== "") {
-            payload.stopLossPercent = Number(source.stopLoss)
+        if (source.stopLossPercent !== undefined && source.stopLossPercent !== null && source.stopLossPercent !== "") {
+            payload.stopLossPercent = Number(source.stopLossPercent)
         }
-        if (source.takeProfit !== undefined && source.takeProfit !== null && source.takeProfit !== "") {
-            payload.takeProfitPercent = Number(source.takeProfit)
+        if (source.takeProfitPercent !== undefined && source.takeProfitPercent !== null && source.takeProfitPercent !== "") {
+            payload.takeProfitPercent = Number(source.takeProfitPercent)
         }
         if (source.rebalanceDays !== undefined && source.rebalanceDays !== null && source.rebalanceDays !== "") {
             payload.rebalanceDays = Number(source.rebalanceDays)
@@ -2487,16 +2772,28 @@ Rectangle {
     function syncDecoratedParameters(sourceValues) {
         var mergedValues = decorateParameters(sourceValues === undefined ? currentEditableParameterValues() : sourceValues)
         root.strategyParameters = mergedValues
+        root.commonStrategyParameters = extractValuesByConfigs(mergedValues, root.commonParameterConfigs)
+        root.personalizedStrategyParameters = extractValuesByConfigs(mergedValues, root.personalizedParameterConfigs)
         root.parametersChanged(mergedValues)
         emitValidationState(currentParameterValidationErrors())
         return mergedValues
     }
 
     function currentParameterValidationErrors() {
-        if (dynamicGenerator && dynamicGenerator.validationErrors) {
-            return dynamicGenerator.validationErrors
+        var combinedErrors = ({})
+        var commonErrors = commonDynamicGenerator && commonDynamicGenerator.validationErrors ? commonDynamicGenerator.validationErrors : ({})
+        var personalizedErrors = personalizedDynamicGenerator && personalizedDynamicGenerator.validationErrors ? personalizedDynamicGenerator.validationErrors : ({})
+        for (var key in commonErrors) {
+            combinedErrors[key] = commonErrors[key]
         }
-        return ({})
+        for (var personalizedKey in personalizedErrors) {
+            if (combinedErrors[personalizedKey] === undefined) {
+                combinedErrors[personalizedKey] = personalizedErrors[personalizedKey]
+            } else {
+                combinedErrors["personalized_" + personalizedKey] = personalizedErrors[personalizedKey]
+            }
+        }
+        return combinedErrors
     }
 
     function refreshRuleComposerValidation() {
@@ -2544,8 +2841,6 @@ Rectangle {
         }
         mergeImportedFactorContext(merged, root.strategyParameters)
         mergeImportedFactorContext(merged, source)
-        delete merged.rule_template_bindings
-        delete merged.rule_template_binding
         merged.rule_composer_state = buildRuleComposerStatePayload()
         merged.rule_profile = buildRuleProfilePayload(source)
         merged.execution_policy = buildExecutionPolicyPayload(source)
@@ -2558,8 +2853,28 @@ Rectangle {
         }
         delete merged.stopLoss
         delete merged.takeProfit
+        delete merged.positionSize
         delete merged.rebalanceDays
         delete merged.maxDrawdownLimit
+        delete merged.longTrendPeriod
+        delete merged.breakoutLookbackPeriod
+        delete merged.breakoutThreshold
+        delete merged.adxPeriod
+        delete merged.adxThreshold
+        delete merged.exitMaPeriod
+        delete merged.atrMultiplier
+        delete merged.bollPeriod
+        delete merged.bollStd
+        delete merged.reversionThreshold
+        delete merged.momentumPeriod
+        delete merged.spreadThreshold
+        delete merged.featureWindow
+        delete merged.predictionDays
+        delete merged.trainingDays
+        delete merged.confidenceThreshold
+        delete merged.factorTypes
+        delete merged.eventTypes
+        delete merged.timeframe
         delete merged.turnoverLimit
         delete merged.slippageLimit
         delete merged.level1Breaker
@@ -2666,7 +2981,7 @@ Rectangle {
         }
 
         if (structuredValue && typeof structuredValue === "object") {
-            var hasTypedBindingFields = structuredValue.template_id || structuredValue.templateId || structuredValue.file_name || structuredValue.fileName
+            var hasTypedBindingFields = structuredValue.templateId || structuredValue.fileName
             if (hasTypedBindingFields) {
                 normalized.push(normalizeStructuredValue(structuredValue))
                 return normalized
@@ -2677,11 +2992,8 @@ Rectangle {
                 if (!entry || typeof entry !== "object") {
                     continue
                 }
-                if (!entry.phase && entry.stageId) {
-                    entry.phase = entry.stageId
-                }
-                if (!entry.phase) {
-                    entry.phase = key
+                if (!entry.stageId) {
+                    entry.stageId = key
                 }
                 normalized.push(normalizeStructuredValue(entry))
             }
@@ -2696,12 +3008,12 @@ Rectangle {
         if (entries.length > 0) {
             for (var index = 0; index < entries.length; ++index) {
                 var item = entries[index] || ({})
-                var phase = normalizedRuleTemplatePhase(item.phase || item.stageId)
-                if (!phase) {
+                var stageId = normalizedRuleTemplatePhase(item.stageId)
+                if (!stageId) {
                     continue
                 }
-                if (!normalized[phase] || Object.keys(normalized[phase]).length === 0) {
-                    normalized[phase] = item
+                if (!normalized[stageId] || Object.keys(normalized[stageId]).length === 0) {
+                    normalized[stageId] = item
                 }
             }
         }
@@ -2740,22 +3052,22 @@ Rectangle {
                     }
 
                     var binding = {
-                        phase: normalizedRuleTemplatePhase(rule.phase || stageId)
+                        stageId: normalizedRuleTemplatePhase(rule.stageId || stageId)
                     }
 
                     if (fileName) {
-                        binding.file_name = fileName
+                        binding.fileName = fileName
                     }
                     if (filePath) {
-                        binding.file_path = filePath
+                        binding.filePath = filePath
                     }
                     if (templateId) {
-                        binding.template_id = templateId
+                        binding.templateId = templateId
                     }
 
                     var templateName = String(rule.templateName || "").trim()
                     if (templateName) {
-                        binding.template_display_name = templateName
+                        binding.templateDisplayName = templateName
                     }
 
                     var summary = String(rule.summary || "").trim()
@@ -2770,31 +3082,31 @@ Rectangle {
 
                     var termId = String(rule.termId || "").trim()
                     if (termId) {
-                        binding.term_id = termId
+                        binding.termId = termId
                     }
 
                     var termName = String(rule.termName || "").trim()
                     if (termName) {
-                        binding.term_display_name = termName
+                        binding.termDisplayName = termName
                     }
                     if (rule.defaultInjected) {
-                        binding.default_injected = true
+                        binding.defaultInjected = true
                     }
 
                     if (groupId) {
-                        binding.group_id = groupId
+                        binding.groupId = groupId
                     }
                     if (groupTitle) {
-                        binding.group_title = groupTitle
+                        binding.groupTitle = groupTitle
                     }
                     if (groupRole) {
-                        binding.group_role = groupRole
+                        binding.groupRole = groupRole
                     }
                     if (groupOperator) {
-                        binding.group_operator = groupOperator
+                        binding.groupOperator = groupOperator
                     }
                     if (groupMinMatchCount > 0) {
-                        binding.group_min_match_count = groupMinMatchCount
+                        binding.groupMinMatchCount = groupMinMatchCount
                     }
 
                     var bindingSignature = JSON.stringify(binding)
@@ -2831,10 +3143,10 @@ Rectangle {
         }
 
         var bindings = []
-        var phases = ["market", "eligibility", "signal", "portfolio", "rebalance", "execution", "account_risk"]
-        for (var index = 0; index < phases.length; ++index) {
-            var phase = phases[index]
-            var binding = (boundRuleTemplateBindings || ({}))[phase]
+        var stageIds = ["market", "eligibility", "signal", "portfolio", "rebalance", "execution", "account_risk"]
+        for (var index = 0; index < stageIds.length; ++index) {
+            var stageId = stageIds[index]
+            var binding = (boundRuleTemplateBindings || ({}))[stageId]
             if (binding && Object.keys(binding).length > 0) {
                 bindings.push(binding)
             }
@@ -2861,8 +3173,8 @@ Rectangle {
     function primaryRuleTemplateBinding(bindingList) {
         var bindings = Array.isArray(bindingList) ? bindingList : boundRuleTemplateBindingList()
         for (var index = 0; index < bindings.length; ++index) {
-            var phase = normalizedRuleTemplatePhase(bindings[index].phase)
-            if (phase === "signal") {
+            var stageId = normalizedRuleTemplatePhase(bindings[index].stageId)
+            if (stageId === "signal") {
                 return bindings[index]
             }
         }
@@ -2877,7 +3189,7 @@ Rectangle {
         var stageList = Array.isArray(stages) ? stages : (root.ruleComposerStages || [])
         var preferredStageId = String(root.selectedRuleComposerStageId || "").trim()
         var preferredGroupId = String(root.selectedRuleComposerGroupId || "").trim()
-        var fallbackStageId = normalizedRuleTemplatePhase((suggestion && suggestion.phase) || preferredStageId || "signal")
+        var fallbackStageId = normalizedRuleTemplatePhase((suggestion && suggestion.stageId) || preferredStageId || "signal")
 
         function findStage(stageId) {
             for (var stageIndex = 0; stageIndex < stageList.length; ++stageIndex) {
@@ -2920,7 +3232,7 @@ Rectangle {
         var targetLocation = resolveSuggestionTargetLocation(suggestion, nextStages)
         var targetStageId = targetLocation.stageId
         var targetGroupId = targetLocation.groupId
-        var templateId = suggestion.template_id || suggestion.templateId || ""
+        var templateId = suggestion.templateId || ""
 
         for (var stageIndex = 0; stageIndex < nextStages.length; ++stageIndex) {
             var stage = nextStages[stageIndex]
@@ -2947,14 +3259,14 @@ Rectangle {
                     resolvedGroup.rules[ruleIndex] = {
                         instanceId: existingRule.instanceId || ("rule_" + Date.now()),
                         templateId: templateId,
-                        templateName: suggestion.template_display_name || suggestion.templateDisplayName || templateId || "未命名模板",
+                        templateName: suggestion.templateDisplayName || templateId || "未命名模板",
                         summary: suggestion.summary || "",
-                        phase: targetStageId,
-                        fileName: suggestion.file_name || suggestion.fileName || existingRule.fileName || "",
-                        filePath: suggestion.file_path || suggestion.filePath || existingRule.filePath || "",
-                        ready: !!(suggestion.is_ready),
-                        termId: suggestion.term_id || suggestion.termId || "",
-                        termName: suggestion.term_display_name || suggestion.termDisplayName || "",
+                        stageId: targetStageId,
+                        fileName: suggestion.fileName || existingRule.fileName || "",
+                        filePath: suggestion.filePath || existingRule.filePath || "",
+                        ready: !!suggestion.isReady,
+                        termId: suggestion.termId || "",
+                        termName: suggestion.termDisplayName || "",
                         category: suggestion.category || ""
                     }
                     updated = true
@@ -2966,14 +3278,14 @@ Rectangle {
                 resolvedGroup.rules.push({
                     instanceId: "rule_" + Date.now() + "_" + Math.floor(Math.random() * 1000),
                     templateId: templateId,
-                    templateName: suggestion.template_display_name || suggestion.templateDisplayName || templateId || "未命名模板",
+                    templateName: suggestion.templateDisplayName || templateId || "未命名模板",
                     summary: suggestion.summary || "",
-                    phase: targetStageId,
-                    fileName: suggestion.file_name || suggestion.fileName || "",
-                    filePath: suggestion.file_path || suggestion.filePath || "",
-                    ready: !!(suggestion.is_ready),
-                    termId: suggestion.term_id || suggestion.termId || "",
-                    termName: suggestion.term_display_name || suggestion.termDisplayName || "",
+                    stageId: targetStageId,
+                    fileName: suggestion.fileName || "",
+                    filePath: suggestion.filePath || "",
+                    ready: !!suggestion.isReady,
+                    termId: suggestion.termId || "",
+                    termName: suggestion.termDisplayName || "",
                     category: suggestion.category || ""
                 })
             }
@@ -3076,11 +3388,11 @@ Rectangle {
         }
     }
 
-    function removeRuleTemplateBinding(phase) {
-        var key = normalizedRuleTemplatePhase(phase)
+    function removeRuleTemplateBinding(stageId) {
+        var key = normalizedRuleTemplatePhase(stageId)
         var nextBindings = normalizeRuleTemplateBindings(boundRuleTemplateBindings)
         var nextEntries = normalizeRuleTemplateBindingEntries(boundRuleTemplateBindingEntries).filter(function(entry) {
-            return normalizedRuleTemplatePhase(entry.phase) !== key
+            return normalizedRuleTemplatePhase(entry.stageId) !== key
         })
         delete nextBindings[key]
         boundRuleTemplateBindingEntries = nextEntries
@@ -3103,19 +3415,19 @@ Rectangle {
 
         var targetLocation = resolveSuggestionTargetLocation(suggestion)
         var nextBinding = {
-            template_id: suggestion.template_id || suggestion.templateId || "",
-            template_display_name: suggestion.template_display_name || suggestion.templateDisplayName || "",
-            term_id: suggestion.term_id || suggestion.termId || "",
-            term_display_name: suggestion.term_display_name || suggestion.termDisplayName || "",
-            file_name: suggestion.file_name || suggestion.fileName || "",
-            file_path: suggestion.file_path || suggestion.filePath || "",
-            phase: normalizedRuleTemplatePhase(targetLocation.stageId || suggestion.phase || "signal"),
+            templateId: suggestion.templateId || "",
+            templateDisplayName: suggestion.templateDisplayName || "",
+            termId: suggestion.termId || "",
+            termDisplayName: suggestion.termDisplayName || "",
+            fileName: suggestion.fileName || "",
+            filePath: suggestion.filePath || "",
+            stageId: normalizedRuleTemplatePhase(targetLocation.stageId || suggestion.stageId || "signal"),
             category: suggestion.category || "",
             summary: suggestion.summary || ""
         }
         var nextBindings = normalizeRuleTemplateBindings(boundRuleTemplateBindings)
         var nextEntries = normalizeRuleTemplateBindingEntries(boundRuleTemplateBindingEntries)
-        nextBindings[nextBinding.phase] = nextBinding
+        nextBindings[nextBinding.stageId] = nextBinding
         nextEntries.push(nextBinding)
         boundRuleTemplateBindingEntries = nextEntries
         boundRuleTemplateBindings = nextBindings
@@ -3143,11 +3455,27 @@ Rectangle {
 
     function applyPersistedStrategy(strategyTypeIndex, parameters, advancedOptions) {
         var sourceParams = parameters || ({})
+        if (!sourceParams || typeof sourceParams !== "object" || Array.isArray(sourceParams)) {
+            throw new Error("编辑参数必须为对象，且符合新字段合同")
+        }
+        if (sourceParams.rule_template_bindings !== undefined
+                && sourceParams.rule_template_bindings !== null
+                && sourceParams.rule_template_bindings !== "") {
+            throw new Error("检测到旧字段 rule_template_bindings，当前仅支持 rule_composer_state 新结构")
+        }
+        if (sourceParams.rule_profile === undefined || sourceParams.rule_profile === null || sourceParams.rule_profile === "") {
+            throw new Error("编辑参数缺少 rule_profile，当前仅支持新字段合同")
+        }
+        if (sourceParams.rule_composer_state === undefined || sourceParams.rule_composer_state === null || sourceParams.rule_composer_state === "") {
+            throw new Error("编辑参数缺少 rule_composer_state，当前仅支持新字段合同")
+        }
         var mappedValues = importedFactorContextPayload(sourceParams)
         var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
         var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
-        var persistedExecutionPolicy = normalizeStructuredValue(sourceParams.execution_policy) || ({})
-        var persistedBacktestAssumptions = normalizeStructuredValue(sourceParams.backtest_assumptions) || ({})
+        var persistedComposerState = normalizeStructuredValue(sourceParams.rule_composer_state) || ({})
+        if (!Array.isArray(persistedComposerState.stages) || persistedComposerState.stages.length === 0) {
+            throw new Error("rule_composer_state.stages 缺失或为空，无法进入编辑态")
+        }
 
         function assignIfPresent(targetKey, sourceKeys, transform) {
             for (var index = 0; index < sourceKeys.length; ++index) {
@@ -3155,21 +3483,6 @@ Rectangle {
                 var resolvedValue = sourceParams[key]
                 if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
                     resolvedValue = persistedRuleProfile[key]
-                }
-                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
-                    resolvedValue = persistedExecutionPolicy[key]
-                }
-                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
-                    resolvedValue = persistedBacktestAssumptions[key]
-                }
-                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
-                    if (key === "stopLoss") {
-                        resolvedValue = persistedRuleProfile.stopLossPercent
-                    } else if (key === "takeProfit") {
-                        resolvedValue = persistedRuleProfile.takeProfitPercent
-                    } else if (key === "rebalanceDays") {
-                        resolvedValue = persistedRuleProfile.rebalanceDays
-                    }
                 }
                 if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
                     continue
@@ -3187,46 +3500,63 @@ Rectangle {
             return numeric <= 1 ? numeric * 100 : numeric
         }
 
-        assignIfPresent("positionSize", ["positionSize"], ratioToPercent)
-        assignIfPresent("stopLoss", ["stopLoss"], ratioToPercent)
-        assignIfPresent("takeProfit", ["takeProfit"], ratioToPercent)
-        assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
-        assignIfPresent("rebalanceDays", ["rebalanceDays"], Number)
+        assignIfPresent("allowShort", ["allowShort"], Boolean)
+        assignIfPresent("maxPositions", ["maxPositions"], Number)
+        assignIfPresent("maxWeightPerStock", ["maxWeightPerStock"], Number)
+        assignIfPresent("minWeightPerStock", ["minWeightPerStock"], Number)
+        assignIfPresent("weightScheme", ["weightScheme"], Number)
+        assignIfPresent("rebalanceFrequency", ["rebalanceFrequency"], Number)
 
-        if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TrendFollowing) {
+        if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.DoubleMovingAverage) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
             assignIfPresent("slowPeriod", ["slowPeriod"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TrendBreakout) {
-            assignIfPresent("longTrendPeriod", ["longTrendPeriod"], Number)
-            assignIfPresent("breakoutLookbackPeriod", ["breakoutLookbackPeriod"], Number)
-            assignIfPresent("breakoutThreshold", ["breakoutThreshold"], ratioToPercent)
-            assignIfPresent("adxPeriod", ["adxPeriod"], Number)
-            assignIfPresent("adxThreshold", ["adxThreshold"], Number)
-            assignIfPresent("exitMaPeriod", ["exitMaPeriod"], Number)
+            assignIfPresent("priceField", ["priceField"])
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TurtleBreakout) {
+            assignIfPresent("channelPeriod", ["channelPeriod"], Number)
+            assignIfPresent("breakoutMultiplier", ["breakoutMultiplier"], Number)
             assignIfPresent("atrPeriod", ["atrPeriod"], Number)
-            assignIfPresent("atrMultiplier", ["atrMultiplier"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MeanReversion) {
-            assignIfPresent("bollPeriod", ["bollPeriod"], Number)
-            assignIfPresent("bollStd", ["bollStd"], Number)
-            assignIfPresent("reversionThreshold", ["reversionThreshold"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Momentum) {
-            assignIfPresent("momentumPeriod", ["momentumPeriod"], Number)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.BollingerBandMeanReversion) {
+            assignIfPresent("period", ["period"], Number)
+            assignIfPresent("standardDeviationMultiplier", ["standardDeviationMultiplier"], Number)
+            assignIfPresent("entryThreshold", ["entryThreshold"], Number)
+            assignIfPresent("exitThreshold", ["exitThreshold"], Number)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RsiMeanReversion) {
+            assignIfPresent("period", ["period"], Number)
+            assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
+            assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactorSelection) {
+            assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Arbitrage) {
-            assignIfPresent("spreadThreshold", ["spreadThreshold"], Number)
+            assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.EarningsSurprise) {
+            assignIfPresent("surpriseThreshold", ["surpriseThreshold"], Number)
+            assignIfPresent("holdDays", ["holdDays"], Number)
+            assignIfPresent("eventSources", ["eventSources"])
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.StatisticalPairTrading) {
+            assignIfPresent("tradingPair", ["tradingPair"])
+            assignIfPresent("hedgeRatio", ["hedgeRatio"], Number)
+            assignIfPresent("lookback", ["lookback"], Number)
             assignIfPresent("entryZScore", ["entryZScore"], Number)
             assignIfPresent("exitZScore", ["exitZScore"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearning) {
-            assignIfPresent("featureWindow", ["featureWindow"], Number)
-            assignIfPresent("predictionDays", ["predictionDays"], Number)
-            assignIfPresent("trainingDays", ["trainingDays"], Number)
-            assignIfPresent("confidenceThreshold", ["confidenceThreshold"], ratioToPercent)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor) {
-            assignIfPresent("factorTypes", ["factorTypes"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.HighFrequency) {
-            assignIfPresent("timeframe", ["timeframe"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.EventDriven) {
-            assignIfPresent("eventTypes", ["eventTypes"])
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RiskParityAllocation) {
+            assignIfPresent("assets", ["assets"])
+            assignIfPresent("volatilityLookback", ["volatilityLookback"], Number)
+            assignIfPresent("targetVolatility", ["targetVolatility"], Number)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearningSelection) {
+            assignIfPresent("modelId", ["modelId"], Number)
+            assignIfPresent("featureIds", ["featureIds"])
+            assignIfPresent("topN", ["topN"], Number)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.OrderFlowImbalance) {
+            assignIfPresent("depthLevels", ["depthLevels"], Number)
+            assignIfPresent("imbalanceThreshold", ["imbalanceThreshold"], Number)
+            assignIfPresent("maxHoldSeconds", ["maxHoldSeconds"], Number)
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.VolatilitySpread) {
+            assignIfPresent("underlying", ["underlying"])
+            assignIfPresent("optionChainFilter", ["optionChainFilter"])
+            assignIfPresent("historicalVolatilityWindow", ["historicalVolatilityWindow"], Number)
+            assignIfPresent("entrySpreadUpper", ["entrySpreadUpper"], Number)
+            assignIfPresent("entrySpreadLower", ["entrySpreadLower"], Number)
+            assignIfPresent("deltaNeutral", ["deltaNeutral"], Boolean)
         } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Custom) {
             assignIfPresent("customCode", ["customCode"])
         }
@@ -3235,58 +3565,41 @@ Rectangle {
         root.selectedStrategyTypeIndex = normalizedStrategyTypeIndex
         loadParamConfigs()
         var persistedFactorOverlay = normalizeStructuredValue(sourceParams.factor_overlay) || ({})
-        var persistedComposerState = normalizeStructuredValue(
-            sourceParams.rule_composer_state
-            || persistedRuleProfile.ruleComposerState
-            || persistedRuleProfile.rule_composer_state
-        )
-            || ({})
+        var hasPersistedComposerStages = true
         var persistedBindingEntries = normalizeRuleTemplateBindingEntries(
-            sourceParams.rule_template_bindings
-            || sourceParams.rule_template_binding
-            || extractRuleTemplateBindingsFromComposerState(persistedComposerState)
+            extractRuleTemplateBindingsFromComposerState(persistedComposerState)
             || ({})
         )
         boundRuleTemplateBindingEntries = persistedBindingEntries
         boundRuleTemplateBindings = normalizeRuleTemplateBindings(persistedBindingEntries)
         var persistedStrategyProfile = persistedRuleProfile.strategyProfile
-            || persistedRuleProfile.strategy_profile
             || ({})
 
         console.log("applyPersistedStrategy:",
                 "strategyTypeIndex=", normalizedStrategyTypeIndex,
                 "bindingCount=", persistedBindingEntries.length,
-                "hasComposerStages=", !!(persistedComposerState && persistedComposerState.stages),
+                "hasComposerStages=", hasPersistedComposerStages,
                 "composerStageCount=", (persistedComposerState && persistedComposerState.stages && persistedComposerState.stages.length) || 0,
+                "forbidDefaultRuleBuildInEdit=", hasPersistedComposerStages,
                 "overlayEnabled=", !!persistedFactorOverlay.enabled,
                 "overlayAllocCount=", Array.isArray(persistedFactorOverlay.allocations) ? persistedFactorOverlay.allocations.length : 0)
 
-        root.strategyProfile = Object.keys(persistedStrategyProfile).length > 0
-            ? persistedStrategyProfile
-            : Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        if (!isPlainObject(persistedStrategyProfile) || Object.keys(persistedStrategyProfile).length === 0) {
+            throw new Error("rule_profile.strategyProfile 缺失，无法进入编辑态")
+        }
+        root.strategyProfile = persistedStrategyProfile
         root.factorOverlay = normalizeFactorOverlay(persistedFactorOverlay, sourceParams)
 
-        if (persistedComposerState && Array.isArray(persistedComposerState.stages) && persistedComposerState.stages.length > 0) {
-            root.ruleComposerStages = normalizeStructuredValue(persistedComposerState.stages) || []
-            var preferredSelection = firstPopulatedRuleComposerSelection(
-                root.ruleComposerStages,
-                persistedComposerState.selectedStageId || root.selectedRuleComposerStageId,
-                persistedComposerState.selectedGroupId || root.selectedRuleComposerGroupId
-            )
-            root.selectedRuleComposerStageId = preferredSelection.stageId || root.selectedRuleComposerStageId
-            root.selectedRuleComposerGroupId = preferredSelection.groupId || root.selectedRuleComposerGroupId
-            ensureSelectedRuleComposerGroup()
-        } else {
-            rebuildRuleComposerState(false)
-            var rebuiltSelection = firstPopulatedRuleComposerSelection(
-                root.ruleComposerStages,
-                root.selectedRuleComposerStageId,
-                root.selectedRuleComposerGroupId
-            )
-            root.selectedRuleComposerStageId = rebuiltSelection.stageId || root.selectedRuleComposerStageId
-            root.selectedRuleComposerGroupId = rebuiltSelection.groupId || root.selectedRuleComposerGroupId
-            ensureSelectedRuleComposerGroup()
-        }
+        root.forbidDefaultRuleBuildInEdit = true
+        root.ruleComposerStages = normalizeStructuredValue(persistedComposerState.stages) || []
+        var preferredSelection = firstPopulatedRuleComposerSelection(
+            root.ruleComposerStages,
+            persistedComposerState.selectedStageId || root.selectedRuleComposerStageId,
+            persistedComposerState.selectedGroupId || root.selectedRuleComposerGroupId
+        )
+        root.selectedRuleComposerStageId = preferredSelection.stageId || root.selectedRuleComposerStageId
+        root.selectedRuleComposerGroupId = preferredSelection.groupId || root.selectedRuleComposerGroupId
+        ensureSelectedRuleComposerGroup()
 
                 console.log("applyPersistedStrategy resolved:",
                     "stageCount=", root.ruleComposerStages.length,
@@ -3297,10 +3610,16 @@ Rectangle {
 
         root.strategyParameters = decorateParameters(mappedValues)
         root.parametersChanged(root.strategyParameters)
-        if (dynamicGenerator) {
-            dynamicGenerator.setValues(mappedValues)
-            root.parametersValid = dynamicGenerator.validateAll()
+        if (commonDynamicGenerator) {
+            commonDynamicGenerator.setValues(mappedValues)
+            root.commonParametersValid = commonDynamicGenerator.validateAll()
         }
+        if (personalizedDynamicGenerator) {
+            personalizedDynamicGenerator.setValues(mappedValues)
+            root.personalizedParametersValid = personalizedDynamicGenerator.validateAll()
+        }
+        syncDecoratedParameters(mappedValues)
+        updateParameterValidationState()
 
         var options = advancedOptions || ({})
         root.enableAdvancedOptions = !!options.enabled
@@ -3328,8 +3647,11 @@ Rectangle {
     
     // 重置表单
     function reset() {
-        if (dynamicGenerator) {
-            dynamicGenerator.reset()
+        if (commonDynamicGenerator) {
+            commonDynamicGenerator.reset()
+        }
+        if (personalizedDynamicGenerator) {
+            personalizedDynamicGenerator.reset()
         }
         if (parameterOptimizationRangeCombo) parameterOptimizationRangeCombo.currentIndex = 1
         if (sensitivityAnalysisCombo) sensitivityAnalysisCombo.currentIndex = 1
@@ -3338,11 +3660,16 @@ Rectangle {
         if (customParameterScriptTextArea) customParameterScriptTextArea.text = ""
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
+        root.forbidDefaultRuleBuildInEdit = false
         root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         root.factorOverlay = defaultFactorOverlay()
         rebuildRuleComposerState(false)
         root.strategyParameters = decorateParameters({})
+        root.commonStrategyParameters = ({})
+        root.personalizedStrategyParameters = ({})
         root.parametersValid = false
+        root.commonParametersValid = true
+        root.personalizedParametersValid = true
         root.enableAdvancedOptions = false
         emitValidationState({})
     }
@@ -3375,6 +3702,7 @@ Rectangle {
         if (root.suppressRuleComposerReset) {
             return
         }
+        root.forbidDefaultRuleBuildInEdit = false
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         rebuildRuleComposerState(true)
         syncDecoratedParameters()
