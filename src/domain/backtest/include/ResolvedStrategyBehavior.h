@@ -16,13 +16,19 @@ struct ResolvedStrategyBehavior {
 
 enum class StrategyStoredType : int {
     Unknown = -1,
-    TrendFollowing = 0,
-    MeanReversion = 1,
-    Alpha = 2,
-    Arbitrage = 3,
-    HighFrequency = 4,
-    Portfolio = 5,
-    Custom = 6,
+    DOUBLE_MOVING_AVERAGE = 0,
+    TURTLE_BREAKOUT = 1,
+    BOLLINGER_BAND_MEAN_REVERSION = 2,
+    RSI_MEAN_REVERSION = 3,
+    MULTI_FACTOR_SELECTION = 4,
+    EARNINGS_SURPRISE = 5,
+    STATISTICAL_PAIR_TRADING = 6,
+    RISK_PARITY_ALLOCATION = 7,
+    MACHINE_LEARNING_SELECTION = 8,
+    ORDER_FLOW_IMBALANCE = 9,
+    VOLATILITY_SPREAD = 10,
+    Portfolio = 11,
+    Custom = 12,
 };
 
 struct ResolvedStrategyIdentity {
@@ -36,36 +42,20 @@ struct ResolvedStrategyIdentity {
     }
 };
 
-inline StrategyStoredType strategyStoredTypeForBehavior(StrategyBehaviorKind behaviorKind)
-{
-    switch (behaviorKind) {
-    case StrategyBehaviorKind::TrendFollowing:
-        return StrategyStoredType::TrendFollowing;
-    case StrategyBehaviorKind::MeanReversion:
-        return StrategyStoredType::MeanReversion;
-    case StrategyBehaviorKind::Momentum:
-    case StrategyBehaviorKind::MultiFactor:
-    case StrategyBehaviorKind::MachineLearning:
-        return StrategyStoredType::Alpha;
-    case StrategyBehaviorKind::Arbitrage:
-        return StrategyStoredType::Arbitrage;
-    case StrategyBehaviorKind::HighFrequency:
-        return StrategyStoredType::HighFrequency;
-    case StrategyBehaviorKind::EventDriven:
-    case StrategyBehaviorKind::Custom:
-    default:
-        return StrategyStoredType::Custom;
-    }
-}
-
 inline ResolvedStrategyIdentity resolveStrategyStoredType(const int storedTypeIndex)
 {
     switch (static_cast<StrategyStoredType>(storedTypeIndex)) {
-    case StrategyStoredType::TrendFollowing:
-    case StrategyStoredType::MeanReversion:
-    case StrategyStoredType::Alpha:
-    case StrategyStoredType::Arbitrage:
-    case StrategyStoredType::HighFrequency:
+    case StrategyStoredType::DOUBLE_MOVING_AVERAGE:
+    case StrategyStoredType::TURTLE_BREAKOUT:
+    case StrategyStoredType::BOLLINGER_BAND_MEAN_REVERSION:
+    case StrategyStoredType::RSI_MEAN_REVERSION:
+    case StrategyStoredType::MULTI_FACTOR_SELECTION:
+    case StrategyStoredType::EARNINGS_SURPRISE:
+    case StrategyStoredType::STATISTICAL_PAIR_TRADING:
+    case StrategyStoredType::RISK_PARITY_ALLOCATION:
+    case StrategyStoredType::MACHINE_LEARNING_SELECTION:
+    case StrategyStoredType::ORDER_FLOW_IMBALANCE:
+    case StrategyStoredType::VOLATILITY_SPREAD:
     case StrategyStoredType::Portfolio:
     case StrategyStoredType::Custom:
         return ResolvedStrategyIdentity{static_cast<StrategyStoredType>(storedTypeIndex), {}, true};

@@ -30,16 +30,16 @@ inline bool rowOwnsMarketBarFields(const QVariantMap& row)
             factor::bridge::CleanedDataFieldGroup::MarketBar);
 }
 
-inline std::string normalizeTradeDate(const std::string& rawDate)
+inline QString normalizeTradeDateText(const QString& rawDate)
 {
-    const QString trimmed = QString::fromStdString(rawDate).trimmed();
+    const QString trimmed = rawDate.trimmed();
     if (trimmed.isEmpty()) {
         return {};
     }
 
     const QDateTime isoDateTime = QDateTime::fromString(trimmed, Qt::ISODate);
     if (isoDateTime.isValid()) {
-        return isoDateTime.date().toString("yyyy-MM-dd").toStdString();
+        return isoDateTime.date().toString(QStringLiteral("yyyy-MM-dd"));
     }
 
     const QStringList dateTimeFormats = {
@@ -51,7 +51,7 @@ inline std::string normalizeTradeDate(const std::string& rawDate)
     for (const QString& format : dateTimeFormats) {
         const QDateTime dateTime = QDateTime::fromString(trimmed, format);
         if (dateTime.isValid()) {
-            return dateTime.date().toString("yyyy-MM-dd").toStdString();
+            return dateTime.date().toString(QStringLiteral("yyyy-MM-dd"));
         }
     }
 
@@ -62,19 +62,110 @@ inline std::string normalizeTradeDate(const std::string& rawDate)
     for (const QString& format : dateFormats) {
         const QDate date = QDate::fromString(trimmed, format);
         if (date.isValid()) {
-            return date.toString("yyyy-MM-dd").toStdString();
+            return date.toString(QStringLiteral("yyyy-MM-dd"));
         }
     }
 
     const int firstSpace = trimmed.indexOf(' ');
     if (firstSpace > 0) {
-        const QDate date = QDate::fromString(trimmed.left(firstSpace), "yyyy-MM-dd");
+        const QDate date = QDate::fromString(trimmed.left(firstSpace), QStringLiteral("yyyy-MM-dd"));
         if (date.isValid()) {
-            return date.toString("yyyy-MM-dd").toStdString();
+            return date.toString(QStringLiteral("yyyy-MM-dd"));
         }
     }
 
-    return trimmed.toStdString();
+    return trimmed;
+}
+
+inline QString tradeDateFromRow(const QVariantMap& row)
+{
+    return normalizeTradeDateText(
+        row.value(factor::bridge::CommonFieldKeys::TRADE_DATE,
+                  row.value(factor::bridge::LegacyCleaningFieldKeys::DATE,
+                            row.value(QStringLiteral("disclosure_date")))).toString());
+}
+
+inline QString symbolFromRow(const QVariantMap& row)
+{
+    return row.value(factor::bridge::CommonFieldKeys::SYMBOL).toString().trimmed().toUpper();
+}
+
+inline bool rowHasBacktestableMarketBarFields(const QVariantMap& row)
+{
+    if (!rowOwnsMarketBarFields(row)) {
+        return false;
+    }
+
+    const QString symbol = symbolFromRow(row);
+    const QString tradeDate = tradeDateFromRow(row);
+    if (symbol.isEmpty() || tradeDate.isEmpty()) {
+        return false;
+    }
+
+    bool openOk = false;
+    bool highOk = false;
+    bool lowOk = false;
+    bool closeOk = false;
+    bool volumeOk = false;
+
+    const double open = row.value(factor::bridge::MarketBarFieldKeys::OPEN).toDouble(&openOk);
+    const double high = row.value(factor::bridge::MarketBarFieldKeys::HIGH).toDouble(&highOk);
+    const double low = row.value(factor::bridge::MarketBarFieldKeys::LOW).toDouble(&lowOk);
+    const double close = row.value(factor::bridge::MarketBarFieldKeys::CLOSE).toDouble(&closeOk);
+    const double volume = row.value(factor::bridge::MarketBarFieldKeys::VOLUME).toDouble(&volumeOk);
+
+    return openOk && highOk && lowOk && closeOk && volumeOk
+        && std::isfinite(open) && std::isfinite(high) && std::isfinite(low) && std::isfinite(close) && std::isfinite(volume)
+        && open > 0.0 && high > 0.0 && low > 0.0 && close > 0.0 && volume > 0.0;
+}
+
+inline std::unordered_map<std::string, std::vector<std::string>> buildSymbolsByDateFromRows(
+    const QVariantList& rows)
+{
+    std::unordered_map<std::string, std::unordered_set<std::string>> dedupedSymbolsByDate;
+    dedupedSymbolsByDate.reserve(static_cast<size_t>(rows.size()));
+
+    for (const QVariant& rowValue : rows) {
+        const QVariantMap row = rowValue.toMap();
+        if (!rowHasBacktestableMarketBarFields(row)) {
+            continue;
+        }
+
+        const std::string tradeDate = tradeDateFromRow(row).toStdString();
+        const std::string symbol = symbolFromRow(row).toStdString();
+        if (tradeDate.empty() || symbol.empty()) {
+            continue;
+        }
+
+        dedupedSymbolsByDate[tradeDate].insert(symbol);
+    }
+
+    std::unordered_map<std::string, std::vector<std::string>> symbolsByDate;
+    symbolsByDate.reserve(dedupedSymbolsByDate.size());
+    for (auto& [tradeDate, symbolSet] : dedupedSymbolsByDate) {
+        std::vector<std::string> symbols(symbolSet.begin(), symbolSet.end());
+        std::sort(symbols.begin(), symbols.end());
+        symbolsByDate.emplace(tradeDate, std::move(symbols));
+    }
+    return symbolsByDate;
+}
+
+inline std::vector<std::string> extractAvailableSymbolsForDateFromRows(const QVariantList& rows,
+                                                                       const QString& tradeDate)
+{
+    const QString normalizedDate = normalizeTradeDateText(tradeDate);
+    if (normalizedDate.isEmpty()) {
+        return {};
+    }
+
+    const auto symbolsByDate = buildSymbolsByDateFromRows(rows);
+    const auto it = symbolsByDate.find(normalizedDate.toStdString());
+    return it == symbolsByDate.end() ? std::vector<std::string>{} : it->second;
+}
+
+inline std::string normalizeTradeDate(const std::string& rawDate)
+{
+    return normalizeTradeDateText(QString::fromStdString(rawDate)).toStdString();
 }
 
 inline bool isBarWithinRange(const CachedMarketBar& bar,
@@ -183,13 +274,8 @@ inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& 
     for (const QVariant& rowValue : rows) {
         const QVariantMap row = rowValue.toMap();
         const bool marketBarOwner = rowOwnsMarketBarFields(row);
-        const QString symbol = row.value(factor::bridge::CommonFieldKeys::SYMBOL).toString().trimmed();
-        QString effectiveDate = row.value(
-            factor::bridge::CommonFieldKeys::TRADE_DATE,
-            row.value(factor::bridge::LegacyCleaningFieldKeys::DATE)).toString().trimmed();
-        if (effectiveDate.isEmpty()) {
-            effectiveDate = row.value(QStringLiteral("disclosure_date")).toString().trimmed();
-        }
+        const QString symbol = symbolFromRow(row);
+        const QString effectiveDate = tradeDateFromRow(row);
         bool closeOk = false;
         const double close = row.value(factor::bridge::MarketBarFieldKeys::CLOSE).toDouble(&closeOk);
         if (symbol.isEmpty() || effectiveDate.isEmpty()) {

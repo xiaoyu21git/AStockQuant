@@ -329,7 +329,7 @@ ApplicationWindow {
                         marketDataService: Bridge.MarketDataService
                         positionAccountService: Bridge.PositionAccountService
                         tradeExecutionService: Bridge.TradeExecutionService
-                        strategyService: Bridge.StrategyService
+                        strategyService: null
                         marketData: window.marketData
                         statusCards: window.statusCards
                         positions: window.positions

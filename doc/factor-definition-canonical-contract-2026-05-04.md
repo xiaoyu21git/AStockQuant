@@ -290,3 +290,8 @@
 
   1. 只有真正直接 `#include "Bar.h"` 的模块保留 `domain_types`。
   2. 其余 target 一律通过更上游的真实域模块依赖获取传递能力，不再保留历史习惯性直链。
+
+## 十一、补充规则
+
+1. 不允许使用 QString 做类型判断，QString 仅允许用于调试输出。
+2. QVariantMap 仅允许作为 QML 输入参数和返回到 QML 的输出载荷，桥接输出对象名统一为 StrategyManage。

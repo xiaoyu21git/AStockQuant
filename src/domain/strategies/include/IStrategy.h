@@ -1,26 +1,68 @@
 #pragma once
 
-#include <vector>
-#include <string>
-
-#include "Bar.h"
-#include "Signal.h"
+#include "StrategyDefinitionTypes.h"
 
 namespace domain::strategies {
 
 class IStrategy {
 public:
-    virtual ~IStrategy() = default;
+    IStrategy(const StrategyCommonConfig& commonConfig, const StrategyMetadata& metadata);
 
-    // 策略名称
-    virtual std::string name() const = 0;
+    virtual ~IStrategy();
 
-    // 输入最新一根 bar，输出 0~N 个信号
-    virtual std::vector<domain::Signal>
-    onBar(const domain::model::Bar& bar) = 0;
+    virtual StrategyType strategyType() const = 0;
 
-    // 生命周期控制（可选）
-    virtual void reset() {}
+    virtual bool isConfigured() const noexcept;
+
+    const StrategyCommonConfig& commonConfig() const noexcept;
+
+    [[nodiscard]] bool allowsShort() const noexcept;
+
+    [[nodiscard]] bool hasPositionCapacity(int openPositionCount) const noexcept;
+
+    [[nodiscard]] int maxPositions() const noexcept;
+
+    [[nodiscard]] bool hasValidPositionLimit() const noexcept;
+
+    [[nodiscard]] double maxWeightPerStock() const noexcept;
+
+    [[nodiscard]] double minWeightPerStock() const noexcept;
+
+    [[nodiscard]] bool hasValidWeightRange() const noexcept;
+
+    [[nodiscard]] WeightScheme weightScheme() const noexcept;
+
+    [[nodiscard]] RebalanceFrequency rebalanceFrequency() const noexcept;
+
+    [[nodiscard]] bool hasValidRebalanceFrequency() const noexcept;
+
+    [[nodiscard]] bool hasValidCommonConfig() const noexcept;
+
+    [[nodiscard]] int rebalanceStepInterval() const noexcept;
+
+    [[nodiscard]] bool shouldRebalanceOnStep(int observedStepCount) const noexcept;
+
+    [[nodiscard]] const std::string& strategyName() const noexcept;
+
+    [[nodiscard]] const std::string& strategyDescription() const noexcept;
+
+    [[nodiscard]] const StrategyUuid& strategyUuid() const noexcept;
+
+    [[nodiscard]] const StrategyMetadata& metadata() const noexcept;
+
+    [[nodiscard]] const std::vector<FactorId>& factorIds() const noexcept;
+
+    [[nodiscard]] const std::vector<RuleId>& ruleIds() const noexcept;
+
+    [[nodiscard]] bool isEnabled() const noexcept;
+
+    void setMetadata(const StrategyMetadata& metadata);
+
+    virtual void reset();
+
+private:
+    StrategyCommonConfig commonConfig_;
+    StrategyMetadata metadata_;
 };
 
 } // namespace domain::strategies

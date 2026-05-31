@@ -68,7 +68,7 @@ Item {
     property bool parametersLoaded: false
     readonly property var riskConfigService: Bridge.RiskConfigService
     readonly property var riskMonitorService: Bridge.RiskMonitorService
-    readonly property var strategyService: Bridge.StrategyService
+    readonly property var strategyService: null
     readonly property int loadedParamCount: dynamicParamConfigs.length
     readonly property real varUsagePercent: riskMonitorService ? riskMonitorService.varUsagePercent : 68
     readonly property real currentDrawdownPercent: riskMonitorService ? riskMonitorService.currentDrawdownPercent : -4.2
@@ -1371,45 +1371,42 @@ Item {
         if (!strategy) {
             return ({})
         }
-        return strategy.parameters || strategy.strategy_params || strategy.strategyParams || ({})
+        return strategy.parameters || ({})
     }
 
     function getStrategyPerformance(strategy) {
         if (!strategy) {
             return ({})
         }
-        return strategy.performance_metrics || strategy.performanceMetrics || ({})
+        return strategy.performanceMetrics || ({})
     }
 
     function getLatestBacktest(strategy) {
         var performance = getStrategyPerformance(strategy)
-        return performance.latestBacktest || performance.latest_backtest || ({})
+        return performance.latestBacktest || ({})
     }
 
     function getStrategyAdvancedOptions(strategy) {
-        if (!strategy) {
-            return ({})
-        }
-        return strategy.advanced_options || ({})
+        return ({})
     }
 
     function getBacktestHistory(strategy) {
         var performance = getStrategyPerformance(strategy)
-        return performance.backtestHistory || performance.backtest_history || []
+        return performance.backtestHistory || []
     }
 
     function resolveStrategyName(strategy) {
         if (!strategy) {
             return "未命名策略"
         }
-        return strategy.strategy_name || strategy.strategyName || strategy.name || "未命名策略"
+        return strategy.strategyName || "未命名策略"
     }
 
     function resolveStrategyId(strategy) {
         if (!strategy) {
             return ""
         }
-        return strategy.strategy_id || strategy.strategyId || strategy.id || ""
+        return strategy.strategyId || ""
     }
 
     function normalizePercentFromRuntime(value) {

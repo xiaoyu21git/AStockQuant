@@ -238,8 +238,11 @@ void CleanedDataController::refreshDatasets()
         
         qDebug() << "CleanedDataController: Got" << allInfos.size() << "datasets from cache";
         
-        // 这里不再做前置过滤，统一把缓存里的数据集交给上层页面/回测控制器按可回测条件筛选。
         for (const ::DataServiceCache::DataSetInfo& info : allInfos) {
+            if (!isCleanedDatasetInfo(info)) {
+                continue;
+            }
+
             QStringList tags = info.tags;
             QVariantMap dataset;
             dataset["id"] = info.id;

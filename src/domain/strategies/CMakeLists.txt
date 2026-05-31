@@ -13,4 +13,5 @@ target_include_directories(domain_strategies
         include
     PRIVATE
         src
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
 )

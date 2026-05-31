@@ -54,7 +54,7 @@ Item {
     readonly property var tradeExecutionService: Bridge.TradeExecutionService
     readonly property var tradingConnectionConfigService: Bridge.TradingConnectionConfigService
     readonly property var tradingRuntimeStatusService: Bridge.TradingRuntimeStatusService
-    readonly property var strategyService: Bridge.StrategyService
+    readonly property var strategyService: null
     readonly property var uiLifecycleCoordinator: Bridge.UiLifecycleCoordinator
     readonly property var tradingConfiguration: tradingConnectionConfigService ? (tradingConnectionConfigService.currentConfiguration || ({})) : ({})
     readonly property string boundStrategyId: String(tradingConfiguration.boundStrategyId || "").trim()
@@ -311,8 +311,8 @@ Item {
 
     function matchesBoundStrategyPayload(payload) {
         var data = payload || ({})
-        var payloadStrategyId = String(data.strategyId || data.strategy_id || "").trim()
-        var payloadRuntimeStrategyId = String(data.runtimeStrategyId || data.runtime_strategy_id || "").trim()
+        var payloadStrategyId = String(data.strategyId || "").trim()
+        var payloadRuntimeStrategyId = String(data.runtimeStrategyId || "").trim()
         if (root.boundStrategyId.length === 0 && root.boundRuntimeStrategyId.length === 0) {
             return true
         }
@@ -1864,8 +1864,8 @@ Item {
                 status: translateOrderStatus(raw.status || raw.rawStatus),
                 rawStatus: String(raw.status || raw.rawStatus || ""),
                 filledQty: Number(raw.filledQuantity !== undefined ? raw.filledQuantity : (raw.filledQty !== undefined ? raw.filledQty : (raw.filled !== undefined ? raw.filled : 0))),
-                strategyId: String(raw.strategyId || raw.strategy_id || "").trim(),
-                strategyName: String(raw.strategyName || raw.strategy_name || "").trim(),
+                strategyId: String(raw.strategyId || "").trim(),
+                strategyName: String(raw.strategyName || "").trim(),
                 executionScopeId: String(raw.executionScopeId || raw.execution_scope_id || "").trim(),
                 batchId: String(raw.batchId || raw.batch_id || "").trim(),
                 batchIndex: Number(raw.batchIndex !== undefined ? raw.batchIndex : raw.batch_index),

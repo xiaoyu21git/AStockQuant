@@ -194,22 +194,22 @@ Rectangle {
 
                     BacktestStatItem {
                         label: "止损"
-                        value: root.formatPercent(root.ruleProfileSnapshot().stopLossRatio, 1)
+                        value: root.formatPercent(root.ruleProfile().stopLossPercent, 1)
                     }
 
                     BacktestStatItem {
                         label: "止盈"
-                        value: root.formatPercent(root.ruleProfileSnapshot().takeProfitRatio, 1)
+                        value: root.formatPercent(root.ruleProfile().takeProfitPercent, 1)
                     }
 
                     BacktestStatItem {
                         label: "最大回撤限制"
-                        value: root.formatPercent(root.riskSpecSnapshot().maxDrawdownLimit, 1)
+                        value: root.formatPercent(root.ruleProfile().maxDrawdownLimit, 1)
                     }
 
                     BacktestStatItem {
                         label: "调仓周期"
-                        value: root.formatInteger(root.executionPolicySnapshot().rebalanceFrequencyDays)
+                        value: root.formatInteger(root.executionPolicy().rebalanceDays)
                     }
                 }
             }
@@ -912,21 +912,24 @@ Rectangle {
         return root.backtestResult.trades || ({})
     }
 
-    function ruleProfileSnapshot() {
-        return root.backtestResult.ruleProfileSnapshot || ({})
+    function parametersRoot() {
+        return root.backtestResult.parameters || ({})
     }
 
-    function executionPolicySnapshot() {
-        return root.backtestResult.executionPolicySnapshot || ({})
+    function ruleProfile() {
+        return parametersRoot().rule_profile || ({})
     }
 
-    function riskSpecSnapshot() {
-        return root.backtestResult.riskSpecSnapshot || ({})
+    function executionPolicy() {
+        return parametersRoot().execution_policy || ({})
     }
 
     function factorOverlaySelectedFactors() {
-        var snapshot = root.backtestResult.factorOverlaySnapshot || ({})
-        return snapshot.selectedFactors instanceof Array ? snapshot.selectedFactors : []
+        var overlay = parametersRoot().factor_overlay || ({})
+        if (overlay.factorIds instanceof Array) {
+            return overlay.factorIds
+        }
+        return []
     }
 
     function factorOverlayFactorIdsText() {
@@ -940,10 +943,10 @@ Rectangle {
     }
 
     function hasExecutionRiskContext() {
-        return hasValue(root.ruleProfileSnapshot().stopLossRatio)
-            || hasValue(root.ruleProfileSnapshot().takeProfitRatio)
-            || hasValue(root.riskSpecSnapshot().maxDrawdownLimit)
-            || hasValue(root.executionPolicySnapshot().rebalanceFrequencyDays)
+        return hasValue(root.ruleProfile().stopLossPercent)
+            || hasValue(root.ruleProfile().takeProfitPercent)
+            || hasValue(root.ruleProfile().maxDrawdownLimit)
+            || hasValue(root.executionPolicy().rebalanceDays)
     }
 
     function hasRuleTemplateSummary() {
@@ -1021,12 +1024,11 @@ Rectangle {
         var trades = result.trades || {}
         var risk = result.risk || {}
         var timeSeries = result.timeSeries || {}
-        var ruleProfile = result.ruleProfileSnapshot || {}
-        var executionPolicy = result.executionPolicySnapshot || {}
-        var riskSpec = result.riskSpecSnapshot || {}
-        var factorIds = (result.factorOverlaySnapshot && result.factorOverlaySnapshot.selectedFactors instanceof Array)
-            ? result.factorOverlaySnapshot.selectedFactors
-            : []
+        var parameters = result.parameters || {}
+        var ruleProfile = parameters.rule_profile || {}
+        var executionPolicy = parameters.execution_policy || {}
+        var factorOverlay = parameters.factor_overlay || {}
+        var factorIds = factorOverlay.factorIds instanceof Array ? factorOverlay.factorIds : []
         var dates = timeSeries.dates || []
         var portfolioValues = timeSeries.portfolioValues || []
 
@@ -1044,12 +1046,12 @@ Rectangle {
             {
                 title: "执行参数",
                 items: [
-                    { label: "止损", value: formatPercent(ruleProfile.stopLossRatio, 2) },
-                    { label: "止盈", value: formatPercent(ruleProfile.takeProfitRatio, 2) },
-                    { label: "最大回撤限制", value: formatPercent(riskSpec.maxDrawdownLimit, 2) },
-                    { label: "调仓周期", value: formatInteger(executionPolicy.rebalanceFrequencyDays) },
-                    { label: "最大总仓位", value: formatPercent(ruleProfile.maxTotalExposureRatio, 2) },
-                    { label: "单标的仓位上限", value: formatPercent(ruleProfile.maxPositionRatio, 2) }
+                    { label: "止损", value: formatPercent(ruleProfile.stopLossPercent, 2) },
+                    { label: "止盈", value: formatPercent(ruleProfile.takeProfitPercent, 2) },
+                    { label: "最大回撤限制", value: formatPercent(ruleProfile.maxDrawdownLimit, 2) },
+                    { label: "调仓周期", value: formatInteger(executionPolicy.rebalanceDays) },
+                    { label: "最大总仓位", value: formatPercent(ruleProfile.maxTotalExposure, 2) },
+                    { label: "单标的仓位上限", value: formatPercent(ruleProfile.maxPositionPercent, 2) }
                 ]
             },
             {

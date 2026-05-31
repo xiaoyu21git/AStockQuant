@@ -4,7 +4,6 @@
 #include "MarketDataService.h"
 #include "PositionAccountService.h"
 #include "RiskConfigService.h"
-#include "StrategyService.h"
 #include "../include/StrategyStructureResolvers.h"
 #include "TradeExecutionService.h"
 #include "TradingConnectionConfigService.h"
@@ -777,35 +776,7 @@ QVariantMap loadTradingConfigurationSnapshot()
 StrategyLookupState loadStrategyLookupState(const QString& strategyId)
 {
     StrategyLookupState result;
-    StrategyService* strategyService = StrategyService::instance();
-    if (!strategyService) {
-        return result;
-    }
-
-    if (!strategyService->isInitialized()) {
-        if (strategyService->isLoading()) {
-            QElapsedTimer waitTimer;
-            waitTimer.start();
-            while (strategyService->isLoading() && !strategyService->isInitialized() && waitTimer.elapsed() < 1500) {
-                QThread::msleep(20);
-            }
-        }
-
-        if (!strategyService->isInitialized() && !strategyService->isLoading()) {
-            strategyService->initialize();
-        }
-    }
-
-    if (!strategyService->isInitialized()) {
-        return result;
-    }
-
-    result.serviceInitialized = true;
-    if (strategyId.trimmed().isEmpty()) {
-        return result;
-    }
-
-    result.strategy = strategyService->getStrategyById(strategyId);
+    Q_UNUSED(strategyId);
     return result;
 }
 
@@ -1066,7 +1037,6 @@ void RiskMonitorService::initialize()
     if (!app || QThread::currentThread() == app->thread()) {
         RiskConfigService* riskConfigService = RiskConfigService::instance();
         PositionAccountService* positionAccountService = PositionAccountService::instance();
-        StrategyService::instance();
 
         if (positionAccountService) {
             positionAccountService->initialize();

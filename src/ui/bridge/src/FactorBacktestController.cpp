@@ -1045,6 +1045,7 @@ BacktestRuntimeRequirements resolveBacktestRuntimeRequirements(
 }
 
 QStringList warmupQuerySymbols(const DataServiceCache::DataSetInfo& dataSetInfo,
+                               const QVariantList& cachedRows,
                                const QVariantList& selectedStockPoolSymbols)
 {
     const QVariantList normalizedSelectedSymbols = normalizedStockPoolSymbols(selectedStockPoolSymbols);
@@ -1055,6 +1056,20 @@ QStringList warmupQuerySymbols(const DataServiceCache::DataSetInfo& dataSetInfo,
             symbols.append(symbolValue.toString().trimmed().toUpper());
         }
         return dedupeStringList(symbols);
+    }
+
+    if (dataSetInfo.startDate.isValid() && !cachedRows.isEmpty()) {
+        const std::vector<std::string> startDateSymbols = factor::cached_bars::extractAvailableSymbolsForDateFromRows(
+            cachedRows,
+            dataSetInfo.startDate.toString(Qt::ISODate));
+        if (!startDateSymbols.empty()) {
+            QStringList symbols;
+            symbols.reserve(static_cast<int>(startDateSymbols.size()));
+            for (const std::string& symbol : startDateSymbols) {
+                symbols.append(QString::fromStdString(symbol));
+            }
+            return dedupeStringList(symbols);
+        }
     }
 
     QStringList symbols;
@@ -2574,7 +2589,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
 
             const DataServiceCache::DataSetInfo dataSetInfo = cache.getDataSetInfo(datasetId);
             const QStringList symbols = dynamicIndexUnionSymbols.isEmpty()
-                ? warmupQuerySymbols(dataSetInfo, selectedStockPoolSymbols)
+                ? warmupQuerySymbols(dataSetInfo, baseRows, selectedStockPoolSymbols)
                 : dynamicIndexUnionSymbols;
             const QVariantList warmupRows = queryDailyBarWarmupRows(
                 database,

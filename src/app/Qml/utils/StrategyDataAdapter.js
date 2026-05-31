@@ -92,7 +92,7 @@ function resolveStrategyIdentifier(strategy) {
         return "";
     }
 
-    return strategy.strategyId || strategy.strategy_id || strategy.id || "";
+    return strategy.strategyId || "";
 }
 
 function resolveBoundStrategyIdentifier(tradingConfiguration) {
@@ -125,7 +125,7 @@ function resolveBoundStrategyIdentifiers(tradingConfiguration) {
                 appendIdentifier(entry)
                 continue
             }
-            appendIdentifier(entry.strategyId || entry.strategy_id || entry.id)
+            appendIdentifier(entry.strategyId)
         }
     }
 
@@ -251,10 +251,10 @@ function mapStrategyToCardData(strategy) {
     
     return {
         // 实体基本信息
-        entityId: strategy.strategyId || strategy.id || "",
+        entityId: strategy.strategyId || "",
         entityType: "strategy",
         displayName: strategy.displayName || strategy.strategyName || strategy.name || "未命名策略",
-        strategyId: strategy.strategyId || strategy.id || "",
+        strategyId: strategy.strategyId || "",
         strategyName: strategy.strategyName || strategy.name || "",
         
         // 类别信息

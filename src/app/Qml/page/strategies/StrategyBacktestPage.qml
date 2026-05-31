@@ -15,7 +15,7 @@ Rectangle {
     property bool embeddedMode: false
     property string preferredStrategyId: ""
 
-    property var strategyService: StrategyService
+    property var strategyService: null
     readonly property var cleanedDataController: CleanedDataController
     property var strategyViewModel: null
     property bool serviceSignalsBound: false
@@ -102,7 +102,7 @@ Rectangle {
     }
 
     function initializeStrategyViewModel() {
-        strategyService = StrategyService
+        strategyService = null
         if (!strategyService) {
             console.error("无法获取 StrategyService 实例")
             return
@@ -123,7 +123,7 @@ Rectangle {
             }
         }
 
-        strategyViewModel = strategyService.getViewModel()
+        strategyViewModel = null
 
         if (!serviceSignalsBound) {
             serviceSignalsBound = true
@@ -199,7 +199,7 @@ Rectangle {
             var row = strategyViewModel.getRow(index)
             strategyVisibleModel.append({
                 sourceIndex: index,
-                strategyId: row ? (row.strategyId || row.id || "") : ""
+                strategyId: row ? (row.strategyId || "") : ""
             })
         }
     }
@@ -213,7 +213,7 @@ Rectangle {
 
         var selectedRow = strategyViewModel.getRow(index)
         selectedStrategyIndex = index
-        selectedStrategyId = selectedRow ? String(selectedRow.strategyId || selectedRow.id || "") : ""
+        selectedStrategyId = selectedRow ? String(selectedRow.strategyId || "") : ""
     }
 
     function selectStrategyById(strategyId) {
@@ -224,7 +224,7 @@ Rectangle {
 
         for (var index = 0; index < strategyViewModel.count; ++index) {
             var row = strategyViewModel.getRow(index)
-            var rowId = row ? String(row.strategyId || row.id || "") : ""
+            var rowId = row ? String(row.strategyId || "") : ""
             if (rowId === normalizedId) {
                 selectStrategyAt(index)
                 return
@@ -242,7 +242,7 @@ Rectangle {
         if (selectedStrategyId) {
             for (var index = 0; index < strategyViewModel.count; ++index) {
                 var row = strategyViewModel.getRow(index)
-                var rowId = row ? String(row.strategyId || row.id || "") : ""
+                var rowId = row ? String(row.strategyId || "") : ""
                 if (rowId === selectedStrategyId) {
                     selectedStrategyIndex = index
                     return
@@ -252,7 +252,7 @@ Rectangle {
 
         if (selectedStrategyIndex >= 0 && selectedStrategyIndex < strategyViewModel.count) {
             var currentRow = strategyViewModel.getRow(selectedStrategyIndex)
-            selectedStrategyId = currentRow ? String(currentRow.strategyId || currentRow.id || "") : ""
+            selectedStrategyId = currentRow ? String(currentRow.strategyId || "") : ""
             return
         }
 
@@ -268,7 +268,7 @@ Rectangle {
         if (strategyViewModel && selectedStrategyId) {
             for (var index = 0; index < strategyViewModel.count; ++index) {
                 var row = strategyViewModel.getRow(index)
-                var rowId = row ? String(row.strategyId || row.id || "") : ""
+                var rowId = row ? String(row.strategyId || "") : ""
                 if (rowId === selectedStrategyId) {
                     return row
                 }
@@ -330,22 +330,12 @@ Rectangle {
 
     function resolveStrategyBacktestTypeIndex(strategyDetail) {
         var strategy = toPlainJsValue(strategyDetail) || ({})
-        var parameters = toPlainJsValue(strategy.parameters) || ({})
-        var explicitTypeIndex = Number(strategy.selectedStrategyTypeIndex !== undefined
-            ? strategy.selectedStrategyTypeIndex
-            : parameters.selectedStrategyTypeIndex)
+        var explicitTypeIndex = Number(strategy.strategyTypeIndex)
         if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
             var normalizedTypeIndex = CreationUtils.normalizeStrategyTypeIndex(explicitTypeIndex)
             if (normalizedTypeIndex !== CreationUtils.StrategyTypeIndex.Invalid) {
                 return normalizedTypeIndex
             }
-        }
-
-        var explicitBehaviorKind = Number(strategy.strategyBehaviorKind !== undefined
-            ? strategy.strategyBehaviorKind
-            : parameters.strategyBehaviorKind)
-        if (isFinite(explicitBehaviorKind) && explicitBehaviorKind >= 0) {
-            return CreationUtils.strategyTypeIndexFromBehaviorKind(explicitBehaviorKind)
         }
 
         return CreationUtils.StrategyTypeIndex.Invalid
@@ -850,10 +840,6 @@ Rectangle {
         var strategyCopy = toPlainJsValue(strategyDetail) || ({})
         var parameters = toPlainJsValue(strategyCopy.parameters) || ({})
         var runtimeValues = toPlainJsValue(editableValues) || ({})
-        var strategyScopeContextSnapshot = toPlainJsValue(strategyCopy.strategyScopeContextSnapshot) || ({})
-        var ruleProfileSnapshot = toPlainJsValue(strategyCopy.ruleProfileSnapshot) || ({})
-        var executionPolicySnapshot = toPlainJsValue(strategyCopy.executionPolicySnapshot) || ({})
-        var backtestAssumptionsSnapshot = toPlainJsValue(strategyCopy.backtestAssumptionsSnapshot) || ({})
         var ruleProfile = toPlainJsValue(parameters.rule_profile) || ({})
         var executionPolicy = toPlainJsValue(parameters.execution_policy) || ({})
         var backtestAssumptions = toPlainJsValue(parameters.backtest_assumptions) || ({})
@@ -897,28 +883,11 @@ Rectangle {
             assignIfConfigured(parameters, strategyParamKey, runtimeValues[strategyParamKey])
         }
 
-        for (var ruleKey in ruleProfile) {
-            ruleProfileSnapshot[ruleKey] = ruleProfile[ruleKey]
-        }
-        for (var executionKey in executionPolicy) {
-            executionPolicySnapshot[executionKey] = executionPolicy[executionKey]
-        }
-        for (var assumptionKey in backtestAssumptions) {
-            backtestAssumptionsSnapshot[assumptionKey] = backtestAssumptions[assumptionKey]
-        }
-        for (var scopeKey in strategyScopeContext) {
-            strategyScopeContextSnapshot[scopeKey] = strategyScopeContext[scopeKey]
-        }
-
         parameters.rule_profile = ruleProfile
         parameters.execution_policy = executionPolicy
         parameters.backtest_assumptions = backtestAssumptions
         parameters.strategy_scope_context = strategyScopeContext
         strategyCopy.parameters = parameters
-        strategyCopy.strategyScopeContextSnapshot = strategyScopeContextSnapshot
-        strategyCopy.ruleProfileSnapshot = ruleProfileSnapshot
-        strategyCopy.executionPolicySnapshot = executionPolicySnapshot
-        strategyCopy.backtestAssumptionsSnapshot = backtestAssumptionsSnapshot
         return strategyCopy
     }
 
@@ -966,7 +935,7 @@ Rectangle {
                 continue
             }
 
-            var strategyId = row.strategyId || row.id || ""
+            var strategyId = row.strategyId || ""
             var strategyName = row.strategyName || row.name || "未命名策略"
             options.push({
                 strategyId: strategyId,
@@ -988,7 +957,7 @@ Rectangle {
 
         for (var index = 0; index < options.length; ++index) {
             var option = options[index]
-            var optionId = option ? String(option.strategyId || option.id || option.value || "") : ""
+            var optionId = option ? String(option.strategyId || option.value || "") : ""
             if (optionId === normalizedId) {
                 return index
             }
@@ -1025,7 +994,7 @@ Rectangle {
 
     function strategyBacktestSelectedDetail() {
         var summary = strategyBacktestSelectedSummary()
-        var strategyId = summary ? String(summary.strategyId || summary.id || "") : ""
+        var strategyId = summary ? String(summary.strategyId || "") : ""
         return strategyId ? getSelectedStrategyDetail(strategyId) : ({})
     }
 
@@ -1161,17 +1130,17 @@ Rectangle {
             return ({})
         }
 
-        return strategyDetail.performance_metrics || strategyDetail.performanceMetrics || ({})
+        return strategyDetail.performanceMetrics || ({})
     }
 
     function getLatestBacktestRecord(strategyDetail) {
         var performance = getStrategyPerformanceMetrics(strategyDetail)
-        return performance.latestBacktest || performance.latest_backtest || ({})
+        return performance.latestBacktest || ({})
     }
 
     function getBacktestHistory(strategyDetail) {
         var performance = getStrategyPerformanceMetrics(strategyDetail)
-        return performance.backtestHistory || performance.backtest_history || []
+        return performance.backtestHistory || []
     }
 
     function formatBacktestPercentValue(value, decimals) {

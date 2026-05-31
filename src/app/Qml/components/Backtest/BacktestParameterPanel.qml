@@ -53,6 +53,13 @@ Rectangle {
     readonly property bool showFallbackRuntimeForm: root.parametersLoaded && root.dynamicParamConfigs.length === 0
     readonly property int parameterFormMaxWidth: 960
     readonly property int parameterFormMinColumnWidth: 320
+    readonly property int selectedDataSourceMode: {
+        var rawMode = root.dynamicParamValues && root.dynamicParamValues.dataSourceMode !== undefined
+            ? Number(root.dynamicParamValues.dataSourceMode)
+            : 0
+        return isFinite(rawMode) ? rawMode : 0
+    }
+    readonly property bool showUniverseSelectionControls: root.selectedDataSourceMode !== 1
 
     function findOptionIndex(options, expectedValue, candidateKeys) {
         var normalizedExpected = String(expectedValue === undefined || expectedValue === null ? "" : expectedValue)
@@ -164,39 +171,6 @@ Rectangle {
             }
 
             BacktestLabeledComboBox {
-                id: universeComboBox
-                label: "股票池"
-                fieldWidth: 150
-                options: root.universeOptions
-                textRole: "label"
-                placeholder: "请选择股票池"
-                currentIndex: root.findOptionIndex(root.universeOptions, root.selectedUniverseType, ["value", "id", "label"])
-                onOptionSelected: function(index, option) {
-                    if (index < 0 || index >= root.universeOptions.length) {
-                        return
-                    }
-                    root.universeOptionSelected(index, option)
-                }
-            }
-
-            BacktestLabeledComboBox {
-                id: indexPoolComboBox
-                visible: root.selectedUniverseType === "index"
-                label: "指数"
-                fieldWidth: 170
-                options: root.indexPoolOptions
-                textRole: "label"
-                placeholder: "请选择指数"
-                currentIndex: root.findOptionIndex(root.indexPoolOptions, root.selectedIndexSymbol, ["value", "symbol", "id", "label"])
-                onOptionSelected: function(index, option) {
-                    if (index < 0 || index >= root.indexPoolOptions.length) {
-                        return
-                    }
-                    root.indexOptionSelected(index, option)
-                }
-            }
-
-            BacktestLabeledComboBox {
                 id: dataSourceComboBox
                 visible: root.showDataSourceSelector
                 label: "数据源"
@@ -227,6 +201,40 @@ Rectangle {
                         return
                     }
                     root.cacheDatasetOptionSelected(index, option)
+                }
+            }
+
+            BacktestLabeledComboBox {
+                id: universeComboBox
+                visible: root.showUniverseSelectionControls
+                label: "股票池"
+                fieldWidth: 150
+                options: root.universeOptions
+                textRole: "label"
+                placeholder: "请选择股票池"
+                currentIndex: root.findOptionIndex(root.universeOptions, root.selectedUniverseType, ["value", "id", "label"])
+                onOptionSelected: function(index, option) {
+                    if (index < 0 || index >= root.universeOptions.length) {
+                        return
+                    }
+                    root.universeOptionSelected(index, option)
+                }
+            }
+
+            BacktestLabeledComboBox {
+                id: indexPoolComboBox
+                visible: root.showUniverseSelectionControls && root.selectedUniverseType === "index"
+                label: "指数"
+                fieldWidth: 170
+                options: root.indexPoolOptions
+                textRole: "label"
+                placeholder: "请选择指数"
+                currentIndex: root.findOptionIndex(root.indexPoolOptions, root.selectedIndexSymbol, ["value", "symbol", "id", "label"])
+                onOptionSelected: function(index, option) {
+                    if (index < 0 || index >= root.indexPoolOptions.length) {
+                        return
+                    }
+                    root.indexOptionSelected(index, option)
                 }
             }
 
@@ -264,8 +272,8 @@ Rectangle {
             Text {
                 Layout.fillWidth: true
                 text: root.showCacheDatasetSelector
-                    ? "缓存K线模式直接沿用所选清洗数据窗口，请先选择清洗数据。"
-                    : "原始K线模式由你直接选择回测日期。"
+                    ? "缓存K线模式直接沿用所选清洗数据窗口和缓存股票池，不再单独选择指数成分。"
+                    : "原始K线模式由你直接选择回测日期，并可继续配置股票池和指数范围。"
                 font.pixelSize: 12
                 color: "#94A3B8"
                 wrapMode: Text.WordWrap

@@ -126,10 +126,6 @@ inline ResolvedStrategyIdentity resolveStrategyIdentity(const QVariantMap& strat
     ResolvedStrategyIdentity identity = resolveStrategyStoredType(
         detail::configuredStoredTypeValue(strategy));
     identity.behavior = resolveStrategyBehavior(strategy);
-    if (!identity.validStoredType && identity.behavior.valid) {
-        identity.storedType = strategyStoredTypeForBehavior(identity.behavior.kind);
-        identity.validStoredType = true;
-    }
     return identity;
 }
 

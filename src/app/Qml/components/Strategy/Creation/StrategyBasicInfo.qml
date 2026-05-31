@@ -748,7 +748,7 @@ Rectangle {
     }
 
     function setBasicInfo(strategyData) {
-        strategyNameField.text = strategyData.strategy_name || strategyData.strategyName || ""
+        strategyNameField.text = strategyData.strategyName || ""
         strategyDescField.text = strategyData.description || ""
 
         assetTypeCombo.currentIndex = Math.max(0, assetTypeIndexOptions.indexOf(Number(strategyData.assetTypeIndex)))
@@ -758,7 +758,7 @@ Rectangle {
         riskLevelCombo.currentIndex = Math.max(0, riskLevelIndexOptions.indexOf(Number(strategyData.riskLevelIndex)))
 
         var values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
-        optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || strategyData.optimizationMethod || "genetic"))
+        optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || "genetic"))
 
         var tags = strategyData.tags || []
         tagsField.text = typeof tags === "string" ? tags : (tags || []).join(', ')

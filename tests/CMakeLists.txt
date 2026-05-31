@@ -167,48 +167,6 @@ else()
     message(WARNING "[TESTS] test_factor_custom_expression.cpp not found!")
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_engine.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_backtest_engine.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_backtest_engine.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_backtest_engine.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_backtest_application_service.cpp")
-    list(APPEND TEST_SOURCES "test_backtest_application_service.cpp")
-    message(STATUS "[TESTS] Found: test_backtest_application_service.cpp")
-else()
-    message(WARNING "[TESTS] test_backtest_application_service.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_entry_service.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_backtest_entry_service.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_backtest_entry_service.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_backtest_entry_service.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_engine_gateway.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_backtest_engine_gateway.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_backtest_engine_gateway.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_backtest_engine_gateway.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_backtest_request_factory.cpp")
-    list(APPEND TEST_SOURCES "test_backtest_request_factory.cpp")
-    message(STATUS "[TESTS] Found: test_backtest_request_factory.cpp")
-else()
-    message(WARNING "[TESTS] test_backtest_request_factory.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_request_adapter.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_backtest_request_adapter.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_backtest_request_adapter.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_backtest_request_adapter.cpp not found!")
-endif()
-
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_runtime_overlay.cpp")
     list(APPEND TEST_SOURCES "test_strategy_backtest_runtime_overlay.cpp")
     message(STATUS "[TESTS] Found: test_strategy_backtest_runtime_overlay.cpp")
@@ -269,7 +227,6 @@ target_link_libraries(test_eventsystem
         engine          # Engine 库（包含 Event）
         domain          # Domain 库
         domain_backtest
-        application_backtest
         bridge
         factor_system   # ConfigurableFactor/Factor runtime symbols
         infrastructure  # MarketDataRepository 回归测试

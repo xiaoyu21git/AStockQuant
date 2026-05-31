@@ -555,8 +555,8 @@ Item {
         for (var index = 0; index < rawStrategies.length; ++index) {
             var rawStrategy = rawStrategies[index] || ({})
             var performance = rawStrategy.performance || ({})
-            var parameters = rawStrategy.parameters || rawStrategy.params || ({})
-            var symbols = parameters.symbols || parameters.symbolList || parameters.targetSymbols || []
+            var parameters = rawStrategy.parameters || ({})
+            var symbols = parameters.symbols || []
             var symbolText = liveText("pendingSymbol")
             if (Array.isArray(symbols) && symbols.length > 0) {
                 symbolText = symbols.slice(0, 2).join(", ")
@@ -567,11 +567,11 @@ Item {
             }
 
             normalizedStrategies.push({
-                strategyId: rawStrategy.strategy_id || rawStrategy.strategyId || rawStrategy.id || "",
-                name: rawStrategy.strategy_name || rawStrategy.strategyName || rawStrategy.name || liveText("unnamedStrategy"),
+                strategyId: rawStrategy.strategyId || "",
+                name: rawStrategy.strategyName || liveText("unnamedStrategy"),
                 status: normalizeStrategyStatus(rawStrategy),
-                subtitle: (rawStrategy.strategy_code || rawStrategy.strategyCode || rawStrategy.strategy_type || rawStrategy.strategyType || liveText("strategySync")) + " / " + symbolText,
-                returns: Number(performance.totalReturn || performance.total_return || performance.returnRate || rawStrategy.returnRate || 0),
+                subtitle: (rawStrategy.strategyCode || rawStrategy.strategyType || liveText("strategySync")) + " / " + symbolText,
+                returns: Number(performance.totalReturn || performance.returnRate || rawStrategy.returnRate || 0),
                 trades: Number(performance.totalTrades || performance.tradeCount || rawStrategy.tradeCount || 0),
                 syncToken: syncToken
             })

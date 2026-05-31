@@ -8,7 +8,7 @@ Item {
     id: root
 
     property var configService
-    property var strategyService: Bridge.StrategyService
+    property var strategyService: null
     property var marketDataService: Bridge.MarketDataService
     property var marketCalendarService: Bridge.TradingMarketCalendarService
     property var runtimeStatusService: Bridge.TradingRuntimeStatusService
@@ -451,12 +451,12 @@ Item {
                 var strategies = strategyService.getAllStrategies() || []
                 for (var index = 0; index < strategies.length; ++index) {
                     var rawStrategy = strategies[index] || ({})
-                    var strategyId = rawStrategy.strategy_id || rawStrategy.strategyId || rawStrategy.id || ""
+                    var strategyId = rawStrategy.strategyId || ""
                     if (!strategyId) {
                         continue
                     }
 
-                    var strategyName = rawStrategy.strategy_name || rawStrategy.strategyName || rawStrategy.name || strategyId
+                    var strategyName = rawStrategy.strategyName || strategyId
                     options.push({
                         label: strategyName + " (" + strategyId + ")",
                         value: strategyId,

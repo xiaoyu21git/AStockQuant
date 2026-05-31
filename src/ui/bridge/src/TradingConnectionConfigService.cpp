@@ -2,7 +2,6 @@
 #include "../../ui/bridge/include/DatabaseConnectionManager.h"
 #include "PositionAccountService.h"
 #include "RiskMonitorService.h"
-#include "StrategyService.h"
 #include "database/StrategyRepository.h"
 
 #include <QCoreApplication>

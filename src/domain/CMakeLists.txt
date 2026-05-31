@@ -1,6 +1,5 @@
 # domain/CMakeLists.txt
 add_subdirectory(types)
-add_subdirectory(strategy)
 add_subdirectory(indicators)
 add_subdirectory(signals)
 add_subdirectory(strategies)
@@ -29,7 +28,6 @@ target_link_libraries(domain
         engine
         foundation
         domain_types
-        domain_strategy
         domain_indicators
         domain_signals
         domain_strategies
@@ -43,7 +41,6 @@ target_link_libraries(domain
 target_include_directories(domain
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/types/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategy/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/indicators/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/signals/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategies/include>

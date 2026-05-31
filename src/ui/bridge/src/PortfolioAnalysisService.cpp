@@ -5,7 +5,6 @@
 #include "PositionAccountService.h"
 #include "RiskConfigService.h"
 #include "RiskMonitorService.h"
-#include "StrategyService.h"
 #include "PortfolioExecutionPlanUtils.h"
 #include "DataFetchFieldContractUtils.h"
 #include "../include/StrategyStructureResolvers.h"
@@ -1063,9 +1062,6 @@ QVariantMap buildSystemStatus(const QVariantMap& snapshot, const QVariantMap& la
 
     int connectedServices = 0;
     if (FactorService::instance()) {
-        connectedServices += 1;
-    }
-    if (StrategyService::instance()) {
         connectedServices += 1;
     }
     if (RiskMonitorService::instance()) {

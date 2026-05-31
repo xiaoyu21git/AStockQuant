@@ -1348,6 +1348,7 @@ void DataFetchController::refreshDataSetInfos()
     for (const DataServiceCache::DataSetInfo& info : dataSetInfos) {
         QVariantMap map;
         map["id"] = info.id;
+        map["name"] = info.displayName;
         map["displayName"] = info.displayName;
         map["description"] = info.description;
         map["sourceType"] = info.sourceType;
@@ -1357,6 +1358,9 @@ void DataFetchController::refreshDataSetInfos()
         map["startDate"] = info.startDate.isValid() ? info.startDate.toString("yyyy-MM-dd") : "";
         map["endDate"] = info.endDate.isValid() ? info.endDate.toString("yyyy-MM-dd") : "";
         map["tags"] = info.tags;
+        map["schemaVersion"] = info.schemaVersion;
+        map["isBacktestReady"] = info.isBacktestReady;
+        map["availableFields"] = info.availableFields;
         result.append(map);
     }
     

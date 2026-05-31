@@ -7,7 +7,6 @@
 
 #include "MarketDataService.h"
 #include "PositionAccountService.h"
-#include "StrategyService.h"
 #include "TradeExecutionService.h"
 #include "TradingConnectionConfigService.h"
 #include "TradingMarketCalendarService.h"
@@ -96,9 +95,6 @@ inline void UiLifecycleCoordinator::activateTradingPage()
 
     if (MarketDataService* marketDataService = MarketDataService::instance()) {
         marketDataService->initializeAsync();
-    }
-    if (StrategyService* strategyService = StrategyService::instance()) {
-        strategyService->initializeAsync();
     }
 
     if (tradingActivatedChanged) {

@@ -19,12 +19,19 @@ function getTranslation(key, language) {
 
 // ============ 策略类型相关 ============
 
-function normalizeStrategyTypeId(typeId) {
-    return String(typeId || "").trim().toLowerCase();
-}
-
 var StrategyTypeIndex = {
     Invalid: -1,
+    DoubleMovingAverage: 0,
+    TurtleBreakout: 1,
+    BollingerBandMeanReversion: 2,
+    RsiMeanReversion: 3,
+    MultiFactorSelection: 4,
+    EarningsSurprise: 5,
+    StatisticalPairTrading: 6,
+    RiskParityAllocation: 7,
+    MachineLearningSelection: 8,
+    OrderFlowImbalance: 9,
+    VolatilitySpread: 10,
     TrendFollowing: 0,
     TrendBreakout: 1,
     MeanReversion: 2,
@@ -64,6 +71,17 @@ var StrategyStoredTypeIndex = {
 
 function normalizeStrategyTypeIndex(strategyTypeIndex) {
     switch (Math.floor(Number(strategyTypeIndex))) {
+        case StrategyTypeIndex.DoubleMovingAverage:
+        case StrategyTypeIndex.TurtleBreakout:
+        case StrategyTypeIndex.BollingerBandMeanReversion:
+        case StrategyTypeIndex.RsiMeanReversion:
+        case StrategyTypeIndex.MultiFactorSelection:
+        case StrategyTypeIndex.EarningsSurprise:
+        case StrategyTypeIndex.StatisticalPairTrading:
+        case StrategyTypeIndex.RiskParityAllocation:
+        case StrategyTypeIndex.MachineLearningSelection:
+        case StrategyTypeIndex.OrderFlowImbalance:
+        case StrategyTypeIndex.VolatilitySpread:
         case StrategyTypeIndex.TrendFollowing:
         case StrategyTypeIndex.TrendBreakout:
         case StrategyTypeIndex.MeanReversion:
@@ -127,35 +145,6 @@ function isTrendStrategyTypeIndex(strategyTypeIndex) {
         || normalizedTypeIndex === StrategyTypeIndex.TrendBreakout
 }
 
-function strategyTypeIndexFromTypeId(typeId) {
-    var normalizedTypeId = normalizeStrategyTypeId(typeId);
-    switch (normalizedTypeId) {
-        case "trend_following":
-            return StrategyTypeIndex.TrendFollowing;
-        case "trend_breakout":
-            return StrategyTypeIndex.TrendBreakout;
-        case "mean_reversion":
-            return StrategyTypeIndex.MeanReversion;
-        case "momentum":
-        case "alpha":
-            return StrategyTypeIndex.Momentum;
-        case "arbitrage":
-            return StrategyTypeIndex.Arbitrage;
-        case "machine_learning":
-            return StrategyTypeIndex.MachineLearning;
-        case "multi_factor":
-            return StrategyTypeIndex.MultiFactor;
-        case "high_frequency":
-            return StrategyTypeIndex.HighFrequency;
-        case "event_driven":
-            return StrategyTypeIndex.EventDriven;
-        case "custom":
-            return StrategyTypeIndex.Custom;
-        default:
-            return StrategyTypeIndex.Invalid;
-    }
-}
-
 function strategyTypeIdFromIndex(strategyTypeIndex) {
     switch (normalizeStrategyTypeIndex(strategyTypeIndex)) {
         case StrategyTypeIndex.TrendFollowing:
@@ -180,33 +169,6 @@ function strategyTypeIdFromIndex(strategyTypeIndex) {
             return "custom";
         default:
             return "";
-    }
-}
-
-function strategyBehaviorKindFromTypeId(typeId) {
-    var normalizedTypeId = normalizeStrategyTypeId(typeId);
-    switch (normalizedTypeId) {
-        case "mean_reversion":
-            return StrategyBehaviorKind.MeanReversion;
-        case "momentum":
-        case "alpha":
-            return StrategyBehaviorKind.Momentum;
-        case "arbitrage":
-            return StrategyBehaviorKind.Arbitrage;
-        case "multi_factor":
-            return StrategyBehaviorKind.MultiFactor;
-        case "machine_learning":
-            return StrategyBehaviorKind.MachineLearning;
-        case "event_driven":
-            return StrategyBehaviorKind.EventDriven;
-        case "high_frequency":
-            return StrategyBehaviorKind.HighFrequency;
-        case "custom":
-            return StrategyBehaviorKind.Custom;
-        case "trend_breakout":
-        case "trend_following":
-        default:
-            return StrategyBehaviorKind.TrendFollowing;
     }
 }
 
@@ -295,74 +257,73 @@ function strategySupportsFactorOverlay(strategyTypeIndex) {
 }
 
 // 获取策略类型名称
-function getStrategyTypeName(typeId) {
-    var normalizedTypeId = normalizeStrategyTypeId(typeId);
-    if (normalizedTypeId === "alpha") {
-        normalizedTypeId = "momentum";
-    }
-    if (!normalizedTypeId) {
+function getStrategyTypeName(strategyTypeIndex) {
+    var normalizedTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
+    var typeId = strategyTypeIdFromIndex(normalizedTypeIndex)
+    if (!typeId) {
         return "";
     }
-    return tr('strategyCreation.strategyTypes.' + normalizedTypeId) || normalizedTypeId;
+    return tr('strategyCreation.strategyTypes.' + typeId) || typeId;
 }
 
 function getStrategyTypeNameFromIndex(strategyTypeIndex) {
-    return getStrategyTypeName(strategyTypeIdFromIndex(strategyTypeIndex));
+    return getStrategyTypeName(strategyTypeIndex);
 }
 
 // 获取策略类型描述
-function getStrategyTypeDescription(typeId) {
-    var normalizedTypeId = normalizeStrategyTypeId(typeId);
-    if (!normalizedTypeId) {
+function getStrategyTypeDescription(strategyTypeIndex) {
+    var normalizedTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
+    var typeId = strategyTypeIdFromIndex(normalizedTypeIndex)
+    if (!typeId) {
         return "";
     }
-    return tr('strategyCreation.strategyTypeDescriptions.' + normalizedTypeId) || tr('strategyCreation.strategyTypeDescriptions.custom');
+    return tr('strategyCreation.strategyTypeDescriptions.' + typeId) || tr('strategyCreation.strategyTypeDescriptions.custom');
 }
 
 function getStrategyTypeDescriptionFromIndex(strategyTypeIndex) {
-    return getStrategyTypeDescription(strategyTypeIdFromIndex(strategyTypeIndex));
+    return getStrategyTypeDescription(strategyTypeIndex);
 }
 
 // 获取策略类型图标
-function getStrategyIcon(typeId) {
-    switch(typeId) {
-        case "trend_following": return "📈";
-        case "trend_breakout": return "🎯";
-        case "mean_reversion": return "🔄";
-        case "momentum": return "🚀";
-        case "arbitrage": return "⚖️";
-        case "machine_learning": return "🤖";
-        case "multi_factor": return "🧩";
-        case "high_frequency": return "⚡";
-        case "event_driven": return "📰";
-        case "custom": return "🛠️";
+function getStrategyIcon(strategyTypeIndex) {
+    switch (normalizeStrategyTypeIndex(strategyTypeIndex)) {
+        case StrategyTypeIndex.TrendFollowing: return "📈";
+        case StrategyTypeIndex.TrendBreakout: return "🎯";
+        case StrategyTypeIndex.MeanReversion: return "🔄";
+        case StrategyTypeIndex.Momentum: return "🚀";
+        case StrategyTypeIndex.Arbitrage: return "⚖️";
+        case StrategyTypeIndex.MachineLearning: return "🤖";
+        case StrategyTypeIndex.MultiFactor: return "🧩";
+        case StrategyTypeIndex.HighFrequency: return "⚡";
+        case StrategyTypeIndex.EventDriven: return "📰";
+        case StrategyTypeIndex.Custom: return "🛠️";
         default: return "📊";
     }
 }
 
 function getStrategyIconFromIndex(strategyTypeIndex) {
-    return getStrategyIcon(strategyTypeIdFromIndex(strategyTypeIndex));
+    return getStrategyIcon(strategyTypeIndex);
 }
 
 // 获取策略类型简要描述
-function getBriefDescription(typeId) {
-    var descriptions = {
-        "trend_following": "跟随价格趋势交易",
-        "trend_breakout": "突破近高并沿趋势持仓",
-        "mean_reversion": "价格偏离均值后回归",
-        "momentum": "跟随强势股票动量",
-        "arbitrage": "利用价差套利交易",
-        "machine_learning": "AI预测价格走势",
-        "multi_factor": "多维度综合评分",
-        "high_frequency": "高频数据快速交易",
-        "event_driven": "事件驱动交易机会",
-        "custom": "用户自定义策略"
-    };
-    return descriptions[typeId] || "策略类型";
+function getBriefDescription(strategyTypeIndex) {
+    switch (normalizeStrategyTypeIndex(strategyTypeIndex)) {
+        case StrategyTypeIndex.TrendFollowing: return "跟随价格趋势交易";
+        case StrategyTypeIndex.TrendBreakout: return "突破近高并沿趋势持仓";
+        case StrategyTypeIndex.MeanReversion: return "价格偏离均值后回归";
+        case StrategyTypeIndex.Momentum: return "跟随强势股票动量";
+        case StrategyTypeIndex.Arbitrage: return "利用价差套利交易";
+        case StrategyTypeIndex.MachineLearning: return "AI预测价格走势";
+        case StrategyTypeIndex.MultiFactor: return "多维度综合评分";
+        case StrategyTypeIndex.HighFrequency: return "高频数据快速交易";
+        case StrategyTypeIndex.EventDriven: return "事件驱动交易机会";
+        case StrategyTypeIndex.Custom: return "用户自定义策略";
+        default: return "策略类型";
+    }
 }
 
 function getBriefDescriptionFromIndex(strategyTypeIndex) {
-    return getBriefDescription(strategyTypeIdFromIndex(strategyTypeIndex));
+    return getBriefDescription(strategyTypeIndex);
 }
 
 function getDefaultStrategyDescription(strategyTypeIndex) {
@@ -622,18 +583,15 @@ function buildCompleteStrategyData(context) {
     var dateStr = currentDate.toISOString().split('T')[0];
     var selectedStrategyTypeIndex = normalizeStrategyTypeIndex(context.selectedStrategyTypeIndex);
     var strategyBehaviorKind = strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex);
-    var strategyTypeId = strategyTypeIdFromIndex(selectedStrategyTypeIndex);
     var normalizedParameters = normalizeStrategyParameters(selectedStrategyTypeIndex, context.strategyParameters);
-    normalizedParameters.selectedStrategyTypeIndex = selectedStrategyTypeIndex;
     
     var strategyData = {
         // 基本信息
         name: context.strategyName,
         displayName: context.strategyName,
-        selectedStrategyTypeIndex: selectedStrategyTypeIndex,
         strategyBehaviorKind: strategyBehaviorKind,
-        strategyTypeIndex: strategyStoredTypeIndexFromTypeIndex(selectedStrategyTypeIndex),
-        typeName: getStrategyTypeName(strategyTypeId),
+        strategyTypeIndex: selectedStrategyTypeIndex,
+        typeName: getStrategyTypeName(selectedStrategyTypeIndex),
         description: context.strategyDescription,
         
         // 基本属性
@@ -646,7 +604,7 @@ function buildCompleteStrategyData(context) {
         enableAdvancedOptions: context.enableAdvancedOptions,
         
         // 元数据
-        statusIndex: 2,
+        statusIndex: false,
         createdDate: dateStr,
         returns: "+0.0%",
         maxDrawdown: "-0.0%",
@@ -686,55 +644,73 @@ function normalizeStrategyParameters(strategyTypeIndex, rawParameters) {
         }
     }
 
-    assignIfPresent("positionSize", ["positionSize"], normalizePercentageToRatio)
-    assignIfPresent("stopLoss", ["stopLoss"], normalizePercentageToRatio)
-    assignIfPresent("takeProfit", ["takeProfit"], normalizePercentageToRatio)
-    assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
-    assignIfPresent("rebalanceDays", ["rebalanceDays"], Number)
+    assignIfPresent("allowShort", ["allowShort"], Boolean)
+    assignIfPresent("maxPositions", ["maxPositions"], Number)
+    assignIfPresent("maxWeightPerStock", ["maxWeightPerStock"], Number)
+    assignIfPresent("minWeightPerStock", ["minWeightPerStock"], Number)
+    assignIfPresent("weightScheme", ["weightScheme"], Number)
+    assignIfPresent("rebalanceFrequency", ["rebalanceFrequency"], Number)
 
-    if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendFollowing) {
+    if (normalizedStrategyTypeIndex === StrategyTypeIndex.DoubleMovingAverage) {
         assignIfPresent("fastPeriod", ["fastPeriod"], Number)
         assignIfPresent("slowPeriod", ["slowPeriod"], Number)
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
-        assignIfPresent("longTrendPeriod", ["longTrendPeriod"], Number)
-        assignIfPresent("breakoutLookbackPeriod", ["breakoutLookbackPeriod"], Number)
-        assignIfPresent("breakoutThreshold", ["breakoutThreshold"], normalizePercentageToRatio)
-        assignIfPresent("adxPeriod", ["adxPeriod"], Number)
-        assignIfPresent("adxThreshold", ["adxThreshold"], Number)
-        assignIfPresent("exitMaPeriod", ["exitMaPeriod"], Number)
+        assignIfPresent("priceField", ["priceField"])
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TurtleBreakout) {
+        assignIfPresent("channelPeriod", ["channelPeriod"], Number)
+        assignIfPresent("breakoutMultiplier", ["breakoutMultiplier"], Number)
         assignIfPresent("atrPeriod", ["atrPeriod"], Number)
-        assignIfPresent("atrMultiplier", ["atrMultiplier"], Number)
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MeanReversion) {
-        assignIfPresent("bollPeriod", ["bollPeriod"], Number)
-        assignIfPresent("bollStd", ["bollStd"], Number)
-        assignIfPresent("reversionThreshold", ["reversionThreshold"], Number)
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Momentum) {
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.BollingerBandMeanReversion) {
+        assignIfPresent("period", ["period"], Number)
+        assignIfPresent("standardDeviationMultiplier", ["standardDeviationMultiplier"], Number)
+        assignIfPresent("entryThreshold", ["entryThreshold"], Number)
+        assignIfPresent("exitThreshold", ["exitThreshold"], Number)
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.RsiMeanReversion) {
+        assignIfPresent("period", ["period"], Number)
+        assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
+        assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactorSelection) {
+        assignIfPresent("factorWeights", ["factorWeights"])
         assignIfPresent("topN", ["topN"], Number)
-        assignIfPresent("momentumPeriod", ["momentumPeriod"], Number)
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Arbitrage) {
-        assignIfPresent("spreadThreshold", ["spreadThreshold"], Number)
+        assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EarningsSurprise) {
+        assignIfPresent("surpriseThreshold", ["surpriseThreshold"], Number)
+        assignIfPresent("holdDays", ["holdDays"], Number)
+        assignIfPresent("eventSources", ["eventSources"])
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.StatisticalPairTrading) {
+        assignIfPresent("tradingPair", ["tradingPair"])
+        assignIfPresent("hedgeRatio", ["hedgeRatio"], Number)
+        assignIfPresent("lookback", ["lookback"], Number)
         assignIfPresent("entryZScore", ["entryZScore"], Number)
         assignIfPresent("exitZScore", ["exitZScore"], Number)
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MachineLearning) {
-        assignIfPresent("featureWindow", ["featureWindow"], Number)
-        assignIfPresent("predictionDays", ["predictionDays"], Number)
-        assignIfPresent("trainingDays", ["trainingDays"], Number)
-        assignIfPresent("confidenceThreshold", ["confidenceThreshold"], normalizePercentageToRatio)
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactor) {
-        assignIfPresent("factorTypes", ["factorTypes"])
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.HighFrequency) {
-        assignIfPresent("timeframe", ["timeframe"])
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EventDriven) {
-        assignIfPresent("eventTypes", ["eventTypes"])
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.RiskParityAllocation) {
+        assignIfPresent("assets", ["assets"])
+        assignIfPresent("volatilityLookback", ["volatilityLookback"], Number)
+        assignIfPresent("targetVolatility", ["targetVolatility"], Number)
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MachineLearningSelection) {
+        assignIfPresent("modelId", ["modelId"], Number)
+        assignIfPresent("featureIds", ["featureIds"])
+        assignIfPresent("topN", ["topN"], Number)
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.OrderFlowImbalance) {
+        assignIfPresent("depthLevels", ["depthLevels"], Number)
+        assignIfPresent("imbalanceThreshold", ["imbalanceThreshold"], Number)
+        assignIfPresent("maxHoldSeconds", ["maxHoldSeconds"], Number)
+    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.VolatilitySpread) {
+        assignIfPresent("underlying", ["underlying"])
+        assignIfPresent("optionChainFilter", ["optionChainFilter"])
+        assignIfPresent("historicalVolatilityWindow", ["historicalVolatilityWindow"], Number)
+        assignIfPresent("entrySpreadUpper", ["entrySpreadUpper"], Number)
+        assignIfPresent("entrySpreadLower", ["entrySpreadLower"], Number)
+        assignIfPresent("deltaNeutral", ["deltaNeutral"], Boolean)
     } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Custom) {
         assignIfPresent("customCode", ["customCode"])
     }
 
-    for (var key in source) {
-        if (normalized[key] === undefined) {
-            normalized[key] = source[key]
-        }
-    }
+    assignIfPresent("rule_profile", ["rule_profile"])
+    assignIfPresent("rule_composer_state", ["rule_composer_state"])
+    assignIfPresent("execution_policy", ["execution_policy"])
+    assignIfPresent("backtest_assumptions", ["backtest_assumptions"])
+    assignIfPresent("strategy_scope_context", ["strategy_scope_context"])
+    assignIfPresent("factor_overlay", ["factor_overlay"])
 
     return normalized
 }
@@ -757,423 +733,141 @@ function getPositionSizingDescription(method) {
     function buildParamConfigs(strategyTypeIndex) {
         var configs = [];
         var normalizedStrategyTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
-        
-        // ============ 通用策略参数 ============
-        configs.push({
-            id: "positionSize",
-            type: "slider",
-            label: tr('strategyCreation.positionSize'),
-            description: tr('strategyCreation.positionSizeDescription'),
-            default: 20,
-            min: 5,
-            max: 100,
-            step: 5,
-            unit: "%",
-            category: tr('strategyCreation.commonParameters')
-        });
 
         configs.push({
-            id: "stopLoss",
+            id: "allowShort",
+            type: "select",
+            label: "允许做空",
+            description: "是否允许空头仓位",
+            options: [false, true],
+            default: false,
+            category: tr('strategyCreation.commonParameters')
+        });
+        configs.push({
+            id: "maxPositions",
             type: "slider",
-            label: tr('strategyCreation.stopLossPercent'),
-            description: tr('strategyCreation.stopLossDescription'),
-            default: 5,
+            label: "最大持仓数",
+            description: "组合允许的最大持仓标的数",
+            default: 100,
             min: 1,
-            max: 50,
-            step: 0.5,
-            unit: "%",
-            category: tr('strategyCreation.commonParameters')
-        });
-
-        configs.push({
-            id: "takeProfit",
-            type: "slider",
-            label: tr('strategyCreation.takeProfitPercent'),
-            description: tr('strategyCreation.takeProfitDescription'),
-            default: 15,
-            min: 5,
-            max: 200,
-            step: 1,
-            unit: "%",
-            category: tr('strategyCreation.commonParameters')
-        });
-
-        configs.push({
-            id: "maxDrawdownLimit",
-            type: "slider",
-            label: tr('strategyCreation.maxDrawdownLimit'),
-            description: tr('strategyCreation.maxDrawdownDescription'),
-            default: 20,
-            min: 1,
-            max: 80,
-            step: 1,
-            unit: "%",
-            category: tr('strategyCreation.commonParameters')
-        });
-
-        configs.push({
-            id: "rebalanceDays",
-            type: "slider",
-            label: tr('strategyCreation.rebalanceDays'),
-            description: tr('strategyCreation.rebalanceDaysDescription'),
-            default: 5,
-            min: 1,
-            max: 60,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.commonParameters')
-        });
-    
-    // 如果请求的是通用参数，直接返回
-    if (normalizedStrategyTypeIndex === StrategyTypeIndex.Common) {
-        return configs;
-    }
-    
-    // ============ 策略特定参数 ============
-    if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendFollowing) {
-        configs.push({
-            id: "fastPeriod",
-            type: "slider",
-            label: tr('strategyCreation.fastPeriod'),
-            description: tr('strategyCreation.fastPeriodDescription'),
-            default: 5,
-            min: 2,
-            max: 50,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "slowPeriod",
-            type: "slider",
-            label: tr('strategyCreation.slowPeriod'),
-            description: tr('strategyCreation.slowPeriodDescription'),
-            default: 20,
-            min: 5,
-            max: 200,
-            step: 5,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
-        configs.push({
-            id: "longTrendPeriod",
-            type: "slider",
-            label: tr('strategyCreation.longTrendPeriod'),
-            description: tr('strategyCreation.longTrendPeriodDescription'),
-            default: 250,
-            min: 120,
-            max: 300,
-            step: 5,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "breakoutLookbackPeriod",
-            type: "slider",
-            label: tr('strategyCreation.breakoutLookbackPeriod'),
-            description: tr('strategyCreation.breakoutLookbackPeriodDescription'),
-            default: 60,
-            min: 20,
-            max: 250,
-            step: 5,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "breakoutThreshold",
-            type: "slider",
-            label: tr('strategyCreation.breakoutThreshold'),
-            description: tr('strategyCreation.breakoutThresholdDescription'),
-            default: 95,
-            min: 85,
-            max: 100,
-            step: 1,
-            unit: "%",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "adxPeriod",
-            type: "slider",
-            label: tr('strategyCreation.adxPeriod'),
-            description: tr('strategyCreation.adxPeriodDescription'),
-            default: 14,
-            min: 5,
-            max: 50,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "adxThreshold",
-            type: "slider",
-            label: tr('strategyCreation.adxThreshold'),
-            description: tr('strategyCreation.adxThresholdDescription'),
-            default: 25,
-            min: 10,
-            max: 50,
-            step: 1,
-            unit: "",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "exitMaPeriod",
-            type: "slider",
-            label: tr('strategyCreation.exitMaPeriod'),
-            description: tr('strategyCreation.exitMaPeriodDescription'),
-            default: 50,
-            min: 10,
-            max: 200,
-            step: 5,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "atrPeriod",
-            type: "slider",
-            label: tr('strategyCreation.atrPeriod'),
-            description: tr('strategyCreation.atrPeriodDescription'),
-            default: 10,
-            min: 5,
-            max: 50,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-
-        configs.push({
-            id: "atrMultiplier",
-            type: "slider",
-            label: tr('strategyCreation.atrMultiplier'),
-            description: tr('strategyCreation.atrMultiplierDescription'),
-            default: 2.0,
-            min: 0.5,
-            max: 5.0,
-            step: 0.1,
-            decimals: 1,
-            unit: "xATR",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MeanReversion) {
-        configs.push({
-            id: "bollPeriod",
-            type: "slider",
-            label: tr('strategyCreation.bollPeriod'),
-            description: tr('strategyCreation.bollPeriodDescription'),
-            default: 20,
-            min: 5,
-            max: 100,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "bollStd",
-            type: "slider",
-            label: tr('strategyCreation.bollStd'),
-            description: tr('strategyCreation.bollStdDescription'),
-            default: 2.0,
-            min: 1.0,
-            max: 3.0,
-            step: 0.1,
-            unit: "",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "reversionThreshold",
-            type: "slider",
-            label: tr('strategyCreation.reversionThreshold'),
-            description: tr('strategyCreation.reversionThresholdDescription'),
-            default: 0.5,
-            min: 0.1,
-            max: 2.0,
-            step: 0.1,
-            unit: "",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Momentum) {
-        configs.push({
-            id: "momentumPeriod",
-            type: "slider",
-            label: tr('strategyCreation.momentumPeriod'),
-            description: tr('strategyCreation.momentumPeriodDescription'),
-            default: 20,
-            min: 5,
-            max: 250,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "topN",
-            type: "slider",
-            label: tr('strategyCreation.topN'),
-            description: tr('strategyCreation.topNDescription'),
-            default: 10,
-            min: 1,
-            max: 50,
+            max: 500,
             step: 1,
             unit: "只",
-            category: tr('strategyCreation.personalizedParameters')
+            category: tr('strategyCreation.commonParameters')
         });
-        
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Arbitrage) {
         configs.push({
-            id: "spreadThreshold",
+            id: "maxWeightPerStock",
             type: "slider",
-            label: tr('strategyCreation.spreadThreshold'),
-            description: tr('strategyCreation.spreadThresholdDescription'),
-            default: 0.02,
-            min: 0.001,
-            max: 0.1,
-            step: 0.001,
-            decimals: 3,
+            label: "单票最大权重",
+            description: "每个标的最大仓位权重",
+            default: 0.1,
+            min: 0.01,
+            max: 1.0,
+            step: 0.01,
+            decimals: 2,
             unit: "",
-            category: tr('strategyCreation.personalizedParameters')
+            category: tr('strategyCreation.commonParameters')
         });
-        
         configs.push({
-            id: "entryZScore",
+            id: "minWeightPerStock",
             type: "slider",
-            label: tr('strategyCreation.entryZScore'),
-            description: tr('strategyCreation.entryZScoreDescription'),
-            default: 2.0,
-            min: 1.0,
-            max: 3.0,
-            step: 0.1,
+            label: "单票最小权重",
+            description: "每个标的最小仓位权重",
+            default: 0.0,
+            min: 0.0,
+            max: 0.5,
+            step: 0.01,
+            decimals: 2,
             unit: "",
-            category: tr('strategyCreation.personalizedParameters')
+            category: tr('strategyCreation.commonParameters')
         });
-        
         configs.push({
-            id: "exitZScore",
-            type: "slider",
-            label: tr('strategyCreation.exitZScore'),
-            description: tr('strategyCreation.exitZScoreDescription'),
-            default: 0.5,
-            min: 0.1,
-            max: 1.5,
-            step: 0.1,
-            unit: "",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MachineLearning) {
-        configs.push({
-            id: "featureWindow",
-            type: "slider",
-            label: tr('strategyCreation.featureWindow'),
-            description: tr('strategyCreation.featureWindowDescription'),
-            default: 60,
-            min: 10,
-            max: 250,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "predictionDays",
-            type: "slider",
-            label: tr('strategyCreation.predictionDays'),
-            description: tr('strategyCreation.predictionDaysDescription'),
-            default: 1,
-            min: 1,
-            max: 10,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "trainingDays",
-            type: "slider",
-            label: tr('strategyCreation.trainingDays'),
-            description: tr('strategyCreation.trainingDaysDescription'),
-            default: 1000,
-            min: 500,
-            max: 5000,
-            step: 100,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-        configs.push({
-            id: "confidenceThreshold",
-            type: "slider",
-            label: tr('strategyCreation.confidenceThreshold'),
-            description: tr('strategyCreation.confidenceThresholdDescription'),
-            default: 60,
-            min: 50,
-            max: 90,
-            step: 1,
-            unit: "%",
-            category: tr('strategyCreation.personalizedParameters')
-        });
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactor) {
-        configs.push({
-            id: "factorTypes",
-            type: "multiselect",
-            label: tr('strategyCreation.factorTypes'),
-            description: tr('strategyCreation.factorTypesDescription'),
-            options: [tr('strategyCreation.value'), tr('strategyCreation.quality'), tr('strategyCreation.growth'), 
-                     tr('strategyCreation.momentum'), tr('strategyCreation.size'), tr('strategyCreation.volatility'),
-                     tr('strategyCreation.liquidity'), tr('strategyCreation.sentiment')],
-            default: [tr('strategyCreation.value'), tr('strategyCreation.quality'), tr('strategyCreation.growth'), tr('strategyCreation.momentum')],
-            multiple: true,
-            category: tr('strategyCreation.personalizedParameters')
-        });
-        
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.HighFrequency) {
-        configs.push({
-            id: "timeframe",
+            id: "weightScheme",
             type: "select",
-            label: tr('strategyCreation.timeframe'),
-            description: tr('strategyCreation.timeframeDescription'),
-            options: [tr('strategyCreation.oneMinute'), tr('strategyCreation.fiveMinutes'), 
-                     tr('strategyCreation.fifteenMinutes'), tr('strategyCreation.thirtyMinutes'), 
-                     tr('strategyCreation.oneHour')],
-            default: tr('strategyCreation.fiveMinutes'),
-            category: tr('strategyCreation.personalizedParameters')
+            label: "权重方案",
+            description: "仓位权重分配方案",
+            options: [0, 1, 2, 3],
+            default: 0,
+            category: tr('strategyCreation.commonParameters')
         });
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EventDriven) {
         configs.push({
-            id: "eventTypes",
-            type: "multiselect",
-            label: tr('strategyCreation.eventTypes'),
-            description: tr('strategyCreation.eventTypesDescription'),
-            options: [tr('strategyCreation.earningsRelease'), tr('strategyCreation.mergerAnnouncement'), 
-                     tr('strategyCreation.dividendAnnouncement'), tr('strategyCreation.managementChange'),
-                     tr('strategyCreation.policyRelease'), tr('strategyCreation.productLaunch')],
-            default: [tr('strategyCreation.earningsRelease'), tr('strategyCreation.mergerAnnouncement')],
-            multiple: true,
-            category: tr('strategyCreation.personalizedParameters')
+            id: "rebalanceFrequency",
+            type: "select",
+            label: "调仓频率",
+            description: "策略调仓频率枚举",
+            options: [0, 1, 2, 3, 4],
+            default: 0,
+            category: tr('strategyCreation.commonParameters')
         });
-    } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Custom) {
-        // 自定义策略不需要特殊参数，用户自己定义代码
-        configs.push({
-            id: "customCode",
-            type: "input",
-            label: tr('strategyCreation.customCode'),
-            description: tr('strategyCreation.customCodeDescription'),
-            default: "# " + tr('strategyCreation.customCode'),
-            multiline: true,
-            placeholder: tr('strategyCreation.customCodePlaceholder'),
-            category: tr('strategyCreation.personalizedParameters')
-        });
-    }
-    
-    return configs;
+
+        if (normalizedStrategyTypeIndex === StrategyTypeIndex.Common) {
+            return configs;
+        }
+
+        if (normalizedStrategyTypeIndex === StrategyTypeIndex.DoubleMovingAverage) {
+            configs.push({id: "fastPeriod", type: "slider", label: "快线周期", default: 5, min: 2, max: 100, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "slowPeriod", type: "slider", label: "慢线周期", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "priceField", type: "select", label: "价格字段", options: [0, 1, 2, 3, 4], default: 3, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TurtleBreakout) {
+            configs.push({id: "channelPeriod", type: "slider", label: "通道周期", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "breakoutMultiplier", type: "slider", label: "突破倍数", default: 1.0, min: 0.1, max: 5.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "atrPeriod", type: "slider", label: "ATR 周期", default: 20, min: 5, max: 100, step: 1, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.BollingerBandMeanReversion) {
+            configs.push({id: "period", type: "slider", label: "周期", default: 20, min: 5, max: 200, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "standardDeviationMultiplier", type: "slider", label: "标准差倍数", default: 2.0, min: 0.5, max: 5.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "entryThreshold", type: "slider", label: "入场阈值", default: 1.0, min: 0.1, max: 5.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "exitThreshold", type: "slider", label: "离场阈值", default: 0.2, min: 0.05, max: 3.0, step: 0.05, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.RsiMeanReversion) {
+            configs.push({id: "period", type: "slider", label: "RSI 周期", default: 14, min: 5, max: 100, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "oversoldLevel", type: "slider", label: "超卖阈值", default: 30, min: 1, max: 50, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "overboughtLevel", type: "slider", label: "超买阈值", default: 70, min: 50, max: 99, step: 1, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactorSelection) {
+            configs.push({id: "factorWeights", type: "input", label: "因子权重", placeholder: "[{\"factorId\":\"f1\",\"weight\":0.2}]", category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "topN", type: "slider", label: "TopN", default: 50, min: 1, max: 500, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "industryNeutral", type: "select", label: "行业中性", options: [false, true], default: false, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EarningsSurprise) {
+            configs.push({id: "surpriseThreshold", type: "slider", label: "惊喜阈值", default: 0.2, min: 0.01, max: 2.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "holdDays", type: "slider", label: "持有天数", default: 5, min: 1, max: 120, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "eventSources", type: "input", label: "事件源", placeholder: "[0,1]", category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.StatisticalPairTrading) {
+            configs.push({id: "tradingPair", type: "input", label: "交易对", placeholder: "{\"first\":\"000001.SZ\",\"second\":\"000002.SZ\"}", category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "hedgeRatio", type: "slider", label: "对冲比", default: 1.0, min: 0.1, max: 5.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "lookback", type: "slider", label: "回看窗口", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "entryZScore", type: "slider", label: "入场Z分数", default: 2.0, min: 0.5, max: 5.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "exitZScore", type: "slider", label: "离场Z分数", default: 0.5, min: 0.1, max: 3.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.RiskParityAllocation) {
+            configs.push({id: "assets", type: "input", label: "资产列表", placeholder: "[\"000300.SH\",\"000905.SH\"]", category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "volatilityLookback", type: "slider", label: "波动率回看", default: 60, min: 5, max: 500, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "targetVolatility", type: "slider", label: "目标波动率", default: 0.0, min: 0.0, max: 1.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MachineLearningSelection) {
+            configs.push({id: "modelId", type: "input", label: "模型ID", default: 0, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "featureIds", type: "input", label: "特征ID列表", placeholder: "[1,2,3]", category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "topN", type: "slider", label: "TopN", default: 50, min: 1, max: 500, step: 1, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.OrderFlowImbalance) {
+            configs.push({id: "depthLevels", type: "slider", label: "盘口层级", default: 5, min: 1, max: 20, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "imbalanceThreshold", type: "slider", label: "失衡阈值", default: 0.3, min: 0.01, max: 1.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "maxHoldSeconds", type: "slider", label: "最大持有秒数", default: 60, min: 1, max: 3600, step: 1, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.VolatilitySpread) {
+            configs.push({id: "underlying", type: "input", label: "标的", placeholder: "510300.SH", category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "optionChainFilter", type: "input", label: "期权链过滤", placeholder: "{\"expiryDaysMin\":15}", category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "historicalVolatilityWindow", type: "slider", label: "历史波动率窗口", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "entrySpreadUpper", type: "slider", label: "入场上阈", default: 0.05, min: 0.0, max: 1.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "entrySpreadLower", type: "slider", label: "入场下阈", default: -0.05, min: -1.0, max: 0.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "deltaNeutral", type: "select", label: "Delta 中性", options: [false, true], default: true, category: tr('strategyCreation.personalizedParameters')});
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Custom) {
+            configs.push({
+                id: "customCode",
+                type: "input",
+                label: tr('strategyCreation.customCode'),
+                description: tr('strategyCreation.customCodeDescription'),
+                default: "# " + tr('strategyCreation.customCode'),
+                multiline: true,
+                placeholder: tr('strategyCreation.customCodePlaceholder'),
+                category: tr('strategyCreation.personalizedParameters')
+            });
+        }
+
+        return configs;
 }
 
 function buildDefaultStrategyProfile(strategyTypeIndex) {
@@ -1792,7 +1486,10 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
 }
 
 function normalizeRuleComposerBindingStage(binding) {
-    var stageId = String((binding && (binding.stageId || binding.phase)) || "signal").trim().toLowerCase();
+    var stageId = String((binding && binding.stageId) || "").trim().toLowerCase();
+    if (stageId === "") {
+        throw new Error("规则绑定缺少 stageId")
+    }
     return canonicalRulePackStageId(stageId);
 }
 
@@ -1804,9 +1501,9 @@ function injectRecommendedBaseBindings(bindings, recommendedBindings) {
 
     for (var index = 0; index < existingBindings.length; ++index) {
         var binding = existingBindings[index] || {};
-        var templateId = String(binding.templateId || binding.template_id || "").trim();
+        var templateId = String(binding.templateId || "").trim();
         var groupKey = normalizeRuleComposerBindingStage(binding)
-            + "::" + String(binding.group_id || binding.groupId || "").trim().toLowerCase();
+            + "::" + String(binding.groupId || "").trim().toLowerCase();
         existingGroupCounts[groupKey] = (existingGroupCounts[groupKey] || 0) + 1;
         if (templateId) {
             existingTemplates[templateId] = true;
@@ -1815,9 +1512,9 @@ function injectRecommendedBaseBindings(bindings, recommendedBindings) {
 
     for (var recommendedIndex = 0; recommendedIndex < recommended.length; ++recommendedIndex) {
         var recommendedBinding = recommended[recommendedIndex] || {};
-        var recommendedTemplateId = String(recommendedBinding.templateId || recommendedBinding.template_id || "").trim();
+        var recommendedTemplateId = String(recommendedBinding.templateId || "").trim();
         var recommendedGroupKey = normalizeRuleComposerBindingStage(recommendedBinding)
-            + "::" + String(recommendedBinding.group_id || recommendedBinding.groupId || "").trim().toLowerCase();
+            + "::" + String(recommendedBinding.groupId || "").trim().toLowerCase();
         if (recommendedTemplateId && existingTemplates[recommendedTemplateId]) {
             continue;
         }
@@ -2078,8 +1775,8 @@ function buildDefaultRuleComposerSkeleton(strategyProfile, rawBindings) {
 
     function targetGroupIndex(stageId, binding, stageGroups) {
         var groups = Array.isArray(stageGroups) ? stageGroups : [];
-        var groupId = String((binding && (binding.group_id || binding.groupId)) || "").trim().toLowerCase();
-        var groupRole = String((binding && (binding.group_role || binding.groupRole)) || "").trim().toLowerCase();
+        var groupId = String((binding && binding.groupId) || "").trim().toLowerCase();
+        var groupRole = String((binding && binding.groupRole) || "").trim().toLowerCase();
         var category = String((binding && binding.category) || "").trim().toLowerCase();
 
         if (groupId !== "") {
@@ -2142,16 +1839,16 @@ function buildDefaultRuleComposerSkeleton(strategyProfile, rawBindings) {
             var destinationGroup = stage.groups[targetGroupIndex(bindingStageId, binding, stage.groups)];
             destinationGroup.rules.push({
                 instanceId: "binding_" + bindingStageId + "_" + bindingIndex,
-                templateId: binding.template_id || binding.templateId || "",
-                templateName: binding.template_display_name || binding.templateDisplayName || binding.template_id || binding.templateId || "未命名模板",
+                templateId: binding.templateId || "",
+                templateName: binding.templateDisplayName || binding.templateId || "未命名模板",
                 summary: binding.summary || "",
-                phase: bindingStageId,
-                fileName: binding.file_name || binding.fileName || "",
-                filePath: binding.file_path || binding.filePath || "",
+                stageId: bindingStageId,
+                fileName: binding.fileName || "",
+                filePath: binding.filePath || "",
                 category: binding.category || "",
-                termId: binding.term_id || binding.termId || "",
-                termName: binding.term_display_name || binding.termDisplayName || "",
-                defaultInjected: !!(binding.default_injected || binding.defaultInjected),
+                termId: binding.termId || "",
+                termName: binding.termDisplayName || "",
+                defaultInjected: !!binding.defaultInjected,
                 ready: true
             });
             break;
@@ -2167,10 +1864,10 @@ function buildRuleComposerIssueKey(stageId, groupId) {
 
 function ruleLikeTemplateText(rule) {
     return [
-        rule && (rule.templateId || rule.template_id),
+        rule && rule.templateId,
         rule && (rule.category || ""),
-        rule && (rule.termId || rule.term_id),
-        rule && (rule.templateName || rule.template_display_name)
+        rule && rule.termId,
+        rule && rule.templateName
     ].join(" ").toLowerCase();
 }
 
@@ -2182,8 +1879,8 @@ function isWatchInvalidationRule(rule) {
 }
 
 function isCompositeBlockingEntryTemplate(rule) {
-    var templateId = String(rule && (rule.templateId || rule.template_id) || "").trim();
-    var fileName = String(rule && (rule.fileName || rule.file_name) || "").trim().toLowerCase();
+    var templateId = String(rule && rule.templateId || "").trim();
+    var fileName = String(rule && rule.fileName || "").trim().toLowerCase();
     return templateId === "template_entry_pullback_ma20_support_v1"
         || templateId === "template_entry_pullback_ma60_support_v1"
         || fileName === "entry_pullback_ma20_support.yaml"
@@ -2304,7 +2001,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
 
             for (var ruleIndex = 0; ruleIndex < rules.length; ++ruleIndex) {
                 var rule = rules[ruleIndex] || {};
-                var templateId = String(rule.templateId || rule.template_id || "").trim();
+                var templateId = String(rule.templateId || "").trim();
                 if (templateId) {
                     templateUsage[templateId] = templateUsage[templateId] || [];
                     templateUsage[templateId].push({ stageId: stageId, groupId: groupId });

@@ -28,11 +28,9 @@
 #include "../../ui/bridge/include/MarketDataService.h"
 #include "../../ui/bridge/include/PortfolioAnalysisService.h"
 #include "../../ui/bridge/include/PositionAccountService.h"
-#include "../../ui/bridge/include/StrategyBacktestRuntimeAccess.h"
 #include "../../ui/bridge/include/TradingMarketCalendarService.h"
 #include "../../ui/bridge/include/TradingRuntimeStatusService.h"
 #include "../../ui/bridge/include/RiskMonitorService.h"
-#include "../../ui/bridge/include/StrategyService.h"
 #include "../../ui/bridge/include/TradeExecutionService.h"
 #include "../../ui/bridge/include/TradingConnectionConfigService.h"
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
@@ -460,8 +458,6 @@ void AppBootstrap::initializeDeferredUiServices()
     if (TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance()) {
         marketCalendarService->initializeAsync();
     }
-
-    bridge::StrategyBacktestRuntimeAccess::initialize();
 
     if (TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance()) {
         runtimeStatusService->initializeAsync();

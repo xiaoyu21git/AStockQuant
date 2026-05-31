@@ -59,46 +59,6 @@ protected:
     static void insertIfConfigured(QVariantMap& target, const QString& key, const QVariant& value);
 };
 
-class RuleProfileResolver final : public AbstractStrategyStructureResolver {
-protected:
-    QString structureKeyImpl() const override;
-    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
-    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
-    QList<AliasGroup> aliasGroups() const override;
-};
-
-class ExecutionPolicyResolver final : public AbstractStrategyStructureResolver {
-protected:
-    QString structureKeyImpl() const override;
-    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
-    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
-    QList<AliasGroup> aliasGroups() const override;
-};
-
-class BacktestAssumptionsResolver final : public AbstractStrategyStructureResolver {
-protected:
-    QString structureKeyImpl() const override;
-    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
-    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
-    QList<AliasGroup> aliasGroups() const override;
-};
-
-class StrategyScopeContextResolver final : public AbstractStrategyStructureResolver {
-protected:
-    QString structureKeyImpl() const override;
-    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
-    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
-    QList<AliasGroup> aliasGroups() const override;
-};
-
-class FactorOverlayResolver final : public AbstractStrategyStructureResolver {
-protected:
-    QString structureKeyImpl() const override;
-    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
-    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
-    QList<AliasGroup> aliasGroups() const override;
-};
-
 class StrategyStructureResolverSet {
 public:
     StrategyStructureResolverSet();

@@ -227,24 +227,22 @@ CREATE TABLE IF NOT EXISTS `financial_indicator_daily` (
 
 -- 策略定义表
 CREATE TABLE IF NOT EXISTS `strategy` (
-    `strategy_id` VARCHAR(100) NOT NULL COMMENT '策略ID',
-    `engine_strategy_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '策略引擎数值ID',
-    `strategy_code` VARCHAR(100) NOT NULL COMMENT '策略代码(唯一标识)',
-    `strategy_name` VARCHAR(200) NOT NULL COMMENT '策略名称',
-    `strategy_type` ENUM('ALPHA', 'ARBITRAGE', 'TREND', 'MEAN_REVERSION', 'HFT', 'PORTFOLIO', 'CUSTOM') DEFAULT 'ALPHA' COMMENT '策略类型',
-    `description` TEXT COMMENT '策略描述',
-    `version` VARCHAR(20) DEFAULT '1.0.0' COMMENT '策略版本',
-    `author` VARCHAR(100) DEFAULT NULL COMMENT '作者',
-    `language` ENUM('PYTHON', 'CPP', 'JULIA', 'R') DEFAULT 'PYTHON' COMMENT '实现语言',
-    `status` ENUM('ACTIVE', 'INACTIVE', 'TESTING', 'ARCHIVED') DEFAULT 'ACTIVE' COMMENT '状态',
-    `parameters` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '策略参数模板(JSON格式，TEXT类型兼容Qt驱动)',
-    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
-    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `strategy_id`           VARCHAR(128) NOT NULL COMMENT '策略UUID主键',
+    `engine_strategy_id`    BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '策略引擎数值ID',
+    `strategy_code`         VARCHAR(128) NOT NULL COMMENT '策略代码(唯一标识)',
+    `metadata_json`         JSON NOT NULL COMMENT '策略元数据(名称/描述/behaviorKind/factorIds/ruleIds/enabled/uuid)',
+    `strategy_identity_json` JSON NOT NULL COMMENT '策略身份(storedTypeIndex/behaviorKind)',
+    `version`               VARCHAR(64) NULL COMMENT '策略版本',
+    `author`                VARCHAR(128) NULL COMMENT '作者',
+    `language`              VARCHAR(32) NOT NULL DEFAULT 'PYTHON' COMMENT '实现语言',
+    `status`                VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT '生命周期状态',
+    `created_at`            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at`            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    `parameters`            JSON NULL COMMENT '策略参数(JSON)',
+    `performance_metrics`   JSON NULL COMMENT '绩效指标(JSON)',
+    `runtime_json`          JSON NULL COMMENT '运行时属性(assetTypeIndex/timeFrameIndex/riskLevelIndex)',
     PRIMARY KEY (`strategy_id`),
-    UNIQUE KEY `uk_engine_strategy_id` (`engine_strategy_id`),
-    UNIQUE KEY `uk_strategy_code` (`strategy_code`),
-    KEY `idx_strategy_type` (`strategy_type`),
-    KEY `idx_status` (`status`)
+    UNIQUE KEY `uq_strategy_code` (`strategy_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='策略定义表';
 
 -- 回测配置表

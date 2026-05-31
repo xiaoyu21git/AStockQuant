@@ -208,9 +208,7 @@ QSet<QString> readBoundStrategyIds(const QJsonObject& configObject)
     for (const QJsonValue& rawEntry : boundStrategies) {
         if (rawEntry.isObject()) {
             const QJsonObject entry = rawEntry.toObject();
-            const QString strategyId = entry.value(QStringLiteral("strategyId")).toString().trimmed().isEmpty()
-                ? entry.value(QStringLiteral("strategy_id")).toString().trimmed()
-                : entry.value(QStringLiteral("strategyId")).toString().trimmed();
+            const QString strategyId = entry.value(QStringLiteral("strategyId")).toString().trimmed();
             if (!strategyId.isEmpty()) {
                 strategyIds.insert(strategyId);
             }
@@ -479,26 +477,18 @@ bool JujinMarketConnector::start()
         readStringSetting(configObject, "accountRuntimeStrategyId", "ASTOCK_GM_ACCOUNT_RUNTIME_STRATEGY_ID"));
     const QString gmStrategyId = QString::fromStdString(
         readStringSetting(configObject, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID"));
-    const QString legacyRuntimeStrategyId = QString::fromStdString(
-        readStringSetting(configObject, "runtimeStrategyId", "ASTOCK_GM_RUNTIME_STRATEGY_ID"));
-    const QString legacyStrategyId = QString::fromStdString(
-        readStringSetting(configObject, "strategyId", "ASTOCK_GM_STRATEGY_ID"));
-
-    QString resolvedGmStrategyId = gmStrategyId.trimmed();
-    if (resolvedGmStrategyId.isEmpty()) {
-        resolvedGmStrategyId = legacyRuntimeStrategyId.trimmed();
-    }
-    if (resolvedGmStrategyId.isEmpty()) {
-        resolvedGmStrategyId = legacyStrategyId.trimmed();
-    }
+    const QString resolvedGmStrategyId = gmStrategyId.trimmed();
 
     QString resolvedConnectorRuntimeId = accountRuntimeStrategyId.trimmed();
     if (resolvedConnectorRuntimeId.isEmpty()) {
         resolvedConnectorRuntimeId = resolvedGmStrategyId;
     }
 
+    if (resolvedConnectorRuntimeId.isEmpty()) {
+        throw std::runtime_error("JujinMarketConnector requires accountRuntimeStrategyId or gmStrategyId");
+    }
+
     if (!resolvedConnectorRuntimeId.isEmpty()) {
-        config.extra_params["strategy_id"] = resolvedConnectorRuntimeId.toStdString();
         config.extra_params["runtime_strategy_id"] = resolvedConnectorRuntimeId.toStdString();
     }
     config.extra_params["mode"] = "1";
@@ -895,8 +885,8 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
             "    item=order if isinstance(order, dict) else {}\n"
             "    result.append({\n"
             "        'order_id': pick(item,'cl_ord_id','order_id','orderId'),\n"
-            "        'business_strategy_id': pick(item,'business_strategy_id','bound_strategy_id'),\n"
-            "        'runtime_strategy_id': pick(item,'runtime_strategy_id','gm_strategy_id','strategy_id'),\n"
+            "        'business_strategy_id': pick(item,'business_strategy_id'),\n"
+            "        'runtime_strategy_id': pick(item,'runtime_strategy_id'),\n"
             "        'symbol': pick(item,'symbol'),\n"
             "        'side': pick(item,'side','position_side'),\n"
             "        'price': pick(item,'price'),\n"
@@ -978,8 +968,8 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
 
             const QJsonObject order = value.toObject();
             const QString orderId = jsonStringValue(order, {"order_id", "cl_ord_id", "orderId"});
-            const QString businessStrategyId = jsonStringValue(order, {"business_strategy_id", "bound_strategy_id"});
-            const QString runtimeStrategyIdentity = jsonStringValue(order, {"runtime_strategy_id", "gm_strategy_id", "strategy_id"});
+            const QString businessStrategyId = jsonStringValue(order, {"business_strategy_id"});
+            const QString runtimeStrategyIdentity = jsonStringValue(order, {"runtime_strategy_id"});
             const QString symbol = jsonStringValue(order, {"symbol"});
             if (orderId.isEmpty() || symbol.isEmpty()) {
                 continue;
@@ -1006,9 +996,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
             event.set("symbol", symbol.toStdString());
             if (!businessStrategyId.trimmed().isEmpty()) {
                 event.set("business_strategy_id", businessStrategyId.trimmed().toStdString());
-                event.set("strategy_id", businessStrategyId.trimmed().toStdString());
                 event.metadata["business_strategy_id"] = businessStrategyId.trimmed().toStdString();
-                event.metadata["strategy_id"] = businessStrategyId.trimmed().toStdString();
             }
             if (!runtimeStrategyIdentity.trimmed().isEmpty()) {
                 event.set("runtime_strategy_id", runtimeStrategyIdentity.trimmed().toStdString());

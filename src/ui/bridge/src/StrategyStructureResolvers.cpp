@@ -18,9 +18,7 @@ namespace rawkeys {
 constexpr const char* kParameters = "parameters";
 constexpr const char* kPerformanceMetrics = "performance_metrics";
 constexpr const char* kAdvancedOptions = "advanced_options";
-constexpr const char* kAdvancedOptionsLegacy = "advancedOptions";
 constexpr const char* kOptimizationConfig = "optimization_config";
-constexpr const char* kOptimizationConfigLegacy = "optimizationConfig";
 constexpr const char* kBacktestRuntime = "backtest_runtime";
 constexpr const char* kBacktestSettings = "backtest_settings";
 constexpr const char* kStages = "stages";
@@ -72,6 +70,14 @@ QVariantMap rawNestedMap(const QVariantMap& map, const char* key)
 QVariantList rawNestedList(const QVariantMap& map, const char* key)
 {
     return variantListValue(rawMapValue(map, key));
+}
+
+domain::strategy::Ratio normalizedPercentRatio(double value)
+{
+    if (value > 1.0 && value <= 100.0) {
+        value /= 100.0;
+    }
+    return domain::strategy::Ratio{value};
 }
 
 bool isConfiguredVariant(const QVariant& value)
@@ -148,20 +154,6 @@ QStringList aliasListWithCanonical(const AbstractStrategyStructureResolver::Alia
         keys.prepend(group.canonicalKey);
     }
     return keys;
-}
-
-AbstractStrategyStructureResolver::AliasGroup aliasGroupFromKeys(const QStringList& keys,
-                                                                 const QVariant& defaultValue = {})
-{
-    AbstractStrategyStructureResolver::AliasGroup group;
-    if (keys.isEmpty()) {
-        return group;
-    }
-
-    group.canonicalKey = keys.front();
-    group.aliases = keys.mid(1);
-    group.defaultValue = defaultValue;
-    return group;
 }
 
 class VariantSourceReader final {
@@ -266,7 +258,7 @@ public:
         const QList<QVariantMap>& sources,
         domain::backtest::StrategyStoredType storedType) const
     {
-        const QVariant value = firstConfiguredValue(sources, {"executionKind", "execution_kind"});
+        const QVariant value = firstConfiguredValue(sources, {"executionKind"});
         bool ok = false;
         const int index = value.toInt(&ok);
         if (ok) {
@@ -284,7 +276,7 @@ public:
 
     [[nodiscard]] domain::strategy::StrategyLanguage configuredLanguage(const QList<QVariantMap>& sources) const
     {
-        const int index = configuredInteger(sources, {"language", "languageIndex"});
+        const int index = configuredInteger(sources, {"language"});
         switch (static_cast<domain::strategy::StrategyLanguage>(index)) {
         case domain::strategy::StrategyLanguage::Python:
         case domain::strategy::StrategyLanguage::Cpp:
@@ -518,7 +510,7 @@ public:
     {
         domain::strategy::RuleComposerState state;
         const QVariantMap composerStateMap = variantMapValue(
-            reader_.firstConfiguredValue({source}, {"ruleComposerState", "rule_composer_state"}));
+            reader_.firstConfiguredValue({source}, {"ruleComposerState"}));
         const QVariantList stageValues = rawNestedList(composerStateMap, rawkeys::kStages);
         state.stages.reserve(stageValues.size());
         for (const QVariant& stageValue : stageValues) {
@@ -545,12 +537,12 @@ public:
                 }
 
                 domain::strategy::RuleComposerGroup group;
-                group.groupId = domain::strategy::GroupId(reader_.configuredText({groupMap}, {"groupId", "group_id"}));
-                group.title = domain::strategy::GroupTitle(reader_.configuredText({groupMap}, {"title", "groupTitle", "group_title"}));
+                group.groupId = domain::strategy::GroupId(reader_.configuredText({groupMap}, {"groupId"}));
+                group.title = domain::strategy::GroupTitle(reader_.configuredText({groupMap}, {"title"}));
                 group.groupRole = configuredGroupRole(groupMap);
                 group.groupOperator = configuredGroupOperator(groupMap);
                 group.minimumMatchCount = reader_.configuredInteger(
-                    {groupMap}, {"minimumMatchCount", "groupMinMatchCount", "minimum_match_count", "group_min_match_count"});
+                    {groupMap}, {"minimumMatchCount", "groupMinMatchCount"});
 
                 const QVariantList ruleValues = rawNestedList(groupMap, rawkeys::kRules);
                 group.rules.reserve(ruleValues.size());
@@ -563,11 +555,11 @@ public:
                     domain::strategy::RuleComposerRule rule;
                     rule.binding.phase = stage.phase;
                     rule.binding.templateId = domain::strategy::RuleTemplateId(
-                        reader_.configuredText({ruleMap}, {"templateId", "template_id"}));
+                        reader_.configuredText({ruleMap}, {"templateId"}));
                     rule.binding.filePath = domain::strategy::FilePathToken(
-                        reader_.configuredText({ruleMap}, {"filePath", "file_path"}));
+                        reader_.configuredText({ruleMap}, {"filePath"}));
                     rule.binding.namespaceId = domain::strategy::NamespaceId(
-                        reader_.configuredText({ruleMap}, {"namespaceId", "namespace_id"}));
+                        reader_.configuredText({ruleMap}, {"namespaceId"}));
                     rule.binding.groupId = group.groupId;
                     rule.binding.groupTitle = group.title;
                     rule.binding.groupRole = group.groupRole;
@@ -636,11 +628,11 @@ public:
             domain::backtest::resolveStrategyIdentity(rawStrategy);
 
         aggregate.identity.strategyId = domain::strategy::StrategyId(
-            reader_.configuredText(sources, {"id", "strategyId"}));
+            reader_.configuredText(sources, {"strategyId"}));
         aggregate.identity.strategyCode = domain::strategy::StrategyCode(
-            reader_.configuredText(sources, {"strategyCode", "code"}));
+            reader_.configuredText(sources, {"strategyCode"}));
         aggregate.identity.strategyName = domain::strategy::StrategyName(
-            reader_.configuredText(sources, {"strategyName", "name"}));
+            reader_.configuredText(sources, {"strategyName"}));
         aggregate.identity.storedType = resolvedIdentity.storedType;
         aggregate.identity.behaviorKind = resolvedIdentity.behavior.valid
             ? resolvedIdentity.behavior.kind
@@ -648,13 +640,13 @@ public:
         aggregate.identity.executionKind = reader_.configuredExecutionKind(sources, resolvedIdentity.storedType);
 
         aggregate.metadata.description = domain::strategy::DescriptionText(
-            reader_.configuredText(sources, {"description", "notes"}));
+            reader_.configuredText(sources, {"description"}));
         aggregate.metadata.version = domain::strategy::VersionText(reader_.configuredText(sources, {"version"}));
-        aggregate.metadata.author = domain::strategy::AuthorName(reader_.configuredText(sources, {"author", "createdBy"}));
+        aggregate.metadata.author = domain::strategy::AuthorName(reader_.configuredText(sources, {"author"}));
         aggregate.metadata.language = reader_.configuredLanguage(sources);
         aggregate.metadata.tags = reader_.readTags(sources);
-        aggregate.metadata.createdAt = reader_.configuredDateTime(sources, {"createdAt", "created_at"});
-        aggregate.metadata.updatedAt = reader_.configuredDateTime(sources, {"updatedAt", "updated_at"});
+        aggregate.metadata.createdAt = reader_.configuredDateTime(sources, {"createdAt"});
+        aggregate.metadata.updatedAt = reader_.configuredDateTime(sources, {"updatedAt"});
 
         aggregate.lifecycle.status = reader_.configuredLifecycleStatus(sources);
         aggregate.runtime.assetTypeIndex = reader_.configuredInteger(sources, {"assetTypeIndex"});
@@ -722,10 +714,10 @@ private:
     [[nodiscard]] domain::strategy::RuleProfileSnapshot buildRuleProfile(const QVariantMap& source) const
     {
         domain::strategy::RuleProfileSnapshot snapshot;
-        snapshot.maxPositionRatio = domain::strategy::Ratio{risk::config::maxPositionPercent(source, 0.0)};
-        snapshot.maxTotalExposureRatio = domain::strategy::Ratio{risk::config::maxTotalExposure(source, 0.0)};
-        snapshot.stopLossRatio = domain::strategy::Ratio{risk::config::stopLossPercent(source, 0.0)};
-        snapshot.takeProfitRatio = domain::strategy::Ratio{risk::config::takeProfitPercent(source, 0.0)};
+        snapshot.maxPositionRatio = normalizedPercentRatio(risk::config::maxPositionPercent(source, 0.0));
+        snapshot.maxTotalExposureRatio = normalizedPercentRatio(risk::config::maxTotalExposure(source, 0.0));
+        snapshot.stopLossRatio = normalizedPercentRatio(risk::config::stopLossPercent(source, 0.0));
+        snapshot.takeProfitRatio = normalizedPercentRatio(risk::config::takeProfitPercent(source, 0.0));
         snapshot.rebalanceDays = risk::config::rebalanceDays(source, 0);
         return snapshot;
     }
@@ -945,205 +937,7 @@ void AbstractStrategyStructureResolver::insertIfConfigured(QVariantMap& target, 
     target.insert(key, value);
 }
 
-QString RuleProfileResolver::structureKeyImpl() const
-{
-    return keyText(structurekeys::kRuleProfile);
-}
-
-QVariantMap RuleProfileResolver::readStructuredValues(const StrategyResolverSourceContext& context) const
-{
-    QVariantMap resolved = readEmbeddedStructure(context.parameters, structureKey());
-    mergeConfiguredValues(resolved, readEmbeddedStructure(context.strategy, structureKey()));
-    return resolved;
-}
-
-QList<QVariantMap> RuleProfileResolver::fallbackSources(const StrategyResolverSourceContext& context) const
-{
-    return {
-        context.backtestRuntime,
-        context.optimizationConfig,
-        context.backtestSettings,
-        context.strategyView,
-        context.appliedRiskConfig
-    };
-}
-
-QList<AbstractStrategyStructureResolver::AliasGroup> RuleProfileResolver::aliasGroups() const
-{
-    return {
-        aliasGroupFromKeys(risk::config::maxTotalExposureKeys()),
-        aliasGroupFromKeys(risk::config::maxPositionPercentKeys()),
-        aliasGroupFromKeys(risk::config::maxDrawdownLimitKeys()),
-        aliasGroupFromKeys(risk::config::maxDailyLossKeys()),
-        aliasGroupFromKeys(risk::config::stopLossPercentKeys()),
-        aliasGroupFromKeys(risk::config::takeProfitPercentKeys()),
-        aliasGroupFromKeys(risk::config::varWarningPercentKeys()),
-        aliasGroupFromKeys(risk::config::level1BreakerKeys()),
-        aliasGroupFromKeys(risk::config::level2BreakerKeys()),
-        aliasGroupFromKeys(risk::config::level3BreakerKeys()),
-        aliasGroupFromKeys(risk::config::autoStopEnabledKeys()),
-        {QStringLiteral("maxPositions"), {}, {}},
-        {QStringLiteral("maxIndustryExposure"), {}, {}},
-        {QStringLiteral("maxThemeExposure"), {}, {}},
-        {QStringLiteral("maxCorrelation"), {}, {}}
-    };
-}
-
-QString ExecutionPolicyResolver::structureKeyImpl() const
-{
-    return keyText(structurekeys::kExecutionPolicy);
-}
-
-QVariantMap ExecutionPolicyResolver::readStructuredValues(const StrategyResolverSourceContext& context) const
-{
-    QVariantMap resolved = readEmbeddedStructure(context.parameters, structureKey());
-    mergeConfiguredValues(resolved, readEmbeddedStructure(context.strategy, structureKey()));
-    return resolved;
-}
-
-QList<QVariantMap> ExecutionPolicyResolver::fallbackSources(const StrategyResolverSourceContext& context) const
-{
-    return {
-        context.optimizationConfig,
-        context.backtestRuntime,
-        context.backtestSettings,
-        context.strategyView,
-        context.appliedRiskConfig
-    };
-}
-
-QList<AbstractStrategyStructureResolver::AliasGroup> ExecutionPolicyResolver::aliasGroups() const
-{
-    return {
-        aliasGroupFromKeys(risk::config::positionSizingMethodKeys()),
-        aliasGroupFromKeys(risk::config::rebalanceDaysKeys()),
-        aliasGroupFromKeys(risk::config::orderSizeLimitKeys()),
-        aliasGroupFromKeys(risk::config::turnoverLimitKeys()),
-        {QStringLiteral("maxBatchOrders"), {QStringLiteral("batchOrderLimit")}, {}},
-        {QStringLiteral("maxBatchNotionalWan"), {QStringLiteral("batchNotionalLimitWan")}, {}},
-        {QStringLiteral("maxBatchNotional"), {QStringLiteral("batchNotionalLimit")}, {}},
-        aliasGroupFromKeys(risk::config::minWeightPercentKeys()),
-        aliasGroupFromKeys(risk::config::maxWeightPercentKeys()),
-        {QStringLiteral("maxPositions"), {}, {}}
-    };
-}
-
-QString BacktestAssumptionsResolver::structureKeyImpl() const
-{
-    return keyText(structurekeys::kBacktestAssumptions);
-}
-
-QVariantMap BacktestAssumptionsResolver::readStructuredValues(const StrategyResolverSourceContext& context) const
-{
-    QVariantMap resolved = readEmbeddedStructure(context.parameters, structureKey());
-    mergeConfiguredValues(resolved, readEmbeddedStructure(context.strategy, structureKey()));
-    return resolved;
-}
-
-QList<QVariantMap> BacktestAssumptionsResolver::fallbackSources(const StrategyResolverSourceContext& context) const
-{
-    return {
-        context.backtestRuntime,
-        context.backtestSettings,
-        context.optimizationConfig,
-        context.strategyView,
-        context.appliedRiskConfig
-    };
-}
-
-QList<AbstractStrategyStructureResolver::AliasGroup> BacktestAssumptionsResolver::aliasGroups() const
-{
-    return {
-        {QStringLiteral("initialCapital"), {}, {}},
-        aliasGroupFromKeys(risk::config::commissionRateKeys()),
-        aliasGroupFromKeys(risk::config::slippageRateKeys()),
-        aliasGroupFromKeys(risk::config::forwardDaysKeys()),
-        aliasGroupFromKeys(risk::config::riskFreeRateKeys()),
-        aliasGroupFromKeys(risk::config::benchmarkSymbolKeys()),
-        {QStringLiteral("dataSourceMode"), {}, {}},
-        {QStringLiteral("startDate"), {QStringLiteral("start_date")}, {}},
-        {QStringLiteral("endDate"), {QStringLiteral("end_date")}, {}},
-        {QStringLiteral("backtestYears"), {QStringLiteral("backtestPeriod"), QStringLiteral("years")}, {}}
-    };
-}
-
-QString StrategyScopeContextResolver::structureKeyImpl() const
-{
-    return keyText(structurekeys::kStrategyScopeContext);
-}
-
-QVariantMap StrategyScopeContextResolver::readStructuredValues(const StrategyResolverSourceContext& context) const
-{
-    QVariantMap resolved = readEmbeddedStructure(context.parameters, structureKey());
-    mergeConfiguredValues(resolved, readEmbeddedStructure(context.strategy, structureKey()));
-    return resolved;
-}
-
-QList<QVariantMap> StrategyScopeContextResolver::fallbackSources(const StrategyResolverSourceContext& context) const
-{
-    return {
-        context.backtestRuntime,
-        context.optimizationConfig,
-        context.strategyView
-    };
-}
-
-QList<AbstractStrategyStructureResolver::AliasGroup> StrategyScopeContextResolver::aliasGroups() const
-{
-    return {
-        {QStringLiteral("universeType"), {}, {}},
-        {QStringLiteral("universeId"), {QStringLiteral("indexSymbol")}, {}},
-        {QStringLiteral("selectedStrategyType"), {}, {}},
-        {QStringLiteral("selectedStrategySubtype"), {}, {}},
-        {QStringLiteral("selectedStrategyName"), {QStringLiteral("strategy_name"), QStringLiteral("strategyName")}, {}},
-        {QStringLiteral("portfolio_source"), {}, {}},
-        {QStringLiteral("portfolio_name"), {}, {}},
-        {QStringLiteral("portfolio_allocations_json"), {QStringLiteral("factor_allocations"), QStringLiteral("allocations")}, {}}
-    };
-}
-
-QString FactorOverlayResolver::structureKeyImpl() const
-{
-    return keyText(structurekeys::kFactorOverlay);
-}
-
-QVariantMap FactorOverlayResolver::readStructuredValues(const StrategyResolverSourceContext& context) const
-{
-    QVariantMap resolved = readEmbeddedStructure(context.parameters, structureKey());
-    mergeConfiguredValues(resolved, readEmbeddedStructure(context.strategy, structureKey()));
-    return resolved;
-}
-
-QList<QVariantMap> FactorOverlayResolver::fallbackSources(const StrategyResolverSourceContext& context) const
-{
-    return {
-        context.backtestRuntime,
-        context.strategyView,
-        context.optimizationConfig
-    };
-}
-
-QList<AbstractStrategyStructureResolver::AliasGroup> FactorOverlayResolver::aliasGroups() const
-{
-    return {
-        {QStringLiteral("enabled"), {QStringLiteral("factorOverlayEnabled")}, {}},
-        {QStringLiteral("targetPositionCount"), {QStringLiteral("target_position_count")}, {}},
-        {QStringLiteral("minimumCompositeScore"), {QStringLiteral("minimum_composite_score")}, {}},
-        {QStringLiteral("allocations"), {}, {}},
-        {QStringLiteral("factorIds"), {QStringLiteral("factor_ids"), QStringLiteral("selectedFactorIds")}, {}},
-        {QStringLiteral("combineMode"), {QStringLiteral("combine_mode")}, {QStringLiteral("rank_only")}},
-        {QStringLiteral("selectionScope"), {QStringLiteral("selection_scope")}, {QStringLiteral("rule_eligible")}}
-    };
-}
-
-StrategyStructureResolverSet::StrategyStructureResolverSet()
-{
-    registerResolver(std::make_unique<RuleProfileResolver>());
-    registerResolver(std::make_unique<ExecutionPolicyResolver>());
-    registerResolver(std::make_unique<BacktestAssumptionsResolver>());
-    registerResolver(std::make_unique<StrategyScopeContextResolver>());
-    registerResolver(std::make_unique<FactorOverlayResolver>());
-}
+StrategyStructureResolverSet::StrategyStructureResolverSet() = default;
 
 void StrategyStructureResolverSet::registerResolver(std::unique_ptr<AbstractStrategyStructureResolver> resolver)
 {
@@ -1179,11 +973,11 @@ StrategyResolverSourceContext StrategyStructureResolverSet::buildContext(const Q
     mergeConfiguredValues(context.strategyView, strategy);
 
     context.advancedOptions = firstConfiguredMap(strategy,
-        {rawkeys::kAdvancedOptions, rawkeys::kAdvancedOptionsLegacy});
+        {rawkeys::kAdvancedOptions});
 
     context.optimizationConfig = firstConfiguredMap(
         context.advancedOptions,
-        {rawkeys::kOptimizationConfig, rawkeys::kOptimizationConfigLegacy});
+        {rawkeys::kOptimizationConfig});
 
     mergeConfiguredEmbeddedMap(context.backtestRuntime, context.parameters, rawkeys::kBacktestRuntime);
     mergeConfiguredEmbeddedMap(context.backtestRuntime, strategy, rawkeys::kBacktestRuntime);

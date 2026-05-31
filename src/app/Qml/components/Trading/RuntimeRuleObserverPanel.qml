@@ -7,7 +7,7 @@ import "../../utils/StrategyCreationUtils.js" as Utils
 Rectangle {
     id: root
 
-    property var strategyService: Bridge.StrategyService
+    property var strategyService: null
     property var configuredRuntimeRuleDefaults: ({})
     property string highlightStrategyId: ""
     property string highlightStrategyName: ""
@@ -551,7 +551,6 @@ Rectangle {
         case "ruleProfile":
             return {
                 effectiveKey: "ruleProfile",
-                snapshotKey: "ruleProfileSnapshot",
                 parameterKey: "rule_profile",
                 fields: [
                     { key: "maxPositionPercent", label: "最大仓位", format: "percent" },
@@ -563,7 +562,6 @@ Rectangle {
         case "executionPolicy":
             return {
                 effectiveKey: "executionPolicy",
-                snapshotKey: "executionPolicySnapshot",
                 parameterKey: "execution_policy",
                 fields: [
                     { key: "rebalanceDays", label: "调仓周期", format: "days" },
@@ -573,7 +571,6 @@ Rectangle {
         case "backtestAssumptions":
             return {
                 effectiveKey: "backtestAssumptions",
-                snapshotKey: "backtestAssumptionsSnapshot",
                 parameterKey: "backtest_assumptions",
                 fields: [
                     { key: "initialCapital", label: "初始资金", format: "number" },
@@ -584,17 +581,16 @@ Rectangle {
         case "strategyScopeContext":
             return {
                 effectiveKey: "strategyScopeContext",
-                snapshotKey: "strategyScopeContextSnapshot",
                 parameterKey: "strategy_scope_context",
                 fields: [
-                    { key: "executionTimeframe", aliases: ["execution_timeframe"], fallbackKeys: ["execution_timeframe", "time_frame", "timeFrame"], label: "执行周期", format: "text" },
-                    { key: "selectedStrategyType", fallbackKeys: ["strategy_type", "strategyType"], label: "策略类型", format: "text" },
-                    { key: "strategyBehaviorKind", aliases: ["strategy_behavior_kind"], fallbackKeys: ["strategyBehaviorKind", "strategy_behavior_kind"], label: "行为类型", format: "strategyBehaviorKind" },
-                    { key: "selectedStrategySubtype", fallbackKeys: ["sub_type", "subType"], label: "策略子类", format: "text" }
+                    { key: "executionTimeframe", aliases: ["execution_timeframe"], label: "执行周期", format: "text" },
+                    { key: "selectedStrategyType", label: "策略类型", format: "text" },
+                    { key: "strategyBehaviorKind", aliases: ["strategy_behavior_kind"], label: "行为类型", format: "strategyBehaviorKind" },
+                    { key: "selectedStrategySubtype", label: "策略子类", format: "text" }
                 ]
             }
         default:
-            return { effectiveKey: "", snapshotKey: "", parameterKey: "", fields: [] }
+            return { effectiveKey: "", parameterKey: "", fields: [] }
         }
     }
 
@@ -615,28 +611,12 @@ Rectangle {
     }
 
     function fallbackValue(strategyObject, fieldSpec) {
-        var strategy = strategyObject || ({})
-        var parameters = strategy.parameters || ({})
-        var fallbackKeys = fieldSpec.fallbackKeys || []
-        for (var index = 0; index < fallbackKeys.length; ++index) {
-            var key = fallbackKeys[index]
-            if (parameters[key] !== undefined) {
-                return parameters[key]
-            }
-            if (strategy[key] !== undefined) {
-                return strategy[key]
-            }
-        }
         return undefined
     }
 
     function strategySectionMap(sectionKey) {
         var spec = sectionSpec(sectionKey)
         var strategy = highlightedStrategyDetail || ({})
-        var snapshot = strategy[spec.snapshotKey] || ({})
-        if (Object.keys(snapshot).length > 0) {
-            return snapshot
-        }
         var parameters = strategy.parameters || ({})
         return parameters[spec.parameterKey] || ({})
     }

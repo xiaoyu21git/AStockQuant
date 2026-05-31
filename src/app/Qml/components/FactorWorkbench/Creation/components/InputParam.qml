@@ -121,7 +121,9 @@ Rectangle {
                 if (item) {
                     item.text = root.value
                     item.placeholderText = root.placeholder
-                    item.echoMode = root.password ? TextInput.Password : TextInput.Normal
+                    if (!root.multiline) {
+                        item.echoMode = root.password ? TextInput.Password : TextInput.Normal
+                    }
                     
                     // 设置验证器
                     setupValidator(item)

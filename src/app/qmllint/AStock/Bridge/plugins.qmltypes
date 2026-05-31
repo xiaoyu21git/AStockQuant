@@ -83,16 +83,6 @@ Module {
     }
     Component {
         file: "Bridge"
-        name: "AStock.Bridge/StrategyViewModel"
-        accessSemantics: "reference"
-        prototype: "QObject"
-        exports: ["AStock.Bridge/StrategyViewModel 1.0"]
-        exportMetaObjectRevisions: [256]
-        isCreatable: true
-        isSingleton: false
-    }
-    Component {
-        file: "Bridge"
         name: "AStock.Bridge/FactorService"
         accessSemantics: "reference"
         prototype: "QObject"
@@ -207,16 +197,6 @@ Module {
         accessSemantics: "reference"
         prototype: "QObject"
         exports: ["AStock.Bridge/TradingRuntimeStatusService 1.0"]
-        exportMetaObjectRevisions: [256]
-        isCreatable: false
-        isSingleton: true
-    }
-    Component {
-        file: "Bridge"
-        name: "AStock.Bridge/StrategyService"
-        accessSemantics: "reference"
-        prototype: "QObject"
-        exports: ["AStock.Bridge/StrategyService 1.0"]
         exportMetaObjectRevisions: [256]
         isCreatable: false
         isSingleton: true

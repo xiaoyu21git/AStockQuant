@@ -20,6 +20,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include "../../ui/bridge/include/DataServiceCache.h"
+#include "../../factor/include/FactorBacktestCachedBarUtils.h"
 
 #include "../../infrastructure/include/database/QtMySQLDatabase.h"
 
@@ -40,17 +41,6 @@ QString normalizeDataSourceMode(const std::string& rawMode) {
     return "raw";
 }
 
-QString normalizeTradeDate(const QVariantMap& row) {
-    QString tradeDate = row.value("trade_date").toString().trimmed();
-    if (tradeDate.isEmpty()) {
-        tradeDate = row.value("date").toString().trimmed();
-    }
-    if (tradeDate.contains('T')) {
-        tradeDate = tradeDate.left(tradeDate.indexOf('T'));
-    }
-    return tradeDate;
-}
-
 QString resolveIndexSnapshotDate(std::shared_ptr<astock::database::QtMySQLDatabase> database,
                                  const QString& indexSymbol,
                                  const QString& requestedSnapshotDate) {
@@ -64,7 +54,7 @@ QString resolveIndexSnapshotDate(std::shared_ptr<astock::database::QtMySQLDataba
         params[":snapshot_date"] = requestedSnapshotDate;
 
         const QString sql =
-            "SELECT COALESCE(MAX(CASE WHEN start_date <= :snapshot_date THEN start_date END), MIN(start_date)) AS resolved_date "
+            "SELECT MAX(CASE WHEN start_date <= :snapshot_date THEN start_date END) AS resolved_date "
             "FROM index_constituents WHERE index_symbol = :index_symbol";
 
         const auto result = database->executeQuery(sql, params);
@@ -315,6 +305,11 @@ std::vector<std::string> DatabaseStockDataProvider::getIndexConstituentSymbols(
         effectiveSnapshotDate = QDate::currentDate().toString("yyyy-MM-dd");
     }
     effectiveSnapshotDate = resolveIndexSnapshotDate(database, indexSymbol.trimmed(), effectiveSnapshotDate);
+    if (effectiveSnapshotDate.isEmpty()) {
+        INTERNAL_WARN_STREAM << "Index constituent coverage missing index=" << indexSymbol.trimmed().toStdString()
+                             << " requestedSnapshotDate=" << snapshotDate.trimmed().toStdString();
+        return symbols;
+    }
 
     std::map<QString, QVariant> params;
     params[":index_symbol"] = indexSymbol.trimmed();
@@ -548,8 +543,11 @@ std::vector<domain::model::Bar> DatabaseStockDataProvider::loadBarsFromCacheData
     QVariantList filteredRows;
     for (const QVariant& rowVariant : rows) {
         const QVariantMap row = rowVariant.toMap();
+        if (!factor::cached_bars::rowHasBacktestableMarketBarFields(row)) {
+            continue;
+        }
         const QString rowSymbol = row.value("symbol").toString().trimmed();
-        const QString tradeDate = normalizeTradeDate(row);
+        const QString tradeDate = factor::cached_bars::tradeDateFromRow(row);
         if (rowSymbol != symbol || !inDateRange(tradeDate, startDate, endDate)) {
             continue;
         }
@@ -592,12 +590,15 @@ std::map<std::string, std::vector<domain::model::Bar>> DatabaseStockDataProvider
 
     for (const QVariant& rowVariant : rows) {
         const QVariantMap row = rowVariant.toMap();
+        if (!factor::cached_bars::rowHasBacktestableMarketBarFields(row)) {
+            continue;
+        }
         const QString rowSymbol = row.value("symbol").toString().trimmed().toUpper();
         if (!requestedSymbols.contains(rowSymbol)) {
             continue;
         }
 
-        const QString tradeDate = normalizeTradeDate(row);
+        const QString tradeDate = factor::cached_bars::tradeDateFromRow(row);
         if (!inDateRange(tradeDate, startDate, endDate)) {
             continue;
         }
@@ -873,7 +874,7 @@ void DatabaseStockDataProvider::mergeCacheSnapshotMetadata(
             continue;
         }
 
-        const QString tradeDateText = normalizeTradeDate(row);
+        const QString tradeDateText = factor::cached_bars::tradeDateFromRow(row);
         const QDate tradeDate = QDate::fromString(tradeDateText, "yyyy-MM-dd");
         if (!tradeDate.isValid()) {
             continue;
@@ -912,28 +913,40 @@ std::vector<std::string> DatabaseStockDataProvider::loadSymbolsFromCacheDataset(
     }
 
     const auto info = DataServiceCache::getInstance().getDataSetInfo(datasetId);
-    if (!info.stockCodes.isEmpty()) {
-        symbols.reserve(static_cast<size_t>(info.stockCodes.size()));
-        for (const QString& code : info.stockCodes) {
-            if (!code.trimmed().isEmpty()) {
-                symbols.push_back(code.trimmed().toStdString());
+    const QVariantList rows = DataServiceCache::getInstance().getDataSetById(datasetId);
+    const QString preferredDate = info.startDate.isValid() ? info.startDate.toString(Qt::ISODate) : QString();
+    std::vector<std::string> activeSymbols = factor::cached_bars::extractAvailableSymbolsForDateFromRows(rows, preferredDate);
+    if (activeSymbols.empty()) {
+        const auto symbolsByDate = factor::cached_bars::buildSymbolsByDateFromRows(rows);
+        std::set<QString> uniqueSymbols;
+        for (const auto& [tradeDate, perDateSymbols] : symbolsByDate) {
+            Q_UNUSED(tradeDate);
+            for (const std::string& code : perDateSymbols) {
+                uniqueSymbols.insert(QString::fromStdString(code));
             }
+        }
+        activeSymbols.reserve(uniqueSymbols.size());
+        for (const QString& code : uniqueSymbols) {
+            activeSymbols.push_back(code.toStdString());
+        }
+    }
+
+    if (!activeSymbols.empty()) {
+        symbols.reserve(activeSymbols.size());
+        for (const std::string& code : activeSymbols) {
+            symbols.push_back(code);
         }
         return symbols;
     }
 
-    const QVariantList rows = DataServiceCache::getInstance().getDataSetById(datasetId);
-    std::set<QString> uniqueSymbols;
-    for (const QVariant& rowVariant : rows) {
-        const QString code = rowVariant.toMap().value("symbol").toString().trimmed();
-        if (!code.isEmpty()) {
-            uniqueSymbols.insert(code);
+    if (!info.stockCodes.isEmpty()) {
+        symbols.reserve(static_cast<size_t>(info.stockCodes.size()));
+        for (const QString& code : info.stockCodes) {
+            if (!code.trimmed().isEmpty()) {
+                symbols.push_back(code.trimmed().toUpper().toStdString());
+            }
         }
-    }
-
-    symbols.reserve(uniqueSymbols.size());
-    for (const QString& code : uniqueSymbols) {
-        symbols.push_back(code.toStdString());
+        return symbols;
     }
     return symbols;
 }

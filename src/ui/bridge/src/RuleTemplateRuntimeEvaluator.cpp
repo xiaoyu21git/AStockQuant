@@ -1,7 +1,5 @@
 #include "RuleTemplateRuntimeEvaluator.h"
 
-#include "../../domain/backtest/include/ResolvedStrategyBehaviorVariant.h"
-
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
@@ -708,11 +706,6 @@ QVariantMap buildStrategyScope(const RuntimeRuleTemplateEvaluationContext& conte
     strategyScope.insert(
         ruleTemplateString(rule_template_strings::kScopeStrategyId),
         context.strategy.value(ruleTemplateString(rule_template_strings::kScopeStrategyId)));
-    const domain::backtest::ResolvedStrategyBehavior behavior =
-        domain::backtest::resolveStrategyBehavior(context.strategy);
-    if (behavior.valid) {
-        strategyScope.insert(ruleTemplateString(rule_template_strings::kScopeStrategyBehaviorKind), behavior.index());
-    }
     strategyScope.insert(ruleTemplateString(rule_template_strings::kScopeParameters), context.strategy.value(ruleTemplateString(rule_template_strings::kScopeParameters)).toMap());
     strategyScope.insert(
         ruleTemplateString(rule_template_strings::kScopeRuleProfile),
