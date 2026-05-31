@@ -11,8 +11,6 @@
 #include <QStringView>
 #include <QVector>
 
-#include <cmath>
-
 namespace domain::strategy {
 
 template <typename Tag>
@@ -112,51 +110,32 @@ using ExecutionScopeId = StrongText<ExecutionScopeIdTag>;
 struct DatasetId final {
     int value{-1};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return value >= 0;
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct Quantity final {
     qint64 value{0};
 
-    [[nodiscard]] bool isPositive() const
-    {
-        return value > 0;
-    }
+    [[nodiscard]] bool isPositive() const;
 };
 
 struct Money final {
     double value{0.0};
 
-    [[nodiscard]] bool isFinite() const
-    {
-        return std::isfinite(value);
-    }
-
-    [[nodiscard]] bool isPositive() const
-    {
-        return isFinite() && value > 0.0;
-    }
+    [[nodiscard]] bool isFinite() const;
+    [[nodiscard]] bool isPositive() const;
 };
 
 struct Ratio final {
     double value{0.0};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return std::isfinite(value) && value >= 0.0 && value <= 1.0;
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct RebalanceFrequencyDays final {
     int value{1};
 
-    [[nodiscard]] bool isPositive() const
-    {
-        return value > 0;
-    }
+    [[nodiscard]] bool isPositive() const;
 };
 
 enum class StrategyLanguage : int {
@@ -344,13 +323,7 @@ struct StrategyIdentity final {
     domain::backtest::StrategyBehaviorKind behaviorKind{domain::backtest::StrategyBehaviorKind::Custom};
     StrategyExecutionKind executionKind{StrategyExecutionKind::Standard};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return strategyId.isValid()
-            && strategyCode.isValid()
-            && strategyName.isValid()
-            && storedType != domain::backtest::StrategyStoredType::Unknown;
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct StrategyMetadata final {
@@ -366,16 +339,8 @@ struct StrategyMetadata final {
 struct StrategyLifecycle final {
     strategy_view::StrategyLifecycleStatus status{strategy_view::StrategyLifecycleStatus::Unknown};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return strategy_view::isKnownStrategyLifecycleStatus(status);
-    }
-
-    [[nodiscard]] bool allowsSignalEmission() const
-    {
-        return status == strategy_view::StrategyLifecycleStatus::Active
-            || status == strategy_view::StrategyLifecycleStatus::Testing;
-    }
+    [[nodiscard]] bool isValid() const;
+    [[nodiscard]] bool allowsSignalEmission() const;
 };
 
 struct StrategyRuntimeProfile final {
@@ -383,10 +348,7 @@ struct StrategyRuntimeProfile final {
     int timeFrameIndex{0};
     int riskLevelIndex{0};
 
-    [[nodiscard]] bool hasAny() const
-    {
-        return assetTypeIndex > 0 || timeFrameIndex > 0 || riskLevelIndex > 0;
-    }
+    [[nodiscard]] bool hasAny() const;
 };
 
 struct RuleTemplateBinding final {
@@ -400,19 +362,13 @@ struct RuleTemplateBinding final {
     RuleGroupOperator groupOperator{RuleGroupOperator::All};
     int groupMinMatchCount{0};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return templateId.isValid() || filePath.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct RuleComposerRule final {
     RuleTemplateBinding binding;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return binding.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct RuleComposerGroup final {
@@ -423,39 +379,27 @@ struct RuleComposerGroup final {
     int minimumMatchCount{0};
     QVector<RuleComposerRule> rules;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return !rules.isEmpty();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct RuleComposerStage final {
     RuleBindingPhase phase{RuleBindingPhase::Signal};
     QVector<RuleComposerGroup> groups;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return !groups.isEmpty();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct RuleComposerState final {
     QVector<RuleComposerStage> stages;
 
-    [[nodiscard]] bool isEmpty() const
-    {
-        return stages.isEmpty();
-    }
+    [[nodiscard]] bool isEmpty() const;
 };
 
 struct FactorOverlayAllocation final {
     FactorId factorId;
     double weightPercent{0.0};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return factorId.isValid() && std::isfinite(weightPercent) && weightPercent > 0.0;
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct RuleProfileSnapshot final {
@@ -465,13 +409,7 @@ struct RuleProfileSnapshot final {
     Ratio takeProfitRatio;
     int rebalanceDays{0};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return maxPositionRatio.isValid()
-            && maxTotalExposureRatio.isValid()
-            && stopLossRatio.isValid()
-            && takeProfitRatio.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct BatchExecutionPolicy final {
@@ -491,10 +429,7 @@ struct ExecutionPolicySnapshot final {
     ShortSellingMode shortSellingMode{ShortSellingMode::Disabled};
     BatchExecutionPolicy batchExecution;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return rebalanceFrequencyDays.isPositive();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct BacktestAssumptionsSnapshot final {
@@ -503,13 +438,7 @@ struct BacktestAssumptionsSnapshot final {
     Ratio slippageRate;
     Ratio taxRate;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return initialCapital.isPositive()
-            && commissionRate.isValid()
-            && slippageRate.isValid()
-            && taxRate.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct UniverseSpec final {
@@ -519,19 +448,7 @@ struct UniverseSpec final {
     QVector<SymbolCode> explicitSymbols;
     QVector<SymbolCode> resolvedSymbols;
 
-    [[nodiscard]] bool isValid() const
-    {
-        switch (universeMode) {
-        case UniverseMode::ExplicitSymbols:
-            return !explicitSymbols.isEmpty();
-        case UniverseMode::SavedUniverse:
-        case UniverseMode::LinkedWatchlist:
-        case UniverseMode::IndexConstituents:
-            return sourceId.isValid() || !resolvedSymbols.isEmpty();
-        default:
-            return false;
-        }
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct FactorOverlaySpec final {
@@ -541,24 +458,7 @@ struct FactorOverlaySpec final {
     QVector<FactorOverlayAllocation> allocations;
     QVector<FactorId> selectedFactors;
 
-    [[nodiscard]] bool isValid() const
-    {
-        if (!enabled) {
-            return true;
-        }
-
-        if (selectedFactors.isEmpty()) {
-            return false;
-        }
-
-        for (const FactorOverlayAllocation& allocation : allocations) {
-            if (!allocation.isValid()) {
-                return false;
-            }
-        }
-
-        return targetPositionCount > 0 && std::isfinite(minimumCompositeScore);
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct StrategyScopeContextSnapshot final {
@@ -567,10 +467,7 @@ struct StrategyScopeContextSnapshot final {
     StrategyName selectedStrategyName;
     int executionTimeFrameIndex{0};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return universe.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct StrategySpec final {
@@ -582,14 +479,7 @@ struct StrategySpec final {
     QVector<RuleTemplateBinding> ruleTemplateBindings;
     RuleComposerState ruleComposerState;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return ruleProfile.isValid()
-            && executionPolicy.isValid()
-            && backtestAssumptions.isValid()
-            && strategyScopeContext.isValid()
-            && factorOverlay.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct PerformanceSummaryMetrics final {
@@ -638,12 +528,7 @@ struct TimeSeriesSnapshot final {
     QVector<double> positions;
     QVector<double> cash;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return dates.size() == portfolioValues.size()
-            && dates.size() == returns.size()
-            && dates.size() == drawdowns.size();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct UniverseResolutionSummary final {
@@ -671,20 +556,14 @@ struct BacktestSnapshot final {
     UniverseResolutionSummary universeResolutionSummary;
     RuleTemplateSummary ruleTemplateSummary;
 
-    [[nodiscard]] bool isValid() const
-    {
-        return recordedAt.isValid() && strategySpec.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct BacktestHistoryEntry final {
     BacktestSnapshot snapshot;
     bool replaceBaselineUniverse{false};
 
-    [[nodiscard]] bool isValid() const
-    {
-        return snapshot.isValid();
-    }
+    [[nodiscard]] bool isValid() const;
 };
 
 struct StrategyPerformanceSummary final {

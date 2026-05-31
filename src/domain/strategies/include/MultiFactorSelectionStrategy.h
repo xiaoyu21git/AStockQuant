@@ -7,13 +7,6 @@
 
 namespace domain::strategies {
 
-struct FactorSnapshot final {
-    SymbolId symbolId{0};
-    std::uint64_t factorId{0};
-    double factorValue{0.0};
-    std::int32_t industryBucket{0};
-};
-
 struct MultiFactorScore final {
     SymbolId symbolId{0};
     double score{0.0};

@@ -8,6 +8,7 @@ add_subdirectory(market)
 add_subdirectory(backtest)
 add_subdirectory(factor)
 add_subdirectory(trading)
+add_subdirectory(strategy)
 
 set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
 
@@ -34,6 +35,7 @@ target_link_libraries(domain
         domain_data
         domain_backtest
         domain_trading
+        domain_strategy_runtime
         factor_system
 )
 
@@ -49,6 +51,7 @@ target_include_directories(domain
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/market/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/factor/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/trading/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategy/include>
         $<INSTALL_INTERFACE:include>   # 安装时路径
 )
 

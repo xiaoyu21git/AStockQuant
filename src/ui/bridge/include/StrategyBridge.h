@@ -12,10 +12,16 @@
 
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
+
+namespace domain::strategy {
+class StrategyEngine;
+}
 
 class StrategyListModel;
 
@@ -52,6 +58,8 @@ public:
     Q_INVOKABLE bool remove(const QString& strategyId);
     Q_INVOKABLE QVariantMap get(const QString& strategyId);
     Q_INVOKABLE QVariantList list();
+    // Runtime lifecycle contract: single-signature flow only supports start/stop.
+    // No intermediate state (pause/resume/restart) is allowed in this bridge contract.
     Q_INVOKABLE bool start(const QString& strategyId);
     Q_INVOKABLE bool stop(const QString& strategyId);
     Q_INVOKABLE bool saveViewCfg(const QString& strategyId, const QVariantMap& visualConfig);
@@ -231,6 +239,14 @@ private:
     void setErr(const QString& message);
     void refreshModel();
 
+    [[nodiscard]] bool isRuntimeManagedStrategy(const astock::database::PersistedStrategyData& strategy) const;
+    [[nodiscard]] std::unique_ptr<domain::strategy::StrategyEngine> buildRuntimeEngineSession(
+        const astock::database::PersistedStrategyData& strategy,
+        QString* errorMessage) const;
+    void cacheRuntimeEngineSession(const QString& strategyId,
+                                   std::unique_ptr<domain::strategy::StrategyEngine> engine);
+    void removeRuntimeEngineSession(const QString& strategyId);
+
     bool m_busy{false};
     bool m_inited{false};
     bool m_cacheOk{false};
@@ -238,4 +254,7 @@ private:
     QString m_selId;
     std::unique_ptr<astock::database::IStrategyRepository> m_repo;
     StrategyListModel* m_listModel{nullptr};
+    mutable std::mutex m_runtimeEngineMutex;
+    // Active runtime sessions only; key exists iff strategy is started and not stopped.
+    std::unordered_map<std::string, std::unique_ptr<domain::strategy::StrategyEngine>> m_runtimeEngines;
 };

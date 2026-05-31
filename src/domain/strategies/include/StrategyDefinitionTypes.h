@@ -16,6 +16,18 @@ using FactorId = std::uint64_t;
 using RuleId = std::uint64_t;
 using StrategyId = std::uint64_t;
 
+struct FactorSnapshot final {
+    SymbolId symbolId{0};
+    FactorId factorId{0};
+    double factorValue{0.0};
+    std::int32_t industryBucket{0};
+
+    [[nodiscard]] bool isValid() const noexcept
+    {
+        return symbolId != 0 && factorId > 0;
+    }
+};
+
 enum class StrategyBehaviorKind : std::uint8_t {
     TrendFollowing = 0,
     MeanReversion = 1,

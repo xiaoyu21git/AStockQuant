@@ -181,6 +181,13 @@ else()
     message(WARNING "[TESTS] test_factor_crosscheck_export.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_runtime_multifactor.cpp")
+    list(APPEND TEST_SOURCES "test_strategy_runtime_multifactor.cpp")
+    message(STATUS "[TESTS] Found: test_strategy_runtime_multifactor.cpp")
+else()
+    message(WARNING "[TESTS] test_strategy_runtime_multifactor.cpp not found!")
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_data_service_regression.cpp")
     list(APPEND TEST_SOURCES "test_data_service_regression.cpp")
     message(STATUS "[TESTS] Found: test_data_service_regression.cpp")
@@ -227,6 +234,8 @@ target_link_libraries(test_eventsystem
         engine          # Engine 库（包含 Event）
         domain          # Domain 库
         domain_backtest
+        domain_strategies
+        domain_strategy_runtime
         bridge
         factor_system   # ConfigurableFactor/Factor runtime symbols
         infrastructure  # MarketDataRepository 回归测试
@@ -392,4 +401,91 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
     )
 
     message(STATUS "[TESTS] Configured run_cleaning_cache_probe executable")
+endif()
+
+option(ENABLE_RULE_SERVICE_HF_BENCHMARK "Enable rule service HF benchmark target" OFF)
+option(ENABLE_RULE_SERVICE_PY_HF_BENCHMARK "Enable python rule service HF benchmark target" OFF)
+option(ENABLE_RULE_SERVICE_PY_WORKER_HF_BENCHMARK "Enable python worker rule service HF benchmark target" OFF)
+
+if(ENABLE_RULE_SERVICE_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_rule_service_hf_benchmark.cpp")
+    message(STATUS "[TESTS] Found: run_strategy_rule_service_hf_benchmark.cpp")
+
+    add_executable(run_strategy_rule_service_hf_benchmark
+        run_strategy_rule_service_hf_benchmark.cpp
+    )
+
+    set_target_properties(run_strategy_rule_service_hf_benchmark PROPERTIES
+        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
+    )
+
+    target_include_directories(run_strategy_rule_service_hf_benchmark
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(run_strategy_rule_service_hf_benchmark
+        PRIVATE
+            domain_strategy_runtime
+            foundation
+    )
+
+    message(STATUS "[TESTS] Configured run_strategy_rule_service_hf_benchmark executable")
+endif()
+
+if(ENABLE_RULE_SERVICE_PY_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_rule_service_py_hf_benchmark.cpp")
+    message(STATUS "[TESTS] Found: run_strategy_rule_service_py_hf_benchmark.cpp")
+
+    add_executable(run_strategy_rule_service_py_hf_benchmark
+        run_strategy_rule_service_py_hf_benchmark.cpp
+    )
+
+    set_target_properties(run_strategy_rule_service_py_hf_benchmark PROPERTIES
+        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
+    )
+
+    target_include_directories(run_strategy_rule_service_py_hf_benchmark
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(run_strategy_rule_service_py_hf_benchmark
+        PRIVATE
+            Qt6::Core
+            domain_strategy_runtime
+            foundation
+    )
+
+    message(STATUS "[TESTS] Configured run_strategy_rule_service_py_hf_benchmark executable")
+endif()
+
+if(ENABLE_RULE_SERVICE_PY_WORKER_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_rule_service_py_worker_hf_benchmark.cpp")
+    message(STATUS "[TESTS] Found: run_strategy_rule_service_py_worker_hf_benchmark.cpp")
+
+    add_executable(run_strategy_rule_service_py_worker_hf_benchmark
+        run_strategy_rule_service_py_worker_hf_benchmark.cpp
+    )
+
+    set_target_properties(run_strategy_rule_service_py_worker_hf_benchmark PROPERTIES
+        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
+    )
+
+    target_include_directories(run_strategy_rule_service_py_worker_hf_benchmark
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(run_strategy_rule_service_py_worker_hf_benchmark
+        PRIVATE
+            Qt6::Core
+            domain_strategy_runtime
+            foundation
+    )
+
+    message(STATUS "[TESTS] Configured run_strategy_rule_service_py_worker_hf_benchmark executable")
 endif()

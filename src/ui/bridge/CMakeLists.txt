@@ -102,6 +102,8 @@ target_link_libraries(bridge
         application_contracts
         engine
         domain
+        domain_strategies
+        domain_strategy_runtime
         astock_market
         infrastructure
         yaml-cpp
