@@ -28,6 +28,43 @@ constexpr const char* kRuleProfileKey = "rule_profile";
 constexpr const char* kRuleComposerStateKey = "rule_composer_state";
 constexpr const char* kFactorOverlayKey = "factor_overlay";
 
+const QStringList& frozenStrategyUpsertPayloadKeys()
+{
+    static const QStringList keys = {
+        QStringLiteral("strategyId"),
+        QStringLiteral("strategyName"),
+        QStringLiteral("strategyTypeIndex"),
+        QStringLiteral("strategyBehaviorKind"),
+        QStringLiteral("description"),
+        QStringLiteral("assetTypeIndex"),
+        QStringLiteral("timeFrameIndex"),
+        QStringLiteral("riskLevelIndex"),
+        QStringLiteral("optimization_method"),
+        QStringLiteral("parameters"),
+        QStringLiteral("tags"),
+        QStringLiteral("status"),
+        QStringLiteral("factorIds"),
+        QStringLiteral("ruleIds")
+    };
+    return keys;
+}
+
+bool hasUnexpectedPayloadKeys(const QVariantMap& payload,
+                              const QStringList& allowedKeys,
+                              QString* firstUnexpectedKey)
+{
+    for (auto it = payload.constBegin(); it != payload.constEnd(); ++it) {
+        if (allowedKeys.contains(it.key())) {
+            continue;
+        }
+        if (firstUnexpectedKey) {
+            *firstUnexpectedKey = it.key();
+        }
+        return true;
+    }
+    return false;
+}
+
 bool isVariantMapObject(const QVariantMap& payload, const QString& key)
 {
     if (!payload.contains(key)) {
@@ -473,18 +510,15 @@ bool StrategyBridig::cacheOk() const
     return m_cacheOk;
 }
 
-QString StrategyBridig::crudContractName() const
-{
-    return QString::fromLatin1(kCrudContractName);
-}
-
-int StrategyBridig::crudContractVersion() const
-{
-    return kCrudContractVersion;
-}
-
 QString StrategyBridig::add(const QVariantMap& payload)
 {
+    QString unexpectedKey;
+    if (hasUnexpectedPayloadKeys(payload, frozenStrategyUpsertPayloadKeys(), &unexpectedKey)) {
+        setErr(QStringLiteral("add payload contains non-frozen field: %1").arg(unexpectedKey));
+        emit operationFailed(kInvalidArgumentCode, m_err);
+        return {};
+    }
+
     if (hasForbiddenFields(payload)) {
         setErr(QStringLiteral("add payload contains forbidden fields"));
         emit operationFailed(kInvalidArgumentCode, m_err);
@@ -570,6 +604,13 @@ QString StrategyBridig::add(const QVariantMap& payload)
 
 bool StrategyBridig::update(const QVariantMap& payload)
 {
+    QString unexpectedKey;
+    if (hasUnexpectedPayloadKeys(payload, frozenStrategyUpsertPayloadKeys(), &unexpectedKey)) {
+        setErr(QStringLiteral("update payload contains non-frozen field: %1").arg(unexpectedKey));
+        emit operationFailed(kInvalidArgumentCode, m_err);
+        return false;
+    }
+
     if (hasForbiddenFields(payload)) {
         setErr(QStringLiteral("update payload contains forbidden fields"));
         emit operationFailed(kInvalidArgumentCode, m_err);

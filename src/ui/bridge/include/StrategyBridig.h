@@ -38,20 +38,15 @@ public:
     explicit StrategyBridig(QObject* parent = nullptr);
     ~StrategyBridig() override;
 
-    // FROZEN CONTRACT: strategy CRUD bridge boundary
-    // Any payload shape extension must be backward compatible and documented.
-    static constexpr const char* kCrudContractName = "strategy-bridge-crud-v1";
-    static constexpr int kCrudContractVersion = 1;
-
     Q_INVOKABLE void init();
     Q_INVOKABLE void initAsync();
     Q_INVOKABLE bool inited() const;
     Q_INVOKABLE bool cacheOk() const;
 
-    Q_INVOKABLE QString crudContractName() const;
-    Q_INVOKABLE int crudContractVersion() const;
-
-    // FROZEN INVOKABLES: create/edit/delete/update/get/list/start/stop
+    // FROZEN CRUD INTERFACE CONTRACT (2026-05-31)
+    // - add/update/remove/get signatures must remain unchanged.
+    // - add/update payload keys are explicitly frozen and validated in bridge runtime.
+    // - strategyId for update/remove/get must be UUID and no fallback alias is allowed.
     Q_INVOKABLE QString add(const QVariantMap& payload);
     Q_INVOKABLE bool update(const QVariantMap& payload);
     Q_INVOKABLE bool remove(const QString& strategyId);

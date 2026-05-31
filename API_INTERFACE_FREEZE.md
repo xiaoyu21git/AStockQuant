@@ -238,6 +238,46 @@ public:
 };
 ```
 
+### 9. 策略创建/编辑/删除/查询桥接接口
+**文件**: `src/ui/bridge/include/StrategyBridig.h`, `src/ui/bridge/src/StrategyBridig.cpp`
+
+```cpp
+// FROZEN INTERFACE - 策略 CRUD 桥接
+class StrategyBridig : public QObject {
+    Q_OBJECT
+public:
+    // 冻结签名：不允许改名、改参、改返回值
+    Q_INVOKABLE QString add(const QVariantMap& payload);
+    Q_INVOKABLE bool update(const QVariantMap& payload);
+    Q_INVOKABLE bool remove(const QString& strategyId);
+    Q_INVOKABLE QVariantMap get(const QString& strategyId);
+};
+```
+
+冻结约束（2026-05-31 生效）：
+- `add/update` 顶层 `payload` 白名单字段固定为：
+  - `strategyId`
+  - `strategyName`
+  - `strategyTypeIndex`
+  - `strategyBehaviorKind`
+  - `description`
+  - `assetTypeIndex`
+  - `timeFrameIndex`
+  - `riskLevelIndex`
+  - `optimization_method`
+  - `parameters`
+  - `tags`
+  - `status`
+  - `factorIds`
+  - `ruleIds`
+- 白名单外字段一律报错拒绝（fail-fast），不做兼容映射。
+- `update/remove/get` 的 `strategyId` 必须是合法 UUID，不允许空值或旧别名字段回退。
+- `parameters` 必须包含 `rule_profile` 与 `rule_composer_state` 对象，旧字段（如 `commonConfig`、`strategySpec`、`rule_template_bindings`）保持拒绝。
+
+冻结说明：
+- 该接口已成为策略创建页、编辑流程与策略库删除/读取流程的稳定边界。
+- 后续如需扩展字段，必须走“新版本接口”或单独新桥接类，不得在现有签名和白名单上直接扩容。
+
 ### 8. 交易执行服务接口
 **文件**: `src/ui/bridge/include/TradeExecutionService.h`
 
@@ -363,36 +403,6 @@ public:
 2. `EventFormat` 事件负载细节：字段可增不减，允许继续为真实交易链补充 metadata。
 3. QML 内部 helper 函数：属于展示实现，不作为稳定 API 承诺。
 
-### 13. 策略创建/编辑/删除/更新桥接接口
-**文件**: `src/ui/bridge/include/StrategyBridig.h`
-
-```cpp
-// FROZEN INTERFACE - 策略 CRUD 桥接
-class StrategyBridig : public QObject {
-    Q_OBJECT
-public:
-    static constexpr const char* kCrudContractName = "strategy-bridge-crud-v1";
-    static constexpr int kCrudContractVersion = 1;
-
-    Q_INVOKABLE QString crudContractName() const;
-    Q_INVOKABLE int crudContractVersion() const;
-
-    Q_INVOKABLE QString add(const QVariantMap& payload);
-    Q_INVOKABLE bool update(const QVariantMap& payload);
-    Q_INVOKABLE bool remove(const QString& strategyId);
-    Q_INVOKABLE QVariantMap get(const QString& strategyId);
-    Q_INVOKABLE QVariantList list();
-    Q_INVOKABLE bool start(const QString& strategyId);
-    Q_INVOKABLE bool stop(const QString& strategyId);
-};
-```
-
-冻结约束：
-1. `add/update` 仅接受新参数合同：`parameters` 中必须包含 `rule_profile` 与 `rule_composer_state` 对象。
-2. `add/update/remove/get/start/stop` 的 `strategyId` 必须是合法 UUID，禁止回退到旧编码。
-3. 允许新增字段，但禁止修改既有字段语义、类型或必填规则。
-4. 如需引入不兼容变更，必须新增版本（例如 `strategy-bridge-crud-v2`），并保留 v1 行为直到迁移完成。
-
 ## 接口扩展指南
 
 ### 允许的修改
@@ -507,7 +517,6 @@ public:
 ## 版本历史
 - v1.0 (2026-03-12): 初始冻结，包含5个核心接口
 - v1.1 (2026-04-05): 扩展冻结交易桥接公共接口，并补充当前重复功能扫描
-- v1.2 (2026-05-31): 新增策略 CRUD 桥接接口冻结（创建/编辑/删除/更新流程）
 
 ## 维护者
 - 项目核心开发团队
