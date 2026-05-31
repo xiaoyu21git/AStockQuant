@@ -1,4 +1,4 @@
-#include "../include/StrategyBridig.h"
+#include "../include/StrategyBridge.h"
 
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"

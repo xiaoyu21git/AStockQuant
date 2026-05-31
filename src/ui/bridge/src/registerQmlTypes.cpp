@@ -27,8 +27,7 @@
 #include "RuleTemplateSuggestionService.h" // 新增：规则模板建议桥接服务
 #include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
 #include "UiLifecycleCoordinator.h"
-#include "StrategyService.h"           // 新增：策略服务
-#include "StrategyViewModel.h"        // 新增：策略视图模型
+#include "StrategyBridge.h"
 
 namespace wang{
 
@@ -212,18 +211,19 @@ namespace wang{
             return UiLifecycleCoordinator::instance();
          }
       );
-      
-      // StrategyService - 策略服务（单例模式）
-      qmlRegisterSingletonType<StrategyService>(
-         url, 1, 0, "StrategyService",
+
+      qmlRegisterSingletonType<StrategyBridge>(
+         url, 1, 0, "StrategyBridge",
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
-            return StrategyService::instance();
+            static StrategyBridge* bridge = nullptr;
+            if (!bridge) {
+               bridge = new StrategyBridge();
+               bridge->initAsync();
+            }
+            return bridge;
          }
       );
-      
-      // StrategyViewModel - 策略视图模型（只负责视图更新）
-      qmlRegisterType<StrategyViewModel>(url, 1, 0, "StrategyViewModel");
    }
 }

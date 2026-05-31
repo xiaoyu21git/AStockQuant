@@ -239,11 +239,11 @@ public:
 ```
 
 ### 9. 策略创建/编辑/删除/查询桥接接口
-**文件**: `src/ui/bridge/include/StrategyBridig.h`, `src/ui/bridge/src/StrategyBridig.cpp`
+**文件**: `src/ui/bridge/include/StrategyBridge.h`, `src/ui/bridge/src/StrategyBridge.cpp`
 
 ```cpp
 // FROZEN INTERFACE - 策略 CRUD 桥接
-class StrategyBridig : public QObject {
+class StrategyBridge : public QObject {
     Q_OBJECT
 public:
     // 冻结签名：不允许改名、改参、改返回值

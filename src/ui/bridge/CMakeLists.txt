@@ -61,12 +61,9 @@ set(BRIDGE_HEADERS
     include/TradingFormPanelHelper.h
     include/TradingRuntimeStatusService.h
     include/UiLifecycleCoordinator.h
-    include/StrategyBacktestRuntimeAccess.h
-    include/StrategyRuntimeRuleEvaluator.h
-    include/StrategyBacktestRequestAdapter.h
+    include/StrategyBridge.h
+    include/StrategyListModel.h
     include/StrategyStructureResolvers.h
-    include/StrategyService.h
-    include/StrategyViewModel.h
 )
 
 add_library(bridge STATIC
@@ -103,7 +100,6 @@ target_link_libraries(bridge
         Qt6::Concurrent
     PRIVATE
         application_contracts
-        application_backtest
         engine
         domain
         astock_market

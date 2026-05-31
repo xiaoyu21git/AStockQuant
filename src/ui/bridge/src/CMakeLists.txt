@@ -39,12 +39,9 @@ set(BRIDGE_SOURCES
     TradingRuntimeStatusService.cpp # 新增：交易运行时状态桥接服务
     UiLifecycleCoordinator.cpp
     RuleTemplateSuggestionService.cpp # 新增：规则模板建议桥接服务
-    StrategyBacktestRuntimeAccess.cpp
-    StrategyBacktestRequestAdapter.cpp
-    StrategyRuntimeRuleEvaluator.cpp
+    StrategyBridge.cpp
+    StrategyListModel.cpp
     StrategyStructureResolvers.cpp
-    StrategyService.cpp       # 新增：策略服务
-    StrategyViewModel.cpp     # 新增：策略视图模型
 )
 
 if(ENABLE_JUJIN_MARKET)

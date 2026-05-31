@@ -70,8 +70,8 @@ Rectangle {
     readonly property real borderRadiusXLarge: 16
     
     // C++服务引用
-    property var strategyService: StrategyService
-    property var strategyViewModel: null
+    readonly property var strategyService: StrategyBridge
+    readonly property var strategyViewModel: StrategyBridge.listModel
     readonly property var tradingConnectionConfigService: TradingConnectionConfigService
     readonly property var tradingMarketCalendarService: TradingMarketCalendarService
     readonly property var tradingRuntimeStatusService: TradingRuntimeStatusService
@@ -82,54 +82,20 @@ Rectangle {
     
     // 初始化策略服务 - 确保数据自动加载
     function initializeStrategyViewModel() {
-        // 获取StrategyService单例
-        strategyService = StrategyService
         if (strategyService) {
-            var strategyServiceReady = false
-            if (typeof strategyService.isInitialized === "function") {
-                strategyServiceReady = !!strategyService.isInitialized()
-            } else if (strategyService.isInitialized !== undefined) {
-                strategyServiceReady = !!strategyService.isInitialized
-            }
-
-            if (!strategyServiceReady) {
-                if (typeof strategyService.initializeAsync === "function") {
-                    strategyService.initializeAsync()
-                } else if (typeof strategyService.initialize === "function") {
-                    strategyService.initialize()
-                }
-            }
-
-            // 获取视图模型 - 先获取，以便绑定到UI
-            strategyViewModel = strategyService.getViewModel()
+            strategyService.initAsync()
 
             if (!serviceSignalsBound) {
                 serviceSignalsBound = true
 
-                strategyService.initializedChanged.connect(function() {
-                    if (strategyViewModel && strategyViewModel.count === 0) {
-                        selectedStrategyIndex = -1
-                    }
-                    rebuildStrategyVisibleModel()
-                })
-
-                strategyService.cacheLoadedChanged.connect(function() {
-                })
-
-                strategyService.strategiesLoaded.connect(function(strategies) {
-                    console.log("策略加载完成信号，数量:", strategies.length)
+                strategyService.strategiesChanged.connect(function() {
+                    console.log("策略数据已更新，刷新列表")
                     rebuildStrategyVisibleModel()
                     syncSelectedStrategy()
                 })
 
-                strategyService.dataChanged.connect(function() {
-                    console.log("策略数据已变更，ViewModel会自动更新")
-                    rebuildStrategyVisibleModel()
-                    syncSelectedStrategy()
-                })
-
-                strategyService.strategyCreated.connect(function(strategyId, strategyData) {
-                    console.log("新策略创建成功，ID:", strategyId, "名称:", strategyData.strategy_name)
+                strategyService.created.connect(function(strategyId, strategyData) {
+                    console.log("新策略创建成功，ID:", strategyId, "名称:", strategyData.strategyName || strategyData.name || "")
                     rebuildStrategyVisibleModel()
                 })
             }
@@ -195,7 +161,7 @@ Rectangle {
 
             strategyVisibleModel.append({
                 sourceIndex: index,
-                strategyId: row ? (row.strategyId || row.id || "") : ""
+                strategyId: row ? (row.strategyId || "") : ""
             })
         }
     }
@@ -284,7 +250,7 @@ Rectangle {
             return ({})
         }
 
-        var strategyId = strategy.strategyId || strategy.strategy_id || strategy.id || ""
+        var strategyId = strategy.strategyId || ""
         if (!strategyId) {
             return ({})
         }
@@ -382,7 +348,7 @@ Rectangle {
     }
 
     function describeStrategyBinding(strategy, configuration) {
-        var strategyId = strategy ? (strategy.strategyId || strategy.strategy_id || strategy.id || "") : ""
+        var strategyId = strategy ? (strategy.strategyId || "") : ""
         if (!strategyId) {
             return "未选择策略"
         }
@@ -408,7 +374,7 @@ Rectangle {
             return StrategyAdapter.isStrategyBoundToTradingConfiguration(strategy, configuration)
         }
 
-        var strategyId = strategy ? (strategy.strategyId || strategy.strategy_id || strategy.id || "") : ""
+        var strategyId = strategy ? (strategy.strategyId || "") : ""
         if (!strategyId) {
             return false
         }
@@ -419,7 +385,7 @@ Rectangle {
             var entry = boundStrategies[index] || ({})
             var boundStrategyId = typeof entry === "string"
                 ? String(entry || "").trim()
-                : String(entry.strategyId || entry.strategy_id || entry.id || "").trim()
+                : String(entry.strategyId || "").trim()
             if (boundStrategyId === strategyId) {
                 return true
             }
@@ -444,7 +410,7 @@ Rectangle {
             return ""
         }
 
-        return strategyCandidate.strategyId || strategyCandidate.strategy_id || strategyCandidate.id || ""
+        return strategyCandidate.strategyId || ""
     }
 
     function resolveStrategyName(strategyCandidate, strategyId) {
@@ -452,13 +418,13 @@ Rectangle {
             return strategyId || ""
         }
 
-        return strategyCandidate.strategyName || strategyCandidate.strategy_name || strategyCandidate.name || strategyId || ""
+        return strategyCandidate.strategyName || strategyCandidate.name || strategyId || ""
     }
 
     function resolveStrategyDetail(strategyCandidate) {
         var strategyId = resolveStrategyIdentifier(strategyCandidate)
-        if (strategyId && strategyService && strategyService.getStrategyById) {
-            var detail = strategyService.getStrategyById(strategyId) || ({})
+        if (strategyId && strategyService && strategyService.get) {
+            var detail = strategyService.get(strategyId) || ({})
             if (detail && Object.keys(detail).length > 0) {
                 return detail
             }
@@ -569,7 +535,7 @@ Rectangle {
             return
         }
 
-        if (strategyService && strategyService.activateStrategy && !strategyService.activateStrategy(strategyId)) {
+        if (strategyService && strategyService.start && !strategyService.start(strategyId)) {
             clearStartRequest(strategyId)
             showActionFeedback("策略“" + strategyName + "”已绑定，但激活失败", true)
             return
@@ -587,7 +553,7 @@ Rectangle {
             return
         }
 
-        if (strategyService && strategyService.deactivateStrategy && !strategyService.deactivateStrategy(strategyId)) {
+        if (strategyService && strategyService.stop && !strategyService.stop(strategyId)) {
             showActionFeedback("策略“" + strategyName + "”停止失败", true)
             return
         }
@@ -654,12 +620,12 @@ Rectangle {
             return ({})
         }
 
-        return strategyDetail.performance_metrics || strategyDetail.performanceMetrics || ({})
+        return strategyDetail.performanceMetrics || ({})
     }
 
     function getLatestBacktestRecord(strategyDetail) {
         var performance = getStrategyPerformanceMetrics(strategyDetail)
-        return performance.latestBacktest || performance.latest_backtest || ({})
+        return performance.latestBacktest || ({})
     }
 
     function getStrategyStartGateState(strategyCandidate) {
@@ -726,7 +692,7 @@ Rectangle {
 
     function getStrategySubscriptionSyncLabel(strategy, configuration) {
         var config = configuration || ({})
-        var strategyId = strategy ? (strategy.strategyId || strategy.strategy_id || strategy.id || "") : ""
+        var strategyId = strategy ? (strategy.strategyId || "") : ""
         if (!strategyId || !isStrategyBoundToTradingConfiguration(strategy, config)) {
             return "--"
         }
@@ -759,7 +725,7 @@ Rectangle {
         var configuration = currentTradingConfiguration()
         var snapshot = currentRuntimeSnapshot(strategy)
         var marketCalendarSnapshot = currentMarketCalendarSnapshot()
-        var strategyId = strategy.strategyId || strategy.strategy_id || strategy.id || ""
+        var strategyId = strategy.strategyId || ""
         var isBound = strategyId !== "" && isStrategyBoundToTradingConfiguration(strategy, configuration)
         var displayStatus = getStrategyDisplayStatus(strategy)
         tags.push(getStrategyDisplayStatusLabel(displayStatus))
@@ -802,7 +768,7 @@ Rectangle {
         var configuration = currentTradingConfiguration()
         var snapshot = currentRuntimeSnapshot(strategy)
         var marketCalendarSnapshot = currentMarketCalendarSnapshot()
-        var strategyId = strategy.strategyId || strategy.strategy_id || strategy.id || ""
+        var strategyId = strategy.strategyId || ""
         var isBound = strategyId !== "" && isStrategyBoundToTradingConfiguration(strategy, configuration)
 
         if (hasRuntimeSnapshotData(snapshot)) {
@@ -884,7 +850,7 @@ Rectangle {
         if (strategyViewModel && selectedStrategyId) {
             for (var index = 0; index < strategyViewModel.count; ++index) {
                 var row = strategyViewModel.getRow(index)
-                var rowId = row ? (row.strategyId || row.id || "") : ""
+                var rowId = row ? (row.strategyId || "") : ""
                 if (rowId === selectedStrategyId) {
                     return row
                 }
@@ -906,7 +872,7 @@ Rectangle {
 
         var selectedRow = strategyViewModel.getRow(index)
         selectedStrategyIndex = index
-        selectedStrategyId = selectedRow ? (selectedRow.strategyId || selectedRow.id || "") : ""
+        selectedStrategyId = selectedRow ? (selectedRow.strategyId || "") : ""
         strategySelected(selectedRow ? (selectedRow.strategyName || selectedRow.name || "") : "")
     }
 
@@ -918,7 +884,7 @@ Rectangle {
 
         for (var index = 0; index < strategyViewModel.count; ++index) {
             var row = strategyViewModel.getRow(index)
-            var rowId = row ? (row.strategyId || row.id || "") : ""
+            var rowId = row ? (row.strategyId || "") : ""
             if (String(rowId) === normalizedId) {
                 selectStrategyAt(index)
                 return
@@ -936,7 +902,7 @@ Rectangle {
         if (selectedStrategyId) {
             for (var index = 0; index < strategyViewModel.count; ++index) {
                 var row = strategyViewModel.getRow(index)
-                var rowId = row ? (row.strategyId || row.id || "") : ""
+                var rowId = row ? (row.strategyId || "") : ""
                 if (rowId === selectedStrategyId) {
                     selectedStrategyIndex = index
                     return
@@ -946,7 +912,7 @@ Rectangle {
 
         if (selectedStrategyIndex >= 0 && selectedStrategyIndex < strategyViewModel.count) {
             var currentRow = strategyViewModel.getRow(selectedStrategyIndex)
-            selectedStrategyId = currentRow ? (currentRow.strategyId || currentRow.id || "") : ""
+            selectedStrategyId = currentRow ? (currentRow.strategyId || "") : ""
             return
         }
 
@@ -954,11 +920,11 @@ Rectangle {
     }
 
     function getSelectedStrategyDetail(strategyId) {
-        if (!strategyService || !strategyId || !strategyService.getStrategyById) {
+        if (!strategyService || !strategyId || !strategyService.get) {
             return ({})
         }
 
-        return strategyService.getStrategyById(strategyId) || ({})
+        return strategyService.get(strategyId) || ({})
     }
 
     function toPlainJsValue(rawValue) {
@@ -981,14 +947,7 @@ Rectangle {
         var parameters = toPlainJsValue(strategyData.parameters) || ({})
         return !!(parameters.rule_profile
                   || parameters.rule_composer_state
-                  || parameters.factor_overlay
-                  || parameters.rule_template_bindings
-                  || parameters.rule_template_binding
-                  || strategyData.factorOverlaySnapshot
-                  || strategyData.ruleProfileSnapshot
-                  || strategyData.executionPolicySnapshot
-                  || strategyData.backtestAssumptionsSnapshot
-                  || strategyData.strategyScopeContextSnapshot)
+                  || parameters.factor_overlay)
     }
 
     function enrichStrategyForEdit(strategyObject, strategyId) {
@@ -998,11 +957,12 @@ Rectangle {
             enriched[key] = source[key]
         }
 
-        if (!strategyService || !strategyId || !strategyService.getStrategyParameters) {
+        if (!strategyService || !strategyId || !strategyService.get) {
             return enriched
         }
 
-        var detailParameters = toPlainJsValue(strategyService.getStrategyParameters(strategyId)) || ({})
+        var detail = toPlainJsValue(strategyService.get(strategyId)) || ({})
+        var detailParameters = toPlainJsValue(detail.parameters) || ({})
         if (Object.keys(detailParameters).length === 0) {
             return enriched
         }
@@ -1018,22 +978,6 @@ Rectangle {
 
         enriched.parameters = mergedParameters
 
-        if (!enriched.ruleProfileSnapshot && detailParameters.rule_profile) {
-            enriched.ruleProfileSnapshot = detailParameters.rule_profile
-        }
-        if (!enriched.executionPolicySnapshot && detailParameters.execution_policy) {
-            enriched.executionPolicySnapshot = detailParameters.execution_policy
-        }
-        if (!enriched.backtestAssumptionsSnapshot && detailParameters.backtest_assumptions) {
-            enriched.backtestAssumptionsSnapshot = detailParameters.backtest_assumptions
-        }
-        if (!enriched.strategyScopeContextSnapshot && detailParameters.strategy_scope_context) {
-            enriched.strategyScopeContextSnapshot = detailParameters.strategy_scope_context
-        }
-        if (!enriched.factorOverlaySnapshot && detailParameters.factor_overlay) {
-            enriched.factorOverlaySnapshot = detailParameters.factor_overlay
-        }
-
         return enriched
     }
 
@@ -1044,16 +988,13 @@ Rectangle {
         if (typeof candidate === "string") {
             strategyId = candidate
         } else {
-            strategyId = candidate.strategy_id || candidate.strategyId || candidate.id || ""
+            strategyId = candidate.strategyId || ""
         }
 
-        if (strategyId && strategyService && strategyService.getStrategyById) {
-            var detail = toPlainJsValue(strategyService.getStrategyById(strategyId)) || ({})
+        if (strategyId && strategyService && strategyService.get) {
+            var detail = toPlainJsValue(strategyService.get(strategyId)) || ({})
             var enrichedDetail = enrichStrategyForEdit(detail, strategyId)
             if (enrichedDetail && Object.keys(enrichedDetail).length > 0 && strategyHasEditableRulePayload(enrichedDetail)) {
-                return enrichedDetail
-            }
-            if (detail && Object.keys(detail).length > 0 && Object.keys(enrichedDetail.parameters || ({})).length > Object.keys((detail.parameters || ({}))).length) {
                 return enrichedDetail
             }
         }
@@ -1071,16 +1012,7 @@ Rectangle {
         strategyCreationLoader.active = true
 
         if (strategyCreationLoader.item) {
-            var hasStrategyIdentity = !!(resolvedStrategy && (resolvedStrategy.strategy_id || resolvedStrategy.strategyId || resolvedStrategy.id))
-            var hasImportedFactorContext = !!(resolvedStrategy
-                && !hasStrategyIdentity
-                && ((resolvedStrategy.factorImportContext && Object.keys(resolvedStrategy.factorImportContext).length > 0)
-                    || (resolvedStrategy.parameters
-                        && resolvedStrategy.parameters.factorImportContext
-                        && Object.keys(resolvedStrategy.parameters.factorImportContext).length > 0)))
-            if (hasImportedFactorContext && strategyCreationLoader.item.loadFactorBacktestImport) {
-                strategyCreationLoader.item.loadFactorBacktestImport(resolvedStrategy)
-            } else if (resolvedStrategy && Object.keys(resolvedStrategy).length > 0 && strategyCreationLoader.item.loadStrategyForEdit) {
+            if (resolvedStrategy && Object.keys(resolvedStrategy).length > 0 && strategyCreationLoader.item.loadStrategyForEdit) {
                 strategyCreationLoader.item.loadStrategyForEdit(resolvedStrategy)
             } else if (strategyCreationLoader.item.resetForm) {
                 strategyCreationLoader.item.resetForm()
@@ -1384,7 +1316,7 @@ Rectangle {
 
                                 width: strategyGridView.cellWidth - 12
                                 height: strategyGridView.cellHeight - 20
-                                strategyId: sourceStrategy ? (sourceStrategy.strategyId || sourceStrategy.id || "") : ""
+                                strategyId: sourceStrategy ? (sourceStrategy.strategyId || "") : ""
                                 strategyName: sourceStrategy ? (sourceStrategy.strategyName || sourceStrategy.name || "未命名策略") : "未命名策略"
                                 displayName: sourceStrategy ? (sourceStrategy.strategyName || sourceStrategy.name || "未命名策略") : "未命名策略"
                                 strategyType: sourceStrategy ? (sourceStrategy.strategyType || "趋势策略") : "趋势策略"
@@ -1403,7 +1335,7 @@ Rectangle {
                                 dailyPnL: sourceStrategy ? (parseFloat(sourceStrategy.dailyPnL) || 0) : 0
                                 position: sourceStrategy ? (parseFloat(sourceStrategy.position) || 0) : 0
                                 selected: strategyLibraryPage.selectedStrategyId !== ""
-                                    ? strategyLibraryPage.selectedStrategyId === (sourceStrategy ? (sourceStrategy.strategyId || sourceStrategy.id || "") : "")
+                                    ? strategyLibraryPage.selectedStrategyId === (sourceStrategy ? (sourceStrategy.strategyId || "") : "")
                                     : strategyLibraryPage.selectedStrategyIndex === sourceIndex
                                 showMiniChart: true
                                 showParameterPanel: false
@@ -1451,7 +1383,7 @@ Rectangle {
 
                                 onDeleteClicked: {
                                     strategyLibraryPage.requestDeleteStrategy(
-                                        sourceStrategy ? (sourceStrategy.strategyId || sourceStrategy.id || "") : "",
+                                        sourceStrategy ? (sourceStrategy.strategyId || "") : "",
                                         sourceStrategy ? (sourceStrategy.strategyName || sourceStrategy.name || "未命名策略") : "未命名策略"
                                     )
                                 }
@@ -1509,7 +1441,7 @@ Rectangle {
 
                             property var selectedStrategy: strategyLibraryPage.getSelectedStrategySummary()
 
-                            strategyId: selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id || "") : ""
+                            strategyId: selectedStrategy ? (selectedStrategy.strategyId || "") : ""
                             strategyName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
                             displayName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
                             strategyType: selectedStrategy ? (selectedStrategy.strategyType || "趋势策略") : "趋势策略"
@@ -1565,7 +1497,7 @@ Rectangle {
 
                             onDeleteClicked: {
                                 strategyLibraryPage.requestDeleteStrategy(
-                                    selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id || "") : "",
+                                    selectedStrategy ? (selectedStrategy.strategyId || "") : "",
                                     selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : "未命名策略"
                                 )
                             }
@@ -1592,7 +1524,7 @@ Rectangle {
                         property var tradingConfiguration: strategyLibraryPage.currentTradingConfiguration()
                         property var marketCalendarSnapshot: strategyLibraryPage.currentMarketCalendarSnapshot()
                         property string selectedStrategyId: selectedStrategySummary
-                            ? (selectedStrategySummary.strategyId || selectedStrategySummary.strategy_id || selectedStrategySummary.id || "")
+                            ? (selectedStrategySummary.strategyId || "")
                             : ""
                         property var runtimeSnapshot: strategyLibraryPage.currentRuntimeSnapshot(selectedStrategySummary)
                         property bool hasRuntimeSnapshot: strategyLibraryPage.hasRuntimeSnapshotData(runtimeSnapshot)
@@ -2019,7 +1951,7 @@ Rectangle {
                         deleteInProgress = true
                         if (strategyService && deleteConfirmDialog.strategyId) {
                             var deletedStrategyId = deleteConfirmDialog.strategyId
-                            var ok = strategyService.deleteStrategy(deletedStrategyId)
+                            var ok = strategyService.remove(deletedStrategyId)
                             if (ok) {
                                 if (selectedStrategyIndex >= 0 && strategyViewModel && selectedStrategyIndex >= strategyViewModel.count - 1) {
                                     selectedStrategyIndex = Math.max(0, strategyViewModel.count - 2)
@@ -2069,16 +2001,9 @@ Rectangle {
         
         onLoaded: {
             if (item) {
-                var hasStrategyIdentity = !!(pendingStrategyData && (pendingStrategyData.strategy_id || pendingStrategyData.strategyId || pendingStrategyData.id))
-                var hasImportedFactorContext = !!(pendingStrategyData
-                    && !hasStrategyIdentity
-                    && ((pendingStrategyData.factorImportContext && Object.keys(pendingStrategyData.factorImportContext).length > 0)
-                        || (pendingStrategyData.parameters
-                            && pendingStrategyData.parameters.factorImportContext
-                            && Object.keys(pendingStrategyData.parameters.factorImportContext).length > 0)))
-                if (hasImportedFactorContext && typeof item.loadFactorBacktestImport !== "undefined") {
-                    item.loadFactorBacktestImport(pendingStrategyData)
-                } else if (pendingStrategyData && Object.keys(pendingStrategyData).length > 0 && typeof item.loadStrategyForEdit !== "undefined") {
+                item.strategyService = strategyLibraryPage.strategyService
+
+                if (pendingStrategyData && Object.keys(pendingStrategyData).length > 0 && typeof item.loadStrategyForEdit !== "undefined") {
                     item.loadStrategyForEdit(pendingStrategyData)
                 } else if (typeof item.resetForm !== "undefined") {
                     item.resetForm()
@@ -2092,42 +2017,12 @@ Rectangle {
                         strategyCreationLoader.active = false;
                         // 确保返回到策略库页面
                         strategyLibraryPage.forceActiveFocus();
-                        // 注意：不需要手动调用syncWithDatabase，因为StrategyService.createStrategy()
-                        // 已经发送了dataChanged信号，这个信号会被我们的监听器处理
-                        console.log("创建页面已关闭，数据更新将由dataChanged信号处理")
+                        // 注意：不需要手动调用syncWithDatabase，因为StrategyService.add()
+                        // 列表由策略模型自动刷新
+                        console.log("创建页面已关闭，列表将由策略模型刷新")
                     });
                 }
                 
-                // 连接策略创建信号（兼容旧版本）
-                if (typeof item.strategyCreated !== "undefined") {
-                    item.strategyCreated.connect(function(strategyData) {
-                        console.log("创建策略:", strategyData);
-                        // 添加到策略模型
-                        strategyModel.append({
-                            name: strategyData.name,
-                            description: strategyData.description,
-                            status: strategyData.status,
-                            returns: strategyData.returns,
-                            maxDrawdown: strategyData.maxDrawdown,
-                            sharpeRatio: strategyData.sharpeRatio,
-                            winRate: strategyData.winRate,
-                            tags: strategyData.tags,
-                            runningDays: 0,
-                            tradesCount: 0,
-                            position: 0,
-                            dailyPnL: 0
-                        });
-                        
-                        // 关闭创建页面
-                        strategyCreationLoader.pendingStrategyData = ({})
-                        strategyCreationLoader.active = false;
-                    });
-                }
-                
-                // 专业版使用resetForm完成后的返回
-                if (typeof item.resetForm !== "undefined") {
-                    // 监听resetForm完成事件（如果有）
-                }
             }
         }
     }
@@ -2177,7 +2072,7 @@ Rectangle {
         }
         
         // 注意：不再使用硬编码数据作为后备，完全依赖数据库数据
-        // 策略数据将通过dataChanged信号自动更新
+        // 策略数据将通过strategyListModel自动更新
         if (visible) {
             strategyLibraryActivationTimer.start()
         }
