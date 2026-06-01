@@ -130,7 +130,7 @@ endfunction()
 set(TEST_SOURCES "")
 set(LIBS_ROOT "C:/libs")
 
-# 检查 test_eventsystem.cpp
+# 检�?test_eventsystem.cpp
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_eventsystem.cpp")
     list(APPEND TEST_SOURCES "test_eventsystem.cpp")
     message(STATUS "[TESTS] Found: test_eventsystem.cpp")
@@ -138,7 +138,7 @@ else()
     message(WARNING "[TESTS] test_eventsystem.cpp not found!")
 endif()
 
-# 检查新增测试文件
+# 检查新增测试文�?
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_eventbus_cpp_units.cpp")
     list(APPEND TEST_SOURCES "test_eventbus_cpp_units.cpp")
     message(STATUS "[TESTS] Found: test_eventbus_cpp_units.cpp")
@@ -202,13 +202,20 @@ else()
     message(WARNING "[TESTS] test_strict_cleaning_regression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_backtest_abstractions.cpp")
+    list(APPEND TEST_SOURCES "test_backtest_abstractions.cpp")
+    message(STATUS "[TESTS] Found: test_backtest_abstractions.cpp")
+else()
+    message(WARNING "[TESTS] test_backtest_abstractions.cpp not found!")
+endif()
+
 if(NOT TEST_SOURCES)
     message(FATAL_ERROR "[TESTS] No test source files found!")
 endif()
 
 message(STATUS "[TESTS] Test sources: ${TEST_SOURCES}")
 
-# ==================== 创建测试可执行文件 ====================
+# ==================== 创建测试可执行文�?====================
 add_executable(test_eventsystem ${TEST_SOURCES})
 set_target_properties(test_eventsystem PROPERTIES
     MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
@@ -218,28 +225,28 @@ if(MSVC)
 endif()
 target_include_directories(test_eventsystem PRIVATE
     ${CMAKE_SOURCE_DIR}/src/engine/include     # Event.h 等引擎头文件
-    ${CMAKE_SOURCE_DIR}/src/domain/include     # Domain 模块头文件
-    ${CMAKE_SOURCE_DIR}/src/foundation/include # Foundation 头文件
-    ${CMAKE_SOURCE_DIR}/astock_engine          # EventSystem.hpp 等
-    ${CMAKE_SOURCE_DIR}/src                    # 其他头文件
+    ${CMAKE_SOURCE_DIR}/src/domain/include     # Domain 模块头文�?
+    ${CMAKE_SOURCE_DIR}/src/foundation/include # Foundation 头文�?
+    ${CMAKE_SOURCE_DIR}/astock_engine          # EventSystem.hpp �?
+    ${CMAKE_SOURCE_DIR}/src                    # 其他头文�?
 )
 
-# 链接库
+# 链接�?
 target_link_libraries(test_eventsystem
     PUBLIC
         GTest::gtest
         GTest::gtest_main
     PRIVATE
         Qt6::Core
-        engine          # Engine 库（包含 Event）
-        domain          # Domain 库
+        engine          # Engine 库（包含 Event�?
+        domain          # Domain �?
         domain_backtest
         domain_strategies
         domain_strategy_runtime
         bridge
         factor_system   # ConfigurableFactor/Factor runtime symbols
         infrastructure  # MarketDataRepository 回归测试
-        foundation      # Foundation 库
+        foundation      # Foundation �?
 )
 
 # 设置输出目录

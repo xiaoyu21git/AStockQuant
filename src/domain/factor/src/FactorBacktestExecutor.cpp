@@ -4,6 +4,11 @@
 #include "domain/factor/include/FactorBacktestGroupingUtils.h"
 #include "domain/factor/include/FactorBacktestIcUtils.h"
 #include "domain/factor/include/FactorBacktestMetricsCalculator.h"
+#include "domain/backtest/include/BacktestWindowAbstraction.h"
+#include "domain/backtest/include/RebalanceScheduleAbstraction.h"
+#include "domain/backtest/include/OrderRoutingEngineAbstraction.h"
+#include "domain/backtest/include/RiskApprovalEngineAbstraction.h"
+#include "domain/backtest/include/TradingCostModelAbstraction.h"
 #include "domain/trading/include/DefaultTradingCore.h"
 #include "domain/trading/include/InMemoryTradingLedger.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
@@ -23,6 +28,7 @@
 #include <thread>
 #include <sstream>
 #include <numeric>
+#include <cstdio>
 #include <unordered_map>
 #include <unordered_set>
 #include <stdexcept>
@@ -36,6 +42,635 @@
 namespace factor {
 
 namespace {
+
+using RebalanceTradingDay = astock::domain::backtest::rebalancing::TradingDay;
+using WindowTradingDay = astock::domain::backtest::windowing::TradingDay;
+
+constexpr int32_t kDateTextLength = 10;
+constexpr int32_t kDateNumberBase = 10;
+constexpr int32_t kDateMonthScale = 100;
+constexpr int32_t kDateYearScale = 10000;
+constexpr int32_t kMonthMin = 1;
+constexpr int32_t kMonthMax = 12;
+constexpr int32_t kDayMin = 1;
+constexpr int32_t kDayMax = 31;
+constexpr int32_t kNoWarmupDays = 0;
+constexpr int32_t kDateBufferSize = 16;
+constexpr int32_t kRiskBpsBase = 10000;
+constexpr int32_t kMinBps = 1;
+constexpr int32_t kHighUrgencyBps = 9000;
+constexpr int32_t kNormalUrgencyBps = 5000;
+constexpr int32_t kPassiveSecondaryDivisor = 4;
+constexpr int32_t kDefaultMaxBatchOrders = 4096;
+
+using RoutingDeltaBps = astock::domain::backtest::order_routing::DeltaBps;
+using RoutingInstrumentId = astock::domain::backtest::order_routing::InstrumentId;
+using RoutingAction = astock::domain::backtest::order_routing::OrderAction;
+
+using RiskDeltaBps = astock::domain::backtest::risk_approval::DeltaBps;
+using RiskInstrumentId = astock::domain::backtest::risk_approval::InstrumentId;
+using RiskAction = astock::domain::backtest::risk_approval::OrderAction;
+
+bool toBpsChecked(double ratio, int32_t* outBps)
+{
+    if (!outBps || !std::isfinite(ratio) || ratio < 0.0 || ratio > 1.0) {
+        return false;
+    }
+
+    const double scaled = ratio * static_cast<double>(kRiskBpsBase);
+    if (scaled < static_cast<double>(kMinBps) || scaled > static_cast<double>(kRiskBpsBase)) {
+        return false;
+    }
+
+    const auto rounded = static_cast<int64_t>(std::llround(scaled));
+    if (rounded < kMinBps || rounded > kRiskBpsBase) {
+        return false;
+    }
+
+    *outBps = static_cast<int32_t>(rounded);
+    return true;
+}
+
+bool convertOrderAction(domain::trading::OrderSide side,
+                        RoutingAction* routingAction,
+                        RiskAction* riskAction)
+{
+    if (!routingAction || !riskAction) {
+        return false;
+    }
+
+    const bool isSell = side == domain::trading::OrderSide::Sell
+        || side == domain::trading::OrderSide::SellShort;
+    *routingAction = isSell ? RoutingAction::Sell : RoutingAction::Buy;
+    *riskAction = isSell ? RiskAction::Sell : RiskAction::Buy;
+    return true;
+}
+
+bool computeDeltaBpsFromNotional(double notional,
+                                 double totalAsset,
+                                 int32_t* outDeltaBps)
+{
+    if (!outDeltaBps
+        || !std::isfinite(notional)
+        || !std::isfinite(totalAsset)
+        || notional <= 0.0
+        || totalAsset <= 0.0) {
+        return false;
+    }
+
+    const double ratio = notional / totalAsset;
+    const double clipped = (std::max)(0.0, (std::min)(1.0, ratio));
+    return toBpsChecked(clipped, outDeltaBps);
+}
+
+bool buildRoutingIntentsFromBatch(
+    const domain::trading::TradeIntentBatch& batch,
+    const domain::trading::TradingSnapshot& snapshot,
+    std::vector<astock::domain::backtest::order_routing::ExecutionIntent>* outIntents,
+    std::unordered_map<QString, uint32_t>* outSymbolToInstrument,
+    std::string* outError)
+{
+    if (!outIntents || !outSymbolToInstrument || !outError) {
+        return false;
+    }
+
+    const double totalAsset = snapshot.account.totalAsset.value;
+    if (!std::isfinite(totalAsset) || totalAsset <= 0.0) {
+        *outError = "invalid_total_asset_for_routing";
+        return false;
+    }
+
+    outIntents->clear();
+    outSymbolToInstrument->clear();
+
+    uint32_t nextInstrumentId = 1U;
+    auto ensureInstrumentId = [&nextInstrumentId, outSymbolToInstrument](const QString& symbol, uint32_t* outId) {
+        if (!outId || symbol.trimmed().isEmpty()) {
+            return false;
+        }
+        const auto existingIt = outSymbolToInstrument->find(symbol);
+        if (existingIt != outSymbolToInstrument->end()) {
+            *outId = existingIt->second;
+            return true;
+        }
+        const uint32_t assignedId = nextInstrumentId;
+        ++nextInstrumentId;
+        outSymbolToInstrument->emplace(symbol, assignedId);
+        *outId = assignedId;
+        return true;
+    };
+
+    for (const domain::trading::TradeIntent& intent : batch.intents) {
+        if (!intent.isValid()) {
+            *outError = "invalid_trade_intent_for_routing";
+            return false;
+        }
+
+        uint32_t instrumentId = 0U;
+        if (!ensureInstrumentId(intent.symbol.text(), &instrumentId)) {
+            *outError = "invalid_symbol_for_routing";
+            return false;
+        }
+
+        int32_t deltaBps = 0;
+        const double notional = intent.referencePrice.value * static_cast<double>(intent.quantity.value);
+        if (!computeDeltaBpsFromNotional(notional, totalAsset, &deltaBps)) {
+            *outError = "invalid_intent_notional_for_routing";
+            return false;
+        }
+
+        RoutingAction routingAction = RoutingAction::Buy;
+        RiskAction riskAction = RiskAction::Buy;
+        if (!convertOrderAction(intent.side, &routingAction, &riskAction)) {
+            *outError = "invalid_order_side_for_routing";
+            return false;
+        }
+
+        Q_UNUSED(riskAction);
+
+        astock::domain::backtest::order_routing::ExecutionIntent routingIntent;
+        routingIntent.instrument = RoutingInstrumentId{instrumentId};
+        routingIntent.action = routingAction;
+        routingIntent.delta = RoutingDeltaBps{deltaBps};
+        routingIntent.urgency = RoutingDeltaBps{kHighUrgencyBps};
+        outIntents->push_back(routingIntent);
+    }
+
+    for (const domain::trading::TargetPosition& position : batch.targetPositions) {
+        if (!position.isValid()) {
+            *outError = "invalid_target_position_for_routing";
+            return false;
+        }
+
+        const qint64 currentQuantity = [&snapshot, &position]() {
+            for (const domain::trading::TradingPositionSnapshot& current : snapshot.positions) {
+                if (current.symbol == position.symbol) {
+                    return current.quantity.value;
+                }
+            }
+            return static_cast<qint64>(0);
+        }();
+
+        const qint64 deltaQuantity = position.targetQuantity.value - currentQuantity;
+        if (deltaQuantity == 0) {
+            continue;
+        }
+
+        uint32_t instrumentId = 0U;
+        if (!ensureInstrumentId(position.symbol.text(), &instrumentId)) {
+            *outError = "invalid_symbol_for_routing";
+            return false;
+        }
+
+        const double notional = position.referencePrice.value
+            * static_cast<double>(std::llabs(deltaQuantity));
+        int32_t deltaBps = 0;
+        if (!computeDeltaBpsFromNotional(notional, totalAsset, &deltaBps)) {
+            *outError = "invalid_target_notional_for_routing";
+            return false;
+        }
+
+        astock::domain::backtest::order_routing::ExecutionIntent routingIntent;
+        routingIntent.instrument = RoutingInstrumentId{instrumentId};
+        routingIntent.action = deltaQuantity < 0 ? RoutingAction::Sell : RoutingAction::Buy;
+        routingIntent.delta = RoutingDeltaBps{deltaBps};
+        routingIntent.urgency = RoutingDeltaBps{kNormalUrgencyBps};
+        outIntents->push_back(routingIntent);
+    }
+
+    return true;
+}
+
+bool gateBatchByRoutingAndRisk(
+    const domain::trading::TradeIntentBatch& batch,
+    const domain::trading::TradingSnapshot& snapshot,
+    const domain::trading::TradingExecutionContext& context,
+    domain::trading::TradeIntentBatch* outBatch,
+    bool* outBlocked,
+    std::string* outError)
+{
+    if (!outBatch || !outBlocked || !outError) {
+        return false;
+    }
+
+    std::vector<astock::domain::backtest::order_routing::ExecutionIntent> intents;
+    std::unordered_map<QString, uint32_t> symbolToInstrument;
+    if (!buildRoutingIntentsFromBatch(batch, snapshot, &intents, &symbolToInstrument, outError)) {
+        return false;
+    }
+
+    if (intents.empty()) {
+        *outBlocked = false;
+        *outBatch = batch;
+        return true;
+    }
+
+    int32_t maxOrderDeltaBps = 0;
+    if (!toBpsChecked(context.riskProfile.maxSinglePositionRatio.value, &maxOrderDeltaBps)) {
+        *outError = "invalid_max_single_position_ratio";
+        return false;
+    }
+
+    const int32_t passiveSecondaryMaxDelta = (std::max)(kMinBps, maxOrderDeltaBps / kPassiveSecondaryDivisor);
+    astock::domain::backtest::order_routing::RoutingSpec routingSpec;
+    routingSpec.maxOrderDelta = RoutingDeltaBps{maxOrderDeltaBps};
+    routingSpec.aggressiveUrgencyThreshold = RoutingDeltaBps{kNormalUrgencyBps};
+    routingSpec.passiveSecondaryMaxDelta = RoutingDeltaBps{passiveSecondaryMaxDelta};
+
+    const astock::domain::backtest::order_routing::SimpleOrderRouter router;
+    const auto routingResult = router.route(routingSpec, std::move(intents));
+    if (!routingResult.ok()) {
+        *outError = "order_routing_rejected";
+        return false;
+    }
+
+    int32_t maxTurnoverBps = 0;
+    if (!toBpsChecked(context.riskProfile.maxPositionRatio.value, &maxTurnoverBps)) {
+        *outError = "invalid_max_total_exposure";
+        return false;
+    }
+
+    if (context.riskProfile.maxBatchOrders <= 0) {
+        *outError = "invalid_max_batch_orders";
+        return false;
+    }
+
+    astock::domain::backtest::risk_approval::RiskLimitsSpec limits;
+    limits.maxSingleOrderDelta = RiskDeltaBps{maxOrderDeltaBps};
+    limits.maxTurnoverDelta = RiskDeltaBps{maxTurnoverBps};
+    limits.maxOrderCount = context.riskProfile.maxBatchOrders;
+    astock::domain::backtest::risk_approval::RiskRuntimeContext riskContext;
+    riskContext.consumedTurnover = RiskDeltaBps{0};
+
+    std::vector<astock::domain::backtest::risk_approval::OrderCandidate> candidates;
+    candidates.reserve(routingResult.value->items.size());
+    for (const auto& routed : routingResult.value->items) {
+        astock::domain::backtest::risk_approval::OrderCandidate candidate;
+        candidate.instrument = RiskInstrumentId{routed.instrument.value};
+        candidate.action = routed.action == RoutingAction::Sell ? RiskAction::Sell : RiskAction::Buy;
+        candidate.delta = RiskDeltaBps{routed.delta.value};
+        candidates.push_back(candidate);
+    }
+
+    const astock::domain::backtest::risk_approval::SequentialRiskApprovalEngine riskEngine;
+    const auto riskResult = riskEngine.evaluate(limits, riskContext, std::move(candidates));
+    if (!riskResult.ok()) {
+        *outError = "risk_approval_rejected";
+        return false;
+    }
+
+    std::unordered_set<uint32_t> approvedInstruments;
+    approvedInstruments.reserve(riskResult.value->approved.size());
+    for (const auto& approved : riskResult.value->approved) {
+        approvedInstruments.insert(approved.instrument.value);
+    }
+
+    if (approvedInstruments.empty()) {
+        *outBlocked = true;
+        outBatch->batchId = batch.batchId;
+        outBatch->mode = batch.mode;
+        outBatch->source = batch.source;
+        return true;
+    }
+
+    *outBlocked = false;
+    outBatch->batchId = batch.batchId;
+    outBatch->mode = batch.mode;
+    outBatch->source = batch.source;
+    outBatch->intents.clear();
+    outBatch->targetPositions.clear();
+
+    auto instrumentOf = [&symbolToInstrument](const QString& symbol) {
+        const auto it = symbolToInstrument.find(symbol);
+        return it == symbolToInstrument.end() ? 0U : it->second;
+    };
+
+    for (const domain::trading::TradeIntent& intent : batch.intents) {
+        const uint32_t instrument = instrumentOf(intent.symbol.text());
+        if (instrument != 0U && approvedInstruments.find(instrument) != approvedInstruments.end()) {
+            outBatch->intents.append(intent);
+        }
+    }
+
+    for (const domain::trading::TargetPosition& position : batch.targetPositions) {
+        const uint32_t instrument = instrumentOf(position.symbol.text());
+        if (instrument != 0U && approvedInstruments.find(instrument) != approvedInstruments.end()) {
+            outBatch->targetPositions.append(position);
+        }
+    }
+
+    return true;
+}
+
+bool validateExecutionCosts(const domain::trading::ExecutionResult& executionResult,
+                           const domain::trading::TradingExecutionContext& context,
+                           std::string* outError)
+{
+    if (!outError) {
+        return false;
+    }
+
+    int32_t commissionBps = 0;
+    int32_t slippageBps = 0;
+    int32_t taxBps = 0;
+    if (!toBpsChecked(context.costProfile.commissionRate.value, &commissionBps)
+        || !toBpsChecked(context.costProfile.slippageRate.value, &slippageBps)
+        || !toBpsChecked(context.costProfile.taxRate.value, &taxBps)) {
+        *outError = "invalid_cost_profile_for_trading_cost_model";
+        return false;
+    }
+
+    astock::domain::backtest::trading_cost::TradingCostSpec costSpec;
+    costSpec.commissionBps.value = commissionBps;
+    costSpec.slippageBps.value = slippageBps;
+    costSpec.sellTaxBps.value = taxBps;
+
+    const astock::domain::backtest::trading_cost::LinearBpsTradingCostModel costModel;
+    for (const domain::trading::FillEvent& fill : executionResult.fills) {
+        const int64_t roundedPrice = static_cast<int64_t>(std::llround(fill.fillPrice.value));
+        const int64_t lots = static_cast<int64_t>(fill.fillQuantity.value);
+        if (roundedPrice <= 0
+            || roundedPrice > std::numeric_limits<int32_t>::max()
+            || lots <= 0
+            || lots > std::numeric_limits<int32_t>::max()) {
+            *outError = "invalid_fill_for_trading_cost_model";
+            return false;
+        }
+
+        astock::domain::backtest::trading_cost::TradeFill tradeFill;
+        tradeFill.price.value = static_cast<int32_t>(roundedPrice);
+        tradeFill.quantity.value = static_cast<int32_t>(lots);
+        tradeFill.side = (fill.side == domain::trading::OrderSide::Sell
+            || fill.side == domain::trading::OrderSide::SellShort)
+            ? astock::domain::backtest::trading_cost::OrderSide::Sell
+            : astock::domain::backtest::trading_cost::OrderSide::Buy;
+
+        const auto costResult = costModel.calculate(tradeFill, costSpec);
+        if (!costResult.ok()) {
+            *outError = "trading_cost_model_rejected_fill";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool parseDateNumber(const std::string& text, int32_t* outDateNumber)
+{
+    if (!outDateNumber || static_cast<int32_t>(text.size()) != kDateTextLength
+        || text[4] != '-' || text[7] != '-') {
+        return false;
+    }
+
+    const std::string yearText = text.substr(0, 4);
+    const std::string monthText = text.substr(5, 2);
+    const std::string dayText = text.substr(8, 2);
+
+    int32_t year = 0;
+    int32_t month = 0;
+    int32_t day = 0;
+    try {
+        year = std::stoi(yearText, nullptr, kDateNumberBase);
+        month = std::stoi(monthText, nullptr, kDateNumberBase);
+        day = std::stoi(dayText, nullptr, kDateNumberBase);
+    } catch (...) {
+        return false;
+    }
+
+    if (month < kMonthMin || month > kMonthMax || day < kDayMin || day > kDayMax) {
+        return false;
+    }
+
+    *outDateNumber = year * kDateYearScale + month * kDateMonthScale + day;
+    return true;
+}
+
+std::string toDateText(int32_t dateNumber)
+{
+    const int32_t year = dateNumber / kDateYearScale;
+    const int32_t month = (dateNumber / kDateMonthScale) % kDateMonthScale;
+    const int32_t day = dateNumber % kDateMonthScale;
+
+    char buffer[kDateBufferSize] = {};
+    std::snprintf(buffer,
+                  sizeof(buffer),
+                  "%04d-%02d-%02d",
+                  static_cast<int>(year),
+                  static_cast<int>(month),
+                  static_cast<int>(day));
+    return std::string(buffer);
+}
+
+struct TradingDayCatalog final {
+    std::vector<int32_t> orderedDays;
+    std::unordered_map<int32_t, size_t> indexByDay;
+};
+
+std::optional<TradingDayCatalog> buildTradingDayCatalog(const std::vector<std::string>& tradeDates)
+{
+    TradingDayCatalog catalog;
+    catalog.orderedDays.reserve(tradeDates.size());
+    catalog.indexByDay.reserve(tradeDates.size());
+
+    for (const std::string& dateText : tradeDates) {
+        int32_t dateNumber = 0;
+        if (!parseDateNumber(dateText, &dateNumber)) {
+            return std::nullopt;
+        }
+
+        if (!catalog.orderedDays.empty() && dateNumber <= catalog.orderedDays.back()) {
+            return std::nullopt;
+        }
+
+        catalog.indexByDay.emplace(dateNumber, catalog.orderedDays.size());
+        catalog.orderedDays.push_back(dateNumber);
+    }
+
+    if (catalog.orderedDays.empty()) {
+        return std::nullopt;
+    }
+    return catalog;
+}
+
+class RebalanceCalendarAdapter final : public astock::domain::backtest::rebalancing::ITradingCalendar {
+public:
+    explicit RebalanceCalendarAdapter(const TradingDayCatalog& catalog)
+        : catalog_(catalog)
+    {
+    }
+
+    std::optional<RebalanceTradingDay> nextTradingDayOnOrAfter(RebalanceTradingDay day) const override
+    {
+        const auto it = std::lower_bound(catalog_.orderedDays.begin(), catalog_.orderedDays.end(), day.value);
+        if (it == catalog_.orderedDays.end()) {
+            return std::nullopt;
+        }
+        return RebalanceTradingDay{*it};
+    }
+
+    std::optional<RebalanceTradingDay> previousTradingDayOnOrBefore(RebalanceTradingDay day) const override
+    {
+        const auto it = std::upper_bound(catalog_.orderedDays.begin(), catalog_.orderedDays.end(), day.value);
+        if (it == catalog_.orderedDays.begin()) {
+            return std::nullopt;
+        }
+        return RebalanceTradingDay{*std::prev(it)};
+    }
+
+    std::optional<RebalanceTradingDay> shiftTradingDays(RebalanceTradingDay day, int32_t offset) const override
+    {
+        const auto indexIt = catalog_.indexByDay.find(day.value);
+        if (indexIt == catalog_.indexByDay.end()) {
+            return std::nullopt;
+        }
+
+        const int64_t currentIndex = static_cast<int64_t>(indexIt->second);
+        const int64_t shiftedIndex = currentIndex + static_cast<int64_t>(offset);
+        if (shiftedIndex < 0 || shiftedIndex >= static_cast<int64_t>(catalog_.orderedDays.size())) {
+            return std::nullopt;
+        }
+
+        return RebalanceTradingDay{catalog_.orderedDays[static_cast<size_t>(shiftedIndex)]};
+    }
+
+private:
+    const TradingDayCatalog& catalog_;
+};
+
+class WindowCalendarAdapter final : public astock::domain::backtest::windowing::ITradingCalendar {
+public:
+    explicit WindowCalendarAdapter(const TradingDayCatalog& catalog)
+        : catalog_(catalog)
+    {
+    }
+
+    bool isTradingDay(WindowTradingDay day) const override
+    {
+        return catalog_.indexByDay.find(day.value) != catalog_.indexByDay.end();
+    }
+
+    std::optional<WindowTradingDay> shiftTradingDays(WindowTradingDay day, int32_t offset) const override
+    {
+        const auto indexIt = catalog_.indexByDay.find(day.value);
+        if (indexIt == catalog_.indexByDay.end()) {
+            return std::nullopt;
+        }
+
+        const int64_t currentIndex = static_cast<int64_t>(indexIt->second);
+        const int64_t shiftedIndex = currentIndex + static_cast<int64_t>(offset);
+        if (shiftedIndex < 0 || shiftedIndex >= static_cast<int64_t>(catalog_.orderedDays.size())) {
+            return std::nullopt;
+        }
+
+        return WindowTradingDay{catalog_.orderedDays[static_cast<size_t>(shiftedIndex)]};
+    }
+
+private:
+    const TradingDayCatalog& catalog_;
+};
+
+std::string describeWindowError(astock::domain::backtest::windowing::WindowBuildError error)
+{
+    using WindowBuildError = astock::domain::backtest::windowing::WindowBuildError;
+    switch (error) {
+    case WindowBuildError::InvalidInput:
+        return "window_invalid_input";
+    case WindowBuildError::InvalidPolicyOutput:
+        return "window_invalid_policy_output";
+    case WindowBuildError::NonTradingBoundary:
+        return "window_non_trading_boundary";
+    case WindowBuildError::MissingHistoricalTradingDay:
+        return "window_missing_historical_day";
+    case WindowBuildError::None:
+    default:
+        break;
+    }
+    return "window_unknown_error";
+}
+
+std::string describeRebalanceError(astock::domain::backtest::rebalancing::RebalancePlanError error)
+{
+    using RebalancePlanError = astock::domain::backtest::rebalancing::RebalancePlanError;
+    switch (error) {
+    case RebalancePlanError::InvalidInput:
+        return "rebalance_invalid_input";
+    case RebalancePlanError::MissingTradingDay:
+        return "rebalance_missing_trading_day";
+    case RebalancePlanError::InvalidCalendarProgress:
+        return "rebalance_invalid_calendar_progress";
+    case RebalancePlanError::None:
+    default:
+        break;
+    }
+    return "rebalance_unknown_error";
+}
+
+bool buildFormalRebalanceDates(const BacktestConfig& config,
+                               const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex,
+                               std::unordered_set<std::string>* outDates,
+                               std::string* outError)
+{
+    if (!outDates || !outError) {
+        return false;
+    }
+
+    const std::optional<TradingDayCatalog> catalog = buildTradingDayCatalog(cachedMarketIndex.tradeDates);
+    if (!catalog.has_value()) {
+        *outError = "invalid_trade_date_catalog";
+        return false;
+    }
+
+    int32_t requestedStartDate = 0;
+    int32_t requestedEndDate = 0;
+    if (!parseDateNumber(config.startDate, &requestedStartDate)
+        || !parseDateNumber(config.endDate, &requestedEndDate)) {
+        *outError = "invalid_config_date_format";
+        return false;
+    }
+
+    WindowCalendarAdapter windowCalendar(*catalog);
+    astock::domain::backtest::windowing::FixedWarmupDaysPolicy warmupPolicy(
+        astock::domain::backtest::windowing::DayCount{kNoWarmupDays},
+        astock::domain::backtest::windowing::DayCount{kNoWarmupDays});
+    astock::domain::backtest::windowing::BacktestWindowBuilder windowBuilder(windowCalendar, warmupPolicy);
+
+    astock::domain::backtest::windowing::WindowBuildSpec windowSpec;
+    windowSpec.requested.start = WindowTradingDay{requestedStartDate};
+    windowSpec.requested.end = WindowTradingDay{requestedEndDate};
+    windowSpec.mode = astock::domain::backtest::windowing::WindowingMode::CrossSection;
+    const auto windowResult = windowBuilder.build(windowSpec);
+    if (!windowResult.ok()) {
+        *outError = describeWindowError(windowResult.error);
+        return false;
+    }
+
+    RebalanceCalendarAdapter rebalanceCalendar(*catalog);
+    astock::domain::backtest::rebalancing::RebalanceScheduleBuilder scheduleBuilder(rebalanceCalendar);
+    astock::domain::backtest::rebalancing::RebalancePlanSpec planSpec;
+    planSpec.window.start = RebalanceTradingDay{windowResult.value->effective.start.value};
+    planSpec.window.end = RebalanceTradingDay{windowResult.value->effective.end.value};
+    planSpec.interval.value = (std::max)(1, config.rebalanceDays);
+    planSpec.anchor = astock::domain::backtest::rebalancing::RebalanceAnchor::StartDay;
+
+    const auto planResult = scheduleBuilder.build(planSpec);
+    if (!planResult.ok()) {
+        *outError = describeRebalanceError(planResult.error);
+        return false;
+    }
+
+    outDates->clear();
+    outDates->reserve(planResult.value->schedule.size());
+    for (const RebalanceTradingDay tradingDay : planResult.value->schedule) {
+        outDates->insert(toDateText(tradingDay.value));
+    }
+
+    if (outDates->empty()) {
+        *outError = "empty_rebalance_schedule";
+        return false;
+    }
+
+    return true;
+}
 
 bool rowOwnsMarketBarFields(const QVariantMap& row)
 {
@@ -157,6 +792,7 @@ domain::trading::TradingExecutionContext buildFormalTradingContext(const Backtes
     context.riskProfile.maxSinglePositionRatio.value = normalizedTradingRatio(config.maxPositionPercent, normalizedTradingRatio(config.maxTotalExposure, 1.0));
     context.riskProfile.maxDrawdownLimit.value = normalizedTradingRatio(config.maxDrawdownLimit, 0.12);
     context.riskProfile.stopLossRate.value = normalizedTradingRatio(config.stopLossRate, 0.10);
+    context.riskProfile.maxBatchOrders = kDefaultMaxBatchOrders;
     context.executionProfile.executionKind = domain::strategy::StrategyExecutionKind::FactorWeightedPortfolio;
     context.executionProfile.positionSizingMethod = domain::strategy::PositionSizingMethod::EqualWeight;
     context.executionProfile.priceModel = domain::trading::ExecutionPriceModel::NextSessionOpen;
@@ -356,12 +992,18 @@ FormalTradingExecution simulateFormalTradingExecution(const BacktestConfig& conf
         return lhs.date < rhs.date;
     });
 
+    std::unordered_set<std::string> rebalanceDates;
+    std::string rebalanceError;
+    if (!buildFormalRebalanceDates(config, cachedMarketIndex, &rebalanceDates, &rebalanceError)) {
+        formalExecution.status = "FAILED";
+        formalExecution.message = "因子正式统一交易调仓计划构建失败: " + rebalanceError;
+        return formalExecution;
+    }
+
     auto tradingLedger = std::make_shared<domain::trading::InMemoryTradingLedger>(
         buildInitialFormalTradingSnapshot(config.initialCapital));
     domain::trading::DefaultTradingCore tradingCore({}, tradingLedger, {}, {});
 
-    const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
-    int holdingDaysSinceRebalance = rebalanceInterval;
     bool processedAnyTradeDate = false;
 
     for (const CalculationResult& factorResult : factorResults) {
@@ -380,8 +1022,7 @@ FormalTradingExecution simulateFormalTradingExecution(const BacktestConfig& conf
         markFormalTradingPositions(&tradingCore, cachedMarketIndex, executionTradeDateIndex);
         processedAnyTradeDate = true;
 
-        const bool shouldRebalance = formalExecution.executedRebalanceCount == 0
-            || holdingDaysSinceRebalance >= rebalanceInterval;
+        const bool shouldRebalance = rebalanceDates.find(executionTradeDate) != rebalanceDates.end();
         if (shouldRebalance) {
             ++formalExecution.scheduledRebalanceCount;
             const double totalAsset = tradingCore.snapshot().account.totalAsset.value;
@@ -393,21 +1034,40 @@ FormalTradingExecution simulateFormalTradingExecution(const BacktestConfig& conf
                 totalAsset);
             const domain::trading::TradingExecutionContext context = buildFormalTradingContext(config, executionTradeDate);
             if (batch.isValid() && context.isValid()) {
-                const domain::trading::ExecutionResult executionResult = tradingCore.execute(batch, context);
-                ++formalExecution.executedRebalanceCount;
-                if (executionResult.isBlocked()) {
-                    ++formalExecution.blockedRebalanceCount;
-                    ++holdingDaysSinceRebalance;
-                } else {
-                    holdingDaysSinceRebalance = 1;
+                bool blockedByAbstraction = false;
+                std::string gateError;
+                domain::trading::TradeIntentBatch gatedBatch;
+                if (!gateBatchByRoutingAndRisk(batch,
+                                               tradingCore.snapshot(),
+                                               context,
+                                               &gatedBatch,
+                                               &blockedByAbstraction,
+                                               &gateError)) {
+                    formalExecution.status = "FAILED";
+                    formalExecution.message = "因子正式统一交易抽象路由/风控失败: " + gateError;
+                    return formalExecution;
                 }
-                formalExecution.acceptedOrderCount += executionResult.acceptedOrders.size();
-                formalExecution.fillCount += executionResult.fills.size();
-            } else {
-                ++holdingDaysSinceRebalance;
+
+                if (blockedByAbstraction || !gatedBatch.isValid()) {
+                    ++formalExecution.blockedRebalanceCount;
+                } else {
+                    const domain::trading::ExecutionResult executionResult = tradingCore.execute(gatedBatch, context);
+                    ++formalExecution.executedRebalanceCount;
+                    if (executionResult.isBlocked()) {
+                        ++formalExecution.blockedRebalanceCount;
+                    }
+
+                    std::string costError;
+                    if (!validateExecutionCosts(executionResult, context, &costError)) {
+                        formalExecution.status = "FAILED";
+                        formalExecution.message = "因子正式统一交易成本模型校验失败: " + costError;
+                        return formalExecution;
+                    }
+
+                    formalExecution.acceptedOrderCount += executionResult.acceptedOrders.size();
+                    formalExecution.fillCount += executionResult.fills.size();
+                }
             }
-        } else {
-            ++holdingDaysSinceRebalance;
         }
 
         appendFormalTradingSnapshot(&formalExecution, executionTradeDate, tradingCore.snapshot());
@@ -426,11 +1086,36 @@ FormalTradingExecution simulateFormalTradingExecution(const BacktestConfig& conf
         cachedMarketIndex,
         finalTradeDateIndex);
     if (liquidationBatch.isValid()) {
-        const domain::trading::ExecutionResult liquidationResult = tradingCore.execute(
-            liquidationBatch,
-            buildFormalTradingContext(config, finalTradeDate));
-        formalExecution.acceptedOrderCount += liquidationResult.acceptedOrders.size();
-        formalExecution.fillCount += liquidationResult.fills.size();
+        const domain::trading::TradingExecutionContext liquidationContext = buildFormalTradingContext(config, finalTradeDate);
+        bool blockedByAbstraction = false;
+        std::string gateError;
+        domain::trading::TradeIntentBatch gatedBatch;
+        if (!gateBatchByRoutingAndRisk(liquidationBatch,
+                                       tradingCore.snapshot(),
+                                       liquidationContext,
+                                       &gatedBatch,
+                                       &blockedByAbstraction,
+                                       &gateError)) {
+            formalExecution.status = "FAILED";
+            formalExecution.message = "因子正式统一交易清仓路由/风控失败: " + gateError;
+            return formalExecution;
+        }
+
+        if (!blockedByAbstraction && gatedBatch.isValid()) {
+            const domain::trading::ExecutionResult liquidationResult = tradingCore.execute(
+                gatedBatch,
+                liquidationContext);
+
+            std::string costError;
+            if (!validateExecutionCosts(liquidationResult, liquidationContext, &costError)) {
+                formalExecution.status = "FAILED";
+                formalExecution.message = "因子正式统一交易清仓成本模型校验失败: " + costError;
+                return formalExecution;
+            }
+
+            formalExecution.acceptedOrderCount += liquidationResult.acceptedOrders.size();
+            formalExecution.fillCount += liquidationResult.fills.size();
+        }
     }
 
     const domain::trading::TradingSnapshot finalSnapshot = tradingCore.snapshot();
@@ -919,15 +1604,14 @@ struct CachedReturnAggregationState {
     size_t maxMatchedStocks = 0;
     bool hasValidGroup = false;
     bool hasAnyFactorResult = false;
-    int researchHoldingDaysSinceRebalance = 0;
-    int executionHoldingDaysSinceRebalance = 0;
+    bool rebalanceScheduleInitialized = false;
+    std::unordered_set<std::string> rebalanceDates;
 };
 
 void initializeCachedReturnAggregationState(const BacktestConfig& config,
                                             CachedReturnAggregationState& state)
 {
     const int groupCount = (std::max)(1, config.numGroups);
-    const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
     state.icSeries.clear();
     state.rawLongShortSeries.clear();
     state.longShortSeries.clear();
@@ -949,8 +1633,41 @@ void initializeCachedReturnAggregationState(const BacktestConfig& config,
     state.maxMatchedStocks = 0;
     state.hasValidGroup = false;
     state.hasAnyFactorResult = false;
-    state.researchHoldingDaysSinceRebalance = rebalanceInterval;
-    state.executionHoldingDaysSinceRebalance = rebalanceInterval;
+    state.rebalanceScheduleInitialized = false;
+    state.rebalanceDates.clear();
+}
+
+bool ensureAggregationRebalanceScheduleInitialized(
+    const BacktestConfig& config,
+    const FactorBacktestExecutor::CachedMarketIndex& cachedMarketIndex,
+    CachedReturnAggregationState& state,
+    std::string* outError)
+{
+    if (state.rebalanceScheduleInitialized) {
+        return true;
+    }
+
+    std::string scheduleError;
+    if (!buildFormalRebalanceDates(config,
+                                   cachedMarketIndex,
+                                   &state.rebalanceDates,
+                                   &scheduleError)) {
+        if (outError) {
+            *outError = scheduleError.empty()
+                ? "因子分组回测调仓计划构建失败"
+                : scheduleError;
+        }
+        return false;
+    }
+
+    state.rebalanceScheduleInitialized = true;
+    return true;
+}
+
+bool shouldRebalanceOnExecutionDate(const CachedReturnAggregationState& state,
+                                    const std::string& executionTradeDate)
+{
+    return state.rebalanceDates.find(executionTradeDate) != state.rebalanceDates.end();
 }
 
 bool aggregateSingleResultWithCachedFutureReturns(
@@ -962,7 +1679,6 @@ bool aggregateSingleResultWithCachedFutureReturns(
     std::string* failureReason)
 {
     const int groupCount = (std::max)(1, config.numGroups);
-    const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
     state.hasAnyFactorResult = true;
     if (!cachedMarketIndex) {
         if (failureReason) {
@@ -983,6 +1699,12 @@ bool aggregateSingleResultWithCachedFutureReturns(
     }
 
     const std::string& executionTradeDate = cachedMarketIndex->tradeDates[static_cast<size_t>(executionTradeDateIndex)];
+    if (!ensureAggregationRebalanceScheduleInitialized(config,
+                                                       *cachedMarketIndex,
+                                                       state,
+                                                       failureReason)) {
+        return false;
+    }
 
     std::vector<double> factorValues;
     std::vector<double> returnValues;
@@ -1031,12 +1753,6 @@ bool aggregateSingleResultWithCachedFutureReturns(
     state.maxMatchedStocks = (std::max)(state.maxMatchedStocks, rankedValues.size());
 
     if (rankedValues.size() < 2) {
-        if (!state.researchActiveGroupSymbols.empty()) {
-            ++state.researchHoldingDaysSinceRebalance;
-        }
-        if (!state.executionActiveGroupSymbols.empty()) {
-            ++state.executionHoldingDaysSinceRebalance;
-        }
         if (failureReason) {
             failureReason->clear();
         }
@@ -1083,10 +1799,9 @@ bool aggregateSingleResultWithCachedFutureReturns(
         return proposedGroupSymbols;
     };
 
-    const bool shouldRebalanceResearch = state.researchActiveGroupSymbols.empty()
-        || state.researchHoldingDaysSinceRebalance >= rebalanceInterval;
-    const bool shouldRebalanceExecution = state.executionActiveGroupSymbols.empty()
-        || state.executionHoldingDaysSinceRebalance >= rebalanceInterval;
+    const bool scheduledRebalance = shouldRebalanceOnExecutionDate(state, executionTradeDate);
+    const bool shouldRebalanceResearch = state.researchActiveGroupSymbols.empty() || scheduledRebalance;
+    const bool shouldRebalanceExecution = state.executionActiveGroupSymbols.empty() || scheduledRebalance;
     const bool needsProposedGroupSymbols = shouldRebalanceResearch || shouldRebalanceExecution;
     const std::vector<std::vector<std::string>> proposedGroupSymbols = needsProposedGroupSymbols
         ? buildProposedGroupSymbols(rankedValues)
@@ -1094,9 +1809,6 @@ bool aggregateSingleResultWithCachedFutureReturns(
 
     if (shouldRebalanceResearch) {
         state.researchActiveGroupSymbols = proposedGroupSymbols;
-        state.researchHoldingDaysSinceRebalance = 1;
-    } else {
-        ++state.researchHoldingDaysSinceRebalance;
     }
 
     if (shouldRebalanceExecution) {
@@ -1118,12 +1830,7 @@ bool aggregateSingleResultWithCachedFutureReturns(
 
         if (passesSignalThreshold && passesMaxTurnover) {
             state.executionActiveGroupSymbols = proposedGroupSymbols;
-            state.executionHoldingDaysSinceRebalance = 1;
-        } else {
-            ++state.executionHoldingDaysSinceRebalance;
         }
-    } else {
-        ++state.executionHoldingDaysSinceRebalance;
     }
 
     const int effectiveGroupCount = static_cast<int>(state.researchActiveGroupSymbols.size());
@@ -1257,8 +1964,7 @@ bool aggregateSingleResultWithCachedFutureReturns(
     return true;
 }
 
-bool populateBacktestResultFromAggregationState(const factor::BacktestConfig& config,
-                                                CachedReturnAggregationState& aggregationState,
+bool populateBacktestResultFromAggregationState(CachedReturnAggregationState& aggregationState,
                                                 factor::BacktestResult& result)
 {
     result.icirResult.icSeries = std::move(aggregationState.icSeries);
@@ -1955,38 +2661,6 @@ RiskControlResult applyRiskControls(const std::vector<double>& periodicReturns,
 }
 
 
-double calculateVariance(const std::vector<double>& values, double mean)
-{
-    if (values.size() < 2) {
-        return 0.0;
-    }
-
-    double sum = 0.0;
-    for (double value : values) {
-        const double diff = value - mean;
-        sum += diff * diff;
-    }
-
-    return sum / static_cast<double>(values.size() - 1);
-}
-
-double calculateCovariance(const std::vector<double>& lhs,
-                           double lhsMean,
-                           const std::vector<double>& rhs,
-                           double rhsMean)
-{
-    if (lhs.size() < 2 || lhs.size() != rhs.size()) {
-        return 0.0;
-    }
-
-    double sum = 0.0;
-    for (size_t index = 0; index < lhs.size(); ++index) {
-        sum += (lhs[index] - lhsMean) * (rhs[index] - rhsMean);
-    }
-
-    return sum / static_cast<double>(lhs.size() - 1);
-}
-
 bool isBarWithinRange(const CachedMarketBar& bar,
                       const std::string& startDate,
                       const std::string& endDate)
@@ -2439,7 +3113,7 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         if (hasLatestFactorResult) {
             result.latestFactorResult = std::move(latestFactorResult);
         }
-        if (!populateBacktestResultFromAggregationState(effectiveConfig, aggregationState, result)) {
+        if (!populateBacktestResultFromAggregationState(aggregationState, result)) {
             result.status = "PARTIAL";
         }
 

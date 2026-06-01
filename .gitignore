@@ -82,16 +82,17 @@ build_test_jujin/
 build_test_qt_mysql/
 build_test_wrapper/
 
-# 测试相关的临时文件
+# 测试相关的临时文�?
 test_*.cpp
 test_*.py
 test_*.bat
 CMakeLists_test_*.txt
 compile_test_*.bat
 !tests/test_factor_backtest_regression.cpp
+!tests/test_backtest_abstractions.cpp
 
-# 数据清洗检查报告
-数据清洗流程检查报告.md
+# 数据清洗检查报�?
+数据清洗流程检查报�?md
 
 # 掘金API测试相关文件
 test_jujin_cpp.cpp
@@ -99,7 +100,7 @@ CMakeLists_test_jujin.txt
 compile_test_jujin.bat
 README_C++掘金API.md
 
-# 第三方SDK库文件（应该从外部获取，不提交到仓库）
+# 第三方SDK库文件（应该从外部获取，不提交到仓库�?
 thirdparty/gmsdk/*.lib
 thirdparty/gmsdk/*.dll
 
@@ -114,7 +115,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# 数据库文件
+# 数据库文�?
 *.db
 *.sqlite
 *.sqlite3
@@ -139,7 +140,7 @@ Thumbs.db
 *.temp
 *.tmp
 
-# 大文件
+# 大文�?
 *.zip
 *.tar
 *.gz

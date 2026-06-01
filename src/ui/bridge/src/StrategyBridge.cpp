@@ -1237,13 +1237,6 @@ void StrategyBridge::setSelId(const QString& strategyId)
     emit selIdChanged();
 }
 
-bool StrategyBridge::needId(const QString& strategyId, int code, const QString& messagePrefix)
-{
-    Q_UNUSED(code);
-    Q_UNUSED(messagePrefix);
-    return !strategyId.trimmed().isEmpty();
-}
-
 void StrategyBridge::setBusy(bool busy)
 {
     if (m_busy == busy) {

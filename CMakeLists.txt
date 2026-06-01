@@ -21,6 +21,94 @@ set(CMAKE_AUTOUIC ON)
 
 include(FetchContent)
 
+# ==================== 性能开源库集成（先集成，后替换） ====================
+option(ASTOCK_ENABLE_PERF_THIRDPARTY "Enable performance-oriented third-party libraries" ON)
+
+if(ASTOCK_ENABLE_PERF_THIRDPARTY)
+    # 强制只使用本地源码，不允许动态下载
+    set(ASTOCK_LIB_ROOT "G:/C++/lib")
+
+    set(ASTOCK_FMT_CANDIDATES
+        "${ASTOCK_LIB_ROOT}/fmt-11.0.2"
+        "${ASTOCK_LIB_ROOT}/fmt"
+    )
+    unset(ASTOCK_FMT_LOCAL_SOURCE_DIR)
+    foreach(_astock_fmt_candidate IN LISTS ASTOCK_FMT_CANDIDATES)
+        if(EXISTS "${_astock_fmt_candidate}/CMakeLists.txt"
+           AND EXISTS "${_astock_fmt_candidate}/include/fmt/format.h")
+            set(ASTOCK_FMT_LOCAL_SOURCE_DIR "${_astock_fmt_candidate}")
+            break()
+        endif()
+    endforeach()
+    if(NOT ASTOCK_FMT_LOCAL_SOURCE_DIR)
+        message(FATAL_ERROR "fmt local source not found under G:/C++/lib. Expected one of: ${ASTOCK_FMT_CANDIDATES}")
+    endif()
+
+    set(FMT_DOC OFF CACHE BOOL "" FORCE)
+    set(FMT_TEST OFF CACHE BOOL "" FORCE)
+    set(FMT_INSTALL OFF CACHE BOOL "" FORCE)
+    set(FMT_HEADER_ONLY ON CACHE BOOL "" FORCE)
+    add_subdirectory("${ASTOCK_FMT_LOCAL_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/thirdparty/fmt")
+
+    set(ASTOCK_UNORDERED_DENSE_CANDIDATES
+        "${ASTOCK_LIB_ROOT}/unordered_dense-4.4.0"
+        "${ASTOCK_LIB_ROOT}/unordered_dense"
+    )
+    unset(ASTOCK_UNORDERED_DENSE_LOCAL_SOURCE_DIR)
+    foreach(_astock_unordered_dense_candidate IN LISTS ASTOCK_UNORDERED_DENSE_CANDIDATES)
+        if(EXISTS "${_astock_unordered_dense_candidate}/include/ankerl/unordered_dense.h")
+            set(ASTOCK_UNORDERED_DENSE_LOCAL_SOURCE_DIR "${_astock_unordered_dense_candidate}")
+            break()
+        endif()
+    endforeach()
+    if(NOT ASTOCK_UNORDERED_DENSE_LOCAL_SOURCE_DIR)
+        message(FATAL_ERROR "unordered_dense local source not found under G:/C++/lib. Expected one of: ${ASTOCK_UNORDERED_DENSE_CANDIDATES}")
+    endif()
+
+    if(NOT TARGET astock_unordered_dense)
+        add_library(astock_unordered_dense INTERFACE)
+        target_include_directories(astock_unordered_dense INTERFACE "${ASTOCK_UNORDERED_DENSE_LOCAL_SOURCE_DIR}/include")
+    endif()
+
+    set(ASTOCK_XXHASH_CANDIDATES
+        "${ASTOCK_LIB_ROOT}/xxHash-0.8.2"
+        "${ASTOCK_LIB_ROOT}/xxhash"
+        "${ASTOCK_LIB_ROOT}/xxHash"
+    )
+    unset(ASTOCK_XXHASH_LOCAL_SOURCE_DIR)
+    foreach(_astock_xxhash_candidate IN LISTS ASTOCK_XXHASH_CANDIDATES)
+        if(EXISTS "${_astock_xxhash_candidate}/xxhash.c"
+           AND EXISTS "${_astock_xxhash_candidate}/xxhash.h")
+            set(ASTOCK_XXHASH_LOCAL_SOURCE_DIR "${_astock_xxhash_candidate}")
+            break()
+        endif()
+    endforeach()
+    if(NOT ASTOCK_XXHASH_LOCAL_SOURCE_DIR)
+        message(FATAL_ERROR "xxhash local source not found under G:/C++/lib. Expected one of: ${ASTOCK_XXHASH_CANDIDATES}")
+    endif()
+
+    if(NOT TARGET astock_xxhash)
+        add_library(astock_xxhash STATIC "${ASTOCK_XXHASH_LOCAL_SOURCE_DIR}/xxhash.c")
+        target_include_directories(astock_xxhash PUBLIC "${ASTOCK_XXHASH_LOCAL_SOURCE_DIR}")
+    endif()
+
+    if(NOT TARGET astock_perf_thirdparty)
+        add_library(astock_perf_thirdparty INTERFACE)
+
+        if(TARGET fmt::fmt-header-only)
+            target_link_libraries(astock_perf_thirdparty INTERFACE fmt::fmt-header-only)
+        elseif(TARGET fmt::fmt)
+            target_link_libraries(astock_perf_thirdparty INTERFACE fmt::fmt)
+        endif()
+
+        target_link_libraries(astock_perf_thirdparty INTERFACE astock_unordered_dense)
+
+        target_link_libraries(astock_perf_thirdparty INTERFACE astock_xxhash)
+    endif()
+
+    message(STATUS "Astock perf third-party integrated from local sources only: fmt, unordered_dense, xxhash")
+endif()
+
 set(ARROW_SIMD_LEVEL NONE CACHE STRING "" FORCE)
 set(ARROW_RUNTIME_SIMD_LEVEL NONE CACHE STRING "" FORCE)
 set(ARROW_DEFINE_OPTIONS ON CACHE BOOL "" FORCE)

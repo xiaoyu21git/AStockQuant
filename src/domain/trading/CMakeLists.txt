@@ -10,7 +10,6 @@ target_include_directories(domain_trading
 
 target_link_libraries(domain_trading
     PUBLIC
-        factor_system
         foundation
 )
 

@@ -54,6 +54,9 @@ set(ALL_LIBS foundation cache_module domain engine infrastructure application_co
 # 鍒涘缓鎺ュ彛搴擄紝鏂逛究Python缁戝畾閾炬帴
 add_library(astock_core INTERFACE)
 target_link_libraries(astock_core INTERFACE ${ALL_LIBS})
+if(TARGET astock_perf_thirdparty)
+    target_link_libraries(astock_core INTERFACE astock_perf_thirdparty)
+endif()
 target_include_directories(astock_core INTERFACE 
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${Qt6Core_INCLUDE_DIRS}

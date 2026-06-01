@@ -6,6 +6,19 @@ target_sources(domain_backtest PRIVATE
     FactorBacktestTypes.cpp
     DatabaseFactorDataProvider.cpp
     DatabaseStockDataProvider.cpp
+    BacktestLayerGuard.cpp
+    BacktestWindowAbstraction.cpp
+    DynamicUniverseAbstraction.cpp
+    RebalanceScheduleAbstraction.cpp
+    GroupingAllocationAbstraction.cpp
+    PositionConstraintAllocationAbstraction.cpp
+    PositionStateMachineAbstraction.cpp
+    TradingCostModelAbstraction.cpp
+    SignalOrderTranslatorAbstraction.cpp
+    RiskApprovalEngineAbstraction.cpp
+    OrderRoutingEngineAbstraction.cpp
+    PortfolioValuationEngineAbstraction.cpp
+    PerformanceMetricsAggregatorAbstraction.cpp
     ${DOMAIN_BACKTEST_SOURCES_CXX}
 )
 

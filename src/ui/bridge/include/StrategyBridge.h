@@ -234,7 +234,6 @@ private:
     std::optional<domain::strategies::StrategyUuid> parseId(const QString& input) const;
     QString clearedMsg() const;
 
-    bool needId(const QString& strategyId, int code, const QString& messagePrefix);
     void setBusy(bool busy);
     void setErr(const QString& message);
     void refreshModel();
