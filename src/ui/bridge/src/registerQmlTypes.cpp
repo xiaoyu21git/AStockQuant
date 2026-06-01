@@ -15,7 +15,6 @@
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
 #include "MarketDataService.h"        // 新增：行情桥接服务
-#include "PortfolioAnalysisService.h" // 新增：组合分析服务
 #include "RiskConfigService.h"        // 新增：风险配置服务
 #include "RiskMonitorService.h"       // 新增：风险快照服务
 #include "PositionAccountService.h"   // 新增：持仓账户服务
@@ -110,15 +109,6 @@ namespace wang{
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
             return MarketDataService::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<PortfolioAnalysisService>(
-         url, 1, 0, "PortfolioAnalysisService",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return PortfolioAnalysisService::instance();
          }
       );
 

@@ -133,16 +133,6 @@ Module {
     }
     Component {
         file: "Bridge"
-        name: "AStock.Bridge/PortfolioAnalysisService"
-        accessSemantics: "reference"
-        prototype: "QObject"
-        exports: ["AStock.Bridge/PortfolioAnalysisService 1.0"]
-        exportMetaObjectRevisions: [256]
-        isCreatable: false
-        isSingleton: true
-    }
-    Component {
-        file: "Bridge"
         name: "AStock.Bridge/RiskMonitorService"
         accessSemantics: "reference"
         prototype: "QObject"

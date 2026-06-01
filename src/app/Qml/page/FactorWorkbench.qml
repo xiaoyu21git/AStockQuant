@@ -11,7 +11,6 @@ import "../components/FactorWorkbench/Creation" as CreationComponents
 import "../components/FactorWorkbench/Backtest" as BacktestComponents
 import "../components/FactorWorkbench/Debug" as DebugComponents
 import "../components/FactorWorkbench/Library" as LibraryComponents
-import "../utils/StrategyStructureAdapter.js" as StructureAdapter
 
 /**
  * 统一因子工作台 - 五模式量化工作台设计

@@ -78,7 +78,6 @@ struct NamespaceIdTag;
 struct GroupIdTag;
 struct GroupTitleTag;
 struct ReasonCodeTag;
-struct BacktestTaskIdTag;
 struct OrderIdTag;
 struct RuntimeStrategyIdTag;
 struct BatchIdTag;
@@ -101,7 +100,6 @@ using NamespaceId = StrongText<NamespaceIdTag>;
 using GroupId = StrongText<GroupIdTag>;
 using GroupTitle = StrongText<GroupTitleTag>;
 using ReasonCode = StrongText<ReasonCodeTag>;
-using BacktestTaskId = StrongText<BacktestTaskIdTag>;
 using OrderId = StrongText<OrderIdTag>;
 using RuntimeStrategyId = StrongText<RuntimeStrategyIdTag>;
 using BatchId = StrongText<BatchIdTag>;
@@ -300,11 +298,6 @@ enum class RuntimePositionEffect : int {
     Close = 1,
 };
 
-enum class BacktestRunStatus : int {
-    Succeeded = 0,
-    Failed = 1,
-};
-
 enum class DiagnosticCode : int {
     None = 0,
     ValidationFailed = 1,
@@ -432,15 +425,6 @@ struct ExecutionPolicySnapshot final {
     [[nodiscard]] bool isValid() const;
 };
 
-struct BacktestAssumptionsSnapshot final {
-    Money initialCapital;
-    Ratio commissionRate;
-    Ratio slippageRate;
-    Ratio taxRate;
-
-    [[nodiscard]] bool isValid() const;
-};
-
 struct UniverseSpec final {
     UniverseMode universeMode{UniverseMode::ExplicitSymbols};
     UniverseType universeType{UniverseType::Equity};
@@ -473,7 +457,6 @@ struct StrategyScopeContextSnapshot final {
 struct StrategySpec final {
     RuleProfileSnapshot ruleProfile;
     ExecutionPolicySnapshot executionPolicy;
-    BacktestAssumptionsSnapshot backtestAssumptions;
     StrategyScopeContextSnapshot strategyScopeContext;
     FactorOverlaySpec factorOverlay;
     QVector<RuleTemplateBinding> ruleTemplateBindings;
@@ -548,26 +531,8 @@ struct DiagnosticMessage final {
     ReasonCode reasonCode;
 };
 
-struct BacktestSnapshot final {
-    QDateTime recordedAt;
-    StrategyExecutionKind executionKind{StrategyExecutionKind::Standard};
-    StrategySpec strategySpec;
-    PerformanceSummaryMetrics performanceSummary;
-    UniverseResolutionSummary universeResolutionSummary;
-    RuleTemplateSummary ruleTemplateSummary;
-
-    [[nodiscard]] bool isValid() const;
-};
-
-struct BacktestHistoryEntry final {
-    BacktestSnapshot snapshot;
-    bool replaceBaselineUniverse{false};
-
-    [[nodiscard]] bool isValid() const;
-};
-
 struct StrategyPerformanceSummary final {
-    QDateTime lastBacktestAt;
+    QDateTime lastRecordedAt;
     PerformanceSummaryMetrics latestMetrics;
 };
 

@@ -26,7 +26,6 @@ set(BRIDGE_SOURCES
     FactorBacktestController.cpp # 新增：因子回测控制器
     FactorMetaService.cpp     # 新增：因子元数据服务
     MarketDataService.cpp     # 新增：行情桥接服务
-    PortfolioAnalysisService.cpp # 新增：组合分析服务
     OrderRuntimeUtils.cpp     # 新增：订单状态公共工具
     RuleTemplateDetailHelper.cpp
     RuleTemplateRuntimeEvaluator.cpp

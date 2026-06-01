@@ -8,7 +8,6 @@ import "../../components/Strategy" as StrategyComponents
 import "../../components/Base" as BaseComponents
 import "../../components" as Components
 import "../../utils/StrategyDataAdapter.js" as StrategyAdapter
-import "../../utils/StrategyStructureAdapter.js" as StructureAdapter
 import "../../utils/StartupGateFormatter.js" as StartupGateFormatter
 
 Rectangle {
@@ -31,6 +30,7 @@ Rectangle {
     property bool showBacktestWorkbench: false
     property string backtestWorkbenchStatusText: ""
     property bool backtestWorkbenchLoadedOnce: false
+    property string backtestWorkbenchMode: "workbench"
     readonly property bool hasSelectedStrategy: selectedStrategyIndex >= 0
         && strategyViewModel
         && strategyViewModel.count > selectedStrategyIndex
@@ -615,19 +615,6 @@ Rectangle {
         return accentBlue
     }
 
-    function getStrategyPerformanceMetrics(strategyDetail) {
-        if (!strategyDetail) {
-            return ({})
-        }
-
-        return strategyDetail.performanceMetrics || ({})
-    }
-
-    function getLatestBacktestRecord(strategyDetail) {
-        var performance = getStrategyPerformanceMetrics(strategyDetail)
-        return performance.latestBacktest || ({})
-    }
-
     function getStrategyStartGateState(strategyCandidate) {
         return {
             canStart: true
@@ -1021,15 +1008,23 @@ Rectangle {
         }
     }
 
-    function openBacktestWorkbench(strategyId) {
+    function openBacktestWorkbench(strategyId, modeValue) {
         if (strategyId) {
             selectStrategyById(strategyId)
         }
+
+        var normalizedMode = String(modeValue || "").trim().toLowerCase()
+        backtestWorkbenchMode = normalizedMode === "analysis" ? "analysis" : "workbench"
         backtestWorkbenchLoadedOnce = true
         showBacktestWorkbench = true
         backtestWorkbenchStatusText = ""
         if (backtestWorkbenchLoader.item) {
             backtestWorkbenchLoader.item.preferredStrategyId = selectedStrategyId
+            if (typeof backtestWorkbenchLoader.item.setPageMode === "function") {
+                backtestWorkbenchLoader.item.setPageMode(backtestWorkbenchMode)
+            } else {
+                backtestWorkbenchLoader.item.pageMode = backtestWorkbenchMode
+            }
             if (typeof backtestWorkbenchLoader.item.syncPreferredStrategySelection === "function") {
                 backtestWorkbenchLoader.item.syncPreferredStrategySelection()
             }
@@ -1088,23 +1083,32 @@ Rectangle {
 
         NavigationComponents.ModeTitleBar {
             Layout.fillWidth: true
-            currentMode: strategyLibraryPage.showBacktestWorkbench ? "backtest" : "library"
+            currentMode: !strategyLibraryPage.showBacktestWorkbench
+                ? "library"
+                : (strategyLibraryPage.backtestWorkbenchMode === "analysis" ? "backtest_analysis" : "backtest")
             showBackButton: false
             modeOptions: [
                 { value: "library", label: "策略库" },
-                { value: "backtest", label: "策略回测" }
+                { value: "backtest", label: "策略回测" },
+                { value: "backtest_analysis", label: "回测分析" }
             ]
             modeTitleMap: {
                 "library": "策略库",
-                "backtest": "策略回测"
+                "backtest": "策略回测",
+                "backtest_analysis": "回测分析"
             }
             modeSubtitleMap: {
                 "library": "浏览并管理策略，新建入口保留在策略库页。",
-                "backtest": "在策略库内直接配置并运行当前策略回测。"
+                "backtest": "在策略库内直接配置并运行当前策略回测。",
+                "backtest_analysis": "独立展示最近回测与历史对比结果，不承载回测配置。"
             }
             onModeSelected: function(mode) {
                 if (mode === "backtest") {
-                    strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId)
+                    strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "workbench")
+                    return
+                }
+                if (mode === "backtest_analysis") {
+                    strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "analysis")
                     return
                 }
                 strategyLibraryPage.closeBacktestWorkbench()
@@ -1743,6 +1747,11 @@ Rectangle {
                     }
                     item.embeddedMode = true
                     item.preferredStrategyId = strategyLibraryPage.selectedStrategyId
+                    if (typeof item.setPageMode === "function") {
+                        item.setPageMode(strategyLibraryPage.backtestWorkbenchMode)
+                    } else {
+                        item.pageMode = strategyLibraryPage.backtestWorkbenchMode
+                    }
                 }
 
                 onStatusChanged: {

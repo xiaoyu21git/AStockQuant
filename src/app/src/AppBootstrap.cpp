@@ -26,7 +26,6 @@
 #include <QtGlobal>
 #include "VasAurora.hpp"
 #include "../../ui/bridge/include/MarketDataService.h"
-#include "../../ui/bridge/include/PortfolioAnalysisService.h"
 #include "../../ui/bridge/include/PositionAccountService.h"
 #include "../../ui/bridge/include/TradingMarketCalendarService.h"
 #include "../../ui/bridge/include/TradingRuntimeStatusService.h"

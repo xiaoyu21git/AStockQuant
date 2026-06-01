@@ -19,8 +19,6 @@ struct StrategyResolverSourceContext {
     QVariantMap strategyView;
     QVariantMap advancedOptions;
     QVariantMap optimizationConfig;
-    QVariantMap backtestRuntime;
-    QVariantMap backtestSettings;
     QVariantMap appliedRiskConfig;
 };
 
@@ -28,7 +26,6 @@ struct StrategyStructureResolution {
     QVariantMap strategyView;
     QVariantMap ruleProfile;
     QVariantMap executionPolicy;
-    QVariantMap backtestAssumptions;
     QVariantMap strategyScopeContext;
     QVariantMap factorOverlay;
 };

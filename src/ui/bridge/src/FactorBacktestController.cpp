@@ -577,7 +577,7 @@ QString resolveInstanceIdFromFactorValue(
     }
 
     const QVariantMap factorMap = factorId.toMap();
-    return factorMap.value(QStringLiteral("instanceId"), factorMap.value(QStringLiteral("factorId"))).toString().trimmed();
+    return factorMap.value(QStringLiteral("instanceId")).toString().trimmed();
 }
 
 factor::FactorType resolveRuntimeType(const factor::FactorInstanceInfo& info,
@@ -1847,7 +1847,7 @@ QVariantMap FactorBacktestController::factorValidationState(const QString& facto
 
 bool FactorBacktestController::datasetSelectableForBacktest(const QVariantMap& dataset) const
 {
-    const int datasetId = dataset.value(QStringLiteral("id"), dataset.value(QStringLiteral("value"))).toInt();
+    const int datasetId = dataset.value(QStringLiteral("id")).toInt();
     if (datasetId <= 0) {
         return false;
     }
@@ -2382,7 +2382,7 @@ QString FactorBacktestController::resolveInstanceId(const QVariant& factorId) co
     }
 
     const QVariantMap factorMap = factorId.toMap();
-    return factorMap.value(QStringLiteral("instanceId"), factorMap.value(QStringLiteral("factorId"))).toString().trimmed();
+    return factorMap.value(QStringLiteral("instanceId")).toString().trimmed();
 }
 
 factor::FactorInstanceInfo FactorBacktestController::getInstanceInfo(const QString& resolvedInstanceId) const

@@ -53,17 +53,28 @@ ApplicationWindow {
         }
     }
 
-    function openStrategyBacktest(preferredStrategyId) {
+    function openStrategyBacktest(preferredStrategyId, modeValue) {
+        var normalizedMode = String(modeValue || "").trim().toLowerCase()
+        if (normalizedMode !== "analysis") {
+            normalizedMode = "workbench"
+        }
         pendingStrategyBacktestRequest = {
             requested: true,
-            strategyId: String(preferredStrategyId || "")
+            strategyId: String(preferredStrategyId || ""),
+            mode: normalizedMode
         }
         window.switchPage("strategy_library", "回测验证")
 
         if (strategyDevelopmentPage && typeof strategyDevelopmentPage.openStrategyBacktest === "function") {
-            strategyDevelopmentPage.openStrategyBacktest(pendingStrategyBacktestRequest.strategyId)
+            strategyDevelopmentPage.openStrategyBacktest(
+                pendingStrategyBacktestRequest.strategyId,
+                pendingStrategyBacktestRequest.mode)
             pendingStrategyBacktestRequest = ({})
         }
+    }
+
+    function openStrategyBacktestAnalysis(preferredStrategyId) {
+        openStrategyBacktest(preferredStrategyId, "analysis")
     }
 
     ColumnLayout {
@@ -241,7 +252,9 @@ ApplicationWindow {
                                     && pendingStrategyBacktestRequest
                                     && pendingStrategyBacktestRequest.requested
                                     && typeof item.openStrategyBacktest === "function") {
-                                item.openStrategyBacktest(pendingStrategyBacktestRequest.strategyId || "")
+                                item.openStrategyBacktest(
+                                    pendingStrategyBacktestRequest.strategyId || "",
+                                    pendingStrategyBacktestRequest.mode || "workbench")
                                 pendingStrategyBacktestRequest = ({})
                             }
                         }
@@ -399,9 +412,9 @@ ApplicationWindow {
                 }
             }
 
-            function openStrategyBacktest(strategyId) {
+            function openStrategyBacktest(strategyId, modeValue) {
                 if (pageLoader.item && typeof pageLoader.item.openBacktestWorkbench === "function") {
-                    pageLoader.item.openBacktestWorkbench(strategyId)
+                    pageLoader.item.openBacktestWorkbench(strategyId, modeValue)
                 }
             }
 

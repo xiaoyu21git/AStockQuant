@@ -90,8 +90,7 @@ QSet<QString> configuredBoundStrategyIds(const QVariantMap& configuration)
     const QVariantList boundStrategies = configuration.value(QStringLiteral("boundStrategies")).toList();
     for (const QVariant& rawEntry : boundStrategies) {
         const QVariantMap entry = rawEntry.toMap();
-        const QString strategyId = entry.value(QStringLiteral("strategyId"),
-            entry.value(QStringLiteral("strategy_id"), entry.value(QStringLiteral("id")))).toString().trimmed();
+        const QString strategyId = entry.value(QStringLiteral("strategyId")).toString().trimmed();
         if (!strategyId.isEmpty()) {
             strategyIds.insert(strategyId);
         }
@@ -261,94 +260,29 @@ bridge::config::StrategyStructureResolution resolveStrategyStructures(const QVar
 QVariantMap buildResolvedStructureView(const bridge::config::StrategyStructureResolution& resolution)
 {
     QVariantMap parameters = resolution.strategyView;
-    mergeConfiguredMap(parameters, resolution.backtestAssumptions);
     mergeConfiguredMap(parameters, resolution.executionPolicy);
     mergeConfiguredMap(parameters, resolution.ruleProfile);
     mergeConfiguredMap(parameters, resolution.strategyScopeContext);
     return parameters;
 }
 
-QVariantMap resolveStrategyParameters(const QVariantMap& strategy, const QVariantMap& latestBacktest)
+QVariantMap resolveStrategyParameters(const QVariantMap& strategy)
 {
     const bridge::config::StrategyStructureResolution resolution = resolveStrategyStructures(strategy);
-    QVariantMap parameters = buildResolvedStructureView(resolution);
-
-    const QVariantMap runtimeParameters = latestBacktest.value("runtimeParameters").toMap();
-    mergeConfiguredMap(parameters, runtimeParameters);
-
-    return parameters;
+    return buildResolvedStructureView(resolution);
 }
 
-QVariantMap resolveLatestBacktestMap(const QVariantMap& strategy)
+int resolveSnapshotTargetPositionCount(const QVariantMap& parameters)
 {
-    const QVariantMap topLevelPerformance = variantMapValue(
-        firstConfiguredValue(strategy, {QStringLiteral("performance_metrics"), QStringLiteral("performanceMetrics")})
-    );
-    const QVariantMap parameterPerformance = variantMapValue(
-        firstConfiguredValue(strategy.value(QStringLiteral("parameters")).toMap(),
-                             {QStringLiteral("performance_metrics"), QStringLiteral("performanceMetrics")})
-    );
-
-    QVariantMap mergedPerformance = parameterPerformance;
-    mergeConfiguredMap(mergedPerformance, topLevelPerformance);
-    return variantMapValue(
-        firstConfiguredValue(mergedPerformance, {QStringLiteral("latestBacktest"), QStringLiteral("latest_backtest")})
-    );
-}
-
-int resolveSnapshotTargetPositionCount(const QVariantMap& parameters,
-                                       const QVariantMap& latestBacktest)
-{
-    const QVariantMap runtimeParameters = variantMapValue(
-        firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
-    );
-
-    const int runtimeTargetCount = integerParam(
-        runtimeParameters,
-        {QStringLiteral("targetPositionCount")},
-        0);
-    if (runtimeTargetCount > 0) {
-        return runtimeTargetCount;
-    }
-
-    const int backtestTargetCount = integerParam(
-        latestBacktest,
-        {QStringLiteral("targetPositionCount")},
-        0);
-    if (backtestTargetCount > 0) {
-        return backtestTargetCount;
-    }
-
     return integerParam(parameters,
                         {QStringLiteral("targetPositionCount")},
                         10);
 }
 
 int resolveStrategyExecutionKind(const QVariantMap& strategy,
-                                 const QVariantMap& parameters,
-                                 const QVariantMap& latestBacktest)
+                                 const QVariantMap& parameters)
 {
-    const QVariantMap runtimeParameters = variantMapValue(
-        firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
-    );
-
     int executionKind = enumParam(
-        runtimeParameters,
-        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
-        -1);
-    if (executionKind >= 0) {
-        return executionKind;
-    }
-
-    executionKind = enumParam(
-        latestBacktest,
-        {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
-        -1);
-    if (executionKind >= 0) {
-        return executionKind;
-    }
-
-    executionKind = enumParam(
         parameters,
         {QStringLiteral("strategyExecutionKind"), QStringLiteral("strategy_execution_kind"), QStringLiteral("executionKind"), QStringLiteral("execution_kind")},
         -1);
@@ -363,10 +297,9 @@ int resolveStrategyExecutionKind(const QVariantMap& strategy,
 }
 
 bool usesFactorWeightedPortfolioExecution(const QVariantMap& strategy,
-                                         const QVariantMap& parameters,
-                                         const QVariantMap& latestBacktest)
+                                         const QVariantMap& parameters)
 {
-    return resolveStrategyExecutionKind(strategy, parameters, latestBacktest) == 1;
+    return resolveStrategyExecutionKind(strategy, parameters) == 1;
 }
 
 std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(const QVariantMap& strategy,
@@ -442,7 +375,6 @@ UniverseResolutionState buildUniverseResolution(const QSet<QString>& symbols,
 UniverseResolutionState resolveUniverseSymbolsState(domain::backtest::DatabaseStockDataProvider& stockProvider,
                                                     const QVariantMap& strategy,
                                                     const QVariantMap& parameters,
-                                                    const QVariantMap& latestBacktest,
                                                     const QString& snapshotDate)
 {
     auto appendSymbols = [](QSet<QString>& target, const QVariant& rawValue) {
@@ -475,16 +407,11 @@ UniverseResolutionState resolveUniverseSymbolsState(domain::backtest::DatabaseSt
         }
     };
 
-    const QVariantMap runtimeParameters = variantMapValue(
-        firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
-    );
-
-    const QString universeType = firstConfiguredValue(latestBacktest, {"universeType"}).toString().trimmed().toLower();
-    const QString indexSymbol = firstConfiguredValue(latestBacktest, {"indexSymbol"}).toString().trimmed();
-    const QString runtimeUniverseId = runtimeParameters.value(QStringLiteral("universeId")).toString().trimmed();
+    const QString universeType = firstConfiguredValue(parameters, {"universeType"}).toString().trimmed().toLower();
+    const QString indexSymbol = firstConfiguredValue(parameters, {"indexSymbol", "universeId"}).toString().trimmed();
 
     if (universeType == "index") {
-        const QString resolvedIndex = !indexSymbol.isEmpty() ? indexSymbol : runtimeUniverseId;
+        const QString resolvedIndex = indexSymbol;
         if (resolvedIndex.isEmpty()) {
             return buildUniverseResolution({}, QStringLiteral("unresolved"), QStringLiteral("指数成分股未命中"));
         }
@@ -500,8 +427,8 @@ UniverseResolutionState resolveUniverseSymbolsState(domain::backtest::DatabaseSt
             QStringLiteral("指数成分股（%1）").arg(resolvedIndex));
     }
 
-    if (universeType == "stock" && !runtimeUniverseId.isEmpty()) {
-        return buildUniverseResolution({runtimeUniverseId}, QStringLiteral("singleStock"), QStringLiteral("单股票回退"));
+    if (universeType == "stock" && !indexSymbol.isEmpty()) {
+        return buildUniverseResolution({indexSymbol}, QStringLiteral("singleStock"), QStringLiteral("单股票回退"));
     }
 
     return buildUniverseResolution({}, QStringLiteral("unresolved"), QStringLiteral("未命中"));
@@ -1181,7 +1108,7 @@ double RiskMonitorService::estimatedVarAmount() const
 }
 
 QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strategy,
-                                                      const QVariantMap& latestBacktest)
+                                                      const QVariantMap&)
 {
     QVariantMap result;
     result.insert("status", QStringLiteral("error"));
@@ -1195,7 +1122,7 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
     FactorService* factorService = FactorService::instance();
     factorService->initialize();
 
-    const QVariantMap parameters = resolveStrategyParameters(strategy, latestBacktest);
+    const QVariantMap parameters = resolveStrategyParameters(strategy);
     const std::vector<PortfolioFactorAllocation> allocations = parsePortfolioAllocations(strategy, parameters);
     if (allocations.empty()) {
         result.insert("error", QStringLiteral("策略未配置可用的组合因子"));
@@ -1209,7 +1136,7 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
     }
 
     domain::backtest::DatabaseStockDataProvider stockProvider(nullptr);
-    const UniverseResolutionState universeResolution = resolveUniverseSymbolsState(stockProvider, strategy, parameters, latestBacktest, snapshotDate);
+    const UniverseResolutionState universeResolution = resolveUniverseSymbolsState(stockProvider, strategy, parameters, snapshotDate);
     const QSet<QString> universeSymbols = universeResolution.symbols;
 
     QHash<QString, ScoreState> scoreBySymbol;
@@ -1302,7 +1229,7 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
         return left.score > right.score;
     });
 
-    const int topN = resolveSnapshotTargetPositionCount(parameters, latestBacktest);
+    const int topN = resolveSnapshotTargetPositionCount(parameters);
     if (topN > 0 && static_cast<std::size_t>(topN) < rankedResults.size()) {
         rankedResults.resize(static_cast<std::size_t>(topN));
     }
@@ -1346,10 +1273,7 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
     diagnostics.insert("portfolioExposurePercent", portfolioExposure * 100.0);
     diagnostics.insert("singlePositionLimitPercent", singlePositionLimit * 100.0);
     diagnostics.insert("universeType", firstConfiguredValue(parameters, {"universeType"}).toString());
-    const QString resolvedUniverseId = firstConfiguredValue(parameters, {"universeId", "indexSymbol"}).toString();
-    diagnostics.insert("indexSymbol", resolvedUniverseId.isEmpty()
-        ? firstConfiguredValue(latestBacktest, {"indexSymbol", "universeId"}).toString()
-        : resolvedUniverseId);
+    diagnostics.insert("indexSymbol", firstConfiguredValue(parameters, {"universeId", "indexSymbol"}).toString());
     diagnostics.insert("universeSourceKey", universeResolution.sourceKey);
     diagnostics.insert("universeSourceLabel", universeResolution.sourceLabel);
     diagnostics.insert("universeSymbolCount", universeSymbols.size());
@@ -1394,8 +1318,9 @@ void RiskMonitorService::handleStrategySignal(const engine::EventFormat& event)
     signalData.insert(QStringLiteral("correlationId"), !event.correlation_id.empty()
         ? QString::fromStdString(event.correlation_id)
         : QString::fromStdString(event.id));
-    signalData.insert(QStringLiteral("strategyId"), eventStringValue(event, "strategy_id"));
-    signalData.insert(QStringLiteral("businessStrategyId"), eventStringValue(event, "business_strategy_id"));
+    const QString businessStrategyId = eventStringValue(event, "business_strategy_id");
+    signalData.insert(QStringLiteral("strategyId"), businessStrategyId);
+    signalData.insert(QStringLiteral("businessStrategyId"), businessStrategyId);
     signalData.insert(QStringLiteral("strategyName"), eventStringValue(event, "strategy_name"));
     signalData.insert(QStringLiteral("runtimeStrategyId"), eventStringValue(event, "runtime_strategy_id"));
     signalData.insert(QStringLiteral("orderId"), eventStringValue(event, "order_id"));
@@ -1832,7 +1757,6 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
         const bridge::config::StrategyStructureResolution resolvedStructures = resolveStrategyStructures(strategyLookup.strategy, riskConfiguration);
         const QVariantMap& ruleProfile = resolvedStructures.ruleProfile;
         const QVariantMap& executionPolicy = resolvedStructures.executionPolicy;
-        const QVariantMap& backtestAssumptions = resolvedStructures.backtestAssumptions;
         const bool autoStopEnabled = risk::config::autoStopEnabled(ruleProfile, true);
         const double stopLossPercent = autoStopEnabled
             ? normalizedPercentValue(

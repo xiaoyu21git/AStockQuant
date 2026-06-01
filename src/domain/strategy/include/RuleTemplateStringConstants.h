@@ -83,7 +83,6 @@ inline constexpr const char* kFieldNamespace = "namespace";
 
 inline constexpr const char* kScopeMarket = "market";
 inline constexpr const char* kScopeStrategyId = "strategy_id";
-inline constexpr const char* kScopeStrategyBehaviorKind = "strategy_behavior_kind";
 inline constexpr const char* kScopeParameters = "parameters";
 inline constexpr const char* kScopeRuleProfile = "rule_profile";
 inline constexpr const char* kScopeExecutionPolicy = "execution_policy";

@@ -101,14 +101,6 @@ bool ExecutionPolicySnapshot::isValid() const
     return rebalanceFrequencyDays.isPositive();
 }
 
-bool BacktestAssumptionsSnapshot::isValid() const
-{
-    return initialCapital.isPositive()
-        && commissionRate.isValid()
-        && slippageRate.isValid()
-        && taxRate.isValid();
-}
-
 bool UniverseSpec::isValid() const
 {
     switch (universeMode) {
@@ -151,7 +143,6 @@ bool StrategySpec::isValid() const
 {
     return ruleProfile.isValid()
         && executionPolicy.isValid()
-        && backtestAssumptions.isValid()
         && strategyScopeContext.isValid()
         && factorOverlay.isValid();
 }
@@ -161,16 +152,6 @@ bool TimeSeriesSnapshot::isValid() const
     return dates.size() == portfolioValues.size()
         && dates.size() == returns.size()
         && dates.size() == drawdowns.size();
-}
-
-bool BacktestSnapshot::isValid() const
-{
-    return recordedAt.isValid() && strategySpec.isValid();
-}
-
-bool BacktestHistoryEntry::isValid() const
-{
-    return snapshot.isValid();
 }
 
 } // namespace domain::strategy

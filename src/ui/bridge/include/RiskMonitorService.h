@@ -29,7 +29,7 @@ public:
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void initializeAsync();
     Q_INVOKABLE QVariantMap buildPortfolioSnapshot(const QVariantMap& strategy,
-                                                  const QVariantMap& latestBacktest = QVariantMap());
+                                                  const QVariantMap& = QVariantMap());
     Q_INVOKABLE QVariantMap reviewTradeSignal(const QVariantMap& signalData,
                                              bool publishDecisionEvent = true);
     Q_INVOKABLE void resetStateForTesting();

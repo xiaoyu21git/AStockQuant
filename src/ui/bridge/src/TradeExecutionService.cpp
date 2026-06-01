@@ -172,21 +172,13 @@ QVariantMap buildRuleHitRecord(const QVariantMap& orderRecord)
     ruleHit.insert(QStringLiteral("stageLabel"), ruleHitStageLabel(stageCode));
     ruleHit.insert(QStringLiteral("decisionType"), ruleHitDecisionType(orderRecord));
     ruleHit.insert(QStringLiteral("templateRuleGroupId"),
-                   orderRecord.value(QStringLiteral("templateRuleGroupId")).toString().trimmed().isEmpty()
-                       ? orderRecord.value(QStringLiteral("group_id")).toString()
-                       : orderRecord.value(QStringLiteral("templateRuleGroupId")).toString());
+                   orderRecord.value(QStringLiteral("templateRuleGroupId")).toString());
     ruleHit.insert(QStringLiteral("templateRuleGroupTitle"),
-                   orderRecord.value(QStringLiteral("templateRuleGroupTitle")).toString().trimmed().isEmpty()
-                       ? orderRecord.value(QStringLiteral("group_title")).toString()
-                       : orderRecord.value(QStringLiteral("templateRuleGroupTitle")).toString());
+                   orderRecord.value(QStringLiteral("templateRuleGroupTitle")).toString());
     ruleHit.insert(QStringLiteral("templateRuleGroupRole"),
-                   orderRecord.value(QStringLiteral("templateRuleGroupRole")).toString().trimmed().isEmpty()
-                       ? orderRecord.value(QStringLiteral("group_role")).toString()
-                       : orderRecord.value(QStringLiteral("templateRuleGroupRole")).toString());
+                   orderRecord.value(QStringLiteral("templateRuleGroupRole")).toString());
     ruleHit.insert(QStringLiteral("templateRuleGroupOperator"),
-                   orderRecord.value(QStringLiteral("templateRuleGroupOperator")).toString().trimmed().isEmpty()
-                       ? orderRecord.value(QStringLiteral("group_operator")).toString()
-                       : orderRecord.value(QStringLiteral("templateRuleGroupOperator")).toString());
+                   orderRecord.value(QStringLiteral("templateRuleGroupOperator")).toString());
     ruleHit.insert(QStringLiteral("executionScopeId"), orderRecord.value(QStringLiteral("executionScopeId")).toString());
     ruleHit.insert(QStringLiteral("batchId"), orderRecord.value(QStringLiteral("batchId")).toString());
     ruleHit.insert(QStringLiteral("requiredBatchId"), orderRecord.value(QStringLiteral("requiredBatchId")).toString());
@@ -202,19 +194,19 @@ QVariantMap buildRuleHitRecord(const QVariantMap& orderRecord)
     return ruleHit;
 }
 
-std::optional<trading::execution::SchedulingRuleBlock> schedulingRuleBlockFromLegacy(
+std::optional<trading::execution::SchedulingRuleBlock> schedulingRuleBlockFromMap(
     const QString& ruleId,
-    const QVariantMap& legacyBlock)
+    const QVariantMap& blockMap)
 {
-    if (legacyBlock.isEmpty()) {
+    if (blockMap.isEmpty()) {
         return std::nullopt;
     }
 
     trading::execution::SchedulingRuleBlock block;
     block.ruleId = ruleId;
-    block.reasonCode = legacyBlock.value(QStringLiteral("reasonCode")).toString();
-    block.message = legacyBlock.value(QStringLiteral("message")).toString();
-    block.attributes = legacyBlock;
+    block.reasonCode = blockMap.value(QStringLiteral("reasonCode")).toString();
+    block.message = blockMap.value(QStringLiteral("message")).toString();
+    block.attributes = blockMap;
     block.attributes.remove(QStringLiteral("reasonCode"));
     block.attributes.remove(QStringLiteral("message"));
     return block;
@@ -271,8 +263,7 @@ QVariantMap loadTradingConnectionConfiguration()
 
 QString configuredStrategyIdFromBindingEntry(const QVariantMap& entry)
 {
-    return entry.value(QStringLiteral("strategyId"),
-        entry.value(QStringLiteral("strategy_id"), entry.value(QStringLiteral("id")))).toString().trimmed();
+    return entry.value(QStringLiteral("strategyId")).toString().trimmed();
 }
 
 QSet<QString> configuredBoundStrategyIds(const QVariantMap& configuration)
@@ -352,18 +343,12 @@ QString resolvedGmStrategyId(const QVariantMap& request, const QVariantMap& conf
         return configured;
     }
 
-    const QString legacyStrategyId = configuration.value(QStringLiteral("strategyId")).toString().trimmed();
-    if (!legacyStrategyId.isEmpty()) {
-        return legacyStrategyId;
-    }
-
     return {};
 }
 
 QString eventStrategyId(const engine::EventFormat& event)
 {
-    const QString businessStrategyId = eventStringValue(event, "business_strategy_id");
-    return businessStrategyId.isEmpty() ? eventStringValue(event, "strategy_id") : businessStrategyId;
+    return eventStringValue(event, "business_strategy_id");
 }
 
 qint64 deriveOrderQuantity(double orderSizeLimitWan, double price)
@@ -697,14 +682,7 @@ QString executionPauseScopeKey(const QVariantMap& orderRecord)
     if (!executionScopeId.isEmpty()) {
         return QStringLiteral("scope:%1").arg(executionScopeId);
     }
-
-    const QString strategyId = orderRecord.value(QStringLiteral("strategyId")).toString().trimmed();
-    const QString runtimeStrategyId = orderRecord.value(QStringLiteral("runtimeStrategyId")).toString().trimmed();
-    if (strategyId.isEmpty() && runtimeStrategyId.isEmpty()) {
-        return {};
-    }
-
-    return QStringLiteral("fallback:%1|%2").arg(strategyId, runtimeStrategyId);
+    return {};
 }
 
 bool isAbnormalRejectStatusOrigin(const QString& statusOrigin)
@@ -1384,16 +1362,16 @@ bool TradeExecutionService::submitBridgeOrder(const QVariantMap& request)
     const std::optional<trading::execution::SchedulingRuleBlock> schedulingBlock =
         trading::execution::evaluateSchedulingRules(orderRequest, {
             {QStringLiteral("RetryOrPauseRule"), [this](const QVariantMap& candidate) {
-                return schedulingRuleBlockFromLegacy(QStringLiteral("RetryOrPauseRule"),
-                                                     findExecutionPauseBlock(candidate));
+                return schedulingRuleBlockFromMap(QStringLiteral("RetryOrPauseRule"),
+                                                  findExecutionPauseBlock(candidate));
             }},
             {QStringLiteral("ManualCheckpointRule"), [this](const QVariantMap& candidate) {
-                return schedulingRuleBlockFromLegacy(QStringLiteral("ManualCheckpointRule"),
-                                                     findManualCheckpointBlock(candidate));
+                return schedulingRuleBlockFromMap(QStringLiteral("ManualCheckpointRule"),
+                                                  findManualCheckpointBlock(candidate));
             }},
             {QStringLiteral("PartialFillAdvanceRule"), [this](const QVariantMap& candidate) {
-                return schedulingRuleBlockFromLegacy(QStringLiteral("PartialFillAdvanceRule"),
-                                                     findPartialFillAdvanceBlock(candidate));
+                return schedulingRuleBlockFromMap(QStringLiteral("PartialFillAdvanceRule"),
+                                                  findPartialFillAdvanceBlock(candidate));
             }},
             {QStringLiteral("PendingOrderConflictRule"), [this](const QVariantMap& candidate) {
                 const QString symbol = candidate.value(QStringLiteral("symbol")).toString();
@@ -2181,7 +2159,6 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
             brokerMetadata[it.key().toStdString()] = textValue.toStdString();
         }
     }
-    brokerMetadata["strategy_id"] = strategyId.toStdString();
     brokerMetadata["business_strategy_id"] = strategyId.toStdString();
     if (!gmStrategyId.isEmpty()) {
         brokerMetadata["runtime_strategy_id"] = gmStrategyId.toStdString();
@@ -2406,7 +2383,7 @@ void TradeExecutionService::publishOrderRequest(const QVariantMap& orderRequest,
         0);
     event.correlation_id = correlationId.toStdString();
     event.set("order_id", orderRequest.value("orderId").toString().toStdString());
-    event.set("strategy_id", orderRequest.value("strategyId").toString().toStdString());
+    event.set("business_strategy_id", orderRequest.value("strategyId").toString().toStdString());
     event.set("strategy_name", orderRequest.value("strategyName").toString().toStdString());
     event.set("symbol", orderRequest.value("symbol").toString().toStdString());
     event.set("side", orderRequest.value("side").toString().toStdString());
@@ -2414,7 +2391,7 @@ void TradeExecutionService::publishOrderRequest(const QVariantMap& orderRequest,
     event.set("quantity", static_cast<int64_t>(orderRequest.value("quantity").toLongLong()));
     event.set("order_type", orderRequest.value("orderType").toString().toStdString());
     event.metadata["order_id"] = orderRequest.value("orderId").toString().toStdString();
-    event.metadata["strategy_id"] = orderRequest.value("strategyId").toString().toStdString();
+    event.metadata["business_strategy_id"] = orderRequest.value("strategyId").toString().toStdString();
     if (!orderRequest.value("runtimeStrategyId").toString().trimmed().isEmpty()) {
         event.set("runtime_strategy_id", orderRequest.value("runtimeStrategyId").toString().toStdString());
         event.metadata["runtime_strategy_id"] = orderRequest.value("runtimeStrategyId").toString().toStdString();
@@ -2453,7 +2430,7 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
         0);
     event.correlation_id = correlationId.toStdString();
     event.set("order_id", orderStatus.value("orderId").toString().toStdString());
-    event.set("strategy_id", orderStatus.value("strategyId").toString().toStdString());
+    event.set("business_strategy_id", orderStatus.value("strategyId").toString().toStdString());
     event.set("symbol", orderStatus.value("symbol").toString().toStdString());
     event.set("side", orderStatus.value("side").toString().toStdString());
     event.set("price", orderStatus.value("price").toDouble());
@@ -2466,7 +2443,7 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
     event.set("created_at", orderStatus.value("createdAt").toString().toStdString());
     event.set("updated_at", orderStatus.value("updatedAt").toString().toStdString());
     event.metadata["order_id"] = orderStatus.value("orderId").toString().toStdString();
-    event.metadata["strategy_id"] = orderStatus.value("strategyId").toString().toStdString();
+    event.metadata["business_strategy_id"] = orderStatus.value("strategyId").toString().toStdString();
     if (!orderStatus.value("runtimeStrategyId").toString().trimmed().isEmpty()) {
         event.set("runtime_strategy_id", orderStatus.value("runtimeStrategyId").toString().toStdString());
         event.metadata["runtime_strategy_id"] = orderStatus.value("runtimeStrategyId").toString().toStdString();
@@ -2554,7 +2531,7 @@ void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const
     event.correlation_id = correlationId.toStdString();
     event.set("fill_id", tradeFill.value("fillId").toString().toStdString());
     event.set("order_id", tradeFill.value("orderId").toString().toStdString());
-    event.set("strategy_id", tradeFill.value("strategyId").toString().toStdString());
+    event.set("business_strategy_id", tradeFill.value("strategyId").toString().toStdString());
     event.set("symbol", tradeFill.value("symbol").toString().toStdString());
     event.set("side", tradeFill.value("side").toString().toStdString());
     event.set("fill_price", tradeFill.value("fillPrice").toDouble());
@@ -2563,7 +2540,7 @@ void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const
     event.set("status", tradeFill.value("status").toString().toStdString());
     event.metadata["fill_id"] = tradeFill.value("fillId").toString().toStdString();
     event.metadata["order_id"] = tradeFill.value("orderId").toString().toStdString();
-    event.metadata["strategy_id"] = tradeFill.value("strategyId").toString().toStdString();
+    event.metadata["business_strategy_id"] = tradeFill.value("strategyId").toString().toStdString();
     if (!tradeFill.value("runtimeStrategyId").toString().trimmed().isEmpty()) {
         event.set("runtime_strategy_id", tradeFill.value("runtimeStrategyId").toString().toStdString());
         event.metadata["runtime_strategy_id"] = tradeFill.value("runtimeStrategyId").toString().toStdString();

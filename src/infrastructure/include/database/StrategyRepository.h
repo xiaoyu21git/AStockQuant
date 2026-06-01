@@ -170,8 +170,6 @@ private:
     // 辅助方法
     PersistedStrategyData rowToStrategyData(const QSqlQuery& query);
     QVariantMap loadStrategyParameters(const QString& strategyId, QSqlDatabase& db);
-    bool saveStrategyParameters(const QString& strategyId, const QVariantMap& parameters, QSqlDatabase& db);
-    bool deleteStrategyParameters(const QString& strategyId, QSqlDatabase& db);
     
     /**
      * @brief 内部保存方法，使用传入的连接
@@ -180,11 +178,6 @@ private:
      * @return 保存成功的策略ID，失败返回空字符串
      */
     QString saveStrategyInternal(const PersistedStrategyData& strategy, QSqlDatabase& db, bool isUpdate = false);
-    
-    /**
-     * @brief 验证策略数据
-     */
-    bool validateStrategy(const PersistedStrategyData& strategy) const;
     
     /**
      * @brief 生成策略代码（如果未提供）

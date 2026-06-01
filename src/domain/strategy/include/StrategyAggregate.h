@@ -11,8 +11,6 @@ struct StrategyAggregate final {
     StrategyRuntimeProfile runtime;
     StrategySpec spec;
     StrategyPerformanceSummary performanceSummary;
-    BacktestSnapshot latestBacktestSnapshot;
-    QVector<BacktestHistoryEntry> backtestHistory;
 
     [[nodiscard]] bool isValid() const
     {

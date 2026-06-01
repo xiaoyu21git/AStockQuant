@@ -51,7 +51,6 @@ set(BRIDGE_HEADERS
     include/FactorMetaService.h
     include/CleanedDataController.h
     include/MarketDataService.h
-    include/PortfolioAnalysisService.h
     include/RiskConfigService.h
     include/RiskMonitorService.h
     include/PositionAccountService.h

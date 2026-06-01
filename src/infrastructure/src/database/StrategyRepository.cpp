@@ -11,11 +11,6 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QRandomGenerator>
-#include <algorithm>
-#include <ctime>
-#include <random>
-#include <sstream>
-#include <iomanip>
 
 using domain::backtest::ResolvedStrategyIdentity;
 using domain::backtest::StrategyStoredType;
@@ -32,8 +27,35 @@ enum class PersistedStrategyStatusCode {
     Testing,
     Archived,
 };
-
-QString storedTypeText(StrategyStoredType storedType);
+const QString kStrategyIdKey = QStringLiteral("strategyId");
+const QString kEngineStrategyIdKey = QStringLiteral("engineStrategyId");
+const QString kStrategyCodeKey = QStringLiteral("strategyCode");
+const QString kMetadataKey = QStringLiteral("metadata");
+const QString kStrategyIdentityKey = QStringLiteral("strategyIdentity");
+const QString kRuntimeKey = QStringLiteral("runtime");
+const QString kParametersKey = QStringLiteral("parameters");
+const QString kVersionKey = QStringLiteral("version");
+const QString kAuthorKey = QStringLiteral("author");
+const QString kLanguageKey = QStringLiteral("language");
+const QString kStatusKey = QStringLiteral("status");
+const QString kStatusIndexKey = QStringLiteral("statusIndex");
+const QString kCreatedAtKey = QStringLiteral("createdAt");
+const QString kUpdatedAtKey = QStringLiteral("updatedAt");
+const QString kStrategyNameKey = QStringLiteral("strategyName");
+const QString kDescriptionKey = QStringLiteral("description");
+const QString kBehaviorKindKey = QStringLiteral("behaviorKind");
+const QString kFactorIdsKey = QStringLiteral("factorIds");
+const QString kRuleIdsKey = QStringLiteral("ruleIds");
+const QString kEnabledKey = QStringLiteral("enabled");
+const QString kUuidKey = QStringLiteral("uuid");
+const QString kStrategyTypeIndexKeyName = QStringLiteral("strategyTypeIndex");
+const QString kStrategyBehaviorKindKeyName = QStringLiteral("strategyBehaviorKind");
+const QString kAssetTypeIndexKey = QStringLiteral("assetTypeIndex");
+const QString kTimeFrameIndexKey = QStringLiteral("timeFrameIndex");
+const QString kRiskLevelIndexKey = QStringLiteral("riskLevelIndex");
+const QString kOptimizationMethodKey = QStringLiteral("optimization_method");
+const QString kTagsKey = QStringLiteral("tags");
+const QString kParametersTextColumnKey = QStringLiteral("parameters_text");
 
 void assignParsedJsonObjectField(QVariantMap& strategy,
                                  const QString& fieldKey,
@@ -71,41 +93,6 @@ QString persistedLanguageText(StrategyLanguageCode languageCode)
     }
 }
 
-PersistedStrategyStatusCode persistedStatusCodeFromDatabase(const QVariant& rawStatus)
-{
-    const QString normalized = rawStatus.toString().trimmed().toUpper();
-    if (normalized == persistedStatusCodeText(PersistedStrategyStatusCode::Active)) {
-        return PersistedStrategyStatusCode::Active;
-    }
-    if (normalized == persistedStatusCodeText(PersistedStrategyStatusCode::Inactive)) {
-        return PersistedStrategyStatusCode::Inactive;
-    }
-    if (normalized == persistedStatusCodeText(PersistedStrategyStatusCode::Testing)) {
-        return PersistedStrategyStatusCode::Testing;
-    }
-    if (normalized == persistedStatusCodeText(PersistedStrategyStatusCode::Archived)) {
-        return PersistedStrategyStatusCode::Archived;
-    }
-    return PersistedStrategyStatusCode::Unknown;
-}
-
-strategy_view::StrategyLifecycleStatus lifecycleStatusFromPersistedCode(PersistedStrategyStatusCode statusCode)
-{
-    switch (statusCode) {
-    case PersistedStrategyStatusCode::Active:
-        return strategy_view::StrategyLifecycleStatus::Active;
-    case PersistedStrategyStatusCode::Inactive:
-        return strategy_view::StrategyLifecycleStatus::Inactive;
-    case PersistedStrategyStatusCode::Testing:
-        return strategy_view::StrategyLifecycleStatus::Testing;
-    case PersistedStrategyStatusCode::Archived:
-        return strategy_view::StrategyLifecycleStatus::Archived;
-    case PersistedStrategyStatusCode::Unknown:
-    default:
-        return strategy_view::StrategyLifecycleStatus::Unknown;
-    }
-}
-
 PersistedStrategyStatusCode persistedStatusCodeFromLifecycle(strategy_view::StrategyLifecycleStatus status)
 {
     switch (status) {
@@ -127,17 +114,6 @@ PersistedStrategyStatusCode persistedStatusCodeFromLifecycle(strategy_view::Stra
     }
 }
 
-bool bindPersistedStatusCode(QSqlQuery& query, PersistedStrategyStatusCode statusCode)
-{
-    const QString persistedText = persistedStatusCodeText(statusCode);
-    if (persistedText.isEmpty()) {
-        return false;
-    }
-
-    query.addBindValue(persistedText);
-    return true;
-}
-
 StrategyLanguageCode persistedLanguageCodeFromRaw(const QString& rawLanguage)
 {
     const QString normalized = rawLanguage.trimmed().toUpper();
@@ -153,255 +129,74 @@ StrategyLanguageCode persistedLanguageCodeFromRaw(const QString& rawLanguage)
     return StrategyLanguageCode::Python;
 }
 
-void bindPersistedLanguageCode(QSqlQuery& query, StrategyLanguageCode languageCode)
-{
-    query.addBindValue(persistedLanguageText(languageCode));
-}
-
-void assignPersistedStrategyIdentity(QVariantMap& strategy);
-void restoreStrategyExtrasFromParameters(QVariantMap& strategy);
-QString persistedStrategyIdKey();
-QString persistedEngineStrategyIdKey();
-QString persistedStrategyCodeKey();
-QString persistedMetadataJsonKey();
-QString persistedStrategyIdentityJsonKey();
-QString persistedRuntimeJsonKey();
-QString persistedStrategyTypeIndexKey();
-QString persistedStrategyBehaviorKindKey();
-QString persistedParametersKey();
-QString persistedVersionKey();
-QString persistedAuthorKey();
-QString persistedLanguageKey();
-QString persistedStatusRawKey();
-QString persistedStatusIndexKey();
-QString persistedCreatedAtKey();
-QString persistedUpdatedAtKey();
 void applyRuntimeIndexesToMap(QVariantMap& target, const StrategyRuntimeProperties& indexes);
-bool tryReadPersistedFactorIds(const QVariant& rawValue,
-                               std::vector<domain::strategies::FactorId>& out);
-bool tryReadPersistedRuleIds(const QVariant& rawValue,
-                             std::vector<domain::strategies::RuleId>& out);
-
-strategy_view::StrategyLifecycleStatus persistedStatusFromDatabase(const QVariant& rawStatus)
-{
-    return lifecycleStatusFromPersistedCode(persistedStatusCodeFromDatabase(rawStatus));
-}
-
-void assignStrategyStatusIndex(QVariantMap& strategy, strategy_view::StrategyLifecycleStatus status)
-{
-    strategy.remove(persistedStatusRawKey());
-    if (strategy_view::isKnownStrategyLifecycleStatus(status)) {
-        strategy.insert(persistedStatusIndexKey(), strategy_view::strategyLifecycleStatusIndex(status));
-    } else {
-        strategy.remove(persistedStatusIndexKey());
-    }
-}
 
 void assignStrategyBaseFields(QVariantMap& strategy, const QSqlQuery& query)
 {
-    strategy.insert(persistedStrategyIdKey(), query.value(persistedStrategyIdKey()));
-    strategy.insert(persistedEngineStrategyIdKey(), query.value(persistedEngineStrategyIdKey()));
-    strategy.insert(persistedStrategyCodeKey(), query.value(persistedStrategyCodeKey()));
-    strategy.insert(persistedVersionKey(), query.value(persistedVersionKey()));
-    strategy.insert(persistedAuthorKey(), query.value(persistedAuthorKey()));
-    strategy.insert(persistedLanguageKey(), query.value(persistedLanguageKey()));
-    assignStrategyStatusIndex(strategy, persistedStatusFromDatabase(query.value(persistedStatusRawKey())));
-    strategy.insert(persistedCreatedAtKey(), query.value(persistedCreatedAtKey()));
-    strategy.insert(persistedUpdatedAtKey(), query.value(persistedUpdatedAtKey()));
-
-    assignParsedJsonObjectField(strategy,
-                                persistedMetadataJsonKey(),
-                                query.value(persistedMetadataJsonKey()).toString());
-    assignParsedJsonObjectField(strategy,
-                                persistedStrategyIdentityJsonKey(),
-                                query.value(persistedStrategyIdentityJsonKey()).toString());
-    assignParsedJsonObjectField(strategy,
-                                persistedRuntimeJsonKey(),
-                                query.value(persistedRuntimeJsonKey()).toString());
-}
-
-void assignPersistedRuntimeIndex(QVariantMap& target,
-                                 const QString& key,
-                                 const QVariant& rawValue)
-{
-    const int index = rawValue.toInt();
-    if (index > 0) {
-        target.insert(key, index);
-    } else {
-        target.remove(key);
+    strategy.insert(kStrategyIdKey, query.value(kStrategyIdKey));
+    strategy.insert(kEngineStrategyIdKey, query.value(kEngineStrategyIdKey));
+    strategy.insert(kStrategyCodeKey, query.value(kStrategyCodeKey));
+    strategy.insert(kVersionKey, query.value(kVersionKey));
+    strategy.insert(kAuthorKey, query.value(kAuthorKey));
+    strategy.insert(kLanguageKey, query.value(kLanguageKey));
+    strategy.remove(kStatusKey);
+    const QString normalizedStatusText = query.value(kStatusKey).toString().trimmed().toUpper();
+    strategy_view::StrategyLifecycleStatus status = strategy_view::StrategyLifecycleStatus::Unknown;
+    if (normalizedStatusText == persistedStatusCodeText(PersistedStrategyStatusCode::Active)) {
+        status = strategy_view::StrategyLifecycleStatus::Active;
+    } else if (normalizedStatusText == persistedStatusCodeText(PersistedStrategyStatusCode::Inactive)) {
+        status = strategy_view::StrategyLifecycleStatus::Inactive;
+    } else if (normalizedStatusText == persistedStatusCodeText(PersistedStrategyStatusCode::Testing)) {
+        status = strategy_view::StrategyLifecycleStatus::Testing;
+    } else if (normalizedStatusText == persistedStatusCodeText(PersistedStrategyStatusCode::Archived)) {
+        status = strategy_view::StrategyLifecycleStatus::Archived;
     }
-}
+    if (strategy_view::isKnownStrategyLifecycleStatus(status)) {
+        strategy.insert(kStatusIndexKey, strategy_view::strategyLifecycleStatusIndex(status));
+    } else {
+        strategy.remove(kStatusIndexKey);
+    }
+    strategy.insert(kCreatedAtKey, query.value(kCreatedAtKey));
+    strategy.insert(kUpdatedAtKey, query.value(kUpdatedAtKey));
 
-QString persistedAssetTypeIndexKey()
-{
-    return QStringLiteral("assetTypeIndex");
-}
-
-QString persistedTimeFrameIndexKey()
-{
-    return QStringLiteral("timeFrameIndex");
-}
-
-QString persistedRiskLevelIndexKey()
-{
-    return QStringLiteral("riskLevelIndex");
-}
-
-QString persistedFactorIdsKey()
-{
-    return QStringLiteral("factorIds");
-}
-
-QString persistedRuleIdsKey()
-{
-    return QStringLiteral("ruleIds");
-}
-
-QString rejectedLegacyAssetTypeKey()
-{
-    return QStringLiteral("asset_type");
-}
-
-QString rejectedLegacyTimeFrameKey()
-{
-    return QStringLiteral("time_frame");
-}
-
-QString rejectedLegacyRiskLevelKey()
-{
-    return QStringLiteral("risk_level");
-}
-
-QString runtimeAssetTypeKey()
-{
-    return QStringLiteral("assetType");
-}
-
-QString runtimeTimeFrameKey()
-{
-    return QStringLiteral("timeFrame");
-}
-
-QString runtimeRiskLevelKey()
-{
-    return QStringLiteral("riskLevel");
+    assignParsedJsonObjectField(strategy,
+                                kMetadataKey,
+                                query.value(kMetadataKey).toString());
+    assignParsedJsonObjectField(strategy,
+                                kStrategyIdentityKey,
+                                query.value(kStrategyIdentityKey).toString());
+    assignParsedJsonObjectField(strategy,
+                                kRuntimeKey,
+                                query.value(kRuntimeKey).toString());
 }
 
 StrategyRuntimeProperties runtimeIndexesFromMap(const QVariantMap& map)
 {
     StrategyRuntimeProperties indexes;
-    indexes.assetTypeIndex = map.value(persistedAssetTypeIndexKey()).toInt();
-    indexes.timeFrameIndex = map.value(persistedTimeFrameIndexKey()).toInt();
-    indexes.riskLevelIndex = map.value(persistedRiskLevelIndexKey()).toInt();
+    indexes.assetTypeIndex = map.value(kAssetTypeIndexKey).toInt();
+    indexes.timeFrameIndex = map.value(kTimeFrameIndexKey).toInt();
+    indexes.riskLevelIndex = map.value(kRiskLevelIndexKey).toInt();
     return indexes;
-}
-
-bool requireRuntimeIndexForRejectedRawText(const QVariantMap& strategyMap,
-                                   const QString& rejectedLegacyKey,
-                                   const QString& runtimeKey,
-                                   const QString& indexKey,
-                                   const char* failureMessage)
-{
-    if ((strategyMap.contains(rejectedLegacyKey) || strategyMap.contains(runtimeKey))
-        && !strategyMap.contains(indexKey)) {
-        qWarning() << failureMessage;
-        return false;
-    }
-    return true;
-}
-
-bool validateRuntimeIndexRange(int indexValue,
-                               int maximumIndex,
-                               const char* failureMessage)
-{
-    if (indexValue <= 0) {
-        return true;
-    }
-
-    if (indexValue > maximumIndex) {
-        qWarning() << failureMessage;
-        return false;
-    }
-
-    return true;
-}
-
-StrategyRuntimeProperties runtimeIndexesFromStrategy(const QVariantMap& strategy)
-{
-    return runtimeIndexesFromMap(strategy);
-}
-
-StrategyRuntimeProperties runtimeIndexesFromParameters(const QVariantMap& parameters)
-{
-    return runtimeIndexesFromMap(parameters);
 }
 
 void applyRuntimeIndexesToMap(QVariantMap& target, const StrategyRuntimeProperties& indexes)
 {
-    assignPersistedRuntimeIndex(target,
-                                persistedAssetTypeIndexKey(),
-                                indexes.assetTypeIndex);
-    assignPersistedRuntimeIndex(target,
-                                persistedTimeFrameIndexKey(),
-                                indexes.timeFrameIndex);
-    assignPersistedRuntimeIndex(target,
-                                persistedRiskLevelIndexKey(),
-                                indexes.riskLevelIndex);
-}
-
-PersistedStrategyData hydrateStrategyDataFromMap(const QVariantMap& strategyMap)
-{
-    QVariantMap normalized = strategyMap;
-    if (normalized.contains(QStringLiteral("parameters"))) {
-        restoreStrategyExtrasFromParameters(normalized);
-    }
-    return PersistedStrategyData::fromVariantMap(normalized);
-}
-
-PersistedStrategyData hydrateStrategyDataWithParameters(PersistedStrategyData strategy,
-                                              const QVariantMap& parameters)
-{
-    if (parameters.isEmpty()) {
-        return strategy;
+    if (indexes.assetTypeIndex > 0) {
+        target.insert(kAssetTypeIndexKey, indexes.assetTypeIndex);
+    } else {
+        target.remove(kAssetTypeIndexKey);
     }
 
-    QVariantMap strategyMap = strategy.toVariantMap();
-    strategyMap.insert(persistedParametersKey(), parameters);
-    return hydrateStrategyDataFromMap(strategyMap);
-}
+    if (indexes.timeFrameIndex > 0) {
+        target.insert(kTimeFrameIndexKey, indexes.timeFrameIndex);
+    } else {
+        target.remove(kTimeFrameIndexKey);
+    }
 
-QString storedTypeText(StrategyStoredType storedType)
-{
-    switch (storedType) {
-    case StrategyStoredType::DOUBLE_MOVING_AVERAGE:
-        return QStringLiteral("DOUBLE_MOVING_AVERAGE");
-    case StrategyStoredType::TURTLE_BREAKOUT:
-        return QStringLiteral("TURTLE_BREAKOUT");
-    case StrategyStoredType::BOLLINGER_BAND_MEAN_REVERSION:
-        return QStringLiteral("BOLLINGER_BAND_MEAN_REVERSION");
-    case StrategyStoredType::RSI_MEAN_REVERSION:
-        return QStringLiteral("RSI_MEAN_REVERSION");
-    case StrategyStoredType::MULTI_FACTOR_SELECTION:
-        return QStringLiteral("MULTI_FACTOR_SELECTION");
-    case StrategyStoredType::EARNINGS_SURPRISE:
-        return QStringLiteral("EARNINGS_SURPRISE");
-    case StrategyStoredType::STATISTICAL_PAIR_TRADING:
-        return QStringLiteral("STATISTICAL_PAIR_TRADING");
-    case StrategyStoredType::RISK_PARITY_ALLOCATION:
-        return QStringLiteral("RISK_PARITY_ALLOCATION");
-    case StrategyStoredType::MACHINE_LEARNING_SELECTION:
-        return QStringLiteral("MACHINE_LEARNING_SELECTION");
-    case StrategyStoredType::ORDER_FLOW_IMBALANCE:
-        return QStringLiteral("ORDER_FLOW_IMBALANCE");
-    case StrategyStoredType::VOLATILITY_SPREAD:
-        return QStringLiteral("VOLATILITY_SPREAD");
-    case StrategyStoredType::Portfolio:
-        return QStringLiteral("PORTFOLIO");
-    case StrategyStoredType::Custom:
-        return QStringLiteral("CUSTOM");
-    case StrategyStoredType::Unknown:
-    default:
-        return {};
+    if (indexes.riskLevelIndex > 0) {
+        target.insert(kRiskLevelIndexKey, indexes.riskLevelIndex);
+    } else {
+        target.remove(kRiskLevelIndexKey);
     }
 }
 
@@ -410,75 +205,7 @@ QString persistedStrategyTypeIndexKey()
     return QString::fromUtf8(domain::backtest::detail::kStrategyTypeIndexKey);
 }
 
-QString persistedStrategyIdKey()
-{
-    return QStringLiteral("strategyId");
-}
 
-QString persistedEngineStrategyIdKey()
-{
-    return QStringLiteral("engineStrategyId");
-}
-
-QString persistedStrategyCodeKey()
-{
-    return QStringLiteral("strategyCode");
-}
-
-QString persistedMetadataJsonKey()
-{
-    return QStringLiteral("metadata");
-}
-
-QString persistedStrategyIdentityJsonKey()
-{
-    return QStringLiteral("strategyIdentity");
-}
-
-QString persistedRuntimeJsonKey()
-{
-    return QStringLiteral("runtime");
-}
-
-QString persistedVersionKey()
-{
-    return QStringLiteral("version");
-}
-
-QString persistedAuthorKey()
-{
-    return QStringLiteral("author");
-}
-
-QString persistedLanguageKey()
-{
-    return QStringLiteral("language");
-}
-
-QString persistedStatusRawKey()
-{
-    return QStringLiteral("status");
-}
-
-QString persistedStatusIndexKey()
-{
-    return QStringLiteral("statusIndex");
-}
-
-QString persistedCreatedAtKey()
-{
-    return QStringLiteral("createdAt");
-}
-
-QString persistedUpdatedAtKey()
-{
-    return QStringLiteral("updatedAt");
-}
-
-QString persistedParametersKey()
-{
-    return QStringLiteral("parameters");
-}
 
 bool tryParseJsonObjectVariantMap(const QString& jsonText,
                                  QVariantMap& parsedMap,
@@ -507,14 +234,6 @@ bool tryParseJsonObjectVariantMap(const QString& jsonText,
 
     parsedMap = doc.object().toVariantMap();
     return true;
-}
-
-void assignStrategyParameters(QVariantMap& strategy, const QVariantMap& parameters)
-{
-    strategy.insert(persistedParametersKey(), parameters);
-    if (!parameters.isEmpty()) {
-        restoreStrategyExtrasFromParameters(strategy);
-    }
 }
 
 void assignParsedJsonObjectField(QVariantMap& strategy,
@@ -549,24 +268,10 @@ QString selectStrategiesSql()
         .arg(persistedStrategyBaseColumnsSql());
 }
 
-QString selectStrategiesWithoutParametersSql()
-{
-    return QStringLiteral("SELECT %1 FROM strategy ORDER BY created_at DESC")
-        .arg(persistedStrategyBaseColumnsSql());
-}
-
 QString selectStrategiesWithoutParametersSql(const QString& suffix)
 {
     return QStringLiteral("SELECT %1 FROM strategy %2")
         .arg(persistedStrategyBaseColumnsSql(), suffix);
-}
-
-QString selectStrategiesWithParametersTextSql()
-{
-    return QStringLiteral(
-               "SELECT %1, CAST(parameters AS CHAR) as parameters_text "
-               "FROM strategy ORDER BY created_at DESC")
-        .arg(persistedStrategyBaseColumnsSql());
 }
 
 QString persistedStrategyUpdateAssignmentsSql()
@@ -596,37 +301,6 @@ QString persistedStrategyInsertValuesSql()
     return QStringLiteral("?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()");
 }
 
-const QStringList& persistedParameterPassthroughKeys()
-{
-    static const QStringList keys = {
-        QStringLiteral("optimization_method"),
-        QStringLiteral("backtest_settings"),
-        persistedPerformanceMetricsKey(),
-        QStringLiteral("tags")
-    };
-    return keys;
-}
-
-QVariantList toPersistedFactorIdVariantList(const std::vector<domain::strategies::FactorId>& values)
-{
-    QVariantList list;
-    list.reserve(static_cast<qsizetype>(values.size()));
-    for (const domain::strategies::FactorId value : values) {
-        list.push_back(QVariant::fromValue<qulonglong>(value));
-    }
-    return list;
-}
-
-QVariantList toPersistedRuleIdVariantList(const std::vector<domain::strategies::RuleId>& values)
-{
-    QVariantList list;
-    list.reserve(static_cast<qsizetype>(values.size()));
-    for (const domain::strategies::RuleId value : values) {
-        list.push_back(QVariant::fromValue<qulonglong>(value));
-    }
-    return list;
-}
-
 QString toCompactJsonText(const QVariantMap& value)
 {
     return QString::fromUtf8(QJsonDocument(QJsonObject::fromVariantMap(value)).toJson(QJsonDocument::Compact));
@@ -634,12 +308,24 @@ QString toCompactJsonText(const QVariantMap& value)
 
 QVariantMap metadataToVariantMap(const domain::strategies::StrategyMetadata& metadata)
 {
+    QVariantList factorIdList;
+    factorIdList.reserve(static_cast<qsizetype>(metadata.factorIds.size()));
+    for (const domain::strategies::FactorId value : metadata.factorIds) {
+        factorIdList.push_back(QVariant::fromValue<qulonglong>(value));
+    }
+
+    QVariantList ruleIdList;
+    ruleIdList.reserve(static_cast<qsizetype>(metadata.ruleIds.size()));
+    for (const domain::strategies::RuleId value : metadata.ruleIds) {
+        ruleIdList.push_back(QVariant::fromValue<qulonglong>(value));
+    }
+
     QVariantMap map;
     map.insert(QStringLiteral("name"), QString::fromStdString(metadata.name));
     map.insert(QStringLiteral("description"), QString::fromStdString(metadata.description));
     map.insert(QStringLiteral("behaviorKind"), static_cast<int>(metadata.behaviorKind));
-    map.insert(QStringLiteral("factorIds"), toPersistedFactorIdVariantList(metadata.factorIds));
-    map.insert(QStringLiteral("ruleIds"), toPersistedRuleIdVariantList(metadata.ruleIds));
+    map.insert(QStringLiteral("factorIds"), factorIdList);
+    map.insert(QStringLiteral("ruleIds"), ruleIdList);
     map.insert(QStringLiteral("enabled"), metadata.enabled);
     if (metadata.uuid.is_valid()) {
         map.insert(QStringLiteral("uuid"), QString::fromStdString(metadata.uuid.to_string()));
@@ -665,96 +351,47 @@ domain::strategies::StrategyMetadata metadataFromVariantMap(const QVariantMap& m
         metadata.uuid = foundation::utils::Uuid::from_string(rawUuid.toStdString());
     }
 
-    tryReadPersistedFactorIds(map.value(persistedFactorIdsKey()), metadata.factorIds);
-    tryReadPersistedRuleIds(map.value(persistedRuleIdsKey()), metadata.ruleIds);
+    const QVariant rawFactorIds = map.value(QStringLiteral("factorIds"));
+    if (rawFactorIds.isValid() && !rawFactorIds.isNull()) {
+        const QVariantList rawFactorIdList = rawFactorIds.toList();
+        std::vector<domain::strategies::FactorId> parsedFactorIds;
+        parsedFactorIds.reserve(static_cast<size_t>(rawFactorIdList.size()));
+        bool factorIdsValid = true;
+        for (const QVariant& item : rawFactorIdList) {
+            bool ok = false;
+            const qulonglong value = item.toULongLong(&ok);
+            if (!ok || value == 0ULL) {
+                factorIdsValid = false;
+                break;
+            }
+            parsedFactorIds.push_back(static_cast<domain::strategies::FactorId>(value));
+        }
+        if (factorIdsValid) {
+            metadata.factorIds = std::move(parsedFactorIds);
+        }
+    }
+
+    const QVariant rawRuleIds = map.value(QStringLiteral("ruleIds"));
+    if (rawRuleIds.isValid() && !rawRuleIds.isNull()) {
+        const QVariantList rawRuleIdList = rawRuleIds.toList();
+        std::vector<domain::strategies::RuleId> parsedRuleIds;
+        parsedRuleIds.reserve(static_cast<size_t>(rawRuleIdList.size()));
+        bool ruleIdsValid = true;
+        for (const QVariant& item : rawRuleIdList) {
+            bool ok = false;
+            const qulonglong value = item.toULongLong(&ok);
+            if (!ok || value == 0ULL) {
+                ruleIdsValid = false;
+                break;
+            }
+            parsedRuleIds.push_back(static_cast<domain::strategies::RuleId>(value));
+        }
+        if (ruleIdsValid) {
+            metadata.ruleIds = std::move(parsedRuleIds);
+        }
+    }
+
     return metadata;
-}
-
-QVariantMap strategyIdentityToVariantMap(const ResolvedStrategyIdentity& strategyIdentity)
-{
-    QVariantMap map;
-    if (!strategyIdentity.validStoredType) {
-        return map;
-    }
-
-    map.insert(persistedStrategyTypeIndexKey(), strategyIdentity.storedTypeIndex());
-    if (strategyIdentity.behavior.valid) {
-        map.insert(persistedStrategyBehaviorKindKey(), strategyIdentity.behavior.index());
-    }
-    return map;
-}
-
-QVariantMap runtimeToVariantMap(const StrategyRuntimeProperties& runtime)
-{
-    QVariantMap map;
-    applyRuntimeIndexesToMap(map, runtime);
-    return map;
-}
-
-bool tryReadPersistedFactorIds(const QVariant& rawValue,
-                               std::vector<domain::strategies::FactorId>& out)
-{
-    if (!rawValue.isValid() || rawValue.isNull()) {
-        out.clear();
-        return true;
-    }
-
-    const QVariantList rawList = rawValue.toList();
-    std::vector<domain::strategies::FactorId> parsed;
-    parsed.reserve(static_cast<size_t>(rawList.size()));
-    for (const QVariant& item : rawList) {
-        bool ok = false;
-        const qulonglong value = item.toULongLong(&ok);
-        if (!ok || value == 0ULL) {
-            return false;
-        }
-        parsed.push_back(static_cast<domain::strategies::FactorId>(value));
-    }
-
-    out = std::move(parsed);
-    return true;
-}
-
-bool tryReadPersistedRuleIds(const QVariant& rawValue,
-                             std::vector<domain::strategies::RuleId>& out)
-{
-    if (!rawValue.isValid() || rawValue.isNull()) {
-        out.clear();
-        return true;
-    }
-
-    const QVariantList rawList = rawValue.toList();
-    std::vector<domain::strategies::RuleId> parsed;
-    parsed.reserve(static_cast<size_t>(rawList.size()));
-    for (const QVariant& item : rawList) {
-        bool ok = false;
-        const qulonglong value = item.toULongLong(&ok);
-        if (!ok || value == 0ULL) {
-            return false;
-        }
-        parsed.push_back(static_cast<domain::strategies::RuleId>(value));
-    }
-
-    out = std::move(parsed);
-    return true;
-}
-
-    QString factorOverlayParameterKey()
-    {
-        return QStringLiteral("factor_overlay");
-    }
-
-void clearRuntimePresentationFields(QVariantMap& strategy)
-{
-    strategy.remove(rejectedLegacyAssetTypeKey());
-    strategy.remove(rejectedLegacyTimeFrameKey());
-    strategy.remove(rejectedLegacyRiskLevelKey());
-    strategy.remove(runtimeAssetTypeKey());
-    strategy.remove(runtimeTimeFrameKey());
-    strategy.remove(runtimeRiskLevelKey());
-    strategy.remove(persistedAssetTypeIndexKey());
-    strategy.remove(persistedTimeFrameIndexKey());
-    strategy.remove(persistedRiskLevelIndexKey());
 }
 
 QString persistedStrategyBehaviorKindKey()
@@ -762,41 +399,17 @@ QString persistedStrategyBehaviorKindKey()
     return QString::fromUtf8(domain::backtest::detail::kStrategyBehaviorKindKey);
 }
 
-void clearPersistedStrategyIdentityFields(QVariantMap& strategy)
-{
-    strategy.remove(persistedStrategyTypeIndexKey());
-    strategy.remove(persistedStrategyBehaviorKindKey());
-}
-
-void writePersistedStrategyIdentityFields(QVariantMap& strategy,
-                                         const ResolvedStrategyIdentity& strategyIdentity)
-{
-    strategy.insert(persistedStrategyTypeIndexKey(), strategyIdentity.storedTypeIndex());
-    if (strategyIdentity.behavior.valid) {
-        strategy.insert(persistedStrategyBehaviorKindKey(), strategyIdentity.behavior.index());
-        return;
-    }
-
-    strategy.remove(persistedStrategyBehaviorKindKey());
-}
-
-void assignPersistedStrategyIdentity(QVariantMap& strategy)
-{
-    const ResolvedStrategyIdentity strategyIdentity = domain::backtest::resolveStrategyIdentity(strategy);
-    if (!strategyIdentity.validStoredType) {
-        clearPersistedStrategyIdentityFields(strategy);
-        return;
-    }
-
-    writePersistedStrategyIdentityFields(strategy, strategyIdentity);
-}
-
 QVariantMap buildPersistedParameters(const QVariantMap& strategy)
 {
-    QVariantMap parameters = strategy.value(persistedParametersKey()).toMap();
-    const StrategyRuntimeProperties runtimeIndexes = runtimeIndexesFromStrategy(strategy);
+    QVariantMap parameters = strategy.value(kParametersKey).toMap();
+    const StrategyRuntimeProperties runtimeIndexes = runtimeIndexesFromMap(strategy);
 
-    for (const QString& key : persistedParameterPassthroughKeys()) {
+    static const QStringList kPassthroughKeys = {
+        kOptimizationMethodKey,
+        persistedPerformanceMetricsKey(),
+        kTagsKey
+    };
+    for (const QString& key : kPassthroughKeys) {
         if (!strategy.contains(key)) {
             continue;
         }
@@ -808,8 +421,6 @@ QVariantMap buildPersistedParameters(const QVariantMap& strategy)
 
         parameters.insert(key, value);
     }
-
-    clearRuntimePresentationFields(parameters);
 
     applyRuntimeIndexesToMap(parameters, runtimeIndexes);
 
@@ -831,26 +442,6 @@ QVariantMap mergeVariantMapsRecursive(const QVariantMap& base, const QVariantMap
     return merged;
 }
 
-void restoreStrategyExtrasFromParameters(QVariantMap& strategy)
-{
-    QVariantMap parameters = strategy.value(persistedParametersKey()).toMap();
-    const StrategyRuntimeProperties runtimeIndexes = runtimeIndexesFromParameters(parameters);
-    clearRuntimePresentationFields(strategy);
-
-    if (parameters.isEmpty()) {
-        return;
-    }
-
-    applyRuntimeIndexesToMap(strategy, runtimeIndexes);
-
-    for (const QString& key : persistedParameterPassthroughKeys()) {
-        if (parameters.contains(key)) {
-            strategy.insert(key, parameters.value(key));
-        }
-    }
-
-}
-
 }
 
 bool PersistedStrategyData::isValid() const
@@ -863,66 +454,77 @@ QVariantMap PersistedStrategyData::toVariantMap() const
     QVariantMap strategyMap;
     QVariantMap persistedParameters = parameters;
     if (!strategyId.empty()) {
-        strategyMap.insert(persistedStrategyIdKey(), QString::fromStdString(strategyId));
+        strategyMap.insert(kStrategyIdKey, QString::fromStdString(strategyId));
     }
     if (engineStrategyId > 0ULL) {
-        strategyMap.insert(persistedEngineStrategyIdKey(), QVariant::fromValue<qulonglong>(engineStrategyId));
+        strategyMap.insert(kEngineStrategyIdKey, QVariant::fromValue<qulonglong>(engineStrategyId));
     }
     if (!strategyCode.empty()) {
-        strategyMap.insert(persistedStrategyCodeKey(), QString::fromStdString(strategyCode));
+        strategyMap.insert(kStrategyCodeKey, QString::fromStdString(strategyCode));
     }
     const QVariantMap metadataMap = metadataToVariantMap(metadata);
-    strategyMap.insert(persistedMetadataJsonKey(), metadataMap);
+    strategyMap.insert(kMetadataKey, metadataMap);
     const QString strategyName = QString::fromStdString(metadata.name);
     if (!strategyName.trimmed().isEmpty()) {
-        strategyMap.insert(QStringLiteral("strategyName"), strategyName);
+        strategyMap.insert(kStrategyNameKey, strategyName);
     }
     const QString description = QString::fromStdString(metadata.description);
     if (!description.trimmed().isEmpty()) {
-        strategyMap.insert(QStringLiteral("description"), description);
+        strategyMap.insert(kDescriptionKey, description);
     }
     if (!version.empty()) {
-        strategyMap.insert(persistedVersionKey(), QString::fromStdString(version));
+        strategyMap.insert(kVersionKey, QString::fromStdString(version));
     }
     if (!author.empty()) {
-        strategyMap.insert(persistedAuthorKey(), QString::fromStdString(author));
+        strategyMap.insert(kAuthorKey, QString::fromStdString(author));
     }
     switch (language) {
     case StrategyLanguageCode::Cpp:
-        strategyMap.insert(persistedLanguageKey(), persistedLanguageText(StrategyLanguageCode::Cpp));
+        strategyMap.insert(kLanguageKey, persistedLanguageText(StrategyLanguageCode::Cpp));
         break;
     case StrategyLanguageCode::Julia:
-        strategyMap.insert(persistedLanguageKey(), persistedLanguageText(StrategyLanguageCode::Julia));
+        strategyMap.insert(kLanguageKey, persistedLanguageText(StrategyLanguageCode::Julia));
         break;
     case StrategyLanguageCode::R:
-        strategyMap.insert(persistedLanguageKey(), persistedLanguageText(StrategyLanguageCode::R));
+        strategyMap.insert(kLanguageKey, persistedLanguageText(StrategyLanguageCode::R));
         break;
     case StrategyLanguageCode::Python:
     default:
-        strategyMap.insert(persistedLanguageKey(), persistedLanguageText(StrategyLanguageCode::Python));
+        strategyMap.insert(kLanguageKey, persistedLanguageText(StrategyLanguageCode::Python));
         break;
     }
 
     if (strategy_view::isKnownStrategyLifecycleStatus(status)) {
-        strategyMap.insert(persistedStatusIndexKey(), strategy_view::strategyLifecycleStatusIndex(status));
+        strategyMap.insert(kStatusIndexKey, strategy_view::strategyLifecycleStatusIndex(status));
     }
 
     if (createdAt.isValid()) {
-        strategyMap.insert(persistedCreatedAtKey(), createdAt);
+        strategyMap.insert(kCreatedAtKey, createdAt);
     }
     if (updatedAt.isValid()) {
-        strategyMap.insert(persistedUpdatedAtKey(), updatedAt);
+        strategyMap.insert(kUpdatedAtKey, updatedAt);
     }
 
     if (strategyIdentity.validStoredType) {
-        const QVariantMap identityMap = strategyIdentityToVariantMap(strategyIdentity);
-        strategyMap.insert(persistedStrategyIdentityJsonKey(), identityMap);
-        writePersistedStrategyIdentityFields(strategyMap, strategyIdentity);
+        QVariantMap identityMap;
+        identityMap.insert(kStrategyTypeIndexKeyName, strategyIdentity.storedTypeIndex());
+        if (strategyIdentity.behavior.valid) {
+            identityMap.insert(kStrategyBehaviorKindKeyName, strategyIdentity.behavior.index());
+        }
+        strategyMap.insert(kStrategyIdentityKey, identityMap);
+        strategyMap.insert(kStrategyTypeIndexKeyName, strategyIdentity.storedTypeIndex());
+        if (strategyIdentity.behavior.valid) {
+            strategyMap.insert(kStrategyBehaviorKindKeyName, strategyIdentity.behavior.index());
+        } else {
+            strategyMap.remove(kStrategyBehaviorKindKeyName);
+        }
     }
 
     applyRuntimeIndexesToMap(persistedParameters, runtime);
-    strategyMap.insert(persistedRuntimeJsonKey(), runtimeToVariantMap(runtime));
-    strategyMap.insert(persistedParametersKey(), persistedParameters);
+    QVariantMap runtimeMap;
+    applyRuntimeIndexesToMap(runtimeMap, runtime);
+    strategyMap.insert(kRuntimeKey, runtimeMap);
+    strategyMap.insert(kParametersKey, persistedParameters);
     if (!performanceMetrics.isEmpty()) {
         strategyMap.insert(persistedPerformanceMetricsKey(), performanceMetrics);
     }
@@ -934,27 +536,24 @@ QVariantMap PersistedStrategyData::toVariantMap() const
 PersistedStrategyData PersistedStrategyData::fromVariantMap(const QVariantMap& strategyMap)
 {
     PersistedStrategyData data;
-    data.strategyId = strategyMap.value(persistedStrategyIdKey()).toString().toStdString();
-    data.engineStrategyId = strategyMap.value(persistedEngineStrategyIdKey()).toULongLong();
-    data.strategyCode = strategyMap.value(persistedStrategyCodeKey()).toString().toStdString();
+    data.strategyId = strategyMap.value(kStrategyIdKey).toString().toStdString();
+    data.engineStrategyId = strategyMap.value(kEngineStrategyIdKey).toULongLong();
+    data.strategyCode = strategyMap.value(kStrategyCodeKey).toString().toStdString();
 
-    data.metadata = metadataFromVariantMap(strategyMap.value(persistedMetadataJsonKey()).toMap());
+    data.metadata = metadataFromVariantMap(strategyMap.value(kMetadataKey).toMap());
 
     data.strategyIdentity = domain::backtest::resolveStrategyIdentity(
-        strategyMap.value(persistedStrategyIdentityJsonKey()).toMap());
+        strategyMap.value(kStrategyIdentityKey).toMap());
 
-    data.version = strategyMap.value(persistedVersionKey()).toString().toStdString();
-    data.author = strategyMap.value(persistedAuthorKey()).toString().toStdString();
-    data.language = persistedLanguageCodeFromRaw(strategyMap.value(persistedLanguageKey()).toString());
-    data.status = strategy_view::resolveStrategyLifecycleStatus(strategyMap.value(persistedStatusIndexKey()));
-    data.createdAt = strategyMap.value(persistedCreatedAtKey()).toDateTime();
-    data.updatedAt = strategyMap.value(persistedUpdatedAtKey()).toDateTime();
-    data.parameters = strategyMap.value(persistedParametersKey()).toMap();
+    data.version = strategyMap.value(kVersionKey).toString().toStdString();
+    data.author = strategyMap.value(kAuthorKey).toString().toStdString();
+    data.language = persistedLanguageCodeFromRaw(strategyMap.value(kLanguageKey).toString());
+    data.status = strategy_view::resolveStrategyLifecycleStatus(strategyMap.value(kStatusIndexKey));
+    data.createdAt = strategyMap.value(kCreatedAtKey).toDateTime();
+    data.updatedAt = strategyMap.value(kUpdatedAtKey).toDateTime();
+    data.parameters = strategyMap.value(kParametersKey).toMap();
     data.performanceMetrics = strategyMap.value(persistedPerformanceMetricsKey()).toMap();
-    data.runtime = runtimeIndexesFromStrategy(strategyMap.value(persistedRuntimeJsonKey()).toMap());
-    if (!data.runtime.hasAny()) {
-        data.runtime = runtimeIndexesFromParameters(data.parameters);
-    }
+    data.runtime = runtimeIndexesFromMap(strategyMap.value(kRuntimeKey).toMap());
 
     return data;
 }
@@ -983,8 +582,16 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
     }
     
     if (query.next()) {
-        return hydrateStrategyDataWithParameters(rowToStrategyData(query),
-                                                 loadStrategyParameters(strategyId, conn.get()));
+        PersistedStrategyData strategyData = rowToStrategyData(query);
+        const QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
+        if (parameters.isEmpty()) {
+            return strategyData;
+        }
+
+        QVariantMap strategyMap = strategyData.toVariantMap();
+        strategyMap.insert(kParametersKey, parameters);
+        return PersistedStrategyData::fromVariantMap(strategyMap);
+        QString strategyId = query.value(kStrategyIdKey).toString();
     }
     
     return std::nullopt;
@@ -1007,9 +614,16 @@ std::optional<PersistedStrategyData> StrategyRepository::findByCode(const QStrin
     }
     
     if (query.next()) {
-        QString strategyId = query.value(persistedStrategyIdKey()).toString();
-        return hydrateStrategyDataWithParameters(rowToStrategyData(query),
-                                                 loadStrategyParameters(strategyId, conn.get()));
+        QString strategyId = query.value(kStrategyIdKey).toString();
+        PersistedStrategyData strategyData = rowToStrategyData(query);
+        const QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
+        if (parameters.isEmpty()) {
+            return strategyData;
+        }
+
+        QVariantMap strategyMap = strategyData.toVariantMap();
+        strategyMap.insert(kParametersKey, parameters);
+        return PersistedStrategyData::fromVariantMap(strategyMap);
     }
     
     return std::nullopt;
@@ -1023,24 +637,9 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
     }
 
     QSqlDatabase& db = conn.get();
-    qWarning() << "[StrategyRepository] findAll db host=" << db.hostName()
-               << "port=" << db.port()
-               << "name=" << db.databaseName()
-               << "user=" << db.userName();
-
-    {
-        QSqlQuery countQuery(db);
-        if (countQuery.exec(QStringLiteral("SELECT COUNT(*) FROM strategy")) && countQuery.next()) {
-            qWarning() << "[StrategyRepository] findAll precheck strategy count=" << countQuery.value(0).toInt();
-        } else {
-            qWarning() << "[StrategyRepository] findAll precheck count failed:" << countQuery.lastError().text();
-        }
-    }
 
     QSqlQuery query(db);
-    const QString sql = selectStrategiesSql();
-    qWarning() << "[StrategyRepository] findAll sql=" << sql;
-    query.prepare(sql);
+    query.prepare(selectStrategiesSql());
     if (!query.exec()) {
         qWarning() << "[StrategyRepository] Failed to find all strategies:" << query.lastError().text();
         return {};
@@ -1050,8 +649,6 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
     while (query.next()) {
         strategies.push_back(rowToStrategyData(query));
     }
-
-    qWarning() << "[StrategyRepository] findAll fetched rows=" << static_cast<int>(strategies.size());
 
     return strategies;
 }
@@ -1070,7 +667,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findByType(StrategyStored
     QSqlQuery query(conn.get());
     query.prepare(selectStrategiesWithoutParametersSql(
         QStringLiteral("WHERE JSON_EXTRACT(strategy_identity_json, '$.%1') = ? ORDER BY created_at DESC")
-            .arg(persistedStrategyTypeIndexKey())));
+            .arg(QStringLiteral("strategyTypeIndex"))));
     query.addBindValue(static_cast<int>(strategyType));
     
     if (!query.exec()) {
@@ -1080,9 +677,15 @@ std::vector<PersistedStrategyData> StrategyRepository::findByType(StrategyStored
     
     std::vector<PersistedStrategyData> strategies;
     while (query.next()) {
-        QString strategyId = query.value(persistedStrategyIdKey()).toString();
-        strategies.push_back(hydrateStrategyDataWithParameters(rowToStrategyData(query),
-                                                               loadStrategyParameters(strategyId, conn.get())));
+        QString strategyId = query.value(kStrategyIdKey).toString();
+        PersistedStrategyData strategyData = rowToStrategyData(query);
+        const QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
+        if (!parameters.isEmpty()) {
+            QVariantMap strategyMap = strategyData.toVariantMap();
+            strategyMap.insert(kParametersKey, parameters);
+            strategyData = PersistedStrategyData::fromVariantMap(strategyMap);
+        }
+        strategies.push_back(std::move(strategyData));
     }
     
     return strategies;
@@ -1105,7 +708,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findByStatus(strategy_vie
     QSqlQuery query(conn.get());
     query.prepare(selectStrategiesWithoutParametersSql(
         QStringLiteral("WHERE status = ? ORDER BY created_at DESC")));
-    bindPersistedStatusCode(query, statusCode);
+    query.addBindValue(persistedStatusCodeText(statusCode));
     
     if (!query.exec()) {
         qWarning() << "[StrategyRepository] Failed to find strategies by status:" << query.lastError().text();
@@ -1114,9 +717,15 @@ std::vector<PersistedStrategyData> StrategyRepository::findByStatus(strategy_vie
     
     std::vector<PersistedStrategyData> strategies;
     while (query.next()) {
-        QString strategyId = query.value(persistedStrategyIdKey()).toString();
-        strategies.push_back(hydrateStrategyDataWithParameters(rowToStrategyData(query),
-                                                               loadStrategyParameters(strategyId, conn.get())));
+        QString strategyId = query.value(kStrategyIdKey).toString();
+        PersistedStrategyData strategyData = rowToStrategyData(query);
+        const QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
+        if (!parameters.isEmpty()) {
+            QVariantMap strategyMap = strategyData.toVariantMap();
+            strategyMap.insert(kParametersKey, parameters);
+            strategyData = PersistedStrategyData::fromVariantMap(strategyMap);
+        }
+        strategies.push_back(std::move(strategyData));
     }
     
     return strategies;
@@ -1143,20 +752,21 @@ std::vector<PersistedStrategyData> StrategyRepository::search(const QString& key
     
     std::vector<PersistedStrategyData> strategies;
     while (query.next()) {
-        QString strategyId = query.value(persistedStrategyIdKey()).toString();
-        strategies.push_back(hydrateStrategyDataWithParameters(rowToStrategyData(query),
-                                                               loadStrategyParameters(strategyId, conn.get())));
+        QString strategyId = query.value(QStringLiteral("strategyId")).toString();
+        PersistedStrategyData strategyData = rowToStrategyData(query);
+        const QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
+        if (!parameters.isEmpty()) {
+            QVariantMap strategyMap = strategyData.toVariantMap();
+            strategyMap.insert(QStringLiteral("parameters"), parameters);
+            strategyData = PersistedStrategyData::fromVariantMap(strategyMap);
+        }
+        strategies.push_back(std::move(strategyData));
     }
     
     return strategies;
 }
 
 QString StrategyRepository::save(const PersistedStrategyData& strategy) {
-    if (!validateStrategy(strategy)) {
-        qWarning() << "[StrategyRepository] Invalid strategy data";
-        return QString();
-    }
-    
     ScopedConnection conn;
     if (!conn.isValid()) {
         qWarning() << "[StrategyRepository] Failed to get database connection";
@@ -1225,22 +835,23 @@ bool StrategyRepository::update(const QString& strategyId, const PersistedStrate
     QVariantMap updatedStrategy = rowToStrategyData(existingQuery).toVariantMap();
     const QVariantMap existingParameters = loadStrategyParameters(strategyId, db);
     if (!existingParameters.isEmpty()) {
-        updatedStrategy[persistedParametersKey()] = existingParameters;
-        restoreStrategyExtrasFromParameters(updatedStrategy);
+        updatedStrategy[kParametersKey] = existingParameters;
     }
 
     const QVariantMap incomingStrategy = strategy.toVariantMap();
 
     for (auto it = incomingStrategy.begin(); it != incomingStrategy.end(); ++it) {
-        if (it.key() == persistedParametersKey()) {
+        if (it.key() == kParametersKey) {
             updatedStrategy[it.key()] = mergeVariantMapsRecursive(existingParameters, it.value().toMap());
             continue;
         }
         updatedStrategy[it.key()] = it.value();
     }
-    updatedStrategy[persistedStrategyIdKey()] = strategyId;
-    
-    QString resultId = saveStrategyInternal(PersistedStrategyData::fromVariantMap(updatedStrategy), db, true);
+    updatedStrategy[kStrategyIdKey] = strategyId;
+
+    const PersistedStrategyData mergedStrategy = PersistedStrategyData::fromVariantMap(updatedStrategy);
+
+    QString resultId = saveStrategyInternal(mergedStrategy, db, true);
     bool success = !resultId.isEmpty();
     
     if (success) {
@@ -1272,8 +883,12 @@ bool StrategyRepository::remove(const QString& strategyId) {
     }
     
     // 删除参数
-    if (!deleteStrategyParameters(strategyId, db)) {
-        qWarning() << "[StrategyRepository] Failed to delete strategy parameters";
+    QSqlQuery clearParametersQuery(db);
+    clearParametersQuery.prepare("UPDATE strategy SET parameters = '{}' WHERE strategy_id = ?");
+    clearParametersQuery.addBindValue(strategyId);
+    if (!clearParametersQuery.exec()) {
+        qWarning() << "[StrategyRepository] Failed to delete strategy parameters:"
+                   << clearParametersQuery.lastError().text();
         db.rollback();
         return false;
     }
@@ -1392,14 +1007,6 @@ bool StrategyRepository::clearAll() {
         return false;
     }
     
-    // 清空参数
-    QSqlQuery clearParamsQuery(db);
-    if (!clearParamsQuery.exec("DELETE FROM backtest_config WHERE config_id IN (SELECT config_id FROM backtest_config)")) {
-        qWarning() << "[StrategyRepository] Failed to clear backtest config:" << clearParamsQuery.lastError().text();
-        db.rollback();
-        return false;
-    }
-    
     // 清空策略
     QSqlQuery clearStrategyQuery(db);
     if (!clearStrategyQuery.exec("DELETE FROM strategy")) {
@@ -1433,7 +1040,7 @@ bool StrategyRepository::updateStatus(const QString& strategyId, strategy_view::
     
     QSqlQuery query(conn.get());
     query.prepare("UPDATE strategy SET status = ?, updated_at = NOW() WHERE strategy_id = ?");
-    bindPersistedStatusCode(query, statusCode);
+    query.addBindValue(persistedStatusCodeText(statusCode));
     query.addBindValue(strategyId);
     
     if (!query.exec()) {
@@ -1487,13 +1094,13 @@ PersistedStrategyData StrategyRepository::rowToStrategyData(const QSqlQuery& que
     }
     
     // 解析参数 JSON
-    int parametersColumn = query.record().indexOf("parameters");
+    int parametersColumn = query.record().indexOf(kParametersKey);
     if (parametersColumn >= 0) {
         QString parametersJson = query.value(parametersColumn).toString();
         if (!parametersJson.isEmpty()) {
             QVariantMap parameters;
             if (tryParseJsonObjectVariantMap(parametersJson, parameters)) {
-                assignStrategyParameters(strategy, parameters);
+                strategy.insert(kParametersKey, parameters);
             }
         }
     }
@@ -1513,7 +1120,7 @@ QVariantMap StrategyRepository::loadStrategyParameters(const QString& strategyId
         return QVariantMap();
     }
     
-    QString parametersJson = query.value("parameters_text").toString();
+    QString parametersJson = query.value(kParametersTextColumnKey).toString();
     if (parametersJson.isEmpty()) {
         return QVariantMap();
     }
@@ -1526,60 +1133,26 @@ QVariantMap StrategyRepository::loadStrategyParameters(const QString& strategyId
     return parameters;
 }
 
-bool StrategyRepository::saveStrategyParameters(const QString& strategyId, const QVariantMap& parameters, QSqlDatabase& db) {
-    // 将参数转换为 JSON 字符串
-    QJsonObject jsonObj = QJsonObject::fromVariantMap(parameters);
-    QJsonDocument doc(jsonObj);
-    QString parametersJson = doc.toJson(QJsonDocument::Compact);
-    
-    QSqlQuery query(db);
-    query.prepare("UPDATE strategy SET parameters = ? WHERE strategy_id = ?");
-    query.addBindValue(parametersJson);
-    query.addBindValue(strategyId);
-    
-    if (!query.exec()) {
-        qWarning() << "[StrategyRepository] Failed to save strategy parameters:" << query.lastError().text();
-        return false;
-    }
-    
-    return true;
-}
-
-bool StrategyRepository::deleteStrategyParameters(const QString& strategyId, QSqlDatabase& db) {
-    // 参数保存在 strategy 表的 JSON 字段中，更新为空 JSON 即可
-    QSqlQuery query(db);
-    query.prepare("UPDATE strategy SET parameters = '{}' WHERE strategy_id = ?");
-    query.addBindValue(strategyId);
-    
-    if (!query.exec()) {
-        qWarning() << "[StrategyRepository] Failed to delete strategy parameters:" << query.lastError().text();
-        return false;
-    }
-    
-    return true;
-}
-
 QString StrategyRepository::saveStrategyInternal(const PersistedStrategyData& strategy, QSqlDatabase& db, bool isUpdate) {
     const QVariantMap strategyMap = strategy.toVariantMap();
     QString strategyId = QString::fromStdString(strategy.strategyId);
     QString strategyCode = QString::fromStdString(strategy.strategyCode);
-    QString strategyName = QString::fromStdString(strategy.metadata.name);
-    const QString metadataJson = toCompactJsonText(strategyMap.value(persistedMetadataJsonKey()).toMap());
-    const QString strategyIdentityJson = toCompactJsonText(strategyMap.value(persistedStrategyIdentityJsonKey()).toMap());
-    const QString runtimeJson = toCompactJsonText(strategyMap.value(persistedRuntimeJsonKey()).toMap());
+    const QString strategyName = QString::fromStdString(strategy.metadata.name);
+    const QString metadataJson = toCompactJsonText(strategyMap.value(kMetadataKey).toMap());
+    const QString strategyIdentityJson = toCompactJsonText(strategyMap.value(kStrategyIdentityKey).toMap());
+    const QString runtimeJson = toCompactJsonText(strategyMap.value(kRuntimeKey).toMap());
     const QString performanceJson = toCompactJsonText(strategy.performanceMetrics);
-    QString version = QString::fromStdString(strategy.version);
-    QString author = QString::fromStdString(strategy.author);
+    const QString version = QString::fromStdString(strategy.version);
+    const QString author = QString::fromStdString(strategy.author);
     const StrategyLanguageCode languageCode = strategy.language;
     const ResolvedStrategyIdentity strategyIdentity = strategy.strategyIdentity;
-    const strategy_view::StrategyLifecycleStatus strategyStatus = strategy.status;
-    const PersistedStrategyStatusCode statusCode = persistedStatusCodeFromLifecycle(strategyStatus);
-    
 
     if (strategyName.isEmpty() || !strategyIdentity.validStoredType) {
         qWarning() << "[StrategyRepository] Strategy name and type are required";
         return QString();
     }
+
+    const PersistedStrategyStatusCode statusCode = persistedStatusCodeFromLifecycle(strategy.status);
     if (statusCode == PersistedStrategyStatusCode::Unknown) {
         qWarning() << "[StrategyRepository] Strategy statusIndex is required and must be persistable";
         return QString();
@@ -1601,8 +1174,8 @@ QString StrategyRepository::saveStrategyInternal(const PersistedStrategyData& st
         query.addBindValue(strategyIdentityJson);
         query.addBindValue(version);
         query.addBindValue(author);
-        bindPersistedLanguageCode(query, languageCode);
-        bindPersistedStatusCode(query, statusCode);
+        query.addBindValue(persistedLanguageText(languageCode));
+        query.addBindValue(persistedStatusCodeText(statusCode));
         query.addBindValue(runtimeJson);
         query.addBindValue(performanceJson);
         query.addBindValue(strategyId);
@@ -1648,8 +1221,8 @@ QString StrategyRepository::saveStrategyInternal(const PersistedStrategyData& st
         query.addBindValue(strategyIdentityJson);
         query.addBindValue(version);
         query.addBindValue(author);
-        bindPersistedLanguageCode(query, languageCode);
-        bindPersistedStatusCode(query, statusCode);
+        query.addBindValue(persistedLanguageText(languageCode));
+        query.addBindValue(persistedStatusCodeText(statusCode));
         query.addBindValue(runtimeJson);
         query.addBindValue(performanceJson);
     }
@@ -1669,89 +1242,33 @@ QString StrategyRepository::saveStrategyInternal(const PersistedStrategyData& st
     
     const QVariantMap parameters = buildPersistedParameters(strategyMap);
     if (isUpdate) {
-        if (!deleteStrategyParameters(strategyId, db)) {
+        QSqlQuery clearParametersQuery(db);
+        clearParametersQuery.prepare("UPDATE strategy SET parameters = '{}' WHERE strategy_id = ?");
+        clearParametersQuery.addBindValue(strategyId);
+        if (!clearParametersQuery.exec()) {
+            qWarning() << "[StrategyRepository] Failed to delete strategy parameters:"
+                       << clearParametersQuery.lastError().text();
             return QString();
         }
     }
 
     if (!parameters.isEmpty()) {
-        if (!saveStrategyParameters(strategyId, parameters, db)) {
+        const QString parametersJson = QString::fromUtf8(
+            QJsonDocument(QJsonObject::fromVariantMap(parameters)).toJson(QJsonDocument::Compact));
+
+        QSqlQuery saveParametersQuery(db);
+        saveParametersQuery.prepare("UPDATE strategy SET parameters = ? WHERE strategy_id = ?");
+        saveParametersQuery.addBindValue(parametersJson);
+        saveParametersQuery.addBindValue(strategyId);
+
+        if (!saveParametersQuery.exec()) {
+            qWarning() << "[StrategyRepository] Failed to save strategy parameters:"
+                       << saveParametersQuery.lastError().text();
             return QString();
         }
     }
     
     return strategyId;
-}
-
-bool StrategyRepository::validateStrategy(const PersistedStrategyData& strategy) const {
-    const QVariantMap strategyMap = strategy.toVariantMap();
-    if (strategy.metadata.name.empty()) {
-        qWarning() << "[StrategyRepository] Validation failed: metadata.name is required";
-        return false;
-    }
-    
-    const ResolvedStrategyIdentity strategyIdentity = strategy.strategyIdentity;
-    if (!strategyIdentity.validStoredType) {
-        qWarning() << "[StrategyRepository] Validation failed: strategyTypeIndex or strategyBehaviorKind is required";
-        return false;
-    }
-    
-    if (strategyMap.contains(persistedStatusRawKey()) && !strategyMap.contains(persistedStatusIndexKey())) {
-        qWarning() << "[StrategyRepository] Validation failed: statusIndex is required; raw status text is not accepted";
-        return false;
-    }
-
-    if (strategyMap.contains(persistedStatusIndexKey())) {
-        const strategy_view::StrategyLifecycleStatus status = strategy.status;
-        if (persistedStatusCodeFromLifecycle(status) == PersistedStrategyStatusCode::Unknown) {
-            qWarning() << "[StrategyRepository] Validation failed: invalid persisted statusIndex";
-            return false;
-        }
-    }
-
-    if (!requireRuntimeIndexForRejectedRawText(strategyMap,
-                                       rejectedLegacyAssetTypeKey(),
-                                       runtimeAssetTypeKey(),
-                                       persistedAssetTypeIndexKey(),
-                                       "[StrategyRepository] Validation failed: assetTypeIndex is required; raw asset type text is not accepted")) {
-        return false;
-    }
-
-    if (!validateRuntimeIndexRange(strategy.runtime.assetTypeIndex,
-                                   6,
-                                   "[StrategyRepository] Validation failed: invalid assetTypeIndex")) {
-        return false;
-    }
-
-    if (!requireRuntimeIndexForRejectedRawText(strategyMap,
-                                       rejectedLegacyTimeFrameKey(),
-                                       runtimeTimeFrameKey(),
-                                       persistedTimeFrameIndexKey(),
-                                       "[StrategyRepository] Validation failed: timeFrameIndex is required; raw time frame text is not accepted")) {
-        return false;
-    }
-
-    if (!validateRuntimeIndexRange(strategy.runtime.timeFrameIndex,
-                                   10,
-                                   "[StrategyRepository] Validation failed: invalid timeFrameIndex")) {
-        return false;
-    }
-
-    if (!requireRuntimeIndexForRejectedRawText(strategyMap,
-                                       rejectedLegacyRiskLevelKey(),
-                                       runtimeRiskLevelKey(),
-                                       persistedRiskLevelIndexKey(),
-                                       "[StrategyRepository] Validation failed: riskLevelIndex is required; raw risk level text is not accepted")) {
-        return false;
-    }
-
-    if (!validateRuntimeIndexRange(strategy.runtime.riskLevelIndex,
-                                   4,
-                                   "[StrategyRepository] Validation failed: invalid riskLevelIndex")) {
-        return false;
-    }
-    
-    return true;
 }
 
 QString StrategyRepository::generateStrategyCode(const PersistedStrategyData& strategy) const {

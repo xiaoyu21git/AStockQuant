@@ -19,8 +19,6 @@ constexpr const char* kParameters = "parameters";
 constexpr const char* kPerformanceMetrics = "performance_metrics";
 constexpr const char* kAdvancedOptions = "advanced_options";
 constexpr const char* kOptimizationConfig = "optimization_config";
-constexpr const char* kBacktestRuntime = "backtest_runtime";
-constexpr const char* kBacktestSettings = "backtest_settings";
 constexpr const char* kStages = "stages";
 constexpr const char* kGroups = "groups";
 constexpr const char* kRules = "rules";
@@ -31,7 +29,6 @@ namespace structurekeys {
 
 constexpr const char* kRuleProfile = "rule_profile";
 constexpr const char* kExecutionPolicy = "execution_policy";
-constexpr const char* kBacktestAssumptions = "backtest_assumptions";
 constexpr const char* kStrategyScopeContext = "strategy_scope_context";
 constexpr const char* kFactorOverlay = "factor_overlay";
 
@@ -132,10 +129,6 @@ void assignResolvedStructure(StrategyStructureResolution& resolution,
     }
     if (key == keyText(structurekeys::kExecutionPolicy)) {
         resolution.executionPolicy = resolvedMap;
-        return;
-    }
-    if (key == keyText(structurekeys::kBacktestAssumptions)) {
-        resolution.backtestAssumptions = resolvedMap;
         return;
     }
     if (key == keyText(structurekeys::kStrategyScopeContext)) {
@@ -360,7 +353,7 @@ public:
 
     [[nodiscard]] QVector<domain::strategy::StrategyTag> readTags(const QList<QVariantMap>& sources) const
     {
-        const QVariantList items = variantListValue(firstConfiguredValue(sources, {"tags", "tagList"}));
+        const QVariantList items = variantListValue(firstConfiguredValue(sources, {"tags"}));
         QVector<domain::strategy::StrategyTag> tags;
         tags.reserve(items.size());
         for (const QVariant& item : items) {
@@ -414,14 +407,14 @@ public:
                 continue;
             }
 
-            const QString factorIdText = firstConfiguredValue({allocationMap}, {"factor_id", "factorId"}).toString().trimmed();
+            const QString factorIdText = firstConfiguredValue({allocationMap}, {"factorId"}).toString().trimmed();
             if (factorIdText.isEmpty()) {
                 continue;
             }
 
             bool ok = false;
             const double weightPercent = firstConfiguredValue(
-                {allocationMap}, {"weight_percent", "weightPercent", "weight"}).toDouble(&ok);
+                {allocationMap}, {"weightPercent", "weight"}).toDouble(&ok);
             if (!ok || !std::isfinite(weightPercent) || weightPercent <= 0.0) {
                 continue;
             }
@@ -431,17 +424,6 @@ public:
         return allocations;
     }
 
-    [[nodiscard]] QDateTime configuredBacktestDateTime(const QVariantMap& source) const
-    {
-        QDateTime recordedAt = firstConfiguredValue({source}, {"recordedAt", "lastBacktestAt"}).toDateTime();
-        if (recordedAt.isValid()) {
-            return recordedAt;
-        }
-
-        return QDateTime::fromString(
-            firstConfiguredValue({source}, {"recordedAt", "lastBacktestAt"}).toString().trimmed(),
-            Qt::ISODate);
-    }
 };
 
 class StrategyRuleStateAssembler final {
@@ -454,7 +436,7 @@ public:
     [[nodiscard]] domain::strategy::RuleGroupOperator configuredGroupOperator(const QVariantMap& map) const
     {
         bool ok = false;
-        const int index = reader_.firstConfiguredValue({map}, {"groupOperator", "group_operator"}).toInt(&ok);
+        const int index = reader_.firstConfiguredValue({map}, {"groupOperator"}).toInt(&ok);
         if (ok) {
             switch (static_cast<domain::strategy::RuleGroupOperator>(index)) {
             case domain::strategy::RuleGroupOperator::All:
@@ -472,7 +454,7 @@ public:
     [[nodiscard]] domain::strategy::RuleGroupRole configuredGroupRole(const QVariantMap& map) const
     {
         bool ok = false;
-        const int index = reader_.firstConfiguredValue({map}, {"groupRole", "group_role"}).toInt(&ok);
+        const int index = reader_.firstConfiguredValue({map}, {"groupRole"}).toInt(&ok);
         if (ok) {
             switch (static_cast<domain::strategy::RuleGroupRole>(index)) {
             case domain::strategy::RuleGroupRole::Unspecified:
@@ -542,7 +524,7 @@ public:
                 group.groupRole = configuredGroupRole(groupMap);
                 group.groupOperator = configuredGroupOperator(groupMap);
                 group.minimumMatchCount = reader_.configuredInteger(
-                    {groupMap}, {"minimumMatchCount", "groupMinMatchCount"});
+                    {groupMap}, {"minimumMatchCount"});
 
                 const QVariantList ruleValues = rawNestedList(groupMap, rawkeys::kRules);
                 group.rules.reserve(ruleValues.size());
@@ -587,7 +569,7 @@ private:
         const QVariantMap& map) const
     {
         bool ok = false;
-        const int index = reader_.firstConfiguredValue({map}, {"phase", "bindingPhase"}).toInt(&ok);
+        const int index = reader_.firstConfiguredValue({map}, {"phase"}).toInt(&ok);
         if (!ok) {
             return std::nullopt;
         }
@@ -655,7 +637,6 @@ public:
 
         aggregate.spec.ruleProfile = buildRuleProfile(resolution.ruleProfile);
         aggregate.spec.executionPolicy = buildExecutionPolicy(resolution.executionPolicy);
-        aggregate.spec.backtestAssumptions = buildBacktestAssumptions(resolution.backtestAssumptions);
         aggregate.spec.strategyScopeContext = buildScopeContext(resolution.strategyScopeContext,
                                                                 aggregate.runtime);
 
@@ -664,27 +645,10 @@ public:
         aggregate.spec.ruleTemplateBindings = ruleStateAssembler_.readRuleTemplateBindings(aggregate.spec.ruleComposerState);
 
         const QVariantMap performanceSummaryData = rawNestedMap(rawStrategy, rawkeys::kPerformanceMetrics);
-        const QVariantMap latestBacktestData = variantMapValue(
-            reader_.firstConfiguredValue({performanceSummaryData, rawStrategy}, {"latestBacktest"}));
-        const QVariantList backtestHistoryData = variantListValue(
-            reader_.firstConfiguredValue({performanceSummaryData, rawStrategy}, {"backtestHistory"}));
-
-        aggregate.performanceSummary.lastBacktestAt = reader_.configuredBacktestDateTime(
-            latestBacktestData.isEmpty() ? performanceSummaryData : latestBacktestData);
-        aggregate.performanceSummary.latestMetrics = buildPerformanceSummary(
-            latestBacktestData.isEmpty() ? performanceSummaryData : latestBacktestData);
-
-        if (!latestBacktestData.isEmpty()) {
-            aggregate.latestBacktestSnapshot = buildBacktestSnapshot(
-                latestBacktestData,
-                aggregate.spec,
-                aggregate.identity.executionKind);
-        }
-
-        aggregate.backtestHistory = buildBacktestHistory(
-            backtestHistoryData,
-            aggregate.spec,
-            aggregate.identity.executionKind);
+        aggregate.performanceSummary.lastRecordedAt = reader_.configuredDateTime(
+            {performanceSummaryData, rawStrategy},
+            {"recordedAt"});
+        aggregate.performanceSummary.latestMetrics = buildPerformanceSummary(performanceSummaryData);
         return aggregate;
     }
 
@@ -693,21 +657,21 @@ private:
     {
         const QList<QVariantMap> sources{source};
         domain::strategy::PerformanceSummaryMetrics metrics;
-        metrics.totalReturn = reader_.configuredDouble(sources, {"totalReturn", "total_return"});
-        metrics.annualizedReturn = reader_.configuredDouble(sources, {"annualizedReturn", "annualized_return"});
+        metrics.totalReturn = reader_.configuredDouble(sources, {"totalReturn"});
+        metrics.annualizedReturn = reader_.configuredDouble(sources, {"annualizedReturn"});
         metrics.volatility = reader_.configuredDouble(sources, {"volatility"});
-        metrics.sharpeRatio = reader_.configuredDouble(sources, {"sharpeRatio", "sharpe_ratio"});
-        metrics.sortinoRatio = reader_.configuredDouble(sources, {"sortinoRatio", "sortino_ratio"});
-        metrics.calmarRatio = reader_.configuredDouble(sources, {"calmarRatio", "calmar_ratio"});
-        metrics.maxDrawdown = reader_.configuredDouble(sources, {"maxDrawdown", "max_drawdown"});
-        metrics.winRate = reader_.configuredDouble(sources, {"winRate", "win_rate"});
-        metrics.profitFactor = reader_.configuredDouble(sources, {"profitFactor", "profit_factor"});
-        metrics.averageWin = reader_.configuredDouble(sources, {"averageWin", "average_win"});
-        metrics.averageLoss = reader_.configuredDouble(sources, {"averageLoss", "average_loss"});
+        metrics.sharpeRatio = reader_.configuredDouble(sources, {"sharpeRatio"});
+        metrics.sortinoRatio = reader_.configuredDouble(sources, {"sortinoRatio"});
+        metrics.calmarRatio = reader_.configuredDouble(sources, {"calmarRatio"});
+        metrics.maxDrawdown = reader_.configuredDouble(sources, {"maxDrawdown"});
+        metrics.winRate = reader_.configuredDouble(sources, {"winRate"});
+        metrics.profitFactor = reader_.configuredDouble(sources, {"profitFactor"});
+        metrics.averageWin = reader_.configuredDouble(sources, {"averageWin"});
+        metrics.averageLoss = reader_.configuredDouble(sources, {"averageLoss"});
         metrics.alpha = reader_.configuredDouble(sources, {"alpha"});
         metrics.beta = reader_.configuredDouble(sources, {"beta"});
-        metrics.informationRatio = reader_.configuredDouble(sources, {"informationRatio", "information_ratio"});
-        metrics.trackingError = reader_.configuredDouble(sources, {"trackingError", "tracking_error"});
+        metrics.informationRatio = reader_.configuredDouble(sources, {"informationRatio"});
+        metrics.trackingError = reader_.configuredDouble(sources, {"trackingError"});
         return metrics;
     }
 
@@ -745,16 +709,6 @@ private:
         return snapshot;
     }
 
-    [[nodiscard]] domain::strategy::BacktestAssumptionsSnapshot buildBacktestAssumptions(const QVariantMap& source) const
-    {
-        domain::strategy::BacktestAssumptionsSnapshot snapshot;
-        snapshot.initialCapital = reader_.configuredMoney({source}, {"initialCapital"});
-        snapshot.commissionRate = domain::strategy::Ratio{risk::config::commissionRate(source, 0.0)};
-        snapshot.slippageRate = domain::strategy::Ratio{risk::config::slippageRate(source, 0.0)};
-        snapshot.taxRate = reader_.configuredRatio({source}, {"taxRate"});
-        return snapshot;
-    }
-
     [[nodiscard]] domain::strategy::StrategyScopeContextSnapshot buildScopeContext(
         const QVariantMap& source,
         const domain::strategy::StrategyRuntimeProfile& runtime) const
@@ -783,7 +737,7 @@ private:
 
         snapshot.universe = universe;
         snapshot.selectedStrategyName = domain::strategy::StrategyName(
-            reader_.firstConfiguredValue(sources, {"selectedStrategyName", "strategy_name", "strategyName"}).toString().trimmed());
+            reader_.firstConfiguredValue(sources, {"selectedStrategyName", "strategyName"}).toString().trimmed());
         snapshot.executionTimeFrameIndex = reader_.configuredInteger(
             sources,
             {"executionTimeFrameIndex", "timeFrameIndex"},
@@ -796,13 +750,13 @@ private:
         const QList<QVariantMap> sources{source};
         domain::strategy::FactorOverlaySpec overlay;
         overlay.enabled = reader_.configuredBool(sources, {"enabled"}, false);
-        overlay.targetPositionCount = reader_.configuredInteger(sources, {"targetPositionCount", "target_position_count"}, 10);
+        overlay.targetPositionCount = reader_.configuredInteger(sources, {"targetPositionCount"}, 10);
         if (overlay.targetPositionCount <= 0) {
             overlay.targetPositionCount = 10;
         }
-        overlay.minimumCompositeScore = reader_.configuredDouble(sources, {"minimumCompositeScore", "minimum_composite_score"}, 0.0);
+        overlay.minimumCompositeScore = reader_.configuredDouble(sources, {"minimumCompositeScore"}, 0.0);
         overlay.allocations = reader_.readFactorOverlayAllocations(reader_.firstConfiguredValue(sources, {"allocations"}));
-        overlay.selectedFactors = reader_.readFactorIds(reader_.firstConfiguredValue(sources, {"factorIds", "selectedFactorIds"}));
+        overlay.selectedFactors = reader_.readFactorIds(reader_.firstConfiguredValue(sources, {"factorIds"}));
         if (overlay.selectedFactors.isEmpty()) {
             overlay.selectedFactors.reserve(overlay.allocations.size());
             for (const domain::strategy::FactorOverlayAllocation& allocation : overlay.allocations) {
@@ -812,58 +766,6 @@ private:
             }
         }
         return overlay;
-    }
-
-    [[nodiscard]] domain::strategy::BacktestSnapshot buildBacktestSnapshot(
-        const QVariantMap& source,
-        const domain::strategy::StrategySpec& strategySpec,
-        domain::strategy::StrategyExecutionKind executionKind) const
-    {
-        domain::strategy::BacktestSnapshot snapshot;
-        snapshot.recordedAt = reader_.configuredBacktestDateTime(source);
-        snapshot.executionKind = executionKind;
-        snapshot.strategySpec = strategySpec;
-        snapshot.performanceSummary = buildPerformanceSummary(source);
-        snapshot.universeResolutionSummary.universeMode = strategySpec.strategyScopeContext.universe.universeMode;
-        snapshot.universeResolutionSummary.requestedSymbolCount = strategySpec.strategyScopeContext.universe.explicitSymbols.size();
-        snapshot.universeResolutionSummary.resolvedSymbolCount = reader_.configuredInteger(
-            {source},
-            {"resolvedSymbolCount", "resolved_symbol_count"},
-            strategySpec.strategyScopeContext.universe.resolvedSymbols.size());
-        snapshot.ruleTemplateSummary.boundTemplateCount = strategySpec.ruleTemplateBindings.size();
-        snapshot.ruleTemplateSummary.matchedTemplateCount = reader_.configuredInteger(
-            {source},
-            {"matchedTemplateCount", "matched_template_count"});
-        snapshot.ruleTemplateSummary.blockedTemplateCount = reader_.configuredInteger(
-            {source},
-            {"blockedTemplateCount", "blocked_template_count"});
-        return snapshot;
-    }
-
-    [[nodiscard]] QVector<domain::strategy::BacktestHistoryEntry> buildBacktestHistory(
-        const QVariantList& values,
-        const domain::strategy::StrategySpec& strategySpec,
-        domain::strategy::StrategyExecutionKind executionKind) const
-    {
-        QVector<domain::strategy::BacktestHistoryEntry> history;
-        history.reserve(values.size());
-        for (const QVariant& item : values) {
-            const QVariantMap map = variantMapValue(item);
-            if (map.isEmpty()) {
-                continue;
-            }
-
-            domain::strategy::BacktestHistoryEntry entry;
-            entry.snapshot = buildBacktestSnapshot(map, strategySpec, executionKind);
-            entry.replaceBaselineUniverse = reader_.configuredBool(
-                {map},
-                {"replaceLatestBacktest", "replaceBaselineUniverse"},
-                false);
-            if (entry.isValid()) {
-                history.push_back(entry);
-            }
-        }
-        return history;
     }
 
     VariantSourceReader reader_;
@@ -978,12 +880,6 @@ StrategyResolverSourceContext StrategyStructureResolverSet::buildContext(const Q
     context.optimizationConfig = firstConfiguredMap(
         context.advancedOptions,
         {rawkeys::kOptimizationConfig});
-
-    mergeConfiguredEmbeddedMap(context.backtestRuntime, context.parameters, rawkeys::kBacktestRuntime);
-    mergeConfiguredEmbeddedMap(context.backtestRuntime, strategy, rawkeys::kBacktestRuntime);
-
-    mergeConfiguredEmbeddedMap(context.backtestSettings, context.parameters, rawkeys::kBacktestSettings);
-    mergeConfiguredEmbeddedMap(context.backtestSettings, strategy, rawkeys::kBacktestSettings);
 
     context.appliedRiskConfig = appliedRiskConfig;
     return context;
