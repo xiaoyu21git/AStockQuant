@@ -195,13 +195,11 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategySortButton.qml
         Qml/components/Strategy/StrategyParameters.qml
         Qml/components/Strategy/StrategyFilterButton.qml
-        Qml/components/Strategy/StrategyDetailCard.qml
-        Qml/components/Strategy/StrategyControls.qml
         Qml/components/Strategy/StrategyChart.qml
         Qml/components/Strategy/CreateStrategyDialog.qml
         Qml/components/Strategy/StrategyFilter.qml
-        Qml/components/Strategy/CreateStrategyButton.qml
         Qml/components/Strategy/StrategySorter.qml
+        Qml/components/Strategy/StrategySummaryHeaderCard.qml
         # 绛栫暐鍒涘缓缁勪欢
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
@@ -253,7 +251,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/FactorParamForm.qml
         Qml/components/Factor/DynamicParamForm.qml
         Qml/utils/FactorMetaLoader.js
-        Qml/utils/StrategyMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
         Qml/utils/RuleTemplatePreviewUtils.js
         Qml/utils/I18n.js

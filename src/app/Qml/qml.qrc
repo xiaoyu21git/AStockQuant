@@ -122,7 +122,6 @@
         <file>components/Risk/RiskCategoryCard.qml</file>
         <file>components/Risk/RiskParameterInput.qml</file>
         <file>components/Risk/RiskParameterSlider.qml</file>
-        <file>components/Strategy/CreateStrategyButton.qml</file>
         <file>components/Strategy/CreateStrategyDialog.qml</file>
         <file>components/Strategy/Creation/RuleComposerSummaryBar.qml</file>
         <file>components/Strategy/Creation/RuleGroupCard.qml</file>
@@ -136,13 +135,12 @@
         <file>components/Strategy/Creation/RuleTemplateSuggestionPanel.qml</file>
         <file>components/Strategy/Creation/StrategyTypeSelector.qml</file>
         <file>components/Strategy/StrategyChart.qml</file>
-        <file>components/Strategy/StrategyControls.qml</file>
-        <file>components/Strategy/StrategyDetailCard.qml</file>
         <file>components/Strategy/StrategyFilter.qml</file>
         <file>components/Strategy/StrategyFilterButton.qml</file>
         <file>components/Strategy/StrategyParameters.qml</file>
         <file>components/Strategy/StrategySortButton.qml</file>
         <file>components/Strategy/StrategySorter.qml</file>
+        <file>components/Strategy/StrategySummaryHeaderCard.qml</file>
         <file>components/Strategy/ViewModeToggle.qml</file>
         <file>components/StrategyCard.qml</file>
         <file>components/ThemeSwitcher.qml</file>
@@ -177,6 +175,7 @@
         <file>page/risk/RiskConfigurationPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyBacktestPage.qml</file>
+        <file>page/strategies/StrategyBacktestAnalysisPage.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
@@ -192,7 +191,6 @@
         <file>utils/TradeTestingPageAdapter.js</file>
         <file>utils/StrategyCreationUtils.js</file>
         <file>utils/StrategyDataAdapter.js</file>
-        <file>utils/StrategyMetaLoader.js</file>
         <file>components/Base/qmldir</file>
     </qresource>
 </RCC>
