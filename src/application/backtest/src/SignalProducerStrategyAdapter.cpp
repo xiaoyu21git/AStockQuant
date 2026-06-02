@@ -64,10 +64,10 @@ StageResult StrategySignalProducerAdapter::generateSignal(RunContext& context) c
             signalEngine->evaluateBatch(dateRange, universe);
 
         if (batchResult.hasValue() && batchResult.value().isValid()) {
+            const std::uint32_t sigCount = static_cast<std::uint32_t>(batchResult.value().signals.size());
             context.workingSet.signalBatch.factorSignalSet =
                 std::make_shared<const factor::compute::SignalSet>(std::move(batchResult.value()));
-            context.workingSet.signalBatch.strategySignalCount =
-                static_cast<std::uint32_t>(batchResult.value().signals.size());
+            context.workingSet.signalBatch.strategySignalCount = sigCount;
             return stageResult;
         }
     }
