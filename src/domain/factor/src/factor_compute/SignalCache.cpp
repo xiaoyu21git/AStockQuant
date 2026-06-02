@@ -3,51 +3,17 @@
 #include <algorithm>
 #include <cstring>
 
+#include "xxhash.h"
+
 namespace factor::compute {
 
 namespace {
-
-template <typename TValue>
-size_t mixValue(size_t seed, TValue value)
-{
-    constexpr size_t kPrime = 1099511628211ULL;
-    seed ^= static_cast<size_t>(value);
-    seed *= kPrime;
-    return seed;
-}
 
 uint64_t bitwiseDouble(double value)
 {
     uint64_t bits = 0U;
     std::memcpy(&bits, &value, sizeof(double));
     return bits;
-}
-
-size_t hashDateRange(const DateRange& dateRange)
-{
-    constexpr size_t kOffsetBasis = 1469598103934665603ULL;
-    size_t seed = kOffsetBasis;
-    seed = mixValue(seed, dateRange.from.value);
-    seed = mixValue(seed, dateRange.to.value);
-    return seed;
-}
-
-size_t hashPostProcessingConfig(size_t seed, const PostProcessingConfig& config)
-{
-    seed = mixValue(seed, bitwiseDouble(config.winsorizeStdBand));
-    seed = mixValue(seed, bitwiseDouble(config.stdEpsilon));
-    seed = mixValue(seed, config.minimumValidSampleCount);
-    return seed;
-}
-
-template <typename TValue, typename TExtractor>
-size_t hashVectorValues(size_t seed, const std::vector<TValue>& values, TExtractor extractor)
-{
-    seed = mixValue(seed, values.size());
-    for (const TValue& value : values) {
-        seed = mixValue(seed, extractor(value));
-    }
-    return seed;
 }
 
 bool equalsDateRange(const DateRange& lhs, const DateRange& rhs)
@@ -108,12 +74,39 @@ size_t SignalCache::SignalCacheKeyHash::operator()(const SignalCacheKey& key) co
     // 先规范化，再哈希，确保等价键落入同一桶
     const SignalCacheKey canonical = canonicalizeKey(key);
 
-    size_t seed = hashDateRange(canonical.dateRange);
-    seed = mixValue(seed, static_cast<uint8_t>(canonical.mode));
-    seed = hashPostProcessingConfig(seed, canonical.postProcessingConfig);
-    seed = hashVectorValues(seed, canonical.instruments, [](const InstrumentId id) { return id.value; });
-    seed = hashVectorValues(seed, canonical.factors, [](const FactorId id) { return id.value; });
-    return seed;
+    // 使用 xxHash64 替代 FNV-1a，预期 10× 加速
+    XXH64_state_t state;
+    XXH64_reset(&state, 0);
+
+    // 哈希基础字段
+    XXH64_update(&state, &canonical.dateRange.from.value, sizeof(canonical.dateRange.from.value));
+    XXH64_update(&state, &canonical.dateRange.to.value, sizeof(canonical.dateRange.to.value));
+    uint8_t mode = static_cast<uint8_t>(canonical.mode);
+    XXH64_update(&state, &mode, sizeof(mode));
+    uint64_t winsorizeBits = bitwiseDouble(canonical.postProcessingConfig.winsorizeStdBand);
+    uint64_t epsilonBits = bitwiseDouble(canonical.postProcessingConfig.stdEpsilon);
+    XXH64_update(&state, &winsorizeBits, sizeof(winsorizeBits));
+    XXH64_update(&state, &epsilonBits, sizeof(epsilonBits));
+    XXH64_update(&state, &canonical.postProcessingConfig.minimumValidSampleCount,
+        sizeof(canonical.postProcessingConfig.minimumValidSampleCount));
+
+    // 哈希仪器列表
+    const size_t instrumentCount = canonical.instruments.size();
+    XXH64_update(&state, &instrumentCount, sizeof(instrumentCount));
+    for (const auto& inst : canonical.instruments) {
+        uint32_t val = inst.value;
+        XXH64_update(&state, &val, sizeof(val));
+    }
+
+    // 哈希因子列表
+    const size_t factorCount = canonical.factors.size();
+    XXH64_update(&state, &factorCount, sizeof(factorCount));
+    for (const auto& fac : canonical.factors) {
+        uint32_t val = fac.value;
+        XXH64_update(&state, &val, sizeof(val));
+    }
+
+    return static_cast<size_t>(XXH64_digest(&state));
 }
 
 bool SignalCache::SignalCacheKeyEqual::operator()(const SignalCacheKey& lhs, const SignalCacheKey& rhs) const noexcept
@@ -142,7 +135,7 @@ uint64_t SignalCache::estimateSignalSetMemory(const SignalSet& signalSet) noexce
     uint64_t bytes = 0U;
     bytes += signalSet.dates.size() * sizeof(DateKey);
     bytes += signalSet.instruments.size() * sizeof(InstrumentId);
-    bytes += signalSet.factors.size() * sizeof(FactorId);
+    bytes += signalSet.signals.size() * sizeof(SignalId);
     bytes += signalSet.values.size() * sizeof(double);
     bytes += signalSet.mask.size() * sizeof(uint8_t);
     bytes += sizeof(SignalSet);

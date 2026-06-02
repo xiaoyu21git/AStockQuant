@@ -282,6 +282,7 @@ target_link_libraries(factor_compute
 target_include_directories(factor_compute
     PUBLIC
         "G:/C++/lib/unordered_dense-4.4.0/include"
+        "G:/C++/lib/xxHash-0.8.2"
 )
 
 if(TARGET Arrow::arrow_shared)
