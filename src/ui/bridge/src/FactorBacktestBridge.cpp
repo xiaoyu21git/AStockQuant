@@ -298,6 +298,127 @@ GenerateSpec FactorBacktestBridge::buildGenerateSpecFromParams(
     return spec;
 }
 
+// ─── QML 兼容方法 ───
+
+void FactorBacktestBridge::startBacktestWithFactors(
+    const QVariantList& factorIds, const QString& startDate, const QString& endDate)
+{
+    QVariantMap params;
+    params["selectedFactorIds"] = factorIds;
+    params["startDate"] = startDate;
+    params["endDate"] = endDate;
+    m_backtestRuntimeParams = params;
+    startBacktest();
+}
+
+void FactorBacktestBridge::startCompositeBacktest(
+    const QVariantMap& compositeDraft, const QString& startDate, const QString& endDate)
+{
+    (void)compositeDraft;
+    QVariantMap params;
+    params["startDate"] = startDate;
+    params["endDate"] = endDate;
+    m_backtestRuntimeParams = params;
+    startBacktest();
+}
+
+bool FactorBacktestBridge::handleFactorSupportMapReady(int requestId, const QVariantMap& supportMap)
+{
+    (void)requestId;
+    m_factorSupportMapCache = supportMap;
+    emit factorSupportMapCacheChanged();
+    return true;
+}
+
+QVariantList FactorBacktestBridge::normalizeFactorIds(const QVariantList& factorIds) const
+{
+    QVariantList normalized;
+    QSet<QString> seen;
+    for (const QVariant& var : factorIds) {
+        QString id = var.toString().trimmed();
+        if (!id.isEmpty() && !seen.contains(id)) {
+            seen.insert(id);
+            normalized.append(id);
+        }
+    }
+    std::sort(normalized.begin(), normalized.end(),
+        [](const QVariant& a, const QVariant& b) { return a.toString() < b.toString(); });
+    return normalized;
+}
+
+QVariantList FactorBacktestBridge::buildBacktestDatasetOptions(const QVariantList& datasetList) const
+{
+    QVariantList options;
+    for (const QVariant& dsVar : datasetList) {
+        QVariantMap ds = dsVar.toMap();
+        QVariantMap option;
+        option["value"] = ds.value("id");
+        option["text"] = ds.value("displayName").toString().isEmpty()
+            ? QStringLiteral("数据集 #%1").arg(ds.value("id").toInt())
+            : ds.value("displayName").toString();
+        option["raw"] = ds;
+        options.append(option);
+    }
+    return options;
+}
+
+bool FactorBacktestBridge::datasetSelectableForBacktest(const QVariantMap& dataset) const
+{
+    return dataset.value("isBacktestReady").toBool();
+}
+
+QVariantMap FactorBacktestBridge::displayedBacktestResults(const QVariantMap& rawResult) const
+{
+    return rawResult;
+}
+
+QString FactorBacktestBridge::displayedBacktestResultName(const QVariantMap& entry) const
+{
+    return entry.value("factorId").toString();
+}
+
+QVariantMap FactorBacktestBridge::buildSingleFactorRunEntry(
+    const QVariantMap& result, const QString& factorId) const
+{
+    QVariantMap entry = result;
+    entry["factorId"] = factorId;
+    return entry;
+}
+
+QVariantList FactorBacktestBridge::pushSingleFactorRunHistory(
+    const QVariantList& history, const QVariantMap& entry) const
+{
+    QVariantList updated = history;
+    updated.prepend(entry);
+    if (updated.size() > 50) {
+        updated = updated.mid(0, 50);
+    }
+    return updated;
+}
+
+QVariantMap FactorBacktestBridge::factorValidationState(
+    const QString& factorId, const QVariantMap& supportInfo) const
+{
+    QVariantMap state;
+    state["factorId"] = factorId;
+    state["supported"] = supportInfo.value("supported").toBool();
+    state["reason"] = supportInfo.value("reason").toString();
+    state["category"] = supportInfo.value("category").toString();
+    return state;
+}
+
+QVariantMap FactorBacktestBridge::resolveRiskConfigurationSnapshot(
+    const QVariantMap& backtestResult) const
+{
+    return backtestResult;
+}
+
+QVariantList FactorBacktestBridge::riskConfigMetricCards(const QVariantMap& riskSnapshot) const
+{
+    (void)riskSnapshot;
+    return {};
+}
+
 // ─── 属性访问器（仅桥接层）───
 
 QVariantMap FactorBacktestBridge::backtestRuntimeParams() const {

@@ -63,6 +63,8 @@ public:
 
     // ── 回测执行 ──
     Q_INVOKABLE void startBacktest();
+    Q_INVOKABLE void startBacktestWithFactors(const QVariantList& factorIds, const QString& startDate, const QString& endDate);
+    Q_INVOKABLE void startCompositeBacktest(const QVariantMap& compositeDraft, const QString& startDate, const QString& endDate);
     Q_INVOKABLE void cancelBacktest();
 
     // ── 因子支持校验 ──
@@ -76,6 +78,19 @@ public:
         const QString& startDate,
         const QString& endDate,
         const QVariantMap& cacheSnapshot);
+    Q_INVOKABLE bool handleFactorSupportMapReady(int requestId, const QVariantMap& supportMap);
+
+    // ── QML 兼容方法 ──
+    Q_INVOKABLE QVariantList normalizeFactorIds(const QVariantList& factorIds) const;
+    Q_INVOKABLE QVariantList buildBacktestDatasetOptions(const QVariantList& datasetList) const;
+    Q_INVOKABLE bool datasetSelectableForBacktest(const QVariantMap& dataset) const;
+    Q_INVOKABLE QVariantMap displayedBacktestResults(const QVariantMap& rawResult) const;
+    Q_INVOKABLE QString displayedBacktestResultName(const QVariantMap& entry) const;
+    Q_INVOKABLE QVariantMap buildSingleFactorRunEntry(const QVariantMap& result, const QString& factorId) const;
+    Q_INVOKABLE QVariantList pushSingleFactorRunHistory(const QVariantList& history, const QVariantMap& entry) const;
+    Q_INVOKABLE QVariantMap factorValidationState(const QString& factorId, const QVariantMap& supportInfo) const;
+    Q_INVOKABLE QVariantMap resolveRiskConfigurationSnapshot(const QVariantMap& backtestResult) const;
+    Q_INVOKABLE QVariantList riskConfigMetricCards(const QVariantMap& riskSnapshot) const;
 
     // ── 属性访问器 ──
     QVariantMap backtestRuntimeParams() const;

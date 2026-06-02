@@ -201,5 +201,16 @@ namespace wang{
             return bridge;
          }
       );
+
+      // FactorBacktestBridge - 因子回测桥接控制器（替换旧的 FactorBacktestController）
+      qmlRegisterSingletonType<FactorBacktestBridge>(
+         url, 1, 0, "FactorBacktestBridge",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            auto* bridge = new FactorBacktestBridge();
+            return bridge;
+         }
+      );
    }
 }
