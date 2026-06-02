@@ -279,6 +279,11 @@ target_link_libraries(factor_compute
         foundation
 )
 
+target_include_directories(factor_compute
+    PUBLIC
+        "G:/C++/lib/unordered_dense-4.4.0/include"
+)
+
 if(TARGET Arrow::arrow_shared)
     target_link_libraries(factor_compute PUBLIC Arrow::arrow_shared)
     target_include_directories(factor_compute PUBLIC ${arrow_SOURCE_DIR}/cpp/src)

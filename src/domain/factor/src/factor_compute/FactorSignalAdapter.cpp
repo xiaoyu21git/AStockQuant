@@ -3,12 +3,13 @@
 
 #include "foundation/thread/ThreadPoolExecutor.h"
 
+#include <ankerl/unordered_dense.h>
+
 #include <atomic>
 #include <chrono>
 #include <cmath>
 #include <future>
 #include <mutex>
-#include <unordered_map>
 #include <vector>
 
 namespace factor::compute {
@@ -170,8 +171,8 @@ FactorSignalAdapter::computeParallel(
         return FactorResult<SignalSet>::failure(FactorError::InvalidUniverse);
     }
 
-    // 构建因子节点索引映射
-    std::unordered_map<uint32_t, const ComputePlanNode*> nodeByFactorId;
+    // 构建因子节点索引映射 (ankerl::unordered_dense::map: 2-5× faster than std::unordered_map)
+    ankerl::unordered_dense::map<uint32_t, const ComputePlanNode*> nodeByFactorId;
     for (const auto& node : plan.nodes) {
         nodeByFactorId[node.factor.value] = &node;
     }
