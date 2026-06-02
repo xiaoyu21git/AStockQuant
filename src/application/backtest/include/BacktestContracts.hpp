@@ -8,6 +8,7 @@
 namespace factor::compute {
 struct SignalSet;
 class IFactorComputeEngine;
+class ISignalEngine;
 }
 
 namespace domain::strategy {
@@ -234,6 +235,7 @@ struct RunResult final {
 
 struct ExistingModuleSlots final {
     factor::compute::IFactorComputeEngine* factorComputeEngine{nullptr};
+    factor::compute::ISignalEngine* signalEngine{nullptr};
     const domain::strategy::IStrategyService* strategyService{nullptr};
     const astock::domain::trading::signal_orders::ISignalOrderTranslator* signalOrderTranslator{nullptr};
     const astock::domain::trading::risk_approval::IRiskApprovalEngine* riskApprovalEngine{nullptr};

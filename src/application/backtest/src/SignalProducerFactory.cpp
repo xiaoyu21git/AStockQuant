@@ -6,7 +6,11 @@ SignalProducerFactoryResult SignalProducerFactory::create(const ExistingModuleSl
 {
     SignalProducerFactoryResult result;
 
-    if (slots.factorComputeEngine != nullptr) {
+    // 优先使用新 ISignalEngine 路径（性能版：集成线程池+预算闸门+池化）
+    if (slots.signalEngine != nullptr) {
+        result.factorSignalProducer =
+            std::make_unique<FactorSignalProducerAdapter>(*slots.signalEngine);
+    } else if (slots.factorComputeEngine != nullptr) {
         result.factorSignalProducer =
             std::make_unique<FactorSignalProducerAdapter>(*slots.factorComputeEngine);
     }
