@@ -359,3 +359,22 @@ if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
         )
     endif()
 endif()
+
+# P2-T3 新旧一致性对比测试
+set(FACTOR_CONSISTENCY_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_factor_signal_consistency.cpp")
+if(EXISTS "${FACTOR_CONSISTENCY_TEST_SOURCE}")
+    add_executable(test_factor_consistency
+        ${FACTOR_CONSISTENCY_TEST_SOURCE}
+    )
+
+    target_link_libraries(test_factor_consistency
+        factor_compute
+    )
+
+    if(BUILD_TESTS)
+        add_test(NAME test_factor_consistency
+            COMMAND test_factor_consistency
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    endif()
+endif()
