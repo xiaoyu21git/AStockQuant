@@ -59,11 +59,28 @@ constexpr std::uint32_t kFNV1aPrime = 16777619U;
 
 FactorSignalProducerAdapter::FactorSignalProducerAdapter(
     factor::compute::IFactorComputeEngine& factorComputeEngine)
-    : factorComputeEngine_(factorComputeEngine)
+    : engine_(std::in_place_index<0>, &factorComputeEngine)
+{
+}
+
+FactorSignalProducerAdapter::FactorSignalProducerAdapter(
+    factor::compute::ISignalEngine& signalEngine)
+    : engine_(std::in_place_index<1>, &signalEngine)
 {
 }
 
 StageResult FactorSignalProducerAdapter::generateSignal(RunContext& context) const
+{
+    // 实施任务清单 P2-T2：
+    // 统一后半链路 — 因子信号接入统一构单、执行、指标链路。
+    // 下半链路仅有一套实现，无来源特判分支污染主流程。
+    if (std::holds_alternative<factor::compute::ISignalEngine*>(engine_)) {
+        return generateViaSignalEngine(context);
+    }
+    return generateViaComputeEngine(context);
+}
+
+StageResult FactorSignalProducerAdapter::generateViaSignalEngine(RunContext& context) const
 {
     StageResult stageResult;
     stageResult.stage = RunStage::GenerateSignal;
@@ -75,8 +92,41 @@ StageResult FactorSignalProducerAdapter::generateSignal(RunContext& context) con
         return stageResult;
     }
 
+    factor::compute::ISignalEngine* signalEngine = std::get<factor::compute::ISignalEngine*>(engine_);
     factor::compute::FactorResult<factor::compute::SignalSet> factorResult =
-        factorComputeEngine_.generate(*generateSpec);
+        signalEngine->generate(*generateSpec);
+    if (!factorResult.hasValue() || !factorResult.value().isValid()) {
+        stageResult.code = RunErrorCode::StageExecutionFailed;
+        return stageResult;
+    }
+
+    // P2-T2 约束：SignalSet 接入统一后半链
+    // 后半链路流程（统一落地设计 Section 5.1）：
+    // stageGenerateSignal → stageConstructTargetPosition → stageRiskApprove →
+    // stageGenerateOrders → stageExecuteFill → stageUpdatePositionState →
+    // stageAggregateMetrics → stageBuildDiagnostics
+    context.workingSet.signalBatch.factorSignalSet =
+        std::make_shared<const factor::compute::SignalSet>(std::move(factorResult.value()));
+    context.workingSet.signalBatch.strategySignalCount = 0U;
+    return stageResult;
+}
+
+StageResult FactorSignalProducerAdapter::generateViaComputeEngine(RunContext& context) const
+{
+    StageResult stageResult;
+    stageResult.stage = RunStage::GenerateSignal;
+    stageResult.code = RunErrorCode::None;
+
+    const std::optional<factor::compute::GenerateSpec> generateSpec = buildGenerateSpec(context);
+    if (!generateSpec.has_value()) {
+        stageResult.code = RunErrorCode::StageExecutionFailed;
+        return stageResult;
+    }
+
+    factor::compute::IFactorComputeEngine* computeEngine =
+        std::get<factor::compute::IFactorComputeEngine*>(engine_);
+    factor::compute::FactorResult<factor::compute::SignalSet> factorResult =
+        computeEngine->generate(*generateSpec);
     if (!factorResult.hasValue() || !factorResult.value().isValid()) {
         stageResult.code = RunErrorCode::StageExecutionFailed;
         return stageResult;
