@@ -299,6 +299,8 @@ target_include_directories(factor_system
     PUBLIC
     "${TA_LIB_GENERATED_INCLUDE_DIR}"
     "${TA_LIB_SOURCE_DIR}/include"
+    "G:/C++/lib/xxHash-0.8.2"
+    "G:/C++/lib/unordered_dense-4.4.0/include"
 )
 
 # 閾炬帴搴?

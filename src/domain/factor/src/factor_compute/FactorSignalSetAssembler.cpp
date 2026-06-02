@@ -15,7 +15,13 @@ SignalSet FactorSignalSetAssembler::assemble(
     SignalSet output;
     output.dates = context.dates;
     output.instruments = context.instruments;
-    output.factors = context.factors;
+    // Convert FactorId → SignalId (design doc Section 8: SignalSet uses SignalId)
+    output.signals.reserve(context.factors.size());
+    for (const FactorId& fid : context.factors) {
+        SignalId sid;
+        sid.value = fid.value;
+        output.signals.push_back(sid);
+    }
     output.progress = context.progress;
     output.isPartial = context.isPartial;
 
@@ -33,5 +39,3 @@ SignalSet FactorSignalSetAssembler::assemble(
 }
 
 } // namespace factor::compute
-
-
