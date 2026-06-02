@@ -25,6 +25,7 @@
 #include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
 #include "UiLifecycleCoordinator.h"
 #include "StrategyBridge.h"
+#include "FactorBacktestBridge.h"
 
 namespace wang{
 
