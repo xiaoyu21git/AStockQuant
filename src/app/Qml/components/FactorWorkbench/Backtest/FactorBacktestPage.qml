@@ -308,7 +308,9 @@ Item {
                 factorId: item.factorId !== undefined && item.factorId !== null ? String(item.factorId) : "",
                 instanceId: item.instanceId !== undefined && item.instanceId !== null ? String(item.instanceId) : "",
                 reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : "",
-                category: item.category !== undefined && item.category !== null ? String(item.category) : ""
+                category: item.category !== undefined && item.category !== null ? String(item.category) : "",
+                runFailureReason: item.runFailureReason !== undefined && item.runFailureReason !== null ? String(item.runFailureReason) : "",
+                runErrorCode: item.runErrorCode !== undefined && item.runErrorCode !== null ? String(item.runErrorCode) : ""
             })
         }
 
@@ -511,6 +513,30 @@ Item {
             meta.chipBackground = "#3F1D24"
             meta.chipBorder = "#DC2626"
             meta.chipText = "#FECACA"
+        } else if (normalizedCategory === "invalid-backtest-window") {
+            meta.statusText = "回测窗口非法"
+            meta.shortText = "窗口非法"
+            meta.detail = "回测开始日期和结束日期必须同时提供，且不能使用隐式兜底窗口。"
+            meta.accentColor = "#F87171"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#DC2626"
+            meta.chipText = "#FECACA"
+        } else if (normalizedCategory === "missing-resolved-symbols") {
+            meta.statusText = "股票池为空"
+            meta.shortText = "缺少股票池"
+            meta.detail = "回测请求中缺少已解析股票池，无法进入因子运行阶段。"
+            meta.accentColor = "#FB923C"
+            meta.chipBackground = "#3F2A17"
+            meta.chipBorder = "#EA580C"
+            meta.chipText = "#FED7AA"
+        } else if (normalizedCategory === "missing-selected-factors") {
+            meta.statusText = "未选择因子"
+            meta.shortText = "缺少因子"
+            meta.detail = "回测请求中缺少选中因子列表，无法进入因子运行阶段。"
+            meta.accentColor = "#FB923C"
+            meta.chipBackground = "#3F2A17"
+            meta.chipBorder = "#EA580C"
+            meta.chipText = "#FED7AA"
         } else if (normalizedCategory === "instance-missing") {
             meta.statusText = "实例未解析"
             meta.shortText = "实例缺失"
@@ -581,7 +607,15 @@ Item {
         if (!factorName) {
             factorName = "该因子"
         }
-        return factorName + "：" + meta.detail
+        var typedTokens = []
+        if (failure && failure.runFailureReason) {
+            typedTokens.push("failureReason=" + failure.runFailureReason)
+        }
+        if (failure && failure.runErrorCode) {
+            typedTokens.push("errorCode=" + failure.runErrorCode)
+        }
+        var tokenText = typedTokens.length > 0 ? "（" + typedTokens.join("，") + "）" : ""
+        return factorName + "：" + meta.detail + tokenText
     }
 
     function buildPreflightFailureExportText(failures) {
@@ -611,6 +645,8 @@ Item {
             lines.push("  factorName: " + resolveFactorDisplayName(failure.factorId || ""))
             lines.push("  instanceId: " + (failure.instanceId || "未解析"))
             lines.push("  category: " + meta.statusText + " (" + (failure.category || "unknown") + ")")
+            lines.push("  runFailureReason: " + (failure.runFailureReason || ""))
+            lines.push("  runErrorCode: " + (failure.runErrorCode || ""))
             lines.push("  reason: " + (failure.reason || "未知预检失败"))
             lines.push("  detail: " + preflightFailureDetailText(failure))
             lines.push("")

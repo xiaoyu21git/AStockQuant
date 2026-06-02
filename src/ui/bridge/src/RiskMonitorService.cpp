@@ -1,6 +1,5 @@
 #include "RiskMonitorService.h"
 
-#include "FactorService.h"
 #include "MarketDataService.h"
 #include "PositionAccountService.h"
 #include "RiskConfigService.h"
@@ -13,8 +12,6 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 
-#include "../../domain/backtest/include/DatabaseStockDataProvider.h"
-
 #include <QDate>
 #include <QDateTime>
 #include <QCoreApplication>
@@ -23,7 +20,6 @@
 #include <QJsonDocument>
 #include <QMetaObject>
 #include <QMutexLocker>
-#include <QRegularExpression>
 #include <QSet>
 #include <QThread>
 #include <QVariantList>
@@ -53,12 +49,6 @@ struct PositionAccountState {
 struct StrategyLookupState {
     bool serviceInitialized{false};
     QVariantMap strategy;
-};
-
-struct UniverseResolutionState {
-    QSet<QString> symbols;
-    QString sourceKey;
-    QString sourceLabel;
 };
 
 QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
@@ -359,158 +349,6 @@ std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(const QVariantM
     }
 
     return allocations;
-}
-
-UniverseResolutionState buildUniverseResolution(const QSet<QString>& symbols,
-                                                const QString& sourceKey,
-                                                const QString& sourceLabel)
-{
-    UniverseResolutionState resolution;
-    resolution.symbols = symbols;
-    resolution.sourceKey = sourceKey;
-    resolution.sourceLabel = sourceLabel;
-    return resolution;
-}
-
-UniverseResolutionState resolveUniverseSymbolsState(domain::backtest::DatabaseStockDataProvider& stockProvider,
-                                                    const QVariantMap& strategy,
-                                                    const QVariantMap& parameters,
-                                                    const QString& snapshotDate)
-{
-    auto appendSymbols = [](QSet<QString>& target, const QVariant& rawValue) {
-        if (!rawValue.isValid() || rawValue.isNull()) {
-            return;
-        }
-
-        const QVariantList items = variantListFromRaw(rawValue);
-        if (!items.isEmpty()) {
-            for (const QVariant& item : items) {
-                const QString symbol = item.toString().trimmed();
-                if (!symbol.isEmpty()) {
-                    target.insert(symbol);
-                }
-            }
-            return;
-        }
-
-        const QString rawText = rawValue.toString().trimmed();
-        if (rawText.isEmpty()) {
-            return;
-        }
-
-        const QStringList parts = rawText.split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
-        for (const QString& part : parts) {
-            const QString symbol = part.trimmed();
-            if (!symbol.isEmpty()) {
-                target.insert(symbol);
-            }
-        }
-    };
-
-    const QString universeType = firstConfiguredValue(parameters, {"universeType"}).toString().trimmed().toLower();
-    const QString indexSymbol = firstConfiguredValue(parameters, {"indexSymbol", "universeId"}).toString().trimmed();
-
-    if (universeType == "index") {
-        const QString resolvedIndex = indexSymbol;
-        if (resolvedIndex.isEmpty()) {
-            return buildUniverseResolution({}, QStringLiteral("unresolved"), QStringLiteral("指数成分股未命中"));
-        }
-
-        const std::vector<std::string> symbols = stockProvider.getIndexConstituentSymbols(resolvedIndex, snapshotDate);
-        QSet<QString> resolved;
-        for (const std::string& symbol : symbols) {
-            resolved.insert(QString::fromStdString(symbol));
-        }
-        return buildUniverseResolution(
-            resolved,
-            QStringLiteral("indexUniverse"),
-            QStringLiteral("指数成分股（%1）").arg(resolvedIndex));
-    }
-
-    if (universeType == "stock" && !indexSymbol.isEmpty()) {
-        return buildUniverseResolution({indexSymbol}, QStringLiteral("singleStock"), QStringLiteral("单股票回退"));
-    }
-
-    return buildUniverseResolution({}, QStringLiteral("unresolved"), QStringLiteral("未命中"));
-}
-
-QVariantMap buildPositionRow(const QString& symbol,
-                            double score,
-                            int contributionCount,
-                            double targetWeightRatio,
-                            double singlePositionLimitRatio,
-                            double lastClose,
-                            const QString& snapshotDate)
-{
-    const double ratioValue = targetWeightRatio * 100.0;
-    const double limitValue = singlePositionLimitRatio * 100.0;
-
-    QString badgeType = QStringLiteral("normal");
-    QString badgeText = QStringLiteral("正常");
-    QString statusText = QStringLiteral("正常");
-    QString statusType = QStringLiteral("green");
-    QString recommendation = QStringLiteral("继续观察");
-
-    if (limitValue > 0.0 && ratioValue >= limitValue) {
-        badgeType = QStringLiteral("danger");
-        badgeText = QStringLiteral("超出上限");
-        statusText = QStringLiteral("高风险");
-        statusType = QStringLiteral("red");
-        recommendation = QStringLiteral("需要收缩配置");
-    } else if (limitValue > 0.0 && ratioValue >= limitValue * 0.8) {
-        badgeType = QStringLiteral("warning");
-        badgeText = QStringLiteral("接近上限");
-        statusText = QStringLiteral("预警");
-        statusType = QStringLiteral("yellow");
-        recommendation = QStringLiteral("接近上限");
-    }
-
-    if (lastClose <= 0.0 && badgeType == QStringLiteral("normal")) {
-        badgeType = QStringLiteral("warning");
-        badgeText = QStringLiteral("待校验");
-        statusText = QStringLiteral("价格缺失");
-        statusType = QStringLiteral("yellow");
-        recommendation = QStringLiteral("复核最新行情");
-    }
-
-    QVariantMap row;
-    row.insert("name", symbol);
-    row.insert("symbol", symbol);
-    row.insert("ratio", QString::number(ratioValue, 'f', 1) + "%");
-    row.insert("ratioValue", ratioValue);
-    row.insert("badgeText", badgeText);
-    row.insert("badgeType", badgeType);
-    row.insert("statusText", statusText);
-    row.insert("statusType", statusType);
-    row.insert("recommendation", recommendation);
-    row.insert("score", score);
-    row.insert("factorCoverage", contributionCount);
-    row.insert("lastPrice", lastClose);
-    row.insert("snapshotDate", snapshotDate);
-    return row;
-}
-
-double resolveLatestClose(domain::backtest::DatabaseStockDataProvider& stockProvider,
-                          const QString& symbol,
-                          const QString& snapshotDate)
-{
-    const QDate endDate = QDate::fromString(snapshotDate, QStringLiteral("yyyy-MM-dd"));
-    const QString startDate = endDate.isValid()
-        ? endDate.addDays(-10).toString(QStringLiteral("yyyy-MM-dd"))
-        : snapshotDate;
-
-    const std::vector<domain::model::Bar> bars = stockProvider.getStockBars(
-        symbol.toStdString(),
-        startDate.toStdString(),
-        snapshotDate.toStdString());
-
-    for (auto it = bars.rbegin(); it != bars.rend(); ++it) {
-        if (it->close > 0.0) {
-            return it->close;
-        }
-    }
-
-    return 0.0;
 }
 
 QString eventStringValue(const engine::EventFormat& event, const std::string& key)
@@ -1119,171 +957,7 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
         return result;
     }
 
-    FactorService* factorService = FactorService::instance();
-    factorService->initialize();
-
-    const QVariantMap parameters = resolveStrategyParameters(strategy);
-    const std::vector<PortfolioFactorAllocation> allocations = parsePortfolioAllocations(strategy, parameters);
-    if (allocations.empty()) {
-        result.insert("error", QStringLiteral("策略未配置可用的组合因子"));
-        return result;
-    }
-
-    const QString snapshotDate = factorService->getLatestAvailableTradeDate().trimmed();
-    if (snapshotDate.isEmpty()) {
-        result.insert("error", QStringLiteral("未找到最新交易日"));
-        return result;
-    }
-
-    domain::backtest::DatabaseStockDataProvider stockProvider(nullptr);
-    const UniverseResolutionState universeResolution = resolveUniverseSymbolsState(stockProvider, strategy, parameters, snapshotDate);
-    const QSet<QString> universeSymbols = universeResolution.symbols;
-
-    QHash<QString, ScoreState> scoreBySymbol;
-    int totalFactorSnapshots = 0;
-
-    for (const PortfolioFactorAllocation& allocation : allocations) {
-        const QVariantMap factorValuesResult = factorService->getFactorValues(allocation.factorId, snapshotDate);
-        if (factorValuesResult.value("status").toString() != QStringLiteral("success")) {
-            continue;
-        }
-
-        const QVariantMap stockValues = factorValuesResult.value("stockValues").toMap();
-        if (stockValues.isEmpty()) {
-            continue;
-        }
-
-        struct RankedSymbol {
-            QString symbol;
-            double value{0.0};
-        };
-
-        std::vector<RankedSymbol> rankedSymbols;
-        rankedSymbols.reserve(static_cast<std::size_t>(stockValues.size()));
-
-        for (auto it = stockValues.constBegin(); it != stockValues.constEnd(); ++it) {
-            bool ok = false;
-            const double factorValue = it.value().toDouble(&ok);
-            if (!ok || !std::isfinite(factorValue)) {
-                continue;
-            }
-
-            if (!universeSymbols.isEmpty() && !universeSymbols.contains(it.key())) {
-                continue;
-            }
-
-            rankedSymbols.push_back({it.key(), factorValue});
-        }
-
-        if (rankedSymbols.empty()) {
-            continue;
-        }
-
-        totalFactorSnapshots += 1;
-        std::sort(rankedSymbols.begin(), rankedSymbols.end(), [](const RankedSymbol& left, const RankedSymbol& right) {
-            if (left.value == right.value) {
-                return left.symbol < right.symbol;
-            }
-            return left.value < right.value;
-        });
-
-        const double denominator = rankedSymbols.size() > 1
-            ? static_cast<double>(rankedSymbols.size() - 1)
-            : 1.0;
-
-        for (std::size_t index = 0; index < rankedSymbols.size(); ++index) {
-            const double rankScore = rankedSymbols.size() > 1
-                ? static_cast<double>(index) / denominator
-                : 1.0;
-            ScoreState& state = scoreBySymbol[rankedSymbols[index].symbol];
-            state.score += allocation.weight * rankScore;
-            state.contributionCount += 1;
-        }
-    }
-
-    if (scoreBySymbol.isEmpty()) {
-        result.insert("error", QStringLiteral("最新交易日未生成可用的候选持仓"));
-        return result;
-    }
-
-    struct SelectedSymbol {
-        QString symbol;
-        double score{0.0};
-        int contributionCount{0};
-    };
-
-    std::vector<SelectedSymbol> rankedResults;
-    rankedResults.reserve(static_cast<std::size_t>(scoreBySymbol.size()));
-    for (auto it = scoreBySymbol.constBegin(); it != scoreBySymbol.constEnd(); ++it) {
-        if (!std::isfinite(it.value().score) || it.value().contributionCount <= 0) {
-            continue;
-        }
-
-        rankedResults.push_back({it.key(), it.value().score, it.value().contributionCount});
-    }
-
-    std::sort(rankedResults.begin(), rankedResults.end(), [](const SelectedSymbol& left, const SelectedSymbol& right) {
-        if (left.score == right.score) {
-            return left.symbol < right.symbol;
-        }
-        return left.score > right.score;
-    });
-
-    const int topN = resolveSnapshotTargetPositionCount(parameters);
-    if (topN > 0 && static_cast<std::size_t>(topN) < rankedResults.size()) {
-        rankedResults.resize(static_cast<std::size_t>(topN));
-    }
-
-    const double portfolioExposure = numericRatioParam(
-        parameters,
-        risk::config::maxTotalExposureKeys(),
-        0.67);
-    const double singlePositionLimit = numericRatioParam(
-        parameters,
-        risk::config::maxPositionPercentKeys(),
-        0.15);
-    const double equalWeightRatio = rankedResults.empty()
-        ? 0.0
-        : portfolioExposure / static_cast<double>(rankedResults.size());
-    const double targetWeightRatio = equalWeightRatio < singlePositionLimit
-        ? equalWeightRatio
-        : singlePositionLimit;
-
-    QVariantList positions;
-    positions.reserve(static_cast<qsizetype>(rankedResults.size()));
-    for (const SelectedSymbol& selected : rankedResults) {
-        const double lastClose = resolveLatestClose(stockProvider, selected.symbol, snapshotDate);
-        positions.push_back(buildPositionRow(
-            selected.symbol,
-            selected.score,
-            selected.contributionCount,
-            targetWeightRatio,
-            singlePositionLimit,
-            lastClose,
-            snapshotDate));
-    }
-
-    QVariantMap diagnostics;
-    diagnostics.insert("snapshotDate", snapshotDate);
-    diagnostics.insert("candidateCount", scoreBySymbol.size());
-    diagnostics.insert("selectedCount", positions.size());
-    diagnostics.insert("allocationCount", static_cast<int>(allocations.size()));
-    diagnostics.insert("factorSnapshotCount", totalFactorSnapshots);
-    diagnostics.insert("targetWeightPercent", targetWeightRatio * 100.0);
-    diagnostics.insert("portfolioExposurePercent", portfolioExposure * 100.0);
-    diagnostics.insert("singlePositionLimitPercent", singlePositionLimit * 100.0);
-    diagnostics.insert("universeType", firstConfiguredValue(parameters, {"universeType"}).toString());
-    diagnostics.insert("indexSymbol", firstConfiguredValue(parameters, {"universeId", "indexSymbol"}).toString());
-    diagnostics.insert("universeSourceKey", universeResolution.sourceKey);
-    diagnostics.insert("universeSourceLabel", universeResolution.sourceLabel);
-    diagnostics.insert("universeSymbolCount", universeSymbols.size());
-    diagnostics.insert("targetPositionCount", topN);
-
-    result.insert("status", QStringLiteral("success"));
-    result.insert("snapshotDate", snapshotDate);
-    result.insert("positions", positions);
-    result.insert("diagnostics", diagnostics);
-    result.insert("recordedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
+    result.insert("error", QStringLiteral("因子服务已删除，组合因子快照不可用"));
     return result;
 }
 

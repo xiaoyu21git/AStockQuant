@@ -43,11 +43,13 @@ set(BRIDGE_HEADERS
     include/ExecutionSchedulingRuleChain.h
     include/RuleTemplateRuntimeEvaluator.h
     include/RuleTemplateDetailHelper.h
-    include/FactorService.h
     include/FactorViewModel.h
     include/FactorDebugController.h
-    include/FactorBacktestController.h
     include/FactorDetectionService.h
+    include/factor_check/FactorSupportCheckCore.h
+    include/factor_check/FactorDetectionCoreService.h
+    include/factor_check/FactorSupportScopeCacheCore.h
+    include/factor_check/FactorSupportScopeKeyCore.h
     include/FactorMetaService.h
     include/CleanedDataController.h
     include/MarketDataService.h

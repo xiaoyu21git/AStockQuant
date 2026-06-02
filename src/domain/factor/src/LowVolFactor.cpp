@@ -7,13 +7,14 @@
 
 #include <ta_libc.h>
 
-#include <QDate>
-#include <QString>
-
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <ctime>
+#include <iomanip>
 #include <mutex>
 #include <numeric>
+#include <sstream>
 #include <unordered_map>
 
 namespace factor {
@@ -64,15 +65,76 @@ LowVolFactor::Params lowVolParamsFromJson(const foundation::json::JsonFacade& js
     return params;
 }
 
-QString earliestLowVolSeriesDate(const QDate& anchorDate, int window)
+bool parseIsoDate(const std::string& text, std::tm& out)
 {
-    const int lookbackDays = std::max(45, (window + 10) * 2);
-    return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+        return false;
+    }
+    try {
+        std::tm candidate = {};
+        candidate.tm_year = std::stoi(text.substr(0, 4)) - 1900;
+        candidate.tm_mon = std::stoi(text.substr(5, 2)) - 1;
+        candidate.tm_mday = std::stoi(text.substr(8, 2));
+        candidate.tm_isdst = -1;
+        if (std::mktime(&candidate) == -1) {
+            return false;
+        }
+        out = candidate;
+        return true;
+    } catch (...) {
+        return false;
+    }
 }
 
-QString resolveBenchmarkSymbol(const LowVolFactor::Params& params)
+std::string formatIsoDate(const std::tm& value)
 {
-    return QString::fromStdString(params.benchmarkSymbol).trimmed();
+    char buffer[11] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &value);
+    return std::string(buffer);
+}
+
+std::string earliestLowVolSeriesDate(const std::string& anchorDate, int window)
+{
+    std::tm parsedDate = {};
+    if (!parseIsoDate(anchorDate, parsedDate)) {
+        return "";
+    }
+    const int lookbackDays = std::max(45, (window + 10) * 2);
+    parsedDate.tm_mday -= lookbackDays;
+    parsedDate.tm_isdst = -1;
+    std::mktime(&parsedDate);
+    return formatIsoDate(parsedDate);
+}
+
+std::string trimAsciiWhitespace(std::string text)
+{
+    const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    const auto begin = std::find_if_not(text.begin(), text.end(), isSpace);
+    const auto end = std::find_if_not(text.rbegin(), text.rend(), isSpace).base();
+    if (begin >= end) {
+        return "";
+    }
+    return std::string(begin, end);
+}
+
+std::string resolveBenchmarkSymbol(const LowVolFactor::Params& params)
+{
+    return trimAsciiWhitespace(params.benchmarkSymbol);
+}
+
+std::string joinByComma(const std::vector<std::string>& values)
+{
+    if (values.empty()) {
+        return "";
+    }
+    std::ostringstream stream;
+    for (size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            stream << ",";
+        }
+        stream << values[index];
+    }
+    return stream.str();
 }
 
 std::vector<LowVolComponent> selectedComponentsOrDefault(const std::vector<LowVolComponent>& components)
@@ -191,47 +253,49 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             return resolveCommonEffectiveDateForFields(
                 context,
                 commonParams,
-                QStringList{QString(factor::bridge::MarketBarFieldKeys::CLOSE)},
+                std::vector<std::string>{std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str())},
                 CommonFieldRequirementMode::AllFields);
         },
         [this, &context](const CommonRuntimeState& runtime, CalculationResult& result) {
-            auto failWithMessage = [&](const QString& message) {
+            auto failWithMessage = [&](const std::string& message) {
                 result.dataStatus.availability = DataAvailability::UNAVAILABLE;
                 result.dataStatus.coverage = 0.0;
-                result.dataStatus.message = message.toStdString();
+                result.dataStatus.message = message;
                 result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
             };
 
-            if (!context.historicalView->hasField(QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString())) {
-                failWithMessage(QStringLiteral("缓存数据集缺少字段 close，无法计算低波因子"));
+            if (!context.historicalView->hasField(std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str()))) {
+                failWithMessage("缓存数据集缺少字段 close，无法计算低波因子");
                 return;
             }
 
-            const QDate endDate = QDate::fromString(runtime.effectiveDate, Qt::ISODate);
-            if (!endDate.isValid()) {
-                failWithMessage(QStringLiteral("低波因子无法解析有效日期 %1").arg(runtime.effectiveDate));
+            std::tm parsedEffectiveDate = {};
+            if (!parseIsoDate(runtime.effectiveDate, parsedEffectiveDate)) {
+                failWithMessage(std::string("低波因子无法解析有效日期 ") + runtime.effectiveDate);
                 return;
             }
 
-            const QString startDate = earliestLowVolSeriesDate(endDate, params_.window);
+            const std::string startDate = earliestLowVolSeriesDate(runtime.effectiveDate, params_.window);
+            if (startDate.empty()) {
+                failWithMessage(std::string("低波因子无法计算回看起始日期 ") + runtime.effectiveDate);
+                return;
+            }
             const std::vector<LowVolComponent> components = selectedComponentsOrDefault(params_.components);
             const bool needsBeta = hasSelectedComponent(components, LowVolComponent::BETA);
             const bool needsVolatility = hasSelectedComponent(components, LowVolComponent::VOLATILITY);
             const bool needsDrawdown = hasSelectedComponent(components, LowVolComponent::DRAWDOWN);
-            const QString benchmarkSymbol = resolveBenchmarkSymbol(params_);
+            const std::string benchmarkSymbol = resolveBenchmarkSymbol(params_);
 
             std::vector<HistoricalDataPoint> benchmarkSeries;
             if (needsBeta) {
                 benchmarkSeries = context.historicalView->getSeries(
-                    benchmarkSymbol.toStdString(),
-                    startDate.toStdString(),
-                    runtime.effectiveDate.toStdString(),
+                    benchmarkSymbol,
+                    startDate,
+                    runtime.effectiveDate,
                     "close");
 
                 if (benchmarkSeries.size() < 2) {
-                    failWithMessage(
-                        QStringLiteral("低波因子需要基准指数 %1 的收盘价序列，HistoricalView 未提供该基准数据")
-                            .arg(benchmarkSymbol));
+                    failWithMessage("低波因子需要基准指数 " + benchmarkSymbol + " 的收盘价序列，HistoricalView 未提供该基准数据");
                     return;
                 }
             }
@@ -241,21 +305,21 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                 activeWeightSum += lowVolComponentWeight(params_, component);
             }
             if (activeWeightSum <= 0.0) {
-                failWithMessage(QStringLiteral("低波因子权重总和不能为 0"));
+                failWithMessage("低波因子权重总和不能为 0");
                 return;
             }
 
             std::vector<std::string> symbols = context.symbols;
             if (symbols.empty()) {
-                symbols = context.historicalView->getAvailableSymbols(runtime.effectiveDate.toStdString());
+                symbols = context.historicalView->getAvailableSymbols(runtime.effectiveDate);
             }
 
             std::map<std::string, std::vector<HistoricalDataPoint>> seriesBySymbol;
             for (const auto& symbol : symbols) {
                 seriesBySymbol[symbol] = context.historicalView->getSeries(
                     symbol,
-                    startDate.toStdString(),
-                    runtime.effectiveDate.toStdString(),
+                    startDate,
+                    runtime.effectiveDate,
                     "close");
             }
 
@@ -304,28 +368,27 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             }
 
             if (metricsBySymbol.empty()) {
-                QStringList componentCodes;
-                componentCodes.reserve(static_cast<qsizetype>(components.size()));
+                std::vector<std::string> componentCodes;
+                componentCodes.reserve(components.size());
                 for (const LowVolComponent component : components) {
-                    componentCodes.push_back(QString::number(static_cast<int>(component)));
+                    componentCodes.push_back(std::to_string(static_cast<int>(component)));
                 }
 
+                std::ostringstream reason;
+                reason << "低波因子没有可用样本: effectiveDate=" << runtime.effectiveDate
+                       << " window=" << params_.window
+                       << " lookbackWindow=" << params_.lookbackWindow
+                       << " symbolCount=" << seriesBySymbol.size()
+                       << " shortSeries=" << shortSeriesCount
+                       << " volatilityMissing=" << volatilityMissingCount
+                       << " drawdownMissing=" << drawdownMissingCount
+                       << " betaMissing=" << betaMissingCount
+                       << " benchmarkSeries=" << benchmarkSeries.size()
+                       << " components=" << joinByComma(componentCodes)
+                       << " benchmarkSymbol=" << benchmarkSymbol;
                 result.metadata.set(
                     "emptyReason",
-                    json_helper::toJsonValue(
-                        QStringLiteral("低波因子没有可用样本: effectiveDate=%1 window=%2 lookbackWindow=%3 symbolCount=%4 shortSeries=%5 volatilityMissing=%6 drawdownMissing=%7 betaMissing=%8 benchmarkSeries=%9 components=%10 benchmarkSymbol=%11")
-                            .arg(runtime.effectiveDate)
-                            .arg(params_.window)
-                            .arg(params_.lookbackWindow)
-                            .arg(seriesBySymbol.size())
-                            .arg(shortSeriesCount)
-                            .arg(volatilityMissingCount)
-                            .arg(drawdownMissingCount)
-                            .arg(betaMissingCount)
-                            .arg(benchmarkSeries.size())
-                            .arg(componentCodes.join(QStringLiteral(",")))
-                            .arg(benchmarkSymbol)
-                            .toStdString()));
+                    json_helper::toJsonValue(reason.str()));
                 return;
             }
 
@@ -392,13 +455,13 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             }
 
             if (result.values.empty()) {
+                std::ostringstream reason;
+                reason << "低波因子缺少至少两个可比样本，无法进行横截面低波排序: effectiveDate="
+                       << runtime.effectiveDate
+                       << " window=" << params_.window;
                 result.metadata.set(
                     "emptyReason",
-                    json_helper::toJsonValue(
-                        QStringLiteral("低波因子缺少至少两个可比样本，无法进行横截面低波排序: effectiveDate=%1 window=%2")
-                            .arg(runtime.effectiveDate)
-                            .arg(params_.window)
-                            .toStdString()));
+                    json_helper::toJsonValue(reason.str()));
             }
         },
         [](const CommonRuntimeState&, CalculationResult&) {},
@@ -410,7 +473,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             }
             result.metadata.set(lowvol_json::kComponentsKey, componentsJson);
             if (hasSelectedComponent(params_.components, LowVolComponent::BETA) || params_.components.empty()) {
-                result.metadata.set(lowvol_json::kBenchmarkSymbolKey, json_helper::toJsonValue(resolveBenchmarkSymbol(params_).toStdString()));
+                result.metadata.set(lowvol_json::kBenchmarkSymbolKey, json_helper::toJsonValue(resolveBenchmarkSymbol(params_)));
             }
             result.metadata.set(lowvol_json::kVolatilityWeightKey, json_helper::toJsonValue(params_.volatilityWeight));
             result.metadata.set(lowvol_json::kDrawdownWeightKey, json_helper::toJsonValue(params_.drawdownWeight));

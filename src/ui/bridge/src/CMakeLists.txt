@@ -18,12 +18,13 @@ set(BRIDGE_SOURCES
     DataFetchController.cpp   # 新增：DataFetchController
     MetaData.cpp              # 新增：元数据配置系统
     ExecutionSchedulingRuleChain.cpp
-    FactorService.cpp         # 新增：因子服务
     FactorViewModel.cpp       # 新增：因子视图模型
     FactorDebugController.cpp # 新增：因子调试控制器
-    FactorBacktestResultContract.cpp
     FactorDetectionService.cpp
-    FactorBacktestController.cpp # 新增：因子回测控制器
+    factor_check/FactorSupportCheckCore.cpp
+    factor_check/FactorDetectionCoreService.cpp
+    factor_check/FactorSupportScopeCacheCore.cpp
+    factor_check/FactorSupportScopeKeyCore.cpp
     FactorMetaService.cpp     # 新增：因子元数据服务
     MarketDataService.cpp     # 新增：行情桥接服务
     OrderRuntimeUtils.cpp     # 新增：订单状态公共工具

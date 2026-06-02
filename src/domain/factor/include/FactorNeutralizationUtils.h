@@ -3,10 +3,9 @@
 #include "BaseFactor.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
-#include <QString>
-
 #include <cmath>
 #include <numeric>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -14,7 +13,7 @@ namespace factor::neutralization {
 
 inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
                                             std::unordered_map<std::string, double>& values,
-                                            QString* errorMessage,
+                                            std::string* errorMessage,
                                             const factor::bridge::FieldKey& industryField = factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE,
                                             const factor::bridge::FieldKey& marketCapField = factor::bridge::MarketBarFieldKeys::MARKET_CAP)
 {
@@ -23,19 +22,19 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
 
     if (!context.historicalView) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化要求 HistoricalView 已就绪");
+            *errorMessage = "中性化要求 HistoricalView 已就绪";
         }
         return false;
     }
     if (!context.historicalView->hasField(industryFieldName)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化缺少 %1 字段").arg(QString::fromUtf8(industryField.c_str()));
+            *errorMessage = "中性化缺少 " + industryFieldName + " 字段";
         }
         return false;
     }
     if (!context.historicalView->hasField(marketCapFieldName)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化缺少 %1 字段").arg(QString::fromUtf8(marketCapField.c_str()));
+            *errorMessage = "中性化缺少 " + marketCapFieldName + " 字段";
         }
         return false;
     }
@@ -75,7 +74,7 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
 
     if (samples.size() < 3) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化样本不足，无法完成行业和市值残差化");
+            *errorMessage = "中性化样本不足，无法完成行业和市值残差化";
         }
         return false;
     }
@@ -99,7 +98,7 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
 
     if (residuals.size() < 3 || residuals.size() != samples.size() || logCaps.size() != samples.size()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化样本不足，无法完成行业和市值残差化");
+            *errorMessage = "中性化样本不足，无法完成行业和市值残差化";
         }
         return false;
     }
@@ -127,7 +126,7 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
 
     if (neutralizedValues.empty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化后没有有效样本");
+            *errorMessage = "中性化后没有有效样本";
         }
         return false;
     }

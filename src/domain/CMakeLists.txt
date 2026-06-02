@@ -10,6 +10,10 @@ add_subdirectory(factor)
 add_subdirectory(trading)
 add_subdirectory(strategy)
 
+if(TARGET astock_ta_lib)
+    target_link_libraries(domain_indicators PUBLIC astock_ta_lib)
+endif()
+
 set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
 
 # 创建一个聚合库，添加一个虚拟源文件

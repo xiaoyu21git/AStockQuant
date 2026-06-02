@@ -1,7 +1,5 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 
-#include <QDate>
-
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -19,8 +17,8 @@ template <typename LatestFinancialSeriesResolver>
 std::unordered_map<std::string, double> computeGrowthYoYScoreMap(
     LatestFinancialSeriesResolver&& latestFinancialSeries,
     const CalculationContext& context,
-    const QString& effectiveDate,
-    const QString& field)
+    const std::string& effectiveDate,
+    const std::string& field)
 {
     std::unordered_map<std::string, double> scores;
     const auto seriesMap = latestFinancialSeries(
@@ -50,8 +48,8 @@ template <typename LatestFinancialSeriesResolver>
 std::unordered_map<std::string, double> computeGrowthDifferenceScoreMap(
     LatestFinancialSeriesResolver&& latestFinancialSeries,
     const CalculationContext& context,
-    const QString& effectiveDate,
-    const QString& field)
+    const std::string& effectiveDate,
+    const std::string& field)
 {
     std::unordered_map<std::string, double> scores;
     const auto seriesMap = latestFinancialSeries(
@@ -76,12 +74,12 @@ template <typename LatestFinancialSeriesResolver>
 std::unordered_map<std::string, double> computeGrowthSueScoreMap(
     LatestFinancialSeriesResolver&& latestFinancialSeries,
     const CalculationContext& context,
-    const QString& effectiveDate)
+    const std::string& effectiveDate)
 {
     std::unordered_map<std::string, double> scores;
     const auto seriesMap = latestFinancialSeries(
         context,
-        QString(factor::bridge::FinancialFieldKeys::EPS),
+        std::string(factor::bridge::FinancialFieldKeys::EPS.c_str()),
         effectiveDate,
         ASTOCK_CONFIGURABLE_GROWTH_SUE_SERIES_POINTS);
     for (const auto& [symbol, values] : seriesMap) {
@@ -163,7 +161,6 @@ void normalizeGrowthScoreMap(StandardizationMethod standardization, std::unorder
     std::vector<double> values;
     values.reserve(scores.size());
     for (const auto& [symbol, value] : scores) {
-        Q_UNUSED(symbol);
         if (std::isfinite(value)) {
             values.push_back(value);
         }
@@ -183,7 +180,6 @@ void normalizeGrowthScoreMap(StandardizationMethod standardization, std::unorder
         const double stdev = std::sqrt(variance / static_cast<double>(values.size()));
         if (stdev > 1e-12) {
             for (auto& [symbol, value] : scores) {
-                Q_UNUSED(symbol);
                 value = (value - mean) / stdev;
             }
         }
@@ -192,7 +188,6 @@ void normalizeGrowthScoreMap(StandardizationMethod standardization, std::unorder
         const double range = *maxIt - *minIt;
         if (range > 1e-12) {
             for (auto& [symbol, value] : scores) {
-                Q_UNUSED(symbol);
                 value = (value - *minIt) / range;
             }
         }
@@ -208,7 +203,7 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
     const std::vector<GrowthMetric>& selectedMetrics = growth.growthMetrics;
     const std::vector<double>& selectedWeights = growth.growthWeights;
     if (selectedMetrics.empty() || selectedWeights.empty() || selectedMetrics.size() != selectedWeights.size()) {
-        return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置必须显式提供等长的 growthMetrics 和 growthWeights").toStdString());
+        return createHistoricalViewRuntimeError(context, "成长因子配置必须显式提供等长的 growthMetrics 和 growthWeights");
     }
 
     const size_t pairCount = selectedMetrics.size();
@@ -219,7 +214,7 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
     struct GrowthMetricSelection {
         GrowthIndicatorSpec indicator;
         double weight{0.0};
-        QString field;
+        std::string field;
     };
 
     std::vector<GrowthMetricSelection> selections;
@@ -229,26 +224,26 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
         const GrowthMetric metric = selectedMetrics[index];
         const double weight = selectedWeights[index];
         if (metric == GrowthMetric::UNKNOWN || !std::isfinite(weight) || weight < 0.0) {
-            return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置包含非法指标或权重").toStdString());
+            return createHistoricalViewRuntimeError(context, "成长因子配置包含非法指标或权重");
         }
         const std::string metricKey = std::to_string(static_cast<int>(metric));
         if (seenMetrics.find(metricKey) != seenMetrics.end()) {
-            return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置不允许重复指标").toStdString());
+            return createHistoricalViewRuntimeError(context, "成长因子配置不允许重复指标");
         }
         seenMetrics.insert(metricKey);
 
         const GrowthIndicatorSpec indicatorSpec = growthIndicatorSpec(metric);
         if (!indicatorSpec.common.hasResolvedSource() || indicatorSpec.common.sourceTable != SourceTable::FINANCIAL_INDICATOR) {
-            return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置包含不支持的指标").toStdString());
+            return createHistoricalViewRuntimeError(context, "成长因子配置包含不支持的指标");
         }
-        const QString field = indicatorSpec.common.fieldKey->toQString();
+        const std::string field = std::string(indicatorSpec.common.fieldKey->c_str());
         selections.push_back({indicatorSpec, weight, field});
     }
 
-    QStringList dateResolutionFields;
-    dateResolutionFields.reserve(static_cast<int>(selections.size()));
+    std::vector<std::string> dateResolutionFields;
+    dateResolutionFields.reserve(selections.size());
     for (const auto& selection : selections) {
-        dateResolutionFields.append(selection.field);
+        dateResolutionFields.push_back(selection.field);
     }
 
     return executeWithCommonParams(
@@ -263,10 +258,10 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
         },
         [this, &context, &selections, standardization](const CommonRuntimeState& runtime, CalculationResult& result) {
             CalculationContext effectiveContext = context;
-            effectiveContext.date = runtime.effectiveDate.toStdString();
+            effectiveContext.date = runtime.effectiveDate;
             auto latestFinancialSeriesResolver = [this](const CalculationContext& queryContext,
-                                                        const QString& field,
-                                                        const QString& date,
+                                                        const std::string& field,
+                                                        const std::string& date,
                                                         int limit) {
                 return latestFinancialSeries(queryContext, field, date, limit);
             };
@@ -289,9 +284,9 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
                 } else if (selection.indicator.metric == GrowthMetric::SUE) {
                     metricScores = computeGrowthSueScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate);
                 } else {
-                    const QString errorMessage = QStringLiteral("成长因子配置包含不支持的指标");
-                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    const std::string errorMessage = "成长因子配置包含不支持的指标";
+                    result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                     return;
                 }
 
@@ -307,7 +302,7 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
             }
 
             if (combinedScores.empty()) {
-                result.metadata.set("emptyReason", json_helper::toJsonValue(QStringLiteral("成长因子没有可用财务数据").toStdString()));
+                result.metadata.set("emptyReason", json_helper::toJsonValue("成长因子没有可用财务数据"));
                 return;
             }
 

@@ -16,11 +16,12 @@
 #include "domain/factor/include/ValueFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/IFactorResolver.h"
+#include "foundation.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
-#include <QDebug>
 #include <QVariant>
 #include <algorithm>
 #include <chrono>
+#include <sstream>
 
 namespace factor {
 
@@ -66,105 +67,92 @@ using FactorCreator = std::shared_ptr<BaseFactor> (*)(const FactorInstanceInfo&,
 
 std::shared_ptr<BaseFactor> createMomentumFactorEntry(const FactorInstanceInfo& info,
                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                      FactorInstanceManager& manager)
+                                                      FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return MomentumFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createValueFactorEntry(const FactorInstanceInfo& info,
                                                    std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                   FactorInstanceManager& manager)
+                                                   FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return ValueFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createQualityFactorEntry(const FactorInstanceInfo& info,
                                                      std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                     FactorInstanceManager& manager)
+                                                     FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return QualityFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createSizeFactorEntry(const FactorInstanceInfo& info,
                                                   std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                  FactorInstanceManager& manager)
+                                                  FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return SizeFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createLowVolFactorEntry(const FactorInstanceInfo& info,
                                                     std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                    FactorInstanceManager& manager)
+                                                    FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return LowVolFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createGrowthFactorEntry(const FactorInstanceInfo& info,
                                                     std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                    FactorInstanceManager& manager)
+                                                    FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return GrowthFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createDividendFactorEntry(const FactorInstanceInfo& info,
                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                      FactorInstanceManager& manager)
+                                                      FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return DividendFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createTechnicalFactorEntry(const FactorInstanceInfo& info,
                                                        std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                       FactorInstanceManager& manager)
+                                                       FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return TechnicalFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createLiquidityFactorEntry(const FactorInstanceInfo& info,
                                                        std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                       FactorInstanceManager& manager)
+                                                       FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return LiquidityFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createMacroFactorEntry(const FactorInstanceInfo& info,
                                                    std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                   FactorInstanceManager& manager)
+                                                   FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return MacroFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createIndustryFactorEntry(const FactorInstanceInfo& info,
                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                      FactorInstanceManager& manager)
+                                                      FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return IndustryFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createSentimentFactorEntry(const FactorInstanceInfo& info,
                                                        std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                       FactorInstanceManager& manager)
+                                                       FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return SentimentFactor::create(info, std::move(dataChecker));
 }
 
 std::shared_ptr<BaseFactor> createCustomFactorEntry(const FactorInstanceInfo& info,
                                                     std::shared_ptr<DataAvailabilityChecker> dataChecker,
-                                                    FactorInstanceManager& manager)
+                                                    FactorInstanceManager&)
 {
-    Q_UNUSED(manager);
     return CustomFactor::create(info, std::move(dataChecker));
 }
 
@@ -233,16 +221,20 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
     try {
         return creator(info, dataChecker_, *this);
     } catch (const std::exception& e) {
-        qWarning() << "FactorInstanceManager::createFactorFromInfo: failed to create instance"
-                   << QString::fromStdString(instanceId)
-                   << "factorType=" << static_cast<int>(factorType)
-                   << "error=" << e.what();
+        std::ostringstream oss;
+        oss << "FactorInstanceManager::createFactorFromInfo: failed to create instance "
+            << instanceId
+            << " factorType=" << static_cast<int>(factorType)
+            << " error=" << e.what();
+        LOG_ERROR(oss.str());
         return nullptr;
     } catch (...) {
-        qWarning() << "FactorInstanceManager::createFactorFromInfo: failed to create instance"
-                   << QString::fromStdString(instanceId)
-                   << "factorType=" << static_cast<int>(factorType)
-                   << "error=unknown";
+        std::ostringstream oss;
+        oss << "FactorInstanceManager::createFactorFromInfo: failed to create instance "
+            << instanceId
+            << " factorType=" << static_cast<int>(factorType)
+            << " error=unknown";
+        LOG_ERROR(oss.str());
         return nullptr;
     }
 }

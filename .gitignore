@@ -90,6 +90,7 @@ CMakeLists_test_*.txt
 compile_test_*.bat
 !tests/test_factor_backtest_regression.cpp
 !tests/test_backtest_abstractions.cpp
+!tests/test_factor_signal_engine_smoke.cpp
 
 # 数据清洗检查报�?
 数据清洗流程检查报�?md

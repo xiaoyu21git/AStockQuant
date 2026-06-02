@@ -2,15 +2,48 @@
 
 #include "../../strategy/include/StrategySnapshotTypes.h"
 
+#include <cstdint>
+#include <vector>
+
 namespace domain::backtest {
 
 struct DateWindow final {
-    QDate startDate;
-    QDate endDate;
+    int32_t startDate{0};
+    int32_t endDate{0};
+
+    [[nodiscard]] static bool isValidDate(int32_t yyyymmdd)
+    {
+        if (yyyymmdd <= 0) {
+            return false;
+        }
+
+        const int year = yyyymmdd / 10000;
+        const int month = (yyyymmdd / 100) % 100;
+        const int day = yyyymmdd % 100;
+
+        if (year < 1900 || year > 2100) {
+            return false;
+        }
+        if (month < 1 || month > 12) {
+            return false;
+        }
+
+        static constexpr int kDaysInMonth[12] = {
+            31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
+        };
+
+        int maxDay = kDaysInMonth[month - 1];
+        const bool leapYear = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        if (month == 2 && leapYear) {
+            maxDay = 29;
+        }
+
+        return day >= 1 && day <= maxDay;
+    }
 
     [[nodiscard]] bool isValid() const
     {
-        return startDate.isValid() && endDate.isValid() && startDate <= endDate;
+        return isValidDate(startDate) && isValidDate(endDate) && startDate <= endDate;
     }
 };
 
@@ -114,6 +147,50 @@ struct BacktestRequest final {
             && runtimeOptions.isValid()
             && window.isValid();
     }
+};
+
+enum class BacktestLayerViolationCode {
+    None,
+    InvalidRequest,
+    OverlayEnableFlagMismatch,
+    RebalanceDaysMustComeFromStrategyDefinition,
+    StrategyExecutionPolicyRebalanceDaysMismatch,
+    ExecutionPositionSizingMethodMismatch,
+    ExecutionShortSellingModeMismatch,
+    OverlayTargetPositionCountMismatch,
+    OverlayMinimumCompositeScoreMismatch,
+    OverlaySelectedFactorsMismatch,
+    OverlayAllocationsMismatch,
+    RiskStopLossMustAlignRuleProfile,
+    RiskMaxPositionMustAlignRuleProfile
+};
+
+struct BacktestLayerGuardResult final {
+    std::vector<BacktestLayerViolationCode> violations;
+
+    [[nodiscard]] bool ok() const
+    {
+        return violations.empty();
+    }
+};
+
+class IBacktestLayerGuard {
+public:
+    virtual ~IBacktestLayerGuard() = default;
+
+    virtual BacktestLayerGuardResult validate(const BacktestRequest& request) const = 0;
+};
+
+class StrictBacktestLayerGuard final : public IBacktestLayerGuard {
+public:
+    static constexpr double kMinimumCompositeScoreTolerance = 1e-9;
+    static constexpr double kAllocationWeightTolerance = 1e-9;
+    static constexpr double kRatioTolerance = 1e-9;
+
+    BacktestLayerGuardResult validate(const BacktestRequest& request) const override;
+
+private:
+    [[nodiscard]] static bool nearEqual(double left, double right, double tolerance);
 };
 
 } // namespace domain::backtest

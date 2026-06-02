@@ -2,11 +2,11 @@
 // 因子元数据服务实现 - 专门处理因子参数元数据的加载和查询
 
 #include "FactorMetaService.h"
+#include "foundation.h"
 
 #include "../../../domain/factor/include/BaseFactor.h"
 #include "../../../domain/factor/include/FactorMetricConfig.h"
 
-#include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -68,6 +68,11 @@ const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLA
 };
 
 namespace {
+
+std::string toStdString(const QString& value)
+{
+    return value.toStdString();
+}
 
 QVariantMap buildFactorUiMeta(const QString& id,
                               int factorType,
@@ -1088,13 +1093,13 @@ const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
 // 构造函数
 FactorMetaService::FactorMetaService(QObject* parent) : QObject(parent)
 {
-    qDebug() << "FactorMetaService created";
+    LOG_DEBUG("FactorMetaService created");
 }
 
 // 析构函数
 FactorMetaService::~FactorMetaService()
 {
-    qDebug() << "FactorMetaService destroyed";
+    LOG_DEBUG("FactorMetaService destroyed");
 }
 
 // 初始化服务
@@ -1103,7 +1108,7 @@ void FactorMetaService::initialize()
     QMutexLocker locker(&m_mutex);
     
     if (m_initialized) {
-        qDebug() << "FactorMetaService already initialized";
+        LOG_DEBUG("FactorMetaService already initialized");
         return;
     }
     
@@ -1115,7 +1120,7 @@ void FactorMetaService::initialize()
     m_initialized = true;
     emit initializedChanged();
     
-    qDebug() << "FactorMetaService initialized successfully";
+    LOG_DEBUG("FactorMetaService initialized successfully");
     emit metaDataLoaded(true, "因子元数据加载成功");
 }
 
@@ -1140,7 +1145,7 @@ void FactorMetaService::reloadMetaData()
     emit factorCategoriesChanged();
     emit parameterTypesChanged();
     
-    qDebug() << "FactorMetaService metadata reloaded";
+    LOG_DEBUG("FactorMetaService metadata reloaded");
     emit metaDataLoaded(true, "因子元数据重新加载成功");
 }
 
@@ -1150,7 +1155,7 @@ QVariantMap FactorMetaService::getFactorCategory(factor::FactorType factorType)
     QMutexLocker locker(&m_mutex);
     
     if (!m_initialized) {
-        qWarning() << "FactorMetaService not initialized";
+        LOG_WARN("FactorMetaService not initialized");
         return QVariantMap();
     }
     
@@ -1219,7 +1224,7 @@ QVariantMap FactorMetaService::getParameterDefinition(const QString& paramName, 
     QMutexLocker locker(&m_mutex);
     
     if (!m_initialized) {
-        qWarning() << "FactorMetaService not initialized";
+        LOG_WARN("FactorMetaService not initialized");
         return QVariantMap();
     }
     
@@ -1242,7 +1247,7 @@ QVariantList FactorMetaService::getCommonParameters(factor::FactorType factorTyp
     QMutexLocker locker(&m_mutex);
     
     if (!m_initialized) {
-        qWarning() << "FactorMetaService not initialized";
+        LOG_WARN("FactorMetaService not initialized");
         return QVariantList();
     }
     
@@ -1266,7 +1271,7 @@ QVariantList FactorMetaService::getSpecificParameters(factor::FactorType factorT
     QMutexLocker locker(&m_mutex);
     
     if (!m_initialized) {
-        qWarning() << "FactorMetaService not initialized";
+        LOG_WARN("FactorMetaService not initialized");
         return QVariantList();
     }
     
@@ -1317,7 +1322,7 @@ QVariantMap FactorMetaService::getDefaultParameterValues(factor::FactorType fact
     QMutexLocker locker(&m_mutex);
     
     if (!m_initialized) {
-        qWarning() << "FactorMetaService not initialized";
+        LOG_WARN("FactorMetaService not initialized");
         return QVariantMap();
     }
     
@@ -1464,12 +1469,12 @@ QVariantMap FactorMetaService::parameterTypes() const
 bool FactorMetaService::loadMetaData()
 {
     if (!loadCommonMetaData()) {
-        qWarning() << "Failed to load common metadata";
+        LOG_WARN("Failed to load common metadata");
         return false;
     }
     
     if (!loadParameterMetaData()) {
-        qWarning() << "Failed to load parameter metadata";
+        LOG_WARN("Failed to load parameter metadata");
         return false;
     }
     
@@ -1493,12 +1498,12 @@ bool FactorMetaService::loadCommonMetaData()
     QFile file(filePath);
     
     if (!file.exists()) {
-        qWarning() << "Common metadata file not found:" << filePath;
+        LOG_WARN(std::string("Common metadata file not found: ") + toStdString(filePath));
         return false;
     }
     
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "Failed to open common metadata file:" << filePath;
+        LOG_WARN(std::string("Failed to open common metadata file: ") + toStdString(filePath));
         return false;
     }
     
@@ -1507,12 +1512,12 @@ bool FactorMetaService::loadCommonMetaData()
     
     QJsonDocument doc = QJsonDocument::fromJson(jsonData);
     if (doc.isNull()) {
-        qWarning() << "Failed to parse common metadata JSON";
+        LOG_WARN("Failed to parse common metadata JSON");
         return false;
     }
     
     m_commonMetaData = doc.object().toVariantMap();
-    qDebug() << "Loaded common metadata from:" << filePath;
+    LOG_DEBUG(std::string("Loaded common metadata from: ") + toStdString(filePath));
     return true;
 }
 
@@ -1522,12 +1527,12 @@ bool FactorMetaService::loadParameterMetaData()
     QFile file(filePath);
     
     if (!file.exists()) {
-        qWarning() << "Parameter metadata file not found:" << filePath;
+        LOG_WARN(std::string("Parameter metadata file not found: ") + toStdString(filePath));
         return false;
     }
     
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "Failed to open parameter metadata file:" << filePath;
+        LOG_WARN(std::string("Failed to open parameter metadata file: ") + toStdString(filePath));
         return false;
     }
     
@@ -1536,12 +1541,12 @@ bool FactorMetaService::loadParameterMetaData()
     
     QJsonDocument doc = QJsonDocument::fromJson(jsonData);
     if (doc.isNull()) {
-        qWarning() << "Failed to parse parameter metadata JSON";
+        LOG_WARN("Failed to parse parameter metadata JSON");
         return false;
     }
     
     m_parameterMetaData = doc.object().toVariantMap();
-    qDebug() << "Loaded parameter metadata from:" << filePath;
+    LOG_DEBUG(std::string("Loaded parameter metadata from: ") + toStdString(filePath));
     return true;
 }
 
@@ -1681,6 +1686,6 @@ QString FactorMetaService::getConfigFilePath(const QString& relativePath)
 void FactorMetaService::updateError(const QString& error)
 {
     m_lastError = error;
-    qWarning() << "FactorMetaService error:" << error;
+    LOG_WARN(std::string("FactorMetaService error: ") + toStdString(error));
     emit errorOccurred(error);
 }

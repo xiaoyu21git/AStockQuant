@@ -6,6 +6,7 @@
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <stdexcept>
 #include <type_traits>
@@ -229,17 +230,38 @@ configurable_factor_detail::LiquidityIndicatorSpec resolvedTechnicalTurnoverMetr
     return configurable_factor_detail::liquidityIndicatorSpec(params.turnoverStabilityMetric);
 }
 
-void appendUniqueRequirementField(std::vector<std::string>& fields, const QString& field)
-{
-    appendUniqueField(fields, field.trimmed().toStdString());
-}
-
 void appendUniqueRequirementField(std::vector<std::string>& fields, const factor::bridge::FieldKey* field)
 {
     if (!field) {
         return;
     }
     appendUniqueField(fields, field->c_str());
+}
+
+void appendUniqueRequirementField(std::vector<std::string>& fields, const std::string& field)
+{
+    appendUniqueField(fields, field);
+}
+
+std::string trimAsciiWhitespace(std::string text)
+{
+    const auto isSpace = [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    };
+    const auto begin = std::find_if_not(text.begin(), text.end(), isSpace);
+    const auto end = std::find_if_not(text.rbegin(), text.rend(), isSpace).base();
+    if (begin >= end) {
+        return {};
+    }
+    return std::string(begin, end);
+}
+
+std::string toLowerAscii(std::string text)
+{
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return text;
 }
 
 void appendConfigurableNeutralizationRequirements(
@@ -250,8 +272,8 @@ void appendConfigurableNeutralizationRequirements(
         return;
     }
 
-    appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
-    appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
+    appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str()));
+    appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
     requirements.sourceTable = SourceTable::UNKNOWN;
 }
 
@@ -285,8 +307,8 @@ DataRequirements derivedLiquidityDataRequirements(
     DataRequirements requirements;
     switch (params.liquidityMetric) {
     case LiquidityMetric::AMIHUD_ILLIQUIDITY:
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::CLOSE));
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::VOLUME));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str()));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::VOLUME.c_str()));
         requirements.sourceTable = SourceTable::DAILY_BAR;
         break;
     case LiquidityMetric::TURNOVER_RATE:
@@ -402,16 +424,16 @@ DataRequirements derivedCustomDataRequirements(
     DataRequirements requirements;
     requirements.sourceTable = baseRequirements.sourceTable;
 
-    const QStringList variables = factor::custom_expression::extractVariables(QString::fromStdString(params.expression).toLower());
-    for (const QString& variable : variables) {
-        QString sourceField = variable;
+    const std::vector<std::string> variables = factor::custom_expression::extractVariables(toLowerAscii(params.expression));
+    for (const std::string& variable : variables) {
+        std::string sourceField = variable;
         for (const auto& binding : params.variables) {
-            if (QString::fromStdString(binding.name).compare(variable, Qt::CaseInsensitive) != 0) {
+            if (toLowerAscii(binding.name) != variable) {
                 continue;
             }
 
-            const QString boundField = QString::fromStdString(binding.field).trimmed();
-            if (!boundField.isEmpty()) {
+            const std::string boundField = trimAsciiWhitespace(binding.field);
+            if (!boundField.empty()) {
                 sourceField = boundField;
             }
             break;
@@ -443,19 +465,19 @@ DataRequirements derivedTechnicalDataRequirements(
         appendUniqueRequirementField(requirements.requiredFields, priceIndicator.common.fieldKey);
     }
     if (needHighLowSeries) {
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::HIGH));
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::LOW));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::HIGH.c_str()));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::LOW.c_str()));
     }
     if (needVolumeSeries) {
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::VOLUME));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::VOLUME.c_str()));
     }
     if (needTurnoverSeries) {
         const auto turnoverIndicator = resolvedTechnicalTurnoverMetricSpec(params);
         appendUniqueRequirementField(requirements.requiredFields, turnoverIndicator.common.fieldKey);
     }
     if (commonParams.neutralizationEnabled) {
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str()));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
     }
 
     if (!requirements.requiredFields.empty()) {
@@ -479,8 +501,8 @@ DataRequirements derivedIndustryDataRequirements(
         requirements.sourceTable = industryIndicator.common.sourceTable;
     }
     if (commonParams.neutralizationEnabled) {
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str()));
+        appendUniqueRequirementField(requirements.requiredFields, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
         requirements.sourceTable = SourceTable::UNKNOWN;
     }
     return requirements;

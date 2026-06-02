@@ -4,11 +4,6 @@
 #include "FactorMetricConfig.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
-#include <QDate>
-#include <QElapsedTimer>
-#include <QSet>
-#include <QStringList>
-
 #include <Eigen/Dense>
 
 #include <limits>
@@ -167,15 +162,9 @@ enum class LaggedDateMode : uint8_t {
 
 void applyConfigurableStandardization(StandardizationMethod standardization,
                                       std::unordered_map<std::string, double>& values);
-QString configurableFrequencyText(DataFrequency frequency);
-QString configurableStandardizationText(StandardizationMethod standardization);
-QString configurableNeutralizationModeText(NeutralizationStatus neutralizationMode);
-QString dividendMetricText(DividendMetric metric);
-QString industryMetricText(IndustryMetric metric);
-QString sectorTypeText(ConfigurableSectorType sectorType);
 bool applyHistoricalViewIndustrySizeNeutralization(const CalculationContext& context,
                                                    std::unordered_map<std::string, double>& values,
-                                                   QString* errorMessage);
+                                                   std::string* errorMessage);
 TechnicalPriceIndicatorSpec technicalPriceIndicatorSpec(TechnicalPriceType priceType);
 foundation::json::JsonFacade technicalIndicatorArrayJson(const std::vector<TechnicalIndicator>& indicators);
 foundation::json::JsonFacade macroDimensionArrayJson(const std::vector<MacroDimension>& dimensions);
@@ -195,10 +184,10 @@ double sectorIndustryWeight(ConfigurableSectorType sectorType);
 double safeMean(const std::vector<double>& values);
 double safeFiniteMean(const std::vector<double>& values);
 double safeRatio(double numerator, double denominator);
-void buildBatchCrossSectionKey(std::string& key, const std::string& date, const QString& field);
+void buildBatchCrossSectionKey(std::string& key, const std::string& date, const std::string& field);
 std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
     const CalculationContext& context,
-    const QString& field,
+    const std::string& field,
     int window);
 SeriesMatrixBatch collectSeriesMatrix(
     const std::unordered_map<std::string, std::vector<double>>& seriesBySymbol,

@@ -1,38 +1,59 @@
 #pragma once
 
-#include <QRegularExpression>
-#include <QString>
-#include <QStringList>
-
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstdlib>
 #include <optional>
+#include <regex>
 #include <stack>
 #include <string>
+#include <string_view>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace factor::custom_expression {
 
 struct VariableBinding {
-    QString name;
-    QString field;
+    std::string name;
+    std::string field;
     bool hasDefaultValue{false};
     double defaultValue{0.0};
 };
 
 struct FieldRequirements {
-    QStringList requiredFields;
-    QStringList optionalFields;
+    std::vector<std::string> requiredFields;
+    std::vector<std::string> optionalFields;
 };
 
-inline QString normalizeBindingName(const QString& text)
+inline std::string trimAsciiWhitespace(const std::string& text)
 {
-    return text.trimmed().toLower();
+    const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    const auto begin = std::find_if_not(text.begin(), text.end(), isSpace);
+    const auto end = std::find_if_not(text.rbegin(), text.rend(), isSpace).base();
+    if (begin >= end) {
+        return {};
+    }
+    return std::string(begin, end);
 }
 
-inline const VariableBinding* findBinding(const std::vector<VariableBinding>& bindings, const QString& variable)
+inline std::string toLowerAscii(std::string value)
 {
-    const QString normalizedVariable = normalizeBindingName(variable);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+inline std::string normalizeBindingName(const std::string& text)
+{
+    return toLowerAscii(trimAsciiWhitespace(text));
+}
+
+inline const VariableBinding* findBinding(const std::vector<VariableBinding>& bindings, const std::string& variable)
+{
+    const std::string normalizedVariable = normalizeBindingName(variable);
     for (const auto& binding : bindings) {
         if (normalizeBindingName(binding.name) == normalizedVariable) {
             return &binding;
@@ -41,26 +62,26 @@ inline const VariableBinding* findBinding(const std::vector<VariableBinding>& bi
     return nullptr;
 }
 
-inline QString resolveBoundField(const VariableBinding& binding)
+inline std::string resolveBoundField(const VariableBinding& binding)
 {
-    const QString explicitField = binding.field.trimmed().toLower();
-    if (!explicitField.isEmpty()) {
+    const std::string explicitField = normalizeBindingName(binding.field);
+    if (!explicitField.empty()) {
         return explicitField;
     }
     return normalizeBindingName(binding.name);
 }
 
-inline bool isOperator(const QString& token)
+inline bool isOperator(std::string_view token)
 {
     return token == "+" || token == "-" || token == "*" || token == "/";
 }
 
-inline bool isSupportedFunction(const QString& token)
+inline bool isSupportedFunction(std::string_view token)
 {
     return token == "sqrt" || token == "abs" || token == "min" || token == "max";
 }
 
-inline int functionArity(const QString& token)
+inline int functionArity(std::string_view token)
 {
     if (token == "sqrt" || token == "abs") {
         return 1;
@@ -71,7 +92,7 @@ inline int functionArity(const QString& token)
     return 0;
 }
 
-inline int precedence(const QString& token)
+inline int precedence(std::string_view token)
 {
     if (token == "+" || token == "-") {
         return 1;
@@ -82,80 +103,93 @@ inline int precedence(const QString& token)
     return 0;
 }
 
-inline QStringList extractVariables(const QString& expression)
+inline bool appendIfAbsent(std::vector<std::string>& values, const std::string& candidate)
 {
-    QStringList variables;
-    QRegularExpression regex(QStringLiteral("\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"));
-    auto it = regex.globalMatch(expression);
-    while (it.hasNext()) {
-        const QString token = it.next().captured(0).trimmed();
-        const QString lower = token.toLower();
-        if (isSupportedFunction(lower)) {
+    if (candidate.empty()) {
+        return false;
+    }
+    if (std::find(values.begin(), values.end(), candidate) != values.end()) {
+        return false;
+    }
+    values.push_back(candidate);
+    return true;
+}
+
+inline std::vector<std::string> extractVariables(const std::string& expression)
+{
+    std::vector<std::string> variables;
+    static const std::regex regexPattern("\\b[a-zA-Z_][a-zA-Z0-9_]*\\b");
+    for (std::sregex_iterator it(expression.begin(), expression.end(), regexPattern), end; it != end; ++it) {
+        const std::string token = toLowerAscii(trimAsciiWhitespace((*it)[0].str()));
+        if (token.empty() || isSupportedFunction(token)) {
             continue;
         }
-        if (!variables.contains(lower)) {
-            variables.append(lower);
-        }
+        appendIfAbsent(variables, token);
     }
     return variables;
 }
 
-inline FieldRequirements resolveFieldRequirements(const QString& expression,
+inline FieldRequirements resolveFieldRequirements(const std::string& expression,
                                                   const std::vector<VariableBinding>& bindings)
 {
     FieldRequirements requirements;
-    const QStringList variables = extractVariables(expression.toLower());
-    for (const QString& variable : variables) {
+    const std::vector<std::string> variables = extractVariables(toLowerAscii(expression));
+    for (const std::string& variable : variables) {
         const VariableBinding* binding = findBinding(bindings, variable);
         if (!binding) {
-            if (!requirements.requiredFields.contains(variable)) {
-                requirements.requiredFields.append(variable);
-            }
+            appendIfAbsent(requirements.requiredFields, variable);
             continue;
         }
 
-        const QString field = resolveBoundField(*binding);
-        if (field.isEmpty()) {
+        const std::string field = resolveBoundField(*binding);
+        if (field.empty()) {
             continue;
         }
 
-        QStringList& target = requirements.requiredFields;
-        if (!target.contains(field)) {
-            target.append(field);
+        if (binding->hasDefaultValue) {
+            appendIfAbsent(requirements.optionalFields, field);
+        } else {
+            appendIfAbsent(requirements.requiredFields, field);
         }
     }
     return requirements;
 }
 
-inline QStringList toRpn(const QString& expression, QString* errorMessage)
+inline std::string formatUnsupportedTokenError(const std::string& token)
 {
-    QStringList output;
-    std::stack<QString> operators;
-    QString token;
+    return std::string("表达式包含不支持的字符: ") + token;
+}
+
+inline std::vector<std::string> toRpn(const std::string& expression, std::string* errorMessage)
+{
+    std::vector<std::string> output;
+    std::stack<std::string> operators;
+    std::string token;
 
     auto flushToken = [&]() {
-        if (!token.isEmpty()) {
-            output.append(token);
+        if (!token.empty()) {
+            output.push_back(token);
             token.clear();
         }
     };
 
-    for (int index = 0; index < expression.size(); ++index) {
-        const QChar ch = expression.at(index);
-        if (ch.isSpace()) {
+    for (size_t index = 0; index < expression.size(); ++index) {
+        const unsigned char ch = static_cast<unsigned char>(expression[index]);
+        if (std::isspace(ch) != 0) {
             flushToken();
             continue;
         }
 
-        if (ch.isLetterOrNumber() || ch == '_' || ch == '.') {
-            token.append(ch);
+        if (std::isalnum(ch) != 0 || ch == '_' || ch == '.') {
+            token.push_back(static_cast<char>(ch));
             continue;
         }
 
-        const QString current(ch);
+        const std::string current(1, static_cast<char>(ch));
         if (current == "(") {
-            if (isSupportedFunction(token.toLower())) {
-                operators.push(token.toLower());
+            const std::string loweredToken = toLowerAscii(token);
+            if (isSupportedFunction(loweredToken)) {
+                operators.push(loweredToken);
                 token.clear();
             } else {
                 flushToken();
@@ -167,12 +201,12 @@ inline QStringList toRpn(const QString& expression, QString* errorMessage)
         flushToken();
         if (current == ",") {
             while (!operators.empty() && operators.top() != "(") {
-                output.append(operators.top());
+                output.push_back(operators.top());
                 operators.pop();
             }
             if (operators.empty()) {
                 if (errorMessage) {
-                    *errorMessage = QString::fromUtf8("表达式参数分隔符位置不正确");
+                    *errorMessage = "表达式参数分隔符位置不正确";
                 }
                 return {};
             }
@@ -180,32 +214,32 @@ inline QStringList toRpn(const QString& expression, QString* errorMessage)
         }
         if (current == ")") {
             while (!operators.empty() && operators.top() != "(") {
-                output.append(operators.top());
+                output.push_back(operators.top());
                 operators.pop();
             }
             if (operators.empty()) {
                 if (errorMessage) {
-                    *errorMessage = QString::fromUtf8("表达式括号不匹配");
+                    *errorMessage = "表达式括号不匹配";
                 }
                 return {};
             }
             operators.pop();
             if (!operators.empty() && isSupportedFunction(operators.top())) {
-                output.append(operators.top());
+                output.push_back(operators.top());
                 operators.pop();
             }
             continue;
         }
         if (!isOperator(current)) {
             if (errorMessage) {
-                *errorMessage = QString::fromUtf8("表达式包含不支持的字符: %1").arg(current);
+                *errorMessage = formatUnsupportedTokenError(current);
             }
             return {};
         }
 
         while (!operators.empty() && isOperator(operators.top())
                && precedence(operators.top()) >= precedence(current)) {
-            output.append(operators.top());
+            output.push_back(operators.top());
             operators.pop();
         }
         operators.push(current);
@@ -215,25 +249,35 @@ inline QStringList toRpn(const QString& expression, QString* errorMessage)
     while (!operators.empty()) {
         if (operators.top() == "(") {
             if (errorMessage) {
-                *errorMessage = QString::fromUtf8("表达式括号不匹配");
+                *errorMessage = "表达式括号不匹配";
             }
             return {};
         }
-        output.append(operators.top());
+        output.push_back(operators.top());
         operators.pop();
     }
 
     return output;
 }
 
-inline std::optional<double> evaluateRpn(const QStringList& rpn,
+inline bool parseNumberToken(const std::string& token, double& value)
+{
+    if (token.empty()) {
+        return false;
+    }
+    char* end = nullptr;
+    value = std::strtod(token.c_str(), &end);
+    return end == token.c_str() + static_cast<std::ptrdiff_t>(token.size());
+}
+
+inline std::optional<double> evaluateRpn(const std::vector<std::string>& rpn,
                                          const std::unordered_map<std::string, double>& variables,
-                                         QString* errorMessage)
+                                         std::string* errorMessage)
 {
     std::stack<double> stack;
-    for (const QString& token : rpn) {
-        bool isNumber = false;
-        const double number = token.toDouble(&isNumber);
+    for (const std::string& token : rpn) {
+        double number = 0.0;
+        const bool isNumber = parseNumberToken(token, number);
         if (isNumber) {
             stack.push(number);
             continue;
@@ -242,7 +286,7 @@ inline std::optional<double> evaluateRpn(const QStringList& rpn,
         if (isOperator(token)) {
             if (stack.size() < 2) {
                 if (errorMessage) {
-                    *errorMessage = QString::fromUtf8("表达式语法错误");
+                    *errorMessage = "表达式语法错误";
                 }
                 return std::nullopt;
             }
@@ -261,7 +305,7 @@ inline std::optional<double> evaluateRpn(const QStringList& rpn,
             const int arity = functionArity(token);
             if (static_cast<int>(stack.size()) < arity) {
                 if (errorMessage) {
-                    *errorMessage = QString::fromUtf8("表达式函数参数不足: %1").arg(token);
+                    *errorMessage = std::string("表达式函数参数不足: ") + token;
                 }
                 return std::nullopt;
             }
@@ -289,10 +333,10 @@ inline std::optional<double> evaluateRpn(const QStringList& rpn,
             continue;
         }
 
-        const auto variableIt = variables.find(token.toStdString());
+        const auto variableIt = variables.find(token);
         if (variableIt == variables.end()) {
             if (errorMessage) {
-                *errorMessage = QString::fromUtf8("表达式变量缺失: %1").arg(token);
+                *errorMessage = std::string("表达式变量缺失: ") + token;
             }
             return std::nullopt;
         }
@@ -301,7 +345,7 @@ inline std::optional<double> evaluateRpn(const QStringList& rpn,
 
     if (stack.size() != 1) {
         if (errorMessage) {
-            *errorMessage = QString::fromUtf8("表达式语法错误");
+            *errorMessage = "表达式语法错误";
         }
         return std::nullopt;
     }

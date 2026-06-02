@@ -13,7 +13,7 @@ CalculationResult DividendFactor::calculate(const CalculationContext& context)
     if (!context.historicalView) {
         return createHistoricalViewRuntimeError(
             context,
-            QStringLiteral("已移除因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
+            "已移除因子运行期数据库取数路径，请由引擎提供 HistoricalView");
     }
     return calculateDividend(context);
 }

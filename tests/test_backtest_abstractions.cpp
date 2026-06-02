@@ -6,20 +6,23 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <algorithm>
 
-#include "domain/backtest/include/BacktestLayerGuard.h"
-#include "domain/backtest/include/BacktestWindowAbstraction.h"
-#include "domain/backtest/include/DynamicUniverseAbstraction.h"
-#include "domain/backtest/include/OrderRoutingEngineAbstraction.h"
-#include "domain/backtest/include/PerformanceMetricsAggregatorAbstraction.h"
-#include "domain/backtest/include/GroupingAllocationAbstraction.h"
-#include "domain/backtest/include/PortfolioValuationEngineAbstraction.h"
-#include "domain/backtest/include/PositionConstraintAllocationAbstraction.h"
-#include "domain/backtest/include/RebalanceScheduleAbstraction.h"
-#include "domain/backtest/include/RiskApprovalEngineAbstraction.h"
-#include "domain/backtest/include/SignalOrderTranslatorAbstraction.h"
-#include "domain/backtest/include/PositionStateMachineAbstraction.h"
-#include "domain/backtest/include/TradingCostModelAbstraction.h"
+#include "domain/backtest/include/BacktestWindowBuilder.h"
+#include "domain/backtest/include/DynamicUniverseBuilder.h"
+#include "domain/backtest/include/BacktestRequest.h"
+#include "domain/trading/include/execution/OrderRouter.h"
+#include "domain/backtest/include/GroupingAllocator.h"
+#include "domain/backtest/include/ValuationEngine.h"
+#include "domain/trading/include/execution/PositionConstraintAllocator.h"
+#include "domain/backtest/include/RebalanceScheduleBuilder.h"
+#include "domain/trading/include/execution/RiskApprovalEngine.h"
+#include "domain/trading/include/execution/SignalOrderTranslator.h"
+#include "domain/trading/include/execution/PositionStateMachine.h"
+#include "domain/trading/include/execution/TradingCostModel.h"
+#include "application/backtest/include/SignalProducers.h"
+#include "application/backtest/include/RunDefaults.h"
+#include "application/backtest/include/RunArtifactRepository.h"
 
 namespace {
 
@@ -681,14 +684,14 @@ TEST(GroupingAllocationAbstractionTest, ReturnsInvalidRankedInstrumentWhenDuplic
     EXPECT_EQ(result.error, GroupingAllocationError::InvalidRankedInstrument);
 }
 
-using astock::domain::backtest::position_constraints::PositionConstraintAllocator;
-using astock::domain::backtest::position_constraints::PositionConstraintError;
-using astock::domain::backtest::position_constraints::PositionConstraintSpec;
-using astock::domain::backtest::position_constraints::PositionCount;
-using ConstrainedRankedCandidate = astock::domain::backtest::position_constraints::RankedCandidate;
-using ConstrainedRankScore = astock::domain::backtest::position_constraints::RankScore;
-using ConstrainedWeightBps = astock::domain::backtest::position_constraints::WeightBps;
-using ConstrainedInstrumentId = astock::domain::backtest::position_constraints::InstrumentId;
+using astock::domain::trading::position_constraints::PositionConstraintAllocator;
+using astock::domain::trading::position_constraints::PositionConstraintError;
+using astock::domain::trading::position_constraints::PositionConstraintSpec;
+using astock::domain::trading::position_constraints::PositionCount;
+using ConstrainedRankedCandidate = astock::domain::trading::position_constraints::RankedCandidate;
+using ConstrainedRankScore = astock::domain::trading::position_constraints::RankScore;
+using ConstrainedWeightBps = astock::domain::trading::position_constraints::WeightBps;
+using ConstrainedInstrumentId = astock::domain::trading::position_constraints::InstrumentId;
 
 TEST(PositionConstraintAllocationAbstractionTest, ReturnsInvalidInputWhenSpecInvalid)
 {
@@ -758,14 +761,14 @@ TEST(PositionConstraintAllocationAbstractionTest, ReturnsInvalidCandidateWhenDup
     EXPECT_EQ(result.error, PositionConstraintError::InvalidCandidate);
 }
 
-using astock::domain::backtest::trading_cost::BpsRate;
-using astock::domain::backtest::trading_cost::LinearBpsTradingCostModel;
-using astock::domain::backtest::trading_cost::OrderSide;
-using astock::domain::backtest::trading_cost::PriceTicks;
-using astock::domain::backtest::trading_cost::QuantityLots;
-using astock::domain::backtest::trading_cost::TradeFill;
-using astock::domain::backtest::trading_cost::TradingCostError;
-using astock::domain::backtest::trading_cost::TradingCostSpec;
+using astock::domain::trading::trading_cost::BpsRate;
+using astock::domain::trading::trading_cost::LinearBpsTradingCostModel;
+using astock::domain::trading::trading_cost::OrderSide;
+using astock::domain::trading::trading_cost::PriceTicks;
+using astock::domain::trading::trading_cost::QuantityLots;
+using astock::domain::trading::trading_cost::TradeFill;
+using astock::domain::trading::trading_cost::TradingCostError;
+using astock::domain::trading::trading_cost::TradingCostSpec;
 
 TEST(TradingCostAbstractionTest, ReturnsInvalidInputForInvalidFill)
 {
@@ -835,14 +838,14 @@ TEST(TradingCostAbstractionTest, ReturnsInvalidInputWhenNotionalOverflows)
     EXPECT_EQ(result.error, TradingCostError::InvalidInput);
 }
 
-using astock::domain::backtest::signal_orders::LinearSignalOrderTranslator;
-using astock::domain::backtest::signal_orders::OrderAction;
-using astock::domain::backtest::signal_orders::SignalBps;
-using astock::domain::backtest::signal_orders::SignalSnapshot;
-using astock::domain::backtest::signal_orders::TranslationError;
-using astock::domain::backtest::signal_orders::TranslationSpec;
-using SignalWeightDeltaBps = astock::domain::backtest::signal_orders::WeightDeltaBps;
-using SignalInstrumentId = astock::domain::backtest::signal_orders::InstrumentId;
+using astock::domain::trading::signal_orders::LinearSignalOrderTranslator;
+using astock::domain::trading::signal_orders::OrderAction;
+using astock::domain::trading::signal_orders::SignalBps;
+using astock::domain::trading::signal_orders::SignalSnapshot;
+using astock::domain::trading::signal_orders::TranslationError;
+using astock::domain::trading::signal_orders::TranslationSpec;
+using SignalWeightDeltaBps = astock::domain::trading::signal_orders::WeightDeltaBps;
+using SignalInstrumentId = astock::domain::trading::signal_orders::InstrumentId;
 
 TEST(SignalOrderTranslatorAbstractionTest, ReturnsInvalidInputWhenSpecInvalid)
 {
@@ -894,14 +897,14 @@ TEST(SignalOrderTranslatorAbstractionTest, ReturnsDuplicateInstrumentWhenSameIns
     EXPECT_EQ(result.error, TranslationError::DuplicateInstrument);
 }
 
-using astock::domain::backtest::execution_state::ExecutionFill;
-using astock::domain::backtest::execution_state::FillSide;
-using astock::domain::backtest::execution_state::LongOnlyPositionStateMachine;
-using astock::domain::backtest::execution_state::NetPositionStateMachine;
-using astock::domain::backtest::execution_state::PositionState;
-using astock::domain::backtest::execution_state::PositionTransitionError;
-using ExecutionQuantityLots = astock::domain::backtest::execution_state::QuantityLots;
-using ExecutionInstrumentId = astock::domain::backtest::execution_state::InstrumentId;
+using astock::domain::trading::execution_state::ExecutionFill;
+using astock::domain::trading::execution_state::FillSide;
+using astock::domain::trading::execution_state::LongOnlyPositionStateMachine;
+using astock::domain::trading::execution_state::NetPositionStateMachine;
+using astock::domain::trading::execution_state::PositionState;
+using astock::domain::trading::execution_state::PositionTransitionError;
+using ExecutionQuantityLots = astock::domain::trading::execution_state::QuantityLots;
+using ExecutionInstrumentId = astock::domain::trading::execution_state::InstrumentId;
 
 TEST(PositionStateMachineAbstractionTest, NetModelCoversShortBeforeAddingLong)
 {
@@ -955,15 +958,15 @@ TEST(PositionStateMachineAbstractionTest, LongOnlyModelReturnsInvalidInputWhenBu
     EXPECT_EQ(result.error, PositionTransitionError::InvalidInput);
 }
 
-using RiskDeltaBps = astock::domain::backtest::risk_approval::DeltaBps;
-using RiskOrderAction = astock::domain::backtest::risk_approval::OrderAction;
-using astock::domain::backtest::risk_approval::OrderCandidate;
-using astock::domain::backtest::risk_approval::RejectReason;
-using astock::domain::backtest::risk_approval::RiskApprovalError;
-using astock::domain::backtest::risk_approval::RiskLimitsSpec;
-using astock::domain::backtest::risk_approval::RiskRuntimeContext;
-using astock::domain::backtest::risk_approval::SequentialRiskApprovalEngine;
-using RiskInstrumentId = astock::domain::backtest::risk_approval::InstrumentId;
+using RiskDeltaBps = astock::domain::trading::risk_approval::DeltaBps;
+using RiskOrderAction = astock::domain::trading::risk_approval::OrderAction;
+using astock::domain::trading::risk_approval::OrderCandidate;
+using astock::domain::trading::risk_approval::RejectReason;
+using astock::domain::trading::risk_approval::RiskApprovalError;
+using astock::domain::trading::risk_approval::RiskLimitsSpec;
+using astock::domain::trading::risk_approval::RiskRuntimeContext;
+using astock::domain::trading::risk_approval::SequentialRiskApprovalEngine;
+using RiskInstrumentId = astock::domain::trading::risk_approval::InstrumentId;
 
 TEST(RiskApprovalAbstractionTest, ReturnsInvalidInputWhenLimitsInvalid)
 {
@@ -1037,15 +1040,15 @@ TEST(RiskApprovalAbstractionTest, ReturnsInvalidOrderWhenDuplicateInstrumentExis
     EXPECT_EQ(result.error, RiskApprovalError::InvalidOrder);
 }
 
-using astock::domain::backtest::order_routing::ExecutionIntent;
-using astock::domain::backtest::order_routing::ExecutionVenue;
-using astock::domain::backtest::order_routing::LiquidityIntent;
-using RoutingOrderAction = astock::domain::backtest::order_routing::OrderAction;
-using astock::domain::backtest::order_routing::OrderRoutingError;
-using astock::domain::backtest::order_routing::RoutingSpec;
-using astock::domain::backtest::order_routing::SimpleOrderRouter;
-using RoutingDeltaBps = astock::domain::backtest::order_routing::DeltaBps;
-using RoutingInstrumentId = astock::domain::backtest::order_routing::InstrumentId;
+using astock::domain::trading::order_routing::ExecutionIntent;
+using astock::domain::trading::order_routing::ExecutionVenue;
+using astock::domain::trading::order_routing::LiquidityIntent;
+using RoutingOrderAction = astock::domain::trading::order_routing::OrderAction;
+using astock::domain::trading::order_routing::OrderRoutingError;
+using astock::domain::trading::order_routing::RoutingSpec;
+using astock::domain::trading::order_routing::SimpleOrderRouter;
+using RoutingDeltaBps = astock::domain::trading::order_routing::DeltaBps;
+using RoutingInstrumentId = astock::domain::trading::order_routing::InstrumentId;
 
 TEST(OrderRoutingAbstractionTest, ReturnsInvalidInputWhenSpecInvalid)
 {
@@ -1203,11 +1206,6 @@ TEST(PortfolioValuationAbstractionTest, ComputesNetValueFromLongAndShort)
     EXPECT_EQ(result.value->netMicros, 160000000);
 }
 
-using astock::domain::backtest::performance_metrics::BasicPerformanceMetricsAggregator;
-using astock::domain::backtest::performance_metrics::EquityPoint;
-using astock::domain::backtest::performance_metrics::MetricsError;
-using astock::domain::backtest::performance_metrics::MetricsSpec;
-
 using domain::backtest::BacktestLayerViolationCode;
 using domain::backtest::BacktestRequest;
 using domain::backtest::StrictBacktestLayerGuard;
@@ -1265,90 +1263,15 @@ BacktestRequest makeValidLayerGuardRequest()
     request.runtimeOptions.maxThreads = 4;
     request.runtimeOptions.cacheTtlSeconds = 0;
 
-    request.window.startDate = QDate(2024, 1, 1);
-    request.window.endDate = QDate(2024, 12, 31);
+    request.window.startDate = 20240101;
+    request.window.endDate = 20241231;
     return request;
 }
 
-TEST(PerformanceMetricsAbstractionTest, ReturnsInsufficientDataWhenSeriesTooShort)
+bool hasViolation(const std::vector<BacktestLayerViolationCode>& violations,
+                  BacktestLayerViolationCode code)
 {
-    const BasicPerformanceMetricsAggregator aggregator;
-    const MetricsSpec spec{252};
-
-    std::vector<EquityPoint> series;
-    series.push_back(EquityPoint{0, 1000000});
-
-    const auto result = aggregator.aggregate(spec, std::move(series));
-
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.error, MetricsError::InsufficientData);
-}
-
-TEST(PerformanceMetricsAbstractionTest, ComputesReturnAndDrawdown)
-{
-    const BasicPerformanceMetricsAggregator aggregator;
-    const MetricsSpec spec{252};
-
-    std::vector<EquityPoint> series;
-    series.push_back(EquityPoint{0, 1000000});
-    series.push_back(EquityPoint{1, 1200000});
-    series.push_back(EquityPoint{2, 900000});
-    series.push_back(EquityPoint{3, 1300000});
-
-    const auto result = aggregator.aggregate(spec, std::move(series));
-
-    ASSERT_TRUE(result.ok());
-    ASSERT_TRUE(result.value.has_value());
-    EXPECT_EQ(result.value->totalReturnBps, 3000);
-    EXPECT_EQ(result.value->maxDrawdownBps, 2500);
-}
-
-TEST(PerformanceMetricsAbstractionTest, ComputesPositiveVolatilityOnFluctuatingSeries)
-{
-    const BasicPerformanceMetricsAggregator aggregator;
-    const MetricsSpec spec{252};
-
-    std::vector<EquityPoint> series;
-    series.push_back(EquityPoint{0, 1000000});
-    series.push_back(EquityPoint{1, 1100000});
-    series.push_back(EquityPoint{2, 1000000});
-
-    const auto result = aggregator.aggregate(spec, std::move(series));
-
-    ASSERT_TRUE(result.ok());
-    ASSERT_TRUE(result.value.has_value());
-    EXPECT_GT(result.value->volatilityBps, 0);
-}
-
-TEST(PerformanceMetricsAbstractionTest, ReturnsInvalidPointWhenDayIndexNotStrictlyIncreasing)
-{
-    const BasicPerformanceMetricsAggregator aggregator;
-    const MetricsSpec spec{252};
-
-    std::vector<EquityPoint> series;
-    series.push_back(EquityPoint{0, 1000000});
-    series.push_back(EquityPoint{0, 1100000});
-    series.push_back(EquityPoint{2, 1200000});
-
-    const auto result = aggregator.aggregate(spec, std::move(series));
-
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.error, MetricsError::InvalidPoint);
-}
-
-TEST(PerformanceMetricsAbstractionTest, ReturnsInvalidPointWhenTotalReturnOverflowsInt32Range)
-{
-    const BasicPerformanceMetricsAggregator aggregator;
-    const MetricsSpec spec{252};
-
-    std::vector<EquityPoint> series;
-    series.push_back(EquityPoint{0, 1});
-    series.push_back(EquityPoint{1, 9223372036854775807LL});
-
-    const auto result = aggregator.aggregate(spec, std::move(series));
-
-    EXPECT_FALSE(result.ok());
-    EXPECT_EQ(result.error, MetricsError::InvalidPoint);
+    return std::find(violations.begin(), violations.end(), code) != violations.end();
 }
 
 TEST(BacktestLayerGuardTest, AcceptsAlignedSessionAndStrategyOwnership)
@@ -1368,7 +1291,7 @@ TEST(BacktestLayerGuardTest, RejectsRebalanceFrequencyOverrideFromSession)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::RebalanceDaysMustComeFromStrategyDefinition));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::RebalanceDaysMustComeFromStrategyDefinition));
 }
 
 TEST(BacktestLayerGuardTest, RejectsStrategyExecutionPolicyRebalanceMismatch)
@@ -1379,7 +1302,7 @@ TEST(BacktestLayerGuardTest, RejectsStrategyExecutionPolicyRebalanceMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::StrategyExecutionPolicyRebalanceDaysMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::StrategyExecutionPolicyRebalanceDaysMismatch));
 }
 
 TEST(BacktestLayerGuardTest, RejectsOverlayEnableFlagMismatch)
@@ -1390,7 +1313,7 @@ TEST(BacktestLayerGuardTest, RejectsOverlayEnableFlagMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::OverlayEnableFlagMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::OverlayEnableFlagMismatch));
 }
 
 TEST(BacktestLayerGuardTest, RejectsOverlayTargetPositionMismatch)
@@ -1401,7 +1324,7 @@ TEST(BacktestLayerGuardTest, RejectsOverlayTargetPositionMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::OverlayTargetPositionCountMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::OverlayTargetPositionCountMismatch));
 }
 
 TEST(BacktestLayerGuardTest, RejectsExecutionPositionSizingMismatch)
@@ -1412,7 +1335,7 @@ TEST(BacktestLayerGuardTest, RejectsExecutionPositionSizingMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::ExecutionPositionSizingMethodMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::ExecutionPositionSizingMethodMismatch));
 }
 
 TEST(BacktestLayerGuardTest, RejectsExecutionShortSellingModeMismatch)
@@ -1423,7 +1346,7 @@ TEST(BacktestLayerGuardTest, RejectsExecutionShortSellingModeMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::ExecutionShortSellingModeMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::ExecutionShortSellingModeMismatch));
 }
 
 TEST(BacktestLayerGuardTest, RejectsOverlaySelectedFactorsMismatch)
@@ -1435,7 +1358,7 @@ TEST(BacktestLayerGuardTest, RejectsOverlaySelectedFactorsMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::OverlaySelectedFactorsMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::OverlaySelectedFactorsMismatch));
 }
 
 TEST(BacktestLayerGuardTest, AcceptsOverlaySelectedFactorsWithDifferentOrder)
@@ -1475,7 +1398,7 @@ TEST(BacktestLayerGuardTest, RejectsOverlayMinimumCompositeScoreMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::OverlayMinimumCompositeScoreMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::OverlayMinimumCompositeScoreMismatch));
 }
 
 TEST(BacktestLayerGuardTest, RejectsRiskStopLossMismatchAgainstRuleProfile)
@@ -1486,7 +1409,7 @@ TEST(BacktestLayerGuardTest, RejectsRiskStopLossMismatchAgainstRuleProfile)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::RiskStopLossMustAlignRuleProfile));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::RiskStopLossMustAlignRuleProfile));
 }
 
 TEST(BacktestLayerGuardTest, RejectsRiskMaxPositionMismatchAgainstRuleProfile)
@@ -1497,18 +1420,18 @@ TEST(BacktestLayerGuardTest, RejectsRiskMaxPositionMismatchAgainstRuleProfile)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::RiskMaxPositionMustAlignRuleProfile));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::RiskMaxPositionMustAlignRuleProfile));
 }
 
 TEST(BacktestLayerGuardTest, RejectsInvalidRequest)
 {
     const StrictBacktestLayerGuard guard;
     BacktestRequest request = makeValidLayerGuardRequest();
-    request.window.endDate = QDate();
+    request.window.endDate = 0;
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::InvalidRequest));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::InvalidRequest));
 }
 
 TEST(BacktestLayerGuardTest, KeepsNonOverlayChecksWhenOverlayDisabled)
@@ -1521,7 +1444,7 @@ TEST(BacktestLayerGuardTest, KeepsNonOverlayChecksWhenOverlayDisabled)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::RebalanceDaysMustComeFromStrategyDefinition));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::RebalanceDaysMustComeFromStrategyDefinition));
 }
 
 TEST(BacktestLayerGuardTest, AcceptsOverlayAllocationsWithDifferentOrder)
@@ -1576,7 +1499,307 @@ TEST(BacktestLayerGuardTest, RejectsOverlayAllocationsWithWeightMismatch)
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
-    EXPECT_TRUE(result.violations.contains(BacktestLayerViolationCode::OverlayAllocationsMismatch));
+    EXPECT_TRUE(hasViolation(result.violations, BacktestLayerViolationCode::OverlayAllocationsMismatch));
+}
+
+class CapturingFactorComputeEngine final : public factor::compute::IFactorComputeEngine {
+public:
+    factor::compute::FactorResult<factor::compute::SignalSet>
+    generate(const factor::compute::GenerateSpec& spec) override
+    {
+        lastGenerateSpec = spec;
+
+        factor::compute::SignalSet signalSet;
+        signalSet.dates.push_back(factor::compute::DateKey{20240102});
+        signalSet.instruments = spec.instrumentUniverse;
+        signalSet.factors = spec.requestedFactors;
+        signalSet.index.timeStride = 1;
+        signalSet.index.instrumentStride = 1;
+        signalSet.index.factorStride = 1;
+        signalSet.progress.plannedFactorCount = static_cast<std::uint32_t>(signalSet.factors.size());
+        signalSet.progress.completedFactorCount = signalSet.progress.plannedFactorCount;
+        signalSet.values.push_back(0.5);
+        signalSet.mask.push_back(1U);
+
+        if (!signalSet.isValid()) {
+            return factor::compute::FactorResult<factor::compute::SignalSet>::failure(
+                factor::compute::FactorError::InternalError);
+        }
+
+        return factor::compute::FactorResult<factor::compute::SignalSet>::success(std::move(signalSet));
+    }
+
+    factor::compute::FactorResult<factor::compute::SignalValue>
+    query(const factor::compute::QuerySpec&) const override
+    {
+        return factor::compute::FactorResult<factor::compute::SignalValue>::failure(
+            factor::compute::FactorError::InternalError);
+    }
+
+    std::optional<factor::compute::GenerateSpec> lastGenerateSpec;
+};
+
+application::backtest::RunSpec makeValidFactorRunSpec(const BacktestRequest& request)
+{
+    static constexpr std::uint64_t kTaskIdValue = 1ULL;
+
+    application::backtest::RunSpec spec;
+    spec.taskId.value = kTaskIdValue;
+    spec.mode = application::backtest::RunMode::FactorBacktest;
+    spec.request = std::make_shared<const BacktestRequest>(request);
+    return spec;
+}
+
+TEST(FactorBacktestConsistencyTest, RunSpecValidatorRejectsMissingResolvedSymbols)
+{
+    BacktestRequest request = makeValidLayerGuardRequest();
+    request.universeSpec.resolvedSymbols.clear();
+    request.factorOverlaySpec.selectedFactors = {domain::strategy::FactorId(QStringLiteral("factor_1"))};
+
+    const application::backtest::StrictRunSpecValidator validator;
+    const auto result = validator.validate(makeValidFactorRunSpec(request));
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.code, application::backtest::RunErrorCode::MissingResolvedSymbols);
+    EXPECT_EQ(
+        application::backtest::toRunFailureReason(result.code),
+        application::backtest::RunFailureReason::MissingResolvedSymbols);
+}
+
+TEST(FactorBacktestConsistencyTest, RunSpecValidatorRejectsMissingSelectedFactors)
+{
+    BacktestRequest request = makeValidLayerGuardRequest();
+    request.universeSpec.resolvedSymbols = {domain::strategy::SymbolCode(QStringLiteral("000001.SZ"))};
+    request.factorOverlaySpec.selectedFactors.clear();
+
+    const application::backtest::StrictRunSpecValidator validator;
+    const auto result = validator.validate(makeValidFactorRunSpec(request));
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.code, application::backtest::RunErrorCode::MissingSelectedFactors);
+    EXPECT_EQ(
+        application::backtest::toRunFailureReason(result.code),
+        application::backtest::RunFailureReason::MissingSelectedFactors);
+}
+
+TEST(FactorBacktestConsistencyTest, RunSpecValidatorAcceptsResolvedSymbolsAndSelectedFactors)
+{
+    BacktestRequest request = makeValidLayerGuardRequest();
+    request.universeSpec.resolvedSymbols = {domain::strategy::SymbolCode(QStringLiteral("000001.SZ"))};
+    request.factorOverlaySpec.selectedFactors = {domain::strategy::FactorId(QStringLiteral("factor_1"))};
+
+    const application::backtest::StrictRunSpecValidator validator;
+    const auto result = validator.validate(makeValidFactorRunSpec(request));
+    EXPECT_TRUE(result.ok());
+    EXPECT_EQ(result.code, application::backtest::RunErrorCode::None);
+}
+
+TEST(FactorBacktestConsistencyTest, RuntimeGenerateSpecMirrorsWindowBudgetAndFieldDemand)
+{
+    static constexpr std::uint64_t kTaskIdValue = 3ULL;
+    static constexpr std::int64_t kGenerateSignalTimeoutMilliseconds = 30000;
+    static constexpr std::uint64_t kGenerateSignalMemoryLimitBytes = 536870912ULL;
+
+    BacktestRequest request = makeValidLayerGuardRequest();
+    request.window.startDate = 20240103;
+    request.window.endDate = 20240131;
+    request.universeSpec.resolvedSymbols = {
+        domain::strategy::SymbolCode(QStringLiteral("000001.SZ")),
+        domain::strategy::SymbolCode(QStringLiteral("000002.SZ"))};
+    request.factorOverlaySpec.selectedFactors = {
+        domain::strategy::FactorId(QStringLiteral("alpha_factor")),
+        domain::strategy::FactorId(QStringLiteral("beta_factor"))};
+
+    CapturingFactorComputeEngine factorComputeEngine;
+    application::backtest::FactorSignalProducerAdapter producer(factorComputeEngine);
+
+    application::backtest::RunContext context;
+    context.spec.taskId.value = kTaskIdValue;
+    context.spec.mode = application::backtest::RunMode::FactorBacktest;
+    context.spec.request = std::make_shared<const BacktestRequest>(request);
+    auto& generateSignalBudget =
+        context.spec.runtimeBudget.stageBudgets[static_cast<std::size_t>(application::backtest::RunStage::GenerateSignal)];
+    generateSignalBudget.timeoutMilliseconds = kGenerateSignalTimeoutMilliseconds;
+    generateSignalBudget.memoryLimitBytes = kGenerateSignalMemoryLimitBytes;
+
+    const auto stageResult = producer.generateSignal(context);
+    ASSERT_TRUE(stageResult.ok());
+    ASSERT_TRUE(factorComputeEngine.lastGenerateSpec.has_value());
+
+    const factor::compute::GenerateSpec& spec = *factorComputeEngine.lastGenerateSpec;
+    EXPECT_EQ(spec.dateRange.from.value, request.window.startDate);
+    EXPECT_EQ(spec.dateRange.to.value, request.window.endDate);
+    EXPECT_EQ(spec.runtimeBudget.timeoutMilliseconds, kGenerateSignalTimeoutMilliseconds);
+    EXPECT_EQ(spec.runtimeBudget.memoryLimitBytes, kGenerateSignalMemoryLimitBytes);
+    EXPECT_EQ(spec.instrumentUniverse.size(), static_cast<std::size_t>(request.universeSpec.resolvedSymbols.size()));
+    EXPECT_EQ(spec.requestedFactors.size(), static_cast<std::size_t>(request.factorOverlaySpec.selectedFactors.size()));
+}
+
+TEST(FactorBacktestConsistencyTest, NonNumericFactorIdStaysConsistentAcrossSelectionPrecheckAndExecution)
+{
+    static constexpr std::uint64_t kTaskIdValue = 1ULL;
+
+    BacktestRequest request = makeValidLayerGuardRequest();
+    const domain::strategy::FactorId alphaFactorId(QStringLiteral("alpha_factor"));
+    const domain::strategy::SymbolCode alphaSymbolCode(QStringLiteral("000001.SZ"));
+
+    request.universeSpec.resolvedSymbols.clear();
+    request.universeSpec.resolvedSymbols.append(alphaSymbolCode);
+
+    request.strategySpec.factorOverlay.selectedFactors.clear();
+    request.strategySpec.factorOverlay.selectedFactors.append(alphaFactorId);
+    request.strategySpec.factorOverlay.allocations.clear();
+    request.strategySpec.factorOverlay.allocations.append(
+        domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0});
+
+    request.factorOverlaySpec.selectedFactors.clear();
+    request.factorOverlaySpec.selectedFactors.append(alphaFactorId);
+    request.factorOverlaySpec.allocations.clear();
+    request.factorOverlaySpec.allocations.append(
+        domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0});
+
+    const StrictBacktestLayerGuard guard;
+    const auto precheckResult = guard.validate(request);
+    ASSERT_TRUE(precheckResult.ok());
+
+    CapturingFactorComputeEngine factorComputeEngine;
+    application::backtest::FactorSignalProducerAdapter producer(factorComputeEngine);
+
+    application::backtest::RunContext context;
+    context.spec.taskId.value = kTaskIdValue;
+    context.spec.mode = application::backtest::RunMode::FactorBacktest;
+    context.spec.request = std::make_shared<const BacktestRequest>(request);
+
+    const auto stageResult = producer.generateSignal(context);
+    ASSERT_TRUE(stageResult.ok());
+    ASSERT_TRUE(context.workingSet.signalBatch.factorSignalSet != nullptr);
+
+    ASSERT_TRUE(factorComputeEngine.lastGenerateSpec.has_value());
+    ASSERT_EQ(factorComputeEngine.lastGenerateSpec->requestedFactors.size(), 1U);
+    EXPECT_TRUE(factorComputeEngine.lastGenerateSpec->requestedFactors.front().isValid());
+}
+
+TEST(FactorBacktestConsistencyTest, DifferentTextFactorIdsMapToDifferentExecutableIds)
+{
+    static constexpr std::uint64_t kTaskIdValueA = 1ULL;
+    static constexpr std::uint64_t kTaskIdValueB = 2ULL;
+    const domain::strategy::SymbolCode alphaSymbolCode(QStringLiteral("000001.SZ"));
+
+    BacktestRequest requestA = makeValidLayerGuardRequest();
+    const domain::strategy::FactorId alphaFactorId(QStringLiteral("alpha_factor"));
+    requestA.universeSpec.resolvedSymbols.clear();
+    requestA.universeSpec.resolvedSymbols.append(alphaSymbolCode);
+    requestA.strategySpec.factorOverlay.selectedFactors = {alphaFactorId};
+    requestA.strategySpec.factorOverlay.allocations = {
+        domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0}};
+    requestA.factorOverlaySpec.selectedFactors = {alphaFactorId};
+    requestA.factorOverlaySpec.allocations = {
+        domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0}};
+
+    BacktestRequest requestB = makeValidLayerGuardRequest();
+    const domain::strategy::FactorId betaFactorId(QStringLiteral("beta_factor"));
+    requestB.universeSpec.resolvedSymbols.clear();
+    requestB.universeSpec.resolvedSymbols.append(alphaSymbolCode);
+    requestB.strategySpec.factorOverlay.selectedFactors = {betaFactorId};
+    requestB.strategySpec.factorOverlay.allocations = {
+        domain::strategy::FactorOverlayAllocation{betaFactorId, 100.0}};
+    requestB.factorOverlaySpec.selectedFactors = {betaFactorId};
+    requestB.factorOverlaySpec.allocations = {
+        domain::strategy::FactorOverlayAllocation{betaFactorId, 100.0}};
+
+    const StrictBacktestLayerGuard guard;
+    ASSERT_TRUE(guard.validate(requestA).ok());
+    ASSERT_TRUE(guard.validate(requestB).ok());
+
+    CapturingFactorComputeEngine factorComputeEngineA;
+    CapturingFactorComputeEngine factorComputeEngineB;
+    application::backtest::FactorSignalProducerAdapter producerA(factorComputeEngineA);
+    application::backtest::FactorSignalProducerAdapter producerB(factorComputeEngineB);
+
+    application::backtest::RunContext contextA;
+    contextA.spec.taskId.value = kTaskIdValueA;
+    contextA.spec.mode = application::backtest::RunMode::FactorBacktest;
+    contextA.spec.request = std::make_shared<const BacktestRequest>(requestA);
+
+    application::backtest::RunContext contextB;
+    contextB.spec.taskId.value = kTaskIdValueB;
+    contextB.spec.mode = application::backtest::RunMode::FactorBacktest;
+    contextB.spec.request = std::make_shared<const BacktestRequest>(requestB);
+
+    ASSERT_TRUE(producerA.generateSignal(contextA).ok());
+    ASSERT_TRUE(producerB.generateSignal(contextB).ok());
+
+    ASSERT_TRUE(factorComputeEngineA.lastGenerateSpec.has_value());
+    ASSERT_TRUE(factorComputeEngineB.lastGenerateSpec.has_value());
+    ASSERT_EQ(factorComputeEngineA.lastGenerateSpec->requestedFactors.size(), 1U);
+    ASSERT_EQ(factorComputeEngineB.lastGenerateSpec->requestedFactors.size(), 1U);
+    EXPECT_NE(
+        factorComputeEngineA.lastGenerateSpec->requestedFactors.front().value,
+        factorComputeEngineB.lastGenerateSpec->requestedFactors.front().value);
+}
+
+TEST(RunArtifactRepositoryTest, UpsertRunResultCreatesFailureArtifact)
+{
+    application::backtest::InMemoryRunArtifactRepository repository;
+
+    application::backtest::RunSpec spec;
+    spec.taskId.value = 401ULL;
+    spec.mode = application::backtest::RunMode::FactorBacktest;
+
+    application::backtest::RunResult result;
+    result.code = application::backtest::RunErrorCode::MissingSelectedFactors;
+    result.failureReason = application::backtest::RunFailureReason::MissingSelectedFactors;
+    result.completedStage = application::backtest::RunStage::Validate;
+    result.partial = false;
+
+    repository.upsertRunResult(spec, result);
+
+    const std::optional<application::backtest::PersistedRunArtifact> artifact =
+        repository.findByTaskId(spec.taskId);
+    ASSERT_TRUE(artifact.has_value());
+    EXPECT_EQ(artifact->taskId.value, spec.taskId.value);
+    EXPECT_EQ(artifact->mode, spec.mode);
+    EXPECT_EQ(artifact->code, result.code);
+    EXPECT_EQ(artifact->failureReason, result.failureReason);
+    EXPECT_EQ(artifact->completedStage, result.completedStage);
+    EXPECT_EQ(artifact->partial, result.partial);
+}
+
+TEST(RunArtifactRepositoryTest, UpsertRunResultUpdatesExistingPersistedArtifactOutcome)
+{
+    application::backtest::InMemoryRunArtifactRepository repository;
+
+    application::backtest::RunContext context;
+    context.spec.taskId.value = 402ULL;
+    context.spec.mode = application::backtest::RunMode::StrategyBacktest;
+    context.workingSet.rebalancePointCount = 3U;
+    context.workingSet.targetPositionCount = 7U;
+    context.workingSet.approvedOrderCount = 5U;
+    context.workingSet.generatedOrderCount = 5U;
+    context.workingSet.filledOrderCount = 4U;
+    context.workingSet.metricCount = 2U;
+    context.workingSet.diagnosticsCount = 6U;
+
+    const application::backtest::StageResult persistResult = repository.persistArtifacts(context);
+    ASSERT_TRUE(persistResult.ok());
+
+    application::backtest::RunResult result;
+    result.code = application::backtest::RunErrorCode::StageExecutionFailed;
+    result.failureReason = application::backtest::RunFailureReason::StageExecutionFailed;
+    result.completedStage = application::backtest::RunStage::GenerateOrders;
+    result.partial = true;
+    result.diagnosticsCount = 9U;
+
+    repository.upsertRunResult(context.spec, result);
+
+    const std::optional<application::backtest::PersistedRunArtifact> artifact =
+        repository.findByTaskId(context.spec.taskId);
+    ASSERT_TRUE(artifact.has_value());
+    EXPECT_EQ(artifact->code, result.code);
+    EXPECT_EQ(artifact->failureReason, result.failureReason);
+    EXPECT_EQ(artifact->completedStage, result.completedStage);
+    EXPECT_EQ(artifact->partial, result.partial);
+    EXPECT_EQ(artifact->diagnosticsCount, result.diagnosticsCount);
+    EXPECT_EQ(artifact->targetPositionCount, context.workingSet.targetPositionCount);
 }
 
 } // namespace
+

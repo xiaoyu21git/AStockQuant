@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace factor {
 
@@ -44,14 +45,14 @@ constexpr SizeMetricDescriptor kSizeMetricDescriptors[] = {
     {SizeMetric::TOTAL_ASSETS, "total_assets"}
 };
 
-QString sizeMetricToJsonString(SizeMetric metric)
+std::string sizeMetricToJsonString(SizeMetric metric)
 {
     for (const auto& descriptor : kSizeMetricDescriptors) {
         if (descriptor.metric == metric) {
-            return QLatin1String(descriptor.jsonName);
+            return descriptor.jsonName;
         }
     }
-    return {};
+    return "";
 }
 
 SizeFactor::Params sizeParamsFromJson(const foundation::json::JsonFacade& json)
@@ -75,10 +76,10 @@ SizeFactor::SizeFactor() {
 }
 
 CalculationResult SizeFactor::calculate(const CalculationContext& context) {
-    const QString column = selectedColumn();
-    if (column.isEmpty()) {
+    const std::string column = selectedColumn();
+    if (column.empty()) {
         CalculationResult result = CalculationResult::createError(
-            QString("当前运行时暂不支持计算规模因子指标 %1").arg(sizeMetricToJsonString(params_.sizeMetric)).toStdString());
+            std::string("当前运行时暂不支持计算规模因子指标 ") + sizeMetricToJsonString(params_.sizeMetric));
         result.date = context.date;
         result.calculationId = foundation::utils::Uuid::generate_v4();
         result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
@@ -99,18 +100,18 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
             return resolveCommonEffectiveDateForFields(
                 context,
                 commonParams,
-                QStringList{column},
+                std::vector<std::string>{column},
                 CommonFieldRequirementMode::AllFields);
         },
         [this, &context, column](const CommonRuntimeState& runtime, CalculationResult& result) {
-            if (!context.historicalView->hasField(column.toStdString())) {
-                const QString errorMessage = QString("缓存数据集缺少字段 %1，无法计算规模因子").arg(column);
-                result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            if (!context.historicalView->hasField(column)) {
+                const std::string errorMessage = std::string("缓存数据集缺少字段 ") + column + "，无法计算规模因子";
+                result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                 return;
             }
 
-            const auto crossSection = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), column.toStdString(), context.symbols);
+            const auto crossSection = context.historicalView->getCrossSection(runtime.effectiveDate, column, context.symbols);
             for (const auto& [symbol, rawValue] : crossSection) {
                 if (rawValue <= 0.0) {
                     continue;
@@ -126,7 +127,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
             std::vector<double> finiteValues;
             finiteValues.reserve(result.values.size());
             for (const auto& [symbol, value] : result.values) {
-                Q_UNUSED(symbol);
+                (void)symbol;
                 if (std::isfinite(value)) {
                     finiteValues.push_back(value);
                 }
@@ -137,7 +138,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 const double upper = BaseFactor::calculatePercentileValue(finiteValues, 0.95);
                 if (upper > lower) {
                     for (auto& [symbol, value] : result.values) {
-                        Q_UNUSED(symbol);
+                        (void)symbol;
                         value = (std::max)(lower, (std::min)(upper, value));
                     }
                 }
@@ -152,7 +153,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
 
 DataRequirements SizeFactor::getDataRequirements() const {
     DataRequirements req;
-    appendRequiredField(req, selectedColumn().toStdString());
+    appendRequiredField(req, selectedColumn());
     appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;
 }
@@ -176,7 +177,7 @@ std::shared_ptr<SizeFactor> SizeFactor::create(
     return factor;
 }
 
-QString SizeFactor::selectedColumn() const {
+std::string SizeFactor::selectedColumn() const {
     switch (params_.sizeMetric) {
     case SizeMetric::MARKET_CAP:
         return "market_cap";
@@ -185,7 +186,7 @@ QString SizeFactor::selectedColumn() const {
     case SizeMetric::TOTAL_ASSETS:
         return "total_assets";
     default:
-        return {};
+        return "";
     }
 }
 

@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
@@ -11,8 +12,12 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
+#include <unordered_set>
 
 #include "DataServiceCache.h"
+#include "factor_check/FactorDetectionCoreService.h"
+#include "factor_check/FactorSupportScopeCacheCore.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
 
 namespace astock {
@@ -37,7 +42,7 @@ public:
     };
 
     struct Request {
-        QVariantList factorIds;
+        QStringList factorIds;
         QString startDate;
         QString endDate;
         QVariantMap cacheSnapshot;
@@ -47,7 +52,7 @@ public:
 
     struct Overrides {
         QHash<QString, int> requiredWarmupTradingDaysOverrideForTests;
-        std::function<QString(const QVariant&)> resolveInstanceIdOverrideForTests;
+        std::function<QString(const QString&)> resolveInstanceIdOverrideForTests;
         std::function<factor::FactorInstanceInfo(const QString&)> instanceInfoOverrideForTests;
         std::function<std::shared_ptr<factor::BaseFactor>(const QString&)> factorInstanceOverrideForTests;
         std::function<QString()> cacheFilePathOverrideForTests;
@@ -74,6 +79,8 @@ public:
 private:
     struct SharedContext {
         QSet<QString> availableFields;
+        std::unordered_set<std::string> availableFieldSet;
+        std::unordered_set<std::string> unusableFieldSet;
         QVariantMap fieldDiagnostics;
         int availableTradeDateCount{0};
         bool useCacheMode{false};
@@ -88,7 +95,7 @@ private:
     mutable std::mutex m_instanceInfoCacheMutex;
 
     QString normalizedDataSourceMode(const QString& dataSourceMode) const;
-    QVariantList dedupeFactorIds(const QVariantList& factorIds) const;
+    QStringList dedupeFactorIds(const QStringList& factorIds) const;
     QStringList dedupeStringList(const QStringList& values) const;
     QVariantList toVariantList(const QStringList& values) const;
     QDate parseSupportDate(const QVariant& value) const;
@@ -99,15 +106,7 @@ private:
     QStringList declaredRequiredFieldsFromConfig(const factor::FactorInstanceInfo& info) const;
     QStringList normalizedRequiredFields(factor::FactorType runtimeType,
                                          const factor::DataRequirements& requirements) const;
-    QVariantMap buildSupportInfo(const QString& factorId,
-                                 const QString& instanceId,
-                                 factor::FactorType runtimeType,
-                                 const QString& category,
-                                 const QString& reason,
-                                 const QStringList& requiredFields,
-                                 const QStringList& missingFields,
-                                 factor::SourceTable sourceTable,
-                                 bool supported) const;
+    QVariantMap buildSupportInfo(const factor::bridge::check::SupportInfo& typedInfo) const;
     int uniqueTradeDateCount(const QVariantList& rows) const;
     QSet<QString> collectAvailableFields(const QVariantMap& cacheSnapshot,
                                          const DataServiceCache::DataSetInfo& dataSetInfo,
@@ -115,18 +114,17 @@ private:
     QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot) const;
     bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,
                               const QString& field) const;
-    QVariantMap normalizedSupportCacheSnapshot(const QVariantMap& cacheSnapshot) const;
     QString buildScopeKey(const Request& request) const;
     QString buildDefinitionFingerprint(const factor::FactorInstanceInfo& info) const;
     QString legacyCacheFilePath() const;
-    QVariantMap loadCacheRoot(const QString& filePath) const;
-    bool persistCacheRoot(const QString& filePath, const QVariantMap& root) const;
-    QVariantMap loadScopeEntries(const QString& filePath, const QString& scopeKey) const;
+    factor::bridge::check::PersistedFactorEntryMap loadScopeEntries(
+        const QString& filePath,
+        const QString& scopeKey) const;
     void persistScopeEntries(const QString& filePath,
                              const QString& scopeKey,
-                             const QVariantMap& scopeEntries) const;
-    QString resolveInstanceId(const QVariant& factorId,
-                              const std::function<QString(const QVariant&)>& resolveOverride) const;
+                             const factor::bridge::check::PersistedFactorEntryMap& scopeEntries) const;
+    QString resolveInstanceId(const QString& factorId,
+                              const std::function<QString(const QString&)>& resolveOverride) const;
     factor::FactorInstanceInfo resolveInstanceInfo(
         const QString& resolvedInstanceId,
         const std::function<factor::FactorInstanceInfo(const QString&)>& instanceInfoOverride,
@@ -135,14 +133,14 @@ private:
         const QString& resolvedInstanceId,
         const std::function<std::shared_ptr<factor::BaseFactor>(const QString&)>& factorInstanceOverride,
         const std::shared_ptr<factor::FactorInstanceManager>& instanceManager) const;
-    QVariantMap buildRuntimeFailureSupportMap(const QVariantList& factorIds,
+    QVariantMap buildRuntimeFailureSupportMap(const QStringList& factorIds,
                                               const QString& reason) const;
-    QVariantMap detectSingleFactor(const QVariant& factorIdValue,
+    QVariantMap detectSingleFactor(const QString& factorId,
                                    const Request& request,
                                    const RuntimeContext& runtimeContext,
                                    const Overrides& overrides,
                                    const SharedContext& sharedContext) const;
-    QVariantMap detectPendingFactors(const QVariantList& factorIds,
+    QVariantMap detectPendingFactors(const QStringList& factorIds,
                                      const Request& request,
                                      const RuntimeContext& runtimeContext,
                                      const Overrides& overrides) const;

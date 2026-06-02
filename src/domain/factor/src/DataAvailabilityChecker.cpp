@@ -7,6 +7,7 @@
 #include <QSet>
 #include <QStringList>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace factor {
 
@@ -98,9 +99,8 @@ QString sqlQuoteIdentifier(const QString& identifier)
 QString normalizeFieldName(const QString& rawField);
 bool fieldRequiresPositiveValues(const QString& rawField);
 
-QStringList sourceColumnsForField(const QString& rawField, const std::string& table)
+QStringList sourceColumnsForField(const QString& rawField, const std::string&)
 {
-    Q_UNUSED(table);
     const QString field = normalizeFieldName(rawField);
     if (field.isEmpty()) {
         return {};
@@ -181,15 +181,14 @@ std::vector<std::string> normalizeUniqueFields(const std::vector<std::string>& f
     std::vector<std::string> normalized;
     normalized.reserve(fields.size());
 
-    QSet<QString> seen;
+    std::unordered_set<std::string> seen;
     for (const auto& field : fields) {
-        const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
-        if (normalizedField.isEmpty() || seen.contains(normalizedField)) {
+        const std::string normalizedField = normalizeFieldName(QString::fromStdString(field)).toStdString();
+        if (normalizedField.empty() || !seen.insert(normalizedField).second) {
             continue;
         }
 
-        seen.insert(normalizedField);
-        normalized.push_back(normalizedField.toStdString());
+        normalized.push_back(normalizedField);
     }
 
     return normalized;
@@ -311,42 +310,42 @@ bool isDerivativesField(const QString& rawField)
 
 bool fieldRequiresPositiveValues(const QString& rawField)
 {
-    static const QSet<QString> positiveFields = {
-        QString(factor::bridge::MarketBarFieldKeys::OPEN),
-        QString(factor::bridge::MarketBarFieldKeys::HIGH),
-        QString(factor::bridge::MarketBarFieldKeys::LOW),
-        QString(factor::bridge::MarketBarFieldKeys::CLOSE),
-        QString(factor::bridge::MarketBarFieldKeys::PRE_CLOSE),
-        QString(factor::bridge::MarketBarFieldKeys::VOLUME),
-        QString(factor::bridge::MarketBarFieldKeys::TURNOVER),
-        QString(factor::bridge::MarketBarFieldKeys::PE_RATIO),
-        QString(factor::bridge::MarketBarFieldKeys::PB_RATIO),
-        QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP),
-        QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP),
-        QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR),
-        QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR),
-        QString(factor::bridge::FinancialFieldKeys::BPS),
-        QString(factor::bridge::FinancialFieldKeys::ROE),
-        QString(factor::bridge::FinancialFieldKeys::ROA),
-        QString(factor::bridge::FinancialFieldKeys::TOTAL_ASSETS),
-        QString(factor::bridge::FinancialFieldKeys::TOTAL_LIABILITIES),
-        QString(factor::bridge::FinancialFieldKeys::EQUITY),
-        QString(factor::bridge::FinancialFieldKeys::NET_PROFIT),
-        QString(factor::bridge::FinancialFieldKeys::TOTAL_REVENUE),
-        QString(factor::bridge::FinancialFieldKeys::EPS),
-        QString(factor::bridge::FinancialFieldKeys::DEBT_TO_EQUITY),
-        QString(factor::bridge::FinancialFieldKeys::CURRENT_RATIO),
-        QString(factor::bridge::FinancialFieldKeys::QUICK_RATIO),
-        QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD),
-        QString(factor::bridge::PolicyFieldKeys::POLICY_STRENGTH),
-        QString(factor::bridge::PolicyFieldKeys::POLICY_COUNT),
-        QString(factor::bridge::AlternativeFieldKeys::POPULARITY_SCORE),
-        QString(factor::bridge::AlternativeFieldKeys::COMMENT_COUNT),
-        QString(factor::bridge::DerivativesFieldKeys::FUTURES_CLOSE),
-        QString(factor::bridge::DerivativesFieldKeys::FUTURES_VOLUME),
-        QString(factor::bridge::DerivativesFieldKeys::OPEN_INTEREST)
+    static const std::unordered_set<std::string> positiveFields = {
+        factor::bridge::MarketBarFieldKeys::OPEN.c_str(),
+        factor::bridge::MarketBarFieldKeys::HIGH.c_str(),
+        factor::bridge::MarketBarFieldKeys::LOW.c_str(),
+        factor::bridge::MarketBarFieldKeys::CLOSE.c_str(),
+        factor::bridge::MarketBarFieldKeys::PRE_CLOSE.c_str(),
+        factor::bridge::MarketBarFieldKeys::VOLUME.c_str(),
+        factor::bridge::MarketBarFieldKeys::TURNOVER.c_str(),
+        factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str(),
+        factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str(),
+        factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str(),
+        factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP.c_str(),
+        factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR.c_str(),
+        factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR.c_str(),
+        factor::bridge::FinancialFieldKeys::BPS.c_str(),
+        factor::bridge::FinancialFieldKeys::ROE.c_str(),
+        factor::bridge::FinancialFieldKeys::ROA.c_str(),
+        factor::bridge::FinancialFieldKeys::TOTAL_ASSETS.c_str(),
+        factor::bridge::FinancialFieldKeys::TOTAL_LIABILITIES.c_str(),
+        factor::bridge::FinancialFieldKeys::EQUITY.c_str(),
+        factor::bridge::FinancialFieldKeys::NET_PROFIT.c_str(),
+        factor::bridge::FinancialFieldKeys::TOTAL_REVENUE.c_str(),
+        factor::bridge::FinancialFieldKeys::EPS.c_str(),
+        factor::bridge::FinancialFieldKeys::DEBT_TO_EQUITY.c_str(),
+        factor::bridge::FinancialFieldKeys::CURRENT_RATIO.c_str(),
+        factor::bridge::FinancialFieldKeys::QUICK_RATIO.c_str(),
+        factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str(),
+        factor::bridge::PolicyFieldKeys::POLICY_STRENGTH.c_str(),
+        factor::bridge::PolicyFieldKeys::POLICY_COUNT.c_str(),
+        factor::bridge::AlternativeFieldKeys::POPULARITY_SCORE.c_str(),
+        factor::bridge::AlternativeFieldKeys::COMMENT_COUNT.c_str(),
+        factor::bridge::DerivativesFieldKeys::FUTURES_CLOSE.c_str(),
+        factor::bridge::DerivativesFieldKeys::FUTURES_VOLUME.c_str(),
+        factor::bridge::DerivativesFieldKeys::OPEN_INTEREST.c_str()
     };
-    return positiveFields.contains(normalizeFieldName(rawField));
+    return positiveFields.find(normalizeFieldName(rawField).toStdString()) != positiveFields.end();
 }
 
 QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
@@ -675,12 +674,9 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
 }
 
 DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::JsonFacade& config,
-                                                    const std::string& instanceId,
-                                                    const std::string& startDate,
+                                                    const std::string&,
+                                                    const std::string&,
                                                     const std::string& endDate) {
-    Q_UNUSED(instanceId);
-    Q_UNUSED(startDate);
-
     DataStatus result;
 
     try {

@@ -161,10 +161,16 @@ void assignMetricSpec(SpecType& spec,
     spec.common = buildCommonIndicatorSpec(sourceTable, fieldKey);
 }
 
-void assignTrimmedUtf8String(std::string& target, const QString& value)
+void assignTrimmedString(std::string& target, const std::string& value)
 {
-    const auto utf8 = value.trimmed().toUtf8();
-    target.assign(utf8.constData(), static_cast<size_t>(utf8.size()));
+    const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    const auto begin = std::find_if_not(value.begin(), value.end(), isSpace);
+    const auto end = std::find_if_not(value.rbegin(), value.rend(), isSpace).base();
+    if (begin >= end) {
+        target.clear();
+        return;
+    }
+    target.assign(begin, end);
 }
 
 void buildBatchSeriesKey(std::string& key,
@@ -282,105 +288,9 @@ void applyConfigurableStandardization(StandardizationMethod standardization,
     applyConfigurableStandardizationImpl(standardization, values);
 }
 
-QString configurableFrequencyText(DataFrequency frequency)
-{
-    switch (frequency) {
-    case DataFrequency::Daily:
-        return QStringLiteral("daily");
-    case DataFrequency::Weekly:
-        return QStringLiteral("weekly");
-    case DataFrequency::Monthly:
-        return QStringLiteral("monthly");
-    case DataFrequency::Quarterly:
-        return QStringLiteral("quarterly");
-    case DataFrequency::Yearly:
-        return QStringLiteral("yearly");
-    default:
-        return QStringLiteral("daily");
-    }
-}
-
-QString configurableStandardizationText(StandardizationMethod standardization)
-{
-    switch (standardization) {
-    case StandardizationMethod::None:
-        return QStringLiteral("none");
-    case StandardizationMethod::ZScore:
-        return QStringLiteral("zscore");
-    case StandardizationMethod::MinMax:
-        return QStringLiteral("minmax");
-    case StandardizationMethod::Rank:
-        return QStringLiteral("rank");
-    case StandardizationMethod::Percentile:
-        return QStringLiteral("percentile");
-    default:
-        return QStringLiteral("none");
-    }
-}
-
-QString configurableNeutralizationModeText(NeutralizationStatus neutralizationMode)
-{
-    switch (neutralizationMode) {
-    case NeutralizationStatus::Disabled:
-        return QStringLiteral("disabled");
-    case NeutralizationStatus::Requested:
-        return QStringLiteral("requested");
-    case NeutralizationStatus::HistoricalViewCrossSectionIndustryMarketCap:
-        return QStringLiteral("historical_view_cross_section_industry_size");
-    case NeutralizationStatus::HistoricalViewFailed:
-        return QStringLiteral("historical_view_neutralization_failed");
-    default:
-        return QStringLiteral("disabled");
-    }
-}
-
-QString dividendMetricText(DividendMetric metric)
-{
-    switch (metric) {
-    case DividendMetric::DIVIDEND_YIELD:
-        return QStringLiteral("dividend_yield");
-    case DividendMetric::PAYOUT_RATIO:
-        return QStringLiteral("payout_ratio");
-    case DividendMetric::DIVIDEND_STABILITY:
-        return QStringLiteral("dividend_stability");
-    default:
-        return QString();
-    }
-}
-
-QString industryMetricText(IndustryMetric metric)
-{
-    switch (metric) {
-    case IndustryMetric::INDUSTRY_PROSPERITY:
-        return QStringLiteral("industry_prosperity");
-    case IndustryMetric::INDUSTRY_MOMENTUM:
-        return QStringLiteral("industry_momentum");
-    case IndustryMetric::INDUSTRY_CONCENTRATION:
-        return QStringLiteral("industry_concentration");
-    default:
-        return QString();
-    }
-}
-
-QString sectorTypeText(ConfigurableSectorType sectorType)
-{
-    switch (sectorType) {
-    case ConfigurableSectorType::SW_L1:
-        return QStringLiteral("sw_l1");
-    case ConfigurableSectorType::SW_L2:
-        return QStringLiteral("sw_l2");
-    case ConfigurableSectorType::CITIC_L1:
-        return QStringLiteral("citic_l1");
-    case ConfigurableSectorType::CITIC_L2:
-        return QStringLiteral("citic_l2");
-    default:
-        return QString();
-    }
-}
-
 bool applyHistoricalViewIndustrySizeNeutralization(const CalculationContext& context,
                                                    std::unordered_map<std::string, double>& values,
-                                                   QString* errorMessage)
+                                                   std::string* errorMessage)
 {
     return neutralization::applyIndustrySizeNeutralization(context, values, errorMessage);
 }
@@ -772,10 +682,10 @@ double safeRatio(double numerator, double denominator)
     return numerator / denominator;
 }
 
-void buildBatchCrossSectionKey(std::string& key, const std::string& date, const QString& field)
+void buildBatchCrossSectionKey(std::string& key, const std::string& date, const std::string& field)
 {
     std::string fieldName;
-    assignTrimmedUtf8String(fieldName, field);
+    assignTrimmedString(fieldName, field);
     key.clear();
     key.reserve(date.size() + fieldName.size() + 8);
     key.append(date);
@@ -785,7 +695,7 @@ void buildBatchCrossSectionKey(std::string& key, const std::string& date, const 
 
 std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
     const CalculationContext& context,
-    const QString& field,
+    const std::string& field,
     int window)
 {
     std::unordered_map<std::string, std::vector<double>> resolvedSeries;
@@ -794,7 +704,7 @@ std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
     }
 
     std::string fieldName;
-    assignTrimmedUtf8String(fieldName, field);
+    assignTrimmedString(fieldName, field);
     if (fieldName.empty()) {
         return resolvedSeries;
     }
@@ -842,8 +752,8 @@ SeriesMatrixBatch collectSeriesMatrix(
     }
 
     size_t commonLength = std::numeric_limits<size_t>::max();
-    for (const auto& [symbol, values] : seriesBySymbol) {
-        Q_UNUSED(symbol);
+    for (const auto& entry : seriesBySymbol) {
+        const auto& values = entry.second;
         if (values.size() < minimumLength) {
             continue;
         }

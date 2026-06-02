@@ -46,6 +46,15 @@ inline QString classifyBacktestPreflightCategory(const QString& category)
     if (normalized == QStringLiteral("runtime-init-failed")) {
         return QStringLiteral("回测运行时初始化失败");
     }
+    if (normalized == QStringLiteral("invalid-backtest-window")) {
+        return QStringLiteral("回测窗口非法");
+    }
+    if (normalized == QStringLiteral("missing-resolved-symbols")) {
+        return QStringLiteral("股票池为空");
+    }
+    if (normalized == QStringLiteral("missing-selected-factors")) {
+        return QStringLiteral("未选择因子");
+    }
     if (normalized == QStringLiteral("invalid-data-source-mode")) {
         return QStringLiteral("数据源模式非法");
     }

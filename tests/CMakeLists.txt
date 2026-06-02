@@ -167,6 +167,27 @@ else()
     message(WARNING "[TESTS] test_factor_custom_expression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_registry_signal_engine.cpp")
+    list(APPEND TEST_SOURCES "test_factor_registry_signal_engine.cpp")
+    message(STATUS "[TESTS] Found: test_factor_registry_signal_engine.cpp")
+else()
+    message(WARNING "[TESTS] test_factor_registry_signal_engine.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_signal_engine_generate.cpp")
+    list(APPEND TEST_SOURCES "test_factor_signal_engine_generate.cpp")
+    message(STATUS "[TESTS] Found: test_factor_signal_engine_generate.cpp")
+else()
+    message(WARNING "[TESTS] test_factor_signal_engine_generate.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_operator_library.cpp")
+    list(APPEND TEST_SOURCES "test_factor_operator_library.cpp")
+    message(STATUS "[TESTS] Found: test_factor_operator_library.cpp")
+else()
+    message(WARNING "[TESTS] test_factor_operator_library.cpp not found!")
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_runtime_overlay.cpp")
     list(APPEND TEST_SOURCES "test_strategy_backtest_runtime_overlay.cpp")
     message(STATUS "[TESTS] Found: test_strategy_backtest_runtime_overlay.cpp")
@@ -339,42 +360,7 @@ elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regress
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
-    message(STATUS "[TESTS] Found: run_factor_full_market_benchmark.cpp")
-
-    add_executable(run_factor_full_market_benchmark
-        run_factor_full_market_benchmark.cpp
-    )
-
-    target_include_directories(run_factor_full_market_benchmark
-        PRIVATE
-            ${CMAKE_SOURCE_DIR}/src/engine/include
-            ${CMAKE_SOURCE_DIR}/src/domain/include
-            ${CMAKE_SOURCE_DIR}/src/foundation/include
-            ${CMAKE_SOURCE_DIR}/src/infrastructure/include
-            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
-            ${CMAKE_SOURCE_DIR}/astock_engine
-            ${CMAKE_SOURCE_DIR}/src
-    )
-
-    target_link_libraries(run_factor_full_market_benchmark
-        PRIVATE
-            Qt6::Core
-            Qt6::Sql
-            bridge
-            cache_module
-            foundation
-            infrastructure
-            factor_system
-    )
-
-    set_target_properties(run_factor_full_market_benchmark PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
-    )
-
-    copy_benchmark_runtime_dlls(run_factor_full_market_benchmark)
-    copy_benchmark_qt_sql_plugins(run_factor_full_market_benchmark)
-
-    message(STATUS "[TESTS] Configured run_factor_full_market_benchmark executable")
+    message(STATUS "[TESTS] Skipping run_factor_full_market_benchmark: legacy factor backtest modules removed")
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")

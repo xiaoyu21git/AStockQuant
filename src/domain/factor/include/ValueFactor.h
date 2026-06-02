@@ -3,8 +3,7 @@
 #include "ConfigurableFactor.h"
 #include "factor_enums.h"
 
-#include <QString>
-#include <QStringList>
+#include <string>
 #include <vector>
 #include <unordered_map>
 
@@ -46,13 +45,13 @@ private:
 
     void loadConfig(const foundation::json::JsonFacade& config) override;
 
-    static void appendUniqueField(QStringList& fields, const QString& field);
+    static void appendUniqueField(std::vector<std::string>& fields, const std::string& field);
     static double calculatePercentileValueLocal(std::vector<double> values, double quantile);
-    static QString valuationMetricField(ValuationMetric metric);
+    static std::string valuationMetricField(ValuationMetric metric);
     static std::vector<ValuationMetric> selectedMetricsFromParams(const Params& params);
     static double valuationMetricWeight(const Params& params, ValuationMetric metric);
     static double scoreFromMetricRawValue(ValuationMetric metric, double rawValue);
-    static QStringList collectDateResolutionFields(const std::vector<ValuationMetric>& metrics);
+    static std::vector<std::string> collectDateResolutionFields(const std::vector<ValuationMetric>& metrics);
     static MetricContribution computeCFPContribution(const CalculationContext& context,
                                                                         const CommonRuntimeState& runtime,
                                                       double weight);

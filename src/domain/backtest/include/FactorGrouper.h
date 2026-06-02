@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 #include <vector>
@@ -6,7 +6,7 @@
 #include <memory>
 #include <algorithm>
 #include <cmath>
-#include "FactorBacktestTypes.h"
+#include "FactorAnalyticsTypes.h"
 
 namespace domain::backtest {
 
@@ -14,22 +14,22 @@ class FactorGrouper {
 public:
     FactorGrouper() = default;
     
-    // 按因子值分组
+    // 鎸夊洜瀛愬€煎垎缁?
     std::vector<FactorGroup> groupByFactorValue(
         const std::map<std::string, double>& factorValues,
         int numGroups);
     
-    // 按分位数分组
+    // 鎸夊垎浣嶆暟鍒嗙粍
     std::vector<FactorGroup> groupByQuantile(
         const std::map<std::string, double>& factorValues,
         int numGroups);
     
-    // 自定义分组规则
+    // 鑷畾涔夊垎缁勮鍒?
     std::vector<FactorGroup> groupByCustomRules(
         const std::map<std::string, double>& factorValues,
         const std::vector<double>& thresholds);
     
-    // 根据配置进行分组
+    // 鏍规嵁閰嶇疆杩涜鍒嗙粍
     std::vector<FactorGroup> group(
         const std::map<std::string, double>& factorValues,
         GroupingMethod method,
@@ -37,18 +37,18 @@ public:
         const std::vector<double>& customThresholds = {});
     
 private:
-    // 内部辅助方法
+    // 鍐呴儴杈呭姪鏂规硶
     std::vector<double> calculateQuantiles(
         const std::vector<double>& values, int numGroups);
     
     std::map<std::string, double> normalizeFactorValues(
         const std::map<std::string, double>& factorValues);
     
-    // 排序因子值
+    // 鎺掑簭鍥犲瓙鍊?
     std::vector<std::pair<std::string, double>> sortFactorValues(
         const std::map<std::string, double>& factorValues);
     
-    // 创建分组
+    // 鍒涘缓鍒嗙粍
     FactorGroup createGroup(int groupId, 
                            const std::string& groupName,
                            double minValue, 

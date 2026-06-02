@@ -1,11 +1,14 @@
 #include "FactorDetectionService.h"
+#include "factor_check/FactorSupportCheckCore.h"
+#include "factor_check/FactorDetectionCoreService.h"
+#include "factor_check/FactorSupportScopeCacheCore.h"
+#include "factor_check/FactorSupportScopeKeyCore.h"
 
 #include "AppStoragePaths.h"
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
-#include <QCryptographicHash>
 #include <QDate>
 #include <QDateTime>
 #include <QDir>
@@ -14,12 +17,137 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
-#include <QSaveFile>
 #include <QSet>
 
 #include <algorithm>
 #include <future>
 #include <thread>
+#include <unordered_set>
+
+namespace {
+
+QString toRunFailureToken(const factor::bridge::check::RunFailureCode code)
+{
+    switch (code) {
+    case factor::bridge::check::RunFailureCode::InvalidRunSpec:
+        return QStringLiteral("InvalidRunSpec");
+    case factor::bridge::check::RunFailureCode::MissingExecutionModule:
+        return QStringLiteral("MissingExecutionModule");
+    case factor::bridge::check::RunFailureCode::MissingResolvedSymbols:
+        return QStringLiteral("MissingResolvedSymbols");
+    case factor::bridge::check::RunFailureCode::MissingSelectedFactors:
+        return QStringLiteral("MissingSelectedFactors");
+    case factor::bridge::check::RunFailureCode::None:
+        return QString();
+    }
+
+    return QString();
+}
+
+std::unordered_set<std::string> toStdStringSet(const QSet<QString>& source)
+{
+    std::unordered_set<std::string> out;
+    out.reserve(static_cast<size_t>(source.size()));
+    for (const QString& value : source) {
+        const QString normalized = value.trimmed().toLower();
+        if (!normalized.isEmpty()) {
+            out.insert(normalized.toStdString());
+        }
+    }
+    return out;
+}
+
+bool diagnosticHasUsableValues(const QVariantMap& fieldDiagnostics,
+                               const QString& field)
+{
+    const QVariantMap diagnostic = fieldDiagnostics.value(field).toMap();
+    if (diagnostic.isEmpty()) {
+        return true;
+    }
+    if (diagnostic.contains(QStringLiteral("nonNullCount"))) {
+        return diagnostic.value(QStringLiteral("nonNullCount")).toInt() > 0;
+    }
+    if (diagnostic.contains(QStringLiteral("latestDateNonNullCount"))) {
+        return diagnostic.value(QStringLiteral("latestDateNonNullCount")).toInt() > 0;
+    }
+    return true;
+}
+
+std::unordered_set<std::string> toUnusableFieldSet(const QVariantMap& fieldDiagnostics)
+{
+    std::unordered_set<std::string> out;
+    out.reserve(static_cast<size_t>(fieldDiagnostics.size()));
+    for (auto it = fieldDiagnostics.constBegin(); it != fieldDiagnostics.constEnd(); ++it) {
+        const QString field = it.key().trimmed().toLower();
+        if (field.isEmpty()) {
+            continue;
+        }
+        if (!diagnosticHasUsableValues(fieldDiagnostics, field)) {
+            out.insert(field.toStdString());
+        }
+    }
+    return out;
+}
+
+QStringList toQStringList(const std::vector<std::string>& values)
+{
+    QStringList out;
+    out.reserve(static_cast<int>(values.size()));
+    for (const std::string& value : values) {
+        out.append(QString::fromStdString(value));
+    }
+    return out;
+}
+
+std::string toStdString(const QString& value)
+{
+    return value.toStdString();
+}
+
+std::vector<factor::bridge::check::FieldKey> toFieldKeys(const QStringList& fields)
+{
+    std::vector<factor::bridge::check::FieldKey> result;
+    result.reserve(static_cast<size_t>(fields.size()));
+    for (const QString& field : fields) {
+        const QString normalized = field.trimmed();
+        if (!normalized.isEmpty()) {
+            result.push_back(factor::bridge::check::FieldKey{normalized.toStdString()});
+        }
+    }
+    return result;
+}
+
+QStringList fromFieldKeys(const std::vector<factor::bridge::check::FieldKey>& fields)
+{
+    QStringList result;
+    result.reserve(static_cast<int>(fields.size()));
+    for (const auto& field : fields) {
+        result.append(QString::fromStdString(field.value));
+    }
+    return result;
+}
+
+std::string toCompactJsonString(const QVariantMap& map)
+{
+    return QJsonDocument::fromVariant(map).toJson(QJsonDocument::Compact).toStdString();
+}
+
+QVariantMap fromJsonStringToVariantMap(const std::string& json)
+{
+    if (json.empty()) {
+        return {};
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(QByteArray::fromStdString(json), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+
+    return document.object().toVariantMap();
+}
+
+} // namespace
 
 FactorDetectionService::RuntimeContext FactorDetectionService::resolveRuntimeContext(
     const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
@@ -67,18 +195,19 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
         return result;
     }
 
-    const QVariantList normalizedFactorIds = dedupeFactorIds(request.factorIds);
+    const QStringList normalizedFactorIds = dedupeFactorIds(request.factorIds);
     const QString cacheFilePath = overrides.cacheFilePathOverrideForTests
         ? overrides.cacheFilePathOverrideForTests().trimmed()
         : persistentCacheFilePath(request.dataSourceMode, request.selectedDatasetId);
-    const QVariantMap persistedScopeEntries = loadScopeEntries(cacheFilePath, result.scopeKey);
+    const factor::bridge::check::PersistedFactorEntryMap persistedScopeEntries =
+        loadScopeEntries(cacheFilePath, result.scopeKey);
 
     QVariantMap supportMap;
-    QVariantList pendingFactorIds;
+    QStringList pendingFactorIds;
     QHash<QString, QString> definitionFingerprints;
 
-    for (const QVariant& factorIdValue : normalizedFactorIds) {
-        const QString factorId = factorIdValue.toString().trimmed();
+    for (const QString& factorIdValue : normalizedFactorIds) {
+        const QString factorId = factorIdValue.trimmed();
         const QString resolvedInstanceId = resolveInstanceId(factorIdValue, overrides.resolveInstanceIdOverrideForTests);
         if (factorId.isEmpty() || resolvedInstanceId.isEmpty()) {
             pendingFactorIds.append(factorIdValue);
@@ -96,12 +225,17 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
         }
 
         definitionFingerprints.insert(factorId, definitionFingerprint);
-        const QVariantMap persistedEntry = persistedScopeEntries.value(factorId).toMap();
-        const QVariantMap persistedSupportInfo = persistedEntry.value(QStringLiteral("supportInfo")).toMap();
-        if (!persistedSupportInfo.isEmpty()
-            && persistedEntry.value(QStringLiteral("definitionFingerprint")).toString() == definitionFingerprint) {
-            supportMap.insert(factorId, persistedSupportInfo);
-            continue;
+        const std::string factorKey = factorId.toStdString();
+        const auto persistedIt = persistedScopeEntries.find(factorKey);
+        if (persistedIt != persistedScopeEntries.end()
+            && persistedIt->second.definitionFingerprint == definitionFingerprint.toStdString()
+            && !persistedIt->second.supportInfoJson.empty()) {
+            const QVariantMap persistedSupportInfo =
+                fromJsonStringToVariantMap(persistedIt->second.supportInfoJson);
+            if (!persistedSupportInfo.isEmpty()) {
+                supportMap.insert(factorId, persistedSupportInfo);
+                continue;
+            }
         }
 
         pendingFactorIds.append(factorIdValue);
@@ -119,10 +253,10 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
     }
 
     if (!cacheFilePath.isEmpty()) {
-        QVariantMap updatedScopeEntries = persistedScopeEntries;
-        const QString checkedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-        for (const QVariant& factorIdValue : normalizedFactorIds) {
-            const QString factorId = factorIdValue.toString().trimmed();
+        factor::bridge::check::PersistedFactorEntryMap updatedScopeEntries = persistedScopeEntries;
+        const std::string checkedAt = toStdString(QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+        for (const QString& factorIdValue : normalizedFactorIds) {
+            const QString factorId = factorIdValue.trimmed();
             const QVariantMap supportInfo = supportMap.value(factorId).toMap();
             if (factorId.isEmpty() || supportInfo.isEmpty()) {
                 continue;
@@ -143,10 +277,11 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
                 continue;
             }
 
-            updatedScopeEntries.insert(factorId, QVariantMap{
-                {QStringLiteral("definitionFingerprint"), definitionFingerprint},
-                {QStringLiteral("checkedAt"), checkedAt},
-                {QStringLiteral("supportInfo"), supportInfo}});
+            updatedScopeEntries[factorId.toStdString()] = factor::bridge::check::PersistedFactorEntry{
+                definitionFingerprint.toStdString(),
+                checkedAt,
+                toCompactJsonString(supportInfo),
+            };
         }
 
         persistScopeEntries(cacheFilePath, result.scopeKey, updatedScopeEntries);
@@ -177,12 +312,12 @@ QString FactorDetectionService::normalizedDataSourceMode(const QString& dataSour
     return normalized.isEmpty() ? QStringLiteral("cache") : normalized;
 }
 
-QVariantList FactorDetectionService::dedupeFactorIds(const QVariantList& factorIds) const
+QStringList FactorDetectionService::dedupeFactorIds(const QStringList& factorIds) const
 {
-    QVariantList normalized;
+    QStringList normalized;
     QSet<QString> seen;
-    for (const QVariant& factorIdValue : factorIds) {
-        const QString factorId = factorIdValue.toString().trimmed();
+    for (const QString& factorIdValue : factorIds) {
+        const QString factorId = factorIdValue.trimmed();
         if (factorId.isEmpty() || seen.contains(factorId)) {
             continue;
         }
@@ -349,26 +484,25 @@ QStringList FactorDetectionService::normalizedRequiredFields(
     return dedupeStringList(fields);
 }
 
-QVariantMap FactorDetectionService::buildSupportInfo(const QString& factorId,
-                                                     const QString& instanceId,
-                                                     factor::FactorType runtimeType,
-                                                     const QString& category,
-                                                     const QString& reason,
-                                                     const QStringList& requiredFields,
-                                                     const QStringList& missingFields,
-                                                     factor::SourceTable sourceTable,
-                                                     bool supported) const
+QVariantMap FactorDetectionService::buildSupportInfo(const factor::bridge::check::SupportInfo& typedInfo) const
 {
+    const QStringList requiredFields = fromFieldKeys(typedInfo.requiredFields);
+    const QStringList missingFields = fromFieldKeys(typedInfo.missingFields);
+
     QVariantMap info;
-    info[QStringLiteral("factorId")] = factorId.trimmed();
-    info[QStringLiteral("instanceId")] = instanceId.trimmed();
-    info[QStringLiteral("runtimeType")] = static_cast<int>(runtimeType);
-    info[QStringLiteral("supported")] = supported;
-    info[QStringLiteral("category")] = category;
-    info[QStringLiteral("reason")] = reason;
+    info[QStringLiteral("factorId")] = QString::fromStdString(typedInfo.factorId.value);
+    info[QStringLiteral("instanceId")] = QString::fromStdString(typedInfo.instanceId.value);
+    info[QStringLiteral("runtimeType")] = static_cast<int>(typedInfo.runtimeType);
+    info[QStringLiteral("supported")] = typedInfo.supported;
+    info[QStringLiteral("category")] =
+        QString::fromStdString(factor::bridge::check::FactorDetectionCoreService::categoryToken(typedInfo.category));
+    info[QStringLiteral("reason")] =
+        QString::fromStdString(factor::bridge::check::FactorDetectionCoreService::reasonMessage(typedInfo));
     info[QStringLiteral("requiredFields")] = toVariantList(requiredFields);
     info[QStringLiteral("missingFields")] = toVariantList(missingFields);
-    info[QStringLiteral("sourceTable")] = static_cast<int>(sourceTable);
+    info[QStringLiteral("sourceTable")] = static_cast<int>(typedInfo.sourceTable);
+    info[QStringLiteral("runFailureReason")] = toRunFailureToken(typedInfo.runFailureCode);
+    info[QStringLiteral("runErrorCode")] = toRunFailureToken(typedInfo.runFailureCode);
     return info;
 }
 
@@ -456,33 +590,22 @@ bool FactorDetectionService::fieldHasUsableValues(const QVariantMap& fieldDiagno
     return true;
 }
 
-QVariantMap FactorDetectionService::normalizedSupportCacheSnapshot(const QVariantMap& cacheSnapshot) const
-{
-    QVariantMap normalized = cacheSnapshot;
-    QStringList availableFields = cacheSnapshot.value(QStringLiteral("availableFields")).toStringList();
-    availableFields = dedupeStringList(availableFields);
-    std::sort(availableFields.begin(), availableFields.end());
-    normalized.insert(QStringLiteral("availableFields"), availableFields);
-    return normalized;
-}
-
 QString FactorDetectionService::buildScopeKey(const Request& request) const
 {
-    QVariantMap payload;
-    payload.insert(QStringLiteral("dataSourceMode"), normalizedDataSourceMode(request.dataSourceMode));
-    payload.insert(QStringLiteral("selectedDatasetId"), request.selectedDatasetId);
-    payload.insert(QStringLiteral("startDate"), request.startDate.trimmed());
-    payload.insert(QStringLiteral("endDate"), request.endDate.trimmed());
-    payload.insert(QStringLiteral("cacheSnapshot"), normalizedSupportCacheSnapshot(request.cacheSnapshot));
-    const QByteArray payloadBytes = QJsonDocument::fromVariant(payload).toJson(QJsonDocument::Compact);
-    return QString::fromLatin1(QCryptographicHash::hash(payloadBytes, QCryptographicHash::Md5).toHex());
+    const QByteArray cacheSnapshotBytes =
+        QJsonDocument::fromVariant(request.cacheSnapshot).toJson(QJsonDocument::Compact);
+    const std::string scopeKey = factor::bridge::check::buildScopeKeyHexMd5(
+        normalizedDataSourceMode(request.dataSourceMode).toStdString(),
+        request.selectedDatasetId,
+        request.startDate.trimmed().toStdString(),
+        request.endDate.trimmed().toStdString(),
+        cacheSnapshotBytes.toStdString());
+    return QString::fromStdString(scopeKey);
 }
 
 QString FactorDetectionService::buildDefinitionFingerprint(const factor::FactorInstanceInfo& info) const
 {
-    return QString::fromLatin1(QCryptographicHash::hash(
-        QByteArray::fromStdString(info.toJson().toString()),
-        QCryptographicHash::Md5).toHex());
+    return QString::fromStdString(factor::bridge::check::md5Hex(info.toJson().toString()));
 }
 
 QString FactorDetectionService::legacyCacheFilePath() const
@@ -494,89 +617,39 @@ QString FactorDetectionService::legacyCacheFilePath() const
     return targetPath;
 }
 
-QVariantMap FactorDetectionService::loadCacheRoot(const QString& filePath) const
+factor::bridge::check::PersistedFactorEntryMap FactorDetectionService::loadScopeEntries(
+    const QString& filePath,
+    const QString& scopeKey) const
 {
-    if (filePath.trimmed().isEmpty()) {
-        return {};
-    }
-
-    QFile file(filePath);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return {};
-    }
-
-    return document.object().toVariantMap();
-}
-
-bool FactorDetectionService::persistCacheRoot(const QString& filePath, const QVariantMap& root) const
-{
-    if (filePath.trimmed().isEmpty()) {
-        return false;
-    }
-
-    bridge::storage::ensureDirectoryExists(QFileInfo(filePath).dir().absolutePath());
-    QSaveFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return false;
-    }
-
-    const QJsonDocument document = QJsonDocument::fromVariant(root);
-    if (file.write(document.toJson(QJsonDocument::Indented)) < 0) {
-        return false;
-    }
-
-    return file.commit();
-}
-
-QVariantMap FactorDetectionService::loadScopeEntries(const QString& filePath,
-                                                     const QString& scopeKey) const
-{
-    const QVariantMap root = loadCacheRoot(filePath);
-    const QVariantMap scopes = root.value(QStringLiteral("scopes")).toMap();
-    const QVariantMap scope = scopes.value(scopeKey).toMap();
-    return scope.value(QStringLiteral("factors")).toMap();
+    return factor::bridge::check::loadScopeEntries(
+        toStdString(filePath.trimmed()),
+        toStdString(scopeKey.trimmed()));
 }
 
 void FactorDetectionService::persistScopeEntries(const QString& filePath,
                                                  const QString& scopeKey,
-                                                 const QVariantMap& scopeEntries) const
+                                                 const factor::bridge::check::PersistedFactorEntryMap& scopeEntries) const
 {
     if (filePath.trimmed().isEmpty() || scopeKey.trimmed().isEmpty()) {
         return;
     }
 
-    QVariantMap root = loadCacheRoot(filePath);
-    QVariantMap scopes = root.value(QStringLiteral("scopes")).toMap();
-    QVariantMap scope = scopes.value(scopeKey).toMap();
-    scope.insert(QStringLiteral("factors"), scopeEntries);
-    scope.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-    scopes.insert(scopeKey, scope);
-    root.insert(QStringLiteral("version"), 2);
-    root.insert(QStringLiteral("scopes"), scopes);
-    persistCacheRoot(filePath, root);
+    factor::bridge::check::persistScopeEntries(
+        toStdString(filePath.trimmed()),
+        toStdString(scopeKey.trimmed()),
+        scopeEntries,
+        toStdString(QDateTime::currentDateTimeUtc().toString(Qt::ISODate)));
 }
 
 QString FactorDetectionService::resolveInstanceId(
-    const QVariant& factorId,
-    const std::function<QString(const QVariant&)>& resolveOverride) const
+    const QString& factorId,
+    const std::function<QString(const QString&)>& resolveOverride) const
 {
     if (resolveOverride) {
         return resolveOverride(factorId).trimmed();
     }
 
-    const QString directId = factorId.toString().trimmed();
-    if (!directId.isEmpty()) {
-        return directId;
-    }
-
-    const QVariantMap factorMap = factorId.toMap();
-    return factorMap.value(QStringLiteral("instanceId"), factorMap.value(QStringLiteral("factorId"))).toString().trimmed();
+    return factorId.trimmed();
 }
 
 factor::FactorInstanceInfo FactorDetectionService::resolveInstanceInfo(
@@ -637,35 +710,30 @@ std::shared_ptr<factor::BaseFactor> FactorDetectionService::resolveFactorInstanc
     return nullptr;
 }
 
-QVariantMap FactorDetectionService::buildRuntimeFailureSupportMap(const QVariantList& factorIds,
+QVariantMap FactorDetectionService::buildRuntimeFailureSupportMap(const QStringList& factorIds,
                                                                   const QString& reason) const
 {
     QVariantMap supportMap;
-    const QVariantList normalized = dedupeFactorIds(factorIds);
-    for (const QVariant& factorIdValue : normalized) {
-        const QString factorId = factorIdValue.toString().trimmed();
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            {},
-            factor::FactorType::UNKNOWN,
-            QStringLiteral("instance-create-failed"),
-            reason,
-            {},
-            {},
-            factor::SourceTable::UNKNOWN,
-            false));
+    const QStringList normalized = dedupeFactorIds(factorIds);
+    for (const QString& factorIdValue : normalized) {
+        const QString factorId = factorIdValue.trimmed();
+        const factor::bridge::check::SupportInfo typedInfo =
+            factor::bridge::check::FactorDetectionCoreService::makeRuntimeInitFailure(
+                factor::bridge::check::FactorId{factorId.toStdString()},
+                reason.toStdString());
+        supportMap.insert(factorId, buildSupportInfo(typedInfo));
     }
     return supportMap;
 }
 
 QVariantMap FactorDetectionService::detectPendingFactors(
-    const QVariantList& factorIds,
+    const QStringList& factorIds,
     const Request& request,
     const RuntimeContext& runtimeContext,
     const Overrides& overrides) const
 {
     QVariantMap supportMap;
-    const QVariantList normalized = dedupeFactorIds(factorIds);
+    const QStringList normalized = dedupeFactorIds(factorIds);
 
     if (normalized.isEmpty()) {
         return supportMap;
@@ -702,7 +770,11 @@ QVariantMap FactorDetectionService::detectPendingFactors(
     }
 
     SharedContext sharedCtx{
-        availableFields, fieldDiagnostics, availableTradeDateCount,
+        availableFields,
+        toStdStringSet(availableFields),
+        toUnusableFieldSet(fieldDiagnostics),
+        fieldDiagnostics,
+        availableTradeDateCount,
         useCacheMode, hasValidDataSet, dataSetInfo.rowCount > 0 || !dataSetRows.isEmpty(), dataSetInfo
     };
 
@@ -719,7 +791,7 @@ QVariantMap FactorDetectionService::detectPendingFactors(
     foundation::thread::ThreadPoolExecutor executor(workerCount);
     std::vector<std::future<QVariantMap>> futures;
     futures.reserve(normalized.size());
-    for (const QVariant& factorIdValue : normalized) {
+    for (const QString& factorIdValue : normalized) {
         futures.push_back(executor.submit([this, factorIdValue, request, runtimeContext, overrides, sharedCtx]() {
             return detectSingleFactor(factorIdValue, request, runtimeContext, overrides, sharedCtx);
         }));
@@ -736,26 +808,20 @@ QVariantMap FactorDetectionService::detectPendingFactors(
 }
 
 QVariantMap FactorDetectionService::detectSingleFactor(
-    const QVariant& factorIdValue,
+    const QString& factorId,
     const Request& request,
     const RuntimeContext& runtimeContext,
     const Overrides& overrides,
     const SharedContext& sharedContext) const
 {
     QVariantMap supportMap;
-    const QString factorId = factorIdValue.toString().trimmed();
-    const QString resolvedInstanceId = resolveInstanceId(factorIdValue, overrides.resolveInstanceIdOverrideForTests);
+    const QString normalizedFactorId = factorId.trimmed();
+    const QString resolvedInstanceId = resolveInstanceId(normalizedFactorId, overrides.resolveInstanceIdOverrideForTests);
     if (resolvedInstanceId.isEmpty()) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            {},
-            factor::FactorType::UNKNOWN,
-            QStringLiteral("instance-missing"),
-            QStringLiteral("未找到对应的因子实例 ID"),
-            {},
-            {},
-            factor::SourceTable::UNKNOWN,
-            false));
+        const factor::bridge::check::SupportInfo typedInfo =
+            factor::bridge::check::FactorDetectionCoreService::makeInstanceMissing(
+                factor::bridge::check::FactorId{normalizedFactorId.toStdString()});
+        supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
         return supportMap;
     }
 
@@ -769,31 +835,23 @@ QVariantMap FactorDetectionService::detectSingleFactor(
         runtimeContext.instanceManager);
     const factor::FactorType runtimeType = resolveRuntimeType(info, factorInstance);
     if (!factorInstance) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("instance-create-failed"),
-            QStringLiteral("因子实例创建失败，无法执行因子检查"),
-            {},
-            {},
-            factor::SourceTable::UNKNOWN,
-            false));
+        const factor::bridge::check::SupportInfo typedInfo =
+            factor::bridge::check::FactorDetectionCoreService::makeInstanceCreateFailed(
+                factor::bridge::check::FactorId{normalizedFactorId.toStdString()},
+                factor::bridge::check::InstanceId{resolvedInstanceId.toStdString()},
+                runtimeType);
+        supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
         return supportMap;
     }
 
     const bool hasPartialBacktestWindow = request.startDate.trimmed().isEmpty() != request.endDate.trimmed().isEmpty();
     if (!sharedContext.useCacheMode && hasPartialBacktestWindow) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("invalid-backtest-window"),
-            QStringLiteral("回测开始/结束日期必须同时提供，禁止使用默认兜底日期"),
-            {},
-            {},
-            factor::SourceTable::UNKNOWN,
-            false));
+        const factor::bridge::check::SupportInfo typedInfo =
+            factor::bridge::check::FactorDetectionCoreService::makeInvalidBacktestWindow(
+                factor::bridge::check::FactorId{normalizedFactorId.toStdString()},
+                factor::bridge::check::InstanceId{resolvedInstanceId.toStdString()},
+                runtimeType);
+        supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
         return supportMap;
     }
 
@@ -835,159 +893,57 @@ QVariantMap FactorDetectionService::detectSingleFactor(
 
     const QStringList requiredFields = normalizedRequiredFields(runtimeType, requirements);
     const factor::SourceTable sourceTable = requirements.sourceTable;
-    if (runtimeType == factor::FactorType::CUSTOM && !configHasCustomExpression(info)) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("missing-field"),
-            QStringLiteral("自定义因子必须显式提供 expression"),
-            requiredFields,
-            {},
-            sourceTable,
-            false));
-        return supportMap;
-    }
-
-    if (requiredFields.isEmpty()) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("missing-field"),
-            QStringLiteral("因子未显式声明可用于回测检查的字段需求"),
-            {},
-            {},
-            sourceTable,
-            false));
-        return supportMap;
-    }
-
-    if (!sharedContext.useCacheMode) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("supported"),
-            QStringLiteral("因子字段检查通过"),
-            requiredFields,
-            {},
-            sourceTable,
-            true));
-        return supportMap;
-    }
-
-    if (request.selectedDatasetId <= 0) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("dataset-missing"),
-            QStringLiteral("未选择可用于因子回测检查的缓存集"),
-            requiredFields,
-            {},
-            sourceTable,
-            false));
-        return supportMap;
-    }
-
-    if (!sharedContext.hasValidDataSet) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("dataset-invalid"),
-            QStringLiteral("所选缓存集不存在或元数据无效"),
-            requiredFields,
-            {},
-            sourceTable,
-            false));
-        return supportMap;
-    }
-
-    if (!sharedContext.hasUsableDataSetRows) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("dataset-empty"),
-            QStringLiteral("所选缓存集没有可用于因子检查的数据"),
-            requiredFields,
-            {},
-            sourceTable,
-            false));
-        return supportMap;
-    }
-
-    QStringList missingFields;
-    QStringList emptyValueFields;
-    for (const QString& requiredField : requiredFields) {
-        if (!sharedContext.availableFields.contains(requiredField)) {
-            missingFields.append(requiredField);
-            continue;
-        }
-        if (!fieldHasUsableValues(sharedContext.fieldDiagnostics, requiredField)) {
-            emptyValueFields.append(requiredField);
-        }
-    }
-
-    missingFields = dedupeStringList(missingFields);
-    emptyValueFields = dedupeStringList(emptyValueFields);
-    if (!missingFields.isEmpty() || !emptyValueFields.isEmpty()) {
-        const QStringList unsupportedFields = dedupeStringList(missingFields + emptyValueFields);
-        QString reason;
-        if (missingFields.isEmpty()) {
-            reason = QStringLiteral("缓存集字段存在但无有效非空值: %1")
-                .arg(emptyValueFields.join(QStringLiteral("、")));
-        } else if (emptyValueFields.isEmpty()) {
-            reason = QStringLiteral("缓存集缺少因子检查所需字段: %1")
-                .arg(missingFields.join(QStringLiteral("、")));
-        } else {
-            reason = QStringLiteral("缓存集缺少因子检查所需字段: %1；以下字段存在但无有效非空值: %2")
-                .arg(missingFields.join(QStringLiteral("、")))
-                .arg(emptyValueFields.join(QStringLiteral("、")));
-        }
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("missing-field"),
-            reason,
-            requiredFields,
-            unsupportedFields,
-            sourceTable,
-            false));
-        return supportMap;
-    }
-
     const int requiredWarmupTradingDays = overrides.requiredWarmupTradingDaysOverrideForTests.contains(resolvedInstanceId)
         ? (std::max)(1, overrides.requiredWarmupTradingDaysOverrideForTests.value(resolvedInstanceId))
         : (std::max)(1, factorInstance->getBoundaryRules().minDataPoints);
-    if (sharedContext.availableTradeDateCount > 0 && sharedContext.availableTradeDateCount < requiredWarmupTradingDays) {
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("insufficient-history"),
-            QStringLiteral("缓存集仅覆盖 %1 个交易日，低于该因子所需的 %2 个交易日")
-                .arg(sharedContext.availableTradeDateCount)
-                .arg(requiredWarmupTradingDays),
-            requiredFields,
-            {},
-            sourceTable,
-            false));
-        return supportMap;
+
+    factor::bridge::check::Input input;
+    input.useCacheMode = sharedContext.useCacheMode;
+    input.hasPartialBacktestWindow = hasPartialBacktestWindow;
+    input.customExpressionRequired = (runtimeType == factor::FactorType::CUSTOM);
+    input.customExpressionAvailable = configHasCustomExpression(info);
+    input.hasValidDataSet = sharedContext.hasValidDataSet;
+    input.hasUsableDataSetRows = sharedContext.hasUsableDataSetRows;
+    input.selectedDatasetId = request.selectedDatasetId;
+    input.availableTradeDateCount = sharedContext.availableTradeDateCount;
+    input.requiredWarmupTradingDays = requiredWarmupTradingDays;
+    input.availableFields = sharedContext.availableFieldSet;
+    input.unusableFields = sharedContext.unusableFieldSet;
+    input.requiredFields.reserve(static_cast<size_t>(requiredFields.size()));
+    for (const QString& requiredField : requiredFields) {
+        input.requiredFields.push_back(requiredField.trimmed().toLower().toStdString());
     }
 
-    supportMap.insert(factorId, buildSupportInfo(
-        factorId,
-        resolvedInstanceId,
-        runtimeType,
-        QStringLiteral("supported"),
-        QStringLiteral("字段与历史窗口检查通过"),
-        requiredFields,
-        {},
-        sourceTable,
-        true));
+    const factor::bridge::check::EvaluationResult evaluation =
+        factor::bridge::check::evaluateSupport(input);
+    const QStringList missingFields = dedupeStringList(toQStringList(evaluation.missingFields));
+    const QStringList emptyValueFields = dedupeStringList(toQStringList(evaluation.emptyValueFields));
+
+    const std::vector<factor::bridge::check::FieldKey> requiredFieldKeys = toFieldKeys(requiredFields);
+    const std::vector<factor::bridge::check::FieldKey> missingFieldKeys = toFieldKeys(missingFields);
+    const std::vector<factor::bridge::check::FieldKey> emptyValueFieldKeys = toFieldKeys(emptyValueFields);
+
+    factor::bridge::check::OutcomeSupportRequest outcomeRequest;
+    outcomeRequest.factorId = factor::bridge::check::FactorId{normalizedFactorId.toStdString()};
+    outcomeRequest.instanceId = factor::bridge::check::InstanceId{resolvedInstanceId.toStdString()};
+    outcomeRequest.runtimeType = runtimeType;
+    outcomeRequest.sourceTable = sourceTable;
+    outcomeRequest.useCacheMode = sharedContext.useCacheMode;
+    outcomeRequest.availableTradeDateCount = sharedContext.availableTradeDateCount;
+    outcomeRequest.requiredWarmupTradingDays = requiredWarmupTradingDays;
+    outcomeRequest.requiredFields = requiredFieldKeys;
+    outcomeRequest.missingFields = missingFieldKeys;
+    outcomeRequest.emptyValueFields = emptyValueFieldKeys;
+    outcomeRequest.code = evaluation.code;
+    outcomeRequest.supported = evaluation.supported;
+
+    factor::bridge::check::SupportInfo typedInfo =
+        factor::bridge::check::FactorDetectionCoreService::makeOutcomeBased(outcomeRequest);
+
+    if (evaluation.code == factor::bridge::check::OutcomeCode::MissingOrEmptyFields) {
+        typedInfo.missingFields = toFieldKeys(dedupeStringList(missingFields + emptyValueFields));
+    }
+
+    supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
     return supportMap;
 }

@@ -1,0 +1,21 @@
+target_sources(application_backtest PRIVATE
+    BacktestQuickStart.cpp
+    BacktestRunEntry.cpp
+    BacktestRuntime.cpp
+    DiagnosticsAdapter.cpp
+    ExportArtifactBuilderAdapter.cpp
+    ExecutionStageAdapters.cpp
+    ExecutionStageFactory.cpp
+    MarketDataWindowProviderAdapter.cpp
+    MetricsAdapter.cpp
+    ModuleRegistryAssembler.cpp
+    PortfolioConstructionAdapter.cpp
+    PositionStateAdapter.cpp
+    RunArtifactRepository.cpp
+    RunDefaults.cpp
+    RunOrchestratorSkeleton.cpp
+    SignalProducerFactory.cpp
+    SignalProducerStrategyAdapter.cpp
+    SignalProducers.cpp
+    RunTaskService.cpp
+)

@@ -3,9 +3,7 @@
 #include "ConfigurableFactor.h"
 #include "factor_enums.h"
 
-#include <QDate>
-#include <QStringList>
-
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -42,8 +40,8 @@ public:
 private:
     Params params_;
 
-    static QString earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent);
-    static QString resolveAdjustFieldName(AdjustPriceType priceType);
+    static std::string earliestMomentumSeriesDate(const std::string& anchorDate, int window, int skipRecent);
+    static std::string resolveAdjustFieldName(AdjustPriceType priceType);
     static double volumeConfirmationMultiplier(const std::vector<double>& volumes);
     
     // 计算逻辑

@@ -2,9 +2,9 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 #include "domain/factor/include/CustomExpressionUtils.h"
 #include "domain/factor/include/factor_enums.h"
-#include <QDate>
 
 #include <algorithm>
+#include <cctype>
 #include <limits>
 
 namespace factor {
@@ -30,6 +30,22 @@ std::vector<double> takeLatestValues(const std::vector<double>& ascendingValues,
         }
     }
     return latestValues;
+}
+
+std::string normalizeToken(std::string value)
+{
+    const auto isSpace = [](unsigned char ch) { return std::isspace(ch) != 0; };
+    const auto begin = std::find_if_not(value.begin(), value.end(), isSpace);
+    const auto end = std::find_if_not(value.rbegin(), value.rend(), isSpace).base();
+    if (begin >= end) {
+        return "";
+    }
+
+    std::string normalized(begin, end);
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return normalized;
 }
 
 } // namespace
@@ -138,13 +154,13 @@ std::vector<std::string> ConfigurableFactorBase::effectiveSymbols(const Calculat
 
 std::unordered_map<std::string, double> ConfigurableFactorBase::currentFieldCrossSection(
     const CalculationContext& context,
-    const QString& field) const
+    const std::string& field) const
 {
-    const QString normalizedField = field.trimmed().toLower();
-    if (normalizedField.isEmpty()) {
+    const std::string normalizedField = normalizeToken(field);
+    if (normalizedField.empty()) {
         return {};
     }
-    const std::string fieldName = normalizedField.toStdString();
+    const std::string fieldName = normalizedField;
 
     if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
         std::string batchKey;
@@ -180,15 +196,14 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::currentFieldCros
 std::vector<double> ConfigurableFactorBase::seriesForField(
     const CalculationContext& context,
     const std::string& symbol,
-    const QString& field,
+    const std::string& field,
     int window) const
 {
     if (window <= 0) {
         return {};
     }
 
-    const QString trimmedField = field.trimmed();
-    const std::string fieldName = trimmedField.toStdString();
+    const std::string fieldName = normalizeToken(field);
 
     const auto seriesBySymbol = fetchBatchSeriesMap(context, field, window);
     const auto seriesIt = seriesBySymbol.find(symbol);
@@ -212,17 +227,17 @@ std::vector<double> ConfigurableFactorBase::seriesForField(
 
 std::unordered_map<std::string, double> ConfigurableFactorBase::latestFinancialMetric(
     const CalculationContext& context,
-    const QString& field,
-    const QString& date) const
+    const std::string& field,
+    const std::string& date) const
 {
-    Q_UNUSED(date);
+    (void)date;
     return currentFieldCrossSection(context, field);
 }
 
 std::unordered_map<std::string, std::vector<double>> ConfigurableFactorBase::latestFinancialSeries(
     const CalculationContext& context,
-    const QString& field,
-    const QString& date,
+    const std::string& field,
+    const std::string& date,
     int limit) const
 {
     std::unordered_map<std::string, std::vector<double>> result;
@@ -231,14 +246,13 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactorBase::lat
     }
 
     const std::vector<std::string> symbols = effectiveSymbols(context);
-    const QString trimmedField = field.trimmed();
-    const std::string fieldName = trimmedField.toStdString();
+    const std::string fieldName = normalizeToken(field);
 
     if (context.historicalView && context.historicalView->hasField(fieldName)) {
         const auto batchValues = context.historicalView->getBatchTimeSeries(
             symbols,
             std::string(),
-            date.toStdString(),
+            date,
             {fieldName});
         const auto fieldIt = batchValues.find(fieldName);
         if (fieldIt != batchValues.end()) {
@@ -259,7 +273,7 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactorBase::lat
     }
 
     for (const auto& symbol : symbols) {
-        const auto series = seriesForField(context, symbol, field, limit);
+        const auto series = seriesForField(context, symbol, fieldName, limit);
         if (!series.empty()) {
             result[symbol] = series;
         }
@@ -267,30 +281,31 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactorBase::lat
     return result;
 }
 
-std::unordered_map<std::string, QString> ConfigurableFactorBase::industryBySymbol(const CalculationContext& context) const
+std::unordered_map<std::string, std::string> ConfigurableFactorBase::industryBySymbol(const CalculationContext& context) const
 {
-    std::unordered_map<std::string, QString> result;
-    if (!context.historicalView || !context.historicalView->hasField(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString())) {
+    std::unordered_map<std::string, std::string> result;
+    const std::string industryField = std::string(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str());
+    if (!context.historicalView || !context.historicalView->hasField(industryField)) {
         return result;
     }
 
     const auto values = context.historicalView->getCrossSection(
         context.date,
-        QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString(),
+        industryField,
         effectiveSymbols(context));
     for (const auto& [symbol, value] : values) {
         if (std::isfinite(value)) {
-            result.emplace(symbol, QString::number(static_cast<long long>(std::llround(value))));
+            result.emplace(symbol, std::to_string(static_cast<long long>(std::llround(value))));
         }
     }
     return result;
 }
 
-const ConfigurableFactorBase::CustomVariableBinding* ConfigurableFactorBase::findCustomVariableBinding(const QString& variableName) const
+const ConfigurableFactorBase::CustomVariableBinding* ConfigurableFactorBase::findCustomVariableBinding(const std::string& variableName) const
 {
-    const QString normalized = variableName.trimmed().toLower();
+    const std::string normalized = normalizeToken(variableName);
     for (const auto& binding : customParams().variables) {
-        if (QString::fromStdString(binding.name).trimmed().toLower() == normalized) {
+        if (normalizeToken(binding.name) == normalized) {
             return &binding;
         }
     }

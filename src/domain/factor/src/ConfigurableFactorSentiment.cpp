@@ -15,8 +15,8 @@ CalculationResult ConfigurableFactorBase::calculateSentiment(const CalculationCo
     const int window = (std::max)(5, static_cast<int>(common.window));
     const auto symbols = effectiveSymbols(context);
     const SentimentIndicatorSpec metricSpec = sentimentIndicatorSpec(sentiment.sentimentMetric);
-    const QString metric = metricSpec.common.fieldKey ? metricSpec.common.fieldKey->toQString() : QString();
-    if (metric.isEmpty() || metricSpec.common.sourceTable != SourceTable::NEWS_SENTIMENT) {
+    const std::string metric = metricSpec.common.fieldKey ? std::string(metricSpec.common.fieldKey->c_str()) : std::string();
+    if (metric.empty() || metricSpec.common.sourceTable != SourceTable::NEWS_SENTIMENT) {
         CalculationResult result;
         result.calculationId = foundation::utils::Uuid::generate_v4();
         result.date = context.date;
@@ -41,17 +41,17 @@ CalculationResult ConfigurableFactorBase::calculateSentiment(const CalculationCo
                 return resolveCommonEffectiveDateForFields(
                     effectiveContext,
                     common,
-                    QStringList{metric},
+                    std::vector<std::string>{metric},
                     CommonFieldRequirementMode::AnyField);
             },
             [this, &effectiveContext, &metric, window, &symbols](const CommonRuntimeState& runtime, CalculationResult& result) {
-                effectiveContext.date = runtime.effectiveDate.toStdString();
+                effectiveContext.date = runtime.effectiveDate;
                 const auto directMetricMap = currentFieldCrossSection(effectiveContext, metric);
                 const auto metricSeriesBySymbol = fetchBatchSeriesMap(effectiveContext, metric, window);
                 if (directMetricMap.empty() && metricSeriesBySymbol.empty()) {
-                    const QString errorMessage = QStringLiteral("情绪因子缺少真实情绪字段，已禁止使用市场宽度代理回测");
-                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    const std::string errorMessage = "情绪因子缺少真实情绪字段，已禁止使用市场宽度代理回测";
+                    result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                     return;
                 }
 
@@ -87,7 +87,7 @@ CalculationResult ConfigurableFactorBase::calculateSentiment(const CalculationCo
                 result.metadata.set("dataMode", json_helper::toJsonValue(static_cast<int>(ConfigurableDataMode::Direct)));
                 result.metadata.set("window", json_helper::toJsonValue(window));
             },
-            QStringLiteral("使用情绪字段/代理模型"));
+            "使用情绪字段/代理模型");
     };
 
     if (useLocalBatchCache) {

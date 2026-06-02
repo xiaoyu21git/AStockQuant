@@ -1,9 +1,8 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 
-#include <QDebug>
-
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <unordered_set>
 
 namespace factor {
@@ -12,9 +11,25 @@ using namespace configurable_factor_detail;
 
 namespace {
 
-QString dividendMetricFieldName(const DividendIndicatorSpec& indicator)
+std::string dividendMetricFieldName(const DividendIndicatorSpec& indicator)
 {
-    return indicator.common.fieldKey ? indicator.common.fieldKey->toQString() : QString();
+    return indicator.common.fieldKey ? std::string(indicator.common.fieldKey->c_str()) : std::string();
+}
+
+std::string joinStrings(const std::vector<std::string>& values, const char* delimiter)
+{
+    if (values.empty()) {
+        return "";
+    }
+
+    std::ostringstream stream;
+    for (size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            stream << delimiter;
+        }
+        stream << values[index];
+    }
+    return stream.str();
 }
 
 std::vector<DividendMetric> dividendMetricList(const std::vector<DividendIndicatorSpec>& indicators)
@@ -54,14 +69,14 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
         dividendIndicators.push_back(indicator);
     }
 
-    QStringList dateResolutionFields;
-    dateResolutionFields.reserve(static_cast<int>(dividendIndicators.size()));
+    std::vector<std::string> dateResolutionFields;
+    dateResolutionFields.reserve(dividendIndicators.size());
     std::vector<std::string> batchFields;
-    batchFields.reserve(static_cast<size_t>(dividendIndicators.size()));
+    batchFields.reserve(dividendIndicators.size());
     std::unordered_set<std::string> seenBatchFields;
     for (const DividendIndicatorSpec& indicator : dividendIndicators) {
-        dateResolutionFields.append(dividendMetricFieldName(indicator));
-        const std::string fieldName = dividendMetricFieldName(indicator).toStdString();
+        const std::string fieldName = dividendMetricFieldName(indicator);
+        dateResolutionFields.push_back(fieldName);
         if (seenBatchFields.insert(fieldName).second) {
             batchFields.push_back(fieldName);
         }
@@ -79,57 +94,45 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
         },
         [this, &context, &dividend, &dividendIndicators, &batchFields](const CommonRuntimeState& runtime, CalculationResult& result) {
             CalculationContext effectiveContext = context;
-            effectiveContext.date = runtime.effectiveDate.toStdString();
+            effectiveContext.date = runtime.effectiveDate;
 
             const std::vector<std::string> symbols = effectiveSymbols(effectiveContext);
             for (const std::string& fieldName : batchFields) {
                 if (!context.historicalView->hasField(fieldName)) {
-                    qWarning() << "ConfigurableFactorBase(dividend): HistoricalView 缺少红利字段"
-                               << "effectiveDate=" << runtime.effectiveDate
-                               << "field=" << QString::fromStdString(fieldName)
-                               << "symbolCount=" << static_cast<qsizetype>(symbols.size());
-                    const QString errorMessage = QStringLiteral("红利因子 HistoricalView 回测缺少字段 %1")
-                        .arg(QString::fromStdString(fieldName));
-                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    const std::string errorMessage = "红利因子 HistoricalView 回测缺少字段 " + fieldName;
+                    result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                     return;
                 }
             }
 
             std::unordered_map<std::string, std::unordered_map<std::string, double>> batchCrossSections;
             if (context.historicalView && !batchFields.empty()) {
-                batchCrossSections = context.historicalView->getBatchCrossSections(runtime.effectiveDate.toStdString(), symbols, batchFields);
+                batchCrossSections = context.historicalView->getBatchCrossSections(runtime.effectiveDate, symbols, batchFields);
                 if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
                     for (const auto& [fieldName, symbolValues] : batchCrossSections) {
                         std::string batchKey;
-                        buildBatchCrossSectionKey(batchKey, runtime.effectiveDate.toStdString(), QString::fromStdString(fieldName));
+                        buildBatchCrossSectionKey(batchKey, runtime.effectiveDate, fieldName);
                         activeBatchComputationCache->crossSectionsByKey[batchKey] = symbolValues;
                     }
                 }
             }
 
             bool hasAnyMetricData = false;
-            QStringList fieldSampleSummaries;
-            fieldSampleSummaries.reserve(static_cast<qsizetype>(dividendIndicators.size()));
+            std::vector<std::string> fieldSampleSummaries;
+            fieldSampleSummaries.reserve(dividendIndicators.size());
             for (const DividendIndicatorSpec& indicator : dividendIndicators) {
-                const QString fieldNameText = dividendMetricFieldName(indicator);
-                const std::string fieldName = fieldNameText.toStdString();
+                const std::string fieldName = dividendMetricFieldName(indicator);
                 const auto fieldIt = batchCrossSections.find(fieldName);
                 const std::unordered_map<std::string, double> metricMap = fieldIt != batchCrossSections.end() ? fieldIt->second : std::unordered_map<std::string, double>{};
                 if (!metricMap.empty()) {
                     hasAnyMetricData = true;
                 }
-                fieldSampleSummaries.append(QStringLiteral("%1:%2")
-                                                .arg(fieldNameText)
-                                                .arg(static_cast<qsizetype>(metricMap.size())));
+                fieldSampleSummaries.push_back(fieldName + ":" + std::to_string(metricMap.size()));
                 batchCrossSections[fieldName] = metricMap;
             }
 
             if (!hasAnyMetricData) {
-                qDebug() << "ConfigurableFactorBase(dividend): 红利字段存在但当日无截面样本"
-                         << "effectiveDate=" << runtime.effectiveDate
-                         << "symbolCount=" << static_cast<qsizetype>(symbols.size())
-                         << "fieldSampleCounts=" << fieldSampleSummaries.join(QStringLiteral(", "));
                 result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子字段存在但当天没有可用分红数据"));
                 return;
             }
@@ -139,7 +142,7 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
                 bool rejectedByYieldFloor = false;
 
                 for (const DividendIndicatorSpec& indicator : dividendIndicators) {
-                    const std::string fieldName = dividendMetricFieldName(indicator).toStdString();
+                    const std::string fieldName = dividendMetricFieldName(indicator);
                     const auto fieldIt = batchCrossSections.find(fieldName);
                     const auto& directMetricMap = fieldIt != batchCrossSections.end()
                         ? fieldIt->second
@@ -166,11 +169,7 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
             }
 
             if (result.values.empty()) {
-                qDebug() << "ConfigurableFactorBase(dividend): 红利字段有样本但未产出最终结果"
-                         << "effectiveDate=" << runtime.effectiveDate
-                         << "symbolCount=" << static_cast<qsizetype>(symbols.size())
-                         << "minDividendYield=" << normalizeDividendYieldFloor(dividend.minDividendYield)
-                         << "fieldSampleCounts=" << fieldSampleSummaries.join(QStringLiteral(", "));
+                result.metadata.set("fieldSampleCounts", json_helper::toJsonValue(joinStrings(fieldSampleSummaries, ", ")));
                 result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子没有可用分红数据"));
             }
         },
@@ -182,7 +181,7 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
             result.metadata.set("dividendConfigMode", json_helper::toJsonValue(static_cast<int>(dividendConfigMode)));
             result.metadata.set("dataMode", json_helper::toJsonValue(static_cast<int>(ConfigurableDataMode::BatchCrossSection)));
         },
-        QStringLiteral("使用红利字段"));
+        "使用红利字段");
 }
 
 } // namespace factor

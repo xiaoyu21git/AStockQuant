@@ -216,14 +216,6 @@ inline QString persistentDatasetFactorSupportPassCacheFilePath(int datasetId)
     return targetPath;
 }
 
-inline QString factorBacktestResultFilePath()
-{
-    const QString targetPath = QDir(filesDir()).filePath(QStringLiteral("factor_backtest_result.json"));
-    migrateLegacyFileIfNeeded(targetPath, legacyLocationsForRelativePath(QStringLiteral("factor_backtest_result.json")));
-    ensureDirectoryExists(QFileInfo(targetPath).dir().absolutePath());
-    return targetPath;
-}
-
 inline QString riskConfigurationFilePath()
 {
     const QString targetPath = QDir(configDir()).filePath(QStringLiteral("risk/risk_configuration.json"));

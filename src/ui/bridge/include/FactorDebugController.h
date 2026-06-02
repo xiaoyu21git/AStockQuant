@@ -14,7 +14,6 @@
 #include <memory>
 #include <atomic>
 
-class FactorService;
 class FactorViewModel;
 
 /**
@@ -164,7 +163,6 @@ signals:
     
 private slots:
     void onRealtimeUpdateTimer();
-    void onFactorServiceDataChanged();
     
 private:
     // 内部方法
@@ -207,6 +205,4 @@ private:
     // 读写锁
     mutable QReadWriteLock m_rwLock;
     
-    // FactorService引用
-    FactorService* m_factorService;
 };

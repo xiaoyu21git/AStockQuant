@@ -10,8 +10,6 @@
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 #include "../../domain/strategy/include/RuntimeStrategyFactory.h"
 
-#include "../include/FactorService.h"
-
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
@@ -205,44 +203,7 @@ domain::strategy::CallbackRuntimeFactorServiceAdapter::Callbacks buildFactorCall
         if (tradeDate.isEmpty() || symbols.isEmpty() || factors.empty()) {
             return;
         }
-
-        FactorService* factorService = FactorService::instance();
-        if (!factorService) {
-            return;
-        }
-        factorService->initialize();
-
-        outputSnapshots.reserve(factors.size() * static_cast<std::size_t>(symbols.size()));
-        for (const domain::strategies::FactorId factorId : factors) {
-            const QVariantMap result = factorService->getFactorValuesForSymbols(
-                QString::number(static_cast<qulonglong>(factorId)),
-                tradeDate,
-                symbols);
-            if (result.value(QStringLiteral("status")).toString().trimmed() != QStringLiteral("success")) {
-                continue;
-            }
-
-            const QVariantMap stockValues = result.value(QStringLiteral("stockValues")).toMap();
-            for (auto it = stockValues.constBegin(); it != stockValues.constEnd(); ++it) {
-                bool symbolOk = false;
-                const qulonglong symbolId = it.key().toULongLong(&symbolOk);
-                if (!symbolOk || symbolId == 0) {
-                    continue;
-                }
-
-                bool valueOk = false;
-                const double value = it.value().toDouble(&valueOk);
-                if (!valueOk || !std::isfinite(value)) {
-                    continue;
-                }
-
-                outputSnapshots.push_back(domain::strategy::RuntimeFactorSnapshot{
-                    static_cast<domain::strategies::SymbolId>(symbolId),
-                    factorId,
-                    value,
-                    kUnknownIndustryBucket});
-            }
-        }
+        Q_UNUSED(kUnknownIndustryBucket)
     };
 
     return callbacks;

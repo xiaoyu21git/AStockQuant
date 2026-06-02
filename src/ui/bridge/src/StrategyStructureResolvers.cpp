@@ -1,7 +1,7 @@
 #include "StrategyStructureResolvers.h"
 #include "RiskConfigService.h"
 
-#include "../../../domain/backtest/include/ResolvedStrategyBehaviorVariant.h"
+#include "../../../infrastructure/include/strategy/ResolvedStrategyBehaviorVariant.h"
 
 #include <QDateTime>
 #include <QMetaType>

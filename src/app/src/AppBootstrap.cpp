@@ -372,7 +372,6 @@ bool AppBootstrap::initServices()
         // 初始化引擎（当前为空，保留占位）
         // engine_ = std::make_unique<Engine>(executor_);
         
-        m_factorService = nullptr;
         std::cout << "[AppBootstrap] Core services initialized; heavy bridge services stay on-demand after UI startup\n";
         
         std::cout << "[AppBootstrap] Services initialized\n";
@@ -389,7 +388,7 @@ bool AppBootstrap::initDatabase()
     std::cout << "[AppBootstrap] Initializing database...\n";
     
     // 这里可以添加数据库连接初始化
-    // 当前项目可能通过FactorService间接初始化数据库
+    // 当前项目保留按需初始化数据库入口
     // 如果需要显式初始化，可以在这里添加
     
     std::cout << "[AppBootstrap] Database initialization skipped (handled by services)\n";
@@ -541,7 +540,3 @@ void AppBootstrap::shutdownOptionalConnectors()
 }
 #endif
 
-FactorService* AppBootstrap::getFactorService()
-{
-    return FactorService::instance();
-}

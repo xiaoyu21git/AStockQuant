@@ -2,7 +2,7 @@
 
 #include "ConfigurableFactor.h"
 
-#include <QString>
+#include <string>
 
 namespace factor {
 
@@ -29,7 +29,7 @@ public:
 private:
     Params params_;
 
-    QString selectedColumn() const;
+    std::string selectedColumn() const;
     double scoreFromRawValue(double rawValue) const;
     void loadConfig(const foundation::json::JsonFacade& config) override;
 };

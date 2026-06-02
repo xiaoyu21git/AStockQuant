@@ -263,13 +263,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
-        Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml
-        Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml
-        Qml/components/FactorWorkbench/Backtest/BacktestResultView.qml
-        Qml/components/FactorWorkbench/Backtest/GroupConfigPanel.qml
-        Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml
-        Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
         # 娉ㄦ剰锛欶actorWizardStep.qml宸茶鍒犻櫎锛屾柊寤哄洜瀛愬姛鑳藉凡缁熶竴鍒板洜瀛愬垎鏋愬伐浣滃彴
     SOURCES
        # Qml/resources/

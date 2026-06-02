@@ -4,7 +4,6 @@
 #include <string>
 #include <QQmlApplicationEngine>
 #include <QMetaObject>
-#include "../../ui/bridge/include/FactorService.h"
 
 namespace engine {
 class EventBus;
@@ -28,9 +27,6 @@ public:
     void init();
     void start();
     void shutdown();
-
-    // 保持向后兼容
-    FactorService* getFactorService();
 
     // 新增：简单状态查询
     bool isInitialized() const { return m_initialized; }
@@ -71,5 +67,4 @@ private:
     std::unique_ptr<JujinMarketConnector> m_jujinMarketConnector;
     bool m_optionalConnectorReconcilePending = false;
 #endif
-    FactorService* m_factorService = nullptr;  // 单例指针，不拥有所有权
 };

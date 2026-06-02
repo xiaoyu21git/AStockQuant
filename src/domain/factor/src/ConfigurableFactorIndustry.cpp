@@ -12,8 +12,8 @@ CalculationResult ConfigurableFactorBase::calculateIndustry(const CalculationCon
     const CommonParams& common = commonParams_;
     const IndustryParams& industry = industryParams();
     const IndustryIndicatorSpec industryIndicator = industryIndicatorSpec(industry.industryMetricKind);
-    const QString industryMetric = industryIndicator.common.fieldKey ? industryIndicator.common.fieldKey->toQString() : QString();
-    if (industryMetric.isEmpty()) {
+    const std::string industryMetric = industryIndicator.common.fieldKey ? std::string(industryIndicator.common.fieldKey->c_str()) : std::string();
+    if (industryMetric.empty()) {
         return createHistoricalViewRuntimeError(context, "行业因子缺少有效 metric 枚举");
     }
     const ConfigurableSectorType sectorType = industry.sectorType;
@@ -27,19 +27,19 @@ CalculationResult ConfigurableFactorBase::calculateIndustry(const CalculationCon
             return resolveCommonEffectiveDateForFields(
                 context,
                 common,
-                QStringList{industryMetric},
+                std::vector<std::string>{industryMetric},
                 CommonFieldRequirementMode::AnyField);
         },
         [this, &context, &industryMetric, window, sectorWeight](const CommonRuntimeState& runtime, CalculationResult& result) {
             CalculationContext effectiveContext = context;
-            effectiveContext.date = runtime.effectiveDate.toStdString();
+            effectiveContext.date = runtime.effectiveDate;
             effectiveContext.symbols = effectiveSymbols(effectiveContext);
 
             const auto metricValues = currentFieldCrossSection(effectiveContext, industryMetric);
             if (metricValues.empty()) {
-                const QString errorMessage = QStringLiteral("行业因子缺少真实行业字段，已禁止使用代理模型回测");
-                result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                const std::string errorMessage = "行业因子缺少真实行业字段，已禁止使用代理模型回测";
+                result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                 return;
             }
 
@@ -71,7 +71,7 @@ CalculationResult ConfigurableFactorBase::calculateIndustry(const CalculationCon
             result.metadata.set("window", json_helper::toJsonValue(window));
             result.metadata.set("dataMode", json_helper::toJsonValue(static_cast<int>(ConfigurableDataMode::DirectCrossSection)));
         },
-        QStringLiteral("使用行业字段"));
+        "使用行业字段");
 }
 
 } // namespace factor

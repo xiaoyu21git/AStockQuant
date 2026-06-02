@@ -1,6 +1,6 @@
 ﻿#include "database/StrategyRepository.h"
 #include "../../ui/bridge/include/StrategyLifecycleStatus.h"
-#include "../../domain/backtest/include/ResolvedStrategyBehaviorVariant.h"
+#include "strategy/ResolvedStrategyBehaviorVariant.h"
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QSqlRecord>

@@ -2,8 +2,6 @@
 
 #include <functional>
 #include <memory>
-#include <QString>
-#include <QStringList>
 #include <string>
 #include <stdexcept>
 #include <algorithm>
@@ -202,7 +200,7 @@ struct CalculationResult {
 struct CommonRuntimeState {
     DataFrequency frequency{DataFrequency::Daily};
     StandardizationMethod standardization{StandardizationMethod::None};
-    QString effectiveDate;
+    std::string effectiveDate;
     NeutralizationStatus neutralizationMode{NeutralizationStatus::Disabled};
 };
 
@@ -269,16 +267,17 @@ protected:
     CalculationResult executeWithCommonParams(
         const CalculationContext& context,
         const CommonMetricParams& params,
-        const std::function<QString()>& effectiveDateResolver,
+        const std::function<std::string()>& effectiveDateResolver,
         const std::function<void(const CommonRuntimeState&, CalculationResult&)>& rawCalculator,
         const std::function<void(const CommonRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
         const std::function<void(const CommonRuntimeState&, CalculationResult&)>& metadataAppender,
-        const QString& dataStatusMessage = QStringLiteral("使用缓存数据集")) const;
+        const std::string& dataStatusMessage = "使用缓存数据集") const;
 
-    QString resolveCommonEffectiveDateForFields(const CalculationContext& context,
-                                                const CommonMetricParams& params,
-                                                const QStringList& requiredFieldsForDateResolution,
-                                                CommonFieldRequirementMode requirementMode) const;
+    std::string resolveCommonEffectiveDateForFields(
+        const CalculationContext& context,
+        const CommonMetricParams& params,
+        const std::vector<std::string>& requiredFieldsForDateResolution,
+        CommonFieldRequirementMode requirementMode) const;
 
     static CommonMetricParams buildCommonMetricParams(int lookbackWindow,
                                                       bool laggedEnabled,

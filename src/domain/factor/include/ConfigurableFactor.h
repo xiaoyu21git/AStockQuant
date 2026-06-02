@@ -4,7 +4,6 @@
 #include "FactorMetricConfig.h"
 #include "factor_enums.h"
 
-#include <QString>
 #include <unordered_set>
 #include <variant>
 
@@ -152,29 +151,29 @@ private:
 
     std::unordered_map<std::string, double> currentFieldCrossSection(
         const CalculationContext& context,
-        const QString& field) const;
+        const std::string& field) const;
     std::vector<double> seriesForField(
         const CalculationContext& context,
         const std::string& symbol,
-        const QString& field,
+        const std::string& field,
         int window) const;
     std::unordered_map<std::string, double> latestFinancialMetric(
         const CalculationContext& context,
-        const QString& field,
-        const QString& date) const;
+        const std::string& field,
+        const std::string& date) const;
     std::unordered_map<std::string, std::vector<double>> latestFinancialSeries(
         const CalculationContext& context,
-        const QString& field,
-        const QString& date,
+        const std::string& field,
+        const std::string& date,
         int limit) const;
-    std::unordered_map<std::string, QString> industryBySymbol(
+    std::unordered_map<std::string, std::string> industryBySymbol(
         const CalculationContext& context) const;
-    const CustomVariableBinding* findCustomVariableBinding(const QString& variableName) const;
+    const CustomVariableBinding* findCustomVariableBinding(const std::string& variableName) const;
     std::unordered_map<std::string, double> evaluateCustomExpression(
         const CalculationContext& context,
-        const QString& expression,
+        const std::string& expression,
         const std::vector<std::string>& symbols,
-        QString* errorMessage) const;
+        std::string* errorMessage) const;
 };
 
 } // namespace factor

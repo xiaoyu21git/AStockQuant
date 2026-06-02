@@ -1,21 +1,97 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 
 #include <algorithm>
+#include <cctype>
+#include <ctime>
+#include <unordered_set>
 
 namespace factor {
 
 using namespace configurable_factor_detail;
 
+namespace {
+
+constexpr int kMonthsPerYear = 12;
+constexpr int kFridayIndex = 5;
+constexpr int kIsoWeekLength = 7;
+
+std::string trimAsciiWhitespace(std::string text)
+{
+    const auto isSpace = [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    };
+    const auto begin = std::find_if_not(text.begin(), text.end(), isSpace);
+    const auto end = std::find_if_not(text.rbegin(), text.rend(), isSpace).base();
+    if (begin >= end) {
+        return "";
+    }
+    return std::string(begin, end);
+}
+
+bool parseIsoDate(const std::string& text, std::tm& out)
+{
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+        return false;
+    }
+
+    try {
+        const int year = std::stoi(text.substr(0, 4));
+        const int month = std::stoi(text.substr(5, 2));
+        const int day = std::stoi(text.substr(8, 2));
+        if (month < 1 || month > kMonthsPerYear || day < 1 || day > 31) {
+            return false;
+        }
+
+        std::tm candidate = {};
+        candidate.tm_year = year - 1900;
+        candidate.tm_mon = month - 1;
+        candidate.tm_mday = day;
+        candidate.tm_isdst = -1;
+        if (std::mktime(&candidate) == -1) {
+            return false;
+        }
+        out = candidate;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::string formatIsoDate(const std::tm& value)
+{
+    char buffer[11] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &value);
+    return std::string(buffer);
+}
+
+std::tm addDays(const std::tm& base, int dayOffset)
+{
+    std::tm shifted = base;
+    shifted.tm_mday += dayOffset;
+    shifted.tm_isdst = -1;
+    std::mktime(&shifted);
+    return shifted;
+}
+
+int isoDayOfWeek(const std::tm& value)
+{
+    const int wday = value.tm_wday;
+    return ((wday + 6) % kIsoWeekLength) + 1;
+}
+
+} // namespace
+
 CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContext& context) const
 {
     const CommonParams& common = commonParams_;
     const MacroParams& macro = macroParams();
-    const QString benchmarkSymbol = QString::fromStdString(macro.benchmarkSymbol).trimmed().isEmpty()
-        ? QStringLiteral("000300.SH")
-        : QString::fromStdString(macro.benchmarkSymbol).trimmed();
+    const std::string benchmarkSymbol = [&]() {
+        const std::string trimmed = trimAsciiWhitespace(macro.benchmarkSymbol);
+        return trimmed.empty() ? std::string("000300.SH") : trimmed;
+    }();
     const TechnicalPriceIndicatorSpec priceIndicator = technicalPriceIndicatorSpec(macro.priceType);
     const factor::bridge::FieldKey* priceFieldKey = priceIndicator.common.fieldKey;
-    const QString priceField = priceFieldKey ? priceFieldKey->toQString() : QString();
+    const std::string priceField = priceFieldKey ? std::string(priceFieldKey->c_str()) : std::string();
     const DataFrequency frequency = macro.macroFrequency;
     if (!priceIndicator.common.hasResolvedSource() || priceIndicator.common.sourceTable != SourceTable::DAILY_BAR) {
         return createHistoricalViewRuntimeError(context, "宏观因子包含不支持的 priceType 配置");
@@ -84,35 +160,45 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
             context,
             macroRuntimeParams,
             [&]() {
-                QString resolvedDate = QString::fromStdString(context.date);
-                QDate anchorDate = QDate::fromString(resolvedDate, Qt::ISODate);
-                if (anchorDate.isValid()) {
+                std::string resolvedDate = context.date;
+                std::tm anchorDate = {};
+                const bool anchorDateValid = parseIsoDate(resolvedDate, anchorDate);
+                if (anchorDateValid) {
                     if (frequency == DataFrequency::Weekly) {
-                        const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-                        anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+                        const int dayOfWeek = isoDayOfWeek(anchorDate);
+                        const int shiftToPreviousFriday = dayOfWeek >= kFridayIndex ? dayOfWeek - kFridayIndex : dayOfWeek + 2;
+                        anchorDate = addDays(anchorDate, -shiftToPreviousFriday);
                     } else if (frequency == DataFrequency::Monthly) {
-                        anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+                        std::tm monthStart = anchorDate;
+                        monthStart.tm_mday = 1;
+                        monthStart.tm_isdst = -1;
+                        std::mktime(&monthStart);
+                        anchorDate = addDays(monthStart, -1);
                     } else if (frequency == DataFrequency::Quarterly) {
-                        const int quarterStartMonth = ((anchorDate.month() - 1) / 3) * 3 + 1;
-                        anchorDate = QDate(anchorDate.year(), quarterStartMonth, 1).addDays(-1);
+                        const int month = anchorDate.tm_mon + 1;
+                        const int quarterStartMonth = ((month - 1) / 3) * 3 + 1;
+                        std::tm quarterStart = anchorDate;
+                        quarterStart.tm_mon = quarterStartMonth - 1;
+                        quarterStart.tm_mday = 1;
+                        quarterStart.tm_isdst = -1;
+                        std::mktime(&quarterStart);
+                        anchorDate = addDays(quarterStart, -1);
                     }
-                    resolvedDate = anchorDate.toString(Qt::ISODate);
+                    resolvedDate = formatIsoDate(anchorDate);
                 }
 
                 const int maxOffset = (std::max)(0, static_cast<int>(common.lookbackWindow));
                 const int startOffset = common.lagEnabled ? (std::max)(1, static_cast<int>(common.lagPeriods)) : 0;
-                const std::vector<std::string> benchmarkSymbols{benchmarkSymbol.toStdString()};
+                const std::vector<std::string> benchmarkSymbols{benchmarkSymbol};
                 for (int offset = startOffset; offset <= maxOffset; ++offset) {
-                    const QString candidate = anchorDate.isValid()
-                        ? anchorDate.addDays(-offset).toString(Qt::ISODate)
-                        : resolvedDate;
-                    if (context.historicalView->getCrossSection(candidate.toStdString(), priceField.toStdString(), symbols).empty()) {
+                    const std::string candidate = anchorDateValid ? formatIsoDate(addDays(anchorDate, -offset)) : resolvedDate;
+                    if (context.historicalView->getCrossSection(candidate, priceField, symbols).empty()) {
                         continue;
                     }
 
                     bool hasBenchmarkSeries = false;
                     for (const auto& fieldName : benchmarkFields) {
-                        if (!context.historicalView->getCrossSection(candidate.toStdString(), fieldName, benchmarkSymbols).empty()) {
+                        if (!context.historicalView->getCrossSection(candidate, fieldName, benchmarkSymbols).empty()) {
                             hasBenchmarkSeries = true;
                             break;
                         }
@@ -125,21 +211,17 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
                 return resolvedDate;
             },
             [this, &context, &effectiveContext, &priceField, resolvedWindow, &benchmarkFields, &benchmarkSymbol, &selectedIndicators](const CommonRuntimeState& runtime, CalculationResult& result) {
-                effectiveContext.date = runtime.effectiveDate.toStdString();
+                effectiveContext.date = runtime.effectiveDate;
 
-                if (!context.historicalView->hasField(priceField.toStdString())) {
-                    const std::string error = QStringLiteral("宏观因子 HistoricalView 回测缺少字段 %1")
-                        .arg(priceField)
-                        .toStdString();
+                if (!context.historicalView->hasField(priceField)) {
+                    const std::string error = "宏观因子 HistoricalView 回测缺少字段 " + priceField;
                     result.dataStatus = CalculationResult::createError(error).dataStatus;
                     result.metadata.set("error", json_helper::toJsonValue(error));
                     return;
                 }
                 for (const auto& fieldName : benchmarkFields) {
                     if (!context.historicalView->hasField(fieldName)) {
-                        const std::string error = QStringLiteral("宏观因子 HistoricalView 回测缺少字段 %1")
-                            .arg(QString::fromStdString(fieldName))
-                            .toStdString();
+                        const std::string error = "宏观因子 HistoricalView 回测缺少字段 " + fieldName;
                         result.dataStatus = CalculationResult::createError(error).dataStatus;
                         result.metadata.set("error", json_helper::toJsonValue(error));
                         return;
@@ -154,8 +236,8 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
                 std::unordered_map<std::string, std::vector<double>> benchmarkSeriesByField;
                 if (context.historicalView && !benchmarkFields.empty()) {
                     const auto benchmarkBatchValues = context.historicalView->getBatchTimeSeries(
-                        {benchmarkSymbol.toStdString()},
-                        runtime.effectiveDate.toStdString(),
+                        {benchmarkSymbol},
+                        runtime.effectiveDate,
                         resolvedWindow + 1,
                         benchmarkFields);
 
@@ -165,7 +247,7 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
                             continue;
                         }
 
-                        const auto symbolIt = fieldIt->second.find(benchmarkSymbol.toStdString());
+                        const auto symbolIt = fieldIt->second.find(benchmarkSymbol);
                         if (symbolIt != fieldIt->second.end()) {
                             benchmarkSeriesByField.emplace(fieldName, symbolIt->second);
                         }
@@ -231,9 +313,9 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
                 result.metadata.set("macroFrequency", json_helper::toJsonValue(static_cast<int>(frequency)));
                 result.metadata.set("macroWindow", json_helper::toJsonValue(baseWindow));
                 result.metadata.set("macroMode", json_helper::toJsonValue(static_cast<int>(MacroComputationMode::ProxySensitivity)));
-                result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
+                result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol));
             },
-            QStringLiteral("使用宏观代理敏感度运行时"));
+            "使用宏观代理敏感度运行时");
     };
 
     if (useLocalBatchCache) {

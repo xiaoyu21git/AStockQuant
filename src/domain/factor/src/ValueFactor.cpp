@@ -85,14 +85,14 @@ constexpr ValuationMetricDescriptor kValuationMetricDescriptors[] = {
     {ValuationMetric::CFP, "cf_p"}
 };
 
-QString valuationMetricToJsonString(ValuationMetric metric)
+std::string valuationMetricToJsonString(ValuationMetric metric)
 {
     for (const auto& descriptor : kValuationMetricDescriptors) {
         if (descriptor.metric == metric) {
-            return QLatin1String(descriptor.jsonName);
+            return descriptor.jsonName;
         }
     }
-    return {};
+    return "";
 }
 
 ValuationMetric valuationMetricFromJsonValue(const foundation::json::JsonFacade& value)
@@ -155,10 +155,13 @@ ValueFactor::Params valueParamsFromJson(const foundation::json::JsonFacade& json
 
 }
 
-void ValueFactor::appendUniqueField(QStringList& fields, const QString& field)
+void ValueFactor::appendUniqueField(std::vector<std::string>& fields, const std::string& field)
 {
-    if (!field.isEmpty() && !fields.contains(field)) {
-        fields.append(field);
+    if (field.empty()) {
+        return;
+    }
+    if (std::find(fields.begin(), fields.end(), field) == fields.end()) {
+        fields.push_back(field);
     }
 }
 
@@ -184,17 +187,17 @@ double ValueFactor::calculatePercentileValueLocal(std::vector<double> values, do
     return lowValue + (highValue - lowValue) * (position - static_cast<double>(lower));
 }
 
-QString ValueFactor::valuationMetricField(ValuationMetric metric)
+std::string ValueFactor::valuationMetricField(ValuationMetric metric)
 {
     switch (metric) {
     case ValuationMetric::BP:
-        return QString(factor::bridge::MarketBarFieldKeys::PB_RATIO);
+        return std::string(factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str());
     case ValuationMetric::EP:
-        return QString(factor::bridge::MarketBarFieldKeys::PE_RATIO);
+        return std::string(factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str());
     case ValuationMetric::DIVIDEND_YIELD:
-        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
+        return std::string(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str());
     default:
-        return {};
+        return "";
     }
 }
 
@@ -245,13 +248,13 @@ double ValueFactor::scoreFromMetricRawValue(ValuationMetric metric, double rawVa
     }
 }
 
-QStringList ValueFactor::collectDateResolutionFields(const std::vector<ValuationMetric>& metrics)
+std::vector<std::string> ValueFactor::collectDateResolutionFields(const std::vector<ValuationMetric>& metrics)
 {
-    QStringList fields;
+    std::vector<std::string> fields;
     for (const ValuationMetric metric : metrics) {
         if (metric == ValuationMetric::CFP) {
-            appendUniqueField(fields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
-            appendUniqueField(fields, QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW));
+            appendUniqueField(fields, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
+            appendUniqueField(fields, std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()));
             continue;
         }
 
@@ -268,12 +271,12 @@ ValueFactor::MetricContribution ValueFactor::computeCFPContribution(const Calcul
     contribution.weight = weight;
 
     const auto marketCaps = context.historicalView->getCrossSection(
-        runtime.effectiveDate.toStdString(),
-        QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString(),
+        runtime.effectiveDate,
+        std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()),
         context.symbols);
     const auto cashFlows = context.historicalView->getCrossSection(
-        runtime.effectiveDate.toStdString(),
-        QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW).toStdString(),
+        runtime.effectiveDate,
+        std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()),
         context.symbols);
 
     for (const auto& [symbol, marketCap] : marketCaps) {
@@ -305,10 +308,10 @@ ValueFactor::MetricContribution ValueFactor::computeStandardContribution(const C
     MetricContribution contribution;
     contribution.weight = weight;
 
-    const QString field = valuationMetricField(metric);
+    const std::string field = valuationMetricField(metric);
     const auto crossSection = context.historicalView->getCrossSection(
-        runtime.effectiveDate.toStdString(),
-        field.toStdString(),
+        runtime.effectiveDate,
+        field,
         context.symbols);
 
     for (const auto& [symbol, rawValue] : crossSection) {
@@ -382,17 +385,17 @@ DataRequirements ValueFactor::getDataRequirements() const
     for (const ValuationMetric metric : params_.valuationMetrics) {
         switch (metric) {
         case ValuationMetric::BP:
-            appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::PB_RATIO).toStdString());
+            appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str()));
             break;
         case ValuationMetric::EP:
-            appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::PE_RATIO).toStdString());
+            appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str()));
             break;
         case ValuationMetric::DIVIDEND_YIELD:
-            appendRequiredField(req, QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD).toStdString());
+            appendRequiredField(req, std::string(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str()));
             break;
         case ValuationMetric::CFP:
-            appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
-            appendRequiredField(req, QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW).toStdString());
+            appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
+            appendRequiredField(req, std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()));
             break;
         default:
             break;
@@ -420,7 +423,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
         params_.neutralizationEnabled);
 
     const std::vector<ValuationMetric> metrics = selectedMetricsFromParams(params_);
-    const QStringList dateResolutionFields = collectDateResolutionFields(metrics);
+    const std::vector<std::string> dateResolutionFields = collectDateResolutionFields(metrics);
 
     return executeWithCommonParams(
         context,
@@ -437,7 +440,6 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 const std::string errorMessage = "价值因子未配置有效的 valuationMetrics";
                 result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
                 result.metadata.set("error", json_helper::toJsonValue(errorMessage));
-            boundaryRules_ = getBoundaryRules();
                 return;
             }
 
@@ -459,10 +461,10 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                     }
                     contributions.push_back(computeCFPContribution(context, runtime, weight));
                 } else {
-                    const QString field = valuationMetricField(metric);
-                    if (field.isEmpty() || !context.historicalView->hasField(field.toStdString())) {
+                    const std::string field = valuationMetricField(metric);
+                    if (field.empty() || !context.historicalView->hasField(field)) {
                         const std::string errorMessage = "缓存数据集缺少字段 "
-                            + (field.isEmpty() ? valuationMetricToJsonString(metric).toStdString() : field.toStdString())
+                            + (field.empty() ? valuationMetricToJsonString(metric) : field)
                             + "，无法计算价值因子";
                         result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
                         result.metadata.set("error", json_helper::toJsonValue(errorMessage));
@@ -519,7 +521,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
             auto valuationWeightsJson = foundation::json::JsonFacade::createArray();
 
             for (const ValuationMetric metric : metrics) {
-                valuationMetricsJson.push_back(json_helper::toJsonValue(valuationMetricToJsonString(metric).toStdString()));
+                valuationMetricsJson.push_back(json_helper::toJsonValue(valuationMetricToJsonString(metric)));
                 valuationWeightsJson.push_back(json_helper::toJsonValue(valuationMetricWeight(params_, metric)));
             }
 
@@ -527,7 +529,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
             result.metadata.set("valuationWeights", valuationWeightsJson);
             if (!metrics.empty()) {
                 result.metadata.set("valuationMetric",
-                                    json_helper::toJsonValue(valuationMetricToJsonString(metrics.front()).toStdString()));
+                                    json_helper::toJsonValue(valuationMetricToJsonString(metrics.front())));
             }
         });
 }

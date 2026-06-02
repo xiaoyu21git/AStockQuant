@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include <QMetaType>
 namespace factor {
 enum class FactorType : uint8_t {
     VALUE = 0,
@@ -406,12 +405,3 @@ inline constexpr FactorType factorTypeFromIndex(int index)
 }
 
 }  // namespace factor
-
-Q_DECLARE_METATYPE(factor::FactorType)
-Q_DECLARE_METATYPE(factor::TechnicalIndicator)
-Q_DECLARE_METATYPE(factor::MacroDimension)
-Q_DECLARE_METATYPE(factor::MacroIndicator)
-Q_DECLARE_METATYPE(factor::LiquidityMetric)
-Q_DECLARE_METATYPE(factor::IndustryMetric)
-Q_DECLARE_METATYPE(factor::SentimentMetric)
-Q_DECLARE_METATYPE(factor::MarketEnvironmentProfile)

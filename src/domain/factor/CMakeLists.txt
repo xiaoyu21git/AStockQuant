@@ -1,10 +1,10 @@
-# 因子系统CMake配置
+﻿# 鍥犲瓙绯荤粺CMake閰嶇疆
 
-# 设置项目
+# 璁剧疆椤圭洰
 cmake_minimum_required(VERSION 3.10)
 project(FactorSystem)
 
-# 设置C++标准
+# 璁剧疆C++鏍囧噯
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -14,7 +14,7 @@ include(CheckFunctionExists)
 include(CheckTypeSize)
 include(CheckSymbolExists)
 
-# 包含目录
+# 鍖呭惈鐩綍
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
@@ -130,12 +130,10 @@ set_source_files_properties(
     PROPERTIES LANGUAGE C
 )
 
-# 源文件
+# 婧愭枃浠?
 set(FACTOR_SOURCES
     src/DataAvailabilityChecker.cpp
-    src/ArrowMarketData.cpp
     src/BaseFactor.cpp
-    src/batch_technical_indicators.cpp
     src/MomentumFactor.cpp
     src/ValueFactor.cpp
     src/SizeFactor.cpp
@@ -162,19 +160,24 @@ set(FACTOR_SOURCES
     src/ConfigurableFactorSentiment.cpp
     src/ConfigurableFactorCustom.cpp
     src/FactorConfigAccess.cpp
-    src/FactorCacheManager.cpp
     src/FactorInstanceManager.cpp
-    src/FactorBacktestMetricsCalculator.cpp
-    src/FactorBacktestExecutor.cpp
+    src/factor_compute/FactorSignalSetAssembler.cpp
+    src/factor_compute/FactorComputeEngine.cpp
+    src/factor_compute/FactorRegistry.cpp
+    src/factor_compute/FactorOperatorLibrary.cpp
+    src/factor_compute/FactorComputeDispatcher.cpp
+    src/factor_compute/FactorComputeOperatorExtensions.cpp
+    src/factor_compute/PostProcessingPipeline.cpp
+    src/factor_compute/SignalCache.cpp
+    src/factor_compute/AnalysisKernel.cpp
+    src/factor_compute/AnalysisModule.cpp
 )
 
-# 头文件
+# 澶存枃浠?
 set(FACTOR_HEADERS
-    include/ArrowMarketData.h
     include/DataAvailabilityChecker.h
     include/BaseFactor.h
     include/FactorNeutralizationUtils.h
-    include/batch_technical_indicators.h
     include/HistoricalView.h
     include/MomentumFactor.h
     include/ValueFactor.h
@@ -194,14 +197,80 @@ set(FACTOR_HEADERS
     include/CompositeFactorConfig.h
     include/IFactorResolver.h
     include/FactorConfigAccess.h
-    include/FactorCacheManager.h
     include/FactorInstanceManager.h
-    include/FactorBacktestMetricsCalculator.h
-    include/FactorBacktestExecutor.h
+    include/factor_compute/FactorSignalTypes.h
+    include/factor_compute/FactorComputeToken.h
+    include/factor_compute/IFactorComputeEngine.h
+    include/factor_compute/IFactorSignalSetAssembler.h
+    include/factor_compute/IFactorRegistry.h
+    include/factor_compute/IFactorComputeDispatcher.h
+    include/factor_compute/IFactorComputeOperatorExtension.h
+    include/factor_compute/DefaultComputeOpRegistrar.h
+    include/factor_compute/ConstComputeOpRegistrar.h
+    include/factor_compute/IFactorOperatorLibrary.h
+    include/factor_compute/IPostProcessingPipeline.h
+    include/factor_compute/IMarketDataView.h
+    include/factor_compute/ISignalCache.h
+    include/factor_compute/IAnalysisModule.h
+    include/factor_compute/FactorComputeDispatcher.h
+    include/factor_compute/PostProcessingPipeline.h
+    include/factor_compute/FactorSignalSetAssembler.h
+    include/factor_compute/SignalCache.h
+    include/factor_compute/FactorComputeEngine.h
+    include/factor_compute/FactorRegistry.h
+    include/factor_compute/FactorOperatorLibrary.h
 )
 
-# 创建库
+set(FACTOR_COMPUTE_SOURCES
+    src/factor_compute/FactorSignalSetAssembler.cpp
+    src/factor_compute/FactorComputeEngine.cpp
+    src/factor_compute/FactorRegistry.cpp
+    src/factor_compute/FactorOperatorLibrary.cpp
+    src/factor_compute/FactorComputeDispatcher.cpp
+    src/factor_compute/FactorComputeOperatorExtensions.cpp
+    src/factor_compute/PostProcessingPipeline.cpp
+    src/factor_compute/SignalCache.cpp
+    src/factor_compute/AnalysisKernel.cpp
+    src/factor_compute/AnalysisModule.cpp
+)
+
+set(FACTOR_COMPUTE_HEADERS
+    include/factor_compute/FactorSignalTypes.h
+    include/factor_compute/FactorComputeToken.h
+    include/factor_compute/IFactorComputeEngine.h
+    include/factor_compute/IFactorSignalSetAssembler.h
+    include/factor_compute/IFactorRegistry.h
+    include/factor_compute/IFactorComputeDispatcher.h
+    include/factor_compute/IFactorComputeOperatorExtension.h
+    include/factor_compute/DefaultComputeOpRegistrar.h
+    include/factor_compute/ConstComputeOpRegistrar.h
+    include/factor_compute/IFactorOperatorLibrary.h
+    include/factor_compute/IPostProcessingPipeline.h
+    include/factor_compute/IMarketDataView.h
+    include/factor_compute/ISignalCache.h
+    include/factor_compute/IAnalysisModule.h
+    include/factor_compute/FactorComputeDispatcher.h
+    include/factor_compute/PostProcessingPipeline.h
+    include/factor_compute/FactorSignalSetAssembler.h
+    include/factor_compute/SignalCache.h
+    include/factor_compute/FactorComputeEngine.h
+    include/factor_compute/FactorRegistry.h
+    include/factor_compute/FactorOperatorLibrary.h
+)
+
+# 鍒涘缓搴?
 add_library(factor_system STATIC ${FACTOR_SOURCES} ${FACTOR_HEADERS})
+
+# 鍒涘缓 factor_compute 澧為噺楠岃瘉搴?
+add_library(factor_compute STATIC
+    ${FACTOR_COMPUTE_SOURCES}
+    ${FACTOR_COMPUTE_HEADERS}
+)
+
+target_link_libraries(factor_compute
+    PUBLIC
+        foundation
+)
 
 target_include_directories(factor_system
     PUBLIC
@@ -209,7 +278,7 @@ target_include_directories(factor_system
     "${TA_LIB_SOURCE_DIR}/include"
 )
 
-# 链接库
+# 閾炬帴搴?
 target_link_libraries(factor_system
     PUBLIC
     Qt6::Sql
@@ -232,7 +301,7 @@ else()
     message(FATAL_ERROR "Arrow C++ target not found after FetchContent population")
 endif()
 
-# 安装
+# 瀹夎
 install(TARGETS factor_system
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
@@ -244,7 +313,7 @@ install(DIRECTORY include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-# 测试程序
+# 娴嬭瘯绋嬪簭
 set(FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/test_factor_system.cpp")
 if(BUILD_TESTS AND EXISTS "${FACTOR_TEST_SOURCE}")
     add_executable(test_factor_system
@@ -259,9 +328,27 @@ if(BUILD_TESTS AND EXISTS "${FACTOR_TEST_SOURCE}")
         pthread
     )
     
-    # 添加测试
+    # 娣诲姞娴嬭瘯
     add_test(NAME test_factor_system
         COMMAND test_factor_system
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
+endif()
+
+set(FACTOR_COMPUTE_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_factor_signal_engine_smoke.cpp")
+if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
+    add_executable(test_factor_compute_smoke
+        ${FACTOR_COMPUTE_TEST_SOURCE}
+    )
+
+    target_link_libraries(test_factor_compute_smoke
+        factor_compute
+    )
+
+    if(BUILD_TESTS)
+        add_test(NAME test_factor_compute_smoke
+            COMMAND test_factor_compute_smoke
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    endif()
 endif()

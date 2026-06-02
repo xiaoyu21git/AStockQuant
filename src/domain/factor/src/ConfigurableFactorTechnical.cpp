@@ -1,5 +1,5 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
-#include "domain/factor/include/batch_technical_indicators.h"
+#include "domain/indicators/include/batch_technical_indicators.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <algorithm>
@@ -64,14 +64,14 @@ void setTechnicalIndicatorContextMetadata(CalculationResult& result,
 }
 
 void setTechnicalCommonRuntimeMetadata(CalculationResult& result,
-                                       const QString& effectiveDate,
+                                       const std::string& effectiveDate,
                                        DataFrequency frequency,
                                        const ConfigurableFactorBase::CommonParams& common,
                                        StandardizationMethod standardization,
                                        NeutralizationStatus neutralizationMode,
                                        int symbolCount)
 {
-    result.metadata.set(technical_metadata::kEffectiveDateKey, json_helper::toJsonValue(effectiveDate.toStdString()));
+    result.metadata.set(technical_metadata::kEffectiveDateKey, json_helper::toJsonValue(effectiveDate));
     result.metadata.set(technical_metadata::kFrequencyKey, json_helper::toJsonValue(static_cast<int>(frequency)));
     result.metadata.set(technical_metadata::kLookbackWindowKey, json_helper::toJsonValue(common.lookbackWindow));
     result.metadata.set(technical_metadata::kLaggedEnabledKey, json_helper::toJsonValue(common.lagEnabled));
@@ -228,19 +228,14 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
             technicalContext,
             common,
             [this, &technicalContext, &common, &requestedFields]() {
-                QStringList dateResolutionFields;
-                dateResolutionFields.reserve(static_cast<int>(requestedFields.size()));
-                for (const std::string& fieldName : requestedFields) {
-                    dateResolutionFields.append(QString::fromStdString(fieldName));
-                }
                 return resolveCommonEffectiveDateForFields(
                     technicalContext,
                     common,
-                    dateResolutionFields,
+                    requestedFields,
                     CommonFieldRequirementMode::AnyField);
             },
             [&, runtimeSymbols](const CommonRuntimeState& runtime, CalculationResult& result) {
-                technicalContext.date = runtime.effectiveDate.toStdString();
+                technicalContext.date = runtime.effectiveDate;
 
                 const auto batchData = technicalContext.historicalView->getBatchTimeSeries(
                     runtimeSymbols,

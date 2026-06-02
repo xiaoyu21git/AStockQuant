@@ -5,7 +5,6 @@
 #include <vector>
 #include <unordered_map>
 #include <mutex>
-#include <QString>
 #include "FactorConfigAccess.h"
 #include "factor_enums.h"
 #include "foundation/json/json_facade.h"
@@ -103,7 +102,7 @@ public:
             
             auto typeJson = foundation::json::JsonFacade::createObject();
             for (const auto& [type, count] : instancesByType) {
-                typeJson.set(QString::number(type).toStdString(), json_helper::toJsonValue(count));
+                typeJson.set(std::to_string(type), json_helper::toJsonValue(count));
             }
             json.set("instances_by_type", typeJson);
             

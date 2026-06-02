@@ -4,8 +4,6 @@
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
-#include <QString>
-
 #include <unordered_set>
 
 namespace factor {
@@ -47,14 +45,14 @@ constexpr QualityMetricDescriptor kQualityMetricDescriptors[] = {
     {QualityMetric::EARNINGS_QUALITY, "earnings_quality"}
 };
 
-QString qualityMetricToJsonString(QualityMetric metric)
+std::string qualityMetricToJsonString(QualityMetric metric)
 {
     for (const auto& descriptor : kQualityMetricDescriptors) {
         if (descriptor.metric == metric) {
-            return QLatin1String(descriptor.jsonName);
+            return descriptor.jsonName;
         }
     }
-    return {};
+    return "";
 }
 
 QualityFactor::Params qualityParamsFromJson(const foundation::json::JsonFacade& json)
@@ -69,21 +67,21 @@ QualityFactor::Params qualityParamsFromJson(const foundation::json::JsonFacade& 
     return params;
 }
 
-QString resolveMetricColumn(QualityMetric metric)
+std::string resolveMetricColumn(QualityMetric metric)
 {
     if (metric == QualityMetric::ROE) {
-        return QString(factor::bridge::FinancialFieldKeys::ROE);
+        return std::string(factor::bridge::FinancialFieldKeys::ROE.c_str());
     }
     if (metric == QualityMetric::ROA) {
-        return QString(factor::bridge::FinancialFieldKeys::ROA);
+        return std::string(factor::bridge::FinancialFieldKeys::ROA.c_str());
     }
     if (metric == QualityMetric::GROSS_MARGIN) {
-        return QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
+        return std::string(factor::bridge::FinancialFieldKeys::GROSS_MARGIN.c_str());
     }
     if (metric == QualityMetric::OPERATING_MARGIN) {
-        return QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN);
+        return std::string(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN.c_str());
     }
-    return QString();
+    return "";
 }
 
 double normalizeThreshold(double threshold)
@@ -100,17 +98,17 @@ QualityFactor::QualityFactor() {
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     const QualityMetric metric = params_.metric;
     const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
-    const QString netProfitField = QString(factor::bridge::FinancialFieldKeys::NET_PROFIT);
-    const QString operatingCashFlowField = QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW);
+    const std::string netProfitField = std::string(factor::bridge::FinancialFieldKeys::NET_PROFIT.c_str());
+    const std::string operatingCashFlowField = std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str());
 
-    QStringList requiredFields;
+    std::vector<std::string> requiredFields;
     if (metric == QualityMetric::EARNINGS_QUALITY) {
         requiredFields = {netProfitField, operatingCashFlowField};
     } else {
-        const QString fieldName = resolveMetricColumn(metric);
-        if (fieldName.isEmpty()) {
+        const std::string fieldName = resolveMetricColumn(metric);
+        if (fieldName.empty()) {
             auto result = CalculationResult::createError(
-                QStringLiteral("质量因子 HistoricalView 回测不支持指标 %1").arg(qualityMetricToJsonString(metric)).toStdString());
+                std::string("质量因子 HistoricalView 回测不支持指标 ") + qualityMetricToJsonString(metric));
             result.date = context.date;
             result.calculationId = foundation::utils::Uuid::generate_v4();
             result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
@@ -144,11 +142,9 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
          netProfitField,
          operatingCashFlowField](const CommonRuntimeState& runtime,
                      CalculationResult& result) {
-            auto requireField = [&](const char* fieldName) {
+            auto requireField = [&](const std::string& fieldName) {
                 if (!context.historicalView->hasField(fieldName)) {
-                    const std::string error = QStringLiteral("质量因子 HistoricalView 回测缺少字段 %1")
-                        .arg(QString::fromUtf8(fieldName))
-                        .toStdString();
+                    const std::string error = std::string("质量因子 HistoricalView 回测缺少字段 ") + fieldName;
                     result.dataStatus = CalculationResult::createError(error).dataStatus;
                     result.metadata.set("error", json_helper::toJsonValue(error));
                     return false;
@@ -156,20 +152,20 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 return true;
             };
 
-            for (const QString& fieldName : requiredFields) {
-                if (!requireField(fieldName.toUtf8().constData())) {
+            for (const std::string& fieldName : requiredFields) {
+                if (!requireField(fieldName)) {
                     return;
                 }
             }
 
             if (metric == QualityMetric::EARNINGS_QUALITY) {
                 const auto netProfitMap = context.historicalView->getCrossSection(
-                    runtime.effectiveDate.toStdString(),
-                    netProfitField.toStdString(),
+                    runtime.effectiveDate,
+                    netProfitField,
                     context.symbols);
                 const auto operatingCashFlowMap = context.historicalView->getCrossSection(
-                    runtime.effectiveDate.toStdString(),
-                    operatingCashFlowField.toStdString(),
+                    runtime.effectiveDate,
+                    operatingCashFlowField,
                     context.symbols);
                 for (const auto& [symbol, netProfit] : netProfitMap) {
                     const auto operatingCashFlowIt = operatingCashFlowMap.find(symbol);
@@ -185,8 +181,8 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                     }
                 }
             } else {
-                const QString fieldName = requiredFields.front();
-                const auto crossSection = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), fieldName.toStdString(), context.symbols);
+                const std::string& fieldName = requiredFields.front();
+                const auto crossSection = context.historicalView->getCrossSection(runtime.effectiveDate, fieldName, context.symbols);
                 for (const auto& [symbol, factorValue] : crossSection) {
                     if (factorValue > 0.0 && factorValue >= qualityThreshold) {
                         result.values[symbol] = factorValue;
@@ -202,7 +198,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
             std::vector<double> finiteValues;
             finiteValues.reserve(result.values.size());
             for (const auto& [symbol, value] : result.values) {
-                Q_UNUSED(symbol);
+                (void)symbol;
                 if (std::isfinite(value)) {
                     finiteValues.push_back(value);
                 }
@@ -213,7 +209,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 const double upper = BaseFactor::calculatePercentileValue(finiteValues, 0.95);
                 if (upper > lower) {
                     for (auto& [symbol, value] : result.values) {
-                        Q_UNUSED(symbol);
+                        (void)symbol;
                         value = (std::max)(lower, (std::min)(upper, value));
                     }
                 }

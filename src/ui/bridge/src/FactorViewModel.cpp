@@ -3,22 +3,31 @@
 // 设计模式：像PreviewDataModel一样，通过Q_INVOKABLE方法更新数据
 
 #include "../../ui/bridge/include/FactorViewModel.h"
-#include "../../ui/bridge/include/FactorService.h"
-#include <QDebug>
+#include "foundation.h"
 #include <QDateTime>
 #include <QRegularExpression>
 #include <QMetaObject>
 #include <QMetaMethod>
+#include <QSet>
+
+namespace {
+
+std::string toStdString(const QString& value)
+{
+    return value.toStdString();
+}
+
+} // namespace
 
 FactorViewModel::FactorViewModel(QObject* parent)
     : QAbstractListModel(parent)
 {
-    qDebug() << "FactorViewModel constructor";
+    LOG_DEBUG("FactorViewModel constructor");
 }
 
 FactorViewModel::~FactorViewModel()
 {
-    qDebug() << "FactorViewModel destructor";
+    LOG_DEBUG("FactorViewModel destructor");
 }
 
 int FactorViewModel::rowCount(const QModelIndex& parent) const
@@ -108,8 +117,6 @@ QHash<int, QByteArray> FactorViewModel::roleNames() const
 
 void FactorViewModel::updateData(const QVariantList& factors)
 {
-   // qDebug() << "FactorViewModel::updateData: 更新数据，条数:" << factors.size();
-
     if (hasSameData(factors)) {
         return;
     }
@@ -126,15 +133,12 @@ void FactorViewModel::updateData(const QVariantList& factors)
     
     endResetModel();
     
-    //qDebug() << "FactorViewModel::updateData: 更新完成，当前条数:" << m_factors.size();
     emit countChanged();
     emit dataUpdated();
 }
 
 void FactorViewModel::clearData()
 {
-    //qDebug() << "FactorViewModel::clearData: 清空所有数据";
-    
     beginResetModel();
     m_factors.clear();
     endResetModel();
@@ -145,14 +149,14 @@ void FactorViewModel::clearData()
 
 void FactorViewModel::appendData(const QVariantMap& factorData)
 {
-    qDebug() << "FactorViewModel::appendData: 添加数据项";
+    LOG_DEBUG("FactorViewModel::appendData: 添加数据项");
     
     FactorViewData factor = FactorViewData::fromVariantMap(factorData);
     
     // 检查是否已存在相同ID的因子
     for (int i = 0; i < m_factors.size(); ++i) {
         if (m_factors.at(i).factorId == factor.factorId) {
-            qWarning() << "因子ID已存在:" << factor.factorId;
+            LOG_WARN(std::string("因子ID已存在: ") + toStdString(factor.factorId));
             return;
         }
     }
@@ -172,7 +176,7 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
         return;
     }
     
-    qDebug() << "FactorViewModel::addDataBatch: 批量添加" << factors.size() << "条数据";
+    LOG_DEBUG("FactorViewModel::addDataBatch: 批量添加 " + std::to_string(factors.size()) + " 条数据");
     
     int startRow = m_factors.size();
     int endRow = startRow + factors.size() - 1;
@@ -187,7 +191,7 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
     
     endInsertRows();
     
-    qDebug() << "FactorViewModel::addDataBatch: 成功添加" << factors.size() << "条数据";
+    LOG_DEBUG("FactorViewModel::addDataBatch: 成功添加 " + std::to_string(factors.size()) + " 条数据");
     emit countChanged();
     emit dataUpdated();
 }
@@ -195,7 +199,8 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
 QVariantMap FactorViewModel::getRow(int index) const
 {
     if (index < 0 || index >= m_factors.size()) {
-        qWarning() << "FactorViewModel::getRow: 索引越界:" << index << "数据大小:" << m_factors.size();
+        LOG_WARN("FactorViewModel::getRow: 索引越界 index=" + std::to_string(index)
+                 + " size=" + std::to_string(m_factors.size()));
         return QVariantMap();
     }
     
@@ -204,20 +209,15 @@ QVariantMap FactorViewModel::getRow(int index) const
 
 QVariantMap FactorViewModel::getFactorById(const QString& factorId) const
 {
-    if (FactorService* service = FactorService::instance()) {
-        return service->getFactorById(factorId);
+    const int index = findIndexById(factorId);
+    if (index >= 0) {
+        return m_factors.at(index).toVariantMap();
     }
     return {};
 }
 
 QVariantList FactorViewModel::getAllFactors() const
 {
-    if (m_factors.isEmpty()) {
-        if (FactorService* service = FactorService::instance()) {
-            return service->getAllFactors();
-        }
-    }
-
     QVariantList factors;
     factors.reserve(m_factors.size());
     for (const FactorViewData& factor : m_factors) {
@@ -228,33 +228,83 @@ QVariantList FactorViewModel::getAllFactors() const
 
 QVariantList FactorViewModel::searchFactors(const QString& keyword) const
 {
-    if (FactorService* service = FactorService::instance()) {
-        return service->searchFactors(keyword);
+    const QString normalizedKeyword = keyword.trimmed().toLower();
+    QVariantList result;
+    for (const FactorViewData& factor : m_factors) {
+        if (normalizedKeyword.isEmpty()) {
+            result.append(factor.toVariantMap());
+            continue;
+        }
+
+        const auto containsKeyword = [&normalizedKeyword](const QString& value) {
+            return value.trimmed().toLower().contains(normalizedKeyword);
+        };
+
+        bool matched = containsKeyword(factor.factorId)
+            || containsKeyword(factor.factorName)
+            || containsKeyword(factor.displayName)
+            || containsKeyword(factor.description)
+            || containsKeyword(factor.majorCategory)
+            || containsKeyword(factor.subCategory);
+        if (!matched) {
+            for (const QString& tag : factor.tags) {
+                if (containsKeyword(tag)) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+
+        if (matched) {
+            result.append(factor.toVariantMap());
+        }
     }
-    return {};
+    return result;
 }
 
 QVariantList FactorViewModel::filterFactorsByCategory(const QString& category) const
 {
-    if (FactorService* service = FactorService::instance()) {
-        return service->filterFactorsByCategory(category);
+    const QString normalizedCategory = category.trimmed();
+    QVariantList result;
+    for (const FactorViewData& factor : m_factors) {
+        if (normalizedCategory.isEmpty()
+            || factor.majorCategory.trimmed() == normalizedCategory
+            || factor.subCategory.trimmed() == normalizedCategory) {
+            result.append(factor.toVariantMap());
+        }
     }
-    return {};
+    return result;
 }
 
 QVariantList FactorViewModel::filterFactorsByTags(const QStringList& tags) const
 {
-    if (FactorService* service = FactorService::instance()) {
-        return service->filterFactorsByTags(tags);
+    if (tags.isEmpty()) {
+        return getAllFactors();
     }
-    return {};
+
+    const QSet<QString> requestedTags = QSet<QString>(tags.cbegin(), tags.cend());
+    QVariantList result;
+    for (const FactorViewData& factor : m_factors) {
+        bool matched = false;
+        for (const QString& tag : factor.tags) {
+            if (requestedTags.contains(tag)) {
+                matched = true;
+                break;
+            }
+        }
+        if (matched) {
+            result.append(factor.toVariantMap());
+        }
+    }
+
+    return result;
 }
 
 void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& factorData)
 {
     int index = findIndexById(factorId);
     if (index == -1) {
-        qWarning() << "未找到因子:" << factorId;
+        LOG_WARN(std::string("未找到因子: ") + toStdString(factorId));
         return;
     }
     
@@ -268,14 +318,13 @@ void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& f
     
     emit dataUpdated();
     
-    //qDebug() << "FactorViewModel::updateFactor 完成，更新因子:" << factorId;
 }
 
 void FactorViewModel::removeFactor(const QString& factorId)
 {
     int index = findIndexById(factorId);
     if (index == -1) {
-        qWarning() << "未找到因子:" << factorId;
+        LOG_WARN(std::string("未找到因子: ") + toStdString(factorId));
         return;
     }
     
@@ -287,7 +336,7 @@ void FactorViewModel::removeFactor(const QString& factorId)
     emit countChanged();
     emit dataUpdated();
     
-    qDebug() << "FactorViewModel::removeFactor 完成，删除因子:" << factorId;
+    LOG_DEBUG(std::string("FactorViewModel::removeFactor 完成，删除因子: ") + toStdString(factorId));
 }
 
 int FactorViewModel::findIndexById(const QString& factorId) const

@@ -2,56 +2,137 @@
 #include "domain/factor/include/CustomExpressionUtils.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <ctime>
+#include <unordered_set>
 
 namespace factor {
 
 using namespace configurable_factor_detail;
 
+namespace {
+
+constexpr int kMonthsPerYear = 12;
+constexpr int kFridayIndex = 5;
+constexpr int kIsoWeekLength = 7;
+
+std::string trimAsciiWhitespace(std::string text)
+{
+    const auto isSpace = [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    };
+    const auto begin = std::find_if_not(text.begin(), text.end(), isSpace);
+    const auto end = std::find_if_not(text.rbegin(), text.rend(), isSpace).base();
+    if (begin >= end) {
+        return "";
+    }
+    return std::string(begin, end);
+}
+
+std::string toLowerAscii(std::string text)
+{
+    std::transform(text.begin(), text.end(), text.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return text;
+}
+
+bool parseIsoDate(const std::string& text, std::tm& out)
+{
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+        return false;
+    }
+
+    try {
+        const int year = std::stoi(text.substr(0, 4));
+        const int month = std::stoi(text.substr(5, 2));
+        const int day = std::stoi(text.substr(8, 2));
+        if (month < 1 || month > kMonthsPerYear || day < 1 || day > 31) {
+            return false;
+        }
+
+        std::tm candidate = {};
+        candidate.tm_year = year - 1900;
+        candidate.tm_mon = month - 1;
+        candidate.tm_mday = day;
+        candidate.tm_isdst = -1;
+        if (std::mktime(&candidate) == -1) {
+            return false;
+        }
+        out = candidate;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::string formatIsoDate(const std::tm& value)
+{
+    char buffer[11] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &value);
+    return std::string(buffer);
+}
+
+std::tm addDays(const std::tm& base, int dayOffset)
+{
+    std::tm shifted = base;
+    shifted.tm_mday += dayOffset;
+    shifted.tm_isdst = -1;
+    std::mktime(&shifted);
+    return shifted;
+}
+
+int isoDayOfWeek(const std::tm& value)
+{
+    const int wday = value.tm_wday;
+    return ((wday + 6) % kIsoWeekLength) + 1;
+}
+
+} // namespace
+
 std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomExpression(
     const CalculationContext& context,
-    const QString& expression,
+    const std::string& expression,
     const std::vector<std::string>& symbols,
-    QString* errorMessage) const
+    std::string* errorMessage) const
 {
     std::unordered_map<std::string, double> results;
-    const QString resolvedExpression = expression.trimmed();
-    if (resolvedExpression.isEmpty()) {
+    const std::string resolvedExpression = trimAsciiWhitespace(expression);
+    if (resolvedExpression.empty()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("自定义因子必须显式提供 expression");
+            *errorMessage = "自定义因子必须显式提供 expression";
         }
         return results;
     }
-    QString parseError;
-    const QStringList rpn = factor::custom_expression::toRpn(resolvedExpression.toLower(), &parseError);
-    if (rpn.isEmpty()) {
+    std::string parseError;
+    const std::vector<std::string> rpn = factor::custom_expression::toRpn(toLowerAscii(resolvedExpression), &parseError);
+    if (rpn.empty()) {
         if (errorMessage) {
             *errorMessage = parseError;
         }
         return results;
     }
 
-    const QStringList variables = factor::custom_expression::extractVariables(resolvedExpression.toLower());
-    std::unordered_map<std::string, QString> sourceFieldByVariable;
+    const std::vector<std::string> variables = factor::custom_expression::extractVariables(toLowerAscii(resolvedExpression));
+    std::unordered_map<std::string, std::string> sourceFieldByVariable;
     std::vector<std::string> batchFields;
     std::unordered_set<std::string> seenBatchFields;
-    for (const QString& variable : variables) {
+    for (const std::string& variable : variables) {
         const auto* binding = findCustomVariableBinding(variable);
-        QString sourceField = variable;
+        std::string sourceField = variable;
         if (binding) {
-            sourceField = QString::fromStdString(binding->field).trimmed();
-            if (sourceField.isEmpty()) {
-                if (errorMessage && errorMessage->isEmpty()) {
-                    *errorMessage = QStringLiteral("自定义表达式变量 %1 缺少 sourceField 配置").arg(variable);
+            sourceField = trimAsciiWhitespace(binding->field);
+            if (sourceField.empty()) {
+                if (errorMessage && errorMessage->empty()) {
+                    *errorMessage = "自定义表达式变量 " + variable + " 缺少 sourceField 配置";
                 }
                 return results;
             }
         }
-        const std::string variableKey = variable.toStdString();
-        sourceFieldByVariable[variableKey] = sourceField;
-        const std::string fieldKey = sourceField.toStdString();
-        if (!fieldKey.empty() && seenBatchFields.insert(fieldKey).second) {
-            batchFields.push_back(fieldKey);
+        sourceFieldByVariable[variable] = sourceField;
+        if (!sourceField.empty() && seenBatchFields.insert(sourceField).second) {
+            batchFields.push_back(sourceField);
         }
     }
 
@@ -59,9 +140,8 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
     if (context.historicalView && !batchFields.empty()) {
         for (const auto& fieldName : batchFields) {
             if (!context.historicalView->hasField(fieldName)) {
-                if (errorMessage && errorMessage->isEmpty()) {
-                    *errorMessage = QStringLiteral("自定义表达式缺少可用字段 %1")
-                        .arg(QString::fromStdString(fieldName));
+                if (errorMessage && errorMessage->empty()) {
+                    *errorMessage = "自定义表达式缺少可用字段 " + fieldName;
                 }
                 return results;
             }
@@ -70,7 +150,7 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
         if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             for (const auto& [fieldName, symbolValues] : batchCrossSections) {
                 std::string batchKey;
-                buildBatchCrossSectionKey(batchKey, context.date, QString::fromStdString(fieldName));
+                buildBatchCrossSectionKey(batchKey, context.date, fieldName);
                 activeBatchComputationCache->crossSectionsByKey[batchKey] = symbolValues;
             }
         }
@@ -79,20 +159,17 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
     for (const auto& symbol : symbols) {
         std::unordered_map<std::string, double> variableMap;
         bool missingVariable = false;
-        for (const QString& variable : variables) {
-            const auto* binding = findCustomVariableBinding(variable);
-            const std::string variableKey = variable.toStdString();
-            const auto sourceFieldIt = sourceFieldByVariable.find(variableKey);
+        for (const std::string& variable : variables) {
+            const auto sourceFieldIt = sourceFieldByVariable.find(variable);
             if (sourceFieldIt == sourceFieldByVariable.end()) {
-                Q_UNUSED(binding);
-                if (errorMessage && errorMessage->isEmpty()) {
-                    *errorMessage = QStringLiteral("自定义表达式变量 %1 缺少字段映射").arg(variable);
+                if (errorMessage && errorMessage->empty()) {
+                    *errorMessage = "自定义表达式变量 " + variable + " 缺少字段映射";
                 }
                 missingVariable = true;
                 break;
             }
 
-            const auto fieldIt = batchCrossSections.find(sourceFieldIt->second.toStdString());
+            const auto fieldIt = batchCrossSections.find(sourceFieldIt->second);
             if (fieldIt == batchCrossSections.end()) {
                 missingVariable = true;
                 break;
@@ -102,13 +179,13 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
                 missingVariable = true;
                 break;
             }
-            variableMap[variableKey] = valueIt->second;
+            variableMap[variable] = valueIt->second;
         }
         if (missingVariable) {
             continue;
         }
 
-        QString evalError;
+        std::string evalError;
         const auto evaluated = factor::custom_expression::evaluateRpn(rpn, variableMap, &evalError);
         if (!evaluated.has_value() || !std::isfinite(*evaluated)) {
             continue;
@@ -133,31 +210,37 @@ CalculationResult ConfigurableFactorBase::calculateCustom(const CalculationConte
             context,
             common,
             [&]() {
-                QString effectiveDate = QString::fromStdString(context.date);
-                QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
-                if (anchorDate.isValid()) {
+                std::string effectiveDate = context.date;
+                std::tm anchorDate = {};
+                const bool anchorDateValid = parseIsoDate(effectiveDate, anchorDate);
+                if (anchorDateValid) {
                     if (common.frequency == DataFrequency::Weekly) {
-                        const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-                        anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+                        const int dayOfWeek = isoDayOfWeek(anchorDate);
+                        const int shiftToPreviousFriday = dayOfWeek >= kFridayIndex ? dayOfWeek - kFridayIndex : dayOfWeek + 2;
+                        anchorDate = addDays(anchorDate, -shiftToPreviousFriday);
                     } else if (common.frequency == DataFrequency::Monthly) {
-                        anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+                        std::tm monthStart = anchorDate;
+                        monthStart.tm_mday = 1;
+                        monthStart.tm_isdst = -1;
+                        std::mktime(&monthStart);
+                        anchorDate = addDays(monthStart, -1);
                     }
-                    effectiveDate = anchorDate.toString(Qt::ISODate);
+                    effectiveDate = formatIsoDate(anchorDate);
                 }
 
                 const int maxOffset = (std::max)(0, static_cast<int>(common.lookbackWindow));
                 const int startOffset = common.lagEnabled ? (std::max)(1, static_cast<int>(common.lagPeriods)) : 0;
                 for (int offset = startOffset; offset <= maxOffset; ++offset) {
-                    const QString candidate = anchorDate.isValid()
-                        ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                    const std::string candidate = anchorDateValid
+                        ? formatIsoDate(addDays(anchorDate, -offset))
                         : effectiveDate;
                     CalculationContext candidateContext = context;
-                    candidateContext.date = candidate.toStdString();
+                    candidateContext.date = candidate;
                     candidateContext.symbols = symbols;
-                    QString candidateError;
+                    std::string candidateError;
                     const auto candidateValues = evaluateCustomExpression(
                         candidateContext,
-                        QString::fromStdString(custom.expression),
+                        custom.expression,
                         symbols,
                         &candidateError);
                     if (!candidateValues.empty()) {
@@ -169,19 +252,19 @@ CalculationResult ConfigurableFactorBase::calculateCustom(const CalculationConte
             },
             [this, &context, &custom, &symbols](const CommonRuntimeState& runtime, CalculationResult& result) {
                 CalculationContext effectiveContext = context;
-                effectiveContext.date = runtime.effectiveDate.toStdString();
+                effectiveContext.date = runtime.effectiveDate;
                 effectiveContext.symbols = symbols;
 
-                QString errorMessage;
+                std::string errorMessage;
                 result.values = evaluateCustomExpression(
                     effectiveContext,
-                    QString::fromStdString(custom.expression),
+                    custom.expression,
                     symbols,
                     &errorMessage);
 
-                if (!errorMessage.isEmpty()) {
-                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                if (!errorMessage.empty()) {
+                    result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                     return;
                 }
 
@@ -200,7 +283,7 @@ CalculationResult ConfigurableFactorBase::calculateCustom(const CalculationConte
                 result.metadata.set("customExpressionMode", json_helper::toJsonValue(static_cast<int>(customResolvedExpressionMode)));
                 result.metadata.set("variableCount", json_helper::toJsonValue(static_cast<int>(custom.variables.size())));
             },
-            QStringLiteral("使用自定义表达式"));
+            "使用自定义表达式");
     };
 
     if (useLocalBatchCache) {

@@ -3,15 +3,74 @@
 #include <ta_libc.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <ctime>
+#include <iomanip>
 #include <limits>
 #include <mutex>
+#include <sstream>
 
 namespace factor {
 
 using namespace configurable_factor_detail;
 
 namespace {
+
+constexpr int kMonthsPerYear = 12;
+constexpr int kFridayIndex = 5;
+constexpr int kIsoWeekLength = 7;
+
+bool parseIsoDate(const std::string& text, std::tm& out)
+{
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+        return false;
+    }
+
+    try {
+        const int year = std::stoi(text.substr(0, 4));
+        const int month = std::stoi(text.substr(5, 2));
+        const int day = std::stoi(text.substr(8, 2));
+        if (month < 1 || month > kMonthsPerYear || day < 1 || day > 31) {
+            return false;
+        }
+
+        std::tm candidate = {};
+        candidate.tm_year = year - 1900;
+        candidate.tm_mon = month - 1;
+        candidate.tm_mday = day;
+        candidate.tm_isdst = -1;
+        if (std::mktime(&candidate) == -1) {
+            return false;
+        }
+        out = candidate;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::string formatIsoDate(const std::tm& value)
+{
+    char buffer[11] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &value);
+    return std::string(buffer);
+}
+
+std::tm addDays(const std::tm& base, int dayOffset)
+{
+    std::tm shifted = base;
+    shifted.tm_mday += dayOffset;
+    shifted.tm_isdst = -1;
+    std::mktime(&shifted);
+    return shifted;
+}
+
+int isoDayOfWeek(const std::tm& value)
+{
+    const int wday = value.tm_wday;
+    return ((wday + 6) % kIsoWeekLength) + 1;
+}
 
 LaggedDateMode resolvedLaggedDateMode(bool lagEnabled, bool laggedDateResolvedByProvider)
 {
@@ -49,24 +108,28 @@ double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBE
 }
 CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationContext& context) const
 {
-    QElapsedTimer elapsedTimer;
-    elapsedTimer.start();
+    const auto startTime = std::chrono::steady_clock::now();
 
     const CommonParams& common = commonParams_;
     const LiquidityParams& liquidity = liquidityParams();
     const LiquidityMetric metricKind = liquidity.liquidityMetric;
     const LiquidityIndicatorSpec metricSpec = liquidityIndicatorSpec(metricKind);
     const factor::bridge::FieldKey* metricKey = metricSpec.common.fieldKey;
-    const QString metric = metricKey ? metricKey->toQString() : QString();
-    if (metric.isEmpty()) {
+    const std::string metric = metricKey ? std::string(metricKey->c_str()) : std::string();
+    if (metric.empty()) {
         return createHistoricalViewRuntimeError(context, "流动性因子缺少有效 metric 枚举");
     }
     const DataFrequency frequency = common.frequency;
     const int window = (std::max)(1, static_cast<int>(common.window));
     bool laggedDateResolvedByProvider = false;
-    auto resolvePreviousAvailableDate = [&](const QString& anchorDate, const QString& requiredField) {
-        if (anchorDate.isEmpty()) {
-            return QString::fromStdString(context.date);
+    auto resolvePreviousAvailableDate = [&](const std::string& anchorDate, const std::string& requiredField) {
+        if (anchorDate.empty()) {
+            return context.date;
+        }
+
+        std::tm parsedAnchor = {};
+        if (!parseIsoDate(anchorDate, parsedAnchor)) {
+            return anchorDate;
         }
 
         const int maxOffset = (std::max)(45, static_cast<int>(common.lookbackWindow));
@@ -74,9 +137,9 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
             ? context.historicalView->getAvailableSymbols(context.date)
             : context.symbols;
         for (int offset = 1; offset <= maxOffset; ++offset) {
-            const QString candidate = QDate::fromString(anchorDate, Qt::ISODate).addDays(-offset).toString(Qt::ISODate);
+            const std::string candidate = formatIsoDate(addDays(parsedAnchor, -offset));
             CalculationContext candidateContext = context;
-            candidateContext.date = candidate.toStdString();
+            candidateContext.date = candidate;
             candidateContext.symbols = symbols;
             if (currentFieldCrossSection(candidateContext, requiredField).empty()) {
                 continue;
@@ -88,16 +151,21 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
         return anchorDate;
     };
 
-    QString effectiveDate = QString::fromStdString(context.date);
-    QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
-    if (anchorDate.isValid()) {
-            if (frequency == DataFrequency::Weekly) {
-            const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-            anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
-            } else if (frequency == DataFrequency::Monthly) {
-            anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+    std::string effectiveDate = context.date;
+    std::tm anchorDate = {};
+    if (parseIsoDate(effectiveDate, anchorDate)) {
+        if (frequency == DataFrequency::Weekly) {
+            const int dayOfWeek = isoDayOfWeek(anchorDate);
+            const int shiftToPreviousFriday = dayOfWeek >= kFridayIndex ? dayOfWeek - kFridayIndex : dayOfWeek + 2;
+            anchorDate = addDays(anchorDate, -shiftToPreviousFriday);
+        } else if (frequency == DataFrequency::Monthly) {
+            std::tm monthStart = anchorDate;
+            monthStart.tm_mday = 1;
+            monthStart.tm_isdst = -1;
+            std::mktime(&monthStart);
+            anchorDate = addDays(monthStart, -1);
         }
-        effectiveDate = anchorDate.toString(Qt::ISODate);
+        effectiveDate = formatIsoDate(anchorDate);
     }
 
     const auto symbols = effectiveSymbols(context);
@@ -109,18 +177,18 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
             context,
             common,
             [&]() {
-                QString resolvedDate = effectiveDate;
+                std::string resolvedDate = effectiveDate;
                 if (common.lagEnabled) {
-                    QString requiredField = QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE);
+                    std::string requiredField = std::string(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE.c_str());
                     switch (metricKind) {
                     case LiquidityMetric::VOLUME:
-                        requiredField = QString(factor::bridge::MarketBarFieldKeys::VOLUME);
+                        requiredField = std::string(factor::bridge::MarketBarFieldKeys::VOLUME.c_str());
                         break;
                     case LiquidityMetric::AMPLITUDE:
-                        requiredField = QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE);
+                        requiredField = std::string(factor::bridge::MarketBarFieldKeys::AMPLITUDE.c_str());
                         break;
                     case LiquidityMetric::AMIHUD_ILLIQUIDITY:
-                        requiredField = QString(factor::bridge::MarketBarFieldKeys::CLOSE);
+                        requiredField = std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str());
                         break;
                     case LiquidityMetric::TURNOVER_RATE:
                     case LiquidityMetric::UNKNOWN:
@@ -132,11 +200,11 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
             },
             [this, &context, &metric, metricKind, window, &symbols](const CommonRuntimeState& runtime, CalculationResult& result) {
                 CalculationContext effectiveContext = context;
-                effectiveContext.date = runtime.effectiveDate.toStdString();
+                effectiveContext.date = runtime.effectiveDate;
                 effectiveContext.symbols = symbols;
 
-                const auto closesBySymbol = fetchBatchSeriesMap(effectiveContext, QString(factor::bridge::MarketBarFieldKeys::CLOSE), window + 1);
-                const auto volumesBySymbol = fetchBatchSeriesMap(effectiveContext, QString(factor::bridge::MarketBarFieldKeys::VOLUME), window + 1);
+                const auto closesBySymbol = fetchBatchSeriesMap(effectiveContext, std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str()), window + 1);
+                const auto volumesBySymbol = fetchBatchSeriesMap(effectiveContext, std::string(factor::bridge::MarketBarFieldKeys::VOLUME.c_str()), window + 1);
                 const auto metricBySymbol = fetchBatchSeriesMap(effectiveContext, metric, window);
 
                 const std::vector<std::string> activeSymbols = [&]() {
@@ -202,7 +270,7 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
                     commonLength = findCommonLength(metricBySymbol);
                 }
 
-                if (commonLength == 0 || (metric == QStringLiteral("amihud_illiquidity") && commonLength < 2)) {
+                if (commonLength == 0 || (metric == "amihud_illiquidity" && commonLength < 2)) {
                     result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
                     return;
                 }
@@ -306,17 +374,10 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
     };
 
     auto finalizeLiquidityResult = [&](CalculationResult result) {
-        const qint64 elapsedMs = elapsedTimer.elapsed();
-        if (elapsedMs >= 300) {
-            qDebug() << "ConfigurableFactorBase(liquidity): 计算耗时较长"
-                     << "date=" << QString::fromStdString(context.date)
-                     << "metric=" << metric
-                     << "window=" << window
-                     << "symbolCount=" << static_cast<int>(symbols.size())
-                     << "resultCount=" << static_cast<int>(result.values.size())
-                     << "usingHistoricalView=" << static_cast<bool>(context.historicalView)
-                     << "elapsedMs=" << elapsedMs;
-        }
+        const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - startTime)
+                                   .count();
+        (void)elapsedMs;
         return result;
     };
 

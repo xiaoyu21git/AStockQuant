@@ -7,13 +7,15 @@
 
 #include <ta_libc.h>
 
-#include <QDate>
-#include <QDebug>
-
 #include <algorithm>
 #include <cmath>
+#include <ctime>
+#include <iomanip>
+#include <limits>
 #include <mutex>
 #include <numeric>
+#include <sstream>
+#include <stdexcept>
 
 namespace factor {
 
@@ -100,24 +102,61 @@ double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBE
     return output[lastIndex];
 }
 
+bool parseDateYyyyMmDd(const std::string& dateText, std::tm& dateValue)
+{
+    std::istringstream input(dateText);
+    input >> std::get_time(&dateValue, "%Y-%m-%d");
+    return !input.fail();
 }
 
-QString MomentumFactor::earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent)
+std::string formatDateYyyyMmDd(const std::tm& dateValue)
+{
+    std::ostringstream output;
+    output << std::put_time(&dateValue, "%Y-%m-%d");
+    return output.str();
+}
+
+std::string shiftDateByDays(const std::string& anchorDate, int dayOffset)
+{
+    std::tm parsedDate{};
+    if (!parseDateYyyyMmDd(anchorDate, parsedDate)) {
+        throw std::runtime_error("非法计算日期");
+    }
+
+    parsedDate.tm_isdst = -1;
+    std::time_t timeValue = std::mktime(&parsedDate);
+    if (timeValue == static_cast<std::time_t>(-1)) {
+        throw std::runtime_error("非法计算日期");
+    }
+
+    constexpr std::time_t kSecondsPerDay = 24 * 60 * 60;
+    timeValue += static_cast<std::time_t>(dayOffset) * kSecondsPerDay;
+
+    const std::tm* shiftedDate = std::localtime(&timeValue);
+    if (shiftedDate == nullptr) {
+        throw std::runtime_error("非法计算日期");
+    }
+    return formatDateYyyyMmDd(*shiftedDate);
+}
+
+}
+
+std::string MomentumFactor::earliestMomentumSeriesDate(const std::string& anchorDate, int window, int skipRecent)
 {
     const int lookbackDays = std::max(365, (window + skipRecent + 10) * 2);
-    return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
+    return shiftDateByDays(anchorDate, -lookbackDays);
 }
 
 /// 将回测配置中的 adjustPriceType 解析为实际使用的复权因子字段名
-QString MomentumFactor::resolveAdjustFieldName(factor::AdjustPriceType priceType)
+std::string MomentumFactor::resolveAdjustFieldName(factor::AdjustPriceType priceType)
 {
     switch (priceType) {
     case factor::AdjustPriceType::PRE_ADJUST_FACTOR:
-        return QStringLiteral("pre_adjust_factor");
+        return "pre_adjust_factor";
     case factor::AdjustPriceType::POST_ADJUST_FACTOR:
-        return QStringLiteral("post_adjust_factor");
+        return "post_adjust_factor";
     default:
-        return {};
+        return "";
     }
 }
 
@@ -166,14 +205,14 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
     if (!context.historicalView) {
         return createHistoricalViewRuntimeError(
             context,
-            QStringLiteral("已移除动量因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
+            "已移除动量因子运行期数据库取数路径，请由引擎提供 HistoricalView");
     }
 
-    const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
-    if (adjustField.isEmpty()) {
+    const std::string adjustField = resolveAdjustFieldName(params_.adjustPriceType);
+    if (adjustField.empty()) {
         return createHistoricalViewRuntimeError(
             context,
-            QStringLiteral("动量因子 adjustPriceType 配置为空，无法确定复权因子字段").toStdString());
+            "动量因子 adjustPriceType 配置为空，无法确定复权因子字段");
     }
 
     const CommonMetricParams commonParams = buildCommonMetricParams(
@@ -184,8 +223,8 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         params_.neutralizationEnabled);
 
     try {
-        QStringList dateResolutionFields{QString(factor::bridge::MarketBarFieldKeys::CLOSE)};
-        dateResolutionFields.append(adjustField);
+        std::vector<std::string> dateResolutionFields{std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str())};
+        dateResolutionFields.push_back(adjustField);
 
         return executeWithCommonParams(
             context,
@@ -199,14 +238,14 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
             },
             [this, &context](const CommonRuntimeState& runtime, CalculationResult& result) {
                 if (params_.useVolume && !context.historicalView->hasField("volume")) {
-                    const QString errorMessage = QStringLiteral("动量因子 HistoricalView 回测缺少 volume 字段，已禁止成交量确认数据库回退");
-                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    const std::string errorMessage = "动量因子 HistoricalView 回测缺少 volume 字段，已禁止成交量确认数据库回退";
+                    result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                     return;
                 }
 
                 CalculationContext resolvedContext = context;
-                resolvedContext.date = runtime.effectiveDate.toStdString();
+                resolvedContext.date = runtime.effectiveDate;
 
                 std::unordered_map<std::string, double> momentumValues;
                 switch (params_.type) {
@@ -232,7 +271,7 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
             [this](const CommonRuntimeState&, CalculationResult& result) {
                 result.values = handleOutliers(result.values);
             },
-            [this, adjustField](const CommonRuntimeState&, CalculationResult& result) {
+            [this](const CommonRuntimeState&, CalculationResult& result) {
                 result.metadata.set(momentum_json::kParamsMetadataKey, momentumParamsToJson(params_));
                 if (!result.metadata.has(momentum_json::kCalculationTypeMetadataKey)) {
                     result.metadata.set(momentum_json::kCalculationTypeMetadataKey, json_helper::toJsonValue(static_cast<int>(params_.type)));
@@ -243,11 +282,15 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
                 result.metadata.set(momentum_json::kUseVolumeKey, json_helper::toJsonValue(params_.useVolume));
 
                 if (result.values.empty()) {
-                    const QString emptyReason = QString("动量因子需要至少 %1 个交易日样本（窗口 %2，跳过最近 %3 个交易日），当前区间内未找到满足条件的股票")
-                        .arg(params_.window + params_.skipRecent + 1)
-                        .arg(params_.window)
-                        .arg(params_.skipRecent);
-                    result.metadata.set(momentum_json::kEmptyReasonMetadataKey, json_helper::toJsonValue(emptyReason.toStdString()));
+                    std::ostringstream emptyReason;
+                    emptyReason << "动量因子需要至少 "
+                                << (params_.window + params_.skipRecent + 1)
+                                << " 个交易日样本（窗口 "
+                                << params_.window
+                                << "，跳过最近 "
+                                << params_.skipRecent
+                                << " 个交易日），当前区间内未找到满足条件的股票";
+                    result.metadata.set(momentum_json::kEmptyReasonMetadataKey, json_helper::toJsonValue(emptyReason.str()));
                 }
             });
     } catch (const std::exception& e) {
@@ -263,18 +306,18 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
 
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
-    const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
-    if (adjustField.isEmpty()) {
+    const std::string adjustField = resolveAdjustFieldName(params_.adjustPriceType);
+    if (adjustField.empty()) {
         throw std::runtime_error("动量因子 adjustPriceType 配置非法");
     }
-    appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString());
-    appendRequiredField(req, adjustField.toStdString());
+    appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str()));
+    appendRequiredField(req, adjustField);
     appendHistoricalNeutralizationRequirements(req,
                                                params_.neutralizationEnabled,
                                                SourceTable::DAILY_BAR);
     
     if (params_.useVolume) {
-        req.optionalFields.push_back(QString(factor::bridge::MarketBarFieldKeys::VOLUME).toStdString());
+        req.optionalFields.push_back(std::string(factor::bridge::MarketBarFieldKeys::VOLUME.c_str()));
     }
 
     return req;
@@ -321,13 +364,12 @@ double MomentumFactor::calculateSymbolMomentum(const std::string& symbol,
     }
 
     if (params_.useVolume) {
-        const QDate currentDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
         std::vector<double> volumes;
         if (context.historicalView && context.historicalView->hasField("volume")) {
             const auto series = context.historicalView->getSeries(
                 symbol,
-                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-                currentDate.toString("yyyy-MM-dd").toStdString(),
+                earliestMomentumSeriesDate(context.date, params_.window, params_.skipRecent),
+                context.date,
                 "volume"
             );
             for (const auto& point : series) {
@@ -446,35 +488,36 @@ std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomen
 
 std::vector<double> MomentumFactor::getAdjustedPriceSeries(const std::string& symbol,
                                                            const CalculationContext& context) {
-    const QDate currentDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
-    if (!currentDate.isValid()) {
+    std::tm parsedDate{};
+    if (!parseDateYyyyMmDd(context.date, parsedDate)) {
         throw std::runtime_error("非法计算日期");
     }
 
     const int requiredPoints = params_.window + params_.skipRecent + 1;
-    const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
-    if (adjustField.isEmpty()) {
+    const std::string adjustField = resolveAdjustFieldName(params_.adjustPriceType);
+    if (adjustField.empty()) {
         throw std::runtime_error("动量因子 adjustPriceType 配置为空");
     }
 
     if (context.historicalView) {
         std::vector<double> adjustedSeries;
-        const std::string adjustFieldStd = adjustField.toStdString();
-        if (!context.historicalView->hasField("close") || !context.historicalView->hasField(adjustFieldStd)) {
-            throw std::runtime_error("动量因子在 " + adjustFieldStd + " 价格模式下要求 HistoricalView 同时提供 close 和 " + adjustFieldStd + " 字段");
+        if (!context.historicalView->hasField("close") || !context.historicalView->hasField(adjustField)) {
+            throw std::runtime_error("动量因子在 " + adjustField + " 价格模式下要求 HistoricalView 同时提供 close 和 " + adjustField + " 字段");
         }
+
+        const std::string startDate = earliestMomentumSeriesDate(context.date, params_.window, params_.skipRecent);
 
         const auto closeSeries = context.historicalView->getSeries(
             symbol,
-            earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-            currentDate.toString("yyyy-MM-dd").toStdString(),
+            startDate,
+            context.date,
             "close"
         );
         const auto factorSeries = context.historicalView->getSeries(
             symbol,
-            earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-            currentDate.toString("yyyy-MM-dd").toStdString(),
-            adjustFieldStd
+            startDate,
+            context.date,
+            adjustField
         );
         const size_t pairCount = std::min(closeSeries.size(), factorSeries.size());
         adjustedSeries.reserve(pairCount);
@@ -489,11 +532,6 @@ std::vector<double> MomentumFactor::getAdjustedPriceSeries(const std::string& sy
         }
 
         if (static_cast<int>(adjustedSeries.size()) < requiredPoints) {
-            qDebug() << "MomentumFactor: 缓存序列长度不足"
-                     << "symbol=" << QString::fromStdString(symbol)
-                     << "date=" << QString::fromStdString(context.date)
-                     << "requiredPoints=" << requiredPoints
-                     << "actualPoints=" << static_cast<int>(adjustedSeries.size());
             throw std::runtime_error("缓存集中缺少足够的历史交易日数据");
         }
 

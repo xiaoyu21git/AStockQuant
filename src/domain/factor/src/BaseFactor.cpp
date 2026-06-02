@@ -3,10 +3,10 @@
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorNeutralizationUtils.h"
 
-#include <QDate>
-
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <ctime>
 #include <numeric>
 
 namespace factor {
@@ -115,12 +115,80 @@ void loadBoundaryRulesFromJson(BoundaryRules& boundaryRules,
     }
 }
 
-bool isNeutralizationSampleInsufficientMessage(const QString& message)
+constexpr int kMonthsPerYear = 12;
+constexpr int kFridayIndex = 5;
+constexpr int kIsoWeekLength = 7;
+
+bool parseIsoDate(const std::string& text, std::tm& out)
 {
-    const QString normalized = message.trimmed();
-    return normalized.contains(QStringLiteral("中性化样本不足"))
-        || normalized.contains(QStringLiteral("中性化后没有有效样本"))
-        || normalized.contains(QStringLiteral("行业和市值残差化"));
+    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+        return false;
+    }
+
+    try {
+        const int year = std::stoi(text.substr(0, 4));
+        const int month = std::stoi(text.substr(5, 2));
+        const int day = std::stoi(text.substr(8, 2));
+        if (month < 1 || month > kMonthsPerYear || day < 1 || day > 31) {
+            return false;
+        }
+
+        std::tm candidate = {};
+        candidate.tm_year = year - 1900;
+        candidate.tm_mon = month - 1;
+        candidate.tm_mday = day;
+        candidate.tm_isdst = -1;
+        if (std::mktime(&candidate) == -1) {
+            return false;
+        }
+        out = candidate;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::string formatIsoDate(const std::tm& value)
+{
+    char buffer[11] = {};
+    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &value);
+    return std::string(buffer);
+}
+
+std::tm addDays(const std::tm& base, int dayOffset)
+{
+    std::tm shifted = base;
+    shifted.tm_mday += dayOffset;
+    shifted.tm_isdst = -1;
+    std::mktime(&shifted);
+    return shifted;
+}
+
+int isoDayOfWeek(const std::tm& value)
+{
+    const int wday = value.tm_wday;
+    return ((wday + 6) % kIsoWeekLength) + 1;
+}
+
+std::string trimAsciiWhitespace(std::string text)
+{
+    const auto isSpace = [](unsigned char ch) {
+        return std::isspace(ch) != 0;
+    };
+    const auto begin = std::find_if_not(text.begin(), text.end(), isSpace);
+    const auto end = std::find_if_not(text.rbegin(), text.rend(), isSpace).base();
+    if (begin >= end) {
+        return "";
+    }
+    return std::string(begin, end);
+}
+
+bool isNeutralizationSampleInsufficientMessage(const std::string& message)
+{
+    const std::string normalized = trimAsciiWhitespace(message);
+    return normalized.find("中性化样本不足") != std::string::npos
+        || normalized.find("中性化后没有有效样本") != std::string::npos
+        || normalized.find("行业和市值残差化") != std::string::npos;
 }
 
 } // namespace
@@ -243,7 +311,7 @@ void BaseFactor::appendCommonMetadata(CalculationResult& result,
                                       const CommonMetricParams& params,
                                       const CommonRuntimeState& runtime)
 {
-    result.metadata.set("effectiveDate", json_helper::toJsonValue(runtime.effectiveDate.toStdString()));
+    result.metadata.set("effectiveDate", json_helper::toJsonValue(runtime.effectiveDate));
     result.metadata.set("frequency", json_helper::toJsonValue(static_cast<int>(runtime.frequency)));
     result.metadata.set("laggedEnabled", json_helper::toJsonValue(params.lagEnabled));
     result.metadata.set("lookbackWindow", json_helper::toJsonValue(params.lookbackWindow));
@@ -309,16 +377,16 @@ CalculationResult BaseFactor::createHistoricalViewRuntimeError(const Calculation
 CalculationResult BaseFactor::executeWithCommonParams(
     const CalculationContext& context,
     const CommonMetricParams& params,
-    const std::function<QString()>& effectiveDateResolver,
+    const std::function<std::string()>& effectiveDateResolver,
     const std::function<void(const CommonRuntimeState&, CalculationResult&)>& rawCalculator,
     const std::function<void(const CommonRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
     const std::function<void(const CommonRuntimeState&, CalculationResult&)>& metadataAppender,
-    const QString& dataStatusMessage) const {
+    const std::string& dataStatusMessage) const {
 
     if (!context.historicalView) {
         return createHistoricalViewRuntimeError(
             context,
-            QStringLiteral("已移除因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
+            "已移除因子运行期数据库取数路径，请由引擎提供 HistoricalView");
     }
 
     CalculationResult result;
@@ -326,12 +394,12 @@ CalculationResult BaseFactor::executeWithCommonParams(
     result.date = context.date;
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = dataStatusMessage.toStdString();
+    result.dataStatus.message = dataStatusMessage;
 
     CommonRuntimeState runtime;
     runtime.frequency = params.frequency;
     runtime.standardization = params.standardization;
-    runtime.effectiveDate = effectiveDateResolver ? effectiveDateResolver() : QString::fromStdString(context.date);
+    runtime.effectiveDate = effectiveDateResolver ? effectiveDateResolver() : context.date;
     runtime.neutralizationMode = params.neutralizationEnabled
         ? NeutralizationStatus::Requested
         : NeutralizationStatus::Disabled;
@@ -355,30 +423,43 @@ CalculationResult BaseFactor::executeWithCommonParams(
     return result;
 }
 
-QString BaseFactor::resolveCommonEffectiveDateForFields(const CalculationContext& context,
-                                                        const CommonMetricParams& params,
-                                                        const QStringList& requiredFieldsForDateResolution,
-                                                        CommonFieldRequirementMode requirementMode) const {
-    QDate anchorDate = QDate::fromString(QString::fromStdString(context.date), Qt::ISODate);
-    if (!anchorDate.isValid()) {
-        return QString::fromStdString(context.date);
+std::string BaseFactor::resolveCommonEffectiveDateForFields(const CalculationContext& context,
+                                                            const CommonMetricParams& params,
+                                                            const std::vector<std::string>& requiredFieldsForDateResolution,
+                                                            CommonFieldRequirementMode requirementMode) const {
+    std::tm anchorDate = {};
+    if (!parseIsoDate(context.date, anchorDate)) {
+        return context.date;
     }
 
     if (params.frequency == DataFrequency::Weekly) {
-        const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-        anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+        const int dayOfWeek = isoDayOfWeek(anchorDate);
+        const int shiftToPreviousFriday = dayOfWeek >= kFridayIndex ? dayOfWeek - kFridayIndex : dayOfWeek + 2;
+        anchorDate = addDays(anchorDate, -shiftToPreviousFriday);
     } else if (params.frequency == DataFrequency::Monthly) {
-        anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+        std::tm monthStart = anchorDate;
+        monthStart.tm_mday = 1;
+        std::mktime(&monthStart);
+        anchorDate = addDays(monthStart, -1);
     } else if (params.frequency == DataFrequency::Quarterly) {
-        const int quarter = (anchorDate.month() - 1) / 3;
+        const int currentMonth = anchorDate.tm_mon + 1;
+        const int quarter = (currentMonth - 1) / 3;
         const int quarterStartMonth = quarter * 3 + 1;
-        anchorDate = QDate(anchorDate.year(), quarterStartMonth, 1).addDays(-1);
+        std::tm quarterStart = anchorDate;
+        quarterStart.tm_mon = quarterStartMonth - 1;
+        quarterStart.tm_mday = 1;
+        std::mktime(&quarterStart);
+        anchorDate = addDays(quarterStart, -1);
     } else if (params.frequency == DataFrequency::Yearly) {
-        anchorDate = QDate(anchorDate.year(), 1, 1).addDays(-1);
+        std::tm yearStart = anchorDate;
+        yearStart.tm_mon = 0;
+        yearStart.tm_mday = 1;
+        std::mktime(&yearStart);
+        anchorDate = addDays(yearStart, -1);
     }
 
-    if (requiredFieldsForDateResolution.isEmpty()) {
-        return anchorDate.toString(Qt::ISODate);
+    if (requiredFieldsForDateResolution.empty()) {
+        return formatIsoDate(anchorDate);
     }
 
     const std::vector<std::string> symbols = context.symbols.empty()
@@ -387,15 +468,15 @@ QString BaseFactor::resolveCommonEffectiveDateForFields(const CalculationContext
     const int maxOffset = (std::max)(0, static_cast<int>(params.lookbackWindow));
     const int startOffset = params.lagEnabled ? (std::max)(1, static_cast<int>(params.lagPeriods)) : 0;
     for (int offset = startOffset; offset <= maxOffset; ++offset) {
-        const QString candidate = anchorDate.addDays(-offset).toString(Qt::ISODate);
+        const std::string candidate = formatIsoDate(addDays(anchorDate, -offset));
         bool matchedField = false;
         bool missingField = false;
-        for (const QString& field : requiredFieldsForDateResolution) {
-            if (field.isEmpty()) {
+        for (const std::string& field : requiredFieldsForDateResolution) {
+            if (field.empty()) {
                 missingField = true;
                 continue;
             }
-            const bool hasFieldData = !context.historicalView->getCrossSection(candidate.toStdString(), field.toStdString(), symbols).empty();
+            const bool hasFieldData = !context.historicalView->getCrossSection(candidate, field, symbols).empty();
             if (hasFieldData) {
                 matchedField = true;
             } else if (requirementMode == CommonFieldRequirementMode::AllFields) {
@@ -411,7 +492,7 @@ QString BaseFactor::resolveCommonEffectiveDateForFields(const CalculationContext
         }
     }
 
-    return anchorDate.toString(Qt::ISODate);
+    return formatIsoDate(anchorDate);
 }
 
 CommonMetricParams BaseFactor::buildCommonMetricParams(int lookbackWindow,
@@ -453,8 +534,8 @@ void BaseFactor::appendHistoricalNeutralizationRequirements(
         return;
     }
 
-    appendRequiredField(requirements, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString());
-    appendRequiredField(requirements, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
+    appendRequiredField(requirements, std::string(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str()));
+    appendRequiredField(requirements, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
     requirements.sourceTable = SourceTable::UNKNOWN;
 }
 
@@ -477,22 +558,22 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     }
 
     CalculationContext neutralizationContext = context;
-    neutralizationContext.date = runtime.effectiveDate.toStdString();
+    neutralizationContext.date = runtime.effectiveDate;
 
-    QString errorMessage;
+    std::string errorMessage;
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
         neutralizationMode = NeutralizationStatus::HistoricalViewFailed;
         result.values.clear();
         if (isNeutralizationSampleInsufficientMessage(errorMessage)) {
             result.dataStatus.availability = DataAvailability::PARTIAL;
             result.dataStatus.coverage = 0.0;
-            result.dataStatus.message = errorMessage.toStdString();
-            result.metadata.set("emptyReason", json_helper::toJsonValue(errorMessage.toStdString()));
+            result.dataStatus.message = errorMessage;
+            result.metadata.set("emptyReason", json_helper::toJsonValue(errorMessage));
             return true;
         }
 
-        result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+        result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue(errorMessage));
         return false;
     }
 
