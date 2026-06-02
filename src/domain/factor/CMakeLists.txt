@@ -279,6 +279,16 @@ target_link_libraries(factor_compute
         foundation
 )
 
+if(TARGET Arrow::arrow_shared)
+    target_link_libraries(factor_compute PUBLIC Arrow::arrow_shared)
+    target_include_directories(factor_compute PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
+    target_include_directories(factor_compute PUBLIC ${arrow_BINARY_DIR}/src)
+elseif(TARGET arrow_shared)
+    target_link_libraries(factor_compute PUBLIC arrow_shared)
+    target_include_directories(factor_compute PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
+    target_include_directories(factor_compute PUBLIC ${arrow_BINARY_DIR}/src)
+endif()
+
 target_include_directories(factor_system
     PUBLIC
     "${TA_LIB_GENERATED_INCLUDE_DIR}"
