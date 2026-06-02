@@ -75,38 +75,56 @@ size_t SignalCache::SignalCacheKeyHash::operator()(const SignalCacheKey& key) co
     const SignalCacheKey canonical = canonicalizeKey(key);
 
     // 使用 xxHash64 替代 FNV-1a，预期 10× 加速
-    XXH64_state_t state;
-    XXH64_reset(&state, 0);
+    // XXH64_state_t 是不透明类型，必须通过堆分配使用
+    XXH64_state_t* state = XXH64_createState();
+    if (!state) {
+        // 退化到简单哈希
+        size_t fallback = 0U;
+        fallback ^= static_cast<size_t>(canonical.dateRange.from.value);
+        fallback ^= static_cast<size_t>(canonical.dateRange.to.value);
+        fallback ^= static_cast<size_t>(canonical.mode);
+        for (const auto& inst : canonical.instruments) {
+            fallback ^= static_cast<size_t>(inst.value);
+        }
+        for (const auto& fac : canonical.factors) {
+            fallback ^= static_cast<size_t>(fac.value);
+        }
+        return fallback;
+    }
+
+    XXH64_reset(state, 0);
 
     // 哈希基础字段
-    XXH64_update(&state, &canonical.dateRange.from.value, sizeof(canonical.dateRange.from.value));
-    XXH64_update(&state, &canonical.dateRange.to.value, sizeof(canonical.dateRange.to.value));
+    XXH64_update(state, &canonical.dateRange.from.value, sizeof(canonical.dateRange.from.value));
+    XXH64_update(state, &canonical.dateRange.to.value, sizeof(canonical.dateRange.to.value));
     uint8_t mode = static_cast<uint8_t>(canonical.mode);
-    XXH64_update(&state, &mode, sizeof(mode));
+    XXH64_update(state, &mode, sizeof(mode));
     uint64_t winsorizeBits = bitwiseDouble(canonical.postProcessingConfig.winsorizeStdBand);
     uint64_t epsilonBits = bitwiseDouble(canonical.postProcessingConfig.stdEpsilon);
-    XXH64_update(&state, &winsorizeBits, sizeof(winsorizeBits));
-    XXH64_update(&state, &epsilonBits, sizeof(epsilonBits));
-    XXH64_update(&state, &canonical.postProcessingConfig.minimumValidSampleCount,
+    XXH64_update(state, &winsorizeBits, sizeof(winsorizeBits));
+    XXH64_update(state, &epsilonBits, sizeof(epsilonBits));
+    XXH64_update(state, &canonical.postProcessingConfig.minimumValidSampleCount,
         sizeof(canonical.postProcessingConfig.minimumValidSampleCount));
 
     // 哈希仪器列表
     const size_t instrumentCount = canonical.instruments.size();
-    XXH64_update(&state, &instrumentCount, sizeof(instrumentCount));
+    XXH64_update(state, &instrumentCount, sizeof(instrumentCount));
     for (const auto& inst : canonical.instruments) {
         uint32_t val = inst.value;
-        XXH64_update(&state, &val, sizeof(val));
+        XXH64_update(state, &val, sizeof(val));
     }
 
     // 哈希因子列表
     const size_t factorCount = canonical.factors.size();
-    XXH64_update(&state, &factorCount, sizeof(factorCount));
+    XXH64_update(state, &factorCount, sizeof(factorCount));
     for (const auto& fac : canonical.factors) {
         uint32_t val = fac.value;
-        XXH64_update(&state, &val, sizeof(val));
+        XXH64_update(state, &val, sizeof(val));
     }
 
-    return static_cast<size_t>(XXH64_digest(&state));
+    const size_t result = static_cast<size_t>(XXH64_digest(state));
+    XXH64_freeState(state);
+    return result;
 }
 
 bool SignalCache::SignalCacheKeyEqual::operator()(const SignalCacheKey& lhs, const SignalCacheKey& rhs) const noexcept

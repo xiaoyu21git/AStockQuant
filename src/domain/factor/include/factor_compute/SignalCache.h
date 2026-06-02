@@ -22,7 +22,7 @@ public:
     /// @brief 构造缓存
     ///
     /// @param maxMemoryBytes 最大内存限额（字节），默认 0 表示不设硬上限
-    explicit SignalCache(uint64_t maxMemoryBytes = 0U);
+    explicit SignalCache(uint64_t maxMemoryBytes = 0U) noexcept;
 
     [[nodiscard]] std::optional<SignalSet>
     load(const SignalCacheKey& key) const override;
