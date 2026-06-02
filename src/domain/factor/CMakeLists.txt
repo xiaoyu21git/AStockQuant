@@ -232,6 +232,9 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/SignalCache.cpp
     src/factor_compute/AnalysisKernel.cpp
     src/factor_compute/AnalysisModule.cpp
+    src/factor_compute/ParquetMarketDataView.cpp
+    src/factor_compute/SubMarketDataView.cpp
+    src/factor_compute/FactorSignalAdapter.cpp
 )
 
 set(FACTOR_COMPUTE_HEADERS
@@ -249,6 +252,10 @@ set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/IMarketDataView.h
     include/factor_compute/ISignalCache.h
     include/factor_compute/IAnalysisModule.h
+    include/factor_compute/AnalysisReportTypes.h
+    include/factor_compute/ISignalEngine.h
+    include/factor_compute/ParquetMarketDataView.h
+    include/factor_compute/SubMarketDataView.h
     include/factor_compute/FactorComputeDispatcher.h
     include/factor_compute/PostProcessingPipeline.h
     include/factor_compute/FactorSignalSetAssembler.h
