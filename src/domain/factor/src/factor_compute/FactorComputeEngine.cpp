@@ -17,6 +17,9 @@ constexpr double kDefaultSignalValue = 0.0;
 constexpr uint8_t kMissingMaskValue = 1U;
 constexpr uint8_t kPresentMaskValue = 0U;
 constexpr uint64_t kSingleSignalValueBytes = sizeof(double) + sizeof(uint8_t);
+constexpr double kTempBufferRatio = 0.5;
+constexpr double kMemorySafetyRatio = 0.8;
+constexpr uint64_t kOperatorWorkspaceBytesEstimate = 64ULL * 1024ULL * 1024ULL;
 
 struct DateAxisSelection final {
     std::vector<DateKey> dates;
@@ -121,13 +124,40 @@ bool isMissingValue(double value)
     return std::isnan(value);
 }
 
+/// @brief 设计文档 Section 6.2 内存预估公式
+///
+/// base_bytes = T * N * F * sizeof(double)
+/// mask_bytes = T * N * F * sizeof(uint8_t)
+/// temp_bytes = base_bytes * temp_buffer_ratio
+/// estimated_total = base_bytes + mask_bytes + temp_bytes + operator_workspace_bytes
+/// 若 estimated_total > available_memory * kMemorySafetyRatio，立即返回 true。
 bool exceedsMemoryBudget(int32_t timeCount, int32_t instrumentCount, int32_t factorCount, const RuntimeBudget& budget)
 {
-    const uint64_t requiredBytes = static_cast<uint64_t>(timeCount)
+    const uint64_t elementCount = static_cast<uint64_t>(timeCount)
         * static_cast<uint64_t>(instrumentCount)
-        * static_cast<uint64_t>(factorCount)
-        * kSingleSignalValueBytes;
-    return requiredBytes > budget.memoryLimitBytes;
+        * static_cast<uint64_t>(factorCount);
+    const uint64_t baseBytes = elementCount * sizeof(double);
+    const uint64_t maskBytes = elementCount * sizeof(uint8_t);
+    const uint64_t tempBytes = static_cast<uint64_t>(static_cast<double>(baseBytes) * kTempBufferRatio);
+
+    // 防止加法溢出
+    uint64_t estimatedTotal = baseBytes;
+    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - maskBytes) {
+        return true;
+    }
+    estimatedTotal += maskBytes;
+    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - tempBytes) {
+        return true;
+    }
+    estimatedTotal += tempBytes;
+    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - kOperatorWorkspaceBytesEstimate) {
+        return true;
+    }
+    estimatedTotal += kOperatorWorkspaceBytesEstimate;
+
+    const uint64_t safetyLimit = static_cast<uint64_t>(
+        static_cast<double>(budget.memoryLimitBytes) * kMemorySafetyRatio);
+    return estimatedTotal > safetyLimit;
 }
 
 int32_t findDateIndex(const std::vector<DateKey>& dates, DateKey date)

@@ -15,6 +15,12 @@ struct FactorId final {
     [[nodiscard]] bool isValid() const noexcept { return value != 0U; }
 };
 
+struct SignalId final {
+    uint32_t value{0U};
+
+    [[nodiscard]] bool isValid() const noexcept { return value != 0U; }
+};
+
 struct FactorName final {
     uint32_t value{0U};
 
@@ -31,6 +37,14 @@ struct FieldKey final {
     uint32_t value{0U};
 
     [[nodiscard]] bool isValid() const noexcept { return value != 0U; }
+};
+
+enum class Frequency : uint8_t {
+    Daily = 0,
+    Weekly = 1,
+    Monthly = 2,
+    Quarterly = 3,
+    Yearly = 4
 };
 
 struct InstrumentId final {
@@ -203,24 +217,50 @@ struct SignalProgress final {
 };
 
 struct SignalSet final {
-    std::vector<DateKey> dates;
-    std::vector<InstrumentId> instruments;
-    std::vector<FactorId> factors;
+    // 设计文档 Section 8 合同字段
+    std::vector<DateKey> dates;          // 时间维度
+    std::vector<InstrumentId> instruments; // 标的维度 (设计文档: insts)
+    std::vector<SignalId> signals;       // 信号维度 (设计文档: signals, 类型SignalId)
     SignalSetIndex index{};
     SignalProgress progress{};
     std::vector<double> values;
     std::vector<uint8_t> mask;
-    bool isPartial{false};
+    bool isPartial{false};               // 设计文档: is_partial
 
     [[nodiscard]] bool isValid() const noexcept
     {
         return !dates.empty()
             && !instruments.empty()
-            && !factors.empty()
+            && !signals.empty()
             && index.isValid()
             && progress.isValid()
-            && progress.plannedFactorCount == static_cast<uint32_t>(factors.size())
+            && progress.plannedFactorCount == static_cast<uint32_t>(signals.size())
             && values.size() == mask.size();
+    }
+
+    /// @brief 三维访问函数（设计文档 Section 8）
+    /// 逻辑索引为 [time][instrument][signal]
+    double operator()(int timeIdx, int instrumentIdx, int signalIdx) const noexcept
+    {
+        const size_t flatIdx = static_cast<size_t>(timeIdx) * static_cast<size_t>(index.timeStride)
+            + static_cast<size_t>(instrumentIdx) * static_cast<size_t>(index.instrumentStride)
+            + static_cast<size_t>(signalIdx) * static_cast<size_t>(index.factorStride);
+        if (flatIdx >= values.size()) {
+            return 0.0;
+        }
+        return values[flatIdx];
+    }
+
+    /// @brief 获取缺失标记
+    bool isMissing(int timeIdx, int instrumentIdx, int signalIdx) const noexcept
+    {
+        const size_t flatIdx = static_cast<size_t>(timeIdx) * static_cast<size_t>(index.timeStride)
+            + static_cast<size_t>(instrumentIdx) * static_cast<size_t>(index.instrumentStride)
+            + static_cast<size_t>(signalIdx) * static_cast<size_t>(index.factorStride);
+        if (flatIdx >= mask.size()) {
+            return true;
+        }
+        return mask[flatIdx] != 0U;
     }
 };
 
