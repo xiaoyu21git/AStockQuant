@@ -2007,7 +2007,7 @@ Item {
     
     // ============ 属性 ============
     
-    property Bridge.FactorService factorService: null
+    property var factorService: null
     property Bridge.CleanedDataController cleanedDataController: null
     
     // 因子选择相关属性 - 现在由C++控制器管理

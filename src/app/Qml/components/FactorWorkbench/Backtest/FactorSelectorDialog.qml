@@ -8,7 +8,7 @@ Dialog {
     id: root
 
     property Bridge.FactorBacktestController factorBacktestController: null
-    property Bridge.FactorService factorService: null
+    property var factorService: null
     property Bridge.FactorViewModel factorViewModel: null
     property var selectedFactorIds: []
     property string dataSourceMode: "cache"

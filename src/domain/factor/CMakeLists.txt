@@ -232,8 +232,8 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/SignalCache.cpp
     src/factor_compute/AnalysisKernel.cpp
     src/factor_compute/AnalysisModule.cpp
-    src/factor_compute/ParquetMarketDataView.cpp
     src/factor_compute/SubMarketDataView.cpp
+    src/factor_compute/ParallelChunkScheduler.cpp
     src/factor_compute/FactorSignalAdapter.cpp
 )
 
@@ -277,6 +277,7 @@ add_library(factor_compute STATIC
 target_link_libraries(factor_compute
     PUBLIC
         foundation
+        astock_xxhash
 )
 
 target_include_directories(factor_compute
@@ -312,6 +313,7 @@ target_link_libraries(factor_system
         domain_backtest
     domain_trading
         astock_ta_lib
+        astock_xxhash
 )
 
 if(TARGET Arrow::arrow_shared)

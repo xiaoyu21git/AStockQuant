@@ -16,7 +16,7 @@ Rectangle {
     // ============ 页面属性 ============
     
     property var factorParamController
-    property Bridge.FactorService factorService: null
+    property var factorService: null
     property var factorDataModel: null
     property var editingFactorData: ({})
     readonly property bool factorMutationInProgress: !!(factorService && factorService.mutationInProgress)

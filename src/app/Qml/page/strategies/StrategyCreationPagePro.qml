@@ -38,7 +38,7 @@ Page {
     
     // C++服务引用
     property var strategyService: null
-    property var factorService: FactorService
+    property var factorService: Bridge.FactorService
     
     // ============ 主布局 ============
     

@@ -220,7 +220,7 @@ struct SignalSet final {
     // 设计文档 Section 8 合同字段
     std::vector<DateKey> dates;          // 时间维度
     std::vector<InstrumentId> instruments; // 标的维度 (设计文档: insts)
-    std::vector<SignalId> signals;       // 信号维度 (设计文档: signals, 类型SignalId)
+    std::vector<SignalId> signalIds;     // 信号维度 (重命名避免 Qt signals 宏冲突)
     SignalSetIndex index{};
     SignalProgress progress{};
     std::vector<double> values;
@@ -231,10 +231,10 @@ struct SignalSet final {
     {
         return !dates.empty()
             && !instruments.empty()
-            && !signals.empty()
+            && !signalIds.empty()
             && index.isValid()
             && progress.isValid()
-            && progress.plannedFactorCount == static_cast<uint32_t>(signals.size())
+            && progress.plannedFactorCount == static_cast<uint32_t>(signalIds.size())
             && values.size() == mask.size();
     }
 

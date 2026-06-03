@@ -19,7 +19,7 @@ Rectangle {
     // ============ 属性 ============
     
     property int selectedStrategyTypeIndex: 0
-    property Bridge.FactorService factorService: null
+    property var factorService: null
     property var strategyParameters: ({})
     property var commonStrategyParameters: ({})
     property var personalizedStrategyParameters: ({})

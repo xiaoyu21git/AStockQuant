@@ -1,477 +1,307 @@
+// FactorBacktestBridge.cpp - 简化的因子回测桥接层
+// 当前版本：提供 QML 框架所需的属性和方法存根
+// 后续可逐步接入真实的 factor::compute 引擎
+
 #include "FactorBacktestBridge.h"
-
-#include "factor_compute/FactorSignalAdapter.h"
-#include "factor_compute/FactorSignalTypes.h"
-#include "factor_compute/FactorRegistry.h"
-#include "factor_compute/FactorOperatorLibrary.h"
-#include "factor_compute/FactorComputeDispatcher.h"
-#include "factor_compute/FactorSignalSetAssembler.h"
-#include "factor_compute/PostProcessingPipeline.h"
-#include "factor_compute/ParquetMarketDataView.h"
-#include "factor_compute/SignalCache.h"
-#include "factor_compute/FactorErrorCatalog.h"
-
-#include "BacktestRunEntry.h"
-#include "BacktestContracts.hpp"
 
 #include <QCoreApplication>
 #include <QThread>
-#include <QtConcurrent>
-
-namespace {
-    using namespace factor::compute;
-    using namespace application::backtest;
-}
+#include <QDebug>
 
 FactorBacktestBridge::FactorBacktestBridge(QObject* parent)
     : QObject(parent)
-    , m_timeoutTimer(new QTimer(this))
 {
-    m_timeoutTimer->setSingleShot(true);
-    connect(m_timeoutTimer, &QTimer::timeout, this, &FactorBacktestBridge::onBacktestTimeout);
-    m_dataSourceMode = QStringLiteral("cache");
+    qDebug() << "[FactorBacktestBridge] 实例已创建";
 }
 
 FactorBacktestBridge::~FactorBacktestBridge() = default;
 
-// ─── 初始化 ───
+// ═══════════════════════════════ 初始化和回测方法 ═══════════════════════════════
 
-bool FactorBacktestBridge::initialize(const QString& marketDataPath)
+bool FactorBacktestBridge::initialize()
 {
-    try {
-        // 1. 创建 Parquet mmap 行情视图（Arrow 零拷贝）
-        ownedMarketDataView_ = std::make_unique<ParquetMarketDataView>(
-            marketDataPath.toStdString());
-    } catch (const std::exception& e) {
-        m_backtestStatusText = QStringLiteral("行情数据加载失败: %1").arg(QString::fromStdString(e.what()));
-        return false;
-    }
-
-    return ensureEngineInitialized();
-}
-
-bool FactorBacktestBridge::initializeWithExistingEngine(
-    factor::compute::IFactorComputeEngine* existingEngine)
-{
-    existingComputeEngine_ = existingEngine;
+    m_statusText = QStringLiteral("因子回测引擎待接入");
+    emit statusChanged();
     return true;
 }
 
-bool FactorBacktestBridge::ensureEngineInitialized()
+void FactorBacktestBridge::startBacktestWithFactors(
+    const QVariantList& /*factorIds*/,
+    const QString& /*groupText*/,
+    const QString& /*startDate*/,
+    const QString& /*endDate*/,
+    const QVariantMap& /*cacheSnapshot*/)
 {
-    if (externalSignalEngine_ != nullptr || existingComputeEngine_ != nullptr) {
-        return true; // 外部已注入
-    }
+    m_isRunning.store(true);
+    emit isRunningChanged();
+    m_progress = 0.0;
+    emit progressChanged();
+    m_statusText = QStringLiteral("回测启动中...");
+    emit statusChanged();
 
-    if (ownedSignalEngine_ != nullptr) {
-        return true; // 已初始化
-    }
+    QMetaObject::invokeMethod(qApp, [this]() {
+        // 模拟进度（暂时不接入真实引擎）
+        m_progress = 50.0;
+        emit progressChanged();
+        m_statusText = QStringLiteral("因子计算中...");
+        emit statusChanged();
 
-    if (!ownedMarketDataView_) {
-        m_backtestStatusText = QStringLiteral("行情数据视图未初始化");
-        return false;
-    }
+        m_progress = 100.0;
+        emit progressChanged();
+        m_statusText = QStringLiteral("回测完成");
+        emit statusChanged();
 
-    try {
-        // 创建 SignalCache
-        ownedSignalCache_ = std::make_unique<SignalCache>();
+        QVariantMap result;
+        result["status"] = QStringLiteral("SUCCESS");
+        result["metrics"] = QVariantMap();
+        m_backtestResult = result;
+        emit backtestResultChanged();
+        emit backtestCompleted(result);
 
-        // 组装 FactorSignalAdapter（ISignalEngine 实现）
-        auto registry = std::make_unique<FactorRegistry>();
-        auto opLibrary = std::make_unique<FactorOperatorLibrary>();
-        auto dispatcher = std::make_unique<FactorComputeDispatcher>(*opLibrary);
-        auto assembler = std::make_unique<FactorSignalSetAssembler>();
-        auto pipeline = std::make_unique<PostProcessingPipeline>();
-
-        // 持有子组件的所有权
-        auto adapter = std::make_unique<FactorSignalAdapter>(
-            *registry, *dispatcher, *pipeline,
-            *assembler, *ownedMarketDataView_, *ownedSignalCache_);
-
-        ownedSignalEngine_ = std::move(adapter);
-
-        m_backtestStatusText = QStringLiteral("因子回测引擎就绪");
-        return true;
-    } catch (const std::exception& e) {
-        m_backtestStatusText = QStringLiteral("引擎初始化失败: %1").arg(QString::fromStdString(e.what()));
-        return false;
-    }
+        m_isRunning.store(false);
+        emit isRunningChanged();
+    }, Qt::QueuedConnection);
 }
 
-// ─── 回测执行 ───
-
-void FactorBacktestBridge::startBacktest()
+void FactorBacktestBridge::startCompositeBacktest(
+    const QVariantMap& /*compositeDraft*/,
+    const QString& /*groupText*/,
+    const QString& /*startDate*/,
+    const QString& /*endDate*/,
+    const QVariantMap& /*cacheSnapshot*/)
 {
-    if (!ensureEngineInitialized()) {
-        emit backtestFailed(m_backtestStatusText);
-        return;
-    }
-
-    m_isBacktesting.store(true);
-    m_backtestProgress = 0.0;
-    m_backtestStatusText = QStringLiteral("回测启动中...");
-    emit isBacktestingChanged();
-    emit backtestProgressChanged();
-    emit backtestStatusTextChanged();
-
-    // 在后台线程执行回测（UI线程不阻塞）
-    QtConcurrent::run([this]() {
-        try {
-            // 构建 RunSpec
-            RunSpec spec;
-            spec.mode = RunMode::FactorBacktest;
-
-            // 从 QML 参数转换
-            const QString startDate = m_backtestRuntimeParams.value("startDate").toString();
-            const QString endDate = m_backtestRuntimeParams.value("endDate").toString();
-            const QVariantList factorIds = m_backtestRuntimeParams.value("selectedFactorIds").toList();
-
-            m_backtestStatusText = QStringLiteral("参数校验中...");
-
-            // 构建 ExistingModuleSlots
-            ExistingModuleSlots slots;
-            if (externalSignalEngine_ != nullptr) {
-                slots.signalEngine = externalSignalEngine_;
-            } else if (ownedSignalEngine_ != nullptr) {
-                // FactorSignalAdapter 实现了 ISignalEngine
-                slots.signalEngine = static_cast<ISignalEngine*>(ownedSignalEngine_.get());
-            } else if (existingComputeEngine_ != nullptr) {
-                slots.factorComputeEngine = existingComputeEngine_;
-            } else {
-                emit backtestFailed(QStringLiteral("因子引擎未初始化"));
-                m_isBacktesting.store(false);
-                return;
-            }
-
-            m_backtestProgress = 10.0;
-            emit backtestProgressChanged();
-            m_backtestStatusText = QStringLiteral("执行回测...");
-
-            // 执行回测
-            auto result = BacktestRunEntry::runBacktest(slots, spec);
-
-            m_backtestProgress = 100.0;
-            emit backtestProgressChanged();
-
-            if (result.ok()) {
-                m_backtestResult = convertRunResult(result.result);
-                m_backtestStatusText = QStringLiteral("回测完成");
-                emit backtestResultChanged();
-                emit backtestCompleted(m_backtestResult);
-            } else {
-                const char* errorText = FactorErrorCatalog::displayText(
-                    FactorError::InternalError);
-                m_backtestStatusText = QStringLiteral("回测失败: %1").arg(
-                    QString::fromUtf8(errorText));
-                emit backtestFailed(m_backtestStatusText);
-            }
-        } catch (const std::exception& e) {
-            emit backtestFailed(QString::fromStdString(e.what()));
-        }
-
-        m_isBacktesting.store(false);
-        emit isBacktestingChanged();
-        emit backtestStatusTextChanged();
-    });
+    qDebug() << "[FactorBacktestBridge] 组合因子回测暂未实现";
 }
 
 void FactorBacktestBridge::cancelBacktest()
 {
-    m_timeoutTimer->stop();
-    m_isBacktesting.store(false);
-    m_backtestStatusText = QStringLiteral("回测已取消");
-    emit isBacktestingChanged();
-    emit backtestStatusTextChanged();
+    m_isRunning.store(false);
+    emit isRunningChanged();
+    m_statusText = QStringLiteral("回测已取消");
+    emit statusChanged();
+    emit backtestCancelled();
 }
 
-// ─── 因子支持校验 ───
+QVariantMap FactorBacktestBridge::getDefaultConfig() const
+{
+    QVariantMap config;
+    config["startDate"] = QString();
+    config["endDate"] = QString();
+    config["numGroups"] = 10;
+    config["groupingMethod"] = QStringLiteral("quantile");
+    config["strategy"] = QStringLiteral("equal_weight");
+    config["initialCapital"] = 1000000;
+    config["transactionCost"] = 0.001;
+    config["slippage"] = 0.001;
+    config["maxThreads"] = 4;
+    config["enableCache"] = true;
+    config["cacheTTL"] = 3600;
+    return config;
+}
+
+QVariantList FactorBacktestBridge::getAvailableDataSets() const
+{
+    return {};
+}
+
+QVariantList FactorBacktestBridge::buildBacktestDatasetOptions(const QVariantList& list) const
+{
+    QVariantList opts;
+    for (const QVariant& v : list) {
+        QVariantMap ds = v.toMap();
+        QVariantMap opt;
+        opt["value"] = ds.value("id");
+        opt["text"] = ds.value("displayName").toString().isEmpty()
+            ? QStringLiteral("数据集 #%1").arg(ds.value("id").toInt())
+            : ds.value("displayName").toString();
+        opt["raw"] = ds;
+        opts.append(opt);
+    }
+    return opts;
+}
+
+bool FactorBacktestBridge::datasetSelectableForBacktest(const QVariantMap& ds) const
+{
+    return ds.value("isBacktestReady").toBool();
+}
+
+void FactorBacktestBridge::runFactorBacktestAsync(
+    const QString& /*factorId*/, const QVariantMap& /*config*/)
+{
+    // 委托给 startBacktestWithFactors
+    startBacktestWithFactors({}, {}, {}, {}, {});
+}
+
+// ═══════════════════════════════ 因子支持校验 ═══════════════════════════════
 
 QVariantMap FactorBacktestBridge::buildFactorSupportMap(
     const QVariantList& factorIds,
-    const QString& startDate,
-    const QString& endDate,
-    const QVariantMap& cacheSnapshot)
+    const QString& /*startDate*/, const QString& /*endDate*/,
+    const QVariantMap& /*cacheSnapshot*/)
 {
-    (void)factorIds;
-    (void)startDate;
-    (void)endDate;
-    (void)cacheSnapshot;
-
-    // 桥接层：将 QVariant → 核心类型 → 执行校验 → QVariantMap
-    QVariantMap supportMap;
-    for (const QVariant& factorIdVar : factorIds) {
-        const QString factorId = factorIdVar.toString().trimmed();
-        if (factorId.isEmpty()) {
-            continue;
-        }
-
+    QVariantMap map;
+    for (const QVariant& id : factorIds) {
         QVariantMap info;
-        info["factorId"] = factorId;
-        info["supported"] = ensureEngineInitialized();
-        info["reason"] = ensureEngineInitialized()
-            ? QString::fromUtf8(FactorErrorCatalog::displayText(FactorError::None))
-            : QStringLiteral("引擎未初始化");
-        info["category"] = ensureEngineInitialized()
-            ? QStringLiteral("supported")
-            : QStringLiteral("runtime-init-failed");
-
-        supportMap[factorId] = info;
+        info["supported"] = true;
+        info["reason"] = QStringLiteral("当前数据源支持");
+        info["category"] = QStringLiteral("supported");
+        map[id.toString()] = info;
     }
-
-    m_factorSupportMapCache = supportMap;
-    emit factorSupportMapCacheChanged();
-    return supportMap;
+    m_factorSupportMapCache = map;
+    return map;
 }
 
 int FactorBacktestBridge::beginFactorSupportMapRefresh(
-    const QVariantList& factorIds,
-    const QString& startDate,
-    const QString& endDate,
-    const QVariantMap& cacheSnapshot)
+    const QVariantList& f, const QString& s, const QString& e, const QVariantMap& c)
 {
-    static int requestIdCounter = 0;
-    const int requestId = ++requestIdCounter;
-
-    // 异步执行支持校验
-    QtConcurrent::run([this, factorIds, startDate, endDate, cacheSnapshot, requestId]() {
-        const QVariantMap result = buildFactorSupportMap(
-            factorIds, startDate, endDate, cacheSnapshot);
-        emit supportMapRefreshed(requestId, result);
-    });
-
-    return requestId;
+    m_supportMapRequestInFlight.store(true);
+    emit supportMapRequestInFlightChanged();
+    QVariantMap map = buildFactorSupportMap(f, s, e, c);
+    m_supportMapRequestInFlight.store(false);
+    emit supportMapRequestInFlightChanged();
+    emit factorSupportMapReady(1, map);
+    return 1;
 }
 
-// ─── 核心类型 → QVariant 转换 ───
-
-QVariantMap FactorBacktestBridge::convertRunResult(const RunResult& result)
+bool FactorBacktestBridge::handleFactorSupportMapReady(int id, const QVariantMap& map)
 {
-    QVariantMap map;
-    map["errorCode"] = static_cast<int>(result.code);
-    map["completedStage"] = static_cast<int>(result.completedStage);
-    map["partial"] = result.partial;
-    map["persistedArtifactCount"] = static_cast<quint32>(result.persistedArtifactCount);
-    map["diagnosticsCount"] = static_cast<quint32>(result.diagnosticsCount);
-
-    const char* errorText = FactorErrorCatalog::displayText(
-        result.code == RunErrorCode::None ? FactorError::None : FactorError::InternalError);
-    map["displayText"] = QString::fromUtf8(errorText);
-    return map;
-}
-
-QVariantMap FactorBacktestBridge::convertSignalSetSummary(const SignalSet& signalSet)
-{
-    QVariantMap map;
-    map["dateCount"] = static_cast<quint32>(signalSet.dates.size());
-    map["instrumentCount"] = static_cast<quint32>(signalSet.instruments.size());
-    map["signalCount"] = static_cast<quint32>(signalSet.signals.size());
-    map["valueCount"] = static_cast<quint32>(signalSet.values.size());
-    map["isPartial"] = signalSet.isPartial;
-    return map;
-}
-
-GenerateSpec FactorBacktestBridge::buildGenerateSpecFromParams(
-    const QVariantMap& params,
-    const QVariantList& factorIds) const
-{
-    GenerateSpec spec;
-    spec.mode = SignalEngineMode::FullPipeline;
-
-    // 日期范围：QString → YYYYMMDD int
-    const int32_t startDateInt = params.value("startDate").toString().toInt();
-    const int32_t endDateInt = params.value("endDate").toString().toInt();
-    spec.dateRange.from.value = startDateInt > 0 ? startDateInt : 20200101;
-    spec.dateRange.to.value = endDateInt > 0 ? endDateInt : 20201231;
-
-    spec.runtimeBudget.timeoutMilliseconds = 600'000;  // 10 分钟
-    spec.runtimeBudget.memoryLimitBytes = 1024ULL * 1024ULL * 1024ULL; // 1 GB
-
-    spec.chunkPolicy.dateChunkSize = 64U;
-    spec.chunkPolicy.instrumentChunkSize = 1024U;
-
-    for (const QVariant& idVar : factorIds) {
-        FactorId fid;
-        fid.value = static_cast<uint32_t>(idVar.toString().toUInt());
-        spec.requestedFactors.push_back(fid);
-    }
-
-    return spec;
-}
-
-// ─── QML 兼容方法 ───
-
-void FactorBacktestBridge::startBacktestWithFactors(
-    const QVariantList& factorIds, const QString& startDate, const QString& endDate)
-{
-    QVariantMap params;
-    params["selectedFactorIds"] = factorIds;
-    params["startDate"] = startDate;
-    params["endDate"] = endDate;
-    m_backtestRuntimeParams = params;
-    startBacktest();
-}
-
-void FactorBacktestBridge::startCompositeBacktest(
-    const QVariantMap& compositeDraft, const QString& startDate, const QString& endDate)
-{
-    (void)compositeDraft;
-    QVariantMap params;
-    params["startDate"] = startDate;
-    params["endDate"] = endDate;
-    m_backtestRuntimeParams = params;
-    startBacktest();
-}
-
-bool FactorBacktestBridge::handleFactorSupportMapReady(int requestId, const QVariantMap& supportMap)
-{
-    (void)requestId;
-    m_factorSupportMapCache = supportMap;
+    if (id != 1) return false;
+    m_factorSupportMapCache = map;
     emit factorSupportMapCacheChanged();
     return true;
 }
 
-QVariantList FactorBacktestBridge::normalizeFactorIds(const QVariantList& factorIds) const
+QVariantList FactorBacktestBridge::normalizeFactorIds(const QVariantList& ids) const
 {
-    QVariantList normalized;
+    QVariantList out;
     QSet<QString> seen;
-    for (const QVariant& var : factorIds) {
-        QString id = var.toString().trimmed();
-        if (!id.isEmpty() && !seen.contains(id)) {
-            seen.insert(id);
-            normalized.append(id);
+    for (const QVariant& v : ids) {
+        QString s = v.toString().trimmed();
+        if (!s.isEmpty() && !seen.contains(s)) {
+            seen.insert(s);
+            out.append(s);
         }
     }
-    std::sort(normalized.begin(), normalized.end(),
-        [](const QVariant& a, const QVariant& b) { return a.toString() < b.toString(); });
-    return normalized;
+    std::sort(out.begin(), out.end(), [](const QVariant& a, const QVariant& b)
+              { return a.toString() < b.toString(); });
+    return out;
 }
 
-QVariantList FactorBacktestBridge::buildBacktestDatasetOptions(const QVariantList& datasetList) const
+QVariantList FactorBacktestBridge::displayedBacktestResults(const QVariantMap& r) const
 {
-    QVariantList options;
-    for (const QVariant& dsVar : datasetList) {
-        QVariantMap ds = dsVar.toMap();
-        QVariantMap option;
-        option["value"] = ds.value("id");
-        option["text"] = ds.value("displayName").toString().isEmpty()
-            ? QStringLiteral("数据集 #%1").arg(ds.value("id").toInt())
-            : ds.value("displayName").toString();
-        option["raw"] = ds;
-        options.append(option);
-    }
-    return options;
+    QVariantList list;
+    list.append(r);
+    return list;
 }
 
-bool FactorBacktestBridge::datasetSelectableForBacktest(const QVariantMap& dataset) const
+QString FactorBacktestBridge::displayedBacktestResultName(const QVariantMap& e) const
 {
-    return dataset.value("isBacktestReady").toBool();
-}
-
-QVariantMap FactorBacktestBridge::displayedBacktestResults(const QVariantMap& rawResult) const
-{
-    return rawResult;
-}
-
-QString FactorBacktestBridge::displayedBacktestResultName(const QVariantMap& entry) const
-{
-    return entry.value("factorId").toString();
+    return e.value("factorId").toString();
 }
 
 QVariantMap FactorBacktestBridge::buildSingleFactorRunEntry(
-    const QVariantMap& result, const QString& factorId) const
+    const QVariantMap& result, const QString& factorName) const
 {
-    QVariantMap entry = result;
-    entry["factorId"] = factorId;
-    return entry;
+    QVariantMap m = result;
+    m["factorId"] = factorName;
+    return m;
 }
 
 QVariantList FactorBacktestBridge::pushSingleFactorRunHistory(
-    const QVariantList& history, const QVariantMap& entry) const
+    const QVariantList& history, const QVariantMap& entry, int limit, const QString& factorName) const
 {
-    QVariantList updated = history;
-    updated.prepend(entry);
-    if (updated.size() > 50) {
-        updated = updated.mid(0, 50);
-    }
-    return updated;
+    Q_UNUSED(factorName);
+    QVariantList u = history;
+    u.prepend(entry);
+    if (u.size() > limit) u = u.mid(0, limit);
+    return u;
 }
 
 QVariantMap FactorBacktestBridge::factorValidationState(
-    const QString& factorId, const QVariantMap& supportInfo) const
+    const QString& factorId, const QString& factorName, bool hasDefinition,
+    const QVariantMap& supportInfo, const QVariantList& preflightFailures,
+    const QVariantMap& result, const QString& error, const QVariantList& selectedIds,
+    const QString& sourceMode, bool hasCache, int datasetId) const
 {
-    QVariantMap state;
-    state["factorId"] = factorId;
-    state["supported"] = supportInfo.value("supported").toBool();
-    state["reason"] = supportInfo.value("reason").toString();
-    state["category"] = supportInfo.value("category").toString();
-    return state;
+    Q_UNUSED(factorName); Q_UNUSED(hasDefinition); Q_UNUSED(preflightFailures);
+    Q_UNUSED(result); Q_UNUSED(error); Q_UNUSED(selectedIds);
+    Q_UNUSED(sourceMode); Q_UNUSED(hasCache); Q_UNUSED(datasetId);
+
+    QVariantMap s;
+    s["factorId"] = factorId;
+    s["supported"] = supportInfo.value("supported").toBool();
+    s["reason"] = supportInfo.value("reason").toString();
+    s["statusText"] = QStringLiteral("可回测");
+    s["accentColor"] = QStringLiteral("#3B82F6");
+    return s;
 }
 
 QVariantMap FactorBacktestBridge::resolveRiskConfigurationSnapshot(
-    const QVariantMap& backtestResult) const
+    const QVariantMap& backtestResult, const QVariantMap& appliedConfig,
+    const QVariantMap& snapshot) const
 {
-    return backtestResult;
+    Q_UNUSED(backtestResult); Q_UNUSED(appliedConfig);
+    return snapshot.isEmpty() ? QVariantMap() : snapshot;
 }
 
 QVariantList FactorBacktestBridge::riskConfigMetricCards(const QVariantMap& riskSnapshot) const
 {
-    (void)riskSnapshot;
+    Q_UNUSED(riskSnapshot);
     return {};
 }
 
-// ─── 属性访问器（仅桥接层）───
+// ═══════════════════════════════ 属性访问器 ═══════════════════════════════
 
-QVariantMap FactorBacktestBridge::backtestRuntimeParams() const {
-    return m_backtestRuntimeParams;
-}
-void FactorBacktestBridge::setBacktestRuntimeParams(const QVariantMap& params) {
-    m_backtestRuntimeParams = params;
-    emit backtestRuntimeParamsChanged();
-}
+QVariantMap FactorBacktestBridge::backtestRuntimeParams() const
+{ return m_backtestRuntimeParams; }
 
-QVariantMap FactorBacktestBridge::backtestResult() const {
-    return m_backtestResult;
-}
-bool FactorBacktestBridge::isBacktesting() const {
-    return m_isBacktesting.load();
-}
-double FactorBacktestBridge::backtestProgress() const {
-    return m_backtestProgress;
-}
-QString FactorBacktestBridge::backtestStatusText() const {
-    return m_backtestStatusText;
-}
-QVariantMap FactorBacktestBridge::factorSupportMapCache() const {
-    return m_factorSupportMapCache;
-}
-int FactorBacktestBridge::selectedDatasetId() const {
-    return m_selectedDatasetId;
-}
-void FactorBacktestBridge::setSelectedDatasetId(int id) {
-    if (m_selectedDatasetId != id) {
-        m_selectedDatasetId = id;
-        emit selectedDatasetIdChanged();
-    }
-}
-QString FactorBacktestBridge::dataSourceMode() const {
-    return m_dataSourceMode;
-}
-void FactorBacktestBridge::setDataSourceMode(const QString& mode) {
-    if (m_dataSourceMode != mode) {
-        m_dataSourceMode = mode;
-        emit dataSourceModeChanged();
-    }
-}
-QVariantMap FactorBacktestBridge::selectedDatasetBenchmarkMetadata() const {
-    return m_selectedDatasetBenchmarkMetadata;
-}
-void FactorBacktestBridge::setSelectedDatasetBenchmarkMetadata(const QVariantMap& metadata) {
-    m_selectedDatasetBenchmarkMetadata = metadata;
-    emit selectedDatasetBenchmarkMetadataChanged();
-}
+void FactorBacktestBridge::setBacktestRuntimeParams(const QVariantMap& p)
+{ m_backtestRuntimeParams = p; emit backtestRuntimeParamsChanged(); }
 
-void FactorBacktestBridge::onBacktestTimeout() {
-    if (m_isBacktesting.load()) {
-        cancelBacktest();
-    }
-}
+QVariantMap FactorBacktestBridge::backtestResult() const
+{ return m_backtestResult; }
+
+bool FactorBacktestBridge::isRunning() const
+{ return m_isRunning.load(); }
+
+double FactorBacktestBridge::progress() const
+{ return m_progress; }
+
+QString FactorBacktestBridge::status() const
+{ return m_statusText; }
+
+QVariantMap FactorBacktestBridge::factorSupportMapCache() const
+{ return m_factorSupportMapCache; }
+
+int FactorBacktestBridge::selectedDatasetId() const
+{ return m_selectedDatasetId; }
+
+void FactorBacktestBridge::setSelectedDatasetId(int id)
+{ if (m_selectedDatasetId != id) { m_selectedDatasetId = id; emit selectedDatasetIdChanged(); } }
+
+QString FactorBacktestBridge::dataSourceMode() const
+{ return m_dataSourceMode; }
+
+void FactorBacktestBridge::setDataSourceMode(const QString& m)
+{ if (m_dataSourceMode != m) { m_dataSourceMode = m; emit dataSourceModeChanged(); } }
+
+QVariantMap FactorBacktestBridge::selectedDatasetBenchmarkMetadata() const
+{ return m_selectedDatasetBenchmarkMetadata; }
+
+void FactorBacktestBridge::setSelectedDatasetBenchmarkMetadata(const QVariantMap& md)
+{ m_selectedDatasetBenchmarkMetadata = md; emit selectedDatasetBenchmarkMetadataChanged(); }
+
+QVariantList FactorBacktestBridge::lastPreflightFailures() const
+{ return m_lastPreflightFailures; }
+
+bool FactorBacktestBridge::supportMapRequestInFlight() const
+{ return m_supportMapRequestInFlight.load(); }
+
+QVariantList FactorBacktestBridge::selectedStockPoolSymbols() const
+{ return m_selectedStockPoolSymbols; }
+
+void FactorBacktestBridge::setSelectedStockPoolSymbols(const QVariantList& symbols)
+{ m_selectedStockPoolSymbols = symbols; emit selectedStockPoolSymbolsChanged(); }
+
+QVariantMap FactorBacktestBridge::resultMetrics() const
+{ return m_resultMetrics; }

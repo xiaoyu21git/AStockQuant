@@ -25,6 +25,7 @@
 #include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
 #include "UiLifecycleCoordinator.h"
 #include "StrategyBridge.h"
+#include "FactorService.h"
 #include "FactorBacktestBridge.h"
 
 namespace wang{
@@ -202,15 +203,22 @@ namespace wang{
          }
       );
 
-      // FactorBacktestBridge - 因子回测桥接控制器（替换旧的 FactorBacktestController）
-      qmlRegisterSingletonType<FactorBacktestBridge>(
-         url, 1, 0, "FactorBacktestBridge",
+      // FactorService - 因子服务桥接层（单例模式）
+      qmlRegisterSingletonType<FactorService>(
+         url, 1, 0, "FactorService",
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
-            auto* bridge = new FactorBacktestBridge();
-            return bridge;
+            auto* service = FactorService::instance();
+            QTimer::singleShot(0, [service]() {
+                service->initialize();
+            });
+            return service;
          }
       );
+
+      // FactorBacktestController - 因子回测控制器（QML 内联组件）
+      qmlRegisterType<FactorBacktestBridge>(
+         url, 1, 0, "FactorBacktestController");
    }
 }

@@ -16,11 +16,11 @@ SignalSet FactorSignalSetAssembler::assemble(
     output.dates = context.dates;
     output.instruments = context.instruments;
     // Convert FactorId → SignalId (design doc Section 8: SignalSet uses SignalId)
-    output.signals.reserve(context.factors.size());
+    output.signalIds.reserve(context.factors.size());
     for (const FactorId& fid : context.factors) {
         SignalId sid;
         sid.value = fid.value;
-        output.signals.push_back(sid);
+        output.signalIds.push_back(sid);
     }
     output.progress = context.progress;
     output.isPartial = context.isPartial;

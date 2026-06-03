@@ -15,7 +15,7 @@ Item {
     
     // ============ 属性 ============
     
-    property Bridge.FactorService factorService: null  // 修复：属性名以小写字母开头
+    property var factorService: null  // 修复：属性名以小写字母开头
     property Bridge.CleanedDataController cleanedDataController: null
     property string selectedFactorId: ""
     
@@ -228,7 +228,7 @@ Item {
                                 Layout.preferredWidth: 160
                                 model: ListModel {
                                     id: datasetModel
-                                    ListElement { id: -1; name: "默认数据源"; description: "使用系统默认数据源" }
+                                    ListElement { datasetId: -1; name: "默认数据源"; description: "使用系统默认数据源" }
                                 }
                                 textRole: "name"
                                 
@@ -857,9 +857,9 @@ Item {
         // 设置数据集配置
         if (datasetComboBox.currentIndex >= 0) {
             var selectedDataSet = datasetModel.get(datasetComboBox.currentIndex)
-            config.dataSetId = selectedDataSet.id
+            config.dataSetId = selectedDataSet.datasetId
             config.dataSetName = selectedDataSet.name
-            console.log("数据集配置:", selectedDataSet.id, selectedDataSet.name)
+            console.log("数据集配置:", selectedDataSet.datasetId, selectedDataSet.name)
         }
         
         return config

@@ -1512,11 +1512,16 @@ public:
         factor::compute::SignalSet signalSet;
         signalSet.dates.push_back(factor::compute::DateKey{20240102});
         signalSet.instruments = spec.instrumentUniverse;
-        signalSet.factors = spec.requestedFactors;
+        // Convert FactorId → SignalId
+        for (const auto& fid : spec.requestedFactors) {
+            factor::compute::SignalId sid;
+            sid.value = fid.value;
+            signalSet.signalIds.push_back(sid);
+        }
         signalSet.index.timeStride = 1;
         signalSet.index.instrumentStride = 1;
         signalSet.index.factorStride = 1;
-        signalSet.progress.plannedFactorCount = static_cast<std::uint32_t>(signalSet.factors.size());
+        signalSet.progress.plannedFactorCount = static_cast<std::uint32_t>(signalSet.signalIds.size());
         signalSet.progress.completedFactorCount = signalSet.progress.plannedFactorCount;
         signalSet.values.push_back(0.5);
         signalSet.mask.push_back(1U);

@@ -288,10 +288,7 @@ enum class RuntimeOrderMode : int {
     Market = 1,
 };
 
-enum class RuntimeOrderSide : int {
-    Buy = 0,
-    Sell = 1,
-};
+// RuntimeOrderSide 定义于 StrategyServiceTypes.h
 
 enum class RuntimePositionEffect : int {
     Open = 0,

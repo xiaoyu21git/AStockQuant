@@ -153,7 +153,7 @@ uint64_t SignalCache::estimateSignalSetMemory(const SignalSet& signalSet) noexce
     uint64_t bytes = 0U;
     bytes += signalSet.dates.size() * sizeof(DateKey);
     bytes += signalSet.instruments.size() * sizeof(InstrumentId);
-    bytes += signalSet.signals.size() * sizeof(SignalId);
+    bytes += signalSet.signalIds.size() * sizeof(SignalId);
     bytes += signalSet.values.size() * sizeof(double);
     bytes += signalSet.mask.size() * sizeof(uint8_t);
     bytes += sizeof(SignalSet);

@@ -169,7 +169,7 @@ public:
         : accessor_(signalSet)
         , closeView_(closeView)
         , instrumentCount_(static_cast<int32_t>(accessor_.instrumentCount()))
-        , hasFactors_(!signalSet.signals.empty())
+        , hasFactors_(!signalSet.signalIds.empty())
     {
     }
 
@@ -537,7 +537,7 @@ public:
     {
         TurnoverSummary summary;
         const int32_t timeCount = static_cast<int32_t>(signalSet_.dates.size());
-        if (timeCount < AnalysisKernel::kMinimumTurnoverTimeCount || signalSet_.signals.empty()) {
+        if (timeCount < AnalysisKernel::kMinimumTurnoverTimeCount || signalSet_.signalIds.empty()) {
             return summary;
         }
 
@@ -854,7 +854,7 @@ public:
     const int32_t instrumentCount = static_cast<int32_t>(signalSet.instruments.size());
     return timeCount >= 2
         && closeView.rowCount >= 2
-        && !signalSet.signals.empty()
+        && !signalSet.signalIds.empty()
         && CrossSectionPairBuilder::isValidCloseView(closeView, instrumentCount);
 }
 
