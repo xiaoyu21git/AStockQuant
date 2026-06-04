@@ -171,6 +171,8 @@ set(FACTOR_SOURCES
     src/factor_compute/SignalCache.cpp
     src/factor_compute/AnalysisKernel.cpp
     src/factor_compute/AnalysisModule.cpp
+    src/factor_compute/SimulatedTradingExecutor.cpp
+    src/factor_compute/SignalSetBuilder.cpp
 )
 
 # 澶存枃浠?
@@ -219,6 +221,9 @@ set(FACTOR_HEADERS
     include/factor_compute/FactorComputeEngine.h
     include/factor_compute/FactorRegistry.h
     include/factor_compute/FactorOperatorLibrary.h
+    include/factor_compute/GroupedBacktestTypes.h
+    include/factor_compute/SimulatedTradingExecutor.h
+    include/factor_compute/SignalSetBuilder.h
 )
 
 set(FACTOR_COMPUTE_SOURCES
@@ -235,6 +240,8 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/SubMarketDataView.cpp
     src/factor_compute/ParallelChunkScheduler.cpp
     src/factor_compute/FactorSignalAdapter.cpp
+    src/factor_compute/SimulatedTradingExecutor.cpp
+    src/factor_compute/SignalSetBuilder.cpp
 )
 
 set(FACTOR_COMPUTE_HEADERS
@@ -263,6 +270,9 @@ set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/FactorComputeEngine.h
     include/factor_compute/FactorRegistry.h
     include/factor_compute/FactorOperatorLibrary.h
+    include/factor_compute/GroupedBacktestTypes.h
+    include/factor_compute/SimulatedTradingExecutor.h
+    include/factor_compute/SignalSetBuilder.h
 )
 
 # 鍒涘缓搴?

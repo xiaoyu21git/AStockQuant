@@ -1,5 +1,5 @@
-// FactorBacktestBridge.cpp — 桥接层，直接调用 BaseFactor 因子体系计算
-// 通过 HistoricalView 适配器将 CachedMarketDataView 适配为因子所需的 HistoricalView 接口
+// FactorBacktestBridge.cpp — 桥接层，纯参数转换、线程调度、进度信号。
+// 因子计算、模拟成交、分析统计等业务逻辑全部在域层执行。
 
 #include "FactorBacktestBridge.h"
 #include "DataServiceCache.h"
@@ -20,6 +20,8 @@
 #include "DataAvailabilityChecker.h"
 
 #include "factor_compute/IAnalysisModule.h"
+#include "factor_compute/SimulatedTradingExecutor.h"
+#include "factor_compute/SignalSetBuilder.h"
 
 #include "DataService.h"
 
@@ -63,19 +65,12 @@ std::shared_ptr<factor::BaseFactor> createFactor(factor::FactorType type,
     }
 }
 
-/// 将 AnalysisReport 转换为 QML 期望的 QVariantMap 格式
-QVariantMap convertAnalysisReport(const factor::compute::AnalysisReport& report,
-                                   const QString& factorId,
-                                   int instrumentCount = 0,
-                                   const std::vector<double>& lastCrossSectionValues = {},
-                                   const std::vector<double>& groupReturns = {},
-                                   const std::vector<int>& /*groupCounts*/ = {},
-                                   int nGroupsOverride = 5,
-                                   double computedAnnRet = 0.0,
-                                   double computedMaxDD = 0.0,
-                                   double computedAnnStd = 0.0,
-                                   double computedSharpe = 0.0,
-                                   double computedEquity = 1.0)
+} // anonymous namespace
+
+QVariantMap FactorBacktestBridge::convertAnalysisReport(
+    const factor::compute::AnalysisReport& report,
+    const QString& factorId,
+    const factor::compute::SimulatedTradingResult& tradingResult) const
 {
     QVariantMap result;
     result["status"]   = QStringLiteral("SUCCESS");
@@ -83,116 +78,64 @@ QVariantMap convertAnalysisReport(const factor::compute::AnalysisReport& report,
 
     QVariantMap metrics;
 
+    // === 执行指标（来自域层 SimulatedTradingResult） ===
     QVariantMap exec;
-    // 使用独立计算的执行指标，回退到 AnalysisReport 的值
-    exec["annualReturn"]          = std::isfinite(computedAnnRet) ? computedAnnRet : 0.0;
-    exec["sharpeRatio"]           = std::isfinite(computedSharpe) ? computedSharpe : 0.0;
-    exec["maxDrawdown"]           = std::isfinite(computedMaxDD) ? computedMaxDD : 0.0;
-    exec["volatility"]            = std::isfinite(computedAnnStd) ? computedAnnStd : 0.0;
-    exec["totalReturn"]           = std::isfinite(computedEquity) ? (computedEquity - 1.0) : 0.0;
-    auto scalarVal = [](const factor::compute::AnalysisScalarMetric& m) -> double {
-        return m.available ? m.value : 0.0;
-    };
-    exec["winRate"]               = scalarVal(report.informationCoefficientPositiveRate);
-    exec["turnoverRate"]          = scalarVal(report.turnoverRatio);
+    exec["annualReturn"]          = tradingResult.annualizedReturn;
+    exec["sharpeRatio"]           = tradingResult.sharpeRatio;
+    exec["maxDrawdown"]           = tradingResult.maxDrawdown;
+    exec["volatility"]            = tradingResult.annualStdDev;
+    exec["totalReturn"]           = tradingResult.totalReturn;
+    exec["winRate"]               = report.informationCoefficientPositiveRate.available
+        ? report.informationCoefficientPositiveRate.value : 0.0;
+    exec["turnoverRate"]          = report.turnoverRatio.available ? report.turnoverRatio.value : 0.0;
     exec["benchmarkAnnualReturn"] = 0.0;
-    exec["excessAnnualReturn"]    = exec["annualReturn"];
-    exec["trackingError"]         = std::isfinite(computedAnnStd) ? computedAnnStd : 0.0;
-    exec["informationRatio"]      = (computedAnnStd > 1e-12 && std::isfinite(computedAnnRet))
-        ? (computedAnnRet / computedAnnStd) : 0.0;
-    exec["alpha"]                 = scalarVal(report.alpha);
+    exec["excessAnnualReturn"]    = tradingResult.annualizedReturn;
+    exec["trackingError"]         = tradingResult.annualStdDev;
+    exec["informationRatio"]      = (tradingResult.annualStdDev > 1e-12)
+        ? (tradingResult.annualizedReturn / tradingResult.annualStdDev) : 0.0;
+    exec["alpha"]                 = report.alpha.available ? report.alpha.value : 0.0;
     exec["beta"]                  = 0.0;
     metrics["execution"] = exec;
 
+    // === IC 指标 ===
     QVariantMap ic;
-    ic["value"] = scalarVal(report.informationCoefficient);
-    ic["ir"]    = scalarVal(report.informationRatio);
+    ic["value"] = report.informationCoefficient.available
+        ? report.informationCoefficient.value : 0.0;
+    ic["ir"]    = report.informationRatio.available
+        ? report.informationRatio.value : 0.0;
     metrics["ic"] = ic;
 
+    // === 因子质量 ===
     QVariantMap fq;
     fq["coreRating"]      = report.numGroups.available ? (int)report.numGroups.value : 0;
-    fq["coreRatingLabel"] = report.numGroups.available
-                                 ? QStringLiteral("待评估")
-                                 : QStringLiteral("待评估");
-    fq["rankIcir"]        = scalarVal(report.informationRatio);
+    fq["coreRatingLabel"] = QStringLiteral("待评估");
+    fq["rankIcir"]        = report.informationRatio.available
+        ? report.informationRatio.value : 0.0;
     metrics["factorQuality"] = fq;
 
+    // === 研究指标 ===
     QVariantMap rs;
     rs["dataCoverage"] = report.coverageRatio;
-    rs["spreadReturn"] = scalarVal(report.layeredReturnSpread);
+    rs["spreadReturn"] = report.layeredReturnSpread.available
+        ? report.layeredReturnSpread.value : 0.0;
     metrics["research"] = rs;
 
-    // 构建分组结果
+    // === 分组结果（来自域层 SimulatedTradingResult） ===
     QVariantList groups;
-    int nGroups = nGroupsOverride > 0 ? nGroupsOverride : 5;
-    if (report.numGroups.available && report.numGroups.value > 0) {
-        nGroups = report.numGroups.value;
+    for (const auto& gm : tradingResult.groups) {
+        QVariantMap grp;
+        grp["groupIndex"]      = gm.groupIndex;
+        grp["stockCount"]      = gm.stockCount > 0 ? gm.stockCount : 0;
+        grp["returnRate"]      = gm.returnRate;
+        grp["annualizedReturn"] = gm.annualizedReturn;
+        grp["minFactorValue"]  = gm.minFactorValue;
+        grp["maxFactorValue"]  = gm.maxFactorValue;
+        groups.append(grp);
     }
-
-    int realInstrumentCount = (instrumentCount > 0) ? instrumentCount : 0;
-
-    // 因子值范围
-    std::vector<double> sortedVals = lastCrossSectionValues;
-    if (!sortedVals.empty()) {
-        sortedVals.erase(std::remove_if(sortedVals.begin(), sortedVals.end(),
-            [](double v) { return !std::isfinite(v); }), sortedVals.end());
-        std::sort(sortedVals.begin(), sortedVals.end());
-    }
-
-    bool hasRealReturns = !groupReturns.empty() && (int)groupReturns.size() >= nGroups;
-
-    if (realInstrumentCount > 0) {
-        for (int g = 0; g < nGroups; ++g) {
-            QVariantMap grp;
-            grp["groupIndex"] = g + 1;
-            grp["stockCount"] = static_cast<int>(realInstrumentCount / nGroups);
-
-            // 使用模拟成交计算的真实收益，否则回退到 spread
-            double ret = 0.0;
-            if (hasRealReturns) {
-                ret = groupReturns[g];
-            } else if (report.layeredReturnSpread.available && nGroups > 1) {
-                double spreadPerGroup = report.layeredReturnSpread.value / (nGroups - 1);
-                ret = g * spreadPerGroup;
-            }
-
-            grp["returnRate"] = ret;
-            grp["annualizedReturn"] = ret * 252; // 日化→年化
-
-            double minFV = 0.0, maxFV = 0.0;
-            if (!sortedVals.empty()) {
-                size_t n = sortedVals.size();
-                size_t groupSize = n / nGroups;
-                size_t startIdx = g * groupSize;
-                size_t endIdx = (g + 1 == nGroups) ? n - 1 : startIdx + groupSize - 1;
-                if (startIdx < n) {
-                    minFV = sortedVals[startIdx];
-                    maxFV = sortedVals[std::min(endIdx, n - 1)];
-                }
-            }
-            grp["minFactorValue"] = minFV;
-            grp["maxFactorValue"] = maxFV;
-            groups.append(grp);
-        }
-    } else {
-        for (int g = 0; g < nGroups; ++g) {
-            QVariantMap grp;
-            grp["groupIndex"] = g + 1;
-            grp["stockCount"] = 0;
-            grp["returnRate"] = 0.0;
-            grp["annualizedReturn"] = 0.0;
-            grp["minFactorValue"] = 0.0;
-            grp["maxFactorValue"] = 0.0;
-            groups.append(grp);
-        }
-    }
-
     metrics["groups"] = groups;
     result["metrics"] = metrics;
     return result;
 }
-
-} // anonymous namespace
 
 
 FactorBacktestBridge::FactorBacktestBridge(QObject* parent)
@@ -227,7 +170,7 @@ bool FactorBacktestBridge::ensureEngineInitialized()
     // ═══ 解析数据集，构建列式矩阵视图 ═══
     QMap<QString, int> dateToIdx, symToIdx;
     std::vector<QString> datesVec;
-    std::vector<QString> symsOrdered;  // 保证顺序一致性
+    std::vector<QString> symsOrdered;
     QSet<QString> numericFields;
 
     struct FlatRow { QString date, symbol; QVariantMap row; };
@@ -253,15 +196,12 @@ bool FactorBacktestBridge::ensureEngineInitialized()
         return false;
     }
 
-    // ⚠️ 关键修复：对日期排序，避免序列回绕导致净值归零
     std::sort(datesVec.begin(), datesVec.end());
-    // 重建日期索引
     dateToIdx.clear();
     for (int i = 0; i < (int)datesVec.size(); ++i) {
         dateToIdx[datesVec[i]] = i;
     }
 
-    // 发现所有数值字段
     for (const auto& fr : flatRows) {
         for (auto it = fr.row.constBegin(); it != fr.row.constEnd(); ++it) {
             const QString key = it.key();
@@ -352,17 +292,11 @@ bool FactorBacktestBridge::ensureEngineInitialized()
 
     m_marketDataView = std::move(view);
 
-    // 构建 HistoricalView 适配器
     m_historicalAdapter = std::make_shared<factor::bridge::CachedMarketDataViewHistoricalAdapter>(
         *m_marketDataView);
 
-    // DB fallback 已预留接口（HistoricalAdapter::setDbFallback）
-    // 待 DataService 引用传递后连接
-
-    // AnalysisModule 仅用于最终指标计算
     m_analysisModule = std::make_unique<factor::compute::AnalysisModule>();
 
-    // 设置数据库跨截面查询回调（标准业务流程）
     DataService* ds = qobject_cast<DataService*>(m_dataService);
     if (ds) {
         m_historicalAdapter->setDbFallback(
@@ -417,8 +351,18 @@ void FactorBacktestBridge::startBacktestWithFactors(
 
     QVariantList capturedFactors = factorIds;
     int factorTypeInt = m_factorTypeInt;
+    int numGroups = m_numGroups;
 
-    m_workerPool->post([this, capturedFactors, factorTypeInt]() {
+    // 从 backtestRuntimeParams 提取回测参数
+    QVariantMap runtimeParams = m_backtestRuntimeParams;
+    int forwardDays = runtimeParams.value("forwardDays", 30).toInt();
+    int rebalanceDays = runtimeParams.value("rebalanceDays", 15).toInt();
+    double commissionRate = runtimeParams.value("commissionRate", 0.001).toDouble();
+    double slippageRate = runtimeParams.value("slippageRate", 0.001).toDouble();
+    double riskFreeRate = runtimeParams.value("riskFreeRate", 0.02).toDouble();
+
+    m_workerPool->post([this, capturedFactors, factorTypeInt, numGroups,
+                        forwardDays, rebalanceDays, commissionRate, slippageRate, riskFreeRate]() {
         auto emitOnMain = [this](std::function<void()> fn) {
             QMetaObject::invokeMethod(this, std::move(fn), Qt::QueuedConnection);
         };
@@ -470,77 +414,19 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     }
                     return compact;
                 };
-std::vector<std::string> dateStrs;
+                std::vector<std::string> dateStrs;
                 dateStrs.reserve(dates.size());
                 for (const auto& d : dates) {
                     dateStrs.push_back(compactToIso(std::to_string(d.value)));
                 }
 
                 auto symbolsVec = m_historicalAdapter->getAvailableSymbols("");
-                qDebug() << "[FactorBacktestBridge] 标的数=" << symbolsVec.size()
-                         << " fields: pb_ratio=" << m_historicalAdapter->hasField("pb_ratio")
-                         << " pe_ratio=" << m_historicalAdapter->hasField("pe_ratio")
-                         << " market_cap=" << m_historicalAdapter->hasField("market_cap")
-                         << " close=" << m_historicalAdapter->hasField("close")
-                         << " industry_code=" << m_historicalAdapter->hasField("industry_code");
 
-                // 检查 close 数据是否真实存在（非全 0）
-                {
-                    auto closeField = m_marketDataView->getField("close");
-                    if (closeField.has_value()) {
-                        const auto& cv = closeField.value();
-                        double sum = 0.0; int nonZero = 0;
-                        for (int i = 0; i < cv.rowCount && i < cv.columnCount && i < 200; ++i) {
-                            double v = cv.data[i * cv.rowStride + i];
-                            sum += v; if (v != 0.0) ++nonZero;
-                        }
-                        qDebug() << "[FactBridge] close数据 前200对角 sum=" << sum << " nonZero=" << nonZero
-                                 << " rows=" << cv.rowCount << " cols=" << cv.columnCount;
-                    }
-                    auto pbField = m_marketDataView->getField("pb_ratio");
-                    if (pbField.has_value()) {
-                        const auto& pv = pbField.value();
-                        double sum = 0.0; int nonZero = 0;
-                        for (int i = 0; i < pv.rowCount && i < pv.columnCount && i < 200; ++i) {
-                            double v = pv.data[i * pv.rowStride + i];
-                            sum += v; if (v != 0.0) ++nonZero;
-                        }
-                        qDebug() << "[FactBridge] pb_ratio 前200对角 sum=" << sum << " nonZero=" << nonZero
-                                 << " rows=" << pv.rowCount << " cols=" << pv.columnCount;
-                    }
-                }
-
-                // 先做一次诊断：直接查询 HistoricalView
-                {
-                    auto test = m_historicalAdapter->getCrossSection(dateStrs[0], "pb_ratio", {symbolsVec[0]});
-                    qDebug() << "[FactBridge] getCrossSection(" << QString::fromStdString(dateStrs[0])
-                             << ", pb_ratio, " << QString::fromStdString(symbolsVec[0]) << ") size=" << test.size();
-                    if (!test.empty()) {
-                        qDebug() << "[FactBridge]   值=" << test.begin()->second;
-                    }
-                    test = m_historicalAdapter->getCrossSection(dateStrs[0], "pb_ratio", {});
-                    qDebug() << "[FactBridge] getCrossSection(all) size=" << test.size();
-                    if (!test.empty()) {
-                        auto it = test.begin();
-                        qDebug() << "[FactBridge]   首项: symbol=" << QString::fromStdString(it->first) << " val=" << it->second;
-                    }
-                    // 检查 pe_ratio 也有横截面数据
-                    auto testPE = m_historicalAdapter->getCrossSection(dateStrs[0], "pe_ratio", {});
-                    qDebug() << "[FactBridge] getCrossSection(all, pe_ratio) size=" << testPE.size();
-                    if (!testPE.empty()) {
-                        auto itPE = testPE.begin();
-                        qDebug() << "[FactBridge]   pe首项: symbol=" << QString::fromStdString(itPE->first) << " val=" << itPE->second;
-                    }
-                    // 检查前一天/后一天是否有数据
-                    qDebug() << "[FactBridge] dateStrs 前3个日期:" << QString::fromStdString(dateStrs[0])
-                             << QString::fromStdString(dateStrs[1]) << QString::fromStdString(dateStrs[2]);
-                }
-
-                // 对每个日期调用 factor->calculate()
+                // === 因子值计算（域层：BaseFactor::calculate） ===
                 int totalDates = static_cast<int>(dateStrs.size());
-                std::unordered_map<std::string, std::unordered_map<std::string, double>> factorValuesByDate;
-
+                factor::compute::SimulatedTradingExecutor::FactorValuesByDate factorValuesByDate;
                 int validDays = 0;
+
                 for (int di = 0; di < totalDates; ++di) {
                     if (!m_isRunning.load()) break;
                     factor::CalculationContext ctx(dateStrs[di], symbolsVec, m_historicalAdapter);
@@ -549,85 +435,26 @@ std::vector<std::string> dateStrs;
                         factorValuesByDate[dateStrs[di]] = std::move(calcResult.values);
                         ++validDays;
                     }
-                    if (di == 0) {
-                        qDebug() << "[FactBridge] 首个日期(" << QString::fromStdString(dateStrs[di])
-                                 << ")计算" << (calcResult.isEmpty() ? "失败(空)" : "成功")
-                                 << ", values数=" << calcResult.values.size()
-                                 << " availability=" << static_cast<int>(calcResult.dataStatus.availability);
-                        if (!calcResult.dataStatus.message.empty()) {
-                            qDebug() << "[FactBridge] 状态:" << QString::fromStdString(calcResult.dataStatus.message);
-                        }
-                        // 打印首个因子值用于诊断
-                        if (!calcResult.values.empty()) {
-                            auto firstEntry = calcResult.values.begin();
-                            qDebug() << "[FactBridge]   首个因子值: symbol=" << QString::fromStdString(firstEntry->first)
-                                     << " val=" << firstEntry->second;
-                        }
-                        // 检查因子getDataRequirements需要哪些字段
-                        auto req = factor->getDataRequirements();
-                        QStringList fields;
-                        for (const auto& f : req.requiredFields) fields << QString::fromStdString(f);
-                        qDebug() << "[FactBridge] 因子需求字段:" << fields;
-                        for (const auto& f : req.requiredFields) {
-                            qDebug() << "[FactBridge]   hasField(" << QString::fromStdString(f) << ")="
-                                     << m_historicalAdapter->hasField(f);
-                        }
-                        // 检查有效日期数组
-                        qDebug() << "[FactBridge] dateStrs前3:" << QString::fromStdString(dateStrs[0])
-                                 << QString::fromStdString(dateStrs[1]) << QString::fromStdString(dateStrs[2]);
-                        qDebug() << "[FactBridge] symbolsVec前3:" << QString::fromStdString(symbolsVec[0])
-                                 << QString::fromStdString(symbolsVec[1]) << QString::fromStdString(symbolsVec[2]);
-                        qDebug() << "[FactBridge] totalDates=" << totalDates << " validDays=" << validDays;
-                    }
                     double subPct = pct + 55.0 * di / totalDates / nFactors;
                     m_progress = subPct;
                 }
 
-                // 构建 SignalSet 供 AnalysisModule 使用
-                // SignalSet 需要紧凑日期（DateKey::value 为 YYYYMMDD）
-                factor::compute::SignalSet signalSet;
-                signalSet.dates.reserve(dates.size());
-                for (const auto& d : dates) {
-                    factor::compute::DateKey dk;
-                    dk.value = d.value;  // int32_t YYYYMMDD 直接赋值
-                    signalSet.dates.push_back(dk);
+                if (validDays == 0) {
+                    emitOnMain([this, fId] {
+                        emit backtestFailed(QStringLiteral("因子计算无有效结果: ") + fId);
+                        m_isRunning.store(false); emit isRunningChanged();
+                    });
+                    return;
                 }
 
-                signalSet.instruments = m_marketDataView->instruments();
-                signalSet.signalIds.push_back({1});
-
-                int timeCount = static_cast<int>(dateStrs.size());
-                int instCount = static_cast<int>(signalSet.instruments.size());
-                int flatSize = timeCount * instCount;
-                signalSet.values.assign(flatSize, 0.0);
-                signalSet.mask.assign(flatSize, 1U);  // 1=缺失, 0=存在 (kPresentMaskValue=0U)
-                signalSet.index = {instCount, 1, 1};
-                signalSet.progress = {1, 1};
-                signalSet.isPartial = false;
-
-                int totalMasks = 0;
-                for (int di = 0; di < timeCount; ++di) {
-                    const auto& dateStr = dateStrs[di];
-                    auto dateIt = factorValuesByDate.find(dateStr);
-                    if (dateIt == factorValuesByDate.end()) continue;
-                    for (int ii = 0; ii < instCount; ++ii) {
-                        std::string symStr = std::to_string(signalSet.instruments[ii].value);
-                        auto valIt = dateIt->second.find(symStr);
-                        if (valIt != dateIt->second.end()) {
-                            signalSet.values[di * instCount + ii] = valIt->second;
-                            signalSet.mask[di * instCount + ii] = 0U;  // 0=存在
-                            ++totalMasks;
-                        }
-                    }
-                }
-                qDebug() << "[FactBridge] SignalSet 构建完成, totalMasks(存在)=" << totalMasks
-                         << " flatSize=" << flatSize
-                         << " mask[0]=" << signalSet.mask[0]
-                         << " values[0]=" << signalSet.values[0];
+                // === SignalSet 构建（域层：SignalSetBuilder） ===
+                const auto& instruments = m_marketDataView->instruments();
+                factor::compute::SignalSet signalSet = factor::compute::SignalSetBuilder::build(
+                    factorValuesByDate, dates, dateStrs, instruments);
 
                 m_progress = pct + 58.0 / nFactors;
 
-                // 调用 AnalysisModule::analyze()
+                // === 因子分析（域层：AnalysisModule::analyze） ===
                 auto closeView = m_marketDataView->close();
                 auto analysisResult = m_analysisModule->analyze(
                     signalSet, factor::compute::GenerateSpec{}, closeView);
@@ -641,157 +468,40 @@ std::vector<std::string> dateStrs;
                     return;
                 }
 
-                // 收集最后一个日期所有标的的因子值，用于分组 min/max 计算
-                std::vector<double> lastCrossSectionValues;
-                if (validDays > 0 && !dateStrs.empty()) {
-                    const auto& lastDate = dateStrs.back();
-                    auto itLast = factorValuesByDate.find(lastDate);
-                    if (itLast != factorValuesByDate.end()) {
-                        lastCrossSectionValues.reserve(itLast->second.size());
-                        for (const auto& [sym, val] : itLast->second) {
-                            lastCrossSectionValues.push_back(val);
-                        }
+                // === 模拟成交（域层：SimulatedTradingExecutor） ===
+                factor::compute::SimulatedTradingParams tradingParams;
+                tradingParams.numGroups = numGroups;
+                tradingParams.forwardDays = forwardDays;
+                tradingParams.rebalanceDays = rebalanceDays;
+                tradingParams.commissionRate = commissionRate;
+                tradingParams.slippageRate = slippageRate;
+                tradingParams.riskFreeRate = riskFreeRate;
+                factor::compute::SimulatedTradingExecutor executor(tradingParams);
+
+                // 构建 instrumentIdToSymbol 映射
+                std::unordered_map<uint32_t, std::string> instrumentIdToSymbol;
+                for (size_t si = 0; si < symbolsVec.size() && si < instruments.size(); ++si) {
+                    instrumentIdToSymbol[instruments[si].value] = symbolsVec[si];
+                }
+
+                auto tradingResult = executor.execute(
+                    factorValuesByDate,
+                    dateStrs,
+                    closeView,
+                    instruments,
+                    instrumentIdToSymbol);
+
+                // 设置分组 stockCount
+                int instCount = static_cast<int>(instruments.size());
+                for (auto& gm : tradingResult.groups) {
+                    if (gm.stockCount == 0 && numGroups > 0) {
+                        gm.stockCount = instCount / numGroups;
                     }
                 }
 
-                // 模拟成交计算分组收益和执行指标
-                int nGroups = m_numGroups > 0 ? m_numGroups : 5;
-                std::vector<double> groupReturns(nGroups, 0.0);
-                std::vector<int> groupCounts(nGroups, 0);
-                std::vector<double> strategyDailyReturns;  // 策略日收益=各组收益均值（已过滤极端值）
-                double strategyEquity = 1.0;               // 净值
-                double maxEquity = 1.0;
-                double maxDrawdown = 0.0;
-                int sampleCount = 0;
-                // 注意：以下变量在外层声明，不要在 if 块内重复声明（避免影子变量遮蔽）
-                double annualizedReturn = 0.0, annualStd = 0.0, sharpe = 0.0;
-
-                if (validDays > 1 && !dateStrs.empty()) {
-                    qDebug() << "[FactBridge] 开始模拟成交, validDays=" << validDays
-                             << " dateStrs.size=" << dateStrs.size()
-                             << " dateStrs[0]=" << QString::fromStdString(dateStrs[0])
-                             << " dateStrs[last]=" << QString::fromStdString(dateStrs.back());
-                    for (size_t di = 0; di + 1 < dateStrs.size(); ++di) {
-                        const auto& curDate = dateStrs[di];
-                        const auto& nxtDate = dateStrs[di + 1];
-                        auto fvIt = factorValuesByDate.find(curDate);
-                        if (fvIt == factorValuesByDate.end()) continue;
-                        auto curClose = m_historicalAdapter->getCrossSection(curDate, "close", {});
-                        auto nxtClose = m_historicalAdapter->getCrossSection(nxtDate, "close", {});
-                        if (curClose.empty() || nxtClose.empty()) continue;
-
-                        // 按因子值排序标的
-                        std::vector<std::pair<std::string, double>> ranked;
-                        for (const auto& [sym, fv] : fvIt->second) {
-                            ranked.emplace_back(sym, fv);
-                        }
-                        std::sort(ranked.begin(), ranked.end(),
-                            [](const auto& a, const auto& b) { return a.second < b.second; });
-
-                        size_t N = ranked.size();
-                        if (N < static_cast<size_t>(nGroups)) continue;
-                        size_t groupSize = N / nGroups;
-
-                        // 每日各组收益
-                        std::vector<double> dayGroupReturns(nGroups, 0.0);
-                        int validGroups = 0;
-
-                        for (int g = 0; g < nGroups; ++g) {
-                            size_t start = g * groupSize;
-                            size_t end = (g + 1 == nGroups) ? N : start + groupSize;
-                            double sumRet = 0.0;
-                            int cnt = 0;
-                            for (size_t i = start; i < end; ++i) {
-                                const auto& sym = ranked[i].first;
-                                auto curIt = curClose.find(sym);
-                                auto nxtIt = nxtClose.find(sym);
-                                if (curIt != curClose.end() && nxtIt != nxtClose.end()
-                                    && std::abs(curIt->second) > 1e-9
-                                    && std::isfinite(nxtIt->second) && nxtIt->second > 1e-9) {
-                                    double fwdRet = (nxtIt->second / curIt->second) - 1.0;
-                                    if (std::isfinite(fwdRet) && std::abs(fwdRet) < 0.5) {
-                                        sumRet += fwdRet;
-                                        ++cnt;
-                                    }
-                                }
-                            }
-                            if (cnt > 0) {
-                                double avgRet = sumRet / cnt;
-                                groupReturns[g] += avgRet;
-                                groupCounts[g]++;
-                                dayGroupReturns[g] = avgRet;
-                                ++validGroups;
-                            }
-                        }
-
-                        // 策略日收益 = 各组收益均值（天然过滤极端值，且与分组结果一致）
-                        if (validGroups > 0) {
-                            double dailyStrategyRet = 0.0;
-                            for (int g = 0; g < nGroups; ++g) {
-                                dailyStrategyRet += dayGroupReturns[g];
-                            }
-                            dailyStrategyRet /= validGroups;
-
-                            strategyDailyReturns.push_back(dailyStrategyRet);
-                            strategyEquity *= (1.0 + dailyStrategyRet);
-                            if (strategyEquity > maxEquity) maxEquity = strategyEquity;
-                            double dd = (maxEquity > 1e-9) ? (maxEquity - strategyEquity) / maxEquity : 0.0;
-                            if (dd > maxDrawdown) maxDrawdown = dd;
-                            if (sampleCount < 5 || sampleCount % 200 == 0) {
-                                qDebug() << "[FactBridge] dailyRet[" << sampleCount << "] =" << dailyStrategyRet
-                                         << "  equity=" << strategyEquity
-                                         << "  maxDD=" << maxDrawdown
-                                         << " validGroups=" << validGroups;
-                            }
-                            ++sampleCount;
-                        }
-                    }
-
-                    // 平均每日每组收益
-                    for (int g = 0; g < nGroups; ++g) {
-                        if (groupCounts[g] > 0) {
-                            groupReturns[g] /= groupCounts[g];
-                        }
-                    }
-                    qDebug() << "[FactBridge] 模拟分组收益(日化):" << groupReturns;
-
-                    // 计算执行指标（注意：不要声明新变量，直接用外层变量赋值，避免影子遮蔽）
-                    {
-                        double totalReturn = strategyEquity - 1.0;
-                        int nDays = (int)strategyDailyReturns.size();
-                        annualizedReturn = (nDays > 0 && nDays < 10000)
-                            ? std::pow(1.0 + totalReturn, 252.0 / nDays) - 1.0 : totalReturn;
-
-                        double avgDaily = 0.0, variance = 0.0;
-                        for (auto r : strategyDailyReturns) avgDaily += r;
-                        avgDaily /= nDays;
-                        for (auto r : strategyDailyReturns) {
-                            double d = r - avgDaily;
-                            variance += d * d;
-                        }
-                        variance /= nDays;
-                        double dailyStd = std::sqrt(std::max(0.0, variance));
-                        annualStd = dailyStd * std::sqrt(252.0);
-                        sharpe = (annualStd > 1e-12) ? (annualizedReturn / annualStd) : 0.0;
-
-                        qDebug() << "[FactBridge] 执行指标: annRet=" << annualizedReturn
-                                 << " annVol=" << annualStd
-                                 << " maxDD=" << maxDrawdown
-                                 << " sharpe=" << sharpe
-                                 << " totalReturn=" << totalReturn
-                                 << " dailyReturns count=" << nDays;
-                    }
-                }
-                #define SET_IF_FINITE(Dst, Src) if (std::isfinite(Src)) Dst = Src;
-                double computedAnnRet = annualizedReturn;
-                double computedMaxDD = maxDrawdown;
-                double computedSharpe = sharpe;
-
+                // === QVariant 转换（桥接层唯一职责） ===
                 QVariantMap fr = convertAnalysisReport(
-                    analysisResult.value(), fId, instCount, lastCrossSectionValues,
-                    groupReturns, groupCounts, nGroups,
-                    annualizedReturn, maxDrawdown, annualStd, sharpe,
-                    strategyEquity);
+                    analysisResult.value(), fId, tradingResult);
                 lastMetrics = fr["metrics"].toMap();
                 resultsArr.append(fr);
 

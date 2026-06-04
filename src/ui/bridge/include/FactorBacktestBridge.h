@@ -7,7 +7,21 @@
 #include <QVariantList>
 #include <QTimer>
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 🧊 FROZEN — 因子回测桥接层 (2026-06-04)
+// 本文件是 QML ↔ 域层之间的纯桥接层。职责仅限于：
+//   1. QVariant ↔ 域层类型转换
+//   2. 线程调度 (ThreadPoolExecutor)
+//   3. 进度信号发射
+// 严禁在此层添加任何因子计算、模拟成交、分组分析等业务逻辑。
+// 业务逻辑应放入 src/domain/factor/factor_compute/ 域层。
+// 如需扩展回测功能，请扩展 SimulatedTradingExecutor / SignalSetBuilder 等域层组件。
+// ══════════════════════════════════════════════════════════════════════════════
+//
 #include <Eigen/Dense>
+
+#include "factor_compute/AnalysisReportTypes.h"
+#include "factor_compute/GroupedBacktestTypes.h"
 
 #include <atomic>
 #include <chrono>
@@ -124,6 +138,12 @@ signals:
 
 private:
     bool ensureEngineInitialized();
+
+    /// 将 AnalysisReport + SimulatedTradingResult 转换为 QML 所需的 QVariantMap
+    QVariantMap convertAnalysisReport(
+        const factor::compute::AnalysisReport& report,
+        const QString& factorId,
+        const factor::compute::SimulatedTradingResult& tradingResult) const;
 
     QVariantMap m_backtestRuntimeParams;
     QVariantMap m_backtestResult;
