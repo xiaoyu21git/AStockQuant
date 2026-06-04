@@ -2768,4 +2768,81 @@ QVariantList DataService::executeVariantQueryForFetch(const QString& sql,
 QString DataService::resolveNewsTable() const {
     return QStringLiteral("news_sentiment");
 }
+
+QVariantMap DataService::fetchFieldCrossSectionSync(
+    const QString& field,
+    const QString& date,
+    const QStringList& symbols)
+{
+    QVariantMap result;
+    if (!m_impl || !m_impl->database) {
+        qWarning() << "[DataService] fetchFieldCrossSectionSync: database not available";
+        return result;
+    }
+
+    if (field.isEmpty() || date.isEmpty()) {
+        qWarning() << "[DataService] fetchFieldCrossSectionSync: invalid params, field=" << field << "date=" << date;
+        return result;
+    }
+
+    // 安全校验：仅允许字母、数字和下划线组成的字段名，防止 SQL 注入
+    static const QRegularExpression validFieldRe(QStringLiteral("^[a-zA-Z_][a-zA-Z0-9_]*$"));
+    if (!validFieldRe.match(field).hasMatch()) {
+        qWarning() << "[DataService] fetchFieldCrossSectionSync: invalid field name" << field;
+        return result;
+    }
+
+    // 校验日期格式 yyyy-MM-dd
+    const QDate parsedDate = QDate::fromString(date, QStringLiteral("yyyy-MM-dd"));
+    if (!parsedDate.isValid()) {
+        qWarning() << "[DataService] fetchFieldCrossSectionSync: invalid date format" << date;
+        return result;
+    }
+
+    try {
+        QString sql;
+        std::map<QString, QVariant> params;
+        params[QStringLiteral(":trade_date")] = date;
+
+        if (symbols.isEmpty()) {
+            // 查询全部标的
+            sql = QStringLiteral(
+                "SELECT symbol, %1 AS field_value "
+                "FROM daily_bar "
+                "WHERE trade_date = :trade_date "
+                "  AND %1 IS NOT NULL")
+                .arg(field);
+        } else {
+            // 构建 IN 子句的参数化查询
+            QStringList placeholders;
+            for (int i = 0; i < symbols.size(); ++i) {
+                const QString placeholder = QStringLiteral(":sym_%1").arg(i);
+                placeholders.append(placeholder);
+                // 同样对 symbol 值做安全处理（symbol 应为字母数字组合）
+                params[placeholder] = symbols[i];
+            }
+            sql = QStringLiteral(
+                "SELECT symbol, %1 AS field_value "
+                "FROM daily_bar "
+                "WHERE trade_date = :trade_date "
+                "  AND symbol IN (%2) "
+                "  AND %1 IS NOT NULL")
+                .arg(field, placeholders.join(QStringLiteral(", ")));
+        }
+
+        const auto queryResult = m_impl->database->executeQuery(sql, params);
+        for (size_t rowIndex = 0; rowIndex < queryResult.rowCount(); ++rowIndex) {
+            const auto row = queryResult.getRow(rowIndex);
+            const QString symbol = row.getString(QStringLiteral("symbol")).trimmed();
+            const double fieldValue = row.getDouble(QStringLiteral("field_value"));
+            if (!symbol.isEmpty()) {
+                result.insert(symbol, fieldValue);
+            }
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "[DataService] fetchFieldCrossSectionSync failed:" << e.what();
+    }
+
+    return result;
+}
    
