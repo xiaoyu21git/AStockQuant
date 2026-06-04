@@ -9,11 +9,11 @@ namespace {
 [[nodiscard]] RunErrorCode validateFactorBacktestRuntimeRequirements(
     const domain::backtest::BacktestRequest& request) noexcept
 {
-    if (request.universeSpec.resolvedSymbols.isEmpty()) {
+    if (request.universeSpec.resolvedSymbols.empty()) {
         return RunErrorCode::MissingResolvedSymbols;
     }
 
-    if (request.factorOverlaySpec.selectedFactors.isEmpty()) {
+    if (request.factorOverlaySpec.selectedFactors.empty()) {
         return RunErrorCode::MissingSelectedFactors;
     }
 

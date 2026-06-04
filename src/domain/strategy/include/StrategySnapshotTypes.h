@@ -1,64 +1,63 @@
 #pragma once
 
-#include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
+#include "../../types/DomainDate.h"
 #include "../../backtest/include/ResolvedStrategyBehavior.h"
 #include "../../factor/include/factor_enums.h"
 
-#include <QDate>
-#include <QDateTime>
-#include <QList>
-#include <QString>
-#include <QStringView>
-#include <QVector>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace domain::strategy {
 
+/// 域层强类型字符串包装（纯 C++，无 Qt）
 template <typename Tag>
 class StrongText final {
 public:
     StrongText() = default;
-    explicit StrongText(const QString& value)
-        : value_(value.trimmed())
+    explicit StrongText(std::string value)
+        : value_(std::move(value))
     {
     }
 
-    explicit StrongText(QString&& value)
-        : value_(value.trimmed())
+    explicit StrongText(const char* value)
+        : value_(value ? value : "")
     {
     }
 
-    [[nodiscard]] bool isEmpty() const
+    [[nodiscard]] bool isEmpty() const noexcept
     {
-        return value_.isEmpty();
+        return value_.empty();
     }
 
-    [[nodiscard]] bool isValid() const
+    [[nodiscard]] bool isValid() const noexcept
     {
-        return !value_.isEmpty();
+        return !value_.empty();
     }
 
-    [[nodiscard]] bool equalsText(QStringView value) const
+    [[nodiscard]] bool equalsText(std::string_view value) const noexcept
     {
         return value_ == value;
     }
 
-    [[nodiscard]] const QString& text() const
+    [[nodiscard]] const std::string& text() const noexcept
     {
         return value_;
     }
 
-    [[nodiscard]] friend bool operator==(const StrongText& left, const StrongText& right)
+    [[nodiscard]] friend bool operator==(const StrongText& left, const StrongText& right) noexcept
     {
         return left.value_ == right.value_;
     }
 
-    [[nodiscard]] friend bool operator!=(const StrongText& left, const StrongText& right)
+    [[nodiscard]] friend bool operator!=(const StrongText& left, const StrongText& right) noexcept
     {
-        return !(left == right);
+        return left.value_ != right.value_;
     }
 
 private:
-    QString value_;
+    std::string value_;
 };
 
 struct StrategyIdTag;
@@ -112,7 +111,7 @@ struct DatasetId final {
 };
 
 struct Quantity final {
-    qint64 value{0};
+    int64_t value{0};
 
     [[nodiscard]] bool isPositive() const;
 };
@@ -288,8 +287,6 @@ enum class RuntimeOrderMode : int {
     Market = 1,
 };
 
-// RuntimeOrderSide 定义于 StrategyServiceTypes.h
-
 enum class RuntimePositionEffect : int {
     Open = 0,
     Close = 1,
@@ -304,6 +301,47 @@ enum class DiagnosticCode : int {
     RuntimeRuleBlocked = 5,
     AutoOrderRejected = 6,
 };
+
+/// 策略生命周期状态枚举（从桥接层提取到域层，去 Qt）
+enum class StrategyLifecycleStatus : int {
+    Unknown = -1,
+    Draft = 0,
+    Active = 1,
+    Inactive = 2,
+    Testing = 3,
+    Archived = 4,
+    Running = 5,
+    Paused = 6,
+    Stopped = 7,
+};
+
+inline StrategyLifecycleStatus strategyLifecycleStatusFromIndex(int statusIndex)
+{
+    switch (static_cast<StrategyLifecycleStatus>(statusIndex)) {
+    case StrategyLifecycleStatus::Draft:
+    case StrategyLifecycleStatus::Active:
+    case StrategyLifecycleStatus::Inactive:
+    case StrategyLifecycleStatus::Testing:
+    case StrategyLifecycleStatus::Archived:
+    case StrategyLifecycleStatus::Running:
+    case StrategyLifecycleStatus::Paused:
+    case StrategyLifecycleStatus::Stopped:
+        return static_cast<StrategyLifecycleStatus>(statusIndex);
+    case StrategyLifecycleStatus::Unknown:
+    default:
+        return StrategyLifecycleStatus::Unknown;
+    }
+}
+
+inline int strategyLifecycleStatusIndex(StrategyLifecycleStatus status)
+{
+    return static_cast<int>(status);
+}
+
+inline bool isKnownStrategyLifecycleStatus(StrategyLifecycleStatus status)
+{
+    return status != StrategyLifecycleStatus::Unknown;
+}
 
 struct StrategyIdentity final {
     StrategyId strategyId;
@@ -321,13 +359,13 @@ struct StrategyMetadata final {
     VersionText version;
     AuthorName author;
     StrategyLanguage language{StrategyLanguage::Python};
-    QVector<StrategyTag> tags;
-    QDateTime createdAt;
-    QDateTime updatedAt;
+    std::vector<StrategyTag> tags;
+    DomainDateTime createdAt;
+    DomainDateTime updatedAt;
 };
 
 struct StrategyLifecycle final {
-    strategy_view::StrategyLifecycleStatus status{strategy_view::StrategyLifecycleStatus::Unknown};
+    StrategyLifecycleStatus status{StrategyLifecycleStatus::Unknown};
 
     [[nodiscard]] bool isValid() const;
     [[nodiscard]] bool allowsSignalEmission() const;
@@ -367,20 +405,20 @@ struct RuleComposerGroup final {
     RuleGroupRole groupRole{RuleGroupRole::Unspecified};
     RuleGroupOperator groupOperator{RuleGroupOperator::All};
     int minimumMatchCount{0};
-    QVector<RuleComposerRule> rules;
+    std::vector<RuleComposerRule> rules;
 
     [[nodiscard]] bool isValid() const;
 };
 
 struct RuleComposerStage final {
     RuleBindingPhase phase{RuleBindingPhase::Signal};
-    QVector<RuleComposerGroup> groups;
+    std::vector<RuleComposerGroup> groups;
 
     [[nodiscard]] bool isValid() const;
 };
 
 struct RuleComposerState final {
-    QVector<RuleComposerStage> stages;
+    std::vector<RuleComposerStage> stages;
 
     [[nodiscard]] bool isEmpty() const;
 };
@@ -426,8 +464,8 @@ struct UniverseSpec final {
     UniverseMode universeMode{UniverseMode::ExplicitSymbols};
     UniverseType universeType{UniverseType::Equity};
     UniverseSourceId sourceId;
-    QVector<SymbolCode> explicitSymbols;
-    QVector<SymbolCode> resolvedSymbols;
+    std::vector<SymbolCode> explicitSymbols;
+    std::vector<SymbolCode> resolvedSymbols;
 
     [[nodiscard]] bool isValid() const;
 };
@@ -436,8 +474,8 @@ struct FactorOverlaySpec final {
     bool enabled{false};
     int targetPositionCount{10};
     double minimumCompositeScore{0.0};
-    QVector<FactorOverlayAllocation> allocations;
-    QVector<FactorId> selectedFactors;
+    std::vector<FactorOverlayAllocation> allocations;
+    std::vector<FactorId> selectedFactors;
 
     [[nodiscard]] bool isValid() const;
 };
@@ -456,7 +494,7 @@ struct StrategySpec final {
     ExecutionPolicySnapshot executionPolicy;
     StrategyScopeContextSnapshot strategyScopeContext;
     FactorOverlaySpec factorOverlay;
-    QVector<RuleTemplateBinding> ruleTemplateBindings;
+    std::vector<RuleTemplateBinding> ruleTemplateBindings;
     RuleComposerState ruleComposerState;
 
     [[nodiscard]] bool isValid() const;
@@ -501,12 +539,12 @@ struct RiskMetrics final {
 };
 
 struct TimeSeriesSnapshot final {
-    QVector<QDate> dates;
-    QVector<double> portfolioValues;
-    QVector<double> returns;
-    QVector<double> drawdowns;
-    QVector<double> positions;
-    QVector<double> cash;
+    std::vector<DomainDate> dates;
+    std::vector<double> portfolioValues;
+    std::vector<double> returns;
+    std::vector<double> drawdowns;
+    std::vector<double> positions;
+    std::vector<double> cash;
 
     [[nodiscard]] bool isValid() const;
 };
@@ -529,7 +567,7 @@ struct DiagnosticMessage final {
 };
 
 struct StrategyPerformanceSummary final {
-    QDateTime lastRecordedAt;
+    DomainDateTime lastRecordedAt;
     PerformanceSummaryMetrics latestMetrics;
 };
 

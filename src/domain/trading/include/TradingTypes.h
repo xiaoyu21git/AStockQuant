@@ -1,12 +1,12 @@
 #pragma once
 
 #include "../../strategy/include/StrategySnapshotTypes.h"
+#include "../../types/DomainDate.h"
 #include "foundation/Utils/Uuid.h"
 
-#include <QDate>
-#include <QVariantList>
-#include <QVariantMap>
-#include <QVector>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace domain::trading {
 
@@ -60,8 +60,8 @@ struct TradeIntent final {
     strategy::SymbolCode symbol;
     strategy::Quantity quantity;
     strategy::Money referencePrice;
-    QDate signalDate;
-    QDate effectiveDate;
+    DomainDate signalDate;
+    DomainDate effectiveDate;
 
     [[nodiscard]] bool isValid() const
     {
@@ -90,12 +90,12 @@ struct TargetPosition final {
 struct TargetPortfolio final {
     foundation::utils::Uuid portfolioId;
     IntentSource source{IntentSource::FactorBacktest};
-    QVector<TargetPosition> positions;
-    QDate effectiveDate;
+    std::vector<TargetPosition> positions;
+    DomainDate effectiveDate;
 
     [[nodiscard]] bool isValid() const
     {
-        return !positions.isEmpty() && effectiveDate.isValid();
+        return !positions.empty() && effectiveDate.isValid();
     }
 };
 
@@ -103,12 +103,12 @@ struct TradeIntentBatch final {
     foundation::utils::Uuid batchId;
     TradingMode mode{TradingMode::Backtest};
     IntentSource source{IntentSource::StrategyExecution};
-    QVector<TradeIntent> intents;
-    QVector<TargetPosition> targetPositions;
+    std::vector<TradeIntent> intents;
+    std::vector<TargetPosition> targetPositions;
 
     [[nodiscard]] bool isValid() const
     {
-        return !intents.isEmpty() || !targetPositions.isEmpty();
+        return !intents.empty() || !targetPositions.empty();
     }
 };
 
@@ -159,8 +159,8 @@ struct TradingExecutionProfile final {
 };
 
 struct TradingDateWindow final {
-    QDate startDate;
-    QDate endDate;
+    DomainDate startDate;
+    DomainDate endDate;
 
     [[nodiscard]] bool isValid() const
     {
@@ -187,7 +187,7 @@ struct TradingExecutionContext final {
     TradingRiskProfile riskProfile;
     TradingExecutionProfile executionProfile;
     TradingRuntimeOptions runtimeOptions;
-    QVariantMap metadata;
+    DiagnosticMap metadata;
 
     [[nodiscard]] bool isValid() const
     {
@@ -218,7 +218,7 @@ struct TradingAccountSnapshot final {
     strategy::Money totalAsset;
     strategy::Money realizedPnl;
     strategy::Money unrealizedPnl;
-    QDate tradingDate;
+    DomainDate tradingDate;
 
     [[nodiscard]] bool isValid() const
     {
@@ -229,10 +229,10 @@ struct TradingAccountSnapshot final {
 };
 
 struct TradingSnapshot final {
-    QVector<TradingPositionSnapshot> positions;
+    std::vector<TradingPositionSnapshot> positions;
     TradingAccountSnapshot account;
-    QVariantList openOrders;
-    QVariantMap diagnostics;
+    std::vector<DiagnosticRecord> openOrders;
+    DiagnosticMap diagnostics;
 
     [[nodiscard]] bool isValid() const
     {
@@ -243,8 +243,8 @@ struct TradingSnapshot final {
 struct RiskDecision final {
     RiskDecisionType type{RiskDecisionType::Pass};
     strategy::ReasonCode reasonCode;
-    QString message;
-    QVariantMap attributes;
+    std::string message;
+    DiagnosticMap attributes;
 
     [[nodiscard]] bool isBlocking() const
     {
@@ -272,7 +272,7 @@ struct OrderPlanItem final {
     strategy::Money limitPrice;
     strategy::BatchId batchId;
     strategy::ExecutionScopeId executionScopeId;
-    QVariantMap metadata;
+    DiagnosticMap metadata;
 
     [[nodiscard]] bool isValid() const
     {
@@ -281,12 +281,12 @@ struct OrderPlanItem final {
 };
 
 struct OrderPlan final {
-    QVector<OrderPlanItem> items;
-    QVariantMap diagnostics;
+    std::vector<OrderPlanItem> items;
+    DiagnosticMap diagnostics;
 
     [[nodiscard]] bool isValid() const
     {
-        return !items.isEmpty();
+        return !items.empty();
     }
 };
 
@@ -296,7 +296,7 @@ struct AcceptedOrder final {
     OrderSide side{OrderSide::Buy};
     strategy::Quantity quantity;
     strategy::Money acceptedPrice;
-    QVariantMap metadata;
+    DiagnosticMap metadata;
 };
 
 struct FillEvent final {
@@ -305,8 +305,8 @@ struct FillEvent final {
     OrderSide side{OrderSide::Buy};
     strategy::Quantity fillQuantity;
     strategy::Money fillPrice;
-    QDate fillDate;
-    QVariantMap metadata;
+    DomainDate fillDate;
+    DiagnosticMap metadata;
 
     [[nodiscard]] bool isValid() const
     {
@@ -319,14 +319,14 @@ struct FillEvent final {
 
 struct CancelEvent final {
     OrderRef orderRef;
-    QString reason;
-    QVariantMap metadata;
+    std::string reason;
+    DiagnosticMap metadata;
 };
 
 struct MarketPriceMark final {
     strategy::SymbolCode symbol;
     strategy::Money price;
-    QDate tradingDate;
+    DomainDate tradingDate;
 
     [[nodiscard]] bool isValid() const
     {
@@ -335,24 +335,24 @@ struct MarketPriceMark final {
 };
 
 struct ExecutionVenueResult final {
-    QVector<AcceptedOrder> acceptedOrders;
-    QVector<FillEvent> fills;
-    QVariantMap diagnostics;
+    std::vector<AcceptedOrder> acceptedOrders;
+    std::vector<FillEvent> fills;
+    DiagnosticMap diagnostics;
 };
 
 struct CancelResult final {
     bool accepted{false};
-    QString message;
-    QVariantMap diagnostics;
+    std::string message;
+    DiagnosticMap diagnostics;
 };
 
 struct ExecutionResult final {
     RiskDecision riskDecision;
     OrderPlan orderPlan;
-    QVector<AcceptedOrder> acceptedOrders;
-    QVector<FillEvent> fills;
+    std::vector<AcceptedOrder> acceptedOrders;
+    std::vector<FillEvent> fills;
     TradingSnapshot endingSnapshot;
-    QVariantMap diagnostics;
+    DiagnosticMap diagnostics;
 
     [[nodiscard]] bool isBlocked() const
     {

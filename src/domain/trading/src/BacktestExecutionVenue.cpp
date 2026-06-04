@@ -1,7 +1,5 @@
 #include "../include/BacktestExecutionVenue.h"
 
-#include <QDate>
-
 namespace domain::trading {
 
 namespace {
@@ -44,12 +42,12 @@ double taxAmount(const OrderPlanItem& item,
 }
 
 ExecutionVenueResult BacktestExecutionVenue::submit(const OrderPlan& plan,
-                                                    const TradingExecutionContext& context)
+                                                     const TradingExecutionContext& context)
 {
     ExecutionVenueResult result;
-    const QDate fillDate = context.window.startDate.isValid()
+    const DomainDate fillDate = context.window.startDate.isValid()
         ? context.window.startDate
-        : QDate::currentDate();
+        : DomainDate{};
 
     for (const OrderPlanItem& item : plan.items) {
         if (!item.isValid()) {
@@ -60,10 +58,10 @@ ExecutionVenueResult BacktestExecutionVenue::submit(const OrderPlan& plan,
         const double notional = fillPrice * static_cast<double>(item.quantity.value);
         const double commission = commissionAmount(notional, context);
         const double tax = taxAmount(item, notional, context);
-        QVariantMap executionMetadata = item.metadata;
-        executionMetadata.insert(QStringLiteral("commissionAmount"), commission);
-        executionMetadata.insert(QStringLiteral("taxAmount"), tax);
-        executionMetadata.insert(QStringLiteral("grossNotional"), notional);
+        DiagnosticMap executionMetadata = item.metadata;
+        diagnosticSet(executionMetadata, "commissionAmount", std::to_string(commission));
+        diagnosticSet(executionMetadata, "taxAmount", std::to_string(tax));
+        diagnosticSet(executionMetadata, "grossNotional", std::to_string(notional));
 
         AcceptedOrder acceptedOrder;
         acceptedOrder.orderRef.orderId = item.plannedOrderId;
@@ -74,7 +72,7 @@ ExecutionVenueResult BacktestExecutionVenue::submit(const OrderPlan& plan,
         acceptedOrder.quantity = item.quantity;
         acceptedOrder.acceptedPrice.value = fillPrice;
         acceptedOrder.metadata = executionMetadata;
-        result.acceptedOrders.append(acceptedOrder);
+        result.acceptedOrders.push_back(acceptedOrder);
 
         FillEvent fillEvent;
         fillEvent.orderRef = acceptedOrder.orderRef;
@@ -84,11 +82,11 @@ ExecutionVenueResult BacktestExecutionVenue::submit(const OrderPlan& plan,
         fillEvent.fillPrice.value = fillPrice;
         fillEvent.fillDate = fillDate;
         fillEvent.metadata = executionMetadata;
-        result.fills.append(fillEvent);
+        result.fills.push_back(fillEvent);
     }
 
-    if (result.acceptedOrders.isEmpty()) {
-        result.diagnostics.insert(QStringLiteral("reason"), QStringLiteral("no_orders_submitted_to_backtest_venue"));
+    if (result.acceptedOrders.empty()) {
+        diagnosticSet(result.diagnostics, "reason", "no_orders_submitted_to_backtest_venue");
     }
 
     return result;
@@ -99,12 +97,12 @@ CancelResult BacktestExecutionVenue::cancel(const OrderRef& orderRef)
     CancelResult result;
     result.accepted = orderRef.isValid();
     result.message = result.accepted
-        ? QStringLiteral("回测撮合环境已接受撤单")
-        : QStringLiteral("撤单引用无效");
+        ? "回测撮合环境已接受撤单"
+        : "撤单引用无效";
     return result;
 }
 
-QVector<FillEvent> BacktestExecutionVenue::poll()
+std::vector<FillEvent> BacktestExecutionVenue::poll()
 {
     return {};
 }

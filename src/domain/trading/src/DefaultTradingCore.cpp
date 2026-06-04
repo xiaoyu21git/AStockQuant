@@ -41,14 +41,14 @@ ExecutionResult DefaultTradingCore::execute(const TradeIntentBatch& batch,
     result.riskDecision = riskRuleChain_->evaluate(batch, startSnapshot, context.riskProfile);
     if (result.riskDecision.isBlocking()) {
         result.endingSnapshot = startSnapshot;
-        result.diagnostics.insert(QStringLiteral("status"), QStringLiteral("blocked_by_risk"));
+        diagnosticSet(result.diagnostics, "status", "blocked_by_risk");
         return result;
     }
 
     result.orderPlan = planner_->buildOrderPlan(batch, startSnapshot, context);
     if (!result.orderPlan.isValid()) {
         result.endingSnapshot = startSnapshot;
-        result.diagnostics.insert(QStringLiteral("status"), QStringLiteral("no_order_plan"));
+        diagnosticSet(result.diagnostics, "status", "no_order_plan");
         return result;
     }
 

@@ -44,13 +44,13 @@ bool StrategyIdentity::isValid() const
 
 bool StrategyLifecycle::isValid() const
 {
-    return strategy_view::isKnownStrategyLifecycleStatus(status);
+    return isKnownStrategyLifecycleStatus(status);
 }
 
 bool StrategyLifecycle::allowsSignalEmission() const
 {
-    return status == strategy_view::StrategyLifecycleStatus::Active
-        || status == strategy_view::StrategyLifecycleStatus::Testing;
+    return status == StrategyLifecycleStatus::Active
+        || status == StrategyLifecycleStatus::Testing;
 }
 
 bool StrategyRuntimeProfile::hasAny() const
@@ -70,17 +70,17 @@ bool RuleComposerRule::isValid() const
 
 bool RuleComposerGroup::isValid() const
 {
-    return !rules.isEmpty();
+    return !rules.empty();
 }
 
 bool RuleComposerStage::isValid() const
 {
-    return !groups.isEmpty();
+    return !groups.empty();
 }
 
 bool RuleComposerState::isEmpty() const
 {
-    return stages.isEmpty();
+    return stages.empty();
 }
 
 bool FactorOverlayAllocation::isValid() const
@@ -105,11 +105,11 @@ bool UniverseSpec::isValid() const
 {
     switch (universeMode) {
     case UniverseMode::ExplicitSymbols:
-        return !explicitSymbols.isEmpty();
+        return !explicitSymbols.empty();
     case UniverseMode::SavedUniverse:
     case UniverseMode::LinkedWatchlist:
     case UniverseMode::IndexConstituents:
-        return sourceId.isValid() || !resolvedSymbols.isEmpty();
+        return sourceId.isValid() || !resolvedSymbols.empty();
     default:
         return false;
     }
@@ -121,7 +121,7 @@ bool FactorOverlaySpec::isValid() const
         return true;
     }
 
-    if (selectedFactors.isEmpty()) {
+    if (selectedFactors.empty()) {
         return false;
     }
 

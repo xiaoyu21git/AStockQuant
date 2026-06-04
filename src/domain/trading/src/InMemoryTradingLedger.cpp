@@ -1,21 +1,19 @@
 #include "../include/InMemoryTradingLedger.h"
 
-#include <QString>
-
 namespace domain::trading {
 namespace {
 
-QString orderIdText(const OrderRef& orderRef)
+std::string orderIdText(const OrderRef& orderRef)
 {
     return orderRef.orderId.text();
 }
 
-int findPositionIndex(const QVector<TradingPositionSnapshot>& positions,
+int findPositionIndex(const std::vector<TradingPositionSnapshot>& positions,
                       const strategy::SymbolCode& symbol)
 {
-    for (int index = 0; index < positions.size(); ++index) {
-        if (positions.at(index).symbol == symbol) {
-            return index;
+    for (size_t index = 0; index < positions.size(); ++index) {
+        if (positions[index].symbol == symbol) {
+            return static_cast<int>(index);
         }
     }
     return -1;
@@ -35,21 +33,22 @@ void recalculateAccountSnapshot(TradingSnapshot* snapshot)
     snapshot->account.totalAsset.value = snapshot->account.availableCash.value + marketValue;
 }
 
-void removeOpenOrder(QVariantList* openOrders, const OrderRef& orderRef)
+void removeOpenOrder(std::vector<DiagnosticRecord>* openOrders, const OrderRef& orderRef)
 {
     if (!openOrders) {
         return;
     }
 
-    const QString targetOrderId = orderIdText(orderRef);
-    if (targetOrderId.isEmpty()) {
+    const std::string targetOrderId = orderIdText(orderRef);
+    if (targetOrderId.empty()) {
         return;
     }
 
-    for (int index = openOrders->size() - 1; index >= 0; --index) {
-        const QVariantMap orderRecord = openOrders->at(index).toMap();
-        if (orderRecord.value(QStringLiteral("orderId")).toString().trimmed() == targetOrderId) {
-            openOrders->removeAt(index);
+    for (auto it = openOrders->begin(); it != openOrders->end(); ) {
+        if (it->key == "orderId" && it->value == targetOrderId) {
+            it = openOrders->erase(it);
+        } else {
+            ++it;
         }
     }
 }
@@ -63,15 +62,35 @@ InMemoryTradingLedger::InMemoryTradingLedger(const TradingSnapshot& initialSnaps
 
 void InMemoryTradingLedger::applyOrderAccepted(const AcceptedOrder& order)
 {
-    QVariantMap orderRecord;
-    orderRecord.insert(QStringLiteral("orderId"), order.orderRef.orderId.text());
-    orderRecord.insert(QStringLiteral("batchId"), order.orderRef.batchId.text());
-    orderRecord.insert(QStringLiteral("executionScopeId"), order.orderRef.executionScopeId.text());
-    orderRecord.insert(QStringLiteral("symbol"), order.symbol.text());
-    orderRecord.insert(QStringLiteral("quantity"), QVariant::fromValue(order.quantity.value));
-    orderRecord.insert(QStringLiteral("price"), order.acceptedPrice.value);
-    orderRecord.insert(QStringLiteral("metadata"), order.metadata);
-    snapshot_.openOrders.append(orderRecord);
+    DiagnosticRecord rec;
+    rec.key = "orderId";
+    rec.value = order.orderRef.orderId.text();
+    snapshot_.openOrders.push_back(rec);
+
+    DiagnosticRecord recBatch;
+    recBatch.key = "batchId";
+    recBatch.value = order.orderRef.batchId.text();
+    snapshot_.openOrders.push_back(recBatch);
+
+    DiagnosticRecord recScope;
+    recScope.key = "executionScopeId";
+    recScope.value = order.orderRef.executionScopeId.text();
+    snapshot_.openOrders.push_back(recScope);
+
+    DiagnosticRecord recSymbol;
+    recSymbol.key = "symbol";
+    recSymbol.value = order.symbol.text();
+    snapshot_.openOrders.push_back(recSymbol);
+
+    DiagnosticRecord recQty;
+    recQty.key = "quantity";
+    recQty.value = std::to_string(order.quantity.value);
+    snapshot_.openOrders.push_back(recQty);
+
+    DiagnosticRecord recPrice;
+    recPrice.key = "price";
+    recPrice.value = std::to_string(order.acceptedPrice.value);
+    snapshot_.openOrders.push_back(recPrice);
 }
 
 void InMemoryTradingLedger::applyFill(const FillEvent& fill)
@@ -81,8 +100,8 @@ void InMemoryTradingLedger::applyFill(const FillEvent& fill)
     }
 
     const double notional = fill.fillPrice.value * static_cast<double>(fill.fillQuantity.value);
-    const double commissionAmount = fill.metadata.value(QStringLiteral("commissionAmount")).toDouble();
-    const double taxAmount = fill.metadata.value(QStringLiteral("taxAmount")).toDouble();
+    const double commissionAmount = std::stod(diagnosticGet(fill.metadata, "commissionAmount", "0"));
+    const double taxAmount = std::stod(diagnosticGet(fill.metadata, "taxAmount", "0"));
     const double totalFees = commissionAmount + taxAmount;
     const bool isBuy = fill.side == OrderSide::Buy || fill.side == OrderSide::BuyToCover;
     snapshot_.account.availableCash.value += isBuy ? -(notional + totalFees) : (notional - totalFees);
@@ -94,8 +113,8 @@ void InMemoryTradingLedger::applyFill(const FillEvent& fill)
     if (positionIndex < 0) {
         TradingPositionSnapshot position;
         position.symbol = fill.symbol;
-        snapshot_.positions.append(position);
-        positionIndex = snapshot_.positions.size() - 1;
+        snapshot_.positions.push_back(position);
+        positionIndex = static_cast<int>(snapshot_.positions.size()) - 1;
     }
 
     TradingPositionSnapshot& position = snapshot_.positions[positionIndex];

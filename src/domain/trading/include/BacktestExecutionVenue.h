@@ -11,7 +11,7 @@ public:
 
     [[nodiscard]] CancelResult cancel(const OrderRef& orderRef) override;
 
-    [[nodiscard]] QVector<FillEvent> poll() override;
+    [[nodiscard]] std::vector<FillEvent> poll() override;
 };
 
 } // namespace domain::trading

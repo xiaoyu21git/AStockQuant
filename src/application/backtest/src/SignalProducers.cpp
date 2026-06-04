@@ -2,7 +2,9 @@
 
 #include "../../../domain/backtest/include/BacktestRequest.h"
 
-#include <QString>
+#include <cstdint>
+#include <optional>
+#include <string>
 
 namespace application::backtest {
 
@@ -11,16 +13,14 @@ namespace {
 constexpr std::uint32_t kFNV1aOffsetBasis = 2166136261U;
 constexpr std::uint32_t kFNV1aPrime = 16777619U;
 
-[[nodiscard]] std::optional<factor::compute::InstrumentId> toInstrumentId(const QString& symbolText)
+[[nodiscard]] std::optional<factor::compute::InstrumentId> toInstrumentId(const std::string& symbolText)
 {
-    const QString trimmedSymbolText = symbolText.trimmed();
-    if (trimmedSymbolText.isEmpty()) {
+    if (symbolText.empty()) {
         return std::nullopt;
     }
 
-    const QByteArray utf8 = trimmedSymbolText.toUtf8();
     std::uint32_t hash = kFNV1aOffsetBasis;
-    for (char ch : utf8) {
+    for (char ch : symbolText) {
         hash ^= static_cast<std::uint8_t>(ch);
         hash *= kFNV1aPrime;
     }
@@ -33,16 +33,14 @@ constexpr std::uint32_t kFNV1aPrime = 16777619U;
     return instrumentId;
 }
 
-[[nodiscard]] std::optional<factor::compute::FactorId> toFactorId(const QString& factorText)
+[[nodiscard]] std::optional<factor::compute::FactorId> toFactorId(const std::string& factorText)
 {
-    const QString trimmedFactorText = factorText.trimmed();
-    if (trimmedFactorText.isEmpty()) {
+    if (factorText.empty()) {
         return std::nullopt;
     }
 
-    const QByteArray utf8 = trimmedFactorText.toUtf8();
     std::uint32_t hash = kFNV1aOffsetBasis;
-    for (char ch : utf8) {
+    for (char ch : factorText) {
         hash ^= static_cast<std::uint8_t>(ch);
         hash *= kFNV1aPrime;
     }
@@ -59,21 +57,18 @@ constexpr std::uint32_t kFNV1aPrime = 16777619U;
 
 FactorSignalProducerAdapter::FactorSignalProducerAdapter(
     factor::compute::IFactorComputeEngine& factorComputeEngine)
-    : engine_(std::in_place_index<0>, &factorComputeEngine)
+    : engine_(&factorComputeEngine)
 {
 }
 
 FactorSignalProducerAdapter::FactorSignalProducerAdapter(
     factor::compute::ISignalEngine& signalEngine)
-    : engine_(std::in_place_index<1>, &signalEngine)
+    : engine_(&signalEngine)
 {
 }
 
 StageResult FactorSignalProducerAdapter::generateSignal(RunContext& context) const
 {
-    // 实施任务清单 P2-T2：
-    // 统一后半链路 — 因子信号接入统一构单、执行、指标链路。
-    // 下半链路仅有一套实现，无来源特判分支污染主流程。
     if (std::holds_alternative<factor::compute::ISignalEngine*>(engine_)) {
         return generateViaSignalEngine(context);
     }
@@ -86,13 +81,19 @@ StageResult FactorSignalProducerAdapter::generateViaSignalEngine(RunContext& con
     stageResult.stage = RunStage::GenerateSignal;
     stageResult.code = RunErrorCode::None;
 
+    if (!context.spec.request) {
+        stageResult.code = RunErrorCode::StageExecutionFailed;
+        return stageResult;
+    }
+
     const std::optional<factor::compute::GenerateSpec> generateSpec = buildGenerateSpec(context);
     if (!generateSpec.has_value()) {
         stageResult.code = RunErrorCode::StageExecutionFailed;
         return stageResult;
     }
 
-    factor::compute::ISignalEngine* signalEngine = std::get<factor::compute::ISignalEngine*>(engine_);
+    factor::compute::ISignalEngine* signalEngine =
+        std::get<factor::compute::ISignalEngine*>(engine_);
     factor::compute::FactorResult<factor::compute::SignalSet> factorResult =
         signalEngine->generate(*generateSpec);
     if (!factorResult.hasValue() || !factorResult.value().isValid()) {
@@ -100,11 +101,6 @@ StageResult FactorSignalProducerAdapter::generateViaSignalEngine(RunContext& con
         return stageResult;
     }
 
-    // P2-T2 约束：SignalSet 接入统一后半链
-    // 后半链路流程（统一落地设计 Section 5.1）：
-    // stageGenerateSignal → stageConstructTargetPosition → stageRiskApprove →
-    // stageGenerateOrders → stageExecuteFill → stageUpdatePositionState →
-    // stageAggregateMetrics → stageBuildDiagnostics
     context.workingSet.signalBatch.factorSignalSet =
         std::make_shared<const factor::compute::SignalSet>(std::move(factorResult.value()));
     context.workingSet.signalBatch.strategySignalCount = 0U;
@@ -161,11 +157,11 @@ FactorSignalProducerAdapter::buildGenerateSpec(const RunContext& context) const
     spec.postProcessingConfig.minimumValidSampleCount = kMinimumValidSampleCount;
 
     const auto& resolvedSymbols = request.universeSpec.resolvedSymbols;
-    if (resolvedSymbols.size() < kMinimumInstrumentUniverseSize) {
+    if (static_cast<int>(resolvedSymbols.size()) < kMinimumInstrumentUniverseSize) {
         return std::nullopt;
     }
 
-    spec.instrumentUniverse.reserve(static_cast<std::size_t>(resolvedSymbols.size()));
+    spec.instrumentUniverse.reserve(resolvedSymbols.size());
     for (const auto& symbolCode : resolvedSymbols) {
         const std::optional<factor::compute::InstrumentId> instrumentId = toInstrumentId(symbolCode.text());
         if (!instrumentId.has_value()) {
@@ -175,11 +171,11 @@ FactorSignalProducerAdapter::buildGenerateSpec(const RunContext& context) const
     }
 
     const auto& selectedFactors = request.factorOverlaySpec.selectedFactors;
-    if (selectedFactors.size() < kMinimumRequestedFactorCount) {
+    if (static_cast<int>(selectedFactors.size()) < kMinimumRequestedFactorCount) {
         return std::nullopt;
     }
 
-    spec.requestedFactors.reserve(static_cast<std::size_t>(selectedFactors.size()));
+    spec.requestedFactors.reserve(selectedFactors.size());
     for (const auto& factorId : selectedFactors) {
         const std::optional<factor::compute::FactorId> mappedFactorId = toFactorId(factorId.text());
         if (!mappedFactorId.has_value()) {

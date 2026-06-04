@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace application::backtest {
 
@@ -20,12 +21,11 @@ const DefaultRiskLimitsPolicy kDefaultRiskLimitsPolicy{};
 const DefaultTranslationSpecPolicy kDefaultTranslationSpecPolicy{};
 const ConfigurableFillOrderPlanPolicy kDefaultFillOrderPlanPolicy{};
 
-[[nodiscard]] QDate toQDate(int32_t yyyymmdd)
+[[nodiscard]] domain::DomainDate toDomainDate(int32_t yyyymmdd)
 {
-    const int year = yyyymmdd / 10000;
-    const int month = (yyyymmdd / 100) % 100;
-    const int day = yyyymmdd % 100;
-    return QDate(year, month, day);
+    domain::DomainDate date;
+    date.value = yyyymmdd;
+    return date;
 }
 
 [[nodiscard]] domain::trading::TradingExecutionContext buildExecutionContext(
@@ -34,8 +34,8 @@ const ConfigurableFillOrderPlanPolicy kDefaultFillOrderPlanPolicy{};
     domain::trading::TradingExecutionContext context;
     context.mode = domain::trading::TradingMode::Backtest;
     context.marketProfile = request.marketEnvironmentSpec.profile;
-    context.window.startDate = toQDate(request.window.startDate);
-    context.window.endDate = toQDate(request.window.endDate);
+    context.window.startDate = toDomainDate(request.window.startDate);
+    context.window.endDate = toDomainDate(request.window.endDate);
 
     context.costProfile.initialCapital = request.costSpec.initialCapital;
     context.costProfile.commissionRate = request.costSpec.commissionRate;
@@ -68,7 +68,7 @@ const ConfigurableFillOrderPlanPolicy kDefaultFillOrderPlanPolicy{};
     std::uint32_t orderIndex)
 {
     const auto& resolvedSymbols = request.universeSpec.resolvedSymbols;
-    if (!resolvedSymbols.isEmpty()) {
+    if (!resolvedSymbols.empty()) {
         const int index = static_cast<int>(orderIndex % static_cast<std::uint32_t>(resolvedSymbols.size()));
         const domain::strategy::SymbolCode& symbol = resolvedSymbols[index];
         if (symbol.isValid()) {
@@ -77,7 +77,7 @@ const ConfigurableFillOrderPlanPolicy kDefaultFillOrderPlanPolicy{};
     }
 
     const auto& explicitSymbols = request.universeSpec.explicitSymbols;
-    if (!explicitSymbols.isEmpty()) {
+    if (!explicitSymbols.empty()) {
         const int index = static_cast<int>(orderIndex % static_cast<std::uint32_t>(explicitSymbols.size()));
         const domain::strategy::SymbolCode& symbol = explicitSymbols[index];
         if (symbol.isValid()) {
@@ -120,7 +120,7 @@ const ConfigurableFillOrderPlanPolicy kDefaultFillOrderPlanPolicy{};
 
     domain::trading::BacktestExecutionVenue executionVenue;
     const domain::trading::ExecutionVenueResult venueResult = executionVenue.submit(*orderPlan, executionContext);
-    if (venueResult.acceptedOrders.isEmpty() || venueResult.fills.isEmpty()) {
+    if (venueResult.acceptedOrders.empty() || venueResult.fills.empty()) {
         stageResult.code = RunErrorCode::StageExecutionFailed;
         return stageResult;
     }
@@ -162,7 +162,7 @@ std::optional<domain::trading::OrderPlan> ConfigurableFillOrderPlanPolicy::build
 
         domain::trading::OrderPlanItem item;
         item.plannedOrderId =
-            domain::strategy::OrderId(QString::number(kDefaultOrderIdBase + static_cast<int32_t>(index)));
+            domain::strategy::OrderId(std::to_string(kDefaultOrderIdBase + static_cast<int32_t>(index)));
         item.symbol = *symbol;
         item.side = *side;
         item.orderType = input.request.executionSpec.useMarketOnClose
@@ -179,230 +179,7 @@ std::optional<domain::trading::OrderPlan> ConfigurableFillOrderPlanPolicy::build
         orderPlan.items.push_back(item);
     }
 
-    return orderPlan.isValid() ? std::optional<domain::trading::OrderPlan>(std::move(orderPlan)) : std::nullopt;
-}
-
-std::optional<domain::trading::OrderSide> ConfigurableFillOrderPlanPolicy::resolveOrderSide(
-    std::uint32_t orderIndex,
-    FillOrderSideMode fillOrderSideMode,
-    bool enableShortSelling) const
-{
-    if (fillOrderSideMode == FillOrderSideMode::LongOnlyBuy) {
-        return domain::trading::OrderSide::Buy;
-    }
-
-    if (!enableShortSelling) {
-        return std::nullopt;
-    }
-
-    const std::uint32_t bucket = orderIndex % kAlternationPeriod;
-    if (bucket == kEvenBucket) {
-        return domain::trading::OrderSide::Buy;
-    }
-    if (bucket == kOddBucket) {
-        return domain::trading::OrderSide::SellShort;
-    }
-    return std::nullopt;
-}
-
-double FirstSliceSignalValueProjection::project(
-    const factor::compute::SignalSet& signalSet,
-    std::size_t instrumentIndex) const
-{
-    const std::size_t kFirstTimeIndex = 0U;
-    const std::size_t kFirstFactorIndex = 0U;
-    const std::size_t offset = static_cast<std::size_t>(signalSet.index.timeStride) * kFirstTimeIndex
-        + static_cast<std::size_t>(signalSet.index.instrumentStride) * instrumentIndex
-        + static_cast<std::size_t>(signalSet.index.factorStride) * kFirstFactorIndex;
-
-    if (offset >= signalSet.values.size()) {
-        return 0.0;
-    }
-
-    const double value = signalSet.values[offset];
-    return std::isfinite(value) ? value : 0.0;
-}
-
-astock::domain::trading::risk_approval::RiskLimitsSpec DefaultRiskLimitsPolicy::build(
-    const domain::backtest::BacktestRequest& request,
-    std::size_t candidateCount) const
-{
-    astock::domain::trading::risk_approval::RiskLimitsSpec riskLimits;
-
-    const auto toDeltaBps = [](double ratio) {
-        astock::domain::trading::risk_approval::DeltaBps bps;
-        const double scaled = std::round(ratio * kBasisPointScale);
-        const int32_t raw = std::isfinite(scaled) ? static_cast<int32_t>(scaled) : 0;
-        bps.value = std::clamp(
-            raw,
-            astock::domain::trading::risk_approval::DeltaBps::kMinValue,
-            astock::domain::trading::risk_approval::DeltaBps::kMaxValue);
-        return bps;
-    };
-
-    riskLimits.maxSingleOrderDelta = toDeltaBps(request.riskSpec.maxSinglePositionRatio.value);
-    riskLimits.maxTurnoverDelta = toDeltaBps(request.riskSpec.maxPositionRatio.value);
-    riskLimits.maxOrderCount = std::max(
-        kMinimumRiskOrderCount,
-        static_cast<int32_t>(candidateCount));
-    return riskLimits;
-}
-
-astock::domain::trading::signal_orders::TranslationSpec DefaultTranslationSpecPolicy::build() const
-{
-    astock::domain::trading::signal_orders::TranslationSpec spec;
-    spec.maxBuyDelta.value = kMaximumBuyDeltaBps;
-    spec.maxSellDelta.value = kMaximumSellDeltaBps;
-    return spec;
-}
-
-SignalDrivenRiskApprovalStageAdapter::SignalDrivenRiskApprovalStageAdapter(
-    const astock::domain::trading::risk_approval::IRiskApprovalEngine& riskApprovalEngine)
-    : riskApprovalEngine_(riskApprovalEngine)
-    , signalProjection_(kDefaultSignalProjection)
-    , riskLimitsPolicy_(kDefaultRiskLimitsPolicy)
-{
-}
-
-SignalDrivenRiskApprovalStageAdapter::SignalDrivenRiskApprovalStageAdapter(
-    const astock::domain::trading::risk_approval::IRiskApprovalEngine& riskApprovalEngine,
-    const ISignalValueProjection& signalProjection,
-    const IRiskLimitsPolicy& riskLimitsPolicy)
-    : riskApprovalEngine_(riskApprovalEngine)
-    , signalProjection_(signalProjection)
-    , riskLimitsPolicy_(riskLimitsPolicy)
-{
-}
-
-StageResult SignalDrivenRiskApprovalStageAdapter::approve(RunContext& context) const
-{
-    StageResult stageResult;
-    stageResult.stage = RunStage::RiskApprove;
-    stageResult.code = RunErrorCode::None;
-
-    if (!context.workingSet.signalBatch.factorSignalSet
-        || !context.workingSet.signalBatch.factorSignalSet->isValid()) {
-        stageResult.code = RunErrorCode::StageExecutionFailed;
-        return stageResult;
-    }
-
-    const factor::compute::SignalSet& signalSet = *context.workingSet.signalBatch.factorSignalSet;
-    std::vector<RiskOrderCandidate> candidates;
-    candidates.reserve(signalSet.instruments.size());
-
-    for (std::size_t idx = 0U; idx < signalSet.instruments.size(); ++idx) {
-        const factor::compute::InstrumentId instrument = signalSet.instruments[idx];
-        const double value = signalProjection_.project(signalSet, idx);
-
-        RiskOrderCandidate candidate;
-        candidate.instrument.value = instrument.value;
-        candidate.action = resolveOrderAction(value);
-        candidate.delta.value = kDefaultOrderDeltaBps;
-        if (candidate.isValid()) {
-            candidates.push_back(candidate);
-        }
-    }
-
-    if (candidates.empty()) {
-        stageResult.code = RunErrorCode::StageExecutionFailed;
-        return stageResult;
-    }
-
-    const astock::domain::trading::risk_approval::RiskLimitsSpec riskLimits =
-        riskLimitsPolicy_.build(*context.spec.request, candidates.size());
-
-    astock::domain::trading::risk_approval::RiskRuntimeContext runtimeContext;
-    runtimeContext.consumedTurnover.value = 0;
-
-    const auto approvalResult = riskApprovalEngine_.evaluate(riskLimits, runtimeContext, std::move(candidates));
-    if (!approvalResult.ok()) {
-        stageResult.code = RunErrorCode::StageExecutionFailed;
-        return stageResult;
-    }
-
-    context.workingSet.approvedOrderCount = static_cast<std::uint32_t>(approvalResult.value->approved.size());
-    return stageResult;
-}
-
-astock::domain::trading::risk_approval::OrderAction
-SignalDrivenRiskApprovalStageAdapter::resolveOrderAction(double signalValue) noexcept
-{
-    if (signalValue < kSignalNonNegativeThreshold) {
-        return astock::domain::trading::risk_approval::OrderAction::Sell;
-    }
-    return astock::domain::trading::risk_approval::OrderAction::Buy;
-}
-
-SignalDrivenOrderGenerationAdapter::SignalDrivenOrderGenerationAdapter(
-    const astock::domain::trading::signal_orders::ISignalOrderTranslator& signalOrderTranslator)
-    : signalOrderTranslator_(signalOrderTranslator)
-    , signalProjection_(kDefaultSignalProjection)
-    , translationSpecPolicy_(kDefaultTranslationSpecPolicy)
-{
-}
-
-SignalDrivenOrderGenerationAdapter::SignalDrivenOrderGenerationAdapter(
-    const astock::domain::trading::signal_orders::ISignalOrderTranslator& signalOrderTranslator,
-    const ISignalValueProjection& signalProjection,
-    const ITranslationSpecPolicy& translationSpecPolicy)
-    : signalOrderTranslator_(signalOrderTranslator)
-    , signalProjection_(signalProjection)
-    , translationSpecPolicy_(translationSpecPolicy)
-{
-}
-
-StageResult SignalDrivenOrderGenerationAdapter::generateOrders(RunContext& context) const
-{
-    StageResult stageResult;
-    stageResult.stage = RunStage::GenerateOrders;
-    stageResult.code = RunErrorCode::None;
-
-    if (!context.workingSet.signalBatch.factorSignalSet
-        || !context.workingSet.signalBatch.factorSignalSet->isValid()) {
-        stageResult.code = RunErrorCode::StageExecutionFailed;
-        return stageResult;
-    }
-
-    const factor::compute::SignalSet& signalSet = *context.workingSet.signalBatch.factorSignalSet;
-
-    std::vector<SignalSnapshot> snapshots;
-    snapshots.reserve(signalSet.instruments.size());
-    for (std::size_t idx = 0U; idx < signalSet.instruments.size(); ++idx) {
-        SignalSnapshot snapshot;
-        snapshot.instrument.value = signalSet.instruments[idx].value;
-        snapshot.signal = toSignalBps(signalProjection_.project(signalSet, idx));
-        if (snapshot.isValid()) {
-            snapshots.push_back(snapshot);
-        }
-    }
-
-    if (snapshots.empty()) {
-        stageResult.code = RunErrorCode::StageExecutionFailed;
-        return stageResult;
-    }
-
-    const astock::domain::trading::signal_orders::TranslationSpec translationSpec =
-        translationSpecPolicy_.build();
-
-    const auto translationResult = signalOrderTranslator_.translate(translationSpec, std::move(snapshots));
-    if (!translationResult.ok()) {
-        stageResult.code = RunErrorCode::StageExecutionFailed;
-        return stageResult;
-    }
-
-    context.workingSet.generatedOrderCount =
-        static_cast<std::uint32_t>(translationResult.value->items.size());
-    return stageResult;
-}
-
-astock::domain::trading::signal_orders::SignalBps
-SignalDrivenOrderGenerationAdapter::toSignalBps(double signalValue) noexcept
-{
-    astock::domain::trading::signal_orders::SignalBps result;
-    const double scaled = std::round(signalValue * static_cast<double>(kBasisPointScale));
-    const int32_t raw = std::isfinite(scaled) ? static_cast<int32_t>(scaled) : 0;
-    result.value = std::clamp(raw, kMinimumSignalBps, kMaximumSignalBps);
-    return result;
+    return orderPlan;
 }
 
 BacktestVenueFillEngineAdapter::BacktestVenueFillEngineAdapter()
@@ -423,6 +200,20 @@ LiveVenueFillEngineAdapter::LiveVenueFillEngineAdapter()
 StageResult LiveVenueFillEngineAdapter::executeFill(RunContext& context) const
 {
     return executeFillWithBacktestVenue(context, fillOrderPlanPolicy_);
+}
+
+std::optional<domain::trading::OrderSide> resolveOrderSide(
+    std::uint32_t orderIndex,
+    FillOrderSideMode fillOrderSideMode,
+    bool enableShortSelling)
+{
+    if (fillOrderSideMode != FillOrderSideMode::AlternatingLongShort || !enableShortSelling) {
+        return domain::trading::OrderSide::Buy;
+    }
+
+    return (orderIndex % 2U == 0U)
+        ? domain::trading::OrderSide::Buy
+        : domain::trading::OrderSide::Sell;
 }
 
 } // namespace application::backtest

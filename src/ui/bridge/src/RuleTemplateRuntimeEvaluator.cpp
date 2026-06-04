@@ -682,10 +682,10 @@ bool isBlockingTemplateResult(const QVariantMap& thenBlock,
 QVariantMap buildCandidateScope(const RuntimeRuleTemplateEvaluationContext& context)
 {
     QVariantMap candidate;
-    candidate.insert(ruleTemplateString(rule_template_strings::kScopeSymbol), context.symbol.text().toUpper());
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeSymbol), QString::fromStdString(context.symbol.text()).toUpper());
     candidate.insert(ruleTemplateString(rule_template_strings::kScopeLatestPrice), context.latestPrice);
     candidate.insert(ruleTemplateString(rule_template_strings::kScopeReferencePrice), context.referencePrice);
-    candidate.insert(ruleTemplateString(rule_template_strings::kScopeMarketEventType), context.marketEventType.text());
+    candidate.insert(ruleTemplateString(rule_template_strings::kScopeMarketEventType), QString::fromStdString(context.marketEventType.text()));
     candidate.insert(ruleTemplateString(rule_template_strings::kScopeCandidateAction), candidateActionName(context.candidateAction));
     candidate.insert(ruleTemplateString(rule_template_strings::kScopeCandidateStrength), context.candidateStrength);
     return candidate;
@@ -695,7 +695,7 @@ QVariantMap buildMarketScope(const RuntimeRuleTemplateEvaluationContext& context
 {
     QVariantMap market = context.marketSessionSnapshot;
     if (!context.marketEventType.isEmpty()) {
-        market.insert(ruleTemplateString(rule_template_strings::kScopeMarketEventType), context.marketEventType.text());
+        market.insert(ruleTemplateString(rule_template_strings::kScopeMarketEventType), QString::fromStdString(context.marketEventType.text()));
     }
     return market;
 }
@@ -920,7 +920,7 @@ double firstNumericMapValue(const QVariantMap& map,
 domain::strategy::GroupId normalizedBindingGroupIdValue(const QVariantMap& binding)
 {
     return domain::strategy::GroupId(
-        firstNonEmptyBindingValue(binding, {rule_template_strings::kBindingGroupId}).trimmed());
+        firstNonEmptyBindingValue(binding, {rule_template_strings::kBindingGroupId}).trimmed().toStdString());
 }
 
 domain::strategy::RuleGroupOperator normalizedBindingGroupOperatorValue(const QVariantMap& binding)
@@ -969,7 +969,7 @@ domain::strategy::RuleGroupRole normalizedBindingGroupRoleValue(const QVariantMa
 domain::strategy::GroupTitle normalizedBindingGroupTitleValue(const QVariantMap& binding)
 {
     return domain::strategy::GroupTitle(
-        firstNonEmptyBindingValue(binding, {rule_template_strings::kBindingGroupTitle}).trimmed());
+        firstNonEmptyBindingValue(binding, {rule_template_strings::kBindingGroupTitle}).trimmed().toStdString());
 }
 
 int ruleBindingPhaseIndexFromStageName(const QString& stage)
@@ -1376,8 +1376,8 @@ RuntimeRuleTemplateEvaluationResult selectGroupMatchedResult(
         return selectedResult;
     }
 
-    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupId), groupedEvaluation.groupId.text());
-    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupTitle), groupedEvaluation.groupTitle.text());
+    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupId), QString::fromStdString(groupedEvaluation.groupId.text()));
+    selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupTitle), QString::fromStdString(groupedEvaluation.groupTitle.text()));
     selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupRole), static_cast<int>(groupedEvaluation.groupRole));
     selectedResult.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupOperator), static_cast<int>(groupedEvaluation.groupOperator));
     selectedResult.binding.insert(
@@ -1407,7 +1407,7 @@ double candidateSelectionScore(const RuntimeRuleTemplateEvaluationResult& result
 
 QString groupDisplayName(const GroupedTemplateEvaluation& groupedEvaluation)
 {
-    const QString groupTitle = groupedEvaluation.groupTitle.text();
+    const QString groupTitle = QString::fromStdString(groupedEvaluation.groupTitle.text());
     const QString groupRole = ruleGroupRoleName(groupedEvaluation.groupRole);
     if (!groupTitle.isEmpty() && !groupRole.isEmpty()) {
         return groupTitle + ruleTemplateString(rule_template_strings::kSeparatorScopeDisplay) + groupRole;
@@ -1418,7 +1418,7 @@ QString groupDisplayName(const GroupedTemplateEvaluation& groupedEvaluation)
     if (!groupRole.isEmpty()) {
         return groupRole;
     }
-    return groupedEvaluation.groupId.text();
+    return QString::fromStdString(groupedEvaluation.groupId.text());
 }
 
 RuntimeRuleTemplateEvaluationResult adjudicationBlockedResult(
@@ -1441,8 +1441,8 @@ RuntimeRuleTemplateEvaluationResult adjudicationBlockedResult(
     result.resultType = domain::strategy::RuleTemplateResultType::Unspecified;
     result.payload.clear();
     result.state.clear();
-    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupId), groupedEvaluation.groupId.text());
-    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupTitle), groupedEvaluation.groupTitle.text());
+    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupId), QString::fromStdString(groupedEvaluation.groupId.text()));
+    result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupTitle), QString::fromStdString(groupedEvaluation.groupTitle.text()));
     result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupRole), static_cast<int>(groupedEvaluation.groupRole));
     result.binding.insert(ruleTemplateString(rule_template_strings::kBindingGroupOperator), static_cast<int>(groupedEvaluation.groupOperator));
     result.binding.insert(
@@ -1458,9 +1458,9 @@ QVariantMap buildGroupDecision(const GroupedTemplateEvaluation& groupedEvaluatio
     const int threshold = resolvedGroupMatchThreshold(groupedEvaluation);
     const double aggregatedScore = matchedScoreSum(groupedEvaluation);
     decision.insert(ruleTemplateString(rule_template_strings::kFieldStage), ruleBindingPhaseName(groupedEvaluation.stage));
-    decision.insert(ruleTemplateString(rule_template_strings::kComposerGroupId), groupedEvaluation.groupId.text());
+    decision.insert(ruleTemplateString(rule_template_strings::kComposerGroupId), QString::fromStdString(groupedEvaluation.groupId.text()));
     if (groupedEvaluation.groupTitle.isValid()) {
-        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldGroupTitle), groupedEvaluation.groupTitle.text());
+        decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldGroupTitle), QString::fromStdString(groupedEvaluation.groupTitle.text()));
     }
     const QString groupRole = ruleGroupRoleName(groupedEvaluation.groupRole);
     if (!groupRole.isEmpty()) {
@@ -1517,7 +1517,7 @@ QVariantMap buildGroupDecision(const GroupedTemplateEvaluation& groupedEvaluatio
         selectGroupMatchedResult(groupedEvaluation);
     if (selectedResult.matched) {
         if (!selectedResult.ruleId.isEmpty()) {
-            decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedRuleId), selectedResult.ruleId.text());
+            decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedRuleId), QString::fromStdString(selectedResult.ruleId.text()));
         }
         if (selectedResult.resultType != domain::strategy::RuleTemplateResultType::Unspecified) {
             decision.insert(
@@ -1525,7 +1525,7 @@ QVariantMap buildGroupDecision(const GroupedTemplateEvaluation& groupedEvaluatio
                 ruleTemplateResultTypeName(selectedResult.resultType));
         }
         if (!selectedResult.reasonCode.isEmpty()) {
-            decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedReasonCode), selectedResult.reasonCode.text());
+            decision.insert(ruleTemplateString(rule_template_strings::kDecisionFieldMatchedReasonCode), QString::fromStdString(selectedResult.reasonCode.text()));
         }
         decision.insert(
             ruleTemplateString(rule_template_strings::kDecisionFieldSelectedBy),
@@ -1568,9 +1568,9 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplate(
     result.hasTemplate = true;
     result.binding = compiledTemplate.value(ruleTemplateString(rule_template_strings::kCompiledTemplateBinding)).toMap();
     result.templateNamespace = domain::strategy::NamespaceId(
-        compiledTemplate.value(ruleTemplateString(rule_template_strings::kFieldNamespace)).toString().trimmed());
+        compiledTemplate.value(ruleTemplateString(rule_template_strings::kFieldNamespace)).toString().trimmed().toStdString());
     result.templateFilePath = domain::strategy::FilePathToken(
-        compiledTemplate.value(ruleTemplateString(rule_template_strings::kCompiledTemplateFilePath)).toString().trimmed());
+        compiledTemplate.value(ruleTemplateString(rule_template_strings::kCompiledTemplateFilePath)).toString().trimmed().toStdString());
 
     const QVariantMap scopes = buildScopes(context);
     QVariantList rules = compiledTemplate.value(ruleTemplateString(rule_template_strings::kFieldRules)).toList();
@@ -1595,9 +1595,9 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplate(
         result.stage = parseRuleTemplateStage(
             rule.value(ruleTemplateString(rule_template_strings::kFieldStage)).toString());
         result.ruleId = domain::strategy::RuleTemplateId(
-            rule.value(ruleTemplateString(rule_template_strings::kFieldId)).toString().trimmed());
+            rule.value(ruleTemplateString(rule_template_strings::kFieldId)).toString().trimmed().toStdString());
         result.reasonCode = domain::strategy::ReasonCode(
-            thenBlock.value(ruleTemplateString(rule_template_strings::kFieldReasonCode)).toString().trimmed());
+            thenBlock.value(ruleTemplateString(rule_template_strings::kFieldReasonCode)).toString().trimmed().toStdString());
         result.message = thenBlock.value(ruleTemplateString(rule_template_strings::kFieldMessage)).toString().trimmed();
         result.resultType = normalizedResultType(thenBlock);
         result.payload = thenBlock.value(ruleTemplateString(rule_template_strings::kFieldPayload)).toMap();
@@ -1770,20 +1770,20 @@ RuntimeRuleTemplateEvaluationResult evaluateRuleTemplates(
     }
 
     if (firstUnmetMandatoryGroup) {
-        RuntimeRuleTemplateEvaluationResult gatedResult = adjudicationBlockedResult(
+    RuntimeRuleTemplateEvaluationResult gatedResult = adjudicationBlockedResult(
             fallbackResult,
             *firstUnmetMandatoryGroup,
-            domain::strategy::ReasonCode(ruleTemplateString(rule_template_strings::kRuntimeReasonMustPassUnmet)),
+            domain::strategy::ReasonCode(std::string{rule_template_strings::kRuntimeReasonMustPassUnmet}),
             QStringLiteral("必须满足组未全部通过: %1").arg(groupDisplayName(*firstUnmetMandatoryGroup)));
         gatedResult.groupDecisions = groupDecisions;
         return gatedResult;
     }
 
     if (hasApplicableTriggerGroup && !hasMatchedTriggerGroup && firstTriggerGroup) {
-        RuntimeRuleTemplateEvaluationResult gatedResult = adjudicationBlockedResult(
+    RuntimeRuleTemplateEvaluationResult gatedResult = adjudicationBlockedResult(
             fallbackResult,
             *firstTriggerGroup,
-            domain::strategy::ReasonCode(ruleTemplateString(rule_template_strings::kRuntimeReasonAnyPassUnmet)),
+            domain::strategy::ReasonCode(std::string{rule_template_strings::kRuntimeReasonAnyPassUnmet}),
             QStringLiteral("任一满足组尚未命中: %1").arg(groupDisplayName(*firstTriggerGroup)));
         gatedResult.groupDecisions = groupDecisions;
         return gatedResult;

@@ -1,24 +1,23 @@
 #include "../include/DefaultTradingPlanner.h"
 
-#include <QString>
-#include <QSet>
+#include <unordered_set>
 
 namespace domain::trading {
 namespace {
 
 strategy::OrderId generatedOrderId()
 {
-    return strategy::OrderId(QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string()));
+    return strategy::OrderId(foundation::utils::Uuid::generate_v4().to_string());
 }
 
 strategy::BatchId generatedBatchId()
 {
-    return strategy::BatchId(QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string()));
+    return strategy::BatchId(foundation::utils::Uuid::generate_v4().to_string());
 }
 
 strategy::ExecutionScopeId generatedExecutionScopeId()
 {
-    return strategy::ExecutionScopeId(QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string()));
+    return strategy::ExecutionScopeId(foundation::utils::Uuid::generate_v4().to_string());
 }
 
 strategy::Quantity currentPositionQuantity(const TradingSnapshot& snapshot,
@@ -37,7 +36,7 @@ void appendPlannedOrder(OrderPlan* plan,
                         OrderSide side,
                         const strategy::Quantity& quantity,
                         const strategy::Money& price,
-                        const QVariantMap& metadata = {})
+                        const DiagnosticMap& metadata = {})
 {
     if (!plan || !symbol.isValid() || !quantity.isPositive() || !price.isFinite()) {
         return;
@@ -53,7 +52,7 @@ void appendPlannedOrder(OrderPlan* plan,
     item.batchId = generatedBatchId();
     item.executionScopeId = generatedExecutionScopeId();
     item.metadata = metadata;
-    plan->items.append(item);
+    plan->items.push_back(item);
 }
 
 } // namespace
@@ -78,10 +77,10 @@ OrderPlan DefaultTradingPlanner::buildOrderPlan(const TradeIntentBatch& batch,
         item.limitPrice = intent.referencePrice;
         item.batchId = generatedBatchId();
         item.executionScopeId = generatedExecutionScopeId();
-        plan.items.append(item);
+        plan.items.push_back(item);
     }
 
-    QSet<QString> targetedSymbols;
+    std::unordered_set<std::string> targetedSymbols;
     for (const TargetPosition& target : batch.targetPositions) {
         if (!target.isValid() || !target.targetQuantity.isPositive()) {
             continue;
@@ -89,12 +88,12 @@ OrderPlan DefaultTradingPlanner::buildOrderPlan(const TradeIntentBatch& batch,
 
         targetedSymbols.insert(target.symbol.text());
         const strategy::Quantity currentQuantity = currentPositionQuantity(snapshot, target.symbol);
-        const qint64 delta = target.targetQuantity.value - currentQuantity.value;
+        const int64_t delta = target.targetQuantity.value - currentQuantity.value;
         if (delta > 0) {
-            QVariantMap metadata;
-            metadata.insert(QStringLiteral("targetMode"), QStringLiteral("rebalance_delta"));
-            metadata.insert(QStringLiteral("targetQuantity"), QVariant::fromValue(target.targetQuantity.value));
-            metadata.insert(QStringLiteral("currentQuantity"), QVariant::fromValue(currentQuantity.value));
+            DiagnosticMap metadata;
+            diagnosticSet(metadata, "targetMode", "rebalance_delta");
+            diagnosticSet(metadata, "targetQuantity", std::to_string(target.targetQuantity.value));
+            diagnosticSet(metadata, "currentQuantity", std::to_string(currentQuantity.value));
             appendPlannedOrder(&plan,
                                target.symbol,
                                OrderSide::Buy,
@@ -102,10 +101,10 @@ OrderPlan DefaultTradingPlanner::buildOrderPlan(const TradeIntentBatch& batch,
                                target.referencePrice,
                                metadata);
         } else if (delta < 0) {
-            QVariantMap metadata;
-            metadata.insert(QStringLiteral("targetMode"), QStringLiteral("rebalance_delta"));
-            metadata.insert(QStringLiteral("targetQuantity"), QVariant::fromValue(target.targetQuantity.value));
-            metadata.insert(QStringLiteral("currentQuantity"), QVariant::fromValue(currentQuantity.value));
+            DiagnosticMap metadata;
+            diagnosticSet(metadata, "targetMode", "rebalance_delta");
+            diagnosticSet(metadata, "targetQuantity", std::to_string(target.targetQuantity.value));
+            diagnosticSet(metadata, "currentQuantity", std::to_string(currentQuantity.value));
             appendPlannedOrder(&plan,
                                target.symbol,
                                OrderSide::Sell,
@@ -115,19 +114,19 @@ OrderPlan DefaultTradingPlanner::buildOrderPlan(const TradeIntentBatch& batch,
         }
     }
 
-    if (!batch.targetPositions.isEmpty()) {
+    if (!batch.targetPositions.empty()) {
         for (const TradingPositionSnapshot& position : snapshot.positions) {
             if (!position.symbol.isValid() || !position.quantity.isPositive()) {
                 continue;
             }
-            if (targetedSymbols.contains(position.symbol.text())) {
+            if (targetedSymbols.count(position.symbol.text()) > 0) {
                 continue;
             }
 
-            QVariantMap metadata;
-            metadata.insert(QStringLiteral("targetMode"), QStringLiteral("rebalance_close"));
-            metadata.insert(QStringLiteral("targetQuantity"), 0);
-            metadata.insert(QStringLiteral("currentQuantity"), QVariant::fromValue(position.quantity.value));
+            DiagnosticMap metadata;
+            diagnosticSet(metadata, "targetMode", "rebalance_close");
+            diagnosticSet(metadata, "targetQuantity", "0");
+            diagnosticSet(metadata, "currentQuantity", std::to_string(position.quantity.value));
             appendPlannedOrder(&plan,
                                position.symbol,
                                OrderSide::Sell,
@@ -137,8 +136,8 @@ OrderPlan DefaultTradingPlanner::buildOrderPlan(const TradeIntentBatch& batch,
         }
     }
 
-    if (plan.items.isEmpty()) {
-        plan.diagnostics.insert(QStringLiteral("reason"), QStringLiteral("no_order_plan_items_generated"));
+    if (plan.items.empty()) {
+        diagnosticSet(plan.diagnostics, "reason", "no_order_plan_items_generated");
     }
 
     return plan;

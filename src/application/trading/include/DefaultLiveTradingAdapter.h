@@ -13,7 +13,7 @@ public:
         const QVariantMap& tradingConfiguration,
         const QVariantMap& riskConfiguration) const override;
 
-    [[nodiscard]] QVector<domain::trading::FillEvent> translateRuntimeFeedback(
+    [[nodiscard]] std::vector<domain::trading::FillEvent> translateRuntimeFeedback(
         const QVariantList& runtimeEvents) const override;
 };
 

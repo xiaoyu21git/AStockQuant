@@ -18,7 +18,7 @@ public:
         const QVariantMap& tradingConfiguration,
         const QVariantMap& riskConfiguration) const = 0;
 
-    [[nodiscard]] virtual QVector<domain::trading::FillEvent> translateRuntimeFeedback(
+    [[nodiscard]] virtual std::vector<domain::trading::FillEvent> translateRuntimeFeedback(
         const QVariantList& runtimeEvents) const = 0;
 };
 
