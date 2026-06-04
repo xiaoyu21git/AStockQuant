@@ -13,7 +13,7 @@ import "../../Backtest" as BacktestComponents
 Item {
     id: root
     
-    // ============ 属性 ============
+    // ============ 属�?============
     
     property var backtestResult: ({})
     property var metricSections: ({})
@@ -70,7 +70,8 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 100
                     }
                     
                     // 夏普比率
@@ -82,19 +83,19 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
-                    // 最大回撤
+                    // 最大回�?
                     BacktestComponents.BacktestMetricCard {
-                        title: "最大回撤"
+                        title: "最大回�?
                         value: root.metricPercentText(executionMetrics().maxDrawdown, 2)
                         description: "Max Drawdown"
                         trend: "down"
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
                     // 胜率
@@ -106,7 +107,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                 }
             }
@@ -131,7 +132,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
 
                     BacktestComponents.BacktestMetricCard {
@@ -142,7 +143,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
 
                     BacktestComponents.BacktestMetricCard {
@@ -153,7 +154,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
 
                     BacktestComponents.BacktestMetricCard {
@@ -164,7 +165,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
 
                     BacktestComponents.BacktestMetricCard {
@@ -175,7 +176,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
 
                     BacktestComponents.BacktestMetricCard {
@@ -186,7 +187,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                 }
             }
@@ -203,40 +204,40 @@ Item {
                     anchors.margins: 16
                     spacing: 16
                     
-                    // IC值
+                    // IC�?
                     BacktestComponents.BacktestMetricCard {
-                        title: "IC值"
+                        title: "IC�?
                         value: root.metricNumberText(icMetrics().value, 3)
                         description: "Information Coefficient"
                         trend: root.metricTrend(icMetrics().value)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
-                    // IR值
+                    // IR�?
                     BacktestComponents.BacktestMetricCard {
-                        title: "IR值"
+                        title: "IR�?
                         value: root.metricNumberText(icMetrics().ir, 2)
                         description: "Information Ratio"
                         trend: root.metricTrend(icMetrics().ir)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
-                    // IC标准差
+                    // IC标准�?
                     BacktestComponents.BacktestMetricCard {
-                        title: "IC标准差"
+                        title: "IC标准�?
                         value: root.metricNumberText(icMetrics().std, 3)
                         description: "IC Std Dev"
                         trend: "neutral"
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
                     // IC正率
@@ -248,7 +249,7 @@ Item {
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
-                        Layout.preferredWidth: 120
+                        Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                 }
             }
@@ -286,11 +287,11 @@ Item {
                             
                             // 表头
                             TableHeaderCell { text: "组别"; width: 80 }
-                            TableHeaderCell { text: "股票数"; width: 80 }
+                            TableHeaderCell { text: "股票�?; width: 80 }
                             TableHeaderCell { text: "收益"; width: 100 }
                             TableHeaderCell { text: "年化收益"; width: 100 }
-                            TableHeaderCell { text: "最小因子值"; width: 100 }
-                            TableHeaderCell { text: "最大因子值"; width: 100 }
+                            TableHeaderCell { text: "最小因子�?; width: 100 }
+                            TableHeaderCell { text: "最大因子�?; width: 100 }
                         }
                         
                         delegate: Row {
@@ -301,11 +302,11 @@ Item {
                             // 组别
                             TableCell {
                                 width: 80
-                                text: "组" + (modelData.groupIndex || (index + 1))
+                                text: "�? + (modelData.groupIndex || (index + 1))
                                 color: index === 0 ? "#EF4444" : index === groupMetrics().length - 1 ? "#10B981" : "#F1F5F9"
                             }
                             
-                            // 股票数
+                            // 股票�?
                             TableCell {
                                 width: 80
                                 text: root.metricIntegerText(modelData.stockCount)
@@ -318,7 +319,7 @@ Item {
                                 color: root.metricColor(modelData.returnRate)
                             }
                             
-                            // 波动率
+                            // 波动�?
                             TableCell {
                                 width: 100
                                 text: root.metricPercentText(modelData.annualizedReturn, 2)
@@ -331,7 +332,7 @@ Item {
                                 color: "#F1F5F9"
                             }
                             
-                            // 最大回撤
+                            // 最大回�?
                             TableCell {
                                 width: 100
                                 text: root.metricNumberText(modelData.maxFactorValue, 2)
@@ -355,7 +356,7 @@ Item {
                     spacing: 12
                     
                     Text {
-                        text: "📊 分组绩效可视化"
+                        text: "📊 分组绩效可视�?
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
                         color: "#F1F5F9"
@@ -389,7 +390,7 @@ Item {
                         color: "#F1F5F9"
                     }
                     
-                    // 图表占位符
+                    // 图表占位�?
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -398,7 +399,7 @@ Item {
                         
                         Text {
                             anchors.centerIn: parent
-                            text: "📊 收益曲线图表\n（需要集成QtCharts）"
+                            text: "📊 收益曲线图表\n（需要集成QtCharts�?
                             font.pixelSize: 14
                             color: "#94A3B8"
                             horizontalAlignment: Text.AlignHCenter
@@ -411,7 +412,7 @@ Item {
     
     // ============ 组件定义 ============
     
-    // 表格表头单元格
+    // 表格表头单元�?
     component TableHeaderCell: Rectangle {
         property string text: ""
         
@@ -430,7 +431,7 @@ Item {
         }
     }
     
-    // 表格单元格
+    // 表格单元�?
     component TableCell: Rectangle {
         property string text: ""
         property color textColor: "#F1F5F9"
@@ -533,9 +534,9 @@ Item {
         })
     }
     
-    // ============ 初始化 ============
+    // ============ 初始�?============
     
     Component.onCompleted: {
-        console.log("回测结果视图初始化完成")
+        console.log("回测结果视图初始化完�?)
     }
 }
