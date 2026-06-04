@@ -5,8 +5,9 @@
 set(BRIDGE_SOURCES
     ../include/RuleTemplateSuggestionService.h
     ../include/RuleTemplateDetailHelper.h
-    ../include/FactorService.h    # 因子服务桥接
-    ../include/FactorBacktestBridge.h  # 因子回测桥接（简化版）
+    ../include/FactorService.h
+    ../include/FactorBacktestBridge.h
+    ../include/CachedMarketDataView.h
         CleanedDataController.cpp
     cleaning/CleaningEngine.cpp
     DataManager.cpp
@@ -45,7 +46,9 @@ set(BRIDGE_SOURCES
         StrategyListModel.cpp
         StrategyStructureResolvers.cpp
         FactorService.cpp
-        FactorBacktestBridge.cpp  # 简化版因子回测桥接
+        FactorBacktestBridge.cpp
+        CachedMarketDataView.cpp
+        CachedMarketDataViewHistoricalAdapter.cpp
 )
 
 if(ENABLE_JUJIN_MARKET)
@@ -63,6 +66,10 @@ target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 
 target_include_directories(bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+    ${CMAKE_SOURCE_DIR}/src/domain/factor/include/factor_compute
+    ${CMAKE_SOURCE_DIR}/src/cache/include
+    ${EIGEN_INCLUDE_DIR}
 )
 
 set_target_properties(bridge PROPERTIES
@@ -85,6 +92,9 @@ target_link_libraries(bridge PRIVATE
     engine
     foundation
     cache_module
+    factor_system
+    factor_compute
+    domain
 )
 
 message(STATUS "bridge库源文件: ${BRIDGE_SOURCES}")

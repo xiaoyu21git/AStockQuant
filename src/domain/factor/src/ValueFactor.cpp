@@ -446,9 +446,13 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
             std::vector<MetricContribution> contributions;
             contributions.reserve(metrics.size());
 
+            qDebug() << "[ValueFactor] 指标数=" << metrics.size()
+                     << " effectiveDate=" << QString::fromStdString(runtime.effectiveDate);
             for (const ValuationMetric metric : metrics) {
                 const double weight = valuationMetricWeight(params_, metric);
+                qDebug() << "[ValueFactor] 指标=" << (int)metric << " weight=" << weight;
                 if (weight <= 0.0) {
+                    qDebug() << "[ValueFactor] 跳过: weight<=0";
                     continue;
                 }
 
@@ -462,6 +466,8 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                     contributions.push_back(computeCFPContribution(context, runtime, weight));
                 } else {
                     const std::string field = valuationMetricField(metric);
+                    qDebug() << "[ValueFactor]   field=" << QString::fromStdString(field)
+                             << " hasField=" << context.historicalView->hasField(field);
                     if (field.empty() || !context.historicalView->hasField(field)) {
                         const std::string errorMessage = "缓存数据集缺少字段 "
                             + (field.empty() ? valuationMetricToJsonString(metric) : field)
@@ -470,7 +476,11 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                         result.metadata.set("error", json_helper::toJsonValue(errorMessage));
                         return;
                     }
-                    contributions.push_back(computeStandardContribution(context, runtime, metric, weight));
+                    auto contrib = computeStandardContribution(context, runtime, metric, weight);
+                    qDebug() << "[ValueFactor]   贡献: scores=" << contrib.scores.size()
+                             << " rawSample=" << contrib.rawSampleCount
+                             << " invalid=" << contrib.invalidSampleCount;
+                    contributions.push_back(std::move(contrib));
                 }
             }
 

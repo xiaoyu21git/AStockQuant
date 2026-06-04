@@ -41,6 +41,9 @@ public:
     [[nodiscard]] NumericConstMatrixView close() const override;
     [[nodiscard]] NumericConstMatrixView volume() const override;
 
+    [[nodiscard]] std::optional<NumericConstMatrixView>
+    getField(const std::string& fieldName) const override;
+
     [[nodiscard]] const std::vector<DateKey>& dates() const override;
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
 

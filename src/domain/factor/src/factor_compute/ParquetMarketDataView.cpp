@@ -299,6 +299,20 @@ NumericConstMatrixView ParquetMarketDataView::volume() const
         impl_->columnCount);
 }
 
+std::optional<NumericConstMatrixView>
+ParquetMarketDataView::getField(const std::string& fieldName) const
+{
+    try {
+        ColumnData column = extractColumn(impl_->table, fieldName);
+        if (column.rawValues == nullptr || column.length <= 0) {
+            return std::nullopt;
+        }
+        return buildMatrixView(column.rawValues, impl_->rowCount, impl_->columnCount);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+}
+
 const std::vector<DateKey>& ParquetMarketDataView::dates() const
 {
     return impl_->datesOwned;

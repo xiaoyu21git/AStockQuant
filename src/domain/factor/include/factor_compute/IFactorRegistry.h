@@ -2,12 +2,15 @@
 
 #include "FactorSignalTypes.h"
 
+#include <string>
+
 namespace factor::compute {
 
 struct ComputePlanNode final {
     FactorId factor{};
     std::vector<FactorId> dependencies;
     uint32_t computeFunctionToken{0U};
+    std::string fieldName; // 因子实际计算所依赖的字段名（如 "close", "pb_ratio", "roe" 等）
 
     [[nodiscard]] bool isValid() const noexcept
     {

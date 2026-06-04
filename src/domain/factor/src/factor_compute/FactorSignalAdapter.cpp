@@ -224,7 +224,7 @@ FactorSignalAdapter::computeParallel(
 
     const auto startTime = std::chrono::steady_clock::now();
 
-    if (threadPool_ != nullptr) {
+            if (threadPool_ != nullptr) {
         // ── 并行路径：每个因子一个任务提交到线程池 ──
         std::vector<std::future<bool>> futures;
         futures.reserve(static_cast<size_t>(factorCount));
@@ -244,12 +244,13 @@ FactorSignalAdapter::computeParallel(
                 return FactorResult<SignalSet>::failure(FactorError::InternalError);
             }
             const uint32_t computeToken = it->second->computeFunctionToken;
+            const std::string fieldName = it->second->fieldName; // 从 ComputePlanNode 获取字段名
 
             // 通过 promise/future 获取每个因子的计算结果
             auto promise = std::make_shared<std::promise<bool>>();
             futures.push_back(promise->get_future());
 
-            threadPool_->post([&, factorIdx, factorId, computeToken, promise]() {
+            threadPool_->post([&, factorIdx, factorId, computeToken, fieldName, promise]() {
                 // 预算检查
                 const auto taskElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - startTime);
@@ -259,8 +260,9 @@ FactorSignalAdapter::computeParallel(
                     return;
                 }
 
+                // 使用 evaluateOnField 在对应字段上执行算子（支持任意命名字段）
                 const FactorResult<std::vector<double>> matrixResult =
-                    dispatcher_.evaluateOnClose(closeView, computeToken);
+                    dispatcher_.evaluateOnField(marketDataView_, fieldName, computeToken);
                 if (!matrixResult.hasValue()) {
                     std::lock_guard<std::mutex> lock(errorMutex);
                     if (!hasError.load()) {
@@ -338,8 +340,9 @@ FactorSignalAdapter::computeParallel(
                 return FactorResult<SignalSet>::failure(FactorError::InternalError);
             }
 
+            const std::string fieldName = it->second->fieldName;
             const FactorResult<std::vector<double>> matrixResult =
-                dispatcher_.evaluateOnClose(closeView, it->second->computeFunctionToken);
+                dispatcher_.evaluateOnField(marketDataView_, fieldName, it->second->computeFunctionToken);
             if (!matrixResult.hasValue()) {
                 return FactorResult<SignalSet>::failure(matrixResult.error());
             }

@@ -33,6 +33,16 @@ public:
                                      const QString& endDate,
                                      const QVariantMap& options = QVariantMap());
 
+    /// @brief 同步查询指定字段在指定日期的横截面数据（标准业务流程）
+    /// @param field DB列名或字段键（如 pb_ratio, pe_ratio, market_cap）
+    /// @param date 查询日期（ISO YYYY-MM-DD）
+    /// @param symbols 标的列表，为空则查全部标的
+    /// @return QVariantMap { "symbol" → QVariant(double) }
+    QVariantMap fetchFieldCrossSectionSync(
+        const QString& field,
+        const QString& date,
+        const QStringList& symbols = QStringList());
+
     QVariantList fetchedData() const;
 
 signals:

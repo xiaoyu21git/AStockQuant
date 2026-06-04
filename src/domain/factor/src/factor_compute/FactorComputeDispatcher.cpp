@@ -1,6 +1,7 @@
 ﻿#include "factor_compute/FactorComputeDispatcher.h"
 
 #include "factor_compute/DefaultComputeOpRegistrar.h"
+#include "factor_compute/IMarketDataView.h"
 
 #include <limits>
 #include <new>
@@ -133,6 +134,55 @@ FactorResult<std::vector<double>> FactorComputeDispatcher::evaluateOnClose(
         closeView.columnCount);
 
     computeOperator->execute(factorOperatorLibrary_, closeView, outputView);
+    return FactorResult<std::vector<double>>::success(std::move(outputBuffer));
+}
+
+FactorResult<std::vector<double>> FactorComputeDispatcher::evaluateOnField(
+    const IMarketDataView& marketDataView,
+    const std::string& fieldName,
+    uint32_t computeToken) const
+{
+    if (hasInvalidRegistration_) {
+        return FactorResult<std::vector<double>>::failure(FactorError::InternalError);
+    }
+
+    const IComputeOp* const computeOperator = findOperator(computeToken);
+    if (computeOperator == nullptr) {
+        return FactorResult<std::vector<double>>::failure(FactorError::InvalidFormula);
+    }
+
+    auto fieldView = marketDataView.getField(fieldName);
+    if (!fieldView.has_value() || !fieldView->isValid()) {
+        return FactorResult<std::vector<double>>::failure(FactorError::InsufficientData);
+    }
+
+    const size_t rowCount = static_cast<size_t>(fieldView->rowCount);
+    const size_t columnCount = static_cast<size_t>(fieldView->columnCount);
+    if (rowCount > (std::numeric_limits<size_t>::max() / columnCount)) {
+        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+    }
+
+    const size_t bufferSize = rowCount * columnCount;
+    const size_t maxBufferSize = std::vector<double>().max_size();
+    if (bufferSize > maxBufferSize) {
+        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+    }
+
+    std::vector<double> outputBuffer;
+    try {
+        outputBuffer.assign(bufferSize, std::numeric_limits<double>::quiet_NaN());
+    } catch (const std::length_error&) {
+        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+    } catch (const std::bad_alloc&) {
+        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+    }
+
+    NumericMatrixView outputView = FactorComputeDispatcher::buildMutableMatrixView(
+        outputBuffer.data(),
+        fieldView->rowCount,
+        fieldView->columnCount);
+
+    computeOperator->execute(factorOperatorLibrary_, fieldView.value(), outputView);
     return FactorResult<std::vector<double>>::success(std::move(outputBuffer));
 }
 

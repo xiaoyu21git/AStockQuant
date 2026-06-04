@@ -77,8 +77,10 @@ target_link_libraries(astockquantapp
     PRIVATE
         engine
         domain
-        bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
+        bridge                # 确保这些目标已定义
         foundation
+        factor_system
+        factor_compute
 )
 
 if(TARGET Arrow::arrow_shared)

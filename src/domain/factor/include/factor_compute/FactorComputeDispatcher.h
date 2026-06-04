@@ -23,6 +23,11 @@ public:
         NumericConstMatrixView closeView,
         uint32_t computeToken) const override;
 
+    [[nodiscard]] FactorResult<std::vector<double>> evaluateOnField(
+        const IMarketDataView& marketDataView,
+        const std::string& fieldName,
+        uint32_t computeToken) const override;
+
     bool registerOperator(
         uint32_t computeToken,
         std::unique_ptr<IComputeOp> computeOperator) override;

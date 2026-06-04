@@ -1,4 +1,5 @@
 ﻿#include "factor_compute/FactorRegistry.h"
+#include "factor_compute/FieldKeyMapping.h"
 
 namespace factor::compute {
 
@@ -26,6 +27,22 @@ bool hasInvalidInstrument(const std::vector<InstrumentId>& universe)
 
 } // namespace
 
+void FactorRegistry::registerFieldMapping(FieldKey key, const std::string& fieldName)
+{
+    if (!key.isValid() || fieldName.empty()) return;
+    fieldKeyToName_[key.value] = fieldName;
+}
+
+std::string FactorRegistry::resolveFieldName(FieldKey key) const
+{
+    auto it = fieldKeyToName_.find(key.value);
+    if (it != fieldKeyToName_.end()) {
+        return it->second;
+    }
+    // 退化映射：使用 StandardFieldKey 枚举 → 字段名
+    return fieldKeyToName(static_cast<StandardFieldKey>(key.value));
+}
+
 const FactorRegistry::RegisteredFactor*
 FactorRegistry::findRegisteredFactorById(const FactorId& factorId) const noexcept
 {
@@ -42,6 +59,7 @@ FactorRegistry::buildComputePlanNode(const FactorId& factorId, const RegisteredF
     ComputePlanNode node;
     node.factor = factorId;
     node.computeFunctionToken = registeredFactor.computeFunctionToken;
+    node.fieldName = registeredFactor.fieldName;
     return node;
 }
 
@@ -66,6 +84,7 @@ FactorRegistry::registerFormula(
     registeredFactor.factorId = FactorId{nextFactorId_++};
     registeredFactor.computeFunctionToken = formulaExpression.token;
     registeredFactor.requiredFields = requiredFields;
+    registeredFactor.fieldName = resolveFieldName(requiredFields.front());
     factorMapByName_.emplace(factorName.value, registeredFactor);
     factorMapById_.emplace(registeredFactor.factorId.value, registeredFactor);
     return FactorResult<FactorId>::success(registeredFactor.factorId);
@@ -92,6 +111,7 @@ FactorRegistry::registerCustom(
     registeredFactor.factorId = FactorId{nextFactorId_++};
     registeredFactor.computeFunctionToken = customComputeToken;
     registeredFactor.requiredFields = requiredFields;
+    registeredFactor.fieldName = resolveFieldName(requiredFields.front());
     factorMapByName_.emplace(factorName.value, registeredFactor);
     factorMapById_.emplace(registeredFactor.factorId.value, registeredFactor);
     return FactorResult<FactorId>::success(registeredFactor.factorId);
@@ -133,5 +153,3 @@ FactorResult<ComputePlan>FactorRegistry::buildPlan(
 }
 
 } // namespace factor::compute
-
-

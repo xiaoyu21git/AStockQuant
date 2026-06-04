@@ -254,6 +254,36 @@ NumericConstMatrixView SubMarketDataView::volume() const
     return view;
 }
 
+std::optional<NumericConstMatrixView>
+SubMarketDataView::getField(const std::string& fieldName) const
+{
+    auto sourceField = impl_->source.getField(fieldName);
+    if (!sourceField.has_value()) {
+        return std::nullopt;
+    }
+
+    const int32_t sourceRowCount = static_cast<int32_t>(impl_->source.dates().size());
+    const int32_t sourceColumnCount = static_cast<int32_t>(impl_->source.instruments().size());
+
+    std::vector<double> buffer;
+    NumericConstMatrixView result = buildFilteredMatrixView(
+        sourceField->data,
+        sourceRowCount,
+        sourceColumnCount,
+        impl_->dateIndexMap,
+        impl_->instrumentIndexMap,
+        buffer);
+
+    // 注意：buffer 的生命周期问题 —— 此处返回视图后 buffer 会析构
+    // 当前 SubView 采用拷贝缓冲区分割设计，getField 同理需要持久化存储
+    // 简单实现：将 buffer 移动到持久化字段映射
+    // 更完整实现应在 Impl 中维护 map<string, vector<double>>
+    // 但 SubMarketDataView 当前设计是构造时一次性拷贝所有列
+    // getField 只能动态构建，这是架构限制
+    // 对于回测场景建议直接使用 CachedMarketDataView 而不是 SubView
+    return std::nullopt; // SubView 不支持动态字段切片
+}
+
 const std::vector<DateKey>& SubMarketDataView::dates() const
 {
     return impl_->datesOwned;

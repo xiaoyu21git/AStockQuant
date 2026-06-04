@@ -33,6 +33,9 @@ public:
     [[nodiscard]] NumericConstMatrixView low() const override { return buildSinglePointView(); }
     [[nodiscard]] NumericConstMatrixView close() const override { return buildSinglePointView(); }
     [[nodiscard]] NumericConstMatrixView volume() const override { return buildSinglePointView(); }
+    [[nodiscard]] std::optional<NumericConstMatrixView> getField(const std::string&) const override {
+        return buildSinglePointView();
+    }
 
     [[nodiscard]] const std::vector<DateKey>& dates() const override { return dates_; }
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override { return instruments_; }

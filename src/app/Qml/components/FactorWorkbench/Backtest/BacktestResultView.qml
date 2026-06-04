@@ -108,8 +108,6 @@ Item {
                         cardHeight: 80
                         Layout.preferredWidth: 120
                     }
-                    
-                    Item { Layout.fillWidth: true }
                 }
             }
 
@@ -190,8 +188,6 @@ Item {
                         cardHeight: 80
                         Layout.preferredWidth: 120
                     }
-
-                    Item { Layout.fillWidth: true }
                 }
             }
             
@@ -254,8 +250,6 @@ Item {
                         cardHeight: 80
                         Layout.preferredWidth: 120
                     }
-                    
-                    Item { Layout.fillWidth: true }
                 }
             }
             
