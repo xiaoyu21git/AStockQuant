@@ -7,6 +7,7 @@
 #include "AppStoragePaths.h"
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
+#include "QtSqlDatabaseAdapter.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <QDate>
@@ -177,9 +178,11 @@ FactorDetectionService::RuntimeContext FactorDetectionService::resolveRuntimeCon
     }
 
     if (!context.dataChecker) {
-        context.dataChecker = std::make_shared<factor::DataAvailabilityChecker>(context.database);
+        context.dataChecker = std::make_shared<factor::DataAvailabilityChecker>(
+            std::make_shared<astock::database::QtSqlDatabaseAdapter>(context.database));
     }
-    context.instanceManager = std::make_shared<factor::FactorInstanceManager>(context.database, context.dataChecker);
+    context.instanceManager = std::make_shared<factor::FactorInstanceManager>(
+        std::make_shared<astock::database::QtSqlDatabaseAdapter>(context.database), context.dataChecker);
     return context;
 }
 

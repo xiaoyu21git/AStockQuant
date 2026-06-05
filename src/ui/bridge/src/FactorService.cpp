@@ -5,6 +5,7 @@
 #include "FactorViewModel.h"
 #include "FactorDetectionService.h"
 #include "DatabaseConnectionManager.h"
+#include "QtSqlDatabaseAdapter.h"
 #include "foundation.h"
 
 #include "../../domain/factor/include/BaseFactor.h"
@@ -156,13 +157,15 @@ bool FactorService::resolveBackend()
         return false;
     }
 
-    m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(m_database);
+    m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(
+        std::make_shared<astock::database::QtSqlDatabaseAdapter>(m_database));
     if (!m_dataChecker) {
         qWarning() << "[FactorService] 创建DataAvailabilityChecker失败";
         return false;
     }
 
-    m_instanceManager = std::make_shared<factor::FactorInstanceManager>(m_database, m_dataChecker);
+    m_instanceManager = std::make_shared<factor::FactorInstanceManager>(
+        std::make_shared<astock::database::QtSqlDatabaseAdapter>(m_database), m_dataChecker);
     if (!m_instanceManager) {
         qWarning() << "[FactorService] 创建FactorInstanceManager失败";
         return false;

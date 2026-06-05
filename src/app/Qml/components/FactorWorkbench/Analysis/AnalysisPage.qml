@@ -33,6 +33,16 @@ Item {
     readonly property var activeResult: resolveActiveResult(backtestReport)
     readonly property var activeFactorQuality: extractFactorQuality(activeResult)
     readonly property bool hasActiveFactorQuality: hasKeys(activeFactorQuality)
+    readonly property bool hasAnyBacktestMetrics: {
+        var rawReport = backtestReport && typeof backtestReport === "object" ? backtestReport : ({})
+        var results = normalizedListValue(rawReport.results)
+        var active = resolveActiveResult(rawReport)
+        var metrics = active && active.metrics ? active.metrics : ({})
+        var execution = metrics.execution || ({})
+        var ic = metrics.ic || ({})
+        var groups = metrics.groups || []
+        return hasKeys(execution) || hasKeys(ic) || groups.length > 0
+    }
     readonly property bool canImportActiveResultToStrategy: factorIdText() !== "-"
 
     function normalizedListValue(value) {
@@ -965,7 +975,7 @@ Item {
                 }
 
                 Column {
-                    visible: hasActiveFactorQuality
+                    visible: hasAnyBacktestMetrics
                     width: parent.width
                     spacing: 18
 

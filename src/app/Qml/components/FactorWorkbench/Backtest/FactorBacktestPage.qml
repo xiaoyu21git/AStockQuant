@@ -5211,7 +5211,7 @@ Item {
                         color: "#38BDF8"
                         horizontalAlignment: Text.AlignRight
                         wrapMode: Text.WordWrap
-                        Layout.preferredWidth: 240
+                                Layout.fillWidth: true
                     }
                 }
 

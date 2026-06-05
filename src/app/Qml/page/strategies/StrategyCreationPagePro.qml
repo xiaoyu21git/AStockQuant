@@ -6,7 +6,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import Qt5Compat.GraphicalEffects
-import AStock.Bridge 1.0  // 导入C++桥接模块
+import AStock.Bridge 1.0 as Bridge  // 导入C++桥接模块
 import "../../utils/StrategyCreationUtils.js" as Utils
 import "../../components/Strategy/Creation" as StrategyComponents
 

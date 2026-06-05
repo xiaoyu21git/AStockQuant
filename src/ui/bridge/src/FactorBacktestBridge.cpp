@@ -95,6 +95,13 @@ QVariantMap FactorBacktestBridge::convertAnalysisReport(
         ? (tradingResult.annualizedReturn / tradingResult.annualStdDev) : 0.0;
     exec["alpha"]                 = report.alpha.available ? report.alpha.value : 0.0;
     exec["beta"]                  = 0.0;
+    exec["calmarRatio"]           = (tradingResult.maxDrawdown > 0.001)
+        ? (tradingResult.annualizedReturn / tradingResult.maxDrawdown) : 0.0;
+    exec["maxConsecutiveLosses"]  = 0;
+    exec["recoveryDays"]          = 0;
+    exec["profitFactor"]          = exec["winRate"].toDouble() > 0.01
+        ? (exec["winRate"].toDouble() / (1.0 - exec["winRate"].toDouble())) : 0.0;
+    exec["sortinoRatio"]          = 0.0;
     metrics["execution"] = exec;
 
     // === IC 指标 ===

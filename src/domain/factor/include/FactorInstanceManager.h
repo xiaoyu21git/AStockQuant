@@ -16,7 +16,7 @@
 // 前向声明
 namespace astock {
 namespace database {
-class QtMySQLDatabase;
+class ISqlDatabase;
 }
 }
 
@@ -48,7 +48,7 @@ struct FactorInstanceInfo {
 // 因子实例管理器
 class FactorInstanceManager {
 public:
-    FactorInstanceManager(std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    FactorInstanceManager(std::shared_ptr<astock::database::ISqlDatabase> db,
                          std::shared_ptr<DataAvailabilityChecker> dataChecker);
     ~FactorInstanceManager() = default;
     
@@ -115,7 +115,7 @@ public:
     friend class FactorInstanceManagerTestAccess;
     
 private:
-    std::shared_ptr<astock::database::QtMySQLDatabase> db_;
+    std::shared_ptr<astock::database::ISqlDatabase> db_;
     std::shared_ptr<DataAvailabilityChecker> dataChecker_;
     std::shared_ptr<foundation::thread::ThreadPoolExecutor> threadPool_;
     

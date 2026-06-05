@@ -13,7 +13,7 @@ import "../../Backtest" as BacktestComponents
 Item {
     id: root
     
-    // ============ 属�?============
+    // ============ 属�?============
     
     property var backtestResult: ({})
     property var metricSections: ({})
@@ -86,9 +86,9 @@ Item {
                         Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
-                    // 最大回�?
+                    // 最大回撤
                     BacktestComponents.BacktestMetricCard {
-                        title: "最大回�?
+                        title: "最大回撤"
                         value: root.metricPercentText(executionMetrics().maxDrawdown, 2)
                         description: "Max Drawdown"
                         trend: "down"
@@ -204,9 +204,9 @@ Item {
                     anchors.margins: 16
                     spacing: 16
                     
-                    // IC�?
+                    // IC指标
                     BacktestComponents.BacktestMetricCard {
-                        title: "IC�?
+                        title: "IC"
                         value: root.metricNumberText(icMetrics().value, 3)
                         description: "Information Coefficient"
                         trend: root.metricTrend(icMetrics().value)
@@ -216,9 +216,9 @@ Item {
                         Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
-                    // IR�?
+                    // IR指标
                     BacktestComponents.BacktestMetricCard {
-                        title: "IR�?
+                        title: "IR"
                         value: root.metricNumberText(icMetrics().ir, 2)
                         description: "Information Ratio"
                         trend: root.metricTrend(icMetrics().ir)
@@ -228,9 +228,9 @@ Item {
                         Layout.fillWidth: true; Layout.minimumWidth: 80
                     }
                     
-                    // IC标准�?
+                    // IC标准差
                     BacktestComponents.BacktestMetricCard {
-                        title: "IC标准�?
+                        title: "IC标准差"
                         value: root.metricNumberText(icMetrics().std, 3)
                         description: "IC Std Dev"
                         trend: "neutral"
@@ -287,11 +287,11 @@ Item {
                             
                             // 表头
                             TableHeaderCell { text: "组别"; width: 80 }
-                            TableHeaderCell { text: "股票�?; width: 80 }
+                            TableHeaderCell { text: "股票数量"; width: 80 }
                             TableHeaderCell { text: "收益"; width: 100 }
                             TableHeaderCell { text: "年化收益"; width: 100 }
-                            TableHeaderCell { text: "最小因子�?; width: 100 }
-                            TableHeaderCell { text: "最大因子�?; width: 100 }
+                            TableHeaderCell { text: "最小因子值"; width: 100 }
+                            TableHeaderCell { text: "最大因子值"; width: 100 }
                         }
                         
                         delegate: Row {
@@ -302,11 +302,11 @@ Item {
                             // 组别
                             TableCell {
                                 width: 80
-                                text: "�? + (modelData.groupIndex || (index + 1))
+                                text: "组 " + (modelData.groupIndex || (index + 1))
                                 color: index === 0 ? "#EF4444" : index === groupMetrics().length - 1 ? "#10B981" : "#F1F5F9"
                             }
                             
-                            // 股票�?
+                            // 股票数量
                             TableCell {
                                 width: 80
                                 text: root.metricIntegerText(modelData.stockCount)
@@ -319,7 +319,7 @@ Item {
                                 color: root.metricColor(modelData.returnRate)
                             }
                             
-                            // 波动�?
+                            // 波动�?
                             TableCell {
                                 width: 100
                                 text: root.metricPercentText(modelData.annualizedReturn, 2)
@@ -332,7 +332,7 @@ Item {
                                 color: "#F1F5F9"
                             }
                             
-                            // 最大回�?
+                            // 最大回�?
                             TableCell {
                                 width: 100
                                 text: root.metricNumberText(modelData.maxFactorValue, 2)
@@ -356,7 +356,7 @@ Item {
                     spacing: 12
                     
                     Text {
-                        text: "📊 分组绩效可视�?
+                        text: "📊 分组绩效可视化"
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
                         color: "#F1F5F9"
@@ -390,7 +390,7 @@ Item {
                         color: "#F1F5F9"
                     }
                     
-                    // 图表占位�?
+                    // 图表占位�?
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -399,7 +399,7 @@ Item {
                         
                         Text {
                             anchors.centerIn: parent
-                            text: "📊 收益曲线图表\n（需要集成QtCharts�?
+                            text: "📊 收益曲线图表\n（需要集成QtCharts）"
                             font.pixelSize: 14
                             color: "#94A3B8"
                             horizontalAlignment: Text.AlignHCenter
@@ -412,7 +412,7 @@ Item {
     
     // ============ 组件定义 ============
     
-    // 表格表头单元�?
+    // 表格表头单元�?
     component TableHeaderCell: Rectangle {
         property string text: ""
         
@@ -431,7 +431,7 @@ Item {
         }
     }
     
-    // 表格单元�?
+    // 表格单元�?
     component TableCell: Rectangle {
         property string text: ""
         property color textColor: "#F1F5F9"
@@ -534,9 +534,9 @@ Item {
         })
     }
     
-    // ============ 初始�?============
+    // ============ 初始�?============
     
     Component.onCompleted: {
-        console.log("回测结果视图初始化完�?)
+        console.log("回测结果视图初始化完成")
     }
 }

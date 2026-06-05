@@ -1,407 +1,205 @@
 ﻿#include "JujinMarketConnector.h"
 
-#include <cstdlib>
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
+#include <fstream>
+#include <iostream>
 #include <sstream>
-
-#include <QCoreApplication>
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QProcess>
-#include <QDebug>
-#include <QSet>
-#include <QTemporaryFile>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 #include "JujinApi.h"
+#include "JujinTypes.h"
 #include "MarketSubscriptionStatusRegistry.h"
 #include "TradingConnectionConfigService.h"
 #include "TradingMarketCalendarService.h"
+#include "foundation/json/json_facade.h"
+#include "foundation/config/ConfigManager.hpp"
 
 namespace {
 
-constexpr auto kRuntimeSubscriptionStatusEvent = "trading.market.subscription.status";
+constexpr const char* kRuntimeSubscriptionStatusEvent = "trading.market.subscription.status";
 
+// ========== 纯 C++ 字符串工具 ==========
+std::string trim(std::string_view s) noexcept
+{
+    auto b = s.find_first_not_of(" \t\r\n");
+    if (b == std::string_view::npos) return {};
+    auto e = s.find_last_not_of(" \t\r\n");
+    return std::string(s.substr(b, e - b + 1));
+}
+
+std::string toLower(std::string s) noexcept
+{
+    for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+std::string toUpper(std::string s) noexcept
+{
+    for (char& c : s) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return s;
+}
+
+// ========== 市场时段检测 ==========
 bool marketSessionAllowsSubscriptions()
 {
-    TradingMarketCalendarService* calendarService = TradingMarketCalendarService::instance();
-    if (!calendarService) {
-        return true;
-    }
-
-    const QVariantMap snapshot = calendarService->currentSessionSnapshot();
-    if (snapshot.isEmpty()) {
-        return true;
-    }
-
-    const QString phase = snapshot.value(QStringLiteral("sessionPhase")).toString().trimmed();
-    return phase == QStringLiteral("PRE_OPEN")
-        || phase == QStringLiteral("TRADING")
-        || phase == QStringLiteral("LUNCH_BREAK");
+    auto* srv = TradingMarketCalendarService::instance();
+    if (!srv) return true;
+    auto snap = srv->currentSessionSnapshot();
+    if (snap.isEmpty()) return true;
+    std::string phase = snap.value("sessionPhase").toString().trimmed().toStdString();
+    return phase == "PRE_OPEN" || phase == "TRADING" || phase == "LUNCH_BREAK";
 }
 
-QString marketSessionPhaseText()
+std::string marketSessionPhaseText()
 {
-    TradingMarketCalendarService* calendarService = TradingMarketCalendarService::instance();
-    if (!calendarService) {
-        return QStringLiteral("UNKNOWN");
-    }
-
-    const QVariantMap snapshot = calendarService->currentSessionSnapshot();
-    const QString phase = snapshot.value(QStringLiteral("sessionPhase")).toString().trimmed();
-    return phase.isEmpty() ? QStringLiteral("UNKNOWN") : phase;
+    auto* srv = TradingMarketCalendarService::instance();
+    if (!srv) return "UNKNOWN";
+    auto snap = srv->currentSessionSnapshot();
+    std::string phase = snap.value("sessionPhase").toString().trimmed().toStdString();
+    return phase.empty() ? "UNKNOWN" : phase;
 }
 
-std::string trim(const std::string& value)
-{
-    const auto begin = value.find_first_not_of(" \t\r\n");
-    if (begin == std::string::npos) {
-        return {};
-    }
+// ========== 配置读取（纯 C++） ==========
+namespace cfg {
 
-    const auto end = value.find_last_not_of(" \t\r\n");
-    return value.substr(begin, end - begin + 1);
+foundation::json::JsonFacade loadConfigObject()
+{
+    try {
+        auto& mgr = foundation::config::ConfigManager::instance();
+        std::string json = mgr.get_app_config_string("jujin.config", "");
+        if (json.empty()) return foundation::json::JsonFacade::createObject();
+        return foundation::json::JsonFacade::parse(json);
+    } catch (...) {
+        return foundation::json::JsonFacade::createObject();
+    }
 }
 
-std::string toGmMarketSymbol(std::string symbol)
+std::string readString(const foundation::json::JsonFacade& obj, const char* key,
+                       const char* envName)
 {
-    symbol = trim(symbol);
-    if (symbol.empty()) {
-        return symbol;
+    if (obj.has(key)) {
+        std::string v = obj.get(key).asString();
+        if (!v.empty()) return v;
     }
-
-    std::transform(symbol.begin(), symbol.end(), symbol.begin(), [](unsigned char ch) {
-        return static_cast<char>(std::toupper(ch));
-    });
-
-    if (symbol.rfind("SHSE.", 0) == 0 || symbol.rfind("SZSE.", 0) == 0 || symbol.rfind("BSE.", 0) == 0
-        || symbol.rfind("CFFEX.", 0) == 0 || symbol.rfind("SHFE.", 0) == 0 || symbol.rfind("DCE.", 0) == 0
-        || symbol.rfind("CZCE.", 0) == 0 || symbol.rfind("INE.", 0) == 0 || symbol.rfind("GFEX.", 0) == 0) {
-        return symbol;
-    }
-
-    const auto dot = symbol.find('.');
-    if (dot == std::string::npos) {
-        return symbol;
-    }
-
-    const std::string code = symbol.substr(0, dot);
-    const std::string exchange = symbol.substr(dot + 1);
-    if (exchange == "SH") {
-        return "SHSE." + code;
-    }
-    if (exchange == "SZ") {
-        return "SZSE." + code;
-    }
-    if (exchange == "BJ") {
-        return "BSE." + code;
-    }
-    if (exchange == "CFFEX" || exchange == "SHFE" || exchange == "DCE"
-        || exchange == "CZCE" || exchange == "INE" || exchange == "GFEX") {
-        return exchange + "." + code;
-    }
-    return symbol;
-}
-
-QString connectorConfigFilePath()
-{
-    return QDir(QCoreApplication::applicationDirPath())
-        .filePath(QStringLiteral("config/trading_connection.json"));
-}
-
-QJsonObject readConnectorConfigObject()
-{
-    QFile file(connectorConfigFilePath());
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    file.close();
-    return document.isObject() ? document.object() : QJsonObject();
-}
-
-std::string readStringSetting(const QJsonObject& configObject, const char* key, const char* envName, const char* fallback = "")
-{
-    const QString configValue = configObject.value(QString::fromUtf8(key)).toString().trimmed();
-    if (!configValue.isEmpty()) {
-        return configValue.toStdString();
-    }
-
-    if (const char* envValue = std::getenv(envName)) {
-        return envValue;
-    }
-
-    return fallback ? std::string(fallback) : std::string();
-}
-
-bool readBoolSetting(const QJsonObject& configObject, const char* key, const char* envName)
-{
-    const QJsonValue configValue = configObject.value(QString::fromUtf8(key));
-    if (!configValue.isUndefined()) {
-        if (configValue.isBool()) {
-            return configValue.toBool();
-        }
-
-        const QString stringValue = configValue.toString().trimmed().toLower();
-        return stringValue == QStringLiteral("1") || stringValue == QStringLiteral("true");
-    }
-
-    if (const char* envValue = std::getenv(envName)) {
-        const std::string value = envValue;
-        return value == "1" || value == "true" || value == "TRUE";
-    }
-
-    return false;
-}
-
-int readIntSetting(const QJsonObject& configObject, const char* key, const char* envName, int fallback)
-{
-    const QJsonValue configValue = configObject.value(QString::fromUtf8(key));
-    if (!configValue.isUndefined()) {
-        if (configValue.isDouble()) {
-            return static_cast<int>(configValue.toDouble());
-        }
-
-        const QString stringValue = configValue.toString().trimmed();
-        bool ok = false;
-        const int parsed = stringValue.toInt(&ok);
-        if (ok) {
-            return parsed;
-        }
-    }
-
-    if (const char* envValue = std::getenv(envName)) {
-        bool ok = false;
-        const int parsed = QString::fromUtf8(envValue).trimmed().toInt(&ok);
-        if (ok) {
-            return parsed;
-        }
-    }
-
-    return fallback;
-}
-
-QSet<QString> readBoundStrategyIds(const QJsonObject& configObject)
-{
-    QSet<QString> strategyIds;
-
-    const QString primaryStrategyId = configObject.value(QStringLiteral("boundStrategyId")).toString().trimmed();
-    if (!primaryStrategyId.isEmpty()) {
-        strategyIds.insert(primaryStrategyId);
-    }
-
-    const QJsonValue rawBoundStrategies = configObject.value(QStringLiteral("boundStrategies"));
-    if (!rawBoundStrategies.isArray()) {
-        return strategyIds;
-    }
-
-    const QJsonArray boundStrategies = rawBoundStrategies.toArray();
-    for (const QJsonValue& rawEntry : boundStrategies) {
-        if (rawEntry.isObject()) {
-            const QJsonObject entry = rawEntry.toObject();
-            const QString strategyId = entry.value(QStringLiteral("strategyId")).toString().trimmed();
-            if (!strategyId.isEmpty()) {
-                strategyIds.insert(strategyId);
-            }
-            continue;
-        }
-
-        if (rawEntry.isString()) {
-            const QString strategyId = rawEntry.toString().trimmed();
-            if (!strategyId.isEmpty()) {
-                strategyIds.insert(strategyId);
-            }
-        }
-    }
-
-    return strategyIds;
-}
-
-QStringList readClientProcessNames(const QJsonObject& configObject)
-{
-    const QVariant value = configObject.value(QStringLiteral("clientProcessNames")).toVariant();
-    if (value.canConvert<QStringList>()) {
-        return value.toStringList();
-    }
-
-    const QString text = configObject.value(QStringLiteral("clientProcessNames")).toString();
-    if (text.trimmed().isEmpty()) {
-        return {
-            QStringLiteral("myquant.exe"),
-            QStringLiteral("MiniQmt.exe"),
-            QStringLiteral("XtMiniQmt.exe"),
-            QStringLiteral("gmtrade.exe"),
-            QStringLiteral("闂佸湱鍎ら敃銏ゅ闯妤ｅ啯鐓傞煫鍥ㄦ尭椤曆呯磽娴ｅ摜澧㈡い?exe"),
-            QStringLiteral("ds-proxy.exe"),
-            QStringLiteral("gmterm-serv.exe"),
-            QStringLiteral("闂佹悶鍎存慨銈嗘叏閸モ晜瀚氬ù锝囶焾閻撴牠鏌熼悜姗堣€块柛?exe")
-        };
-    }
-
-    QStringList names;
-    const QStringList rawNames = text.split(',', Qt::SkipEmptyParts);
-    for (const QString& rawName : rawNames) {
-        const QString trimmedName = rawName.trimmed();
-        if (!trimmedName.isEmpty()) {
-            names.append(trimmedName);
-        }
-    }
-    return names;
-}
-
-bool hasRequiredClientProcess(const QJsonObject& configObject, QString* matchedProcessName = nullptr)
-{
-    const QStringList processNames = readClientProcessNames(configObject);
-    if (processNames.isEmpty()) {
-        if (matchedProcessName) {
-            matchedProcessName->clear();
-        }
-        return false;
-    }
-
-    QProcess process;
-    process.start(QStringLiteral("tasklist"), {QStringLiteral("/FO"), QStringLiteral("CSV"), QStringLiteral("/NH")});
-    if (!process.waitForFinished(3000) || process.exitStatus() != QProcess::NormalExit) {
-        if (matchedProcessName) {
-            matchedProcessName->clear();
-        }
-        return false;
-    }
-
-    const QString output = QString::fromLocal8Bit(process.readAllStandardOutput()).toLower();
-    for (const QString& processName : processNames) {
-        const QString candidate = processName.trimmed().toLower();
-        if (!candidate.isEmpty() && output.contains(QStringLiteral("\"") + candidate + QStringLiteral("\""))) {
-            if (matchedProcessName) {
-                *matchedProcessName = processName.trimmed();
-            }
-            return true;
-        }
-    }
-
-    if (matchedProcessName) {
-        matchedProcessName->clear();
-    }
-    return false;
-}
-
-int64_t toEpochUs(const std::chrono::system_clock::time_point& timePoint)
-{
-    if (timePoint == std::chrono::system_clock::time_point()) {
-        return 0;
-    }
-
-    return std::chrono::duration_cast<std::chrono::microseconds>(
-        timePoint.time_since_epoch()).count();
-}
-
-QString formatOrderTime(const std::chrono::system_clock::time_point& timePoint)
-{
-    if (timePoint == std::chrono::system_clock::time_point()) {
-        return {};
-    }
-
-    const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
-        timePoint.time_since_epoch()).count();
-    return QDateTime::fromMSecsSinceEpoch(milliseconds, Qt::LocalTime)
-        .toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
-}
-
-std::string orderSideToString(thirdparty::OrderSide side)
-{
-    return side == thirdparty::OrderSide::SELL ? "SELL" : "BUY";
-}
-
-QString jsonStringValue(const QJsonObject& object, std::initializer_list<const char*> keys)
-{
-    for (const char* key : keys) {
-        const QJsonValue value = object.value(QString::fromUtf8(key));
-        if (value.isString()) {
-            const QString text = value.toString().trimmed();
-            if (!text.isEmpty()) {
-                return text;
-            }
-        }
-        if (value.isDouble()) {
-            return QString::number(value.toDouble(), 'f', 6);
-        }
-        if (value.isBool()) {
-            return value.toBool() ? QStringLiteral("true") : QStringLiteral("false");
-        }
-    }
+    if (const char* e = std::getenv(envName)) return std::string(e);
     return {};
 }
 
-double jsonDoubleValue(const QJsonObject& object, std::initializer_list<const char*> keys, double fallback = 0.0)
+bool readBool(const foundation::json::JsonFacade& obj, const char* key,
+              const char* envName)
 {
-    for (const char* key : keys) {
-        const QJsonValue value = object.value(QString::fromUtf8(key));
-        if (value.isDouble()) {
-            return value.toDouble();
-        }
-        if (value.isString()) {
-            bool ok = false;
-            const double parsed = value.toString().trimmed().toDouble(&ok);
-            if (ok) {
-                return parsed;
-            }
-        }
+    if (obj.has(key)) {
+        auto v = obj.get(key);
+        if (v.isBool()) return v.asBool();
+        std::string s = toLower(trim(v.asString()));
+        return s == "1" || s == "true";
+    }
+    if (const char* e = std::getenv(envName)) {
+        std::string s = toLower(trim(std::string(e)));
+        return s == "1" || s == "true";
+    }
+    return false;
+}
+
+int readInt(const foundation::json::JsonFacade& obj, const char* key,
+            const char* envName, int fallback)
+{
+    if (obj.has(key)) {
+        auto v = obj.get(key);
+        if (v.isNumber()) return v.asInt();
+        try { return std::stoi(trim(v.asString())); } catch (...) {}
+    }
+    if (const char* e = std::getenv(envName)) {
+        try { return std::stoi(trim(std::string(e))); } catch (...) {}
     }
     return fallback;
 }
 
-QString normalizeOrderSide(const QString& side)
+std::unordered_set<std::string> readBoundStrategyIds(const foundation::json::JsonFacade& obj)
 {
-    const QString normalized = side.trimmed().toUpper();
-    if (normalized == QStringLiteral("1") || normalized == QStringLiteral("BUY") || normalized == QStringLiteral("LONG")) {
-        return QStringLiteral("BUY");
+    std::unordered_set<std::string> ids;
+    if (obj.has("boundStrategyId")) {
+        std::string v = trim(obj.get("boundStrategyId").asString());
+        if (!v.empty()) ids.insert(v);
     }
-    if (normalized == QStringLiteral("2") || normalized == QStringLiteral("SELL") || normalized == QStringLiteral("SHORT")) {
-        return QStringLiteral("SELL");
+    if (obj.has("boundStrategies") && obj.get("boundStrategies").isArray()) {
+        auto arr = obj.get("boundStrategies");
+        for (size_t i = 0; i < arr.size(); ++i) {
+            auto entry = arr.at(i);
+            if (entry.isObject()) {
+                std::string v = trim(entry.get("strategyId").asString());
+                if (!v.empty()) ids.insert(v);
+            } else if (entry.isString()) {
+                std::string v = trim(entry.asString());
+                if (!v.empty()) ids.insert(v);
+            }
+        }
     }
-    return normalized;
+    return ids;
 }
 
-QString normalizeOrderStatus(const QString& status)
+} // namespace cfg
+
+// ========== 掘金市场符号标准化 ==========
+std::string toGmMarketSymbol(std::string symbol)
 {
-    const QString normalized = status.trimmed().toUpper();
-    if (normalized.isEmpty()) {
-        return QStringLiteral("SUBMITTED");
-    }
-    if (normalized == QStringLiteral("0") || normalized == QStringLiteral("UNKNOWN")) {
-        return QStringLiteral("PENDING");
-    }
-    if (normalized == QStringLiteral("1") || normalized == QStringLiteral("10") || normalized == QStringLiteral("13")) {
-        return QStringLiteral("SUBMITTED");
-    }
-    if (normalized == QStringLiteral("2")) {
-        return QStringLiteral("PARTIAL_FILLED");
-    }
-    if (normalized == QStringLiteral("3")) {
-        return QStringLiteral("FILLED");
-    }
-    if (normalized == QStringLiteral("4") || normalized == QStringLiteral("5") || normalized == QStringLiteral("12")) {
-        return QStringLiteral("CANCELLED");
-    }
-    if (normalized == QStringLiteral("8")) {
-        return QStringLiteral("REJECTED");
-    }
-    if (normalized == QStringLiteral("6") || normalized == QStringLiteral("7") || normalized == QStringLiteral("9") || normalized == QStringLiteral("11") || normalized == QStringLiteral("14")) {
-        return QStringLiteral("PENDING");
-    }
-    if (normalized == QStringLiteral("PENDINGNEW") || normalized == QStringLiteral("NEW")) {
-        return QStringLiteral("SUBMITTED");
-    }
-    return normalized;
+    symbol = trim(symbol);
+    if (symbol.empty()) return symbol;
+    symbol = toUpper(symbol);
+
+    if (symbol.rfind("SHSE.", 0) == 0 || symbol.rfind("SZSE.", 0) == 0 || symbol.rfind("BSE.", 0) == 0
+        || symbol.rfind("CFFEX.", 0) == 0 || symbol.rfind("SHFE.", 0) == 0 || symbol.rfind("DCE.", 0) == 0
+        || symbol.rfind("CZCE.", 0) == 0 || symbol.rfind("INE.", 0) == 0 || symbol.rfind("GFEX.", 0) == 0)
+        return symbol;
+
+    auto dot = symbol.find('.');
+    if (dot == std::string::npos) return symbol;
+    std::string code = symbol.substr(0, dot);
+    std::string exchange = symbol.substr(dot + 1);
+    if (exchange == "SH") return "SHSE." + code;
+    if (exchange == "SZ") return "SZSE." + code;
+    if (exchange == "BJ") return "BSE." + code;
+    if (exchange == "CFFEX" || exchange == "SHFE" || exchange == "DCE"
+        || exchange == "CZCE" || exchange == "INE" || exchange == "GFEX")
+        return exchange + "." + code;
+    return symbol;
+}
+
+// ========== 订单字段规范化 ==========
+std::string normalizeOrderSide(std::string side) noexcept
+{
+    side = toUpper(trim(side));
+    if (side == "1" || side == "BUY" || side == "LONG") return "BUY";
+    if (side == "2" || side == "SELL" || side == "SHORT") return "SELL";
+    return side;
+}
+
+std::string normalizeOrderStatus(std::string status) noexcept
+{
+    status = toUpper(trim(status));
+    if (status.empty()) return "SUBMITTED";
+    if (status == "0" || status == "UNKNOWN") return "PENDING";
+    if (status == "1" || status == "10" || status == "13") return "SUBMITTED";
+    if (status == "2") return "PARTIAL_FILLED";
+    if (status == "3") return "FILLED";
+    if (status == "4" || status == "5" || status == "12") return "CANCELLED";
+    if (status == "8") return "REJECTED";
+    if (status == "PENDINGNEW" || status == "NEW") return "SUBMITTED";
+    return status;
+}
+
+int64_t toEpochUs(const std::chrono::system_clock::time_point& tp) noexcept
+{
+    if (tp == std::chrono::system_clock::time_point()) return 0;
+    return std::chrono::duration_cast<std::chrono::microseconds>(tp.time_since_epoch()).count();
 }
 
 } // namespace
@@ -415,7 +213,8 @@ JujinMarketConnector::~JujinMarketConnector()
 
 bool JujinMarketConnector::isEnabledByEnvironment() const
 {
-    return readBoolSetting(readConnectorConfigObject(), "enabled", "ASTOCK_ENABLE_JUJIN_MARKET");
+    auto obj = cfg::loadConfigObject();
+    return cfg::readBool(obj, "enabled", "ASTOCK_ENABLE_JUJIN_MARKET");
 }
 
 bool JujinMarketConnector::start()
@@ -438,26 +237,16 @@ bool JujinMarketConnector::start()
         }
     }
 
-    const QJsonObject configObject = readConnectorConfigObject();
-    m_maxMarketSubscriptions = static_cast<size_t>((std::max)(1, readIntSetting(
-        configObject,
-        "maxMarketSubscriptions",
-        "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS",
-        32)));
-    m_marketSubscriptionBatchSize = static_cast<size_t>((std::max)(1, readIntSetting(
-        configObject,
-        "marketSubscriptionBatchSize",
-        "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE",
-        4)));
+    auto configObj = cfg::loadConfigObject();
+    m_maxMarketSubscriptions = static_cast<size_t>(
+        (std::max)(1, cfg::readInt(configObj, "maxMarketSubscriptions",
+                                   "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS", 32)));
+    m_marketSubscriptionBatchSize = static_cast<size_t>(
+        (std::max)(1, cfg::readInt(configObj, "marketSubscriptionBatchSize",
+                                   "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE", 4)));
     std::cout << "[JujinMarketConnector] start requested\n";
 
-    QString matchedProcessName;
-    const bool hasClientProcess = hasRequiredClientProcess(configObject, &matchedProcessName);
-    if (!hasClientProcess) {
-        qWarning() << "JujinMarketConnector: configured client process not detected, will still try token-based connection";
-    }
-
-    const std::string token = readStringSetting(configObject, "token", "ASTOCK_GM_TOKEN");
+    std::string token = cfg::readString(configObj, "token", "ASTOCK_GM_TOKEN");
     if (token.empty()) {
         m_lastError = "jujin token is empty";
         return false;
@@ -466,111 +255,64 @@ bool JujinMarketConnector::start()
     thirdparty::ConfigParams config;
     config.platform = thirdparty::PlatformType::JUJIN;
     config.token = token;
-    config.account_id = readStringSetting(configObject, "accountId", "ASTOCK_GM_ACCOUNT_ID");
-    config.server_url = readStringSetting(configObject, "serverUrl", "ASTOCK_GM_SERVER_URL");
-    const QString boundStrategyId = QString::fromStdString(
-        readStringSetting(configObject, "boundStrategyId", "ASTOCK_GM_BOUND_STRATEGY_ID"));
-    const QString boundStrategyName = QString::fromStdString(
-        readStringSetting(configObject, "boundStrategyName", "ASTOCK_GM_BOUND_STRATEGY_NAME"));
-    const QSet<QString> boundStrategyIds = readBoundStrategyIds(configObject);
-    const QString accountRuntimeStrategyId = QString::fromStdString(
-        readStringSetting(configObject, "accountRuntimeStrategyId", "ASTOCK_GM_ACCOUNT_RUNTIME_STRATEGY_ID"));
-    const QString gmStrategyId = QString::fromStdString(
-        readStringSetting(configObject, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID"));
-    const QString resolvedGmStrategyId = gmStrategyId.trimmed();
+    config.account_id = cfg::readString(configObj, "accountId", "ASTOCK_GM_ACCOUNT_ID");
+    config.server_url = cfg::readString(configObj, "serverUrl", "ASTOCK_GM_SERVER_URL");
 
-    QString resolvedConnectorRuntimeId = accountRuntimeStrategyId.trimmed();
-    if (resolvedConnectorRuntimeId.isEmpty()) {
-        resolvedConnectorRuntimeId = resolvedGmStrategyId;
-    }
+    std::string boundStrategyId = cfg::readString(configObj, "boundStrategyId", "ASTOCK_GM_BOUND_STRATEGY_ID");
+    std::string accountRuntimeId = cfg::readString(configObj, "accountRuntimeStrategyId",
+                                                    "ASTOCK_GM_ACCOUNT_RUNTIME_STRATEGY_ID");
+    std::string gmStrategyId = cfg::readString(configObj, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID");
 
-    if (resolvedConnectorRuntimeId.isEmpty()) {
+    std::string resolvedId = trim(accountRuntimeId);
+    if (resolvedId.empty()) resolvedId = trim(gmStrategyId);
+    if (resolvedId.empty())
         throw std::runtime_error("JujinMarketConnector requires accountRuntimeStrategyId or gmStrategyId");
-    }
 
-    if (!resolvedConnectorRuntimeId.isEmpty()) {
-        config.extra_params["runtime_strategy_id"] = resolvedConnectorRuntimeId.toStdString();
-    }
+    config.extra_params["runtime_strategy_id"] = resolvedId;
     config.extra_params["mode"] = "1";
     config.extra_params["simtrade_only"] = "false";
-    config.extra_params["read_only"] = readBoolSetting(configObject, "readOnly", "ASTOCK_GM_READ_ONLY") ? "true" : "false";
-    const std::string configuredStartupSymbols = readStringSetting(configObject, "symbols", "ASTOCK_GM_SYMBOLS", "");
+    config.extra_params["read_only"] = cfg::readBool(configObj, "readOnly", "ASTOCK_GM_READ_ONLY") ? "true" : "false";
 
-    std::cout << "[JujinMarketConnector] matched process=" << (hasClientProcess ? matchedProcessName.toStdString() : std::string("<not-found>"))
-              << " accountId=" << config.account_id
-              << " boundStrategyId=" << boundStrategyId.toStdString()
-              << " connectorRuntimeId=" << resolvedConnectorRuntimeId.toStdString()
-              << " strategyRuntimeId=" << resolvedGmStrategyId.toStdString()
+    std::cout << "[JujinMarketConnector] accountId=" << config.account_id
+              << " boundStrategyId=" << boundStrategyId
+              << " connectorRuntimeId=" << resolvedId
               << " mode=" << config.extra_params["mode"]
               << " simtradeOnly=" << config.extra_params["simtrade_only"]
-              << " readOnly=" << config.extra_params["read_only"]
-              << " symbols=" << (trim(configuredStartupSymbols).empty() ? std::string("<empty>") : std::string("<disabled>"))
-              << "\n";
+              << " readOnly=" << config.extra_params["read_only"] << "\n";
 
     m_api = std::make_unique<thirdparty::JujinApi>();
     m_api->set_event_bus(std::shared_ptr<engine::EventBus>(eventBus, [](engine::EventBus*) {}));
 
-    if (!m_api->initialize(config)) {
-        m_lastError = "initialize failed";
-        m_api.reset();
-        return false;
-    }
-
-    if (!m_api->connect()) {
-        m_lastError = "connect failed";
-        m_api.reset();
-        return false;
-    }
+    if (!m_api->initialize(config)) { m_lastError = "initialize failed"; m_api.reset(); return false; }
+    if (!m_api->connect()) { m_lastError = "connect failed"; m_api.reset(); return false; }
 
     engine::register_shared_jujin_api(m_api.get());
     m_stopRequested.store(false);
 
-    if (m_marketSubscriptionThread.joinable()) {
-        m_marketSubscriptionThread.join();
-    }
-    m_marketSubscriptionThread = std::thread([this, eventBus]() {
-        processSubscriptionRequests(eventBus);
-    });
+    if (m_marketSubscriptionThread.joinable()) m_marketSubscriptionThread.join();
+    m_marketSubscriptionThread = std::thread([this, eventBus]() { processSubscriptionRequests(eventBus); });
 
     std::cout << "[JujinMarketConnector] API connected successfully\n";
 
     const std::vector<std::string> watchlist = watchlistFromEnvironment();
     if (!watchlist.empty() && marketSessionAllowsSubscriptions()) {
-        for (const std::string& symbol : watchlist) {
-            enqueueWatchSymbol(symbol);
-        }
-    } else if (!watchlist.empty()) {
-        qInfo() << "JujinMarketConnector: market session closed, skip startup watchlist subscription"
-                << "phase=" << marketSessionPhaseText();
+        for (const auto& symbol : watchlist) enqueueWatchSymbol(symbol);
     }
 
     m_watchRequestSubscription = eventBus->subscribe("market.watch.ensure",
         [this](const engine::EventFormat& event) {
-            if (!m_api) {
-                return;
-            }
-
-            if (!marketSessionAllowsSubscriptions()) {
-                return;
-            }
-
+            if (!m_api || !marketSessionAllowsSubscriptions()) return;
             auto symbolValue = event.get<std::string>("symbol");
-            if (!symbolValue.has_value() || symbolValue->empty()) {
-                return;
-            }
-
-            enqueueWatchSymbol(*symbolValue);
+            if (symbolValue.has_value() && !symbolValue->empty())
+                enqueueWatchSymbol(*symbolValue);
         });
-
-    std::cout << "[JujinMarketConnector] subscriptions initialized, watchlist size=" << watchlist.size()
-              << " maxMarketSubscriptions=" << m_maxMarketSubscriptions
-              << " marketSubscriptionBatchSize=" << m_marketSubscriptionBatchSize << "\n";
 
     m_started = true;
     m_lastError.clear();
     publishSubscriptionStatus(eventBus, true);
 
-    publishExistingOrders(eventBus, token, config.account_id, QString(), QSet<QString>{});
+    std::unordered_set<std::string> boundIds = cfg::readBoundStrategyIds(configObj);
+    publishExistingOrders(eventBus, token, config.account_id, resolvedId, boundIds);
     std::cout << "[JujinMarketConnector] start completed\n";
     return true;
 }
@@ -833,227 +575,188 @@ const std::string& JujinMarketConnector::lastError() const
 void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
                                                 const std::string& token,
                                                 const std::string& accountId,
-                                                const QString& runtimeStrategyId,
-                                                const QSet<QString>& boundStrategyIds)
+                                                const std::string& runtimeStrategyId,
+                                                const std::unordered_set<std::string>& boundStrategyIds)
 {
-    if (!eventBus || !eventBus->is_running() || token.empty()) {
-        return;
-    }
+    if (!eventBus || !eventBus->is_running() || token.empty()) return;
 
-    if (m_initialOrderSyncThread.joinable()) {
+    if (m_initialOrderSyncThread.joinable())
         m_initialOrderSyncThread.join();
-    }
 
     auto* rawEventBus = eventBus;
     const std::string requestToken = token;
     const std::string requestAccountId = accountId;
-    const QString configuredRuntimeStrategyId = runtimeStrategyId.trimmed();
-    const QSet<QString> configuredBoundStrategyIds = boundStrategyIds;
+    const std::string configuredRuntimeId = trim(runtimeStrategyId);
+    const std::unordered_set<std::string> configuredBoundIds = boundStrategyIds;
 
-    m_initialOrderSyncThread = std::thread([this,
-                                            rawEventBus,
-                                            requestToken,
-                                            requestAccountId,
-                                            configuredRuntimeStrategyId,
-                                            configuredBoundStrategyIds]() {
+    m_initialOrderSyncThread = std::thread([this, rawEventBus, requestToken, requestAccountId,
+                                            configuredRuntimeId, configuredBoundIds]() {
         std::cout << "[JujinMarketConnector] initial unfinished-order sync started asynchronously\n";
-        qDebug() << "JujinMarketConnector: initial unfinished-order sync started asynchronously";
 
-        QTemporaryFile scriptFile(QDir::temp().filePath(QStringLiteral("astock_jujin_sync_XXXXXX.py")));
-        if (!scriptFile.open()) {
-            qWarning() << "JujinMarketConnector: failed to create temp python script file";
+        // 1. Write Python script to temp file
+#ifdef _WIN32
+        std::string tmpPath = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".")
+                              + "\\astock_jujin_sync_" + std::to_string(std::rand()) + ".py";
+#else
+        std::string tmpPath = "/tmp/astock_jujin_sync_" + std::to_string(std::rand()) + ".py";
+#endif
+        std::ofstream scriptFile(tmpPath, std::ios::out | std::ios::trunc);
+        if (!scriptFile.is_open()) {
+            std::cerr << "[JujinMarketConnector] failed to create temp python script file\n";
             return;
         }
 
-        const QString scriptText = QStringLiteral(
-            "import json,sys\n"
-            "import gm.api as gm\n"
-            "token=sys.argv[1]\n"
-            "account_id=sys.argv[2]\n"
-            "gm.set_token(token)\n"
-            "if account_id:\n"
-            "    gm.set_account_id(account_id)\n"
-            "orders=gm.get_unfinished_orders() or []\n"
-            "def pick(obj,*keys):\n"
-            "    for key in keys:\n"
-            "        value=obj.get(key) if isinstance(obj, dict) else None\n"
-            "        if value is not None and value != '':\n"
-            "            return value\n"
-            "    return None\n"
-            "result=[]\n"
-            "for order in orders:\n"
-            "    item=order if isinstance(order, dict) else {}\n"
-            "    result.append({\n"
-            "        'order_id': pick(item,'cl_ord_id','order_id','orderId'),\n"
-            "        'business_strategy_id': pick(item,'business_strategy_id'),\n"
-            "        'runtime_strategy_id': pick(item,'runtime_strategy_id'),\n"
-            "        'symbol': pick(item,'symbol'),\n"
-            "        'side': pick(item,'side','position_side'),\n"
-            "        'price': pick(item,'price'),\n"
-            "        'quantity': pick(item,'volume','quantity'),\n"
-            "        'filled_quantity': pick(item,'filled_volume','filledQuantity'),\n"
-            "        'filled_notional': pick(item,'filled_amount','filledNotional'),\n"
-            "        'status': pick(item,'status'),\n"
-            "        'message': pick(item,'ord_rej_reason_detail','status_msg','message'),\n"
-            "        'created_at': str(pick(item,'created_at','createdAt') or ''),\n"
-            "        'updated_at': str(pick(item,'updated_at','updatedAt') or '')\n"
-            "    })\n"
-            "print(json.dumps(result, ensure_ascii=True))\n");
-        const QByteArray script = scriptText.toUtf8();
+        const char* kPyScript = R"py(
+import json, sys
+import gm.api as gm
+token = sys.argv[1]
+account_id = sys.argv[2]
+gm.set_token(token)
+if account_id:
+    gm.set_account_id(account_id)
+orders = gm.get_unfinished_orders() or []
 
-        scriptFile.write(script);
-        scriptFile.flush();
+def pick(obj, *keys):
+    for key in keys:
+        value = obj.get(key) if isinstance(obj, dict) else None
+        if value is not None and value != '':
+            return value
+    return None
 
-        QProcess process;
+result = []
+for order in orders:
+    item = order if isinstance(order, dict) else {}
+    result.append({
+        'order_id': pick(item, 'cl_ord_id', 'order_id', 'orderId'),
+        'business_strategy_id': pick(item, 'business_strategy_id'),
+        'runtime_strategy_id': pick(item, 'runtime_strategy_id'),
+        'symbol': pick(item, 'symbol'),
+        'side': pick(item, 'side', 'position_side'),
+        'price': pick(item, 'price'),
+        'quantity': pick(item, 'volume', 'quantity'),
+        'filled_quantity': pick(item, 'filled_volume', 'filledQuantity'),
+        'filled_notional': pick(item, 'filled_amount', 'filledNotional'),
+        'status': pick(item, 'status'),
+        'message': pick(item, 'ord_rej_reason_detail', 'status_msg', 'message'),
+        'created_at': str(pick(item, 'created_at', 'createdAt') or ''),
+        'updated_at': str(pick(item, 'updated_at', 'updatedAt') or '')
+    })
+print(json.dumps(result, ensure_ascii=True))
+)py";
 
-        process.start(QStringLiteral("python"), {
-            scriptFile.fileName(),
-            QString::fromStdString(requestToken),
-            QString::fromStdString(requestAccountId)
-        });
+        scriptFile << kPyScript;
+        scriptFile.close();
 
-        if (!process.waitForStarted(2000)) {
-            std::cout << "[JujinMarketConnector] initial unfinished-order sync failed to start python process\n";
-            qWarning() << "JujinMarketConnector: initial unfinished-order sync failed to start python process";
+        // 2. Execute Python
+        std::string cmd = "python \"" + tmpPath + "\" \"" + requestToken + "\" \"" + requestAccountId + "\"";
+#ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+        FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+        if (!pipe) {
+            std::remove(tmpPath.c_str());
+            std::cerr << "[JujinMarketConnector] python process start failed\n";
             return;
         }
 
-        if (!process.waitForFinished(5000)) {
-            process.kill();
-            process.waitForFinished(1000);
-            std::cout << "[JujinMarketConnector] initial unfinished-order sync timed out\n";
-            qWarning() << "JujinMarketConnector: initial unfinished-order sync timed out";
+        std::string output;
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), pipe)) output += buf;
+        int ret = 
+#ifdef _WIN32
+            _pclose(pipe);
+#else
+            pclose(pipe);
+#endif
+        std::remove(tmpPath.c_str());
+
+        if (m_stopRequested.load()) return;
+        if (ret != 0) {
+            std::cerr << "[JujinMarketConnector] python exited code=" << ret
+                      << " output=" << output.substr(0, 256) << "\n";
             return;
         }
 
-        if (m_stopRequested.load()) {
-            std::cout << "[JujinMarketConnector] initial unfinished-order sync canceled by stop request\n";
-            qDebug() << "JujinMarketConnector: initial unfinished-order sync canceled by stop request";
+        // 3. Parse JSON
+        auto doc = foundation::json::JsonFacade::parse(output);
+        if (!doc.isArray()) {
+            std::cerr << "[JujinMarketConnector] invalid JSON array\n";
+            return;
+        }
+        if (doc.size() == 0) {
+            std::cout << "[JujinMarketConnector] no orders found\n";
             return;
         }
 
-        if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
-            std::cout << "[JujinMarketConnector] initial unfinished-order sync python exited with code="
-                      << process.exitCode() << " stderr="
-                      << process.readAllStandardError().toStdString() << "\n";
-            qWarning() << "JujinMarketConnector: initial unfinished-order sync python exited with code="
-                       << process.exitCode();
-            return;
-        }
+        std::size_t publishedCount = 0, filteredCount = 0;
+        for (std::size_t i = 0; i < doc.size() && !m_stopRequested.load()
+             && rawEventBus && rawEventBus->is_running(); ++i) {
+            auto order = doc.at(i);
+            if (!order.isObject()) continue;
 
-        const QByteArray standardOutput = process.readAllStandardOutput();
-        QJsonParseError parseError;
-        const QJsonDocument document = QJsonDocument::fromJson(standardOutput, &parseError);
-        if (!document.isArray()) {
-            std::cout << "[JujinMarketConnector] initial unfinished-order sync returned invalid json\n";
-            qWarning() << "JujinMarketConnector: initial unfinished-order sync returned invalid json"
-                       << parseError.errorString()
-                       << QString::fromUtf8(standardOutput.left(256));
-            return;
-        }
+            std::string orderId    = order.has("order_id") ? trim(order.get("order_id").asString()) : "";
+            std::string bizId      = order.has("business_strategy_id") ? trim(order.get("business_strategy_id").asString()) : "";
+            std::string rtId       = order.has("runtime_strategy_id") ? trim(order.get("runtime_strategy_id").asString()) : "";
+            std::string sym        = order.has("symbol") ? trim(order.get("symbol").asString()) : "";
+            if (orderId.empty() || sym.empty()) continue;
 
-        const QJsonArray orders = document.array();
-        if (orders.isEmpty()) {
-            std::cout << "[JujinMarketConnector] initial unfinished-order sync found no orders\n";
-            qDebug() << "JujinMarketConnector: initial unfinished-order sync found no orders";
-            return;
-        }
-
-        std::size_t publishedCount = 0;
-        std::size_t filteredCount = 0;
-        for (const QJsonValue& value : orders) {
-            if (m_stopRequested.load() || !rawEventBus || !rawEventBus->is_running() || !value.isObject()) {
-                break;
-            }
-
-            const QJsonObject order = value.toObject();
-            const QString orderId = jsonStringValue(order, {"order_id", "cl_ord_id", "orderId"});
-            const QString businessStrategyId = jsonStringValue(order, {"business_strategy_id"});
-            const QString runtimeStrategyIdentity = jsonStringValue(order, {"runtime_strategy_id"});
-            const QString symbol = jsonStringValue(order, {"symbol"});
-            if (orderId.isEmpty() || symbol.isEmpty()) {
-                continue;
-            }
-
-            const bool hasRuntimeFilter = !configuredRuntimeStrategyId.isEmpty();
-            const bool hasBusinessFilter = !configuredBoundStrategyIds.isEmpty();
-            const bool runtimeMatched = hasRuntimeFilter
-                && !runtimeStrategyIdentity.trimmed().isEmpty()
-                && runtimeStrategyIdentity.trimmed() == configuredRuntimeStrategyId;
-            const bool businessMatched = hasBusinessFilter
-                && !businessStrategyId.trimmed().isEmpty()
-                && configuredBoundStrategyIds.contains(businessStrategyId.trimmed());
-            if ((hasRuntimeFilter || hasBusinessFilter) && !(runtimeMatched || businessMatched)) {
-                ++filteredCount;
-                continue;
-            }
+            // Strategy filter
+            bool hasRt = !configuredRuntimeId.empty();
+            bool hasBiz = !configuredBoundIds.empty();
+            bool rtMatch = hasRt && !rtId.empty() && rtId == configuredRuntimeId;
+            bool bizMatch = hasBiz && !bizId.empty() && configuredBoundIds.find(bizId) != configuredBoundIds.end();
+            if ((hasRt || hasBiz) && !(rtMatch || bizMatch)) { ++filteredCount; continue; }
 
             engine::EventFormat event = engine::EventFormat::create_from_strings(
                 engine::EventTypes::TRADING_ORDER_UPDATED,
                 "TRADING_SNAPSHOT",
                 toEpochUs(std::chrono::system_clock::now()));
-            event.set("order_id", orderId.toStdString());
-            event.set("symbol", symbol.toStdString());
-            if (!businessStrategyId.trimmed().isEmpty()) {
-                event.set("business_strategy_id", businessStrategyId.trimmed().toStdString());
-                event.metadata["business_strategy_id"] = businessStrategyId.trimmed().toStdString();
-            }
-            if (!runtimeStrategyIdentity.trimmed().isEmpty()) {
-                event.set("runtime_strategy_id", runtimeStrategyIdentity.trimmed().toStdString());
-                event.metadata["runtime_strategy_id"] = runtimeStrategyIdentity.trimmed().toStdString();
-            }
-            event.set("side", normalizeOrderSide(jsonStringValue(order, {"side", "position_side"})).toStdString());
-            event.set("price", jsonDoubleValue(order, {"price"}, 0.0));
-            event.set("quantity", static_cast<int64_t>(jsonDoubleValue(order, {"quantity", "volume"}, 0.0)));
-            event.set("filled_quantity", static_cast<int64_t>(jsonDoubleValue(order, {"filled_quantity", "filled_volume"}, 0.0)));
-            event.set("filled_notional", jsonDoubleValue(order, {"filled_notional", "filled_amount"}, 0.0));
-            event.set("status", normalizeOrderStatus(jsonStringValue(order, {"status"})).toStdString());
-            event.set("message", jsonStringValue(order, {"message", "status_msg", "ord_rej_reason_detail"}).toStdString());
+            event.set("order_id", orderId);
+            event.set("symbol", sym);
+            if (!bizId.empty()) { event.set("business_strategy_id", bizId); event.metadata["business_strategy_id"] = bizId; }
+            if (!rtId.empty())  { event.set("runtime_strategy_id", rtId); event.metadata["runtime_strategy_id"] = rtId; }
 
-            const QString createdAt = jsonStringValue(order, {"created_at", "createdAt"});
-            const QString updatedAt = jsonStringValue(order, {"updated_at", "updatedAt"});
-            if (!createdAt.isEmpty()) {
-                event.set("created_at", createdAt.toStdString());
-                event.metadata["created_at"] = createdAt.toStdString();
-            }
-            if (!updatedAt.isEmpty()) {
-                event.set("updated_at", updatedAt.toStdString());
-                event.metadata["updated_at"] = updatedAt.toStdString();
-            }
+            std::string rawSide = order.has("side") ? trim(order.get("side").asString()) : "1";
+            event.set("side", normalizeOrderSide(rawSide));
+            double price = order.has("price") ? order.get("price").asDouble() : 0.0;
+            event.set("price", price);
+            int64_t qty = order.has("quantity") ? static_cast<int64_t>(order.get("quantity").asDouble()) : 0;
+            event.set("quantity", qty);
+            int64_t fqty = order.has("filled_quantity") ? static_cast<int64_t>(order.get("filled_quantity").asDouble()) : 0;
+            event.set("filled_quantity", fqty);
+            double fnotional = order.has("filled_notional") ? order.get("filled_notional").asDouble() : 0.0;
+            event.set("filled_notional", fnotional);
+            std::string rawStatus = order.has("status") ? trim(order.get("status").asString()) : "";
+            event.set("status", normalizeOrderStatus(rawStatus));
+            std::string msg = order.has("message") ? trim(order.get("message").asString()) : "";
+            event.set("message", msg);
 
-            event.metadata["order_id"] = orderId.toStdString();
-            event.metadata["symbol"] = symbol.toStdString();
-            event.metadata["side"] = normalizeOrderSide(jsonStringValue(order, {"side", "position_side"})).toStdString();
-            event.metadata["status"] = normalizeOrderStatus(jsonStringValue(order, {"status"})).toStdString();
+            if (order.has("created_at")) { std::string v = trim(order.get("created_at").asString()); event.set("created_at", v); event.metadata["created_at"] = v; }
+            if (order.has("updated_at")) { std::string v = trim(order.get("updated_at").asString()); event.set("updated_at", v); event.metadata["updated_at"] = v; }
+
+            event.metadata["order_id"] = orderId;
+            event.metadata["symbol"] = sym;
+            event.metadata["side"] = normalizeOrderSide(rawSide);
+            event.metadata["status"] = normalizeOrderStatus(rawStatus);
             event.metadata["source"] = "snapshot.async";
             event.metadata["event_contract"] = "canonical";
 
-            const auto result = rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
-            if (!result) {
-                std::cout << "[JujinMarketConnector] failed to publish async unfinished-order snapshot: "
-                          << result.message << "\n";
-                continue;
-            }
-
+            rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
             ++publishedCount;
         }
-
-        std::cout << "[JujinMarketConnector] initial unfinished-order sync published=" << publishedCount << "\n";
-        qDebug() << "JujinMarketConnector: initial unfinished-order sync published=" << static_cast<qulonglong>(publishedCount)
-                 << "filtered=" << static_cast<qulonglong>(filteredCount);
+        std::cout << "[JujinMarketConnector] sync done published=" << publishedCount
+                  << " filtered=" << filteredCount << "\n";
     });
 }
 
 std::vector<std::string> JujinMarketConnector::watchlistFromEnvironment() const
 {
-    const std::string raw = readStringSetting(
-        readConnectorConfigObject(),
-        "symbols",
-        "ASTOCK_GM_SYMBOLS",
-        "");
+    auto obj = cfg::loadConfigObject();
+    std::string raw = cfg::readString(obj, "symbols", "ASTOCK_GM_SYMBOLS");
 
     if (!trim(raw).empty()) {
-        qWarning() << "JujinMarketConnector: startup symbol watchlist disabled, ignoring configured symbols";
+        std::cerr << "[JujinMarketConnector] startup symbol watchlist disabled, ignoring configured symbols\n";
     }
 
     return {};

@@ -10,9 +10,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <QSet>
-
 #include "foundation/Utils/Uuid.h"
+#include "JujinTypes.h"
 
 namespace engine {
 class EventBus;
@@ -37,8 +36,8 @@ private:
     void publishExistingOrders(engine::EventBus* eventBus,
                                const std::string& token,
                                const std::string& accountId,
-                               const QString& runtimeStrategyId,
-                               const QSet<QString>& boundStrategyIds);
+                               const std::string& runtimeStrategyId,
+                               const std::unordered_set<std::string>& boundStrategyIds);
     void enqueueWatchSymbol(const std::string& symbol);
     void processSubscriptionRequests(engine::EventBus* eventBus);
     bool subscribeSymbolBatch(const std::vector<std::string>& symbols, engine::EventBus* eventBus);

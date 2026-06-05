@@ -1,7 +1,5 @@
 #pragma once
 
-#include "../../../domain/strategy/include/StrategyAggregate.h"
-
 #include <QList>
 #include <QString>
 #include <QStringList>
@@ -19,6 +17,8 @@ struct StrategyResolverSourceContext {
     QVariantMap strategyView;
     QVariantMap advancedOptions;
     QVariantMap optimizationConfig;
+    QVariantMap backtestRuntime;
+    QVariantMap backtestSettings;
     QVariantMap appliedRiskConfig;
 };
 
@@ -26,8 +26,8 @@ struct StrategyStructureResolution {
     QVariantMap strategyView;
     QVariantMap ruleProfile;
     QVariantMap executionPolicy;
+    QVariantMap backtestAssumptions;
     QVariantMap strategyScopeContext;
-    QVariantMap factorOverlay;
 };
 
 class AbstractStrategyStructureResolver {
@@ -56,6 +56,38 @@ protected:
     static void insertIfConfigured(QVariantMap& target, const QString& key, const QVariant& value);
 };
 
+class RuleProfileResolver final : public AbstractStrategyStructureResolver {
+protected:
+    QString structureKeyImpl() const override;
+    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
+    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
+    QList<AliasGroup> aliasGroups() const override;
+};
+
+class ExecutionPolicyResolver final : public AbstractStrategyStructureResolver {
+protected:
+    QString structureKeyImpl() const override;
+    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
+    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
+    QList<AliasGroup> aliasGroups() const override;
+};
+
+class BacktestAssumptionsResolver final : public AbstractStrategyStructureResolver {
+protected:
+    QString structureKeyImpl() const override;
+    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
+    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
+    QList<AliasGroup> aliasGroups() const override;
+};
+
+class StrategyScopeContextResolver final : public AbstractStrategyStructureResolver {
+protected:
+    QString structureKeyImpl() const override;
+    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
+    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
+    QList<AliasGroup> aliasGroups() const override;
+};
+
 class StrategyStructureResolverSet {
 public:
     StrategyStructureResolverSet();
@@ -70,9 +102,5 @@ private:
 
     std::vector<std::unique_ptr<AbstractStrategyStructureResolver>> m_resolvers;
 };
-
-[[nodiscard]] domain::strategy::StrategyAggregate buildStrategyAggregate(
-    const QVariantMap& strategy,
-    const QVariantMap& appliedRiskConfig = QVariantMap());
 
 } // namespace bridge::config

@@ -1889,11 +1889,14 @@ Rectangle {
     }
 
     function openFactorSelector() {
+        console.log("[StrategyParamConfig] openFactorSelector called, factorService:", !!factorService)
         if (!factorService) {
+            console.warn("[StrategyParamConfig] factorService is null/undefined, cannot open factor selector")
             return
         }
 
         if (factorService.initialize) {
+            console.log("[StrategyParamConfig] initializing factorService...")
             factorService.initialize()
         }
 
@@ -1903,8 +1906,9 @@ Rectangle {
         }
 
         var component = Qt.createComponent("../../FactorWorkbench/Backtest/FactorSelectorDialog.qml")
+        console.log("[StrategyParamConfig] FactorSelectorDialog component status:", component.status, component.errorString())
         if (component.status !== Component.Ready) {
-            console.warn("加载因子选择对话框失败:", component.errorString())
+            console.warn("[StrategyParamConfig] 加载因子选择对话框失败:", component.errorString())
             return
         }
 
@@ -1914,7 +1918,9 @@ Rectangle {
             requireSupportValidation: false,
             selectedFactorIds: (root.factorOverlay.allocations || []).map(function(item) { return item.factor_id || "" })
         })
+        console.log("[StrategyParamConfig] factorSelectorDialog created:", !!factorSelectorDialog)
         if (!factorSelectorDialog) {
+            console.warn("[StrategyParamConfig] factorSelectorDialog creation returned null")
             return
         }
 
@@ -1926,6 +1932,7 @@ Rectangle {
             }
         })
         factorSelectorDialog.open()
+        console.log("[StrategyParamConfig] factorSelectorDialog opened")
     }
 
     function rebalanceFactorOverlayWeights() {

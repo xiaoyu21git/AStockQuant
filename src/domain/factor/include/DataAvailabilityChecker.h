@@ -13,7 +13,7 @@
 // 前向声明
 namespace astock {
 namespace database {
-class QtMySQLDatabase;
+class ISqlDatabase;
 }
 }
 
@@ -101,7 +101,7 @@ struct DataStatus {
 // 数据可用性检查器
 class DataAvailabilityChecker {
 public:
-    explicit DataAvailabilityChecker(std::shared_ptr<astock::database::QtMySQLDatabase> db);
+    explicit DataAvailabilityChecker(std::shared_ptr<astock::database::ISqlDatabase> db);
     ~DataAvailabilityChecker() = default;
     
     // 检查因子数据可用性
@@ -157,7 +157,7 @@ public:
                                                      DataType type);
     
 private:
-    std::shared_ptr<astock::database::QtMySQLDatabase> db_;
+    std::shared_ptr<astock::database::ISqlDatabase> db_;
     mutable std::mutex cacheMutex_;
     mutable std::unordered_map<std::string, bool> columnExistenceCache_;
     mutable std::unordered_map<std::string, bool> fieldValidityCache_;

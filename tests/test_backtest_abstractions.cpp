@@ -1214,9 +1214,9 @@ BacktestRequest makeValidLayerGuardRequest()
 {
     BacktestRequest request;
 
-    request.strategyIdentity.strategyId = domain::strategy::StrategyId(QStringLiteral("strategy_1"));
-    request.strategyIdentity.strategyCode = domain::strategy::StrategyCode(QStringLiteral("code_1"));
-    request.strategyIdentity.strategyName = domain::strategy::StrategyName(QStringLiteral("name_1"));
+    request.strategyIdentity.strategyId = domain::strategy::StrategyId(std::string{"strategy_1"});
+    request.strategyIdentity.strategyCode = domain::strategy::StrategyCode(std::string{"code_1"});
+    request.strategyIdentity.strategyName = domain::strategy::StrategyName(std::string{"name_1"});
     request.strategyIdentity.storedType = domain::backtest::StrategyStoredType::DOUBLE_MOVING_AVERAGE;
 
     request.strategySpec.ruleProfile.maxPositionRatio = domain::strategy::Ratio{0.9};
@@ -1228,18 +1228,18 @@ BacktestRequest makeValidLayerGuardRequest()
     request.strategySpec.executionPolicy.rebalanceFrequencyDays = domain::strategy::RebalanceFrequencyDays{5};
 
     request.strategySpec.strategyScopeContext.universe.universeMode = domain::strategy::UniverseMode::ExplicitSymbols;
-    request.strategySpec.strategyScopeContext.universe.explicitSymbols.append(
-        domain::strategy::SymbolCode(QStringLiteral("000001.SZ")));
+    request.strategySpec.strategyScopeContext.universe.explicitSymbols.push_back(
+        domain::strategy::SymbolCode(std::string{"000001.SZ"}));
 
     request.strategySpec.factorOverlay.enabled = true;
     request.strategySpec.factorOverlay.targetPositionCount = 12;
     request.strategySpec.factorOverlay.minimumCompositeScore = 0.5;
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 100.0});
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 100.0});
 
     request.universeSpec.universeMode = domain::strategy::UniverseMode::ExplicitSymbols;
-    request.universeSpec.explicitSymbols.append(domain::strategy::SymbolCode(QStringLiteral("000001.SZ")));
+    request.universeSpec.explicitSymbols.push_back(domain::strategy::SymbolCode(std::string{"000001.SZ"}));
 
     request.costSpec.initialCapital = domain::strategy::Money{1000000.0};
     request.costSpec.commissionRate = domain::strategy::Ratio{0.001};
@@ -1256,9 +1256,9 @@ BacktestRequest makeValidLayerGuardRequest()
     request.factorOverlaySpec.enabled = true;
     request.factorOverlaySpec.targetPositionCount = 12;
     request.factorOverlaySpec.minimumCompositeScore = 0.5;
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 100.0});
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 100.0});
 
     request.runtimeOptions.maxThreads = 4;
     request.runtimeOptions.cacheTtlSeconds = 0;
@@ -1354,7 +1354,7 @@ TEST(BacktestLayerGuardTest, RejectsOverlaySelectedFactorsMismatch)
     const StrictBacktestLayerGuard guard;
     BacktestRequest request = makeValidLayerGuardRequest();
     request.factorOverlaySpec.selectedFactors.clear();
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
@@ -1367,24 +1367,24 @@ TEST(BacktestLayerGuardTest, AcceptsOverlaySelectedFactorsWithDifferentOrder)
     BacktestRequest request = makeValidLayerGuardRequest();
 
     request.strategySpec.factorOverlay.selectedFactors.clear();
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
 
     request.factorOverlaySpec.selectedFactors.clear();
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
 
     request.strategySpec.factorOverlay.allocations.clear();
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 50.0});
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_2")), 50.0});
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 50.0});
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_2"}), 50.0});
 
     request.factorOverlaySpec.allocations.clear();
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 50.0});
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_2")), 50.0});
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 50.0});
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_2"}), 50.0});
 
     const auto result = guard.validate(request);
     EXPECT_TRUE(result.ok());
@@ -1453,22 +1453,22 @@ TEST(BacktestLayerGuardTest, AcceptsOverlayAllocationsWithDifferentOrder)
     BacktestRequest request = makeValidLayerGuardRequest();
 
     request.strategySpec.factorOverlay.selectedFactors.clear();
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
     request.strategySpec.factorOverlay.allocations.clear();
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 60.0});
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_2")), 40.0});
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 60.0});
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_2"}), 40.0});
 
     request.factorOverlaySpec.selectedFactors.clear();
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
     request.factorOverlaySpec.allocations.clear();
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_2")), 40.0});
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 60.0});
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_2"}), 40.0});
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 60.0});
 
     const auto result = guard.validate(request);
     EXPECT_TRUE(result.ok());
@@ -1480,22 +1480,22 @@ TEST(BacktestLayerGuardTest, RejectsOverlayAllocationsWithWeightMismatch)
     BacktestRequest request = makeValidLayerGuardRequest();
 
     request.strategySpec.factorOverlay.selectedFactors.clear();
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.strategySpec.factorOverlay.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.strategySpec.factorOverlay.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
     request.strategySpec.factorOverlay.allocations.clear();
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 60.0});
-    request.strategySpec.factorOverlay.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_2")), 40.0});
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 60.0});
+    request.strategySpec.factorOverlay.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_2"}), 40.0});
 
     request.factorOverlaySpec.selectedFactors.clear();
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_1")));
-    request.factorOverlaySpec.selectedFactors.append(domain::strategy::FactorId(QStringLiteral("factor_2")));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_1"}));
+    request.factorOverlaySpec.selectedFactors.push_back(domain::strategy::FactorId(std::string{"factor_2"}));
     request.factorOverlaySpec.allocations.clear();
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_1")), 55.0});
-    request.factorOverlaySpec.allocations.append(
-        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(QStringLiteral("factor_2")), 45.0});
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_1"}), 55.0});
+    request.factorOverlaySpec.allocations.push_back(
+        domain::strategy::FactorOverlayAllocation{domain::strategy::FactorId(std::string{"factor_2"}), 45.0});
 
     const auto result = guard.validate(request);
     EXPECT_FALSE(result.ok());
@@ -1559,7 +1559,7 @@ TEST(FactorBacktestConsistencyTest, RunSpecValidatorRejectsMissingResolvedSymbol
 {
     BacktestRequest request = makeValidLayerGuardRequest();
     request.universeSpec.resolvedSymbols.clear();
-    request.factorOverlaySpec.selectedFactors = {domain::strategy::FactorId(QStringLiteral("factor_1"))};
+    request.factorOverlaySpec.selectedFactors = {domain::strategy::FactorId(std::string{"factor_1"})};
 
     const application::backtest::StrictRunSpecValidator validator;
     const auto result = validator.validate(makeValidFactorRunSpec(request));
@@ -1573,7 +1573,7 @@ TEST(FactorBacktestConsistencyTest, RunSpecValidatorRejectsMissingResolvedSymbol
 TEST(FactorBacktestConsistencyTest, RunSpecValidatorRejectsMissingSelectedFactors)
 {
     BacktestRequest request = makeValidLayerGuardRequest();
-    request.universeSpec.resolvedSymbols = {domain::strategy::SymbolCode(QStringLiteral("000001.SZ"))};
+    request.universeSpec.resolvedSymbols = {domain::strategy::SymbolCode(std::string{"000001.SZ"})};
     request.factorOverlaySpec.selectedFactors.clear();
 
     const application::backtest::StrictRunSpecValidator validator;
@@ -1588,8 +1588,8 @@ TEST(FactorBacktestConsistencyTest, RunSpecValidatorRejectsMissingSelectedFactor
 TEST(FactorBacktestConsistencyTest, RunSpecValidatorAcceptsResolvedSymbolsAndSelectedFactors)
 {
     BacktestRequest request = makeValidLayerGuardRequest();
-    request.universeSpec.resolvedSymbols = {domain::strategy::SymbolCode(QStringLiteral("000001.SZ"))};
-    request.factorOverlaySpec.selectedFactors = {domain::strategy::FactorId(QStringLiteral("factor_1"))};
+    request.universeSpec.resolvedSymbols = {domain::strategy::SymbolCode(std::string{"000001.SZ"})};
+    request.factorOverlaySpec.selectedFactors = {domain::strategy::FactorId(std::string{"factor_1"})};
 
     const application::backtest::StrictRunSpecValidator validator;
     const auto result = validator.validate(makeValidFactorRunSpec(request));
@@ -1607,11 +1607,11 @@ TEST(FactorBacktestConsistencyTest, RuntimeGenerateSpecMirrorsWindowBudgetAndFie
     request.window.startDate = 20240103;
     request.window.endDate = 20240131;
     request.universeSpec.resolvedSymbols = {
-        domain::strategy::SymbolCode(QStringLiteral("000001.SZ")),
-        domain::strategy::SymbolCode(QStringLiteral("000002.SZ"))};
+        domain::strategy::SymbolCode(std::string{"000001.SZ"}),
+        domain::strategy::SymbolCode(std::string{"000002.SZ"})};
     request.factorOverlaySpec.selectedFactors = {
-        domain::strategy::FactorId(QStringLiteral("alpha_factor")),
-        domain::strategy::FactorId(QStringLiteral("beta_factor"))};
+        domain::strategy::FactorId(std::string{"alpha_factor"}),
+        domain::strategy::FactorId(std::string{"beta_factor"})};
 
     CapturingFactorComputeEngine factorComputeEngine;
     application::backtest::FactorSignalProducerAdapter producer(factorComputeEngine);
@@ -1643,22 +1643,22 @@ TEST(FactorBacktestConsistencyTest, NonNumericFactorIdStaysConsistentAcrossSelec
     static constexpr std::uint64_t kTaskIdValue = 1ULL;
 
     BacktestRequest request = makeValidLayerGuardRequest();
-    const domain::strategy::FactorId alphaFactorId(QStringLiteral("alpha_factor"));
-    const domain::strategy::SymbolCode alphaSymbolCode(QStringLiteral("000001.SZ"));
+    const domain::strategy::FactorId alphaFactorId(std::string{"alpha_factor"});
+    const domain::strategy::SymbolCode alphaSymbolCode(std::string{"000001.SZ"});
 
     request.universeSpec.resolvedSymbols.clear();
-    request.universeSpec.resolvedSymbols.append(alphaSymbolCode);
+    request.universeSpec.resolvedSymbols.push_back(alphaSymbolCode);
 
     request.strategySpec.factorOverlay.selectedFactors.clear();
-    request.strategySpec.factorOverlay.selectedFactors.append(alphaFactorId);
+    request.strategySpec.factorOverlay.selectedFactors.push_back(alphaFactorId);
     request.strategySpec.factorOverlay.allocations.clear();
-    request.strategySpec.factorOverlay.allocations.append(
+    request.strategySpec.factorOverlay.allocations.push_back(
         domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0});
 
     request.factorOverlaySpec.selectedFactors.clear();
-    request.factorOverlaySpec.selectedFactors.append(alphaFactorId);
+    request.factorOverlaySpec.selectedFactors.push_back(alphaFactorId);
     request.factorOverlaySpec.allocations.clear();
-    request.factorOverlaySpec.allocations.append(
+    request.factorOverlaySpec.allocations.push_back(
         domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0});
 
     const StrictBacktestLayerGuard guard;
@@ -1686,12 +1686,12 @@ TEST(FactorBacktestConsistencyTest, DifferentTextFactorIdsMapToDifferentExecutab
 {
     static constexpr std::uint64_t kTaskIdValueA = 1ULL;
     static constexpr std::uint64_t kTaskIdValueB = 2ULL;
-    const domain::strategy::SymbolCode alphaSymbolCode(QStringLiteral("000001.SZ"));
+    const domain::strategy::SymbolCode alphaSymbolCode(std::string{"000001.SZ"});
 
     BacktestRequest requestA = makeValidLayerGuardRequest();
-    const domain::strategy::FactorId alphaFactorId(QStringLiteral("alpha_factor"));
+    const domain::strategy::FactorId alphaFactorId(std::string{"alpha_factor"});
     requestA.universeSpec.resolvedSymbols.clear();
-    requestA.universeSpec.resolvedSymbols.append(alphaSymbolCode);
+    requestA.universeSpec.resolvedSymbols.push_back(alphaSymbolCode);
     requestA.strategySpec.factorOverlay.selectedFactors = {alphaFactorId};
     requestA.strategySpec.factorOverlay.allocations = {
         domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0}};
@@ -1700,9 +1700,9 @@ TEST(FactorBacktestConsistencyTest, DifferentTextFactorIdsMapToDifferentExecutab
         domain::strategy::FactorOverlayAllocation{alphaFactorId, 100.0}};
 
     BacktestRequest requestB = makeValidLayerGuardRequest();
-    const domain::strategy::FactorId betaFactorId(QStringLiteral("beta_factor"));
+    const domain::strategy::FactorId betaFactorId(std::string{"beta_factor"});
     requestB.universeSpec.resolvedSymbols.clear();
-    requestB.universeSpec.resolvedSymbols.append(alphaSymbolCode);
+    requestB.universeSpec.resolvedSymbols.push_back(alphaSymbolCode);
     requestB.strategySpec.factorOverlay.selectedFactors = {betaFactorId};
     requestB.strategySpec.factorOverlay.allocations = {
         domain::strategy::FactorOverlayAllocation{betaFactorId, 100.0}};
