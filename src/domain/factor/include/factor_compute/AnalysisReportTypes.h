@@ -148,33 +148,33 @@ struct AnalysisReport final {
             && std::isfinite(crossSectionVariance)
             && crossSectionVariance >= 0.0
             && isCrossSectionVarianceConsistent()
-            && informationCoefficient.isValid()
-            && informationCoefficientStdDev.isValid()
-            && informationRatio.isValid()
-            && informationCoefficientPositiveRate.isValid()
+            && isOptionalValid(informationCoefficient)
+            && isOptionalValid(informationCoefficientStdDev)
+            && isOptionalValid(informationRatio)
+            && isOptionalValid(informationCoefficientPositiveRate)
             && hasRequiredDependencies()
             && isWithinCorrelationRange(informationCoefficient)
             && isNonNegative(informationCoefficientStdDev)
             && isWithinUnitInterval(informationCoefficientPositiveRate)
-            && informationCoefficientSignificance.isValid()
+            && isOptionalValid(informationCoefficientSignificance)
             && isIcSignificanceConsistent()
-            && monotonicity.isValid()
+            && isOptionalValid(monotonicity)
             && isWithinCorrelationRange(monotonicity)
-            && discrimination.isValid()
+            && isOptionalValid(discrimination)
             && isNonNegative(discrimination)
-            && layeredReturnSpread.isValid()
+            && isOptionalValid(layeredReturnSpread)
             && isDiscriminationConsistent()
-            && turnoverRatio.isValid()
+            && isOptionalValid(turnoverRatio)
             && isWithinUnitInterval(turnoverRatio)
-            && longShortSharpe.isValid()
-            && longShortAnnualReturn.isValid()
-            && icHalfLife.isValid()
+            && isOptionalValid(longShortSharpe)
+            && isOptionalValid(longShortAnnualReturn)
+            && isOptionalValid(icHalfLife)
             && isPositiveInt(icHalfLife)
-            && costAdjustedSharpe.isValid()
-            && alpha.isValid()
-            && monthlyWinRate.isValid()
+            && isOptionalValid(costAdjustedSharpe)
+            && isOptionalValid(alpha)
+            && isOptionalValid(monthlyWinRate)
             && isWithinUnitInterval(monthlyWinRate)
-            && numGroups.isValid()
+            && isOptionalValid(numGroups)
             && isPositiveInt(numGroups)
             && isNumGroupsConsistent()
             && icWindowDiagnostics.isValid()
@@ -184,6 +184,12 @@ struct AnalysisReport final {
     }
 
 private:
+    template<typename T>
+    [[nodiscard]] static bool isOptionalValid(const T& metric) noexcept
+    {
+        return metric.isValid();
+    }
+
     static constexpr double kMetricBoundEpsilon = 1e-9;
 
     [[nodiscard]] static bool isWithinClosedRange(

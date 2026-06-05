@@ -482,3 +482,6 @@ if(ENABLE_RULE_SERVICE_PY_WORKER_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE
 
     message(STATUS "[TESTS] Configured run_strategy_rule_service_py_worker_hf_benchmark executable")
 endif()
+# live test
+add_executable(test_live_backtest_log test_live_backtest_log.cpp)
+set_target_properties(test_live_backtest_log PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL)
