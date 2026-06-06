@@ -1,18 +1,18 @@
-cmake_minimum_required(VERSION 3.16)
+﻿cmake_minimum_required(VERSION 3.16)
 project(AStockQuantApp VERSION 1.0.0 LANGUAGES CXX)
 
-# 鍩烘湰閰嶇疆
+# 閸╃儤婀伴柊宥囩枂
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 鑷姩澶勭悊 Qt 鐨勫厓瀵硅薄绯荤粺
+# 閼奉亜濮╂径鍕倞 Qt 閻ㄥ嫬鍘撶€电钖勭化鑽ょ埠
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
 
-# 鏌ユ壘 Qt6 find_package(Qt5 COMPONENTS GraphicalEffects REQUIRED) 
+# 閺屻儲澹?Qt6 find_package(Qt5 COMPONENTS GraphicalEffects REQUIRED) 
 find_package(Qt6 REQUIRED COMPONENTS 
     Core 
     Charts
@@ -27,18 +27,18 @@ find_package(Qt6 REQUIRED COMPONENTS
     QuickWidgets
 )
 
-# 璁剧疆 Qt 椤圭洰
+# 鐠佸墽鐤?Qt 妞ゅ湱娲?
 qt_standard_project_setup()
 
-# 让 Qt 工具链把 ConsoleUi 模块输出到与 URI 对齐的目录，避免 qmllint 无法解析模块。
+# 璁?Qt 宸ュ叿閾炬妸 ConsoleUi 妯″潡杈撳嚭鍒颁笌 URI 瀵归綈鐨勭洰褰曪紝閬垮厤 qmllint 鏃犳硶瑙ｆ瀽妯″潡銆?
 set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ConsoleUi")
 
-# 娣诲姞瀛愮洰褰曪紙鍋囪 src/ 涓湁 CMakeLists.txt锛?
+# 濞ｈ濮炵€涙劗娲拌ぐ鏇礄閸嬪洩顔?src/ 娑擃厽婀?CMakeLists.txt閿?
 #add_subdirectory(src)
 
-# 鍒涘缓涓诲簱鐩爣
+# 閸掓稑缂撴稉璇茬氨閻╊喗鐖?
 add_library(astockquantapp SHARED
-    # 濡傛灉鏈夋簮鏂囦欢鍙互鍦ㄨ繖閲屾坊鍔狅紝鍚﹀垯鍦?src/CMakeLists.txt 涓鐞?
+    # 婵″倹鐏夐張澶嬬爱閺傚洣娆㈤崣顖欎簰閸︺劏绻栭柌灞惧潑閸旂媴绱濋崥锕€鍨崷?src/CMakeLists.txt 娑擃厼顦╅悶?
     src/AppBootstrap.cpp
     src/VasAurora.cpp
 )
@@ -55,14 +55,14 @@ if(ENABLE_JUJIN_MARKET)
     )
 endif()
 
-# 璁剧疆搴撶殑灞炴€?
+# 鐠佸墽鐤嗘惔鎾舵畱鐏炵偞鈧?
 target_compile_definitions(astockquantapp PRIVATE BUILD_DLL)
 
 if(MSVC)
     target_compile_options(astockquantapp PRIVATE /FS)
 endif()
 
-# 閾炬帴渚濊禆
+# 闁剧偓甯存笟婵婄
 target_link_libraries(astockquantapp
     PUBLIC
         Qt6::Core
@@ -77,7 +77,7 @@ target_link_libraries(astockquantapp
     PRIVATE
         engine
         domain
-        bridge                # 确保这些目标已定义
+        bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
         foundation
         factor_system
         factor_compute
@@ -115,7 +115,7 @@ if(ENABLE_JUJIN_MARKET)
     endforeach()
 endif()
 
-# 鍒涘缓QML妯″潡
+# 閸掓稑缂換ML濡€虫健
 qt_add_qml_module(astockquantapp
     URI ConsoleUi
     VERSION 1.0
@@ -152,6 +152,7 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
         Qml/page/strategies/StrategyCreationPagePro.qml
+        Qml/page/strategies/StrategyBacktestAnalysisPage.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/DataAnalysis/CacheManagementPage.qml
             Qml/page/risk/RiskConfigurationPage.qml
@@ -171,7 +172,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Backtest/BacktestLabeledDatePicker.qml
         Qml/components/Backtest/BacktestLabeledComboBox.qml
         Qml/components/Backtest/BacktestMetricCard.qml
-        Qml/components/Backtest/BacktestParameterPanel.qml
         Qml/components/Backtest/BacktestResultPanel.qml
         Qml/components/Backtest/BacktestStatItem.qml
         Qml/components/ButtonBuy.qml
@@ -194,6 +194,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Base/MetaCard.qml
         Qml/components/UserInfoPanel.qml
         Qml/components/Strategy/ViewModeToggle.qml
+        Qml/components/Strategy/StrategyBacktestParams.qml
         Qml/components/Strategy/StrategySortButton.qml
         Qml/components/Strategy/StrategyParameters.qml
         Qml/components/Strategy/StrategyFilterButton.qml
@@ -202,7 +203,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategyFilter.qml
         Qml/components/Strategy/StrategySorter.qml
         Qml/components/Strategy/StrategySummaryHeaderCard.qml
-        # 绛栫暐鍒涘缓缁勪欢
+        # 缁涙牜鏆愰崚娑樼紦缂佸嫪娆?
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
         Qml/components/Strategy/Creation/StrategyParamConfig.qml
@@ -236,12 +237,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/FactorListRow.qml
         Qml/components/Factor/FactorCardEnhanced.qml
         Qml/page/FactorWorkbench.qml
-        # FactorWorkbench缁勪欢鏂囦欢
+        # FactorWorkbench缂佸嫪娆㈤弬鍥︽
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
         Qml/components/FactorWorkbench/Creation/FactorTypeCard.qml
         Qml/components/FactorWorkbench/Creation/CreationPagePluginIntegrated.qml
-        # 鎻掍欢鍖栫粍浠?
+        # 閹绘帊娆㈤崠鏍矋娴?
         Qml/components/FactorWorkbench/Creation/components/ParamComponents.qml
         Qml/components/FactorWorkbench/Creation/components/DynamicParamGenerator.qml
         Qml/components/FactorWorkbench/Creation/components/SliderParam.qml
@@ -285,14 +286,14 @@ qt_add_qml_module(astockquantapp
         Qml/page/strategies/qmldir
         Qml/page/trading/qmldir
 
-        # 濡傛灉鏈夌浉鍏崇殑C++绫伙紝鍙互鍦ㄨ繖閲屾坊鍔?
+        # 婵″倹鐏夐張澶屾祲閸忓磭娈慍++缁紮绱濋崣顖欎簰閸︺劏绻栭柌灞惧潑閸?
 )
 
 if(MSVC AND TARGET astockquantappplugin)
     target_compile_options(astockquantappplugin PRIVATE /FS)
 endif()
 
-# 鍖呭惈鐩綍
+# 閸栧懎鎯堥惄顔肩秿
 target_include_directories(astockquantapp
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -303,7 +304,7 @@ target_include_directories(astockquantapp
         ${CMAKE_CURRENT_SOURCE_DIR}/foundation/public
 )
 
-# 鍒涘缓鍙墽琛屾枃浠?
+# 閸掓稑缂撻崣顖涘⒔鐞涘本鏋冩禒?
 add_executable(astockquantapp-exe
     main.cpp
     app_icon.rc
@@ -369,7 +370,7 @@ else()
     message(STATUS "Skipping astockquant_tradeprobe because ENABLE_JUJIN_MARKET is OFF")
 endif()
 
-# 娴嬭瘯
+# 濞村鐦?
 include(CTest)
 enable_testing()
 

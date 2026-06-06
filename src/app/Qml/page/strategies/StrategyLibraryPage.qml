@@ -1019,18 +1019,8 @@ Rectangle {
         showBacktestWorkbench = true
         backtestWorkbenchStatusText = ""
         if (backtestWorkbenchLoader.item) {
-            backtestWorkbenchLoader.item.preferredStrategyId = selectedStrategyId
-            if (typeof backtestWorkbenchLoader.item.setPageMode === "function") {
-                backtestWorkbenchLoader.item.setPageMode(backtestWorkbenchMode)
-            } else {
-                backtestWorkbenchLoader.item.pageMode = backtestWorkbenchMode
-            }
-            if (typeof backtestWorkbenchLoader.item.syncPreferredStrategySelection === "function") {
-                backtestWorkbenchLoader.item.syncPreferredStrategySelection()
-            }
-            if (typeof backtestWorkbenchLoader.item.syncStrategyBacktestEditor === "function") {
-                backtestWorkbenchLoader.item.syncStrategyBacktestEditor()
-            }
+            backtestWorkbenchLoader.item.selectedStrategyId = selectedStrategyId
+            backtestWorkbenchLoader.item.selectedStrategyName = getSelectedStrategySummary() ? (getSelectedStrategySummary().strategyName || getSelectedStrategySummary().name || "") : ""
         }
     }
 
@@ -1738,19 +1728,19 @@ Rectangle {
                 asynchronous: true
                 active: backtestWorkbenchLoadedOnce
                 visible: status === Loader.Ready && strategyLibraryPage.showBacktestWorkbench
-                source: "qrc:/page/strategies/StrategyBacktestPage.qml"
+                source: "qrc:/components/Strategy/StrategyBacktestParams.qml"
 
                 onLoaded: {
                     strategyLibraryPage.backtestWorkbenchStatusText = ""
                     if (!item) {
                         return
                     }
-                    item.embeddedMode = true
-                    item.preferredStrategyId = strategyLibraryPage.selectedStrategyId
-                    if (typeof item.setPageMode === "function") {
-                        item.setPageMode(strategyLibraryPage.backtestWorkbenchMode)
-                    } else {
-                        item.pageMode = strategyLibraryPage.backtestWorkbenchMode
+                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                    if (typeof item.startBacktestRequested !== "undefined") {
+                        item.startBacktestRequested.connect(function() {
+                            console.log("StrategyBacktestParams: 用户点击开始回测")
+                        })
                     }
                 }
 
@@ -2099,7 +2089,8 @@ Rectangle {
 
     onSelectedStrategyIdChanged: {
         if (backtestWorkbenchLoader.item) {
-            backtestWorkbenchLoader.item.preferredStrategyId = selectedStrategyId
+            backtestWorkbenchLoader.item.selectedStrategyId = selectedStrategyId
+            backtestWorkbenchLoader.item.selectedStrategyName = getSelectedStrategySummary() ? (getSelectedStrategySummary().strategyName || getSelectedStrategySummary().name || "") : ""
         }
     }
 

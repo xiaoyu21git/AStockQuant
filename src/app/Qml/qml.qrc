@@ -1,4 +1,4 @@
-<RCC version="1.0">
+﻿<RCC version="1.0">
     <qresource prefix="/">
         <file>resources/icons/app.ico</file>
         <file>resources/icons/16x16.ico</file>
@@ -68,7 +68,6 @@
         <file>components/Backtest/BacktestLabeledDatePicker.qml</file>
         <file>components/Backtest/BacktestLabeledComboBox.qml</file>
         <file>components/Backtest/BacktestMetricCard.qml</file>
-        <file>components/Backtest/BacktestParameterPanel.qml</file>
         <file>components/Backtest/BacktestResultPanel.qml</file>
         <file>components/Backtest/BacktestStatItem.qml</file>
         <file>components/DataAnalysis/CoreModule.qml</file>
@@ -142,6 +141,7 @@
         <file>components/Strategy/StrategySorter.qml</file>
         <file>components/Strategy/StrategySummaryHeaderCard.qml</file>
         <file>components/Strategy/ViewModeToggle.qml</file>
+        <file>components/Strategy/StrategyBacktestParams.qml</file>
         <file>components/StrategyCard.qml</file>
         <file>components/ThemeSwitcher.qml</file>
         <file>components/TopNavigation/BreadcrumbItem.qml</file>
@@ -174,7 +174,6 @@
         <file>page/leftSidebar/SecondaryMenu.qml</file>
         <file>page/risk/RiskConfigurationPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
-        <file>page/strategies/StrategyBacktestPage.qml</file>
         <file>page/strategies/StrategyBacktestAnalysisPage.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
