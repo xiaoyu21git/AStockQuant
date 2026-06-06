@@ -798,36 +798,42 @@ QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn,
     
     // 默认保守关闭 forward-only，只在显式流式访问的大结果集上开启。
     query.setForwardOnly(forwardOnly);
-    
-    if (!query.prepare(sql)) {
-        qDebug() << "查询准备失败:" << query.lastError().text();
-        throw QtMySQLException("Failed to prepare query: " + query.lastError().text());
-    }
-    
-    // 绑定参数
-    for (const auto& [key, value] : params) {
-        if (isPositionalBindingKey(key)) {
-            // 位置绑定
-            query.addBindValue(value);
-            qDebug() << "位置绑定参数:" << value.toString();
-        } else {
-            // 命名绑定
-            // 注意：如果key已经包含冒号前缀，不要重复添加
-            if (key.startsWith(":")) {
-                query.bindValue(key, value);
-                qDebug() << "命名绑定参数" << key << ":" << value.toString();
+
+    // 无参数时直接用 exec()，避免 Qt MySQL 驱动因 prepared statement 参数缺失而报错
+    if (params.empty()) {
+        qDebug() << "无参数查询，使用直接执行模式 SQL:" << sql.left(200);
+        if (!query.exec(sql)) {
+            qDebug() << "查询执行失败:" << query.lastError().text();
+            throw QtMySQLException("Failed to execute query: " + query.lastError().text());
+        }
+    } else {
+        if (!query.prepare(sql)) {
+            qDebug() << "查询准备失败:" << query.lastError().text();
+            throw QtMySQLException("Failed to prepare query: " + query.lastError().text());
+        }
+
+        // 绑定参数
+        for (const auto& [key, value] : params) {
+            if (isPositionalBindingKey(key)) {
+                query.addBindValue(value);
+                qDebug() << "位置绑定参数:" << value.toString();
             } else {
-                query.bindValue(":" + key, value);
-                qDebug() << "命名绑定参数 :" << key << ":" << value.toString();
+                if (key.startsWith(":")) {
+                    query.bindValue(key, value);
+                    qDebug() << "命名绑定参数" << key << ":" << value.toString();
+                } else {
+                    query.bindValue(":" + key, value);
+                    qDebug() << "命名绑定参数 :" << key << ":" << value.toString();
+                }
             }
         }
+
+        if (!query.exec()) {
+            qDebug() << "查询执行失败:" << query.lastError().text();
+            throw QtMySQLException("Failed to execute query: " + query.lastError().text());
+        }
     }
-    
-    if (!query.exec()) {
-        qDebug() << "查询执行失败:" << query.lastError().text();
-        throw QtMySQLException("Failed to execute query: " + query.lastError().text());
-    }
-    
+
     qDebug() << "查询执行成功";
     qDebug() << "查询是否激活:" << query.isActive();
     qDebug() << "查询是否有效:" << query.isValid();
@@ -836,7 +842,7 @@ QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn,
     qDebug() << "受影响行数:" << query.numRowsAffected();
     qDebug() << "查询是否只向前:" << query.isForwardOnly();
     qDebug() << "=== QtMySQLDatabase::executeQuery 私有方法结束 ===";
-    
+
     return query;
 }
 
@@ -936,31 +942,36 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
     // QMYSQL 在某些包含 TEXT/JSON 字段的预处理查询上，forward-only 模式会出现
     // 能拿到列结构但 next() 读不到数据行的问题，这里优先保证正确性。
     query.setForwardOnly(false);
-    
-    if (!query.prepare(sql)) {
-        qWarning() << "查询准备失败:" << query.lastError().text();
-        throw QtMySQLException("Failed to prepare query: " + query.lastError().text());
-    }
-    
-    // 绑定参数
-    for (const auto& [key, value] : params) {
-        if (isPositionalBindingKey(key)) {
-            // 位置绑定
-            query.addBindValue(value);
-        } else {
-            // 命名绑定
-            // 注意：如果key已经包含冒号前缀，不要重复添加
-            if (key.startsWith(":")) {
-                query.bindValue(key, value);
+
+    // 无参数时直接用 exec()，避免 Qt MySQL 驱动因 prepared statement 参数缺失而报错
+    if (params.empty()) {
+        if (!query.exec(sql)) {
+            qWarning() << "查询执行失败:" << query.lastError().text();
+            throw QtMySQLException("Failed to execute query: " + query.lastError().text());
+        }
+    } else {
+        if (!query.prepare(sql)) {
+            qWarning() << "查询准备失败:" << query.lastError().text();
+            throw QtMySQLException("Failed to prepare query: " + query.lastError().text());
+        }
+
+        // 绑定参数
+        for (const auto& [key, value] : params) {
+            if (isPositionalBindingKey(key)) {
+                query.addBindValue(value);
             } else {
-                query.bindValue(":" + key, value);
+                if (key.startsWith(":")) {
+                    query.bindValue(key, value);
+                } else {
+                    query.bindValue(":" + key, value);
+                }
             }
         }
-    }
-    
-    if (!query.exec()) {
-        qWarning() << "查询执行失败:" << query.lastError().text();
-        throw QtMySQLException("Failed to execute query: " + query.lastError().text());
+
+        if (!query.exec()) {
+            qWarning() << "查询执行失败:" << query.lastError().text();
+            throw QtMySQLException("Failed to execute query: " + query.lastError().text());
+        }
     }
     
     // 检查是否是SELECT查询

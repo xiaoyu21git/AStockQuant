@@ -2,7 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import AStock.Bridge 1.0  // 导入C++桥接模块
+import AStock.Bridge 1.0
 import "../../components/FactorWorkbench/Navigation" as NavigationComponents
 import "../../components/Strategy" as StrategyComponents
 import "../../components/Base" as BaseComponents
@@ -1737,6 +1737,9 @@ Rectangle {
                     }
                     item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
                     item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                    var cdc = CleanedDataController
+                    if (cdc && typeof cdc.initialize === "function") { cdc.initialize() }
+                    item.cleanedDataController = cdc
                     if (typeof item.startBacktestRequested !== "undefined") {
                         item.startBacktestRequested.connect(function() {
                             console.log("StrategyBacktestParams: 用户点击开始回测")
