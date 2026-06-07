@@ -14,6 +14,8 @@
 
 namespace factor::compute {
 
+struct DeltaMarketData;  // defined in ISignalEngine.h
+
 class FactorComputeEngine final : public IFactorComputeEngine {
 public:
     FactorComputeEngine(
@@ -39,8 +41,15 @@ public:
         const IPostProcessingPipeline& postProcessingPipeline,
         const IAnalysisModule& analysisModule) noexcept;
 
+    void setComputeMode(ComputeMode mode) noexcept override { computeMode_ = mode; }
+
     [[nodiscard]] FactorResult<SignalSet>
     generate(const GenerateSpec& spec) override;
+
+    [[nodiscard]] FactorResult<SignalSet>
+    incrementalUpdate(
+        const SignalSet& baseResult,
+        const DeltaMarketData& deltaData) override;
 
     [[nodiscard]] FactorResult<SignalValue>
     query(const QuerySpec& spec) const override;
@@ -77,6 +86,7 @@ private:
     const IAnalysisModule* analysisModule_{nullptr};
     std::optional<AnalysisReport> latestAnalysisReport_;
     std::optional<FactorError> latestAnalysisError_;
+    ComputeMode computeMode_{ComputeMode::Batch};
 };
 
 } // namespace factor::compute

@@ -9,6 +9,9 @@
 
 namespace factor::compute {
 
+/// @brief 统一数值类型别名，全链路使用 float32 以降低内存占用与带宽消耗
+using signal_value_t = float;
+
 struct FactorId final {
     uint32_t value{0U};
 
@@ -108,6 +111,14 @@ struct PostProcessingConfig final {
     }
 };
 
+/// @brief 信号引擎运行模式
+///
+/// 底层通用模块通过此枚举感知当前由哪种上层入口驱动，
+/// 并据此选择符合当前模式的业务逻辑路径。
+///
+/// SignalOnly     — 因子评价：仅计算因子信号 + IC 分析
+/// FullPipeline   — 策略回测：信号 → 构仓 → 风控 → 成交 → 指标聚合
+/// Incremental    — 实盘增量：仅计算当前日期信号，无历史回溯
 enum class SignalEngineMode : uint8_t {
     SignalOnly = 0,
     FullPipeline = 1,
@@ -190,8 +201,14 @@ struct QuerySpec final {
     }
 };
 
+/// @brief 计算模式
+enum class ComputeMode : uint8_t {
+    Batch = 0,         ///< 全量并行模式（回测场景）
+    Incremental = 1,   ///< 单线程低延迟模式（实盘场景）
+};
+
 struct SignalValue final {
-    double value{0.0};
+    signal_value_t value{0.0f};
     bool isMissing{false};
 };
 
@@ -223,7 +240,7 @@ struct SignalSet final {
     std::vector<SignalId> signalIds;     // 信号维度 (重命名避免 Qt signals 宏冲突)
     SignalSetIndex index{};
     SignalProgress progress{};
-    std::vector<double> values;
+    std::vector<signal_value_t> values;  // float32 轻量数值存储
     std::vector<uint8_t> mask;
     bool isPartial{false};               // 设计文档: is_partial
 
@@ -240,13 +257,13 @@ struct SignalSet final {
 
     /// @brief 三维访问函数（设计文档 Section 8）
     /// 逻辑索引为 [time][instrument][signal]
-    double operator()(int timeIdx, int instrumentIdx, int signalIdx) const noexcept
+    signal_value_t operator()(int timeIdx, int instrumentIdx, int signalIdx) const noexcept
     {
         const size_t flatIdx = static_cast<size_t>(timeIdx) * static_cast<size_t>(index.timeStride)
             + static_cast<size_t>(instrumentIdx) * static_cast<size_t>(index.instrumentStride)
             + static_cast<size_t>(signalIdx) * static_cast<size_t>(index.factorStride);
         if (flatIdx >= values.size()) {
-            return 0.0;
+            return signal_value_t{0};
         }
         return values[flatIdx];
     }

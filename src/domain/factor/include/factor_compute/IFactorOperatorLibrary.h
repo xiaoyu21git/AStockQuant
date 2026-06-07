@@ -5,7 +5,7 @@
 namespace factor::compute {
 
 struct NumericMatrixView final {
-    double* data{nullptr};
+    signal_value_t* data{nullptr};
     int32_t rowCount{0};
     int32_t columnCount{0};
     int32_t rowStride{0};
@@ -17,7 +17,7 @@ struct NumericMatrixView final {
 };
 
 struct NumericConstMatrixView final {
-    const double* data{nullptr};
+    const signal_value_t* data{nullptr};
     int32_t rowCount{0};
     int32_t columnCount{0};
     int32_t rowStride{0};

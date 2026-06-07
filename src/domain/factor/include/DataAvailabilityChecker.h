@@ -115,6 +115,15 @@ public:
                                const std::string& startDate,
                                const std::string& endDate);
     
+    /// @brief 跨表检查字段数据可用性（支持字段分布在多个表中）
+    DataStatus checkFieldsCrossTable(const std::vector<std::string>& fields,
+                                     const std::string& date = "");
+
+    /// @brief 按字段类型将字段分组到对应的数据表名
+    /// @return map<table_name → [normalized_fields]>
+    static std::map<std::string, std::vector<std::string>> groupFieldsByTable(
+        const std::vector<std::string>& fields);
+
     // 检查特定数据类型
     DataStatus checkDataType(DataType type,
                              const std::string& date);

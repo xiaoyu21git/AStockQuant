@@ -16,11 +16,11 @@ namespace factor::compute {
 
 namespace {
 
-constexpr double kDefaultSignalValue = 0.0;
+constexpr signal_value_t kDefaultSignalValue = 0.0f;
 constexpr uint8_t kMissingMaskValue = 1U;
 constexpr uint8_t kPresentMaskValue = 0U;
 
-bool isMissingValue(double value) {
+bool isMissingValue(signal_value_t value) {
     return std::isnan(value);
 }
 
@@ -43,7 +43,7 @@ FactorSignalAdapter::FactorSignalAdapter(
     , marketDataView_(marketDataView)
     , signalCache_(signalCache)
     , analysisModule_(analysisModule)
-    , threadPool_(nullptr)        // 无线程池 → 串行执行
+    , threadPool_(nullptr)
     , bufferPool_(nullptr)
     , ownedBufferPool_(std::make_unique<SignalTensorBufferPool>())
 {
@@ -72,14 +72,13 @@ FactorSignalAdapter::FactorSignalAdapter(
 {
 }
 
-// ─── generate（主入口，集成了预算闸门 + 线程池 + 池化）───
+// ─── generate ───
 
 FactorResult<SignalSet>
 FactorSignalAdapter::generate(const GenerateSpec& spec)
 {
     resetAnalysisState();
 
-    // ═══ 阶段 1: 参数校验 ═══
     if (!spec.isValid()) {
         return FactorResult<SignalSet>::failure(FactorError::InvalidUniverse);
     }
@@ -99,7 +98,6 @@ FactorSignalAdapter::generate(const GenerateSpec& spec)
         return FactorResult<SignalSet>::failure(FactorError::InvalidUniverse);
     }
 
-    // ═══ 阶段 2: 缓存检查 ═══
     {
         auto budgetResult = budgetGuard.checkBudget(BudgetStage::Validate);
         if (budgetResult.exceeded) {
@@ -112,7 +110,6 @@ FactorSignalAdapter::generate(const GenerateSpec& spec)
         return FactorResult<SignalSet>::success(cached.value());
     }
 
-    // ═══ 阶段 3: Registry 构建计算计划 ═══
     const FactorResult<ComputePlan> planResult = registry_.buildPlan(
         spec.requestedFactors, spec.dateRange, spec.instrumentUniverse);
     if (!planResult.hasValue()) {
@@ -123,25 +120,21 @@ FactorSignalAdapter::generate(const GenerateSpec& spec)
         return FactorResult<SignalSet>::failure(FactorError::InvalidFormula);
     }
 
-    // ═══ 阶段 4: 验证行情视图 ═══
     const NumericConstMatrixView closeView = marketDataView_.close();
     if (!closeView.isValid()) {
         return FactorResult<SignalSet>::failure(FactorError::InsufficientData);
     }
 
-    // ═══ 阶段 5: 并行计算 ═══
     const auto computeResult = computeParallel(spec, cacheKey, plan, closeView, marketDataView_.dates());
     if (!computeResult.hasValue()) {
         return computeResult;
     }
     SignalSet signalSet = computeResult.value();
 
-    // ═══ 阶段 6: 缓存（仅完整结果）═══
     if (!signalSet.isPartial) {
         signalCache_.store(cacheKey, signalSet);
     }
 
-    // ═══ 阶段 7: 分析（可选）═══
     if (analysisModule_ != nullptr && !signalSet.isPartial) {
         const FactorResult<AnalysisReport> analysisResult =
             analysisModule_->analyze(signalSet, spec, closeView);
@@ -151,7 +144,7 @@ FactorSignalAdapter::generate(const GenerateSpec& spec)
     return FactorResult<SignalSet>::success(signalSet);
 }
 
-// ─── computeParallel（集成线程池 + 预算闸门 + 池化）───
+// ─── computeParallel ───
 
 FactorResult<SignalSet>
 FactorSignalAdapter::computeParallel(
@@ -161,7 +154,7 @@ FactorSignalAdapter::computeParallel(
     NumericConstMatrixView closeView,
     const std::vector<DateKey>& marketDates)
 {
-    (void)cacheKey; // 缓存已在 generate() 处理
+    (void)cacheKey;
 
     const int32_t timeCount = static_cast<int32_t>(marketDates.size());
     const int32_t instrumentCount = static_cast<int32_t>(spec.instrumentUniverse.size());
@@ -171,15 +164,12 @@ FactorSignalAdapter::computeParallel(
         return FactorResult<SignalSet>::failure(FactorError::InvalidUniverse);
     }
 
-    // 构建因子节点索引映射 (ankerl::unordered_dense::map: 2-5× faster than std::unordered_map)
     ankerl::unordered_dense::map<uint32_t, const ComputePlanNode*> nodeByFactorId;
     for (const auto& node : plan.nodes) {
         nodeByFactorId[node.factor.value] = &node;
     }
 
-    // ═══ 池化：从池中获取 or 分配新的 rawTensor ═══
     SignalTensorBufferPool* pool = bufferPool_ ? bufferPool_ : ownedBufferPool_.get();
-
     SignalTensorBuffer rawTensor;
     bool usePool = (pool != nullptr && pool->cachedCount() > 0);
     if (usePool) {
@@ -195,17 +185,12 @@ FactorSignalAdapter::computeParallel(
         rawTensor.factorCount = factorCount;
     }
 
-    // ═══ 预准备：为每个因子生成不同的 ComputeToken 并预先验证结果矩阵 ═══
-    // 约束（设计文档 Section 6.3）：并行归约协议 — 分块顺序固定
-    // 同一输出单元总是按递增 instrument index 归并
-
     std::vector<FactorId> factorIds;
     factorIds.reserve(static_cast<size_t>(factorCount));
     for (int32_t idx = 0; idx < factorCount; ++idx) {
         factorIds.push_back(spec.requestedFactors[static_cast<size_t>(idx)]);
     }
 
-    // 构建分块计划（用于归约顺序）
     ChunkPolicy chunkPolicy = spec.chunkPolicy;
     if (!chunkPolicy.isValid()) {
         chunkPolicy.dateChunkSize = 64U;
@@ -215,7 +200,6 @@ FactorSignalAdapter::computeParallel(
     const ParallelChunkPlan chunkPlan = chunkScheduler.buildPlan(
         timeCount, instrumentCount, 5, chunkPolicy);
 
-    // ═══ 并行执行（通过 foundation 线程池）═══
     std::atomic<uint32_t> completedFactorCount{0U};
     std::atomic<bool> hasPartial{false};
     std::atomic<bool> hasError{false};
@@ -224,13 +208,11 @@ FactorSignalAdapter::computeParallel(
 
     const auto startTime = std::chrono::steady_clock::now();
 
-            if (threadPool_ != nullptr) {
-        // ── 并行路径：每个因子一个任务提交到线程池 ──
+    if (threadPool_ != nullptr) {
         std::vector<std::future<bool>> futures;
         futures.reserve(static_cast<size_t>(factorCount));
 
         for (int32_t factorIdx = 0; factorIdx < factorCount; ++factorIdx) {
-            // 提交前检查预算
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime);
             if (elapsed.count() > spec.runtimeBudget.timeoutMilliseconds) {
@@ -244,14 +226,12 @@ FactorSignalAdapter::computeParallel(
                 return FactorResult<SignalSet>::failure(FactorError::InternalError);
             }
             const uint32_t computeToken = it->second->computeFunctionToken;
-            const std::string fieldName = it->second->fieldName; // 从 ComputePlanNode 获取字段名
+            const std::string fieldName = it->second->fieldName;
 
-            // 通过 promise/future 获取每个因子的计算结果
             auto promise = std::make_shared<std::promise<bool>>();
             futures.push_back(promise->get_future());
 
             threadPool_->post([&, factorIdx, factorId, computeToken, fieldName, promise]() {
-                // 预算检查
                 const auto taskElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - startTime);
                 if (taskElapsed.count() > spec.runtimeBudget.timeoutMilliseconds) {
@@ -260,8 +240,7 @@ FactorSignalAdapter::computeParallel(
                     return;
                 }
 
-                // 使用 evaluateOnField 在对应字段上执行算子（支持任意命名字段）
-                const FactorResult<std::vector<double>> matrixResult =
+                const FactorResult<std::vector<signal_value_t>> matrixResult =
                     dispatcher_.evaluateOnField(marketDataView_, fieldName, computeToken);
                 if (!matrixResult.hasValue()) {
                     std::lock_guard<std::mutex> lock(errorMutex);
@@ -273,7 +252,7 @@ FactorSignalAdapter::computeParallel(
                     return;
                 }
 
-                const std::vector<double>& matrix = matrixResult.value();
+                const std::vector<signal_value_t>& matrix = matrixResult.value();
                 const size_t expectedSize = static_cast<size_t>(closeView.rowCount)
                     * static_cast<size_t>(closeView.columnCount);
                 if (matrix.size() < expectedSize) {
@@ -286,7 +265,6 @@ FactorSignalAdapter::computeParallel(
                     return;
                 }
 
-                // 填充张量切片（按固定顺序归约）
                 for (const auto& block : chunkPlan.blocks) {
                     for (int32_t d = 0; d < block.dateCount; ++d) {
                         const int32_t t = block.dateStart + d;
@@ -308,7 +286,7 @@ FactorSignalAdapter::computeParallel(
                                 continue;
                             }
 
-                            const double value = matrix[matrixIdx];
+                            const signal_value_t value = matrix[matrixIdx];
                             rawTensor.values[flatIdx] = isMissingValue(value) ? kDefaultSignalValue : value;
                             rawTensor.mask[flatIdx] = isMissingValue(value) ? kMissingMaskValue : kPresentMaskValue;
                         }
@@ -320,12 +298,10 @@ FactorSignalAdapter::computeParallel(
             });
         }
 
-        // 等待所有任务完成
         for (auto& future : futures) {
             future.wait();
         }
     } else {
-        // ── 串行路径（无线程池时）───
         for (int32_t factorIdx = 0; factorIdx < factorCount; ++factorIdx) {
             const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime);
@@ -341,13 +317,13 @@ FactorSignalAdapter::computeParallel(
             }
 
             const std::string fieldName = it->second->fieldName;
-            const FactorResult<std::vector<double>> matrixResult =
+            const FactorResult<std::vector<signal_value_t>> matrixResult =
                 dispatcher_.evaluateOnField(marketDataView_, fieldName, it->second->computeFunctionToken);
             if (!matrixResult.hasValue()) {
                 return FactorResult<SignalSet>::failure(matrixResult.error());
             }
 
-            const std::vector<double>& matrix = matrixResult.value();
+            const std::vector<signal_value_t>& matrix = matrixResult.value();
             for (const auto& block : chunkPlan.blocks) {
                 for (int32_t d = 0; d < block.dateCount; ++d) {
                     const int32_t t = block.dateStart + d;
@@ -369,7 +345,7 @@ FactorSignalAdapter::computeParallel(
                             continue;
                         }
 
-                        const double value = matrix[matrixIdx];
+                        const signal_value_t value = matrix[matrixIdx];
                         rawTensor.values[flatIdx] = isMissingValue(value) ? kDefaultSignalValue : value;
                         rawTensor.mask[flatIdx] = isMissingValue(value) ? kMissingMaskValue : kPresentMaskValue;
                     }
@@ -383,7 +359,6 @@ FactorSignalAdapter::computeParallel(
         return FactorResult<SignalSet>::failure(firstError);
     }
 
-    // ═══ 后处理 ═══
     const FactorResult<SignalTensorBuffer> processedResult =
         postProcessingPipeline_.run(std::move(rawTensor), spec);
     if (!processedResult.hasValue()) {
@@ -395,7 +370,6 @@ FactorSignalAdapter::computeParallel(
         return FactorResult<SignalSet>::failure(FactorError::InternalError);
     }
 
-    // ═══ 装配 SignalSet ═══
     AssembleContext assembleCtx;
     assembleCtx.dates = marketDates;
     assembleCtx.instruments = spec.instrumentUniverse;
@@ -457,20 +431,20 @@ FactorSignalAdapter::query(const QuerySpec& spec) const
     }
 
     const ComputePlanNode& node = planResult.value().nodes.front();
-    const FactorResult<std::vector<double>> matrixResult =
+    const FactorResult<std::vector<signal_value_t>> matrixResult =
         dispatcher_.evaluateOnClose(closeView, node.computeFunctionToken);
     if (!matrixResult.hasValue()) {
         return FactorResult<SignalValue>::failure(matrixResult.error());
     }
 
-    const std::vector<double>& matrix = matrixResult.value();
+    const std::vector<signal_value_t>& matrix = matrixResult.value();
     const size_t flatIdx = static_cast<size_t>(dateIdx) * static_cast<size_t>(closeView.columnCount)
         + static_cast<size_t>(instIdx);
     if (flatIdx >= matrix.size()) {
         return FactorResult<SignalValue>::failure(FactorError::InternalError);
     }
 
-    const double value = matrix[flatIdx];
+    const signal_value_t value = matrix[flatIdx];
     SignalValue sv;
     sv.value = isMissingValue(value) ? kDefaultSignalValue : value;
     sv.isMissing = isMissingValue(value);

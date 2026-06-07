@@ -435,46 +435,33 @@ std::string sourceTableDatabaseName(SourceTable sourceTable)
     }
 }
 
-std::string inferTableForFields(const std::vector<std::string>& fields)
+/// @brief 按字段类型分组到对应数据表（支持跨表）
+std::map<std::string, std::vector<std::string>> groupFieldsByTable(const std::vector<std::string>& fields)
 {
-    if (fields.empty()) return {};
-
-    bool hasDailyBar = false, hasFinancial = false, hasSymbolInfo = false;
-    bool hasNews = false, hasPolicy = false, hasAlternative = false, hasDerivatives = false;
-
+    std::map<std::string, std::vector<std::string>> groups;
     for (const auto& field : fields) {
         std::string nf = normalizeFieldName(field);
         if (nf.empty()) continue;
-        if (isDailyBarField(nf)) hasDailyBar = true;
-        else if (isFinancialField(nf)) hasFinancial = true;
-        else if (isSymbolInfoField(nf)) hasSymbolInfo = true;
-        else if (isNewsField(nf)) hasNews = true;
-        else if (isPolicyField(nf)) hasPolicy = true;
-        else if (isAlternativeField(nf)) hasAlternative = true;
-        else if (isDerivativesField(nf)) hasDerivatives = true;
-        else return {};
+        std::string table;
+        if (isDailyBarField(nf)) table = checker_contract::kDailyBarTable;
+        else if (isFinancialField(nf)) table = checker_contract::kFinancialIndicatorDailyTable;
+        else if (isSymbolInfoField(nf)) table = checker_contract::kSymbolInfoTable;
+        else if (isNewsField(nf)) table = checker_contract::kNewsSentimentTable;
+        else if (isPolicyField(nf)) table = checker_contract::kPolicyDataTable;
+        else if (isAlternativeField(nf)) table = checker_contract::kAlternativeDataTable;
+        else if (isDerivativesField(nf)) table = checker_contract::kDerivativesDataTable;
+        else continue;
+        groups[table].push_back(nf);
     }
+    return groups;
+}
 
-    int tableKinds = static_cast<int>(hasDailyBar) + static_cast<int>(hasFinancial)
-        + static_cast<int>(hasSymbolInfo) + static_cast<int>(hasNews)
-        + static_cast<int>(hasPolicy) + static_cast<int>(hasAlternative)
-        + static_cast<int>(hasDerivatives);
-    if (tableKinds > 1) return {};
-
-    if (hasFinancial && !hasDailyBar && !hasNews && !hasSymbolInfo && !hasPolicy && !hasAlternative && !hasDerivatives)
-        return checker_contract::kFinancialIndicatorDailyTable;
-    if (hasSymbolInfo && !hasDailyBar && !hasFinancial && !hasNews && !hasPolicy && !hasAlternative && !hasDerivatives)
-        return checker_contract::kSymbolInfoTable;
-    if (hasNews && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasPolicy && !hasAlternative && !hasDerivatives)
-        return checker_contract::kNewsSentimentTable;
-    if (hasPolicy && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasAlternative && !hasDerivatives)
-        return checker_contract::kPolicyDataTable;
-    if (hasAlternative && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasPolicy && !hasDerivatives)
-        return checker_contract::kAlternativeDataTable;
-    if (hasDerivatives && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasPolicy && !hasAlternative)
-        return checker_contract::kDerivativesDataTable;
-    if (hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasPolicy && !hasAlternative && !hasDerivatives)
-        return checker_contract::kDailyBarTable;
+std::string inferTableForFields(const std::vector<std::string>& fields)
+{
+    auto groups = groupFieldsByTable(fields);
+    if (groups.empty()) return {};
+    if (groups.size() == 1U) return groups.begin()->first;
+    // 跨表时返回空（兼容旧行为），新调用方应使用 groupFieldsByTable
     return {};
 }
 
@@ -541,6 +528,7 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
             return result;
         }
 
+        // 检查是否有显式 sourceTable 配置 —— 如果有则按单表检查
         SourceTable sourceTable = SourceTable::UNKNOWN;
         if (dataReq.has(checker_contract::kSourceTableKey)) {
             auto sourceTableValue = dataReq.get(checker_contract::kSourceTableKey);
@@ -550,13 +538,26 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
             sourceTable = static_cast<SourceTable>(index);
         }
 
-        std::string table = sourceTable != SourceTable::UNKNOWN
-            ? sourceTableDatabaseName(sourceTable)
-            : resolveTableForFields(fields);
-        if (table.empty())
-            return createErrorStatus("当前因子依赖的数据表尚未接入");
+        if (sourceTable != SourceTable::UNKNOWN) {
+            // 指定了单表：使用旧路径
+            std::string table = sourceTableDatabaseName(sourceTable);
+            if (table.empty())
+                return createErrorStatus("当前因子配置的 sourceTable 无效");
+            result = checkFields(fields, endDate, table);
+        } else {
+            // 未指定 sourceTable：自动分表，使用跨表检查
+            auto groups = groupFieldsByTable(fields);
+            if (groups.empty())
+                return createErrorStatus("当前因子依赖的数据表尚未接入");
 
-        result = checkFields(fields, endDate, table);
+            if (groups.size() == 1U) {
+                // 所有字段在同一张表，走旧路径
+                result = checkFields(fields, endDate, groups.begin()->first);
+            } else {
+                // 字段跨多张表，使用跨表检查
+                result = checkFieldsCrossTable(fields, endDate);
+            }
+        }
     } catch (const std::exception& e) {
         result.availability = DataAvailability::UNAVAILABLE;
         result.message = "检查数据时出错: " + std::string(e.what());
@@ -764,6 +765,93 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
     return status;
 }
 
+DataStatus DataAvailabilityChecker::checkFieldsCrossTable(
+    const std::vector<std::string>& fields, const std::string& date)
+{
+    DataStatus status;
+    if (fields.empty()) {
+        status.availability = DataAvailability::AVAILABLE;
+        status.message = "no fields to check";
+        return status;
+    }
+
+    std::vector<std::string> normalizedFields = normalizeUniqueFields(fields);
+    if (normalizedFields.empty()) {
+        status.availability = DataAvailability::AVAILABLE;
+        status.coverage = 1.0;
+        status.message = "无必需字段";
+        return status;
+    }
+
+    // 按表分组
+    auto groups = groupFieldsByTable(normalizedFields);
+    if (groups.empty()) {
+        status.availability = DataAvailability::UNAVAILABLE;
+        status.coverage = 0.0;
+        status.message = "无法解析字段对应的数据表";
+        status.missingFields = normalizedFields;
+        return status;
+    }
+
+    std::vector<std::string> allMissingFields;
+    std::vector<std::string> allInvalidFields;
+    int totalValidFields = 0;
+    int totalFields = static_cast<int>(normalizedFields.size());
+    int fieldsChecked = 0;
+
+    // 对每张表分别执行检查
+    for (const auto& [table, tableFields] : groups) {
+        if (tableFields.empty()) continue;
+        fieldsChecked += static_cast<int>(tableFields.size());
+
+        auto fieldSnapshots = fetchFieldAvailabilitySnapshot(db_, table, tableFields, date);
+        for (const auto& field : tableFields) {
+            auto it = fieldSnapshots.find(field);
+            if (it == fieldSnapshots.end() || !it->second.columnExists) {
+                allMissingFields.push_back(field);
+                continue;
+            }
+
+            if (it->second.validCount > 0) {
+                totalValidFields++;
+            } else if (fieldRequiresPositiveValues(field) && it->second.nonNullCount > 0) {
+                allInvalidFields.push_back(field);
+            } else {
+                allMissingFields.push_back(field);
+            }
+        }
+    }
+
+    // 如果某些字段未被任何表覆盖，标记为缺失
+    std::unordered_set<std::string> covered;
+    for (const auto& [table, tableFields] : groups) {
+        for (const auto& f : tableFields) covered.insert(f);
+    }
+    for (const auto& f : normalizedFields) {
+        if (covered.find(f) == covered.end()) {
+            allMissingFields.push_back(f);
+        }
+    }
+
+    if (totalValidFields == totalFields) {
+        status.availability = DataAvailability::AVAILABLE;
+        status.coverage = 1.0;
+        status.message = "all fields available (cross-table)";
+    } else if (totalValidFields > 0) {
+        status.availability = DataAvailability::PARTIAL;
+        status.coverage = static_cast<double>(totalValidFields) / totalFields;
+        status.message = "部分字段数据可用（跨表）";
+    } else {
+        status.availability = DataAvailability::UNAVAILABLE;
+        status.coverage = 0.0;
+        status.message = "no data available";
+    }
+
+    status.missingFields = allMissingFields;
+    status.invalidFields = allInvalidFields;
+    return status;
+}
+
 std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type)
 {
     switch (type) {
@@ -779,6 +867,13 @@ std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type
 std::string DataAvailabilityChecker::resolveTableForFields(const std::vector<std::string>& fields) const
 {
     return inferTableForFields(fields);
+}
+
+std::map<std::string, std::vector<std::string>> DataAvailabilityChecker::groupFieldsByTable(
+    const std::vector<std::string>& fields)
+{
+    // 委托给匿名命名空间的同名函数（使用括号避免成员函数自我递归）
+    return (groupFieldsByTable)(fields);
 }
 
 DataStatus DataAvailabilityChecker::createErrorStatus(const std::string& message,

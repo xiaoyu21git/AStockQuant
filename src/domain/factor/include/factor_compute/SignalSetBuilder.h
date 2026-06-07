@@ -21,12 +21,14 @@ public:
     /// @param dates SignalSet 的日期列表 (DateKey 数组)
     /// @param dateStrs 日期字符串列表 (YYYY-MM-DD, 与 dates 一一对应)
     /// @param instruments SignalSet 的标的列表
+    /// @param mode 当前引擎模式，决定日志输出级别和校验策略
     /// @return 构建完成的 SignalSet
     static SignalSet build(
         const FactorValuesByDate& factorValues,
         const std::vector<DateKey>& dates,
         const std::vector<std::string>& dateStrs,
-        const std::vector<InstrumentId>& instruments);
+        const std::vector<InstrumentId>& instruments,
+        SignalEngineMode mode);
 };
 
 } // namespace factor::compute

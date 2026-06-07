@@ -1,4 +1,5 @@
 #include "factor_compute/ParquetMarketDataView.h"
+#include "factor_compute/SubMarketDataView.h"
 
 #include <algorithm>
 #include <memory>
@@ -16,9 +17,9 @@ namespace factor::compute {
 
 namespace {
 
-/// @brief 将原始 double 数组封装为 NumericConstMatrixView
+/// @brief 将原始 float32 数组封装为 NumericConstMatrixView
 NumericConstMatrixView buildMatrixView(
-    const double* data,
+    const signal_value_t* data,
     int32_t rowCount,
     int32_t columnCount) noexcept
 {
@@ -31,11 +32,12 @@ NumericConstMatrixView buildMatrixView(
 }
 
 /// @brief 设计文档 Section 5.2：
-/// 从 Arrow Table 中按列名提取 double 数组并接管所有权。
-/// 返回指向内部数据的 const double* 指针。
+/// 从 Arrow Table 中按列名提取 float32 数组并接管所有权。
+/// Arrow 源数据为 float64，读取时转换为 float32 以节省内存。
+/// 返回指向内部数据的 const float* 指针。
 struct ColumnData final {
-    std::shared_ptr<arrow::DoubleArray> array;
-    const double* rawValues{nullptr};
+    std::vector<signal_value_t> values;  // float32 存储
+    const signal_value_t* rawValues{nullptr};
     int32_t length{0};
 };
 
@@ -56,7 +58,7 @@ ColumnData extractColumn(
             "ParquetMarketDataView: column '" + columnName + "' is null");
     }
 
-    // 合并所有 chunk 为单个数组
+    // 合并所有 chunk 为单个 double 数组
     const auto consolidatedResult = chunkedArray->View(
         arrow::float64());
     if (!consolidatedResult.ok()) {
@@ -65,10 +67,16 @@ ColumnData extractColumn(
             + "': " + consolidatedResult.status().ToString());
     }
 
-    const auto consolidatedArray = consolidatedResult.ValueOrDie();
-    result.array = std::static_pointer_cast<arrow::DoubleArray>(consolidatedArray);
-    result.rawValues = result.array->raw_values();
-    result.length = static_cast<int32_t>(result.array->length());
+    // 转换为 float32 存储
+    const auto doubleArray = std::static_pointer_cast<arrow::DoubleArray>(
+        consolidatedResult.ValueOrDie());
+    result.length = static_cast<int32_t>(doubleArray->length());
+    result.values.resize(static_cast<size_t>(result.length));
+    const double* src = doubleArray->raw_values();
+    for (int32_t i = 0; i < result.length; ++i) {
+        result.values[static_cast<size_t>(i)] = static_cast<signal_value_t>(src[i]);
+    }
+    result.rawValues = result.values.data();
     return result;
 }
 
@@ -80,7 +88,6 @@ std::vector<DateKey> extractDateKeys(
     std::vector<DateKey> dateKeys;
     const auto columnIndex = table->schema()->GetFieldIndex(dateColumnName);
     if (columnIndex < 0) {
-        // 如果无日期列，生成默认序列
         return dateKeys;
     }
 
@@ -141,21 +148,14 @@ std::vector<InstrumentId> extractInstrumentIds(
 
 class ParquetMarketDataView::Impl final {
 public:
-    // Arrow Table 持有所有列数据的所有权，保证 raw_values 指针有效
     std::shared_ptr<arrow::Table> table;
-
-    // 各列数据的包装（持有 array 引用，保证 raw_values 生命周期）
     ColumnData openColumn;
     ColumnData highColumn;
     ColumnData lowColumn;
     ColumnData closeColumn;
     ColumnData volumeColumn;
-
-    // 维度的拥有性副本
     std::vector<DateKey> datesOwned;
     std::vector<InstrumentId> instrumentsOwned;
-
-    // 维度信息
     int32_t rowCount{0};
     int32_t columnCount{0};
 };
@@ -163,17 +163,7 @@ public:
 ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
     : impl_(std::make_unique<Impl>())
 {
-    // P4-T2：列式 mmap 与零拷贝读路径
-    //
-    // 设计文档 Section 5.2 预期流程：
-    // 1. arrow::io::MemoryMappedFile::Open(parquetPath, arrow::io::FileMode::READ)
-    // 2. parquet::arrow::FileReader::Make(arrow::default_memory_pool(), ...)
-    // 3. 按列读取为 arrow::Table
-    // 4. 通过 arrow::DoubleArray::raw_values() 获取 const double* 指针
-    // 5. 构造 NumericConstMatrixView 时绑定这些指针
-
     try {
-        // Step 1: 打开 Parquet 文件的内存映射
         auto maybeMmap = arrow::io::MemoryMappedFile::Open(
             parquetPath, arrow::io::FileMode::READ);
         if (!maybeMmap.ok()) {
@@ -181,10 +171,8 @@ ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
                 "ParquetMarketDataView: failed to mmap '" + parquetPath
                 + "': " + maybeMmap.status().ToString());
         }
-        std::shared_ptr<arrow::io::MemoryMappedFile> mmapFile =
-            maybeMmap.ValueOrDie();
+        std::shared_ptr<arrow::io::MemoryMappedFile> mmapFile = maybeMmap.ValueOrDie();
 
-        // Step 2: 创建 Parquet reader
         std::unique_ptr<parquet::arrow::FileReader> reader;
         auto readerStatus = parquet::arrow::OpenFile(
             mmapFile, arrow::default_memory_pool(), &reader);
@@ -194,7 +182,6 @@ ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
                 + parquetPath + "': " + readerStatus.ToString());
         }
 
-        // Step 3: 读取整个表（按列）
         std::shared_ptr<arrow::Table> table;
         auto readStatus = reader->ReadTable(&table);
         if (!readStatus.ok()) {
@@ -204,14 +191,12 @@ ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
         }
         impl_->table = table;
 
-        // Step 4: 提取 OHLCV 五列
         impl_->openColumn = extractColumn(impl_->table, "open");
         impl_->highColumn = extractColumn(impl_->table, "high");
         impl_->lowColumn = extractColumn(impl_->table, "low");
         impl_->closeColumn = extractColumn(impl_->table, "close");
         impl_->volumeColumn = extractColumn(impl_->table, "volume");
 
-        // 验证列长度一致性
         const int32_t rowCount = impl_->closeColumn.length;
         if (impl_->openColumn.length != rowCount
             || impl_->highColumn.length != rowCount
@@ -222,14 +207,10 @@ ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
                 + parquetPath + "'");
         }
 
-        // Step 5: 提取维度信息
         impl_->datesOwned = extractDateKeys(impl_->table, "date");
         impl_->instrumentsOwned = extractInstrumentIds(impl_->table, "instrument");
 
-        // 如果 Parquet 中无显式日期/标的列，从维度推断
         if (impl_->datesOwned.empty() && impl_->instrumentsOwned.empty()) {
-            // 从 Parquet 行数推断：假设行优先格式
-            // 实际使用时由外部注入维度信息
             impl_->rowCount = rowCount;
             impl_->columnCount = 1;
             return;
@@ -238,7 +219,6 @@ ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
         const int32_t instCount = impl_->instrumentsOwned.empty()
             ? 1
             : static_cast<int32_t>(impl_->instrumentsOwned.size());
-
         const int32_t dateCount = impl_->datesOwned.empty()
             ? (rowCount / instCount)
             : static_cast<int32_t>(impl_->datesOwned.size());
@@ -261,42 +241,27 @@ ParquetMarketDataView::~ParquetMarketDataView() = default;
 
 NumericConstMatrixView ParquetMarketDataView::open() const
 {
-    return buildMatrixView(
-        impl_->openColumn.rawValues,
-        impl_->rowCount,
-        impl_->columnCount);
+    return buildMatrixView(impl_->openColumn.rawValues, impl_->rowCount, impl_->columnCount);
 }
 
 NumericConstMatrixView ParquetMarketDataView::high() const
 {
-    return buildMatrixView(
-        impl_->highColumn.rawValues,
-        impl_->rowCount,
-        impl_->columnCount);
+    return buildMatrixView(impl_->highColumn.rawValues, impl_->rowCount, impl_->columnCount);
 }
 
 NumericConstMatrixView ParquetMarketDataView::low() const
 {
-    return buildMatrixView(
-        impl_->lowColumn.rawValues,
-        impl_->rowCount,
-        impl_->columnCount);
+    return buildMatrixView(impl_->lowColumn.rawValues, impl_->rowCount, impl_->columnCount);
 }
 
 NumericConstMatrixView ParquetMarketDataView::close() const
 {
-    return buildMatrixView(
-        impl_->closeColumn.rawValues,
-        impl_->rowCount,
-        impl_->columnCount);
+    return buildMatrixView(impl_->closeColumn.rawValues, impl_->rowCount, impl_->columnCount);
 }
 
 NumericConstMatrixView ParquetMarketDataView::volume() const
 {
-    return buildMatrixView(
-        impl_->volumeColumn.rawValues,
-        impl_->rowCount,
-        impl_->columnCount);
+    return buildMatrixView(impl_->volumeColumn.rawValues, impl_->rowCount, impl_->columnCount);
 }
 
 std::optional<NumericConstMatrixView>
@@ -313,14 +278,47 @@ ParquetMarketDataView::getField(const std::string& fieldName) const
     }
 }
 
-const std::vector<DateKey>& ParquetMarketDataView::dates() const
+const std::vector<DateKey>& ParquetMarketDataView::dates() const { return impl_->datesOwned; }
+const std::vector<InstrumentId>& ParquetMarketDataView::instruments() const { return impl_->instrumentsOwned; }
+
+std::unique_ptr<IMarketDataView>
+ParquetMarketDataView::slice(DateRange dateRange) const
 {
-    return impl_->datesOwned;
+    const auto& allDates = dates();
+    std::vector<DateKey> dateSubset;
+    for (const auto& d : allDates) {
+        if (d.value >= dateRange.from.value && d.value <= dateRange.to.value) {
+            dateSubset.push_back(d);
+        }
+    }
+    if (dateSubset.empty()) {
+        throw std::runtime_error("ParquetMarketDataView::slice(dateRange): empty date subset");
+    }
+    const auto& allInstruments = instruments();
+    return std::make_unique<SubMarketDataView>(
+        *this, std::move(dateSubset), std::vector<InstrumentId>(allInstruments));
 }
 
-const std::vector<InstrumentId>& ParquetMarketDataView::instruments() const
+std::unique_ptr<IMarketDataView>
+ParquetMarketDataView::slice(const std::vector<InstrumentId>& instrumentIds) const
 {
-    return impl_->instrumentsOwned;
+    std::unordered_set<uint32_t> idSet;
+    for (const auto& id : instrumentIds) {
+        idSet.insert(id.value);
+    }
+    std::vector<InstrumentId> instSubset;
+    const auto& allInstruments = instruments();
+    for (const auto& inst : allInstruments) {
+        if (idSet.count(inst.value)) {
+            instSubset.push_back(inst);
+        }
+    }
+    if (instSubset.empty()) {
+        throw std::runtime_error("ParquetMarketDataView::slice(instrumentIds): empty instrument subset");
+    }
+    const auto& allDates = dates();
+    return std::make_unique<SubMarketDataView>(
+        *this, std::vector<DateKey>(allDates), std::move(instSubset));
 }
 
 } // namespace factor::compute

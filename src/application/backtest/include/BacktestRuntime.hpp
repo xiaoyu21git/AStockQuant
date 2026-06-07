@@ -3,6 +3,7 @@
 #include "ModuleRegistryAssembler.h"
 #include "RunArtifactRepository.h"
 #include "RunTaskService.hpp"
+#include "../../../domain/scheduler/include/ResourceGovernor.h"
 
 #include <optional>
 #include <vector>

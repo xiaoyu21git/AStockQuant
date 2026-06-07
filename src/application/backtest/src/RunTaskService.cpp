@@ -3,8 +3,13 @@
 namespace application::backtest {
 
 RunTaskService::RunTaskService(const IRunOrchestrator& orchestrator)
-    : orchestrator_(orchestrator)
+    : orchestrator_(&orchestrator)
 {
+}
+
+void RunTaskService::rebindOrchestrator(const IRunOrchestrator& orchestrator)
+{
+    orchestrator_ = &orchestrator;
 }
 
 IngestTaskResult RunTaskService::ingestBacktestTask(RunSpec spec)
@@ -60,7 +65,7 @@ ExecuteTaskResult RunTaskService::execute(RunTaskId taskId) const
     }
 
     result.code = RunTaskServiceErrorCode::None;
-    result.result = orchestrator_.run(*spec);
+    result.result = orchestrator_->run(*spec);
     return result;
 }
 

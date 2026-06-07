@@ -52,13 +52,16 @@ public:
     [[nodiscard]] IngestTaskResult ingestBacktestTask(RunSpec spec) override;
     [[nodiscard]] ExecuteTaskResult execute(RunTaskId taskId) const override;
 
+    /// @brief 重新绑定 orchestrator 引用，用于移动构造后修复指针
+    void rebindOrchestrator(const IRunOrchestrator& orchestrator);
+
 private:
     static constexpr std::uint64_t kFirstTaskId = 1ULL;
     static constexpr std::uint64_t kMaximumTaskId = std::numeric_limits<std::uint64_t>::max();
 
     [[nodiscard]] std::optional<RunSpec> findTaskSpec(RunTaskId taskId) const;
 
-    const IRunOrchestrator& orchestrator_;
+    const IRunOrchestrator* orchestrator_{nullptr};
     std::vector<RunSpec> queuedSpecs_;
     std::uint64_t nextTaskId_{kFirstTaskId};
 };

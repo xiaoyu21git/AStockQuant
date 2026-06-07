@@ -7,6 +7,7 @@ set(BRIDGE_SOURCES
     ../include/RuleTemplateDetailHelper.h
     ../include/FactorService.h
     ../include/FactorBacktestBridge.h
+    ../include/StrategyBacktestBridge.h
     ../include/CachedMarketDataView.h
         CleanedDataController.cpp
     cleaning/CleaningEngine.cpp
@@ -47,6 +48,7 @@ set(BRIDGE_SOURCES
         StrategyStructureResolvers.cpp
         FactorService.cpp
         FactorBacktestBridge.cpp
+        StrategyBacktestBridge.cpp
         CachedMarketDataView.cpp
         CachedMarketDataViewHistoricalAdapter.cpp
 )
@@ -68,6 +70,9 @@ target_include_directories(bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_SOURCE_DIR}/src/domain/factor/include
     ${CMAKE_SOURCE_DIR}/src/domain/factor/include/factor_compute
+    ${CMAKE_SOURCE_DIR}/src/domain/backtest/include
+    ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+    ${CMAKE_SOURCE_DIR}/src/application/backtest/include
     ${CMAKE_SOURCE_DIR}/src/cache/include
     ${EIGEN_INCLUDE_DIR}
 )
@@ -95,6 +100,7 @@ target_link_libraries(bridge PRIVATE
     factor_system
     factor_compute
     domain
+    application_backtest
 )
 
 message(STATUS "bridge库源文件: ${BRIDGE_SOURCES}")

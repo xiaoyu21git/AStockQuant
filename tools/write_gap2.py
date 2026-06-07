@@ -1,0 +1,67 @@
+# -*- coding: utf-8 -*-
+import codecs
+
+content = """# 优化版性能时序图 - 第二次对齐缺口分析
+
+> 基于7个阶段优化实施完成后，重新对时序图进行逐行分析。
+
+## 缺口总览
+
+| 编号 | 时序图行 | 要求 | 状态 | 优先级 |
+|------|---------|------|------|--------|
+| G1 | 75-76 | FactorComputeEngine::incrementalUpdate()实现体 | 声明存在，实现体缺失 | P0 |
+| G2 | 31 | CPU亲和性脚本设置进程低优先级 | 亲和性已设，优先级未设 | P1 |
+| G3 | 61-64 | MatrixPnLEngine集成到BacktestPipelineOrchestrator | 独立模块，未连接 | P2 |
+| G4 | 35-38 | 数据服务按批次分块返回(slice切片接口) | IMarketDataView无slice() | P3 |
+| G5 | 74 | 实盘数据流增量推送(LiveMarketDataView实现) | 接口已定义，缺实现 | P4 |
+| G6 | 31 | ResourceGovernor监控降速 | 已实现 | - |
+| G7 | 42 | SIMD+并行线程池 | Phase2+3已实现 | - |
+| G8 | 46 | 因子分析IC/IR/分层 | AnalysisReportTypes有IC/IR | - |
+
+## 各缺口详情
+
+### G1: incrementalUpdate实现体缺失
+
+FactorComputeEngine.cpp中缺少incrementalUpdate()的方法体。
+
+**修复**: 在FactorComputeEngine.cpp末尾添加实现，当前回退到重新执行generate()。
+
+### G2: CPU亲和性脚本缺少优先级设置
+
+set_cpu_affinity.ps1缺少进程优先级设置行。
+
+**修复**: 添加 $process.PriorityClass = [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+
+### G3: MatrixPnLEngine未连接到回测流水线
+
+BacktestPipelineOrchestrator完全不知晓MatrixPnLEngine。
+
+**修复**: RunSpec添加useMatrixPnL标志，BacktestOrchestrator::run()中做路径选择。
+
+### G4: 数据服务缺少批次切片接口
+
+ParquetMarketDataView全量映射，无法按批次返回子视图。
+
+**修复**: IMarketDataView新增slice(DateRange)和slice(vector<InstrumentId>)接口。
+
+### G5: 缺LiveMarketDataView实现
+
+无实现类将数据流连接到因子引擎。
+
+**修复**: 新建LiveMarketDataView实现IMarketDataView+IMarketDataSubscriber。
+
+## 修复路线图
+
+| 顺序 | 缺口 | 预估时间 |
+|------|------|----------|
+| 1 | G1 - incrementalUpdate实现体 | 5分钟 |
+| 2 | G2 - CPU优先级设置 | 5分钟 |
+| 3 | G3 - MatrixPnL集成 | 30分钟 |
+| 4 | G4 - batch slice | 20分钟 |
+| 5 | G5 - LiveMarketDataView | 30分钟 |
+"""
+
+with codecs.open('doc/优化版性能时序图_对齐缺口_第二次分析.md', 'w', 'utf-8-sig') as f:
+    f.write(content)
+
+print('Done')

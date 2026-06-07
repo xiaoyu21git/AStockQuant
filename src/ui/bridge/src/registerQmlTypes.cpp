@@ -27,6 +27,7 @@
 #include "StrategyBridge.h"
 #include "FactorService.h"
 #include "FactorBacktestBridge.h"
+#include "StrategyBacktestBridge.h"
 
 namespace wang{
 
@@ -189,19 +190,14 @@ namespace wang{
          }
       );
 
-      qmlRegisterSingletonType<StrategyBridge>(
-         url, 1, 0, "StrategyBridge",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            static StrategyBridge* bridge = nullptr;
-            if (!bridge) {
-               bridge = new StrategyBridge();
-               bridge->initAsync();
-            }
-            return bridge;
-         }
-      );
+       qmlRegisterSingletonType<StrategyBridge>(
+          url, 1, 0, "StrategyBridge",
+          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+             Q_UNUSED(engine)
+             Q_UNUSED(scriptEngine)
+             return StrategyBridge::instance();
+          }
+       );
 
       // FactorService - 因子服务桥接层（单例模式）
       qmlRegisterSingletonType<FactorService>(
@@ -217,8 +213,12 @@ namespace wang{
          }
       );
 
-      // FactorBacktestController - 因子回测控制器（QML 内联组件）
-      qmlRegisterType<FactorBacktestBridge>(
-         url, 1, 0, "FactorBacktestController");
-   }
+       // FactorBacktestController - 因子回测控制器（QML 内联组件）
+       qmlRegisterType<FactorBacktestBridge>(
+          url, 1, 0, "FactorBacktestController");
+
+       // StrategyBacktestController - 策略回测控制器（QML 内联组件）
+       qmlRegisterType<StrategyBacktestBridge>(
+          url, 1, 0, "StrategyBacktestController");
+    }
 }

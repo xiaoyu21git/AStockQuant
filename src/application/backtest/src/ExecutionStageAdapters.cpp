@@ -202,10 +202,95 @@ StageResult LiveVenueFillEngineAdapter::executeFill(RunContext& context) const
     return executeFillWithBacktestVenue(context, fillOrderPlanPolicy_);
 }
 
-std::optional<domain::trading::OrderSide> resolveOrderSide(
+double FirstSliceSignalValueProjection::project(
+    const factor::compute::SignalSet& signalSet,
+    std::size_t instrumentIndex) const
+{
+    if (!signalSet.values.empty() && instrumentIndex < signalSet.values.size()) {
+        return signalSet.values[instrumentIndex];
+    }
+    return 0.0;
+}
+
+astock::domain::trading::risk_approval::RiskLimitsSpec DefaultRiskLimitsPolicy::build(
+    const domain::backtest::BacktestRequest& request,
+    std::size_t /*candidateCount*/) const
+{
+    astock::domain::trading::risk_approval::RiskLimitsSpec spec;
+    spec.maxSingleOrderDelta = astock::domain::trading::risk_approval::DeltaBps{
+        static_cast<std::int32_t>(request.riskSpec.maxSinglePositionRatio.value * kBasisPointScale)};
+    spec.maxTurnoverDelta = astock::domain::trading::risk_approval::DeltaBps{
+        static_cast<std::int32_t>(request.riskSpec.maxPositionRatio.value * kBasisPointScale)};
+    spec.maxOrderCount = kMinimumRiskOrderCount;
+    return spec;
+}
+
+astock::domain::trading::signal_orders::TranslationSpec DefaultTranslationSpecPolicy::build() const
+{
+    astock::domain::trading::signal_orders::TranslationSpec spec;
+    spec.maxBuyDelta = astock::domain::trading::signal_orders::WeightDeltaBps{kMaximumBuyDeltaBps};
+    spec.maxSellDelta = astock::domain::trading::signal_orders::WeightDeltaBps{kMaximumSellDeltaBps};
+    return spec;
+}
+
+SignalDrivenRiskApprovalStageAdapter::SignalDrivenRiskApprovalStageAdapter(
+    const astock::domain::trading::risk_approval::IRiskApprovalEngine& riskApprovalEngine)
+    : riskApprovalEngine_(riskApprovalEngine)
+    , signalProjection_(kDefaultSignalProjection)
+    , riskLimitsPolicy_(kDefaultRiskLimitsPolicy)
+{
+}
+
+SignalDrivenRiskApprovalStageAdapter::SignalDrivenRiskApprovalStageAdapter(
+    const astock::domain::trading::risk_approval::IRiskApprovalEngine& riskApprovalEngine,
+    const ISignalValueProjection& signalProjection,
+    const IRiskLimitsPolicy& riskLimitsPolicy)
+    : riskApprovalEngine_(riskApprovalEngine)
+    , signalProjection_(signalProjection)
+    , riskLimitsPolicy_(riskLimitsPolicy)
+{
+}
+
+SignalDrivenOrderGenerationAdapter::SignalDrivenOrderGenerationAdapter(
+    const astock::domain::trading::signal_orders::ISignalOrderTranslator& signalOrderTranslator)
+    : signalOrderTranslator_(signalOrderTranslator)
+    , signalProjection_(kDefaultSignalProjection)
+    , translationSpecPolicy_(kDefaultTranslationSpecPolicy)
+{
+}
+
+SignalDrivenOrderGenerationAdapter::SignalDrivenOrderGenerationAdapter(
+    const astock::domain::trading::signal_orders::ISignalOrderTranslator& signalOrderTranslator,
+    const ISignalValueProjection& signalProjection,
+    const ITranslationSpecPolicy& translationSpecPolicy)
+    : signalOrderTranslator_(signalOrderTranslator)
+    , signalProjection_(signalProjection)
+    , translationSpecPolicy_(translationSpecPolicy)
+{
+}
+
+StageResult SignalDrivenRiskApprovalStageAdapter::approve(RunContext& context) const
+{
+    StageResult result;
+    result.stage = RunStage::RiskApprove;
+    result.code = RunErrorCode::None;
+    context.workingSet.approvedOrderCount = context.workingSet.generatedOrderCount;
+    return result;
+}
+
+StageResult SignalDrivenOrderGenerationAdapter::generateOrders(RunContext& context) const
+{
+    StageResult result;
+    result.stage = RunStage::GenerateOrders;
+    result.code = RunErrorCode::None;
+    context.workingSet.generatedOrderCount = 1U;
+    return result;
+}
+
+std::optional<domain::trading::OrderSide> ConfigurableFillOrderPlanPolicy::resolveOrderSide(
     std::uint32_t orderIndex,
     FillOrderSideMode fillOrderSideMode,
-    bool enableShortSelling)
+    bool enableShortSelling) const
 {
     if (fillOrderSideMode != FillOrderSideMode::AlternatingLongShort || !enableShortSelling) {
         return domain::trading::OrderSide::Buy;

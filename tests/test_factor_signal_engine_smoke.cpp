@@ -15,7 +15,7 @@ constexpr int kExitFailure = 1;
 constexpr int32_t kSingleRowCount = 1;
 constexpr int32_t kSingleColumnCount = 1;
 constexpr int32_t kSingleRowStride = 1;
-constexpr double kDummyPrice = 1.0;
+constexpr signal_value_t kDummyPrice = 1.0f;
 constexpr uint32_t kFactorNameToken = 1001U;
 constexpr uint32_t kFieldToken = 3001U;
 constexpr uint32_t kInstrumentToken = 600001U;
@@ -40,6 +40,9 @@ public:
     [[nodiscard]] const std::vector<DateKey>& dates() const override { return dates_; }
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override { return instruments_; }
 
+    [[nodiscard]] std::unique_ptr<IMarketDataView> slice(DateRange) const override { return nullptr; }
+    [[nodiscard]] std::unique_ptr<IMarketDataView> slice(const std::vector<InstrumentId>&) const override { return nullptr; }
+
 private:
     [[nodiscard]] NumericConstMatrixView buildSinglePointView() const
     {
@@ -51,7 +54,7 @@ private:
         return view;
     }
 
-    double dummyValue_{kDummyPrice};
+    signal_value_t dummyValue_{kDummyPrice};
     std::vector<DateKey> dates_{DateKey{kStartDate}};
     std::vector<InstrumentId> instruments_{InstrumentId{kInstrumentToken}};
 };
@@ -185,6 +188,3 @@ int main()
 
     return kExitSuccess;
 }
-
-
-

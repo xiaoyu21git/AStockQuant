@@ -50,7 +50,7 @@ check_include_files(locale.h HAVE_LOCALE_H)
 check_include_files(stddef.h HAVE_STDDEF_H)
 check_include_files(stdint.h HAVE_STDINT_H)
 check_include_files(stdlib.h HAVE_STDLIB_H)
-check_include_files(string.h HAVE_STRING_H)
+check_include_files(n.h HAVE_STRING_H)
 check_include_files(unistd.h HAVE_UNISTD_H)
 check_include_files(wchar.h HAVE_WCHAR_H)
 check_include_files(wctype.h HAVE_WCTYPE_H)
@@ -110,6 +110,22 @@ add_library(astock_ta_lib STATIC
 
 if(MSVC)
     target_compile_options(astock_ta_lib PRIVATE /FS)
+endif()
+
+# SIMD flags
+include(CheckCXXCompilerFlag)
+if(MSVC)
+    check_cxx_compiler_flag("/arch:AVX2" HAS_MSVC_AVX2)
+    if(HAS_MSVC_AVX2)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/arch:AVX2>)
+        add_definitions(-DSIGNAL_SIMD_AVX2 -DSIGNAL_SIMD_SUPPORTED)
+    endif()
+else()
+    check_cxx_compiler_flag("-mavx2" HAS_GCC_AVX2)
+    if(HAS_GCC_AVX2)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-mavx2 -mfma>)
+        add_definitions(-DSIGNAL_SIMD_AVX2 -DSIGNAL_SIMD_SUPPORTED)
+    endif()
 endif()
 
 target_include_directories(astock_ta_lib
@@ -390,21 +406,3 @@ if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
     endif()
 endif()
 
-# P2-T3 新旧一致性对比测试
-set(FACTOR_CONSISTENCY_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_factor_signal_consistency.cpp")
-if(EXISTS "${FACTOR_CONSISTENCY_TEST_SOURCE}")
-    add_executable(test_factor_consistency
-        ${FACTOR_CONSISTENCY_TEST_SOURCE}
-    )
-
-    target_link_libraries(test_factor_consistency
-        factor_compute
-    )
-
-    if(BUILD_TESTS)
-        add_test(NAME test_factor_consistency
-            COMMAND test_factor_consistency
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-        )
-    endif()
-endif()

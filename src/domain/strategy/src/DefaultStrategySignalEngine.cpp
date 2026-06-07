@@ -47,7 +47,7 @@ DefaultStrategySignalEngine::evaluateBatch(
     const size_t signalCount = result.signals.size();
     const size_t flatSize = dateCount * instCount * signalCount;
 
-    result.values.resize(flatSize, 0.0);
+    result.values.resize(flatSize, factor::compute::signal_value_t{0});
     result.mask.resize(flatSize, 0U);
     result.isPartial = false;
 

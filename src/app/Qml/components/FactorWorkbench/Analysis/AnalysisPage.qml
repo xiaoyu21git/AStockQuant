@@ -41,7 +41,8 @@ Item {
         var execution = metrics.execution || ({})
         var ic = metrics.ic || ({})
         var groups = metrics.groups || []
-        return hasKeys(execution) || hasKeys(ic) || groups.length > 0
+        var factorQuality = metrics.factorQuality || ({})
+        return hasKeys(execution) || hasKeys(ic) || groups.length > 0 || hasKeys(factorQuality)
     }
     readonly property bool canImportActiveResultToStrategy: factorIdText() !== "-"
 
@@ -696,8 +697,7 @@ Item {
                         }
 
                         Flow {
-                            width: Math.min(parent.width, metricRowWidth(coreMetricItems(), "core"))
-                            x: centeredFlowX(width, parent.width)
+                            width: parent.width
                             spacing: cardGap
 
                             Repeater {
@@ -796,8 +796,9 @@ Item {
                             }
 
                             Column {
-                                width: parent.width - 236
+                                width: parent.width - 356
                                 spacing: 8
+                                anchors.verticalCenter: parent.verticalCenter
 
                                 Text {
                                     text: factorDisplayName()
@@ -833,6 +834,7 @@ Item {
                                 border.width: 1
                                 border.color: hasActiveFactorQuality ? "#FB923C" : panelBorder
                                 opacity: hasActiveFactorQuality ? 1 : 0.5
+                                anchors.verticalCenter: parent.verticalCenter
 
                                 Text {
                                     anchors.centerIn: parent
@@ -858,6 +860,7 @@ Item {
                                 border.width: 1
                                 border.color: canImportActiveResultToStrategy ? "#60A5FA" : panelBorder
                                 opacity: canImportActiveResultToStrategy ? 1 : 0.5
+                                anchors.verticalCenter: parent.verticalCenter
 
                                 Text {
                                     anchors.centerIn: parent
@@ -1031,6 +1034,7 @@ Item {
                                             spacing: 8
 
                                             Text {
+                                                anchors.verticalCenter: parent.verticalCenter
                                                 text: metricText(modelData)
                                                 font.pixelSize: String(modelData.format || "") === "text"
                                                     ? 20
@@ -1310,6 +1314,7 @@ Item {
                                                                 elide: Text.ElideRight
                                                                 font.pixelSize: 10
                                                                 color: textSecondary
+                                                                anchors.verticalCenter: parent.verticalCenter
                                                             }
 
                                                             Item { width: Math.max(0, parent.width - 160); height: 1 }
@@ -1319,6 +1324,7 @@ Item {
                                                                 font.pixelSize: 11
                                                                 font.weight: Font.DemiBold
                                                                 color: textPrimary
+                                                                anchors.verticalCenter: parent.verticalCenter
                                                             }
                                                         }
                                                     }
@@ -1390,6 +1396,7 @@ Item {
                                             spacing: 6
 
                                             Text {
+                                                anchors.verticalCenter: parent.verticalCenter
                                                 text: metricText(modelData)
                                                 font.pixelSize: 20
                                                 font.weight: Font.Black
@@ -1529,6 +1536,7 @@ Item {
                                                 spacing: 6
 
                                                 Text {
+                                                    anchors.verticalCenter: parent.verticalCenter
                                                     text: metricText(modelData)
                                                     font.pixelSize: 18
                                                     font.weight: Font.Black

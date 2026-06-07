@@ -138,44 +138,34 @@ foreach(_astock_arrow_candidate IN LISTS ARROW_LOCAL_SOURCE_DIR_HINTS)
     endif()
 endforeach()
 
-if(_astock_arrow_local_source_dir)
-    set(FETCHCONTENT_SOURCE_DIR_ARROW "${_astock_arrow_local_source_dir}" CACHE PATH "Local Arrow source directory" FORCE)
-    message(STATUS "Using local Arrow source directory: ${_astock_arrow_local_source_dir}")
-else()
-    message(STATUS "Local Arrow source tree is incomplete or missing required sources; falling back to FetchContent tarball")
-    if(DEFINED FETCHCONTENT_SOURCE_DIR_ARROW)
-        unset(FETCHCONTENT_SOURCE_DIR_ARROW CACHE)
-    endif()
+if(NOT _astock_arrow_local_source_dir)
+    message(FATAL_ERROR "Arrow local source not found under G:/C++/lib. Expected one of: ${ARROW_LOCAL_SOURCE_DIR_HINTS}")
 endif()
+
+set(FETCHCONTENT_SOURCE_DIR_ARROW "${_astock_arrow_local_source_dir}" CACHE PATH "Local Arrow source directory" FORCE)
+message(STATUS "Using local Arrow source directory: ${_astock_arrow_local_source_dir}")
 unset(_astock_arrow_candidate)
 unset(_astock_arrow_local_source_dir)
 
 set(BOOST_LOCAL_SOURCE_DIR "G:/C++/lib/boost")
-if(EXISTS "${BOOST_LOCAL_SOURCE_DIR}/boost/multiprecision/cpp_int.hpp")
-    set(FETCHCONTENT_SOURCE_DIR_BOOST "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Local Boost source directory" FORCE)
-    set(BOOST_ROOT "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost source root" FORCE)
-    set(BOOST_INCLUDEDIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
-    set(Boost_INCLUDE_DIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
-    set(Boost_INCLUDE_DIRS "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
-    message(STATUS "Using local Boost source directory: ${BOOST_LOCAL_SOURCE_DIR}")
-
-    if(NOT TARGET boost_headers)
-        add_library(boost_headers INTERFACE)
-        target_include_directories(boost_headers INTERFACE ${BOOST_LOCAL_SOURCE_DIR})
-    endif()
-else()
-    message(STATUS "Local Boost source tree is incomplete or missing required headers; falling back to FetchContent tarball")
-    if(DEFINED FETCHCONTENT_SOURCE_DIR_BOOST)
-        unset(FETCHCONTENT_SOURCE_DIR_BOOST CACHE)
-    endif()
+if(NOT EXISTS "${BOOST_LOCAL_SOURCE_DIR}/boost/multiprecision/cpp_int.hpp")
+    message(FATAL_ERROR "Boost local source not found at ${BOOST_LOCAL_SOURCE_DIR}. Expected boost headers under G:/C++/lib/boost")
 endif()
 
-FetchContent_Declare(
-    boost
-    URL https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.gz
-    URL_HASH SHA256=5734305f40a76c30f951c9abd409a45a2a19fb546efe4162119250bbe4d3a463
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
+set(FETCHCONTENT_SOURCE_DIR_BOOST "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Local Boost source directory" FORCE)
+set(BOOST_ROOT "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost source root" FORCE)
+set(BOOST_INCLUDEDIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+set(Boost_INCLUDE_DIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+set(Boost_INCLUDE_DIRS "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+message(STATUS "Using local Boost source directory: ${BOOST_LOCAL_SOURCE_DIR}")
+
+if(NOT TARGET boost_headers)
+    add_library(boost_headers INTERFACE)
+    target_include_directories(boost_headers INTERFACE ${BOOST_LOCAL_SOURCE_DIR})
+endif()
+
+# Boost 完全使用本地源码，不进行网络下载
+FetchContent_Declare(boost SOURCE_DIR "${BOOST_LOCAL_SOURCE_DIR}")
 FetchContent_GetProperties(boost)
 if(NOT boost_POPULATED)
     FetchContent_Populate(boost)
@@ -189,12 +179,8 @@ if(MSVC)
     set(CMAKE_BUILD_TYPE Debug)
 endif()
 
-FetchContent_Declare(
-    arrow
-    URL https://archive.apache.org/dist/arrow/arrow-15.0.0/apache-arrow-15.0.0.tar.gz
-    URL_HASH SHA512=d5dccaa0907b0e6f2a460e32ae75091942dcb70b51db4aefe2767ee8d99882694607b723a9c06898dda3938d8eb498258d7f9aad11054665b6ea9c2fbaeafa74
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
+# Arrow 完全使用本地源码，不进行网络下载
+FetchContent_Declare(arrow SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_ARROW}")
 FetchContent_GetProperties(arrow)
 if(NOT arrow_POPULATED)
     FetchContent_Populate(arrow)
@@ -247,20 +233,12 @@ foreach(_astock_eigen_candidate IN LISTS EIGEN_LOCAL_SOURCE_DIR_HINTS)
     endif()
 endforeach()
 
-if(_astock_eigen_local_source_dir)
-    message(STATUS "Using local Eigen source directory: ${_astock_eigen_local_source_dir}")
-    include_directories(${_astock_eigen_local_source_dir})
-else()
-    FetchContent_Declare(
-        eigen
-        URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
-    )
-    FetchContent_GetProperties(eigen)
-    if(NOT eigen_POPULATED)
-        FetchContent_Populate(eigen)
-    endif()
-    include_directories(${eigen_SOURCE_DIR})
+if(NOT _astock_eigen_local_source_dir)
+    message(FATAL_ERROR "Eigen local source not found under G:/C++/lib. Expected one of: ${EIGEN_LOCAL_SOURCE_DIR_HINTS}")
 endif()
+
+message(STATUS "Using local Eigen source directory: ${_astock_eigen_local_source_dir}")
+include_directories(${_astock_eigen_local_source_dir})
 unset(_astock_eigen_candidate)
 unset(_astock_eigen_local_source_dir)
 

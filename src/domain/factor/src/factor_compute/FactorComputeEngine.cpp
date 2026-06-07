@@ -1,11 +1,14 @@
 ﻿#include "factor_compute/FactorComputeEngine.h"
 
 #include "factor_compute/IAnalysisModule.h"
+#include "factor_compute/ISignalEngine.h"
 #include "factor_compute/PostProcessingPipeline.h"
 #include "factor_compute/SignalCache.h"
 
-#include <cmath>
 #include <chrono>
+#include <cmath>
+#include <future>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -13,13 +16,14 @@ namespace factor::compute {
 
 namespace {
 
-constexpr double kDefaultSignalValue = 0.0;
+constexpr signal_value_t kDefaultSignalValue = 0.0f;
 constexpr uint8_t kMissingMaskValue = 1U;
 constexpr uint8_t kPresentMaskValue = 0U;
-constexpr uint64_t kSingleSignalValueBytes = sizeof(double) + sizeof(uint8_t);
+constexpr uint64_t kSingleSignalValueBytes = sizeof(signal_value_t) + sizeof(uint8_t);
 constexpr double kTempBufferRatio = 0.5;
 constexpr double kMemorySafetyRatio = 0.8;
 constexpr uint64_t kOperatorWorkspaceBytesEstimate = 64ULL * 1024ULL * 1024ULL;
+constexpr int32_t kMaxParallelFactorCount = 8;  // 并行计算上限（防止过度并发）
 
 struct DateAxisSelection final {
     std::vector<DateKey> dates;
@@ -31,6 +35,7 @@ struct DateAxisSelection final {
     }
 };
 
+// ... 其余函数保持不变（toInt32Index, buildDateAxisSelection 等）
 std::optional<int32_t> toInt32Index(size_t index);
 
 DateAxisSelection buildDateAxisSelection(const DateRange& dateRange, const std::vector<DateKey>& marketDates)
@@ -75,11 +80,9 @@ std::optional<size_t> checkedMultiply(size_t lhs, size_t rhs)
     if (lhs == 0U || rhs == 0U) {
         return static_cast<size_t>(0U);
     }
-
     if (lhs > (std::numeric_limits<size_t>::max() / rhs)) {
         return std::nullopt;
     }
-
     return lhs * rhs;
 }
 
@@ -88,14 +91,11 @@ std::optional<size_t> buildTensorFlatCount(int32_t timeCount, int32_t instrument
     if (timeCount < 0 || instrumentCount < 0 || factorCount < 0) {
         return std::nullopt;
     }
-
     const std::optional<size_t> timeInstrumentCount = checkedMultiply(
-        static_cast<size_t>(timeCount),
-        static_cast<size_t>(instrumentCount));
+        static_cast<size_t>(timeCount), static_cast<size_t>(instrumentCount));
     if (!timeInstrumentCount.has_value()) {
         return std::nullopt;
     }
-
     return checkedMultiply(timeInstrumentCount.value(), static_cast<size_t>(factorCount));
 }
 
@@ -104,7 +104,6 @@ std::optional<int32_t> toInt32Index(size_t index)
     if (index > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
         return std::nullopt;
     }
-
     return static_cast<int32_t>(index);
 }
 
@@ -119,40 +118,27 @@ SignalCacheKey buildSignalCacheKey(const GenerateSpec& spec)
     return key;
 }
 
-bool isMissingValue(double value)
+bool isMissingValue(signal_value_t value)
 {
     return std::isnan(value);
 }
 
-/// @brief 设计文档 Section 6.2 内存预估公式
-///
-/// base_bytes = T * N * F * sizeof(double)
-/// mask_bytes = T * N * F * sizeof(uint8_t)
-/// temp_bytes = base_bytes * temp_buffer_ratio
-/// estimated_total = base_bytes + mask_bytes + temp_bytes + operator_workspace_bytes
-/// 若 estimated_total > available_memory * kMemorySafetyRatio，立即返回 true。
+/// @brief 内存预估公式
 bool exceedsMemoryBudget(int32_t timeCount, int32_t instrumentCount, int32_t factorCount, const RuntimeBudget& budget)
 {
     const uint64_t elementCount = static_cast<uint64_t>(timeCount)
         * static_cast<uint64_t>(instrumentCount)
         * static_cast<uint64_t>(factorCount);
-    const uint64_t baseBytes = elementCount * sizeof(double);
+    const uint64_t baseBytes = elementCount * sizeof(signal_value_t);
     const uint64_t maskBytes = elementCount * sizeof(uint8_t);
     const uint64_t tempBytes = static_cast<uint64_t>(static_cast<double>(baseBytes) * kTempBufferRatio);
 
-    // 防止加法溢出
     uint64_t estimatedTotal = baseBytes;
-    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - maskBytes) {
-        return true;
-    }
+    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - maskBytes) return true;
     estimatedTotal += maskBytes;
-    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - tempBytes) {
-        return true;
-    }
+    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - tempBytes) return true;
     estimatedTotal += tempBytes;
-    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - kOperatorWorkspaceBytesEstimate) {
-        return true;
-    }
+    if (estimatedTotal > std::numeric_limits<uint64_t>::max() - kOperatorWorkspaceBytesEstimate) return true;
     estimatedTotal += kOperatorWorkspaceBytesEstimate;
 
     const uint64_t safetyLimit = static_cast<uint64_t>(
@@ -183,40 +169,24 @@ int32_t findInstrumentIndex(const std::vector<InstrumentId>& instruments, Instru
 }
 
 std::optional<size_t> flattenIndex(
-    int32_t timeIndex,
-    int32_t instrumentIndex,
-    int32_t factorIndex,
-    int32_t instrumentCount,
-    int32_t factorCount)
+    int32_t timeIndex, int32_t instrumentIndex, int32_t factorIndex,
+    int32_t instrumentCount, int32_t factorCount)
 {
-    if (timeIndex < 0
-        || instrumentIndex < 0
-        || factorIndex < 0
-        || instrumentCount <= 0
-        || factorCount <= 0) {
+    if (timeIndex < 0 || instrumentIndex < 0 || factorIndex < 0
+        || instrumentCount <= 0 || factorCount <= 0) {
         return std::nullopt;
     }
-
     const std::optional<size_t> timeStride = checkedMultiply(
-        static_cast<size_t>(instrumentCount),
-        static_cast<size_t>(factorCount));
-    if (!timeStride.has_value()) {
-        return std::nullopt;
-    }
+        static_cast<size_t>(instrumentCount), static_cast<size_t>(factorCount));
+    if (!timeStride.has_value()) return std::nullopt;
 
     const std::optional<size_t> timeOffset = checkedMultiply(
-        static_cast<size_t>(timeIndex),
-        timeStride.value());
-    if (!timeOffset.has_value()) {
-        return std::nullopt;
-    }
+        static_cast<size_t>(timeIndex), timeStride.value());
+    if (!timeOffset.has_value()) return std::nullopt;
 
     const std::optional<size_t> instrumentOffset = checkedMultiply(
-        static_cast<size_t>(instrumentIndex),
-        static_cast<size_t>(factorCount));
-    if (!instrumentOffset.has_value()) {
-        return std::nullopt;
-    }
+        static_cast<size_t>(instrumentIndex), static_cast<size_t>(factorCount));
+    if (!instrumentOffset.has_value()) return std::nullopt;
 
     if (timeOffset.value() > (std::numeric_limits<size_t>::max() - instrumentOffset.value())) {
         return std::nullopt;
@@ -225,40 +195,47 @@ std::optional<size_t> flattenIndex(
     if (timeInstrumentOffset > (std::numeric_limits<size_t>::max() - static_cast<size_t>(factorIndex))) {
         return std::nullopt;
     }
-
     return timeInstrumentOffset + static_cast<size_t>(factorIndex);
 }
 
 std::optional<size_t> flattenMatrixIndex(int32_t rowIndex, int32_t columnIndex, int32_t columnCount)
 {
-    if (rowIndex < 0 || columnIndex < 0 || columnCount <= 0) {
-        return std::nullopt;
-    }
-
+    if (rowIndex < 0 || columnIndex < 0 || columnCount <= 0) return std::nullopt;
     const std::optional<size_t> rowOffset = checkedMultiply(
-        static_cast<size_t>(rowIndex),
-        static_cast<size_t>(columnCount));
-    if (!rowOffset.has_value()) {
-        return std::nullopt;
-    }
-
+        static_cast<size_t>(rowIndex), static_cast<size_t>(columnCount));
+    if (!rowOffset.has_value()) return std::nullopt;
     if (rowOffset.value() > (std::numeric_limits<size_t>::max() - static_cast<size_t>(columnIndex))) {
         return std::nullopt;
     }
-
     return rowOffset.value() + static_cast<size_t>(columnIndex);
 }
 
 [[nodiscard]] bool hasSufficientMatrixSize(
-    const std::vector<double>& matrix,
+    const std::vector<signal_value_t>& matrix,
     NumericConstMatrixView view) noexcept
 {
     const std::optional<size_t> expectedMatrixSize = checkedMultiply(
-        static_cast<size_t>(view.rowCount),
-        static_cast<size_t>(view.columnCount));
+        static_cast<size_t>(view.rowCount), static_cast<size_t>(view.columnCount));
     return expectedMatrixSize.has_value() && matrix.size() >= expectedMatrixSize.value();
 }
 
+/// @brief 并行任务线程数：逻辑核 - 2，至少 1，最多 kMaxParallelFactorCount
+int32_t computeParallelThreadCount() noexcept
+{
+    int32_t hc = static_cast<int32_t>(std::thread::hardware_concurrency());
+    if (hc <= 2) return 1;
+    return (std::min)(hc - 2, kMaxParallelFactorCount);
+}
+
+/// @brief 单个因子的计算结果（用于并行任务间传递）
+struct SingleFactorSliceResult final {
+    FactorError error{FactorError::None};
+    std::vector<signal_value_t> factorMatrix;
+};
+
+// ========================================================================
+// GenerateWorkflow：核心工作流类（并行 fillRawTensor 改造）
+// ========================================================================
 class GenerateWorkflow final {
 public:
     GenerateWorkflow(
@@ -285,9 +262,7 @@ public:
     [[nodiscard]] FactorResult<SignalSet> run()
     {
         const FactorResult<ComputePlan> computePlanResult = factorRegistry_.buildPlan(
-            spec_.requestedFactors,
-            spec_.dateRange,
-            spec_.instrumentUniverse);
+            spec_.requestedFactors, spec_.dateRange, spec_.instrumentUniverse);
         if (!computePlanResult.hasValue()) {
             return FactorResult<SignalSet>::failure(computePlanResult.error());
         }
@@ -346,16 +321,12 @@ private:
     {
         nodeByFactorId_.reserve(computePlan.nodes.size());
         for (const ComputePlanNode& node : computePlan.nodes) {
-            if (!node.isValid()) {
-                return FactorError::InvalidFormula;
-            }
+            if (!node.isValid()) return FactorError::InvalidFormula;
             nodeByFactorId_.emplace(node.factor.value, &node);
         }
 
         dateAxisSelection_ = buildDateAxisSelection(spec_.dateRange, marketDataView_.dates());
-        if (!dateAxisSelection_.isValid()) {
-            return FactorError::InsufficientData;
-        }
+        if (!dateAxisSelection_.isValid()) return FactorError::InsufficientData;
 
         timeCount_ = static_cast<int32_t>(dateAxisSelection_.dates.size());
         instrumentCount_ = static_cast<int32_t>(spec_.instrumentUniverse.size());
@@ -366,76 +337,159 @@ private:
         }
 
         const std::optional<size_t> flatCount = buildTensorFlatCount(timeCount_, instrumentCount_, factorCount_);
-        if (!flatCount.has_value()) {
-            return FactorError::MemoryExceeded;
-        }
+        if (!flatCount.has_value()) return FactorError::MemoryExceeded;
 
-        rawTensor_.values = std::vector<double>(flatCount.value(), kDefaultSignalValue);
+        rawTensor_.values = std::vector<signal_value_t>(flatCount.value(), kDefaultSignalValue);
         rawTensor_.mask = std::vector<uint8_t>(flatCount.value(), kMissingMaskValue);
         rawTensor_.timeCount = timeCount_;
         rawTensor_.instrumentCount = instrumentCount_;
         rawTensor_.factorCount = factorCount_;
 
         closeView_ = marketDataView_.close();
-        if (!closeView_.isValid()) {
-            return FactorError::InsufficientData;
-        }
+        if (!closeView_.isValid()) return FactorError::InsufficientData;
         if (closeView_.rowCount < timeCount_ || closeView_.columnCount < instrumentCount_) {
             return FactorError::InsufficientData;
         }
-
         return FactorError::None;
     }
 
+    /// @brief 并行填充 tensor（Phase 3 核心改造）
     [[nodiscard]] FactorError fillRawTensor()
+    {
+        if (factorCount_ <= 0) return FactorError::None;
+
+        const int32_t threadCount = computeParallelThreadCount();
+
+        // 当因子数少或线程资源有限时退化回串行
+        if (factorCount_ < 4 || threadCount <= 1) {
+            return fillRawTensorSerial();
+        }
+
+        return fillRawTensorParallel(threadCount);
+    }
+
+    /// @brief 串行回退路径
+    [[nodiscard]] FactorError fillRawTensorSerial()
     {
         for (int32_t factorIndex = 0; factorIndex < factorCount_; ++factorIndex) {
             if (hasTimedOut()) {
                 hasPartialResult_ = completedFactorCount_ < static_cast<uint32_t>(factorCount_);
                 break;
             }
+            const FactorError err = computeAndFillOneFactor(factorIndex);
+            if (err != FactorError::None) return err;
+            ++completedFactorCount_;
+        }
+        return FactorError::None;
+    }
 
-            const FactorId factorId = spec_.requestedFactors[static_cast<size_t>(factorIndex)];
-            const auto nodeIt = nodeByFactorId_.find(factorId.value);
-            if (nodeIt == nodeByFactorId_.end()) {
-                return FactorError::InternalError;
+    /// @brief 并行路径：使用 std::async 并行计算所有因子
+    [[nodiscard]] FactorError fillRawTensorParallel(int32_t threadCount)
+    {
+        // 限制并发因子数
+        const int32_t effectiveFactorCount = (std::min)(factorCount_, kMaxParallelFactorCount);
+
+        std::vector<std::future<SingleFactorSliceResult>> futures;
+        futures.reserve(static_cast<size_t>(effectiveFactorCount));
+
+        // 启动并行任务
+        for (int32_t fi = 0; fi < effectiveFactorCount; ++fi) {
+            futures.push_back(std::async(std::launch::async,
+                [this, fi]() -> SingleFactorSliceResult {
+                    SingleFactorSliceResult result;
+                    if (hasTimedOut()) {
+                        result.error = FactorError::Timeout;
+                        return result;
+                    }
+                    const FactorId factorId = spec_.requestedFactors[static_cast<size_t>(fi)];
+                    const auto nodeIt = nodeByFactorId_.find(factorId.value);
+                    if (nodeIt == nodeByFactorId_.end()) {
+                        result.error = FactorError::InternalError;
+                        return result;
+                    }
+                    const ComputePlanNode& node = *nodeIt->second;
+                    if (node.fieldName.empty()) {
+                        result.error = FactorError::InsufficientData;
+                        return result;
+                    }
+                    auto fieldOpt = marketDataView_.getField(node.fieldName);
+                    if (!fieldOpt.has_value()) {
+                        result.error = FactorError::InsufficientData;
+                        return result;
+                    }
+                    const NumericConstMatrixView fieldView = fieldOpt.value();
+                    const FactorResult<std::vector<signal_value_t>> matrixResult =
+                        factorComputeDispatcher_.evaluateOnClose(fieldView, node.computeFunctionToken);
+                    if (!matrixResult.hasValue()) {
+                        result.error = matrixResult.error();
+                        return result;
+                    }
+                    result.factorMatrix = matrixResult.value();
+                    return result;
+                }));
+        }
+
+        // 收集结果并填充到 tensor
+        for (int32_t fi = 0; fi < effectiveFactorCount; ++fi) {
+            SingleFactorSliceResult result = futures[static_cast<size_t>(fi)].get();
+            if (result.error != FactorError::None) {
+                return result.error;
             }
 
-            const ComputePlanNode& node = *nodeIt->second;
-            const FactorResult<std::vector<double>> factorMatrixResult = factorComputeDispatcher_.evaluateOnClose(
-                closeView_,
-                node.computeFunctionToken);
-            if (!factorMatrixResult.hasValue()) {
-                return factorMatrixResult.error();
-            }
-
-            const std::vector<double>& factorMatrix = factorMatrixResult.value();
-            if (!hasSufficientMatrixSize(factorMatrix, closeView_)) {
-                return FactorError::InternalError;
-            }
-
-            const FactorError fillFactorError = fillSingleFactorSlice(factorIndex, factorMatrix);
-            if (fillFactorError != FactorError::None) {
-                return fillFactorError;
-            }
+            const FactorError fillErr = fillSingleFactorSlice(fi, result.factorMatrix);
+            if (fillErr != FactorError::None) return fillErr;
 
             ++completedFactorCount_;
+        }
 
+        // 如果有超出并发上限的剩余因子，串行处理
+        for (int32_t fi = effectiveFactorCount; fi < factorCount_; ++fi) {
             if (hasTimedOut()) {
-                const bool hasRemainingFactors = (factorIndex + 1) < factorCount_;
-                if (hasRemainingFactors) {
-                    hasPartialResult_ = true;
-                    break;
-                }
+                hasPartialResult_ = completedFactorCount_ < static_cast<uint32_t>(factorCount_);
+                break;
             }
+            const FactorError err = computeAndFillOneFactor(fi);
+            if (err != FactorError::None) return err;
+            ++completedFactorCount_;
         }
 
         return FactorError::None;
     }
 
+    /// @brief 计算并填充单个因子
+    /// 根据因子注册时声明的 fieldName 获取对应的数据列进行运算
+    /// 字段不可用时返回 InsufficientData
+    [[nodiscard]] FactorError computeAndFillOneFactor(int32_t factorIndex)
+    {
+        const FactorId factorId = spec_.requestedFactors[static_cast<size_t>(factorIndex)];
+        const auto nodeIt = nodeByFactorId_.find(factorId.value);
+        if (nodeIt == nodeByFactorId_.end()) return FactorError::InternalError;
+
+        const ComputePlanNode& node = *nodeIt->second;
+
+        // 因子必须声明 fieldName，据此从行情视图获取对应的数据列
+        if (node.fieldName.empty()) return FactorError::InsufficientData;
+        const std::optional<NumericConstMatrixView> fieldOpt =
+            marketDataView_.getField(node.fieldName);
+        if (!fieldOpt.has_value()) return FactorError::InsufficientData;
+        const NumericConstMatrixView fieldView = fieldOpt.value();
+
+        if (!fieldView.isValid()) {
+            return FactorError::InsufficientData;
+        }
+
+        const FactorResult<std::vector<signal_value_t>> factorMatrixResult =
+            factorComputeDispatcher_.evaluateOnClose(fieldView, node.computeFunctionToken);
+        if (!factorMatrixResult.hasValue()) return factorMatrixResult.error();
+
+        const std::vector<signal_value_t>& factorMatrix = factorMatrixResult.value();
+        if (!hasSufficientMatrixSize(factorMatrix, fieldView)) return FactorError::InternalError;
+
+        return fillSingleFactorSlice(factorIndex, factorMatrix);
+    }
+
     [[nodiscard]] FactorError fillSingleFactorSlice(
-        int32_t factorIndex,
-        const std::vector<double>& factorMatrix)
+        int32_t factorIndex, const std::vector<signal_value_t>& factorMatrix)
     {
         for (int32_t timeIndex = 0; timeIndex < timeCount_; ++timeIndex) {
             for (int32_t instrumentIndex = 0; instrumentIndex < instrumentCount_; ++instrumentIndex) {
@@ -443,31 +497,21 @@ private:
                 if (sourceRowIndex < 0 || sourceRowIndex >= closeView_.rowCount) {
                     return FactorError::InsufficientData;
                 }
-
                 const std::optional<size_t> matrixFlat = flattenMatrixIndex(
-                    sourceRowIndex,
-                    instrumentIndex,
-                    closeView_.columnCount);
+                    sourceRowIndex, instrumentIndex, closeView_.columnCount);
                 const std::optional<size_t> tensorFlat = flattenIndex(
-                    timeIndex,
-                    instrumentIndex,
-                    factorIndex,
-                    instrumentCount_,
-                    factorCount_);
-                if (!matrixFlat.has_value()
-                    || !tensorFlat.has_value()
+                    timeIndex, instrumentIndex, factorIndex, instrumentCount_, factorCount_);
+                if (!matrixFlat.has_value() || !tensorFlat.has_value()
                     || matrixFlat.value() >= factorMatrix.size()
                     || tensorFlat.value() >= rawTensor_.values.size()
                     || tensorFlat.value() >= rawTensor_.mask.size()) {
                     return FactorError::InternalError;
                 }
-
-                const double computedValue = factorMatrix[matrixFlat.value()];
+                const signal_value_t computedValue = factorMatrix[matrixFlat.value()];
                 rawTensor_.values[tensorFlat.value()] = isMissingValue(computedValue) ? kDefaultSignalValue : computedValue;
                 rawTensor_.mask[tensorFlat.value()] = isMissingValue(computedValue) ? kMissingMaskValue : kPresentMaskValue;
             }
         }
-
         return FactorError::None;
     }
 
@@ -491,6 +535,9 @@ private:
     bool hasPartialResult_{false};
 };
 
+// ========================================================================
+// QueryWorkflow（保持串行，无变化）
+// ========================================================================
 class QueryWorkflow final {
 public:
     QueryWorkflow(
@@ -540,18 +587,15 @@ private:
         if (computePlan.nodes.size() != 1U || !computePlan.nodes.front().isValid()) {
             return FactorResult<QueryContext>::failure(FactorError::InternalError);
         }
-
         QueryContext context;
         context.node = computePlan.nodes.front();
         if (context.node.factor.value != spec_.factor.value) {
             return FactorResult<QueryContext>::failure(FactorError::InternalError);
         }
-
         context.closeView = marketDataView_.close();
         if (!context.closeView.isValid()) {
             return FactorResult<QueryContext>::failure(FactorError::InsufficientData);
         }
-
         context.dateIndex = findDateIndex(marketDataView_.dates(), spec_.date);
         context.instrumentIndex = findInstrumentIndex(marketDataView_.instruments(), spec_.instrument);
         if (context.dateIndex < 0 || context.instrumentIndex < 0) {
@@ -560,30 +604,24 @@ private:
         if (context.dateIndex >= context.closeView.rowCount || context.instrumentIndex >= context.closeView.columnCount) {
             return FactorResult<QueryContext>::failure(FactorError::InsufficientData);
         }
-
         return FactorResult<QueryContext>::success(context);
     }
 
     [[nodiscard]] FactorResult<SignalValue> resolveSignalValue(const QueryContext& context) const
     {
-        const FactorResult<std::vector<double>> factorMatrixResult = factorComputeDispatcher_.evaluateOnClose(
-            context.closeView,
-            context.node.computeFunctionToken);
+        const FactorResult<std::vector<signal_value_t>> factorMatrixResult =
+            factorComputeDispatcher_.evaluateOnClose(context.closeView, context.node.computeFunctionToken);
         if (!factorMatrixResult.hasValue()) {
             return FactorResult<SignalValue>::failure(factorMatrixResult.error());
         }
-
-        const std::vector<double>& factorMatrix = factorMatrixResult.value();
+        const std::vector<signal_value_t>& factorMatrix = factorMatrixResult.value();
         const std::optional<size_t> matrixFlat =
             flattenMatrixIndex(context.dateIndex, context.instrumentIndex, context.closeView.columnCount);
         if (!hasSufficientMatrixSize(factorMatrix, context.closeView)
-            || !matrixFlat.has_value()
-            || matrixFlat.value() >= factorMatrix.size()) {
+            || !matrixFlat.has_value() || matrixFlat.value() >= factorMatrix.size()) {
             return FactorResult<SignalValue>::failure(FactorError::InternalError);
         }
-
-        const double value = factorMatrix[matrixFlat.value()];
-
+        const signal_value_t value = factorMatrix[matrixFlat.value()];
         SignalValue signalValue;
         signalValue.value = isMissingValue(value) ? kDefaultSignalValue : value;
         signalValue.isMissing = isMissingValue(value);
@@ -598,6 +636,9 @@ private:
 
 } // namespace
 
+// ========================================================================
+// FactorComputeEngine 构造与公开方法
+// ========================================================================
 FactorComputeEngine::FactorComputeEngine(
     const IFactorRegistry& factorRegistry,
     const IFactorSignalSetAssembler& signalSetAssembler,
@@ -672,21 +713,16 @@ FactorComputeEngine::generate(const GenerateSpec& spec)
     }
 
     GenerateWorkflow workflow(
-        spec,
-        cacheKey,
-        factorRegistry_,
-        signalSetAssembler_,
-        factorComputeDispatcher_,
-        marketDataView_,
-        *signalCache_,
-        *postProcessingPipeline_);
+        spec, cacheKey, factorRegistry_, signalSetAssembler_,
+        factorComputeDispatcher_, marketDataView_, *signalCache_, *postProcessingPipeline_);
     const FactorResult<SignalSet> generateResult = workflow.run();
     if (!generateResult.hasValue()) {
         return generateResult;
     }
 
     const SignalSet signalSet = generateResult.value();
-    const FactorResult<AnalysisReport> analysisResult = analysisModule_->analyze(signalSet, spec, workflow.closeView());
+    const FactorResult<AnalysisReport> analysisResult =
+        analysisModule_->analyze(signalSet, spec, workflow.closeView());
     captureLatestAnalysisState(analysisResult);
 
     return FactorResult<SignalSet>::success(signalSet);
@@ -699,56 +735,74 @@ FactorComputeEngine::query(const QuerySpec& spec) const
     return workflow.run();
 }
 
+// ... latestFactorQualityMetrics16, latestFactorQualityDiagnostics16 等方法保持不变
 std::optional<FactorQualityMetrics16View>
 FactorComputeEngine::latestFactorQualityMetrics16() const noexcept
 {
-    if (!latestAnalysisReport_.has_value()) {
-        return std::nullopt;
-    }
-
+    if (!latestAnalysisReport_.has_value()) return std::nullopt;
     return buildFactorQualityMetrics16View(latestAnalysisReport_.value());
 }
 
 std::optional<FactorQualityMetrics16DiagnosticsView>
 FactorComputeEngine::latestFactorQualityDiagnostics16() const noexcept
 {
-    if (!latestAnalysisReport_.has_value()) {
-        return std::nullopt;
-    }
-
+    if (!latestAnalysisReport_.has_value()) return std::nullopt;
     return buildFactorQualityMetrics16DiagnosticsView(latestAnalysisReport_.value());
 }
 
 std::optional<FactorQualityMetrics16Snapshot>
 FactorComputeEngine::latestFactorQualitySnapshot16() const noexcept
 {
-    if (!latestAnalysisReport_.has_value()) {
-        return std::nullopt;
-    }
-
+    if (!latestAnalysisReport_.has_value()) return std::nullopt;
     return buildFactorQualityMetrics16Snapshot(latestAnalysisReport_.value());
 }
 
-void
-FactorComputeEngine::resetLatestAnalysisState() noexcept
+void FactorComputeEngine::resetLatestAnalysisState() noexcept
 {
     latestAnalysisReport_.reset();
     latestAnalysisError_.reset();
 }
 
-void
-FactorComputeEngine::captureLatestAnalysisState(const FactorResult<AnalysisReport>& analysisResult) noexcept
+void FactorComputeEngine::captureLatestAnalysisState(
+    const FactorResult<AnalysisReport>& analysisResult) noexcept
 {
     if (analysisResult.hasValue()) {
         latestAnalysisReport_ = analysisResult.value();
         latestAnalysisError_.reset();
         return;
     }
-
     latestAnalysisReport_.reset();
     latestAnalysisError_ = analysisResult.error();
 }
 
+FactorResult<SignalSet>
+FactorComputeEngine::incrementalUpdate(
+    const SignalSet& baseResult,
+    const DeltaMarketData& deltaData)
+{
+    if (!deltaData.isValid() || !baseResult.isValid()) {
+        return FactorResult<SignalSet>::failure(FactorError::InvalidUniverse);
+    }
+    // 增量模式：从 baseResult 提取 spec 信息
+    GenerateSpec spec;
+    spec.mode = SignalEngineMode::Incremental;
+    spec.dateRange.from = deltaData.date;
+    spec.dateRange.to = deltaData.date;
+    spec.instrumentUniverse = deltaData.instruments;
+    // 从 baseResult 的 signalIds 反推 requestedFactors
+    spec.requestedFactors.reserve(baseResult.signalIds.size());
+    for (const auto& sid : baseResult.signalIds) {
+        FactorId fid;
+        fid.value = sid.value;
+        spec.requestedFactors.push_back(fid);
+    }
+    // 设置默认预算
+    spec.runtimeBudget.timeoutMilliseconds = 1000;
+    spec.runtimeBudget.memoryLimitBytes = 256ULL * 1024ULL * 1024ULL;
+    spec.chunkPolicy.dateChunkSize = 1;
+    spec.chunkPolicy.instrumentChunkSize = static_cast<uint32_t>(deltaData.instruments.size());
+    // 调用 generate 计算新日期
+    return generate(spec);
+}
+
 } // namespace factor::compute
-
-

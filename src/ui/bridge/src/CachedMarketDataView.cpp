@@ -1,9 +1,12 @@
 #include "CachedMarketDataView.h"
+#include "factor_compute/SubMarketDataView.h"
+
 #include <algorithm>
+#include <unordered_set>
 
 namespace factor::compute {
 
-using RowMatrixXd = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+using RowMatrixXf = Eigen::Matrix<signal_value_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
 
 class CachedMarketDataView::Impl {
 public:
@@ -13,24 +16,24 @@ public:
     ColumnData m_close[1]{};
     ColumnData m_volume[1]{};
 
-    RowMatrixXd m_openMat;
-    RowMatrixXd m_highMat;
-    RowMatrixXd m_lowMat;
-    RowMatrixXd m_closeMat;
-    RowMatrixXd m_volumeMat;
+    RowMatrixXf m_openMat;
+    RowMatrixXf m_highMat;
+    RowMatrixXf m_lowMat;
+    RowMatrixXf m_closeMat;
+    RowMatrixXf m_volumeMat;
 
-    std::unordered_map<std::string, RowMatrixXd> m_fieldMats;
+    std::unordered_map<std::string, RowMatrixXf> m_fieldMats;
 
     std::vector<DateKey> m_dates;
     std::vector<InstrumentId> m_instruments;
 
-    void buildMatrix(const ColumnData& col, RowMatrixXd& mat)
+    void buildMatrix(const ColumnData& col, RowMatrixXf& mat)
     {
         mat.resize(col.dateCount, col.instrumentCount);
         for (int d = 0; d < col.dateCount; ++d) {
             for (int i = 0; i < col.instrumentCount; ++i) {
                 int idx = d * col.instrumentCount + i;
-                mat(d, i) = (idx < static_cast<int>(col.values.size())) ? col.values[idx] : 0.0;
+                mat(d, i) = (idx < static_cast<int>(col.values.size())) ? col.values[idx] : signal_value_t{0};
             }
         }
     }
@@ -65,7 +68,7 @@ void CachedMarketDataView::loadFromColumnData(
 void CachedMarketDataView::loadAdditionalField(const std::string& fieldName, ColumnData column)
 {
     if (fieldName.empty()) return;
-    RowMatrixXd mat;
+    RowMatrixXf mat;
     impl_->buildMatrix(column, mat);
     impl_->m_fieldMats[fieldName] = std::move(mat);
 }
@@ -109,7 +112,7 @@ CachedMarketDataView::getField(const std::string& fieldName) const
     if (it == impl_->m_fieldMats.end()) {
         return std::nullopt;
     }
-    const RowMatrixXd& mat = it->second;
+    const RowMatrixXf& mat = it->second;
     return NumericConstMatrixView{
         mat.data(),
         static_cast<int>(mat.rows()),
@@ -125,5 +128,46 @@ bool CachedMarketDataView::hasField(const std::string& fieldName) const
 
 const std::vector<DateKey>& CachedMarketDataView::dates() const { return impl_->m_dates; }
 const std::vector<InstrumentId>& CachedMarketDataView::instruments() const { return impl_->m_instruments; }
+
+std::unique_ptr<IMarketDataView>
+CachedMarketDataView::slice(DateRange dateRange) const
+{
+    // Return a view filtered by date range using SubMarketDataView
+    const auto& allDates = dates();
+    std::vector<DateKey> dateSubset;
+    for (const auto& d : allDates) {
+        if (d.value >= dateRange.from.value && d.value <= dateRange.to.value) {
+            dateSubset.push_back(d);
+        }
+    }
+    if (dateSubset.empty()) {
+        throw std::runtime_error("CachedMarketDataView::slice(dateRange): empty date subset");
+    }
+    const auto& allInstruments = instruments();
+    return std::make_unique<SubMarketDataView>(
+        *this, std::move(dateSubset), std::vector<InstrumentId>(allInstruments));
+}
+
+std::unique_ptr<IMarketDataView>
+CachedMarketDataView::slice(const std::vector<InstrumentId>& instrumentIds) const
+{
+    std::unordered_set<uint32_t> idSet;
+    for (const auto& id : instrumentIds) {
+        idSet.insert(id.value);
+    }
+    std::vector<InstrumentId> instSubset;
+    const auto& allInstruments = instruments();
+    for (const auto& inst : allInstruments) {
+        if (idSet.count(inst.value)) {
+            instSubset.push_back(inst);
+        }
+    }
+    if (instSubset.empty()) {
+        throw std::runtime_error("CachedMarketDataView::slice(instrumentIds): empty instrument subset");
+    }
+    const auto& allDates = dates();
+    return std::make_unique<SubMarketDataView>(
+        *this, std::vector<DateKey>(allDates), std::move(instSubset));
+}
 
 } // namespace factor::compute

@@ -47,6 +47,12 @@ public:
     [[nodiscard]] const std::vector<DateKey>& dates() const override;
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
 
+    [[nodiscard]] std::unique_ptr<IMarketDataView>
+    slice(DateRange dateRange) const override;
+
+    [[nodiscard]] std::unique_ptr<IMarketDataView>
+    slice(const std::vector<InstrumentId>& instrumentIds) const override;
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

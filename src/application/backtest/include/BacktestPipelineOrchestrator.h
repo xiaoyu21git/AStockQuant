@@ -5,6 +5,7 @@
 #include "ExecutionStageAdapters.h"
 #include "PerformanceMetricsAggregator.h"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,6 +14,9 @@ namespace application::backtest {
 
 class StagePipeline final {
 public:
+    /// @brief 进度回调：阶段 + 进度百分比(0.0~100.0)
+    using ProgressCallback = std::function<void(RunStage stage, double progress)>;
+
     StagePipeline();
 
     void setSignalProducer(std::shared_ptr<ISignalProducer> producer);
@@ -20,7 +24,8 @@ public:
     void setOrderGenerationEngine(std::shared_ptr<IOrderGenerationEngine> engine);
     void setFillEngine(std::shared_ptr<IFillEngine> engine);
 
-    [[nodiscard]] RunResult execute(RunContext& context);
+    [[nodiscard]] RunResult execute(RunContext& context,
+                                     ProgressCallback onProgress = nullptr);
     [[nodiscard]] AggregatedPerformanceMetrics metrics() const;
 
 private:
@@ -54,7 +59,8 @@ class BacktestOrchestrator final {
 public:
     explicit BacktestOrchestrator(std::unique_ptr<StagePipeline> pipeline);
 
-    [[nodiscard]] RunResult run(const RunSpec& spec);
+    [[nodiscard]] RunResult run(const RunSpec& spec,
+                                 StagePipeline::ProgressCallback onProgress = nullptr);
     [[nodiscard]] AggregatedPerformanceMetrics metrics() const;
 
 private:

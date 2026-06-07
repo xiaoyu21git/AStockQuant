@@ -19,11 +19,11 @@ public:
         const IFactorOperatorLibrary& factorOperatorLibrary,
         const std::vector<const IComputeOpRegistrar*>& extensionRegistrars) noexcept;
 
-    [[nodiscard]] FactorResult<std::vector<double>> evaluateOnClose(
+    [[nodiscard]] FactorResult<std::vector<signal_value_t>> evaluateOnClose(
         NumericConstMatrixView closeView,
         uint32_t computeToken) const override;
 
-    [[nodiscard]] FactorResult<std::vector<double>> evaluateOnField(
+    [[nodiscard]] FactorResult<std::vector<signal_value_t>> evaluateOnField(
         const IMarketDataView& marketDataView,
         const std::string& fieldName,
         uint32_t computeToken) const override;
@@ -34,7 +34,7 @@ public:
 
 private:
     [[nodiscard]] static NumericMatrixView
-    buildMutableMatrixView(double* data, int32_t rowCount, int32_t columnCount) noexcept;
+    buildMutableMatrixView(signal_value_t* data, int32_t rowCount, int32_t columnCount) noexcept;
 
     void registerDefaultOperators();
     bool registerExtensionOperators(

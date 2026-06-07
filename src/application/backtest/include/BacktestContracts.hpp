@@ -179,6 +179,7 @@ struct RunSpec final {
     FillOrderSideMode fillOrderSideMode{kDefaultFillOrderSideMode};
     std::shared_ptr<const domain::backtest::BacktestRequest> request;
     RuntimeBudgetPlan runtimeBudget;
+    bool useMatrixPnL{false};           ///< 使用矩阵一次性损益计算（Phase 4）
 
     [[nodiscard]] bool isValid() const noexcept
     {

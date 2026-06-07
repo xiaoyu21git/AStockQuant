@@ -22,7 +22,7 @@ struct AssembleContext final {
 };
 
 struct ProcessedTensorView final {
-    const double* values{nullptr};
+    const signal_value_t* values{nullptr};
     const uint8_t* mask{nullptr};
     int32_t timeCount{0};
     int32_t instrumentCount{0};

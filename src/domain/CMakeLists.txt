@@ -9,6 +9,7 @@ add_subdirectory(backtest)
 add_subdirectory(factor)
 add_subdirectory(trading)
 add_subdirectory(strategy)
+add_subdirectory(scheduler)
 
 if(TARGET astock_ta_lib)
     target_link_libraries(domain_indicators PUBLIC astock_ta_lib)
@@ -38,6 +39,7 @@ target_link_libraries(domain
         domain_strategies
         domain_data
         domain_backtest
+        domain_scheduler
         domain_trading
         domain_strategy_runtime
         factor_system

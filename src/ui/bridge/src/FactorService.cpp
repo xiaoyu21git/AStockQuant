@@ -11,6 +11,7 @@
 #include "../../domain/factor/include/BaseFactor.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/factor/include/DataAvailabilityChecker.h"
+#include "../../domain/factor/include/FactorConfigAccess.h"
 #include "../../domain/factor/include/factor_enums.h"
 #include "../../domain/factor/include/JsonFacadeHelpers.h"
 
@@ -510,6 +511,95 @@ bool FactorService::deleteFactor(const QString& factorId)
         endMutation(false, err);
         emit errorOccurred(err);
         return false;
+    }
+}
+
+// ============ 跨表因子数据视图生成 ============
+
+QString FactorService::generateFactorDataView(const QString& factorId)
+{
+    if (factorId.isEmpty() || !m_initialized.load() || !m_instanceManager) {
+        QString err = QStringLiteral("因子服务未就绪或ID为空");
+        emit errorOccurred(err);
+        return err;
+    }
+
+    try {
+        auto info = m_instanceManager->getInstanceInfo(toStd(factorId));
+        if (info.instanceId.empty()) {
+            QString err = QStringLiteral("因子 '%1' 不存在").arg(factorId);
+            emit errorOccurred(err);
+            return err;
+        }
+
+        // 读取配置中的 dataRequirements
+        const auto& config = info.config;
+        if (!factor::config::hasDataRequirementsConfig(config)) {
+            QString err = QStringLiteral("因子 '%1' 缺少 dataRequirements 配置").arg(factorId);
+            emit errorOccurred(err);
+            return err;
+        }
+
+        auto dataReq = factor::config::dataRequirementsConfig(config);
+        if (!dataReq.isObject() || !dataReq.has("required")) {
+            QString err = QStringLiteral("因子 '%1' dataRequirements 缺少 required 字段").arg(factorId);
+            emit errorOccurred(err);
+            return err;
+        }
+
+        auto requiredFields = dataReq.get("required");
+        std::vector<std::string> fields;
+        for (size_t i = 0; i < requiredFields.size(); ++i)
+            fields.push_back(requiredFields.at(i).asString());
+
+        if (fields.empty()) {
+            QString msg = QStringLiteral("因子 '%1' 无必需字段").arg(factorId);
+            endMutation(true, msg);
+            return msg;
+        }
+
+        // 按表分组
+        auto groups = factor::DataAvailabilityChecker::groupFieldsByTable(fields);
+
+        // 构建结果报告
+        QString report;
+        report += QStringLiteral("因子: %1\n").arg(factorId);
+        report += QStringLiteral("必需字段数: %1\n").arg(fields.size());
+
+        if (groups.empty()) {
+            report += QStringLiteral("警告: 所有字段均无法匹配到已知数据表");
+        } else {
+            report += QStringLiteral("涉及数据表数: %1\n").arg(groups.size());
+            for (const auto& [table, tableFields] : groups) {
+                report += QStringLiteral("  表 %1: %2 个字段\n")
+                    .arg(QString::fromStdString(table))
+                    .arg(tableFields.size());
+                for (const auto& f : tableFields) {
+                    report += QStringLiteral("    - %1\n").arg(QString::fromStdString(f));
+                }
+            }
+
+            // 如果只有单一表，可直接走原 checkFields 路径
+            if (groups.size() == 1U) {
+                report += QStringLiteral("\n所有字段集中在单表，可通旧路径加载\n");
+            } else {
+                report += QStringLiteral("\n跨表因子：需要从 %1 张表分别加载数据后合并\n").arg(groups.size());
+            }
+        }
+
+        endMutation(true, report);
+        return report;
+
+    } catch (const std::exception& e) {
+        QString err = QStringLiteral("生成因子数据视图失败: %1").arg(QString::fromStdString(e.what()));
+        endMutation(false, err);
+        emit errorOccurred(err);
+        return err;
+    } catch (...) {
+        QString err = QStringLiteral("生成因子数据视图失败: 未知异常");
+        endMutation(false, err);
+        emit errorOccurred(err);
+        return err;
     }
 }
 

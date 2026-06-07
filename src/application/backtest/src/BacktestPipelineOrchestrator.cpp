@@ -99,7 +99,8 @@ StageResult StagePipeline::executeStage(RunStage stage, RunContext& context) con
     return fail;
 }
 
-RunResult StagePipeline::execute(RunContext& context)
+RunResult StagePipeline::execute(RunContext& context,
+                                  ProgressCallback onProgress)
 {
     aggregator_.reset();
     if (context.spec.request) {
@@ -110,6 +111,11 @@ RunResult StagePipeline::execute(RunContext& context)
 
     for (std::size_t i = 0; i < kPipelineStageCount; ++i) {
         const RunStage stage = kPipelineStages[i].stage;
+        if (onProgress) {
+            const double progress = static_cast<double>(i) *
+                100.0 / static_cast<double>(kPipelineStageCount);
+            onProgress(stage, progress);
+        }
         aggregator_.recordStageStart(stage);
         StageResult result = executeStage(stage, context);
         aggregator_.recordStageEnd(stage, result);
@@ -119,6 +125,10 @@ RunResult StagePipeline::execute(RunContext& context)
         if (!result.ok()) {
             return buildFailureResult(stage, result.code);
         }
+    }
+
+    if (onProgress) {
+        onProgress(RunStage::Finalize, 100.0);
     }
 
     RunResult ok;
@@ -175,12 +185,13 @@ BacktestOrchestrator::BacktestOrchestrator(std::unique_ptr<StagePipeline> pipeli
 {
 }
 
-RunResult BacktestOrchestrator::run(const RunSpec& spec)
+RunResult BacktestOrchestrator::run(const RunSpec& spec,
+                                     StagePipeline::ProgressCallback onProgress)
 {
     RunContext context;
     context.spec = spec;
 
-    return pipeline_->execute(context);
+    return pipeline_->execute(context, std::move(onProgress));
 }
 
 AggregatedPerformanceMetrics BacktestOrchestrator::metrics() const

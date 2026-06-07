@@ -1,4 +1,6 @@
 #include "ModuleRegistryAssembler.h"
+#include "../../../domain/trading/include/execution/RiskApprovalEngine.h"
+#include "../../../domain/trading/include/execution/SignalOrderTranslator.h"
 
 namespace application::backtest {
 
@@ -70,8 +72,26 @@ OwnedModules ModuleRegistryAssembler::assemble(
     policyRefs.riskLimitsPolicy = owned.riskLimitsPolicy.get();
     policyRefs.translationSpecPolicy = owned.translationSpecPolicy.get();
 
+    // 使用 OwnedModules 成员持有默认引擎实例，避免 static 局部变量线程安全问题
+    if (slots.riskApprovalEngine == nullptr) {
+        owned.ownedRiskApprovalEngine =
+            std::make_unique<astock::domain::trading::risk_approval::SequentialRiskApprovalEngine>();
+    }
+    if (slots.signalOrderTranslator == nullptr) {
+        owned.ownedSignalOrderTranslator =
+            std::make_unique<astock::domain::trading::signal_orders::LinearSignalOrderTranslator>();
+    }
+
+    ExistingModuleSlots patchedSlots = slots;
+    if (patchedSlots.riskApprovalEngine == nullptr) {
+        patchedSlots.riskApprovalEngine = owned.ownedRiskApprovalEngine.get();
+    }
+    if (patchedSlots.signalOrderTranslator == nullptr) {
+        patchedSlots.signalOrderTranslator = owned.ownedSignalOrderTranslator.get();
+    }
+
     ExecutionStageFactoryResult executionStages = ExecutionStageFactory::create(
-        slots,
+        patchedSlots,
         policyRefs);
     owned.riskApprovalEngine = std::move(executionStages.riskApprovalEngine);
     owned.orderGenerationEngine = std::move(executionStages.orderGenerationEngine);

@@ -70,7 +70,7 @@ BacktestRuntime::buildWithExecutionPolicies(
     }
 
     if (!registry.hasModeModules(RunMode::FactorBacktest)
-        || !registry.hasModeModules(RunMode::StrategyBacktest)) {
+        && !registry.hasModeModules(RunMode::StrategyBacktest)) {
         if (error != nullptr) {
             error->code = RunErrorCode::MissingModeRoute;
         }
@@ -96,6 +96,8 @@ BacktestRuntime::BacktestRuntime(OwnedModules ownedModules,
     , orchestrator_(std::move(orchestrator))
     , runTaskService_(std::move(runTaskService))
 {
+    // RunTaskService 持有 orchestrator_ 的裸指针，move 后需要重新绑定
+    runTaskService_.rebindOrchestrator(orchestrator_);
 }
 
 RunBacktestIngressResult BacktestRuntime::runBacktest(RunSpec spec)

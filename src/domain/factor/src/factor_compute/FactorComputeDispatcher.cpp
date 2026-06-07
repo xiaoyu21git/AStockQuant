@@ -11,7 +11,7 @@
 namespace factor::compute {
 
 NumericMatrixView FactorComputeDispatcher::buildMutableMatrixView(
-    double* data,
+    signal_value_t* data,
     int32_t rowCount,
     int32_t columnCount) noexcept
 {
@@ -90,42 +90,42 @@ const IComputeOp* FactorComputeDispatcher::findOperator(
     return strategyIt->second.get();
 }
 
-FactorResult<std::vector<double>> FactorComputeDispatcher::evaluateOnClose(
+FactorResult<std::vector<signal_value_t>> FactorComputeDispatcher::evaluateOnClose(
     NumericConstMatrixView closeView,
     uint32_t computeToken) const
 {
     if (hasInvalidRegistration_) {
-        return FactorResult<std::vector<double>>::failure(FactorError::InternalError);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::InternalError);
     }
 
     if (!closeView.isValid()) {
-        return FactorResult<std::vector<double>>::failure(FactorError::InsufficientData);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::InsufficientData);
     }
 
     const IComputeOp* const computeOperator = findOperator(computeToken);
     if (computeOperator == nullptr) {
-        return FactorResult<std::vector<double>>::failure(FactorError::InvalidFormula);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::InvalidFormula);
     }
 
     const size_t rowCount = static_cast<size_t>(closeView.rowCount);
     const size_t columnCount = static_cast<size_t>(closeView.columnCount);
     if (rowCount > (std::numeric_limits<size_t>::max() / columnCount)) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     }
 
     const size_t bufferSize = rowCount * columnCount;
-    const size_t maxBufferSize = std::vector<double>().max_size();
+    const size_t maxBufferSize = std::vector<signal_value_t>().max_size();
     if (bufferSize > maxBufferSize) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     }
 
-    std::vector<double> outputBuffer;
+    std::vector<signal_value_t> outputBuffer;
     try {
-        outputBuffer.assign(bufferSize, std::numeric_limits<double>::quiet_NaN());
+        outputBuffer.assign(bufferSize, std::numeric_limits<signal_value_t>::quiet_NaN());
     } catch (const std::length_error&) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     } catch (const std::bad_alloc&) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     }
 
     NumericMatrixView outputView = FactorComputeDispatcher::buildMutableMatrixView(
@@ -134,47 +134,47 @@ FactorResult<std::vector<double>> FactorComputeDispatcher::evaluateOnClose(
         closeView.columnCount);
 
     computeOperator->execute(factorOperatorLibrary_, closeView, outputView);
-    return FactorResult<std::vector<double>>::success(std::move(outputBuffer));
+    return FactorResult<std::vector<signal_value_t>>::success(std::move(outputBuffer));
 }
 
-FactorResult<std::vector<double>> FactorComputeDispatcher::evaluateOnField(
+FactorResult<std::vector<signal_value_t>> FactorComputeDispatcher::evaluateOnField(
     const IMarketDataView& marketDataView,
     const std::string& fieldName,
     uint32_t computeToken) const
 {
     if (hasInvalidRegistration_) {
-        return FactorResult<std::vector<double>>::failure(FactorError::InternalError);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::InternalError);
     }
 
     const IComputeOp* const computeOperator = findOperator(computeToken);
     if (computeOperator == nullptr) {
-        return FactorResult<std::vector<double>>::failure(FactorError::InvalidFormula);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::InvalidFormula);
     }
 
     auto fieldView = marketDataView.getField(fieldName);
     if (!fieldView.has_value() || !fieldView->isValid()) {
-        return FactorResult<std::vector<double>>::failure(FactorError::InsufficientData);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::InsufficientData);
     }
 
     const size_t rowCount = static_cast<size_t>(fieldView->rowCount);
     const size_t columnCount = static_cast<size_t>(fieldView->columnCount);
     if (rowCount > (std::numeric_limits<size_t>::max() / columnCount)) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     }
 
     const size_t bufferSize = rowCount * columnCount;
-    const size_t maxBufferSize = std::vector<double>().max_size();
+    const size_t maxBufferSize = std::vector<signal_value_t>().max_size();
     if (bufferSize > maxBufferSize) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     }
 
-    std::vector<double> outputBuffer;
+    std::vector<signal_value_t> outputBuffer;
     try {
-        outputBuffer.assign(bufferSize, std::numeric_limits<double>::quiet_NaN());
+        outputBuffer.assign(bufferSize, std::numeric_limits<signal_value_t>::quiet_NaN());
     } catch (const std::length_error&) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     } catch (const std::bad_alloc&) {
-        return FactorResult<std::vector<double>>::failure(FactorError::MemoryExceeded);
+        return FactorResult<std::vector<signal_value_t>>::failure(FactorError::MemoryExceeded);
     }
 
     NumericMatrixView outputView = FactorComputeDispatcher::buildMutableMatrixView(
@@ -183,7 +183,7 @@ FactorResult<std::vector<double>> FactorComputeDispatcher::evaluateOnField(
         fieldView->columnCount);
 
     computeOperator->execute(factorOperatorLibrary_, fieldView.value(), outputView);
-    return FactorResult<std::vector<double>>::success(std::move(outputBuffer));
+    return FactorResult<std::vector<signal_value_t>>::success(std::move(outputBuffer));
 }
 
 } // namespace factor::compute

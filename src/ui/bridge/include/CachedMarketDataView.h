@@ -18,7 +18,7 @@ namespace factor::compute {
 class CachedMarketDataView final : public IMarketDataView {
 public:
     struct ColumnData {
-        std::vector<double> values;        // 扁平化数据 [dateCount][instrumentCount]
+        std::vector<signal_value_t> values;  // 扁平化数据 [dateCount][instrumentCount], float32
         std::vector<DateKey> dates;
         std::vector<InstrumentId> instruments;
         int dateCount{0};
@@ -51,6 +51,12 @@ public:
 
     [[nodiscard]] const std::vector<DateKey>& dates() const override;
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
+
+    [[nodiscard]] std::unique_ptr<IMarketDataView>
+    slice(DateRange dateRange) const override;
+
+    [[nodiscard]] std::unique_ptr<IMarketDataView>
+    slice(const std::vector<InstrumentId>& instrumentIds) const override;
 
     /// @brief 查询是否有指定字段
     [[nodiscard]] bool hasField(const std::string& fieldName) const;

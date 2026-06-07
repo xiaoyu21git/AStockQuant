@@ -1504,6 +1504,17 @@ TEST(BacktestLayerGuardTest, RejectsOverlayAllocationsWithWeightMismatch)
 
 class CapturingFactorComputeEngine final : public factor::compute::IFactorComputeEngine {
 public:
+    void setComputeMode(factor::compute::ComputeMode) noexcept override {}
+
+    factor::compute::FactorResult<factor::compute::SignalSet>
+    incrementalUpdate(
+        const factor::compute::SignalSet&,
+        const factor::compute::DeltaMarketData&) override
+    {
+        return factor::compute::FactorResult<factor::compute::SignalSet>::failure(
+            factor::compute::FactorError::InternalError);
+    }
+
     factor::compute::FactorResult<factor::compute::SignalSet>
     generate(const factor::compute::GenerateSpec& spec) override
     {

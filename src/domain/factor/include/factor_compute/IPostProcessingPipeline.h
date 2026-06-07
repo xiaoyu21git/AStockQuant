@@ -5,7 +5,7 @@
 namespace factor::compute {
 
 struct SignalTensorBuffer final {
-    std::vector<double> values;
+    std::vector<signal_value_t> values;
     std::vector<uint8_t> mask;
     int32_t timeCount{0};
     int32_t instrumentCount{0};

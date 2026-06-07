@@ -49,6 +49,9 @@ public:
     Q_INVOKABLE bool inited() const;
     Q_INVOKABLE bool cacheOk() const;
 
+    /// @brief 获取全局单例（在 registerQmlTypes 中注册后有效）
+    [[nodiscard]] static StrategyBridge* instance();
+
     // FROZEN CRUD INTERFACE CONTRACT (2026-05-31)
     // - add/update/remove/get signatures must remain unchanged.
     // - add/update payload keys are explicitly frozen and validated in bridge runtime.
@@ -69,6 +72,11 @@ public:
     [[nodiscard]] QString selId() const;
     [[nodiscard]] QAbstractListModel* listModel() const;
     void setSelId(const QString& strategyId);
+
+    /// @brief 为回测提供策略引擎实例
+    /// @param strategyId 策略 ID
+    /// @return StrategyEngine 指针，失败返回 nullptr；调用者不持有所有权
+    [[nodiscard]] Q_INVOKABLE domain::strategy::StrategyEngine* backtestEngineProvider(const QString& strategyId);
 
 signals:
     void busyChanged();

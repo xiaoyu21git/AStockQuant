@@ -1,8 +1,9 @@
 #include "factor_compute/PostProcessingPipeline.h"
+#include "factor_compute/SIMDAdapter.h"
 
 #include <chrono>
-#include <cmath>
 #include <cstddef>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -14,7 +15,8 @@ namespace factor::compute {
 namespace {
 
 constexpr uint8_t kMissingMaskValue = 1U;
-constexpr double kZeroZScoreValue = 0.0;
+constexpr uint8_t kPresentMaskValue = 0U;
+constexpr signal_value_t kZeroZScoreValue = 0.0f;
 constexpr size_t kDefaultStepCount = 2U;
 
 struct SliceStatistics final {
@@ -66,7 +68,7 @@ std::optional<size_t> calculateTensorByteFootprint(const SignalTensorBuffer& ten
 {
     size_t valueBytes = 0U;
     size_t maskBytes = 0U;
-    if (!checkedMultiply(tensor.values.size(), sizeof(double), valueBytes)) {
+    if (!checkedMultiply(tensor.values.size(), sizeof(signal_value_t), valueBytes)) {
         return std::nullopt;
     }
     if (!checkedMultiply(tensor.mask.size(), sizeof(uint8_t), maskBytes)) {
@@ -106,28 +108,6 @@ size_t buildSliceFlatIndex(size_t sliceBaseOffset, int32_t instrumentIndex, int3
     return sliceBaseOffset + static_cast<size_t>(instrumentIndex) * static_cast<size_t>(factorCount);
 }
 
-template <typename TElementCallback>
-void forEachValidElementInSlice(
-    SignalTensorBuffer& tensor,
-    int32_t timeIndex,
-    int32_t factorIndex,
-    TElementCallback callback)
-{
-    const size_t sliceBaseOffset = buildSliceBaseOffset(
-        timeIndex,
-        factorIndex,
-        tensor.instrumentCount,
-        tensor.factorCount);
-
-    for (int32_t instrumentIndex = 0; instrumentIndex < tensor.instrumentCount; ++instrumentIndex) {
-        const size_t flat = buildSliceFlatIndex(sliceBaseOffset, instrumentIndex, tensor.factorCount);
-        if (tensor.mask[flat] == kMissingMaskValue) {
-            continue;
-        }
-        callback(flat);
-    }
-}
-
 template <typename TSliceCallback>
 void forEachSlice(const SignalTensorBuffer& tensor, TSliceCallback callback)
 {
@@ -159,7 +139,8 @@ std::optional<SliceStatistics> computeSliceStatistics(
             continue;
         }
 
-        const double value = tensor.values[flat];
+        const signal_value_t val = tensor.values[flat];
+        const double value = static_cast<double>(val);
         ++validCount;
         const double delta = value - mean;
         mean += delta / static_cast<double>(validCount);
@@ -183,6 +164,9 @@ std::optional<SliceStatistics> computeSliceStatistics(
     return stats;
 }
 
+// ============================================================================
+// SIMD 热点路径：winsorize 极值裁剪
+// ============================================================================
 void winsorizeByStdBand(
     SignalTensorBuffer& tensor,
     int32_t timeIndex,
@@ -190,18 +174,51 @@ void winsorizeByStdBand(
     const SliceStatistics& stats,
     const PostProcessingConfig& config)
 {
-    const double lowerBound = stats.mean - config.winsorizeStdBand * stats.stdDev;
-    const double upperBound = stats.mean + config.winsorizeStdBand * stats.stdDev;
-    forEachValidElementInSlice(tensor, timeIndex, factorIndex, [&](size_t flat) {
-        const double value = tensor.values[flat];
-        if (value < lowerBound) {
-            tensor.values[flat] = lowerBound;
-        } else if (value > upperBound) {
-            tensor.values[flat] = upperBound;
+    const signal_value_t lowerBound = static_cast<signal_value_t>(
+        stats.mean - config.winsorizeStdBand * stats.stdDev);
+    const signal_value_t upperBound = static_cast<signal_value_t>(
+        stats.mean + config.winsorizeStdBand * stats.stdDev);
+
+    const size_t sliceBaseOffset = buildSliceBaseOffset(
+        timeIndex, factorIndex, tensor.instrumentCount, tensor.factorCount);
+    signal_value_t* values = tensor.values.data();
+    uint8_t* mask = tensor.mask.data();
+    const int32_t instCount = tensor.instrumentCount;
+    const int32_t factorCnt = tensor.factorCount;
+
+    // SIMD 向量化主路径
+    int32_t i = 0;
+#ifdef SIGNAL_SIMD_SUPPORTED
+    const auto vLower = simd::broadcast(lowerBound);
+    const auto vUpper = simd::broadcast(upperBound);
+    for (; i <= instCount - simd::kVectorWidth; i += simd::kVectorWidth) {
+        const size_t base = sliceBaseOffset + static_cast<size_t>(i) * static_cast<size_t>(factorCnt);
+        bool allMissing = true;
+        for (int j = 0; j < simd::kVectorWidth; ++j) {
+            if (mask[base + j] < kMissingMaskValue) { allMissing = false; break; }
         }
-    });
+        if (allMissing) continue;
+
+        auto vec = simd::load(&values[base]);
+        vec = simd::max(vec, vLower);
+        vec = simd::min(vec, vUpper);
+        simd::store(&values[base], vec);
+    }
+#endif
+    // 标量 fallback
+    for (; i < instCount; ++i) {
+        const size_t flat = sliceBaseOffset + static_cast<size_t>(i) * static_cast<size_t>(factorCnt);
+        if (mask[flat] == kMissingMaskValue) continue;
+        signal_value_t v = values[flat];
+        if (v < lowerBound) v = lowerBound;
+        else if (v > upperBound) v = upperBound;
+        values[flat] = v;
+    }
 }
 
+// ============================================================================
+// SIMD 热点路径：z-score 标准化
+// ============================================================================
 void zScoreNormalize(
     SignalTensorBuffer& tensor,
     int32_t timeIndex,
@@ -209,19 +226,67 @@ void zScoreNormalize(
     const SliceStatistics& stats,
     const PostProcessingConfig& config)
 {
+    const size_t sliceBaseOffset = buildSliceBaseOffset(
+        timeIndex, factorIndex, tensor.instrumentCount, tensor.factorCount);
+    signal_value_t* values = tensor.values.data();
+    uint8_t* mask = tensor.mask.data();
+    const int32_t instCount = tensor.instrumentCount;
+    const int32_t factorCnt = tensor.factorCount;
+
     if (stats.stdDev <= config.stdEpsilon) {
-        forEachValidElementInSlice(tensor, timeIndex, factorIndex, [&](size_t flat) {
-            tensor.values[flat] = kZeroZScoreValue;
-        });
+        // 零标准差分支：全部置 0
+        int32_t i = 0;
+#ifdef SIGNAL_SIMD_SUPPORTED
+        const auto vZero = simd::broadcast(signal_value_t{0});
+        for (; i <= instCount - simd::kVectorWidth; i += simd::kVectorWidth) {
+            const size_t base = sliceBaseOffset + static_cast<size_t>(i) * static_cast<size_t>(factorCnt);
+            bool allMissing = true;
+            for (int j = 0; j < simd::kVectorWidth; ++j) {
+                if (mask[base + j] < kMissingMaskValue) { allMissing = false; break; }
+            }
+            if (allMissing) continue;
+            simd::store(&values[base], vZero);
+        }
+#endif
+        for (; i < instCount; ++i) {
+            const size_t flat = sliceBaseOffset + static_cast<size_t>(i) * static_cast<size_t>(factorCnt);
+            if (mask[flat] == kMissingMaskValue) continue;
+            values[flat] = kZeroZScoreValue;
+        }
         return;
     }
 
-    const double inverseStdDev = 1.0 / stats.stdDev;
-    forEachValidElementInSlice(tensor, timeIndex, factorIndex, [&](size_t flat) {
-        tensor.values[flat] = (tensor.values[flat] - stats.mean) * inverseStdDev;
-    });
+    // 正常标准化: z = (x - mean) * (1 / stdDev)
+    const signal_value_t vMean = static_cast<signal_value_t>(stats.mean);
+    const signal_value_t vInvStd = static_cast<signal_value_t>(1.0 / stats.stdDev);
+
+    int32_t i = 0;
+#ifdef SIGNAL_SIMD_SUPPORTED
+    const auto vMeanBroadcast = simd::broadcast(vMean);
+    const auto vInvStdBroadcast = simd::broadcast(vInvStd);
+    for (; i <= instCount - simd::kVectorWidth; i += simd::kVectorWidth) {
+        const size_t base = sliceBaseOffset + static_cast<size_t>(i) * static_cast<size_t>(factorCnt);
+        bool allMissing = true;
+        for (int j = 0; j < simd::kVectorWidth; ++j) {
+            if (mask[base + j] < kMissingMaskValue) { allMissing = false; break; }
+        }
+        if (allMissing) continue;
+
+        auto vec = simd::load(&values[base]);
+        vec = simd::mul(simd::sub(vec, vMeanBroadcast), vInvStdBroadcast);
+        simd::store(&values[base], vec);
+    }
+#endif
+    for (; i < instCount; ++i) {
+        const size_t flat = sliceBaseOffset + static_cast<size_t>(i) * static_cast<size_t>(factorCnt);
+        if (mask[flat] == kMissingMaskValue) continue;
+        values[flat] = (values[flat] - vMean) * vInvStd;
+    }
 }
 
+// ============================================================================
+// 处理步骤类
+// ============================================================================
 class WinsorizeByStdBandStep final : public IPostProcessingStep {
 public:
     void apply(SignalTensorBuffer& tensor, const PostProcessingConfig& config) const override

@@ -659,6 +659,16 @@ StrategyBridge::StrategyBridge(QObject* parent)
 
 StrategyBridge::~StrategyBridge() = default;
 
+StrategyBridge* StrategyBridge::instance()
+{
+    static StrategyBridge* s_instance = []() -> StrategyBridge* {
+        auto* bridge = new StrategyBridge();
+        bridge->init();  // 同步初始化，确保 instance() 返回后 inited() == true
+        return bridge;
+    }();
+    return s_instance;
+}
+
 void StrategyBridge::init()
 {
     if (m_inited) {
@@ -1165,6 +1175,17 @@ bool StrategyBridge::saveViewCfg(const QString& strategyId, const QVariantMap& v
     setErr(clearedMsg());
     emit operationFailed(kInvalidArgumentCode, m_err);
     return false;
+}
+
+domain::strategy::StrategyEngine* StrategyBridge::backtestEngineProvider(const QString& strategyId)
+{
+    const std::string key = strategyId.trimmed().toStdString();
+    const std::lock_guard<std::mutex> lock(m_runtimeEngineMutex);
+    const auto iter = m_runtimeEngines.find(key);
+    if (iter == m_runtimeEngines.end()) {
+        return nullptr;
+    }
+    return iter->second.get();
 }
 
 bool StrategyBridge::busy() const

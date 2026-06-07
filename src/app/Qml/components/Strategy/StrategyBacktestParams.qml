@@ -22,7 +22,15 @@ Rectangle {
     property string outSampleStart: "2024-01-01"
     property bool parametersValid: true; property string validationMessage: ""
 
+    // === 回测运行时状态 ===
+    property bool isBacktesting: false
+    property real backtestProgress: 0.0
+    property string backtestStatus: ""
+    property string backtestError: ""
+    property var backtestResult: null
+
     signal parametersChanged(var params); signal startBacktestRequested(); signal strategySwitched(string strategyId)
+    signal backtestFinished(var result)
 
     readonly property var bmOpts: [{l:"沪深300",v:"000300.SH"},{l:"中证500",v:"000905.SH"},{l:"中证1000",v:"000852.SH"},{l:"创业板指",v:"399006.SZ"},{l:"上证50",v:"000016.SH"},{l:"科创50",v:"000688.SH"}]
     readonly property var fqOpts: [{l:"日线",v:"daily"},{l:"周线",v:"weekly"},{l:"月线",v:"monthly"}]
@@ -75,21 +83,84 @@ Rectangle {
     }
 
     // ============================ Strategies ============================
-    ListModel { id: strategyComboModel }
+    ListModel { id: strategyComboModel; ListElement { text: "加载中..."; sid: "" } }
+    property bool strategySignalConnected: false
+
     function initStrategyList() {
-        if (!StrategyBridge) return
+        if (!StrategyBridge) {
+            rebuildFallbackStrategyCombo()
+            return
+        }
         StrategyBridge.initAsync()
         strategyViewModel = StrategyBridge.listModel
-        rebuildStrategyCombo()
+
+        if (!strategySignalConnected) {
+            strategySignalConnected = true
+            StrategyBridge.strategiesChanged.connect(function() {
+                console.log("StrategyBacktestParams: 策略数据已更新，刷新下拉列表")
+                rebuildStrategyCombo()
+            })
+        }
+        // 延迟刷新：initAsync 可能需要一点时间，用 Timer 兜底
+        strategyRefreshTimer.start()
     }
+
     function rebuildStrategyCombo() {
         strategyComboModel.clear()
-        if (!strategyViewModel) return
+        if (!strategyViewModel || strategyViewModel.count <= 0) {
+            // 如果异步数据还没到，尝试直接用 StrategyBridge.list() 同步获取
+            if (StrategyBridge && StrategyBridge.list) {
+                var list = StrategyBridge.list()
+                if (list && Array.isArray(list) && list.length > 0) {
+                    for (var i = 0; i < list.length; i++) {
+                        var item = list[i]
+                        strategyComboModel.append({ text: item.strategyName || item.name || "未命名", sid: item.strategyId || "" })
+                    }
+                    console.log("StrategyBacktestParams: 通过 list() 加载了 " + strategyComboModel.count + " 个策略")
+                    syncStrategyComboSelection()
+                    return
+                }
+            }
+            strategyComboModel.append({ text: "暂无策略", sid: "" })
+            return
+        }
         for (var i = 0; i < strategyViewModel.count; i++) {
             var r = strategyViewModel.getRow(i)
             strategyComboModel.append({ text: r.strategyName || r.name || "未命名", sid: r.strategyId || "" })
         }
+        console.log("StrategyBacktestParams: 通过 viewModel 加载了 " + strategyComboModel.count + " 个策略")
+        syncStrategyComboSelection()
     }
+
+    function rebuildFallbackStrategyCombo() {
+        strategyComboModel.clear()
+        if (StrategyBridge && StrategyBridge.list) {
+            var list = StrategyBridge.list()
+            if (list && Array.isArray(list) && list.length > 0) {
+                for (var i = 0; i < list.length; i++) {
+                    var item = list[i]
+                    strategyComboModel.append({ text: item.strategyName || item.name || "未命名", sid: item.strategyId || "" })
+                }
+                console.log("StrategyBacktestParams: 通过 list() 回退加载了 " + strategyComboModel.count + " 个策略")
+                syncStrategyComboSelection()
+                return
+            }
+        }
+        strategyComboModel.append({ text: "暂无策略", sid: "" })
+    }
+
+    function syncStrategyComboSelection() {
+        if (root.selectedStrategyId === "") return
+        for (var i = 0; i < strategyComboModel.count; i++) {
+            if (strategyComboModel.get(i).sid === root.selectedStrategyId) {
+                strategyComboBox.currentIndex = i
+                return
+            }
+        }
+    }
+
+    Timer { id: strategyRefreshTimer; interval: 200; repeat: false; onTriggered: { rebuildStrategyCombo() } }
+
     function switchStrategy(sid, sname) {
         if (sid) { root.selectedStrategyId = sid; root.selectedStrategyName = sname || ""; root.ec(); root.strategySwitched(sid) }
     }
@@ -274,13 +345,114 @@ Rectangle {
                 }
             }
 
-            // === 开始按钮 ===
-            Rectangle { width: 200; height: 44; radius: 8; color: "#3B82F6"; anchors.right: parent.right
-                Text { anchors.centerIn: parent; text: "▶ 开始回测"; font.pixelSize: 15; font.weight: Font.Medium; color: "white" }
-                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (root.vp()) root.startBacktestRequested() } } }
+            // === START/CANCEL BUTTONS WITH PROGRESS BAR ===
+            Column { width: parent.width; spacing: 10
+                // 进度条行（只在回测进行中显示）
+                Row { width: parent.width; height: root.isBacktesting ? 34 : 0; spacing: 12; visible: root.isBacktesting
+                    Rectangle { width: parent.width - 124; height: 8; radius: 4; color: "#334155"; anchors.verticalCenter: parent.verticalCenter
+                        Rectangle { width: Math.max(2, parent.parent.width === 0 ? 0 : (parent.width - 124) * Math.min(1.0, Math.max(0.0, root.backtestProgress))); height: 8; radius: 4; color: "#3B82F6"
+                            Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } } } }
+                    Text { text: Math.round(root.backtestProgress * 100) + "%"; font.pixelSize: 12; font.weight: Font.Medium; color: "#3B82F6"; width: 40; anchors.verticalCenter: parent.verticalCenter }
+                    // 取消按钮
+                    Rectangle { width: 60; height: 30; radius: 6; color: "#475569"; border.width: 1; border.color: "#64748B"; anchors.verticalCenter: parent.verticalCenter
+                        Text { anchors.centerIn: parent; text: "取消"; font.pixelSize: 12; color: "#F1F5F9" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.isBacktesting = false } } }
+                }
+                // 状态文字行
+                Row { width: parent.width; height: root.isBacktesting && root.backtestStatus !== "" ? 20 : 0; visible: root.isBacktesting && root.backtestStatus !== ""
+                    Text { text: root.backtestStatus; font.pixelSize: 12; color: "#94A3B8"; elide: Text.ElideRight; width: parent.width } }
+                // 开始按钮行
+                Row { width: parent.width; height: root.isBacktesting ? 0 : 44; visible: !root.isBacktesting
+                    Rectangle { width: 1; height: 1 }
+                    Rectangle { width: 200; height: 44; radius: 8; color: "#3B82F6"
+                        Text { anchors.centerIn: parent; text: "▶ 开始回测"; font.pixelSize: 15; font.weight: Font.Medium; color: "white" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { if (root.vp()) root.doStartBacktest() } } }
+                }
+            }
+            // 错误提示
+            Rectangle { visible: root.backtestError !== ""; width: parent.width; height: 44; radius: 8; color: "#7F1D1D"; border.width: 1; border.color: "#EF4444"
+                Text { anchors.fill: parent; anchors.margins: 10; text: root.backtestError; font.pixelSize: 13; color: "#FCA5A5" } }
             Item { width: 1; height: 20 }
         }
     }
+    // ============================ 回测控制器 ============================
+    StrategyBacktestController {
+        id: backtestController
+
+        onIsRunningChanged: {
+            root.isBacktesting = backtestController.isRunning
+        }
+        onProgressChanged: {
+            root.backtestProgress = 0.0
+        }
+        onStatusChanged: {
+            root.backtestStatus = backtestController.status
+        }
+        onBacktestCompleted: function(result) {
+            root.backtestResult = result
+            root.isBacktesting = false
+            root.backtestError = ""
+            root.backtestFinished(result)
+        }
+        onBacktestFailed: function(error) {
+            root.backtestError = error
+            root.isBacktesting = false
+        }
+        onBacktestCancelled: {
+            root.isBacktesting = false
+            root.backtestStatus = "已取消"
+        }
+    }
+
+    function doStartBacktest() {
+        root.backtestError = ""
+        root.backtestResult = null
+
+        if (!root.selectedStrategyId || root.selectedStrategyId === "") {
+            root.backtestError = "请先选择一个策略"
+            return
+        }
+        if (!backtestController) {
+            root.backtestError = "回测控制器未就绪"
+            return
+        }
+        if (!backtestController.initialize()) {
+            root.backtestError = "回测控制器初始化失败"
+            return
+        }
+
+        // 构建回测参数
+        var config = {
+            strategyId: root.selectedStrategyId,
+            strategyName: root.selectedStrategyName,
+            startDate: root.startDateP,
+            endDate: root.endDateP,
+            benchmarkIndex: root.benchmarkIndex,
+            dataFrequency: root.dataFrequency,
+            priceAdjustment: root.priceAdjustment,
+            initialCapital: root.initialCapital,
+            commissionRate: root.commissionRate,
+            minCommission: root.minCommission,
+            slippageRate: root.slippageRate,
+            stampTaxRate: root.stampTaxRate,
+            executionTiming: root.executionTiming,
+            volumeLimitPercent: root.volumeLimitPercent,
+            rebalanceFrequency: root.rebalanceFrequency,
+            maxPositionCount: root.maxPositionCount,
+            singlePositionWeight: root.singlePositionWeight,
+            stopLossPercent: root.stopLossPercent,
+            takeProfitPercent: root.takeProfitPercent,
+            backtestMode: root.backtestMode,
+            outSampleStart: root.outSampleStart,
+            datasetCacheId: root.selectedDatasetId,
+            numGroups: 10
+        }
+
+        backtestController.runBacktest(root.selectedStrategyId, config)
+        root.startBacktestRequested()
+        console.log("StrategyBacktestParams: 策略回测已启动, strategyId=", root.selectedStrategyId)
+    }
+
     onCleanedDataControllerChanged: { root.loadDatasets() }
     Component.onCompleted: { root.initStrategyList(); root.loadDatasets() }
 }

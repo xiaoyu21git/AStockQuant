@@ -13,6 +13,14 @@
 
 #include <memory>
 
+namespace astock::domain::trading::risk_approval {
+class SequentialRiskApprovalEngine;
+}
+
+namespace astock::domain::trading::signal_orders {
+class LinearSignalOrderTranslator;
+}
+
 namespace application::backtest {
 
 struct OwnedModules final {
@@ -35,6 +43,10 @@ struct OwnedModules final {
     std::unique_ptr<IDiagnosticsEngine> diagnosticsEngine;
     std::unique_ptr<IResultRepository> resultRepository;
     std::unique_ptr<IExportArtifactBuilder> exportArtifactBuilder;
+
+    // 持有默认域层引擎实例，避免 static 局部变量线程安全问题
+    std::unique_ptr<astock::domain::trading::risk_approval::SequentialRiskApprovalEngine> ownedRiskApprovalEngine;
+    std::unique_ptr<astock::domain::trading::signal_orders::LinearSignalOrderTranslator> ownedSignalOrderTranslator;
 
     [[nodiscard]] RunModuleRegistry registry() const noexcept;
 };
