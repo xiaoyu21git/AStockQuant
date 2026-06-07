@@ -1,4 +1,4 @@
-# tests/CMakeLists.txt
+﻿# tests/CMakeLists.txt
 cmake_minimum_required(VERSION 3.15)
 
 message(STATUS "[TESTS] Configuring unit tests in ${CMAKE_CURRENT_SOURCE_DIR}")
@@ -251,7 +251,7 @@ target_link_libraries(test_eventsystem
         domain_strategies
         domain_strategy_runtime
         bridge
-        factor_system   # ConfigurableFactor/Factor runtime symbols
+        factor   # ConfigurableFactor/Factor runtime symbols
         infrastructure  # MarketDataRepository 回归测试
         foundation      # Foundation �?
 )
@@ -471,3 +471,4 @@ endif()
 # live test
 add_executable(test_live_backtest_log test_live_backtest_log.cpp)
 set_target_properties(test_live_backtest_log PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL)
+

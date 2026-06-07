@@ -6,6 +6,7 @@ target_sources(application_backtest PRIVATE
     ExportArtifactBuilderAdapter.cpp
     ExecutionStageAdapters.cpp
     ExecutionStageFactory.cpp
+    FactorBacktestOrchestrator.cpp
     MarketDataWindowProviderAdapter.cpp
     MetricsAdapter.cpp
     ModuleRegistryAssembler.cpp

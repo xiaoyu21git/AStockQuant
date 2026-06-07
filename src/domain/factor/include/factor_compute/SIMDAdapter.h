@@ -19,9 +19,13 @@ namespace factor::compute::simd {
 
 // ---------- 平台检测与宽度定义 ----------
 
-#if defined(__AVX2__) || defined(_M_AVX2)
-    #define SIGNAL_SIMD_AVX2
-    #define SIGNAL_SIMD_SUPPORTED
+#if defined(__AVX2__) || defined(_M_AVX2) || defined(SIGNAL_SIMD_AVX2)
+    #if !defined(SIGNAL_SIMD_AVX2)
+        #define SIGNAL_SIMD_AVX2
+    #endif
+    #if !defined(SIGNAL_SIMD_SUPPORTED)
+        #define SIGNAL_SIMD_SUPPORTED
+    #endif
     constexpr int kVectorWidth = 8;   // 256-bit / 32-bit float
 #elif defined(__ARM_NEON) || defined(__aarch64__) || defined(_M_ARM64)
     #define SIGNAL_SIMD_NEON

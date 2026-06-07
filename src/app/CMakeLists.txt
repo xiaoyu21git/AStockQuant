@@ -79,8 +79,8 @@ target_link_libraries(astockquantapp
         domain
         bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
         foundation
-        factor_system
-        factor_compute
+        factor
+        factor
 )
 
 if(TARGET Arrow::arrow_shared)
@@ -351,7 +351,7 @@ if(ENABLE_JUJIN_MARKET)
             domain_strategies
             domain_signals
             domain_indicators
-            factor_system
+            factor
             infrastructure
             astock_market
             thirdParty
@@ -373,4 +373,5 @@ endif()
 # 濞村鐦?
 include(CTest)
 enable_testing()
+
 

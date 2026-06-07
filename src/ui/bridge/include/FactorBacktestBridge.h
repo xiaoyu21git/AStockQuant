@@ -49,6 +49,10 @@ namespace factor::bridge {
 class CachedMarketDataViewHistoricalAdapter;
 }
 
+namespace application::backtest {
+class FactorBacktestOrchestrator;
+}
+
 class FactorBacktestBridge : public QObject {
     Q_OBJECT
 
@@ -139,11 +143,20 @@ signals:
 private:
     bool ensureEngineInitialized();
 
-    /// 将 AnalysisReport + SimulatedTradingResult 转换为 QML 所需的 QVariantMap
+    // ── QVariant 格式化方法 (私有，不暴露给外部) ──
+
     QVariantMap convertAnalysisReport(
         const factor::compute::AnalysisReport& report,
-        const QString& factorId,
-        const factor::compute::SimulatedTradingResult& tradingResult) const;
+        const QString& factorId) const;
+
+    static QVariantList buildCoreMetrics(const factor::compute::FactorQualityMetrics16View& metrics,
+                                         const factor::compute::FactorQualityMetrics16DiagnosticsView& diag);
+    static QVariantList buildGroupCharts(const factor::compute::SimulatedTradingResult& tradingResult);
+    static QVariantMap buildReturnSeries(const factor::compute::SimulatedTradingResult& tradingResult);
+    static QString coreRatingLabel(int32_t rating);
+    static QString coreRatingTitle(int32_t rating);
+    static QString coreRatingSummary(const factor::compute::FactorQualityMetrics16View& metrics);
+    static QVariantList buildRatingChecks(const factor::compute::FactorQualityMetrics16View& metrics);
 
     QVariantMap m_backtestRuntimeParams;
     QVariantMap m_backtestResult;
@@ -171,11 +184,13 @@ private:
     // 分组数量（从 QML 参数页传入）
     int m_numGroups{5};
 
-    // 行情数据视图
-    std::unique_ptr<factor::compute::CachedMarketDataView> m_marketDataView;
-    // HistoricalView 适配器
-    std::shared_ptr<factor::bridge::CachedMarketDataViewHistoricalAdapter> m_historicalAdapter;
-    // AnalysisModule（仅用于最终指标计算）
-    std::unique_ptr<factor::compute::AnalysisModule> m_analysisModule;
+    // ── 新架构：Bridge 只持有 Orchestrator，所有逻辑委托给它 ──
+    // Orchestrator 内部组合了 Scheduler / DataSvc / FactorEngine / Reporter
+    std::unique_ptr<application::backtest::FactorBacktestOrchestrator> m_orchestrator;
+
+    // 以下旧成员已废弃，待清理：
+    // std::unique_ptr<factor::compute::CachedMarketDataView> m_marketDataView;
+    // std::shared_ptr<factor::bridge::CachedMarketDataViewHistoricalAdapter> m_historicalAdapter;
+    // std::unique_ptr<factor::compute::AnalysisModule> m_analysisModule;
     bool m_engineReady{false};
 };

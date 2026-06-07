@@ -1,6 +1,6 @@
-#include "CachedMarketDataViewHistoricalAdapter.h"
+#include "factor_compute/MarketDataViewHistoricalAdapter.h"
 
-namespace factor::bridge {
+namespace factor::compute {
 
 CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     const factor::compute::IMarketDataView& marketDataView)
@@ -209,4 +209,4 @@ CachedMarketDataViewHistoricalAdapter::getBatchTimeSeries(
     return getBatchTimeSeries(symbols, startDate, anchorDate, fields);
 }
 
-} // namespace factor::bridge
+} // namespace factor::compute

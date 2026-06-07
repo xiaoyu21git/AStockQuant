@@ -1,4 +1,4 @@
-# domain/CMakeLists.txt
+﻿# domain/CMakeLists.txt
 add_subdirectory(types)
 add_subdirectory(indicators)
 add_subdirectory(signals)
@@ -42,7 +42,7 @@ target_link_libraries(domain
         domain_scheduler
         domain_trading
         domain_strategy_runtime
-        factor_system
+        factor
 )
 
 # 暴露 include 目录

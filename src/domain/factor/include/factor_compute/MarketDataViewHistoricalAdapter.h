@@ -9,9 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-class DataService;
-
-namespace factor::bridge {
+namespace factor::compute {
 
 /// @brief 将 factor::compute::IMarketDataView 适配为 factor::HistoricalView
 ///
@@ -85,4 +83,4 @@ private:
     std::vector<std::string> symbols_;
 };
 
-} // namespace factor::bridge
+} // namespace factor::compute

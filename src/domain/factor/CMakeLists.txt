@@ -146,7 +146,7 @@ set_source_files_properties(
     PROPERTIES LANGUAGE C
 )
 
-# 婧愭枃浠?
+# 因子系统核心库
 set(FACTOR_SOURCES
     src/DataAvailabilityChecker.cpp
     src/BaseFactor.cpp
@@ -191,7 +191,7 @@ set(FACTOR_SOURCES
     src/factor_compute/SignalSetBuilder.cpp
 )
 
-# 澶存枃浠?
+# 因子系统头文件
 set(FACTOR_HEADERS
     include/DataAvailabilityChecker.h
     include/BaseFactor.h
@@ -258,6 +258,8 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/FactorSignalAdapter.cpp
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
+    src/factor_compute/BacktestFactorEngine.cpp
+    src/factor_compute/MarketDataViewHistoricalAdapter.cpp
 )
 
 set(FACTOR_COMPUTE_HEADERS
@@ -291,71 +293,47 @@ set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/SignalSetBuilder.h
 )
 
-# 鍒涘缓搴?
-add_library(factor_system STATIC ${FACTOR_SOURCES} ${FACTOR_HEADERS})
-
-# 鍒涘缓 factor_compute 澧為噺楠岃瘉搴?
-add_library(factor_compute STATIC
+# 创建库 — 合并 factor 和 factor_compute 为统一库 factor
+set(FACTOR_ALL_SOURCES
+    ${FACTOR_SOURCES}
     ${FACTOR_COMPUTE_SOURCES}
-    ${FACTOR_COMPUTE_HEADERS}
 )
+add_library(factor STATIC ${FACTOR_ALL_SOURCES} ${FACTOR_HEADERS} ${FACTOR_COMPUTE_HEADERS})
 
-target_link_libraries(factor_compute
+target_include_directories(factor
     PUBLIC
-        foundation
-        astock_xxhash
-)
-
-target_include_directories(factor_compute
-    PUBLIC
-        "G:/C++/lib/unordered_dense-4.4.0/include"
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        "${TA_LIB_GENERATED_INCLUDE_DIR}"
+        "${TA_LIB_SOURCE_DIR}/include"
         "G:/C++/lib/xxHash-0.8.2"
+        "G:/C++/lib/unordered_dense-4.4.0/include"
 )
 
-if(TARGET Arrow::arrow_shared)
-    target_link_libraries(factor_compute PUBLIC Arrow::arrow_shared)
-    target_include_directories(factor_compute PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
-    target_include_directories(factor_compute PUBLIC ${arrow_BINARY_DIR}/src)
-elseif(TARGET arrow_shared)
-    target_link_libraries(factor_compute PUBLIC arrow_shared)
-    target_include_directories(factor_compute PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
-    target_include_directories(factor_compute PUBLIC ${arrow_BINARY_DIR}/src)
-endif()
-
-target_include_directories(factor_system
+target_link_libraries(factor
     PUBLIC
-    "${TA_LIB_GENERATED_INCLUDE_DIR}"
-    "${TA_LIB_SOURCE_DIR}/include"
-    "G:/C++/lib/xxHash-0.8.2"
-    "G:/C++/lib/unordered_dense-4.4.0/include"
-)
-
-# 閾炬帴搴?
-target_link_libraries(factor_system
-    PUBLIC
-    Qt6::Sql
+        Qt6::Sql
         foundation
         infrastructure
         domain_backtest
-    domain_trading
+        domain_trading
         astock_ta_lib
         astock_xxhash
 )
 
 if(TARGET Arrow::arrow_shared)
-    target_link_libraries(factor_system PUBLIC Arrow::arrow_shared)
-    target_include_directories(factor_system PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
-    target_include_directories(factor_system PUBLIC ${arrow_BINARY_DIR}/src)
+    target_link_libraries(factor PUBLIC Arrow::arrow_shared)
+    target_include_directories(factor PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
+    target_include_directories(factor PUBLIC ${arrow_BINARY_DIR}/src)
 elseif(TARGET arrow_shared)
-    target_link_libraries(factor_system PUBLIC arrow_shared)
-    target_include_directories(factor_system PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
-    target_include_directories(factor_system PUBLIC ${arrow_BINARY_DIR}/src)
+    target_link_libraries(factor PUBLIC arrow_shared)
+    target_include_directories(factor PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
+    target_include_directories(factor PUBLIC ${arrow_BINARY_DIR}/src)
 else()
     message(FATAL_ERROR "Arrow C++ target not found after FetchContent population")
 endif()
 
-# 瀹夎
-install(TARGETS factor_system
+# 安装
+install(TARGETS factor
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
@@ -367,14 +345,14 @@ install(DIRECTORY include/
 )
 
 # 娴嬭瘯绋嬪簭
-set(FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/test_factor_system.cpp")
+set(FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/test_factor.cpp")
 if(BUILD_TESTS AND EXISTS "${FACTOR_TEST_SOURCE}")
-    add_executable(test_factor_system
+    add_executable(test_factor
         ${FACTOR_TEST_SOURCE}
     )
     
-    target_link_libraries(test_factor_system
-        factor_system
+    target_link_libraries(test_factor
+        factor
         foundation
         infrastructure
         pymysql
@@ -382,8 +360,8 @@ if(BUILD_TESTS AND EXISTS "${FACTOR_TEST_SOURCE}")
     )
     
     # 娣诲姞娴嬭瘯
-    add_test(NAME test_factor_system
-        COMMAND test_factor_system
+    add_test(NAME test_factor
+        COMMAND test_factor
         WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
     )
 endif()
@@ -395,7 +373,7 @@ if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
     )
 
     target_link_libraries(test_factor_compute_smoke
-        factor_compute
+        factor
     )
 
     if(BUILD_TESTS)
@@ -405,4 +383,5 @@ if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
         )
     endif()
 endif()
+
 

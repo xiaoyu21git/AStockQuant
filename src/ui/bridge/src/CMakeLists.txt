@@ -50,7 +50,6 @@ set(BRIDGE_SOURCES
         FactorBacktestBridge.cpp
         StrategyBacktestBridge.cpp
         CachedMarketDataView.cpp
-        CachedMarketDataViewHistoricalAdapter.cpp
 )
 
 if(ENABLE_JUJIN_MARKET)
@@ -69,7 +68,7 @@ target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 target_include_directories(bridge PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_SOURCE_DIR}/src/domain/factor/include
-    ${CMAKE_SOURCE_DIR}/src/domain/factor/include/factor_compute
+    ${CMAKE_SOURCE_DIR}/src/domain/factor/include/factor
     ${CMAKE_SOURCE_DIR}/src/domain/backtest/include
     ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
     ${CMAKE_SOURCE_DIR}/src/application/backtest/include
@@ -97,8 +96,8 @@ target_link_libraries(bridge PRIVATE
     engine
     foundation
     cache_module
-    factor_system
-    factor_compute
+    factor
+    factor
     domain
     application_backtest
 )

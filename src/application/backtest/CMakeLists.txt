@@ -1,4 +1,4 @@
-add_library(application_backtest STATIC)
+﻿add_library(application_backtest STATIC)
 add_subdirectory(src)
 
 target_include_directories(application_backtest
@@ -11,7 +11,8 @@ target_include_directories(application_backtest
 target_link_libraries(application_backtest
     PUBLIC
         domain_backtest
-        factor_system
+        domain_scheduler
+        factor
 )
 
 if(TARGET Qt6::Core)
