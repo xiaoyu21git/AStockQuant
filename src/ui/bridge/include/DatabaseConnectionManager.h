@@ -3,6 +3,7 @@
 #pragma once
 
 #include "../../../infrastructure/include/database/QtMySQLDatabase.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "../../../infrastructure/include/database/DatabaseConfig.h"
 #include "../../../infrastructure/include/database/ConnectionPool.h"
 #include "../../../foundation/include/foundation.h"
@@ -35,7 +36,7 @@ public:
         return *instance;
     }
     
-    // 获取数据库连接
+    // 获取 Qt 数据库连接
     std::shared_ptr<QtMySQLDatabase> getDatabase() {
         std::lock_guard<std::mutex> lock(m_mutex);
         
@@ -53,6 +54,33 @@ public:
         }
         
         return m_database;
+    }
+
+    // 获取纯 C++ 数据库连接 (基于 libmysqlclient，零 Qt 依赖)
+    std::shared_ptr<astock::database::ISqlDatabase> getNativeConnection() {
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        if (!m_nativePoolInitialized) {
+            try {
+                DatabaseConfig config = readDatabaseConfig();
+                if (NativeMySQLConnectionPool::instance().initialize(config)) {
+                    m_nativePoolInitialized = true;
+                }
+            } catch (const std::exception& e) {
+                // 日志可能尚未初始化，直接输出到 stderr
+                fprintf(stderr, "[DatabaseConnectionManager] Native pool init failed: %s\n", e.what());
+                fflush(stderr);
+            } catch (...) {
+                fprintf(stderr, "[DatabaseConnectionManager] Native pool init failed: unknown exception\n");
+                fflush(stderr);
+            }
+        }
+
+        if (!m_nativePoolInitialized) {
+            return nullptr;
+        }
+
+        return NativeMySQLConnectionPool::instance().getConnection();
     }
     
     // 初始化数据库连接
@@ -187,6 +215,29 @@ private:
 private:
     std::shared_ptr<QtMySQLDatabase> m_database;
     mutable std::mutex m_mutex;
+    bool m_nativePoolInitialized{false};
+
+    static DatabaseConfig readDatabaseConfig() {
+        DatabaseConfig config;
+        try {
+            auto& configManager = foundation::config::ConfigManager::instance();
+            config.host     = configManager.get_app_config_string("mysql.host", "127.0.0.1");
+            config.port     = configManager.get_app_config_int("mysql.port", 3306);
+            config.database = configManager.get_app_config_string("mysql.database", "astock_quant");
+            config.username = configManager.get_app_config_string("mysql.user", "root");
+            config.password = configManager.get_app_config_string("mysql.password", "123456a");
+            config.charset  = "utf8mb4";
+        } catch (...) {
+            // fallback defaults
+            config.host     = "127.0.0.1";
+            config.port     = 3306;
+            config.database = "astock_quant";
+            config.username = "root";
+            config.password = "123456a";
+            config.charset  = "utf8mb4";
+        }
+        return config;
+    }
 };
 
 } // namespace database

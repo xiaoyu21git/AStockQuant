@@ -123,7 +123,7 @@ Item {
             }
         }
 
-        return factorId ? ("因子 " + factorId) : "未选择因子"
+        return factorId ? ("因子 " + factorId) : ""
     }
 
     function factorIdText() {
@@ -476,7 +476,7 @@ Item {
         if (!displayName) {
             displayName = analysisResultKey(candidate)
         }
-        return displayName ? displayName : "未命名因子"
+        return displayName ? displayName : ""
     }
 
     function analysisResultSubtitle(result) {

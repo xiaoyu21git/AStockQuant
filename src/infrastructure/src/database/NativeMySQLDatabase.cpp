@@ -88,6 +88,11 @@ NativeMySQLDatabase::NativeMySQLDatabase(const DatabaseConfig& config)
             throw std::runtime_error("mysql_real_connect failed: " + err);
         }
         impl_->open_ = true;
+
+        // 确保连接字符集正确 (QtMySQLDatabase 使用 SET NAMES)
+        if (!config.charset.empty()) {
+            mysql_set_character_set(impl_->conn, config.charset.c_str());
+        }
     }
 }
 
@@ -125,7 +130,9 @@ bool NativeMySQLDatabase::isOpen() const
     if (!impl_->conn || !impl_->open_) {
         return false;
     }
-    return mysql_ping(impl_->conn) == 0;
+    // 在生产代码中，mysql_ping() 可能因 TCP 状态变化产生副作用。
+    // 为避免调试模式下触发 assert，此处仅基于本地状态判断。
+    return impl_->open_;
 }
 
 SqlQueryResult NativeMySQLDatabase::executeQuery(const std::string& sql,

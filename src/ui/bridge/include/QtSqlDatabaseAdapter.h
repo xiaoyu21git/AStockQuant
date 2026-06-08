@@ -37,7 +37,7 @@ public:
         std::map<QString, QVariant> qtParams;
         int index = 0;
         for (const auto& param : params) {
-            QString key = QStringLiteral("__param_%1").arg(index++, 8, 10, QLatin1Char('0'));
+            QString key = QStringLiteral("__pos_%1").arg(index++, 8, 10, QLatin1Char('0'));
             if (std::holds_alternative<std::int32_t>(param)) {
                 qtParams[key] = QVariant::fromValue(std::get<std::int32_t>(param));
             } else if (std::holds_alternative<std::int64_t>(param)) {
@@ -68,7 +68,7 @@ public:
         std::map<QString, QVariant> qtParams;
         int index = 0;
         for (const auto& param : params) {
-            QString key = QStringLiteral("__param_%1").arg(index++, 8, 10, QLatin1Char('0'));
+            QString key = QStringLiteral("__pos_%1").arg(index++, 8, 10, QLatin1Char('0'));
             if (std::holds_alternative<std::int32_t>(param)) {
                 qtParams[key] = QVariant::fromValue(std::get<std::int32_t>(param));
             } else if (std::holds_alternative<std::int64_t>(param)) {

@@ -5,8 +5,8 @@
 #include "FactorViewModel.h"
 #include "FactorDetectionService.h"
 #include "DatabaseConnectionManager.h"
-#include "QtSqlDatabaseAdapter.h"
 #include "foundation.h"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 #include "../../domain/factor/include/BaseFactor.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
@@ -20,6 +20,20 @@
 #include <QThread>
 #include <QCoreApplication>
 #include <QDateTime>
+#include <fstream>
+#include <ctime>
+
+namespace {
+void fsDiag(const std::string& msg) {
+    std::ofstream ofs("factor_resolve_diag.log", std::ios::app);
+    if (ofs.is_open()) {
+        std::time_t now = std::time(nullptr);
+        char buf[32];
+        std::strftime(buf, sizeof(buf), "%H:%M:%S", std::localtime(&now));
+        ofs << "[" << buf << "] " << msg << std::endl;
+    }
+}
+}
 
 namespace {
 
@@ -144,43 +158,53 @@ FactorService::~FactorService()
 
 bool FactorService::resolveBackend()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    try {
+        fprintf(stderr, "[FS] resolveBackend START\n"); fflush(stderr);
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
-    if (!dbManager.initialize()) {
-        qWarning() << "[FactorService] 数据库连接管理器初始化失败";
+        auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+        fprintf(stderr, "[FS] dbManager OK\n"); fflush(stderr);
+
+        // 纯 C++ 连接池 (NativeMySQLConnectionPool, 零 Qt 依赖)
+        auto nativeDb = dbManager.getNativeConnection();
+        if (!nativeDb) {
+            fprintf(stderr, "[FS] nativeDb=null\n"); fflush(stderr);
+            emit errorOccurred(QStringLiteral("FactorService: 数据库连接池初始化失败"));
+            return false;
+        }
+        fprintf(stderr, "[FS] nativeDb OK\n"); fflush(stderr);
+
+        m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(nativeDb);
+        fprintf(stderr, "[FS] DataAvailabilityChecker OK\n"); fflush(stderr);
+
+        // 分步追踪 FactorInstanceManager 构造
+        fprintf(stderr, "[FS] creating FIM...\n"); fflush(stderr);
+        {
+            auto mgr = new factor::FactorInstanceManager(nativeDb, m_dataChecker);
+            fprintf(stderr, "[FS] FIM new OK\n"); fflush(stderr);
+            m_instanceManager.reset(mgr);
+        }
+        fprintf(stderr, "[FS] FactorInstanceManager OK\n"); fflush(stderr);
+
+        m_detectionService = std::make_unique<FactorDetectionService>();
+        fprintf(stderr, "[FS] DetectionService OK\n"); fflush(stderr);
+
+        if (!m_viewModel) {
+            m_viewModel = new FactorViewModel(this);
+        }
+        fprintf(stderr, "[FS] ViewModel OK\n"); fflush(stderr);
+
+        fprintf(stderr, "[FS] resolveBackend COMPLETE\n"); fflush(stderr);
+        return true;
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[FS] EXCEPTION: %s\n", e.what()); fflush(stderr);
+        emit errorOccurred(QStringLiteral("FactorService 异常: %1").arg(QString::fromStdString(e.what())));
+        return false;
+    } catch (...) {
+        fprintf(stderr, "[FS] UNKNOWN EXCEPTION crash\n"); fflush(stderr);
+        emit errorOccurred(QStringLiteral("FactorService 未知异常"));
         return false;
     }
-
-    m_database = dbManager.getDatabase();
-    if (!m_database) {
-        qWarning() << "[FactorService] 获取数据库连接失败";
-        return false;
-    }
-
-    m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(
-        std::make_shared<astock::database::QtSqlDatabaseAdapter>(m_database));
-    if (!m_dataChecker) {
-        qWarning() << "[FactorService] 创建DataAvailabilityChecker失败";
-        return false;
-    }
-
-    m_instanceManager = std::make_shared<factor::FactorInstanceManager>(
-        std::make_shared<astock::database::QtSqlDatabaseAdapter>(m_database), m_dataChecker);
-    if (!m_instanceManager) {
-        qWarning() << "[FactorService] 创建FactorInstanceManager失败";
-        return false;
-    }
-
-    m_detectionService = std::make_unique<FactorDetectionService>();
-
-    // 创建 ViewModel
-    if (!m_viewModel) {
-        m_viewModel = new FactorViewModel(this);
-    }
-
-    qDebug() << "[FactorService] 后端服务解析成功";
-    return true;
 }
 
 void FactorService::initialize()
@@ -293,7 +317,6 @@ QVariantMap FactorService::getFactorById(const QString& factorId)
         qWarning() << "[FactorService] getFactorById 未知异常 factorId:" << factorId;
     }
 
-    // 回退：从ViewModel查找
     if (m_viewModel) {
         return m_viewModel->getFactorById(factorId);
     }
@@ -303,7 +326,6 @@ QVariantMap FactorService::getFactorById(const QString& factorId)
 
 QVariantMap FactorService::getFactorByIdFromRepository(const QString& factorId)
 {
-    // 与 getFactorById 相同：直接从底层仓库查询
     return getFactorById(factorId);
 }
 
@@ -325,7 +347,6 @@ QString FactorService::addFactor(const QVariantMap& factorData)
                 QString::number(QDateTime::currentMSecsSinceEpoch()));
         }
 
-        // 生成唯一ID
         QString factorId = factorData.value(QStringLiteral("factorId")).toString();
         if (factorId.isEmpty()) {
             factorId = factorData.value(QStringLiteral("instanceId")).toString();
@@ -338,13 +359,11 @@ QString FactorService::addFactor(const QVariantMap& factorData)
 
         QString description = factorData.value(QStringLiteral("description")).toString();
 
-        // 构建配置JSON
         foundation::json::JsonFacade config = foundation::json::JsonFacade::createObject();
         factor::config::setSerializedInstanceId(config, toStd(factorId));
         factor::config::setSerializedInstanceName(config, toStd(factorName));
         factor::config::setSerializedDescription(config, toStd(description));
 
-        // 设置因子类型
         QVariant factorTypeVar = factorData.value(QStringLiteral("factorType"));
         factor::FactorType factorType = factor::FactorType::CUSTOM;
         if (factorTypeVar.isValid()) {
@@ -356,14 +375,12 @@ QString FactorService::addFactor(const QVariantMap& factorData)
         }
         factor::config::setFactorType(config, factorType);
 
-        // 保存参数
         QVariantMap parameters = factorData.value(QStringLiteral("parameters")).toMap();
         if (!parameters.isEmpty()) {
             auto paramsJson = foundation::json::JsonFacade::createObject();
             for (auto it = parameters.constBegin(); it != parameters.constEnd(); ++it) {
                 const QString& key = it.key();
                 QVariant value = it.value();
-                // Use createObject for nested objects, createString for strings, etc.
                 if (value.metaType().id() == QMetaType::Int || value.metaType().id() == QMetaType::LongLong) {
                     paramsJson.set(key.toStdString(), foundation::json::JsonFacade::createInt(value.toInt()));
                 } else if (value.metaType().id() == QMetaType::Double || static_cast<QMetaType::Type>(value.metaType().id()) == QMetaType::Float) {
@@ -412,32 +429,27 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
 
     beginMutation();
     try {
-        // 获取现有因子信息
         auto info = m_instanceManager->getInstanceInfo(toStd(factorId));
         if (info.instanceId.empty()) {
             endMutation(false, QStringLiteral("因子 '%1' 不存在").arg(factorId));
             return false;
         }
 
-        // 更新配置
         foundation::json::JsonFacade config = info.config;
         if (config.empty()) {
             config = foundation::json::JsonFacade::createObject();
         }
 
-        // 更新名称
         if (factorData.contains(QStringLiteral("factorName"))) {
             factor::config::setSerializedInstanceName(config, toStd(factorData.value(QStringLiteral("factorName")).toString()));
         } else if (factorData.contains(QStringLiteral("name"))) {
             factor::config::setSerializedInstanceName(config, toStd(factorData.value(QStringLiteral("name")).toString()));
         }
 
-        // 更新描述
         if (factorData.contains(QStringLiteral("description"))) {
             factor::config::setSerializedDescription(config, toStd(factorData.value(QStringLiteral("description")).toString()));
         }
 
-        // 更新参数
         if (factorData.contains(QStringLiteral("parameters"))) {
             QVariantMap parameters = factorData.value(QStringLiteral("parameters")).toMap();
             auto paramsJson = foundation::json::JsonFacade::createObject();
@@ -457,7 +469,6 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
             config.set("parameters", paramsJson);
         }
 
-        // 保存更新
         bool updated = m_instanceManager->updateInstanceConfig(toStd(factorId), config);
 
         if (updated) {
@@ -493,7 +504,6 @@ bool FactorService::deleteFactor(const QString& factorId)
     try {
         qDebug() << "[FactorService] 删除因子:" << factorId;
 
-        // 从ViewModel移除
         if (m_viewModel) {
             ensureViewModelPopulated();
         }
@@ -532,7 +542,6 @@ QString FactorService::generateFactorDataView(const QString& factorId)
             return err;
         }
 
-        // 读取配置中的 dataRequirements
         const auto& config = info.config;
         if (!factor::config::hasDataRequirementsConfig(config)) {
             QString err = QStringLiteral("因子 '%1' 缺少 dataRequirements 配置").arg(factorId);
@@ -558,10 +567,8 @@ QString FactorService::generateFactorDataView(const QString& factorId)
             return msg;
         }
 
-        // 按表分组
         auto groups = factor::DataAvailabilityChecker::groupFieldsByTable(fields);
 
-        // 构建结果报告
         QString report;
         report += QStringLiteral("因子: %1\n").arg(factorId);
         report += QStringLiteral("必需字段数: %1\n").arg(fields.size());
@@ -579,7 +586,6 @@ QString FactorService::generateFactorDataView(const QString& factorId)
                 }
             }
 
-            // 如果只有单一表，可直接走原 checkFields 路径
             if (groups.size() == 1U) {
                 report += QStringLiteral("\n所有字段集中在单表，可通旧路径加载\n");
             } else {

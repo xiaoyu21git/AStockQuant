@@ -2050,6 +2050,7 @@ Item {
     property string compositeDraftName: ""
     property bool compositeDraftDirty: false
     property var factorSupportMapCache: ({})
+    property bool _analysisReportSuppressed: false
     property string appliedSupportMapScopeFingerprint: ""
     property string pendingSupportMapScopeFingerprint: ""
     property var pendingSupportMapFactorIds: []
@@ -2213,6 +2214,7 @@ Item {
         
         onBacktestStarted: function(factorId) {
             console.log("回测开始:", factorId)
+            root._analysisReportSuppressed = false
             root.clearDisplayedBacktestState()
             root.lastBacktestError = ""
             root.lastPreflightFailures = []
@@ -2257,7 +2259,10 @@ Item {
                 analysisReport.activeAnalysisFactorId = activeFactorId
             }
 
-            root.analysisReportRequested(analysisReport)
+            if (!root._analysisReportSuppressed) {
+                root._analysisReportSuppressed = true
+                root.analysisReportRequested(analysisReport)
+            }
         }
         onBacktestFailed: function(error) {
             console.error("回测失败:", error)

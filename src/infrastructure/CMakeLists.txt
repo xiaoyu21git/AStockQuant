@@ -57,6 +57,8 @@ endif()
 # 基础设施静态库源码
 add_library(infrastructure STATIC
     src/database/ConnectionPool.cpp
+    src/database/NativeMySQLConnectionPool.cpp
+    src/database/NativeMySQLDatabase.cpp
     src/database/MarketDataRepository.cpp
     src/database/QtMySQLDatabase.cpp
     src/database/QueryBuilder.cpp
