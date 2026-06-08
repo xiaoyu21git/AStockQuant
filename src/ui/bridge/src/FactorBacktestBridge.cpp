@@ -385,18 +385,21 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     QVariantMap result;
                     result["status"] = QStringLiteral("SUCCESS");
                     QString jsonStr = QString::fromStdString(serializedResult);
-                    result["results"] = jsonStr;
 
-                    // 解析 JSON 并填充 m_resultMetrics（供 QML onResultMetricsChanged 读取）
+                    // 解析 JSON 并正确填充 metrics（QML 通过 result.metrics.execution 取值）
                     QJsonParseError parseError;
                     QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &parseError);
                     if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
                         QJsonObject rootObj = doc.object();
                         if (rootObj.contains("metrics") && rootObj["metrics"].isObject()) {
-                            m_resultMetrics = rootObj["metrics"].toVariant().toMap();
+                            QVariantMap metrics = rootObj["metrics"].toVariant().toMap();
+                            m_resultMetrics = metrics;
+                            result["metrics"] = metrics;
                             emit resultMetricsChanged();
                         }
                     }
+                    // results 保持空数组（QML 展开分析结果列表用）
+                    result["results"] = QVariantList();
 
                     m_backtestResult = result;
                     emit backtestResultChanged();

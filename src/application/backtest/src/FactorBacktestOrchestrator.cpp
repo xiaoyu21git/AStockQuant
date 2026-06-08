@@ -92,6 +92,15 @@ void FactorBacktestOrchestrator::run(
             }
         });
 
+    // compute() 内部通过 buildViewForFields 构建了 MarketView
+    // 需要重新获取 view 指针，确保模拟交易有正确的价格矩阵
+    if (m_dataService) {
+        auto updatedBatch = m_dataService->loadBatch(0);
+        if (updatedBatch.marketView) {
+            lastMarketView = updatedBatch.marketView;
+        }
+    }
+
     // ── 模拟成交 ──
     factor::compute::SimulatedTradingResult tradingResult;
     if (!reporterInput.factorValuesByDate.empty()) {
@@ -165,6 +174,14 @@ void FactorBacktestOrchestrator::run(
             instrumentIds,
             instrumentIdToSymbol);
 
+        fprintf(stderr, "[Orchestrator] tradingResult: groups=%zu sharpe=%.4f annualRet=%.4f maxDD=%.4f totalRet=%.4f\n",
+                tradingResult.groups.size(),
+                tradingResult.sharpeRatio,
+                tradingResult.annualizedReturn,
+                tradingResult.maxDrawdown,
+                tradingResult.totalReturn);
+        fflush(stderr);
+
         if (onProgress) onProgress(60.0, "trading simulated");
     }
 
@@ -182,17 +199,9 @@ void FactorBacktestOrchestrator::run(
     if (onProgress) onProgress(80.0, "building result");
 
     // ── 产出 JSON 结果 ──
+    // 不传递原始因子值（55 万行），QML 展示只需要聚合指标
     if (onComplete) {
-        std::string jsonResult = "{\"status\":\"SUCCESS\",\"factorValues\":[";
-        bool first = true;
-        for (const auto& [date, symbolMap] : reporterInput.factorValuesByDate) {
-            for (const auto& [symbol, value] : symbolMap) {
-                if (!first) jsonResult += ",";
-                first = false;
-                jsonResult += "{\"date\":\"" + date + "\",\"symbol\":\"" + symbol + "\",\"value\":" + std::to_string(value) + "}";
-            }
-        }
-        jsonResult += "],\"metrics\":{";
+        std::string jsonResult = "{\"status\":\"SUCCESS\",\"factorValues\":[],\"metrics\":{";
 
         // ── 分组数据（来自 SimulatedTradingExecutor 真实计算结果）──
         jsonResult += "\"groups\":[";

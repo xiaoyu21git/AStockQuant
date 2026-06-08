@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -78,11 +79,26 @@ std::unique_ptr<CachedMarketDataView> buildMarketViewFromJson(
         col.instrumentCount = numInsts;
         col.values.assign(static_cast<size_t>(numDates) * numInsts, nanVal);
         for (const auto& d : sortedDates) {
-            col.dates.push_back(DateKey{std::stoi(d)});
+            int dateInt = 0;
+            try {
+                // d 格式为 "2020-01-02"，转换为 20200102
+                if (d.size() == 10 && d[4] == '-' && d[7] == '-') {
+                    dateInt = std::stoi(d) * 10000 + std::stoi(d.substr(5, 2)) * 100 + std::stoi(d.substr(8, 2));
+                } else {
+                    dateInt = std::stoi(d);
+                }
+            } catch (...) {
+                dateInt = 0;
+            }
+            col.dates.push_back(DateKey{dateInt});
         }
         col.instruments = instruments;
         return col;
     };
+
+    // 字符串 → 整数 哈希映射（用于 industry_code 等分类字段）
+    std::unordered_map<std::string, int> stringToIntMap;
+    int nextStringId = 1;
 
     auto fillColumn = [&](CachedMarketDataView::ColumnData& col,
                           const std::string& field) {
@@ -90,6 +106,21 @@ std::unique_ptr<CachedMarketDataView> buildMarketViewFromJson(
             const auto row = root.at(i);
             if (!row.isObject()) continue;
             if (!row.has(field)) continue;
+            const auto fieldValue = row.get(field);
+
+            double val = 0.0;
+            if (fieldValue.isNumber()) {
+                val = fieldValue.asDouble();
+            } else if (fieldValue.isString()) {
+                const std::string strVal = fieldValue.asString();
+                auto it = stringToIntMap.find(strVal);
+                if (it == stringToIntMap.end()) {
+                    it = stringToIntMap.emplace(strVal, nextStringId++).first;
+                }
+                val = static_cast<double>(it->second);
+            } else {
+                continue;  // null 等类型跳过
+            }
 
             std::string sym, date;
             if (row.has("symbol"))  sym  = row.get("symbol").asString();
@@ -100,7 +131,6 @@ std::unique_ptr<CachedMarketDataView> buildMarketViewFromJson(
 
             int sIdx = static_cast<int>(sit->second.value);
             int dIdx = dit->second;
-            double val = row.get(field).asDouble();
             col.values[static_cast<size_t>(dIdx) * numInsts + sIdx]
                 = static_cast<float>(val);
         }
@@ -192,10 +222,18 @@ FactorMatrix BacktestFactorEngine::compute(const MarketMatrixBatch& marketData,
     FactorMatrix result;
     result.batchIndex = marketData.batchIndex;
 
-    if (!m_instanceManager) return result;
+    if (!m_instanceManager) {
+        fprintf(stderr, "[BacktestFactorEngine] m_instanceManager is null, aborting compute\n");
+        fflush(stderr);
+        return result;
+    }
 
     auto factor = m_instanceManager->createInstance(cacheKey.factorName);
-    if (!factor) return result;
+    if (!factor) {
+        fprintf(stderr, "[BacktestFactorEngine] createInstance returned null for: %s\n", cacheKey.factorName.c_str());
+        fflush(stderr);
+        return result;
+    }
 
     // 获取因子需要的字段 → 按需构建 MarketView
     if (m_dataSvc) {
@@ -221,21 +259,36 @@ FactorMatrix BacktestFactorEngine::compute(const MarketMatrixBatch& marketData,
         view = batch.marketView;
     }
 
-    if (view) {
-        CachedMarketDataViewHistoricalAdapter adapter(*view);
-        auto symbols = adapter.getAvailableSymbols("");
-        for (const auto& date : view->dates()) {
-            std::string dateStr = std::to_string(date.value);
-            factor::CalculationContext ctx(dateStr, symbols,
-                std::make_shared<CachedMarketDataViewHistoricalAdapter>(*view));
-            auto cr = factor->calculate(ctx);
-            std::map<std::string, double> dateValues;
-            for (const auto& [sym, val] : cr.values) {
+    if (!view) {
+        fprintf(stderr, "[BacktestFactorEngine] view is null, no data to compute\n");
+        fflush(stderr);
+        return result;
+    }
+
+    CachedMarketDataViewHistoricalAdapter adapter(*view);
+    auto symbols = adapter.getAvailableSymbols("");
+
+    int dateCount = 0, valueCount = 0;
+    for (const auto& date : view->dates()) {
+        std::string dateStr = std::to_string(date.value);
+        factor::CalculationContext ctx(dateStr, symbols,
+            std::make_shared<CachedMarketDataViewHistoricalAdapter>(*view));
+        auto cr = factor->calculate(ctx);
+        std::map<std::string, double> dateValues;
+        for (const auto& [sym, val] : cr.values) {
+            if (std::isfinite(val)) {
                 dateValues[sym] = val;
+                ++valueCount;
             }
+        }
+        if (!dateValues.empty()) {
             result.factorValues[dateStr] = std::move(dateValues);
+            ++dateCount;
         }
     }
+    fprintf(stderr, "[BacktestFactorEngine] compute done: dates=%zu symbols=%zu validDates=%d values=%d\n",
+            view->dates().size(), symbols.size(), dateCount, valueCount);
+    fflush(stderr);
 
     return result;
 }
