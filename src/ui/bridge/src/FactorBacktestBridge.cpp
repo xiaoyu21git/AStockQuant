@@ -7,6 +7,11 @@
 #include "factor_compute/AnalysisReportTypes.h"
 
 #include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#include <QCoreApplication>
+#include <QDir>
 #include <cstdio>
 #include <cmath>
 
@@ -14,6 +19,7 @@
 #include "FactorBacktestOrchestrator.h"
 #include "BacktestScheduler.h"
 #include "BacktestRunConfig.h"
+#include "FactorService.h"
 
 // ═══ 静态 QVariant 格式化方法 — 纯数据转换，无业务逻辑 ═══
 
@@ -231,16 +237,52 @@ FactorBacktestBridge::~FactorBacktestBridge() = default;
 
 bool FactorBacktestBridge::initialize()
 {
+    // 1) 创建四个下层域组件
+    m_scheduler       = std::make_unique<domain::scheduler::BacktestScheduler>(0ULL);
+    m_backtestDataSvc = std::make_unique<factor::compute::BacktestDataService>();
+    m_factorEngine    = std::make_unique<factor::compute::BacktestFactorEngine>(0ULL);
+    m_reporter        = std::make_unique<factor::compute::BacktestReporter>();
+
+    if (!m_scheduler || !m_backtestDataSvc || !m_factorEngine || !m_reporter) {
+        qDebug() << "[FactBacktestBridge] 域组件创建失败";
+        m_scheduler.reset();
+        m_backtestDataSvc.reset();
+        m_factorEngine.reset();
+        m_reporter.reset();
+        return false;
+    }
+
+    // 2) 创建 Orchestrator 并注入依赖
+    m_orchestrator = std::make_unique<application::backtest::FactorBacktestOrchestrator>();
+    if (!m_orchestrator) {
+        qDebug() << "[FactBacktestBridge] 因子回测编排器初始化失败";
+        return false;
+    }
+
+    m_orchestrator->setScheduler(m_scheduler.get());
+    m_orchestrator->setDataService(m_backtestDataSvc.get());
+    m_orchestrator->setFactorEngine(m_factorEngine.get());
+    m_orchestrator->setReporter(m_reporter.get());
+
+    // 引擎需要 DataSvc 引用以便按需构建 MarketView
+    m_factorEngine->setDataService(m_backtestDataSvc.get());
+
+    // 3) 复用 FactorService 已有的 FactorInstanceManager（避免重复查询）
+    auto* factorSvc = FactorService::instance();
+    if (factorSvc && factorSvc->isInitialized()) {
+        auto* instanceMgr = factorSvc->instanceManager();
+        if (instanceMgr) {
+            m_factorEngine->setInstanceManager(instanceMgr);
+            qDebug() << "[FactBacktestBridge] 复用 FactorService 的 FactorInstanceManager";
+        }
+    }
+
+    m_engineReady = true;
     m_statusText = QStringLiteral("因子回测引擎就绪");
     emit statusChanged();
     return true;
 }
 
-bool FactorBacktestBridge::ensureEngineInitialized()
-{
-    // 空壳 — 域层逻辑已迁至 Orchestrator/Scheduler/DataSvc/FactorEngine/Reporter
-    return true;
-}
 
 void FactorBacktestBridge::startBacktestWithFactors(
     const QVariantList& factorIds,
@@ -250,6 +292,15 @@ void FactorBacktestBridge::startBacktestWithFactors(
     const QVariantMap& /*cacheSnapshot*/)
 {
     if (m_isRunning.load()) return;
+
+    // 懒初始化: 确保 Orchestrator 等组件已创建
+    if (!m_orchestrator) {
+        if (!initialize()) {
+            emit backtestFailed(QStringLiteral("因子回测引擎初始化失败"));
+            return;
+        }
+    }
+
     m_isRunning.store(true);
     emit isRunningChanged();
     m_progress = 0.0; emit progressChanged();
@@ -288,7 +339,27 @@ void FactorBacktestBridge::startBacktestWithFactors(
         config.factorIds.push_back(id.toString().toStdString());
     }
 
-    m_workerPool->post([this, config]() {
+    // 异步: 全部重操作移到 worker 线程，不阻塞 UI
+    int capturedDatasetId = m_selectedDatasetId;
+    m_workerPool->post([this, config, capturedDatasetId]() {
+        // ① 在 worker 线程中加载缓存数据集 + 构建 MarketView
+        if (capturedDatasetId > 0 && m_backtestDataSvc) {
+            QVariantList data = DataServiceCache::getInstance().getDataSetById(capturedDatasetId);
+            if (!data.isEmpty()) {
+            QJsonDocument doc(QJsonArray::fromVariantList(data));
+            std::string jsonStr = doc.toJson(QJsonDocument::Compact).toStdString();
+            m_backtestDataSvc->storeRawJson(jsonStr);
+            qDebug() << "[FactBacktestBridge] DataSvc 存储原始 JSON, ID=" << capturedDatasetId
+                     << "(" << data.size() << " 行, 延迟构建视图)";
+            } else {
+                QMetaObject::invokeMethod(this, [this]() {
+                    emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));
+                    m_isRunning.store(false); emit isRunningChanged();
+                }, Qt::QueuedConnection);
+                return;
+            }
+        }
+        // ② 校验 + 运行
         if (!m_orchestrator) {
             QMetaObject::invokeMethod(this, [this]() {
                 emit backtestFailed(QStringLiteral("回测编排器未初始化"));
@@ -313,7 +384,20 @@ void FactorBacktestBridge::startBacktestWithFactors(
                 QMetaObject::invokeMethod(this, [this, serializedResult]() {
                     QVariantMap result;
                     result["status"] = QStringLiteral("SUCCESS");
-                    result["results"] = QString::fromStdString(serializedResult);
+                    QString jsonStr = QString::fromStdString(serializedResult);
+                    result["results"] = jsonStr;
+
+                    // 解析 JSON 并填充 m_resultMetrics（供 QML onResultMetricsChanged 读取）
+                    QJsonParseError parseError;
+                    QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &parseError);
+                    if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+                        QJsonObject rootObj = doc.object();
+                        if (rootObj.contains("metrics") && rootObj["metrics"].isObject()) {
+                            m_resultMetrics = rootObj["metrics"].toVariant().toMap();
+                            emit resultMetricsChanged();
+                        }
+                    }
+
                     m_backtestResult = result;
                     emit backtestResultChanged();
                     emit backtestCompleted(result);

@@ -7,12 +7,15 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 #include "BacktestRunConfig.h"
+#include "factor_compute/SimulatedTradingExecutor.h"
 
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
+
 
 namespace factor::compute {
     class BacktestDataService;
@@ -61,11 +64,16 @@ public:
              FactorOrchestratorResultCallback onComplete);
 
 private:
+    // 从 reporterInput.factorValuesByDate 构建排序日期列表
+    static std::vector<std::string> sortedDatesFrom(
+        const std::map<std::string, std::map<std::string, double>>& fvByDate);
+
     // ── 持有的下层组件引用 ──
     domain::scheduler::BacktestScheduler* m_scheduler = nullptr;
     factor::compute::BacktestDataService* m_dataService = nullptr;
     factor::compute::BacktestFactorEngine* m_engine = nullptr;
     factor::compute::BacktestReporter* m_reporter = nullptr;
+    std::unique_ptr<factor::compute::SimulatedTradingExecutor> m_executor;
 };
 
 } // namespace application::backtest

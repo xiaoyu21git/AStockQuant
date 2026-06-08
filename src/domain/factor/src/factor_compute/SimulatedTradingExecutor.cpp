@@ -69,7 +69,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         if (ranked.empty()) continue;
 
         std::sort(ranked.begin(), ranked.end(),
-            [](const auto& a, const auto& b) { return a.second < b.second; });
+            [](const auto& a, const auto& b) { return a.second > b.second; });
 
         const size_t N = ranked.size();
         if (N < static_cast<size_t>(nGroups)) continue;
@@ -198,7 +198,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
             }
         }
         if (!allFiniteVals.empty()) {
-            std::sort(allFiniteVals.begin(), allFiniteVals.end());
+            std::sort(allFiniteVals.begin(), allFiniteVals.end(), std::greater<double>());
             const size_t Nvals = allFiniteVals.size();
             const size_t gSize = Nvals / nGroups;
             for (int32_t g = 0; g < nGroups; ++g) {

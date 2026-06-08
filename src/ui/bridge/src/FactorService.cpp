@@ -626,6 +626,11 @@ void FactorService::beginMutation()
     emit mutationInProgressChanged();
 }
 
+factor::FactorInstanceManager* FactorService::instanceManager() const
+{
+    return m_instanceManager.get();
+}
+
 void FactorService::endMutation(bool success, const QString& message)
 {
     {

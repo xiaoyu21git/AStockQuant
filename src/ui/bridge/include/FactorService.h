@@ -63,6 +63,9 @@ public:
     // 因子分析
     Q_INVOKABLE void analyzeFactor(const QString& factorId);
 
+    /// @brief 获取底层 FactorInstanceManager（供回测引擎复用，避免重复创建）
+    factor::FactorInstanceManager* instanceManager() const;
+
     // 属性访问器
     bool mutationInProgress() const;
     QVariantMap lastOperationReport() const;

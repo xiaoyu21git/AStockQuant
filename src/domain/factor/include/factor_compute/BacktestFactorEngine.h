@@ -72,8 +72,20 @@ public:
     BacktestDataService(const BacktestDataService&) = delete;
     BacktestDataService& operator=(const BacktestDataService&) = delete;
 
-    void initialize(const std::string& parquetPath, std::size_t batchSize = 500);
+    /// @brief 存储原始 JSON（不构建任何视图，零内存开销）
+    void storeRawJson(const std::string& jsonContent);
+
+    /// @brief 按因子要求的字段构建 MarketView（只加载 OHLCV + 指定字段）
+    void buildViewForFields(const std::vector<std::string>& extraFields);
+
+    void setMarketView(IMarketDataView* view);
     MarketMatrixBatch loadBatch(std::size_t batchIndex);
+
+private:
+    IMarketDataView* m_marketView = nullptr;
+    std::unique_ptr<class CachedMarketDataView> m_ownedView;
+    std::string m_rawJson;
+    bool m_jsonStored = false;
 };
 
 // ═══ FactorEngine (Layer 3b) ═══
@@ -87,11 +99,15 @@ public:
 
     void setInstanceManager(factor::FactorInstanceManager* mgr);
 
+    /// @brief 设置 DataSvc 引用 (compute() 中按需构建 MarketView 用)
+    void setDataService(class BacktestDataService* dataSvc);
+
     FactorMatrix compute(const MarketMatrixBatch& marketData, const FactorCacheKey& cacheKey);
 
 private:
     std::unique_ptr<SignalCache> m_signalCache;
     factor::FactorInstanceManager* m_instanceManager = nullptr;
+    class BacktestDataService* m_dataSvc = nullptr;
 };
 
 // ═══ Reporter (Layer 4) ═══

@@ -22,7 +22,10 @@
 
 #include "factor_compute/AnalysisReportTypes.h"
 #include "factor_compute/GroupedBacktestTypes.h"
-
+#include "factor_compute/BacktestFactorEngine.h"
+#include "CachedMarketDataView.h"
+#include "FactorBacktestOrchestrator.h"
+#include "BacktestScheduler.h"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -141,7 +144,6 @@ signals:
     void factorSupportMapReady(int requestId, const QVariantMap& supportMap);
 
 private:
-    bool ensureEngineInitialized();
 
     // ── QVariant 格式化方法 (私有，不暴露给外部) ──
 
@@ -187,10 +189,10 @@ private:
     // ── 新架构：Bridge 只持有 Orchestrator，所有逻辑委托给它 ──
     // Orchestrator 内部组合了 Scheduler / DataSvc / FactorEngine / Reporter
     std::unique_ptr<application::backtest::FactorBacktestOrchestrator> m_orchestrator;
+    std::unique_ptr<domain::scheduler::BacktestScheduler>   m_scheduler;
+    std::unique_ptr<factor::compute::BacktestDataService>   m_backtestDataSvc;
+    std::unique_ptr<factor::compute::BacktestFactorEngine>  m_factorEngine;
+    std::unique_ptr<factor::compute::BacktestReporter>      m_reporter;
 
-    // 以下旧成员已废弃，待清理：
-    // std::unique_ptr<factor::compute::CachedMarketDataView> m_marketDataView;
-    // std::shared_ptr<factor::bridge::CachedMarketDataViewHistoricalAdapter> m_historicalAdapter;
-    // std::unique_ptr<factor::compute::AnalysisModule> m_analysisModule;
     bool m_engineReady{false};
 };
