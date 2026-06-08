@@ -16,8 +16,8 @@
 #include "ValueFactor.h"
 #include "FactorConfigAccess.h"
 #include "IFactorResolver.h"
-#include "foundation.h"
 #include "infrastructure/include/database/ISqlDatabase.h"
+#include <cstdio>
 #include <algorithm>
 #include <chrono>
 #include <sstream>
@@ -195,9 +195,12 @@ FactorInstanceManager::FactorInstanceManager(
     std::shared_ptr<DataAvailabilityChecker> dataChecker)
     : db_(db), dataChecker_(dataChecker) {
 
+    fprintf(stderr, "[FIM] ctor START\n"); fflush(stderr);
     threadPool_ = std::make_shared<foundation::thread::ThreadPoolExecutor>(4);
+    fprintf(stderr, "[FIM] threadpool OK\n"); fflush(stderr);
 
     refreshCache();
+    fprintf(stderr, "[FIM] ctor DONE\n"); fflush(stderr);
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
@@ -213,20 +216,14 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
     try {
         return creator(info, dataChecker_, *this);
     } catch (const std::exception& e) {
-        std::ostringstream oss;
-        oss << "FactorInstanceManager::createFactorFromInfo: failed to create instance "
-            << instanceId
-            << " factorType=" << static_cast<int>(factorType)
-            << " error=" << e.what();
-        LOG_ERROR(oss.str());
+        fprintf(stderr, "[FIM] createFactorFromInfo failed: %s type=%d error=%s\n",
+                instanceId.c_str(), static_cast<int>(factorType), e.what());
+        fflush(stderr);
         return nullptr;
     } catch (...) {
-        std::ostringstream oss;
-        oss << "FactorInstanceManager::createFactorFromInfo: failed to create instance "
-            << instanceId
-            << " factorType=" << static_cast<int>(factorType)
-            << " error=unknown";
-        LOG_ERROR(oss.str());
+        fprintf(stderr, "[FIM] createFactorFromInfo failed: %s type=%d error=unknown\n",
+                instanceId.c_str(), static_cast<int>(factorType));
+        fflush(stderr);
         return nullptr;
     }
 }
@@ -369,21 +366,40 @@ bool FactorInstanceManager::updateInstanceConfig(
             return true;
         }
 
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[FIM] updateInstanceConfig EXCEPTION: id=%s error=%s\n",
+                instanceId.c_str(), e.what());
+        fflush(stderr);
+    } catch (...) {
+        fprintf(stderr, "[FIM] updateInstanceConfig UNKNOWN EXCEPTION: id=%s\n",
+                instanceId.c_str());
+        fflush(stderr);
     }
 
     return false;
 }
 
 void FactorInstanceManager::refreshCache() {
-    std::lock_guard<std::mutex> lock(cacheMutex_);
+    fprintf(stderr, "[FIM] refreshCache START\n"); fflush(stderr);
+    try {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
 
-    instanceCache_.clear();
-    infoCache_.clear();
+        instanceCache_.clear();
+        infoCache_.clear();
 
-    auto allInstances = loadAllInstancesFromDB();
-    for (auto& info : allInstances) {
-        infoCache_[info.instanceId] = info;
+        fprintf(stderr, "[FIM] refreshCache calling loadAllInstancesFromDB\n"); fflush(stderr);
+        auto allInstances = loadAllInstancesFromDB();
+        fprintf(stderr, "[FIM] refreshCache loaded %zu instances\n", allInstances.size()); fflush(stderr);
+        for (auto& info : allInstances) {
+            infoCache_[info.instanceId] = info;
+        }
+        fprintf(stderr, "[FIM] refreshCache DONE\n"); fflush(stderr);
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[FIM] refreshCache EXCEPTION: %s\n", e.what()); fflush(stderr);
+    } catch (...) {
+        fprintf(stderr, "[FIM] refreshCache UNKNOWN EXCEPTION (likely Foundation logger crash)\n"); fflush(stderr);
+        // 崩溃源：updateInstanceAvailability → DataAvailabilityChecker → Foundation logger
+        // 缓存刷新失败不影响主流程，继续运行
     }
 }
 
@@ -438,7 +454,14 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
 
         updateInstanceAvailability(info);
 
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[FIM] loadInstanceFromDB EXCEPTION: id=%s error=%s\n",
+                instanceId.c_str(), e.what());
+        fflush(stderr);
+    } catch (...) {
+        fprintf(stderr, "[FIM] loadInstanceFromDB UNKNOWN EXCEPTION: id=%s\n",
+                instanceId.c_str());
+        fflush(stderr);
     }
 
     return info;
@@ -469,7 +492,13 @@ void FactorInstanceManager::updateInstanceAvailability(
             if (!latestResult.isEmpty()) {
                 checkDate = latestResult.getRow(0).getString("latest_date");
             }
-        } catch (const std::exception&) {
+        } catch (const std::exception& e) {
+            fprintf(stderr, "[FIM] updateInstanceAvailability daily_bar query EXCEPTION: %s\n",
+                    e.what());
+            fflush(stderr);
+        } catch (...) {
+            fprintf(stderr, "[FIM] updateInstanceAvailability daily_bar query UNKNOWN EXCEPTION\n");
+            fflush(stderr);
         }
     }
 
@@ -479,7 +508,9 @@ void FactorInstanceManager::updateInstanceAvailability(
         return;
     }
 
+    // 使用已解析的 config 直接检查，避免 checkFactorData 内部重复查询 factor_instance 表
     info.dataStatus = dataChecker_->checkFactorData(
+        info.config,
         info.instanceId,
         checkDate,
         checkDate
@@ -520,7 +551,12 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
             instances.push_back(info);
         }
 
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
+        fprintf(stderr, "[FIM] loadAllInstancesFromDB EXCEPTION: %s\n", e.what());
+        fflush(stderr);
+    } catch (...) {
+        fprintf(stderr, "[FIM] loadAllInstancesFromDB UNKNOWN EXCEPTION\n");
+        fflush(stderr);
     }
 
     return instances;

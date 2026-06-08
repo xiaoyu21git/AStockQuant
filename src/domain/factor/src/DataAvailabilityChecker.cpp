@@ -436,7 +436,7 @@ std::string sourceTableDatabaseName(SourceTable sourceTable)
 }
 
 /// @brief 按字段类型分组到对应数据表（支持跨表）
-std::map<std::string, std::vector<std::string>> groupFieldsByTable(const std::vector<std::string>& fields)
+std::map<std::string, std::vector<std::string>> detailGroupFieldsByTable(const std::vector<std::string>& fields)
 {
     std::map<std::string, std::vector<std::string>> groups;
     for (const auto& field : fields) {
@@ -458,7 +458,7 @@ std::map<std::string, std::vector<std::string>> groupFieldsByTable(const std::ve
 
 std::string inferTableForFields(const std::vector<std::string>& fields)
 {
-    auto groups = groupFieldsByTable(fields);
+    auto groups = detailGroupFieldsByTable(fields);
     if (groups.empty()) return {};
     if (groups.size() == 1U) return groups.begin()->first;
     // 跨表时返回空（兼容旧行为），新调用方应使用 groupFieldsByTable
@@ -872,8 +872,8 @@ std::string DataAvailabilityChecker::resolveTableForFields(const std::vector<std
 std::map<std::string, std::vector<std::string>> DataAvailabilityChecker::groupFieldsByTable(
     const std::vector<std::string>& fields)
 {
-    // 委托给匿名命名空间的同名函数（使用括号避免成员函数自我递归）
-    return (groupFieldsByTable)(fields);
+    // 委托给匿名命名空间的独立函数（避免与成员函数同名导致无限递归）
+    return detailGroupFieldsByTable(fields);
 }
 
 DataStatus DataAvailabilityChecker::createErrorStatus(const std::string& message,
