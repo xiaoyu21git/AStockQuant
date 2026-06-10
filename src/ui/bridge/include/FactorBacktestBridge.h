@@ -24,7 +24,8 @@
 #include "factor_compute/GroupedBacktestTypes.h"
 #include "factor_compute/BacktestFactorEngine.h"
 #include "CachedMarketDataView.h"
-#include "FactorBacktestOrchestrator.h"
+#include "../../domain/factor/include/FactorBacktestOrchestrator.h"
+#include "../../domain/factor/include/BacktestRunConfig.h"
 #include "BacktestScheduler.h"
 #include <atomic>
 #include <chrono>
@@ -52,7 +53,7 @@ namespace factor::bridge {
 class CachedMarketDataViewHistoricalAdapter;
 }
 
-namespace application::backtest {
+namespace Factor::backtest {
 class FactorBacktestOrchestrator;
 }
 
@@ -188,7 +189,7 @@ private:
 
     // ── 新架构：Bridge 只持有 Orchestrator，所有逻辑委托给它 ──
     // Orchestrator 内部组合了 Scheduler / DataSvc / FactorEngine / Reporter
-    std::unique_ptr<application::backtest::FactorBacktestOrchestrator> m_orchestrator;
+    std::unique_ptr<Factor::backtest::FactorBacktestOrchestrator> m_orchestrator;
     std::unique_ptr<domain::scheduler::BacktestScheduler>   m_scheduler;
     std::unique_ptr<factor::compute::BacktestDataService>   m_backtestDataSvc;
     std::unique_ptr<factor::compute::BacktestFactorEngine>  m_factorEngine;

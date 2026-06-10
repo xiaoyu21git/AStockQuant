@@ -71,7 +71,6 @@ target_include_directories(bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/src/domain/factor/include/factor
     ${CMAKE_SOURCE_DIR}/src/domain/backtest/include
     ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
-    ${CMAKE_SOURCE_DIR}/src/application/backtest/include
     ${CMAKE_SOURCE_DIR}/src/cache/include
     ${EIGEN_INCLUDE_DIR}
 )
@@ -99,7 +98,6 @@ target_link_libraries(bridge PRIVATE
     factor
     factor
     domain
-    application_backtest
 )
 
 message(STATUS "bridge库源文件: ${BRIDGE_SOURCES}")

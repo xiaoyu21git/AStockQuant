@@ -189,6 +189,7 @@ set(FACTOR_SOURCES
     src/factor_compute/AnalysisModule.cpp
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
+    src/FactorBacktestOrchestrator.cpp
 )
 
 # 因子系统头文件
@@ -240,6 +241,8 @@ set(FACTOR_HEADERS
     include/factor_compute/GroupedBacktestTypes.h
     include/factor_compute/SimulatedTradingExecutor.h
     include/factor_compute/SignalSetBuilder.h
+    include/FactorBacktestOrchestrator.h
+    include/BacktestRunConfig.h
 )
 
 set(FACTOR_COMPUTE_SOURCES
@@ -315,6 +318,7 @@ target_link_libraries(factor
         foundation
         infrastructure
         domain_backtest
+        domain_scheduler
         domain_trading
         astock_ta_lib
         astock_xxhash

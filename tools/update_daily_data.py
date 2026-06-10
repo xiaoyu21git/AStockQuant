@@ -929,8 +929,6 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
         juejin_df = fetch_symbol_daily_from_juejin(symbol, start_date, end_date)
         if juejin_df is not None and not juejin_df.empty:
             return juejin_df
-        if symbol_has_no_new_juejin_rows(symbol, start_date, end_date):
-            return pd.DataFrame()
     except Exception as exc:
         print(f"[warn] {symbol} juejin_daily failed, fallback to akshare: {exc}", flush=True)
 

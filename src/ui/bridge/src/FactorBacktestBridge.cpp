@@ -16,9 +16,9 @@
 #include <cmath>
 
 #include "foundation/thread/ThreadPoolExecutor.h"
-#include "FactorBacktestOrchestrator.h"
+#include "../../domain/factor/include/FactorBacktestOrchestrator.h"
+#include "../../domain/factor/include/BacktestRunConfig.h"
 #include "BacktestScheduler.h"
-#include "BacktestRunConfig.h"
 #include "FactorService.h"
 
 // ═══ 静态 QVariant 格式化方法 — 纯数据转换，无业务逻辑 ═══
@@ -253,7 +253,7 @@ bool FactorBacktestBridge::initialize()
     }
 
     // 2) 创建 Orchestrator 并注入依赖
-    m_orchestrator = std::make_unique<application::backtest::FactorBacktestOrchestrator>();
+    m_orchestrator = std::make_unique<Factor::backtest::FactorBacktestOrchestrator>();
     if (!m_orchestrator) {
         qDebug() << "[FactBacktestBridge] 因子回测编排器初始化失败";
         return false;
@@ -316,17 +316,17 @@ void FactorBacktestBridge::startBacktestWithFactors(
     // ── 新架构: Bridge 只做三件事 — 启动 / 进度 / 接收结果 ──
     // QVariantMap → BacktestRunConfig 转换, 然后委托给 Orchestrator
 
-    application::backtest::BacktestRunConfig config;
-    config.dataSourceMode = application::backtest::DataSourceMode::Cache;
+    Factor::backtest::BacktestRunConfig config;
+    config.dataSourceMode = Factor::backtest::DataSourceMode::Cache;
     config.selectedDatasetId = m_selectedDatasetId;
 
     // 根据 factorIds 数量自动推断因子模式
     if (factorIds.size() == 1) {
-        config.factorMode = application::backtest::FactorMode::Single;
+        config.factorMode = Factor::backtest::FactorMode::Single;
     } else if (factorIds.size() == 2) {
-        config.factorMode = application::backtest::FactorMode::Dual;
+        config.factorMode = Factor::backtest::FactorMode::Dual;
     } else {
-        config.factorMode = application::backtest::FactorMode::Composite;
+        config.factorMode = Factor::backtest::FactorMode::Composite;
     }
 
     config.numGroups = m_numGroups;

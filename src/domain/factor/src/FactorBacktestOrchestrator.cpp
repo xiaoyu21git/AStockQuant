@@ -7,7 +7,7 @@
 #include <string>
 #include <vector>
 
-namespace application::backtest {
+namespace Factor::backtest {
 
 FactorBacktestOrchestrator::FactorBacktestOrchestrator() = default;
 FactorBacktestOrchestrator::~FactorBacktestOrchestrator() = default;
@@ -248,4 +248,4 @@ void FactorBacktestOrchestrator::run(
     if (onProgress) onProgress(100.0, "completed");
 }
 
-} // namespace application::backtest
+} // namespace Factor::backtest

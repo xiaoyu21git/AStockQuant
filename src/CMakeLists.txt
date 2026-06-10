@@ -18,9 +18,6 @@ add_subdirectory(domain)
 # 鍩虹璁炬柦灞備緷璧?foundation / domain_types
 add_subdirectory(infrastructure)
 
-# 新应用合同层依赖领域与基础设施
-add_subdirectory(application)
-
 # 寮曟搸渚濊禆棰嗗煙妯″瀷鍜屽熀纭€搴?
 add_subdirectory(engine)
 
@@ -49,7 +46,7 @@ add_subdirectory(app)
 
 # ==================== 鍒涘缓涓诲簱鐩爣锛堜緵Python缁戝畾浣跨敤锛?====================
 # 鏀堕泦鎵€鏈夊簱鏂囦欢
-set(ALL_LIBS foundation cache_module domain engine infrastructure application_contracts)
+set(ALL_LIBS foundation cache_module domain engine infrastructure)
 
 # 鍒涘缓鎺ュ彛搴擄紝鏂逛究Python缁戝畾閾炬帴
 add_library(astock_core INTERFACE)

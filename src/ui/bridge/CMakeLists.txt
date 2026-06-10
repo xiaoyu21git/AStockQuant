@@ -100,7 +100,6 @@ target_link_libraries(bridge
         Qt6::QuickWidgets
         Qt6::Concurrent
     PRIVATE
-        application_contracts
         engine
         domain
         domain_strategies

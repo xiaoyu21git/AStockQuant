@@ -31,7 +31,7 @@ namespace domain::scheduler {
     struct BatchPlan;
 }
 
-namespace application::backtest {
+namespace Factor::backtest {
 
 /// @brief 进度回调: (进度百分比 0~100, 状态文本)
 using FactorOrchestratorProgressCallback = std::function<void(double progress, std::string status)>;
@@ -76,4 +76,4 @@ private:
     std::unique_ptr<factor::compute::SimulatedTradingExecutor> m_executor;
 };
 
-} // namespace application::backtest
+} // namespace Factor::backtest

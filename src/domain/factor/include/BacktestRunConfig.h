@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace application::backtest {
+namespace Factor::backtest {
 
 /// @brief 数据源模式
 enum class FactorMode : int {
@@ -43,4 +43,4 @@ struct BacktestRunConfig {
     double riskFreeRate = 0.02;
 };
 
-} // namespace application::backtest
+} // namespace Factor::backtest
