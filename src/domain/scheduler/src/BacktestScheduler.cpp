@@ -1,6 +1,6 @@
 #include "BacktestScheduler.h"
 #include "ResourceGovernor.h"
-#include "factor_compute/BacktestFactorEngine.h"
+#include "factor_compute/FactorEngine.h"
 
 #include <algorithm>
 

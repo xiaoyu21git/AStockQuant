@@ -1,6 +1,6 @@
 #pragma once
 // ══════════════════════════════════════════════════════════════════════════════
-// BacktestFactorEngine — 合并 Layer 3a+3b+4 的单头文件
+// FactorEngine — 合并 Layer 3a+3b+4 的单头文件
 //   DataSvc (Layer 3a): 列存读取 + mmap + 解压 → float32 行情矩阵
 //   FactorEngine (Layer 3b): 缓存+并行+SIMD → float32 因子值
 //   Reporter (Layer 4): AnalysisKernel → IC/IR/分层/多空
@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-// 前置声明，完整定义在 BacktestFactorEngine.cpp 中引入
+// 前置声明，完整定义在 FactorEngine.cpp 中引入
 namespace factor::compute { class SignalCache; }
 
 namespace factor { class FactorInstanceManager; class BaseFactor; }
@@ -90,12 +90,12 @@ private:
 
 // ═══ FactorEngine (Layer 3b) ═══
 
-class BacktestFactorEngine {
+class FactorEngine {
 public:
-    explicit BacktestFactorEngine(uint64_t maxMemoryBytes = 0U);
-    ~BacktestFactorEngine();
-    BacktestFactorEngine(const BacktestFactorEngine&) = delete;
-    BacktestFactorEngine& operator=(const BacktestFactorEngine&) = delete;
+    explicit FactorEngine(uint64_t maxMemoryBytes = 0U);
+    ~FactorEngine();
+    FactorEngine(const FactorEngine&) = delete;
+    FactorEngine& operator=(const FactorEngine&) = delete;
 
     void setInstanceManager(factor::FactorInstanceManager* mgr);
 

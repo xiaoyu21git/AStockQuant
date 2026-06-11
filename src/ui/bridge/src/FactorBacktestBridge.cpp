@@ -240,7 +240,7 @@ bool FactorBacktestBridge::initialize()
     // 1) 创建四个下层域组件
     m_scheduler       = std::make_unique<domain::scheduler::BacktestScheduler>(0ULL);
     m_backtestDataSvc = std::make_unique<factor::compute::BacktestDataService>();
-    m_factorEngine    = std::make_unique<factor::compute::BacktestFactorEngine>(0ULL);
+m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
     m_reporter        = std::make_unique<factor::compute::BacktestReporter>();
 
     if (!m_scheduler || !m_backtestDataSvc || !m_factorEngine || !m_reporter) {

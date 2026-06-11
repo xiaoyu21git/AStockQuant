@@ -190,14 +190,7 @@ namespace wang{
          }
       );
 
-       qmlRegisterSingletonType<StrategyBridge>(
-          url, 1, 0, "StrategyBridge",
-          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-             Q_UNUSED(engine)
-             Q_UNUSED(scriptEngine)
-             return StrategyBridge::instance();
-          }
-       );
+       qmlRegisterType<StrategyBridge>(url, 1, 0, "StrategyBridge");
 
       // FactorService - 因子服务桥接层（单例模式）
       qmlRegisterSingletonType<FactorService>(

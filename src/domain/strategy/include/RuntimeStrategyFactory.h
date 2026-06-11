@@ -22,9 +22,9 @@ struct MultiFactorRuntimeEngineSetup final {
 [[nodiscard]] std::shared_ptr<IRuntimeStrategy> createMultiFactorSelectionRuntimeStrategy(
     std::shared_ptr<const ::domain::strategies::MultiFactorSelectionStrategy> strategyDefinition,
     StrategyInstanceId strategyInstanceId,
-    rules::RuleSetId ruleSetId = rules::kRuleSetAllPass);
+    CallbackRuntimeFactorServiceAdapter::Callbacks factorCallbacks);
 
-[[nodiscard]] std::optional<StrategyEngine> createMultiFactorRuntimeEngine(
+[[nodiscard]] std::unique_ptr<StrategyEngine> createMultiFactorRuntimeEngine(
     MultiFactorRuntimeEngineSetup setup);
 
 } // namespace domain::strategy

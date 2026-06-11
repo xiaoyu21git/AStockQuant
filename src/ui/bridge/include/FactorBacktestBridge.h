@@ -22,7 +22,7 @@
 
 #include "factor_compute/AnalysisReportTypes.h"
 #include "factor_compute/GroupedBacktestTypes.h"
-#include "factor_compute/BacktestFactorEngine.h"
+#include "factor_compute/FactorEngine.h"
 #include "CachedMarketDataView.h"
 #include "../../domain/factor/include/FactorBacktestOrchestrator.h"
 #include "../../domain/factor/include/BacktestRunConfig.h"
@@ -192,7 +192,7 @@ private:
     std::unique_ptr<Factor::backtest::FactorBacktestOrchestrator> m_orchestrator;
     std::unique_ptr<domain::scheduler::BacktestScheduler>   m_scheduler;
     std::unique_ptr<factor::compute::BacktestDataService>   m_backtestDataSvc;
-    std::unique_ptr<factor::compute::BacktestFactorEngine>  m_factorEngine;
+std::unique_ptr<factor::compute::FactorEngine>  m_factorEngine;
     std::unique_ptr<factor::compute::BacktestReporter>      m_reporter;
 
     bool m_engineReady{false};

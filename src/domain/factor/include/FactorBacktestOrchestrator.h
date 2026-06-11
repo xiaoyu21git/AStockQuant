@@ -19,7 +19,7 @@
 
 namespace factor::compute {
     class BacktestDataService;
-    class BacktestFactorEngine;
+class FactorEngine;
     class BacktestReporter;
     struct MarketMatrixBatch;
     struct FactorMatrix;
@@ -51,7 +51,7 @@ public:
     // ── 依赖注入 (由 Bridge 在 start 前设置) ──
     void setScheduler(domain::scheduler::BacktestScheduler* scheduler);
     void setDataService(factor::compute::BacktestDataService* dataService);
-    void setFactorEngine(factor::compute::BacktestFactorEngine* engine);
+void setFactorEngine(factor::compute::FactorEngine* engine);
     void setReporter(factor::compute::BacktestReporter* reporter);
 
     // ── 启动回测 ──
@@ -71,7 +71,7 @@ private:
     // ── 持有的下层组件引用 ──
     domain::scheduler::BacktestScheduler* m_scheduler = nullptr;
     factor::compute::BacktestDataService* m_dataService = nullptr;
-    factor::compute::BacktestFactorEngine* m_engine = nullptr;
+factor::compute::FactorEngine* m_engine = nullptr;
     factor::compute::BacktestReporter* m_reporter = nullptr;
     std::unique_ptr<factor::compute::SimulatedTradingExecutor> m_executor;
 };

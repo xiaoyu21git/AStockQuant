@@ -1,5 +1,5 @@
 #include "FactorBacktestOrchestrator.h"
-#include "factor_compute/BacktestFactorEngine.h"
+#include "factor_compute/FactorEngine.h"
 #include "BacktestScheduler.h"
 
 #include <algorithm>
@@ -23,7 +23,7 @@ void FactorBacktestOrchestrator::setDataService(factor::compute::BacktestDataSer
     }
 }
 
-void FactorBacktestOrchestrator::setFactorEngine(factor::compute::BacktestFactorEngine* engine) {
+void FactorBacktestOrchestrator::setFactorEngine(factor::compute::FactorEngine* engine) {
     m_engine = engine;
 }
 

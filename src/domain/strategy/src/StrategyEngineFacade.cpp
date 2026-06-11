@@ -1,10 +1,67 @@
 #include "../include/IStrategyService.h"
+#include "../../../infrastructure/include/database/ISqlDatabase.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "foundation/json/json_facade.h"
 #include "foundation/thread/thread_pool.hpp"
 
 #include <cstdlib>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace domain::strategy {
+
+namespace {
+std::vector<::domain::strategies::FactorId> parseFactorIds(const std::string& json) {
+    std::vector<::domain::strategies::FactorId> ids;
+    if (json.empty()) return ids;
+    try {
+        auto root = foundation::json::JsonFacade::parse(json);
+        for (std::size_t i = 0; i < root.size(); ++i) {
+            ids.push_back(static_cast<::domain::strategies::FactorId>(root.at(i).asInt()));
+        }
+    } catch(...) {}
+    return ids;
+}
+} // anonymous namespace
+
+std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId)
+{
+    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    if (!pool.isInitialized()) return nullptr;
+
+    auto db = pool.getConnection();
+    if (!db || !db->isOpen()) return nullptr;
+
+    // 查询策略定义表获取参数
+    auto result = db->executeQuery(
+        "SELECT strategy_name, description, behavior_kind, parameters, factor_ids "
+        "FROM strategy_definitions WHERE strategy_id = ?",
+        {strategyId});
+    if (result.isEmpty()) return nullptr;
+
+    const auto& row = result.getRow(0);
+    StrategyCreationParams params;
+    params.strategyId = strategyId;
+    params.strategyName = row.getString("strategy_name");
+    params.description = row.getString("description");
+    params.behaviorKind = static_cast<::domain::strategies::StrategyBehaviorKind>(
+        row.getInt("behavior_kind", 0));
+
+    std::string paramJson = row.getString("parameters");
+    if (!paramJson.empty()) {
+        auto root = foundation::json::JsonFacade::parse(paramJson);
+        params.topN = root.has("topN") ? root.get("topN").asInt() : 0;
+        params.allowShort = root.has("allowShort") && root.get("allowShort").asBool();
+        params.maxPositions = root.has("maxPositions") ? root.get("maxPositions").asInt() : 100;
+        params.maxWeightPerStock = root.has("maxWeightPerStock") ? root.get("maxWeightPerStock").asDouble() : 0.1;
+        params.minWeightPerStock = root.has("minWeightPerStock") ? root.get("minWeightPerStock").asDouble() : 0.0;
+        params.maxOrderQuantity = root.has("maxOrderQuantity") ? static_cast<std::uint32_t>(root.get("maxOrderQuantity").asInt()) : 100U;
+    }
+
+    params.factorIds = parseFactorIds(row.getString("factor_ids"));
+    return fromParams(params);
+}
 
 StrategyEngine::Builder StrategyEngine::builder()
 {
@@ -109,6 +166,11 @@ void StrategyEngine::setAsyncExecutor(std::shared_ptr<foundation::thread::IExecu
     }
 }
 
+void StrategyEngine::setFactorSvc(std::shared_ptr<IFactorSvc> svc)
+{
+    m_factorSvc = std::move(svc);
+}
+
 std::optional<std::vector<OrderRequest>> StrategyEngine::collectOrders(
     const StrategyServiceFlowResult& flowResult)
 {
@@ -131,6 +193,13 @@ StrategyEngine::Builder& StrategyEngine::Builder::withFactorService(
     std::unique_ptr<IRuntimeFactorService> factorService)
 {
     factorService_ = std::move(factorService);
+    return *this;
+}
+
+StrategyEngine::Builder& StrategyEngine::Builder::withRuleEvaluationService(
+    std::unique_ptr<IRuleEvaluationService> ruleEvaluationService)
+{
+    ruleEvaluationService_ = std::move(ruleEvaluationService);
     return *this;
 }
 
@@ -206,7 +275,7 @@ StrategyEngine::Builder& StrategyEngine::Builder::maxMarketDataPerBatch(Strategy
     return *this;
 }
 
-StrategyEngine StrategyEngine::Builder::build()
+std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
 {
     if (!factorService_) {
         // 运行时主链必须显式注入真实因子服务，不允许默认伪服务回退。
@@ -214,8 +283,12 @@ StrategyEngine StrategyEngine::Builder::build()
     }
     std::unique_ptr<IRuntimeFactorService> factorService = std::move(factorService_);
 
-    std::unique_ptr<IRuleEvaluationService> ruleEvaluationService =
-        std::make_unique<LocalRuleEvaluationService>();
+    std::unique_ptr<IRuleEvaluationService> ruleEvaluationService;
+    if (ruleEvaluationService_) {
+        ruleEvaluationService = std::move(ruleEvaluationService_);
+    } else {
+        ruleEvaluationService = std::make_unique<LocalRuleEvaluationService>();
+    }
 
     std::unique_ptr<IStrategyService> strategyService;
     if (orderSink_) {
@@ -240,12 +313,12 @@ StrategyEngine StrategyEngine::Builder::build()
         std::abort();
     }
 
-    StrategyEngine engine(
+    auto engine = std::make_unique<StrategyEngine>(
         std::move(factorService),
         std::move(ruleEvaluationService),
         std::move(strategyService));
     if (asyncExecutor_) {
-        engine.setAsyncExecutor(std::move(asyncExecutor_));
+        engine->setAsyncExecutor(std::move(asyncExecutor_));
     }
     return engine;
 }

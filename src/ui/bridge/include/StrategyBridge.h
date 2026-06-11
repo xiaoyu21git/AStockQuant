@@ -12,11 +12,8 @@
 
 #include <initializer_list>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
-#include <utility>
 #include <vector>
 
 namespace domain::strategy {
@@ -49,20 +46,11 @@ public:
     Q_INVOKABLE bool inited() const;
     Q_INVOKABLE bool cacheOk() const;
 
-    /// @brief 获取全局单例（在 registerQmlTypes 中注册后有效）
-    [[nodiscard]] static StrategyBridge* instance();
-
-    // FROZEN CRUD INTERFACE CONTRACT (2026-05-31)
-    // - add/update/remove/get signatures must remain unchanged.
-    // - add/update payload keys are explicitly frozen and validated in bridge runtime.
-    // - strategyId for update/remove/get must be UUID and no fallback alias is allowed.
     Q_INVOKABLE QString add(const QVariantMap& payload);
     Q_INVOKABLE bool update(const QVariantMap& payload);
     Q_INVOKABLE bool remove(const QString& strategyId);
     Q_INVOKABLE QVariantMap get(const QString& strategyId);
     Q_INVOKABLE QVariantList list();
-    // Runtime lifecycle contract: single-signature flow only supports start/stop.
-    // No intermediate state (pause/resume/restart) is allowed in this bridge contract.
     Q_INVOKABLE bool start(const QString& strategyId);
     Q_INVOKABLE bool stop(const QString& strategyId);
     Q_INVOKABLE bool saveViewCfg(const QString& strategyId, const QVariantMap& visualConfig);
@@ -73,9 +61,6 @@ public:
     [[nodiscard]] QAbstractListModel* listModel() const;
     void setSelId(const QString& strategyId);
 
-    /// @brief 为回测提供策略引擎实例
-    /// @param strategyId 策略 ID
-    /// @return StrategyEngine 指针，失败返回 nullptr；调用者不持有所有权
     [[nodiscard]] Q_INVOKABLE domain::strategy::StrategyEngine* backtestEngineProvider(const QString& strategyId);
 
 signals:
@@ -130,26 +115,12 @@ private:
             [[nodiscard]] double minWeightPerStock() const noexcept { return minWeightPerStock_; }
             [[nodiscard]] int weightScheme() const noexcept { return weightScheme_; }
             [[nodiscard]] int rebalanceFrequency() const noexcept { return rebalanceFrequency_; }
-
             void setAllowShort(bool value) { allowShort_ = value; }
             void setMaxPositions(int value) { maxPositions_ = value; }
             void setMaxWeightPerStock(double value) { maxWeightPerStock_ = value; }
             void setMinWeightPerStock(double value) { minWeightPerStock_ = value; }
             void setWeightScheme(int value) { weightScheme_ = value; }
             void setRebalanceFrequency(int value) { rebalanceFrequency_ = value; }
-
-            [[nodiscard]] QVariantMap toVariantMap() const
-            {
-                QVariantMap map;
-                map.insert(QStringLiteral("allowShort"), allowShort_);
-                map.insert(QStringLiteral("maxPositions"), maxPositions_);
-                map.insert(QStringLiteral("maxWeightPerStock"), maxWeightPerStock_);
-                map.insert(QStringLiteral("minWeightPerStock"), minWeightPerStock_);
-                map.insert(QStringLiteral("weightScheme"), weightScheme_);
-                map.insert(QStringLiteral("rebalanceFrequency"), rebalanceFrequency_);
-                return map;
-            }
-
         private:
             bool allowShort_{false};
             int maxPositions_{100};
@@ -162,14 +133,7 @@ private:
         class StrategySpecPayload final {
         public:
             [[nodiscard]] const QVariantMap& values() const noexcept { return values_; }
-            void setValue(const QString& key, const QVariant& value)
-            {
-                if (!value.isValid() || value.isNull()) {
-                    return;
-                }
-                values_.insert(key, value);
-            }
-
+            void setValue(const QString& key, const QVariant& value) { values_.insert(key, value); }
         private:
             QVariantMap values_;
         };
@@ -184,15 +148,7 @@ private:
         [[nodiscard]] const RuleIdListSpec& ruleIds() const noexcept { return ruleIds_; }
         [[nodiscard]] bool status() const noexcept { return status_; }
         [[nodiscard]] const QVariantMap& parameters() const noexcept { return parameters_; }
-        [[nodiscard]] const CommonConfigPayload& commonConfig() const noexcept { return commonConfig_; }
-        [[nodiscard]] const StrategySpecPayload& strategySpec() const noexcept { return strategySpec_; }
-
-        void setStrategyId(const domain::strategies::StrategyUuid& value)
-        {
-            strategyId_ = value;
-            hasStrategyId_ = true;
-        }
-
+        void setStrategyId(const domain::strategies::StrategyUuid& value) { strategyId_ = value; hasStrategyId_ = true; }
         void setStrategyName(std::string value) { strategyName_ = std::move(value); }
         void setDescription(std::string value) { description_ = std::move(value); }
         void setStrategyType(const StrategyTypeSpec& value) { strategyType_ = value; }
@@ -201,9 +157,6 @@ private:
         void setRuleIds(const RuleIdListSpec& value) { ruleIds_ = value; }
         void setStatus(bool value) { status_ = value; }
         void setParameters(const QVariantMap& value) { parameters_ = value; }
-        void setCommonConfig(const CommonConfigPayload& value) { commonConfig_ = value; }
-        void setStrategySpec(const StrategySpecPayload& value) { strategySpec_ = value; }
-
     private:
         domain::strategies::StrategyUuid strategyId_{foundation::utils::Uuid::null()};
         bool hasStrategyId_{false};
@@ -215,8 +168,6 @@ private:
         RuleIdListSpec ruleIds_;
         bool status_{false};
         QVariantMap parameters_;
-        CommonConfigPayload commonConfig_;
-        StrategySpecPayload strategySpec_;
     };
 
     QString readText(const QVariantMap& payload, std::initializer_list<const char*> keys) const;
@@ -226,33 +177,17 @@ private:
     FactorIdListSpec readFactorIds(const QVariantMap& payload) const;
     RuleIdListSpec readRuleIds(const QVariantMap& payload) const;
     bool hasForbiddenFields(const QVariantMap& payload) const;
-    QVariant readValue(const QVariantMap& payload,
-                       std::initializer_list<const char*> keys) const;
-    QVariantMap readMap(const QVariantMap& payload,
-                        std::initializer_list<const char*> keys) const;
+    QVariant readValue(const QVariantMap& payload, std::initializer_list<const char*> keys) const;
+    QVariantMap readMap(const QVariantMap& payload, std::initializer_list<const char*> keys) const;
     std::optional<domain::strategies::StrategyUuid> readId(const QVariantMap& payload) const;
-    BridgeUpsertRequest::CommonConfigPayload readCommonConfig(const QVariantMap& parameters) const;
-    BridgeUpsertRequest::StrategySpecPayload readStrategySpecPayload(
-        const StrategyTypeSpec& strategyType,
-        const QVariantMap& parameters) const;
     BridgeUpsertRequest parseReq(const QVariantMap& payload) const;
-   
-    void applyReq(const BridgeUpsertRequest& request,
-                  astock::database::PersistedStrategyData& target) const;
+    void applyReq(const BridgeUpsertRequest& request, astock::database::PersistedStrategyData& target) const;
     std::optional<domain::strategies::StrategyUuid> parseId(const QString& input) const;
     QString clearedMsg() const;
 
     void setBusy(bool busy);
     void setErr(const QString& message);
     void refreshModel();
-
-    [[nodiscard]] bool isRuntimeManagedStrategy(const astock::database::PersistedStrategyData& strategy) const;
-    [[nodiscard]] std::unique_ptr<domain::strategy::StrategyEngine> buildRuntimeEngineSession(
-        const astock::database::PersistedStrategyData& strategy,
-        QString* errorMessage) const;
-    void cacheRuntimeEngineSession(const QString& strategyId,
-                                   std::unique_ptr<domain::strategy::StrategyEngine> engine);
-    void removeRuntimeEngineSession(const QString& strategyId);
 
     bool m_busy{false};
     bool m_inited{false};
@@ -261,7 +196,4 @@ private:
     QString m_selId;
     std::unique_ptr<astock::database::IStrategyRepository> m_repo;
     StrategyListModel* m_listModel{nullptr};
-    mutable std::mutex m_runtimeEngineMutex;
-    // Active runtime sessions only; key exists iff strategy is started and not stopped.
-    std::unordered_map<std::string, std::unique_ptr<domain::strategy::StrategyEngine>> m_runtimeEngines;
 };

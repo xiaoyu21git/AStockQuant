@@ -1,6 +1,7 @@
 #pragma once
 
 #include "StrategyServiceTypes.h"
+#include "IFactorSvc.h"
 
 #include <functional>
 #include <future>
@@ -15,6 +16,8 @@ namespace thread {
 class IExecutor;
 }
 }
+
+namespace astock { namespace database { class ISqlDatabase; } }
 
 namespace domain::strategy {
 
@@ -448,6 +451,12 @@ public:
 
     static Builder builder();
 
+    /// @brief 从数据库通过 strategyId 加载参数并构建引擎（内部自己获取连接）
+    [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId);
+
+    /// @brief 从策略参数构建完整的引擎实例
+    [[nodiscard]] static std::unique_ptr<StrategyEngine> fromParams(const StrategyCreationParams& params);
+
     StrategyEngine(std::unique_ptr<IRuntimeFactorService> factorService,
                    std::unique_ptr<IRuleEvaluationService> ruleEvaluationService,
                    std::unique_ptr<IStrategyService> strategyService);
@@ -481,11 +490,14 @@ private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
 
+    void setFactorSvc(std::shared_ptr<IFactorSvc> svc);
+
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
     std::unique_ptr<IStrategyService> strategyService_;
     std::shared_ptr<foundation::thread::IExecutor> asyncExecutor_;
+    std::shared_ptr<IFactorSvc> m_factorSvc;
 };
 
 class StrategyEngine::Builder final {
@@ -494,6 +506,7 @@ public:
 
     Builder& withFactorService(std::unique_ptr<IRuntimeFactorService> factorService);
     Builder& withFactorCallbacks(CallbackRuntimeFactorServiceAdapter::Callbacks callbacks);
+    Builder& withRuleEvaluationService(std::unique_ptr<IRuleEvaluationService> ruleEvaluationService);
     Builder& withOrderSink(IRuntimeOrderSink& orderSink);
     Builder& withDiagnosticsSink(IDiagnosticsSink& diagnosticsSink);
     Builder& withOrderBuilder(const IOrderBuilder& orderBuilder);
@@ -503,10 +516,11 @@ public:
     Builder& maxRuleResultsPerBatch(StrategyCount value);
     Builder& maxMarketDataPerBatch(StrategyCount value);
 
-    [[nodiscard]] StrategyEngine build();
+    [[nodiscard]] std::unique_ptr<StrategyEngine> build();
 
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
+    std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
     IRuntimeOrderSink* orderSink_{nullptr};
     IDiagnosticsSink* diagnosticsSink_{nullptr};
     const IOrderBuilder* orderBuilder_{nullptr};

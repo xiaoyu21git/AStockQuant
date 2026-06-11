@@ -4,6 +4,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 namespace domain::strategy {
@@ -29,6 +31,11 @@ enum class StrategyServiceState : std::uint8_t {
     Stopped = 0,
     Running = 1,
     Paused = 2,
+};
+
+enum class EngineExecutionMode : std::uint8_t {
+    Live = 0,
+    Backtest = 1,
 };
 
 enum class DiagnosticsEventCode : std::uint8_t {
@@ -504,5 +511,33 @@ inline constexpr std::size_t kDefaultMarketDataBatchReserve = 256;
         kDefaultSignalBufferReserve,
         kDefaultRuleResultBufferReserve);
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// StrategyCreationParams — 纯 C++ 策略创建参数（依赖前面全部类型）
+// ══════════════════════════════════════════════════════════════════════════════
+
+struct StrategyCreationParams final {
+    std::string strategyId;
+    std::vector<::domain::strategies::FactorWeight> factorWeights;
+    int topN{0};
+    ::domain::strategies::WeightScheme weightScheme{::domain::strategies::WeightScheme::EQUAL};
+    ::domain::strategies::RebalanceFrequency rebalanceFrequency{::domain::strategies::RebalanceFrequency::DAILY};
+    bool industryNeutral{false};
+    bool allowShort{false};
+    int maxPositions{100};
+    double maxWeightPerStock{0.1};
+    double minWeightPerStock{0.0};
+    std::uint32_t maxOrderQuantity{100};
+    std::uint64_t snapshotVersion{1};
+    std::string strategyName;
+    std::string description;
+    ::domain::strategies::StrategyBehaviorKind behaviorKind{::domain::strategies::StrategyBehaviorKind::Custom};
+    std::vector<::domain::strategies::FactorId> factorIds;
+
+    // 因子回调（桥接层填充）
+    std::function<StrategyServiceFlowResult(const MarketDataPoint&)> onIncremental;
+    std::function<StrategyServiceFlowResult(const std::vector<MarketDataPoint>&)> onBatch;
+    std::function<void(std::vector<RuntimeFactorSnapshot>&)> onCopySnapshots;
+};
 
 } // namespace domain::strategy

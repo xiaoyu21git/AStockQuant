@@ -1,4 +1,4 @@
-#include "factor_compute/BacktestFactorEngine.h"
+#include "factor_compute/FactorEngine.h"
 #include "factor_compute/SignalCache.h"
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "FactorInstanceManager.h"
@@ -203,21 +203,21 @@ MarketMatrixBatch BacktestDataService::loadBatch(std::size_t batchIndex) {
     return batch;
 }
 
-BacktestFactorEngine::BacktestFactorEngine(uint64_t maxMemoryBytes)
+FactorEngine::FactorEngine(uint64_t maxMemoryBytes)
     : m_signalCache(std::make_unique<SignalCache>(maxMemoryBytes)) {
 }
 
-BacktestFactorEngine::~BacktestFactorEngine() = default;
+FactorEngine::~FactorEngine() = default;
 
-void BacktestFactorEngine::setInstanceManager(factor::FactorInstanceManager* mgr) {
+void FactorEngine::setInstanceManager(factor::FactorInstanceManager* mgr) {
     m_instanceManager = mgr;
 }
 
-void BacktestFactorEngine::setDataService(BacktestDataService* dataSvc) {
+void FactorEngine::setDataService(BacktestDataService* dataSvc) {
     m_dataSvc = dataSvc;
 }
 
-FactorMatrix BacktestFactorEngine::compute(const MarketMatrixBatch& marketData,
+FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
                                             const FactorCacheKey& cacheKey) {
     FactorMatrix result;
     result.batchIndex = marketData.batchIndex;
