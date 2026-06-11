@@ -70,8 +70,7 @@ Rectangle {
     readonly property real borderRadiusXLarge: 16
     
     // C++服务引用
-    readonly property var strategyService: StrategyBridge
-    readonly property var strategyViewModel: StrategyBridge.listModel
+    readonly property var strategyViewModel: strategyService.listModel
     readonly property var tradingConnectionConfigService: TradingConnectionConfigService
     readonly property var tradingMarketCalendarService: TradingMarketCalendarService
     readonly property var tradingRuntimeStatusService: TradingRuntimeStatusService
@@ -2102,5 +2101,9 @@ Rectangle {
         interval: 0
         repeat: false
         onTriggered: strategyLibraryPage.ensurePageServicesReady()
+    }
+
+    StrategyBridge {
+        id: strategyService
     }
 }
