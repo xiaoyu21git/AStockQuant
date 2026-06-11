@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../strategy/include/StrategySnapshotTypes.h"
+#include "foundation/Utils/Timestamp.h"
 
 #include <cstdint>
 #include <vector>
@@ -8,42 +9,12 @@
 namespace domain::backtest {
 
 struct DateWindow final {
-    int32_t startDate{0};
-    int32_t endDate{0};
-
-    [[nodiscard]] static bool isValidDate(int32_t yyyymmdd)
-    {
-        if (yyyymmdd <= 0) {
-            return false;
-        }
-
-        const int year = yyyymmdd / 10000;
-        const int month = (yyyymmdd / 100) % 100;
-        const int day = yyyymmdd % 100;
-
-        if (year < 1900 || year > 2100) {
-            return false;
-        }
-        if (month < 1 || month > 12) {
-            return false;
-        }
-
-        static constexpr int kDaysInMonth[12] = {
-            31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31
-        };
-
-        int maxDay = kDaysInMonth[month - 1];
-        const bool leapYear = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-        if (month == 2 && leapYear) {
-            maxDay = 29;
-        }
-
-        return day >= 1 && day <= maxDay;
-    }
+    foundation::utils::Timestamp startDate;
+    foundation::utils::Timestamp endDate;
 
     [[nodiscard]] bool isValid() const
     {
-        return isValidDate(startDate) && isValidDate(endDate) && startDate <= endDate;
+        return startDate <= endDate;
     }
 };
 

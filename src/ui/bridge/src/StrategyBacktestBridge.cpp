@@ -4,6 +4,7 @@
 
 #include "StrategyBacktestBridge.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "foundation/Utils/Timestamp.h"
 
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
@@ -37,10 +38,12 @@ BacktestRequest buildBacktestRequest(const QString& strategyId, const QVariantMa
         params.value("strategyName").toString().toStdString());
     req.strategyIdentity.executionKind = StrategyExecutionKind::Standard;
 
-    QString startDate = params.value("startDate").toString();
-    QString endDate = params.value("endDate").toString();
-    req.window.startDate = startDate.replace("-", "").toInt();
-    req.window.endDate = endDate.replace("-", "").toInt();
+    const QString startDate = params.value("startDate").toString();
+    const QString endDate = params.value("endDate").toString();
+    req.window.startDate = foundation::utils::Timestamp::from_string(
+        startDate.toStdString(), "%Y-%m-%d");
+    req.window.endDate = foundation::utils::Timestamp::from_string(
+        endDate.toStdString(), "%Y-%m-%d");
 
     req.costSpec.initialCapital = Money{params.value("initialCapital", 1000000.0).toDouble()};
     req.costSpec.commissionRate = Ratio{params.value("commissionRate", 0.0003).toDouble()};

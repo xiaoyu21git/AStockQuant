@@ -3,12 +3,16 @@
 #include "StrategyServiceTypes.h"
 #include "IFactorSvc.h"
 
+#include <atomic>
+#include <condition_variable>
 #include <functional>
 #include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <queue>
 #include <chrono>
+#include <thread>
 #include <vector>
 
 namespace foundation {
@@ -445,6 +449,16 @@ public:
         OrderRequest& outputOrder) const override;
 };
 
+/// @brief 实盘异步模式下，订单通过此回调通知上层，而非同步返回值。
+class IOrderListener {
+public:
+    virtual ~IOrderListener() = default;
+
+    /// @brief 当引擎后台线程处理完一批行情后调用。
+    /// @param orders 本次步进产生的订单列表（可能为空）。
+    virtual void onOrders(const std::vector<OrderRequest>& orders) = 0;
+};
+
 class StrategyEngine final {
 public:
     class Builder;
@@ -486,17 +500,43 @@ public:
     [[nodiscard]] const IStrategyService& service() const noexcept;
     void setAsyncExecutor(std::shared_ptr<foundation::thread::IExecutor> executor);
 
+    // ─── 实盘异步专有接口 ───
+
+    /// @brief 向后台线程推送一条实时行情数据，唤醒后台自循环线程。
+    void enqueueMarketData(const MarketDataPoint& marketDataPoint);
+
+    /// @brief 启动专属后台线程（ThreadPoolExecutor(1,1)），进入 drainQueue 事件循环。
+    void startLiveLoop();
+
+    /// @brief 安全停止后台线程并等待完成。
+    void stopLiveLoop();
+
+    /// @brief 设置订单回调监听器，所有订单通过此回调通知。
+    void setOrderListener(IOrderListener* listener);
+
 private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
 
     void setFactorSvc(std::shared_ptr<IFactorSvc> svc);
 
+    /// @brief 后台线程主函数：阻塞等待行情 → step() → 通知订单。
+    void drainQueue();
+
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
     std::unique_ptr<IStrategyService> strategyService_;
     std::shared_ptr<foundation::thread::IExecutor> asyncExecutor_;
+
+    // 实盘异步线程 —— 每个引擎独立的专属线程池（1线程）
+    std::shared_ptr<foundation::thread::IExecutor> m_dedicatedExecutor;
+    std::queue<MarketDataPoint> m_mdpQueue;
+    std::mutex m_queueMutex;
+    std::condition_variable m_queueCv;
+    std::atomic<bool> m_loopRunning{false};
+    IOrderListener* m_orderListener{nullptr};
+
     std::shared_ptr<IFactorSvc> m_factorSvc;
 };
 

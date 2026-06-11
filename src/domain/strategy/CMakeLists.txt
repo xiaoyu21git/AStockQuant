@@ -9,6 +9,7 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyPythonRuleService.cpp
     src/StrategyServer.cpp
     src/StrategyEngineFacade.cpp
+    src/StrategyManager.cpp
 )
 
 target_include_directories(domain_strategy_runtime

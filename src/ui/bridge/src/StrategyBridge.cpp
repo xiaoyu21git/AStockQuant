@@ -550,6 +550,9 @@ bool StrategyBridge::start(const QString& strategyId)
         return false;
     }
 
+    // 启动实盘异步后台线程（每个引擎独立线程，自循环等待行情）
+    engine->startLiveLoop();
+
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
     refreshModel();
     emit started(repositoryId);
@@ -574,6 +577,9 @@ bool StrategyBridge::stop(const QString& strategyId)
         emit operationFailed(kRepositoryErrorCode, m_err);
         return false;
     }
+
+    // 先停止异步后台线程（如已启动）
+    engine->stopLiveLoop();
 
     const auto result = engine->stop();
     if (!result.isOk()) {

@@ -70,6 +70,24 @@ public:
         return Timestamp(std::chrono::system_clock::time_point(
             std::chrono::microseconds(microseconds)));
     }
+
+    /// @brief 从 yyyymmdd 格式的整数创建 Timestamp（日期部分，时间 00:00:00）
+    static Timestamp from_yyyymmdd(int32_t yyyymmdd) {
+        const int year  = yyyymmdd / 10000;
+        const int month = (yyyymmdd / 100) % 100;
+        const int day   = yyyymmdd % 100;
+        std::tm tm = {};
+        tm.tm_year = year - 1900;
+        tm.tm_mon  = month - 1;
+        tm.tm_mday = day;
+        return Timestamp(std::chrono::system_clock::from_time_t(std::mktime(&tm)));
+    }
+
+    /// @brief 转换为 yyyymmdd 格式的 int32_t
+    int32_t to_yyyymmdd() const {
+        return year() * 10000 + month() * 100 + day();
+    }
+
     static std::string tostring(){
         return now().to_string();
     }

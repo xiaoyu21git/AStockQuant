@@ -3,11 +3,16 @@
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/thread/thread_pool.hpp"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <cstdlib>
+#include <chrono>
+#include <exception>
 #include <string>
 #include <utility>
 #include <vector>
+
+using namespace std::chrono_literals;
 
 namespace domain::strategy {
 
@@ -66,6 +71,20 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 StrategyEngine::Builder StrategyEngine::builder()
 {
     return Builder();
+}
+
+std::unique_ptr<StrategyEngine> StrategyEngine::fromParams(const StrategyCreationParams& params)
+{
+    // 使用 Builder 模式构建完整引擎
+    CallbackRuntimeFactorServiceAdapter::Callbacks cbs;
+    cbs.updateIncremental = params.onIncremental;
+    cbs.updateBatch      = params.onBatch;
+    cbs.copySnapshots    = params.onCopySnapshots;
+
+    return builder()
+        .withFactorCallbacks(std::move(cbs))
+        .maxStrategies(params.maxPositions)
+        .build();
 }
 
 StrategyEngine::StrategyEngine(std::unique_ptr<IRuntimeFactorService> factorService,
@@ -185,6 +204,86 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::collectOrders(
     std::vector<OrderRequest> output;
     strategyService_->copyPendingOrders(output);
     return output;
+}
+
+// ─── 实盘异步实现 ───
+
+void StrategyEngine::enqueueMarketData(const MarketDataPoint& marketDataPoint)
+{
+    if (!m_loopRunning.load(std::memory_order_acquire)) {
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        m_mdpQueue.push(marketDataPoint);
+    }
+    m_queueCv.notify_one();
+}
+
+void StrategyEngine::startLiveLoop()
+{
+    if (m_loopRunning.load(std::memory_order_acquire)) {
+        return; // 已经运行
+    }
+    if (!m_dedicatedExecutor) {
+        m_dedicatedExecutor = std::make_shared<foundation::thread::ThreadPoolExecutor>(
+            1, 1, std::chrono::seconds(60), "StrategyEngineLiveLoop");
+    }
+    m_loopRunning.store(true, std::memory_order_release);
+
+    // 提交 drainQueue 到专属线程（线程池只有 1 个 worker，独占该线程）
+    m_dedicatedExecutor->post([this]() {
+        drainQueue();
+    });
+}
+
+void StrategyEngine::stopLiveLoop()
+{
+    if (!m_loopRunning.load(std::memory_order_acquire)) {
+        return;
+    }
+    m_loopRunning.store(false, std::memory_order_release);
+    m_queueCv.notify_one();
+
+    if (m_dedicatedExecutor) {
+        m_dedicatedExecutor->shutdown(false);
+        // 等待线程池终止（最多 5 秒）
+        m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
+    }
+}
+
+void StrategyEngine::setOrderListener(IOrderListener* listener)
+{
+    m_orderListener = listener;
+}
+
+void StrategyEngine::drainQueue()
+{
+    while (m_loopRunning.load(std::memory_order_acquire)) {
+        MarketDataPoint mdp;
+        {
+            std::unique_lock<std::mutex> lock(m_queueMutex);
+            m_queueCv.wait(lock, [this]() {
+                return !m_mdpQueue.empty() || !m_loopRunning.load(std::memory_order_acquire);
+            });
+            if (!m_loopRunning.load(std::memory_order_acquire)) {
+                return;
+            }
+            mdp = m_mdpQueue.front();
+            m_mdpQueue.pop();
+        }
+
+        try {
+            auto orders = step(mdp);
+            if (orders.has_value() && m_orderListener) {
+                m_orderListener->onOrders(*orders);
+            }
+        } catch (const std::exception& e) {
+            // 单引擎异常不崩溃，故障隔离
+            (void)e;
+            // 继续处理下一条行情
+        }
+    }
 }
 
 StrategyEngine::Builder::Builder() = default;

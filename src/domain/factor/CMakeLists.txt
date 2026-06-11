@@ -261,7 +261,7 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/FactorSignalAdapter.cpp
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
-    src/factor_compute/BacktestFactorEngine.cpp
+    src/factor_compute/FactorEngine.cpp
     src/factor_compute/MarketDataViewHistoricalAdapter.cpp
 )
 

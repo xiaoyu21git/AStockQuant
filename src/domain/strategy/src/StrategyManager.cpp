@@ -2,6 +2,11 @@
 
 namespace domain::strategy {
 
+StrategyManager& StrategyManager::instance() {
+    static StrategyManager s_instance;
+    return s_instance;
+}
+
 StrategyEngine* StrategyManager::createEngine(const std::string& strategyId) {
     auto engine = StrategyEngine::fromDb(strategyId);
     if (!engine) return nullptr;
@@ -66,6 +71,26 @@ std::vector<OrderRequest> StrategyManager::stepAll(const MarketDataPoint& mdp) {
         }
     }
     return orders;
+}
+
+void StrategyManager::pushMarketData(const MarketDataPoint& mdp)
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [id, engine] : m_engines) {
+        if (engine) {
+            engine->enqueueMarketData(mdp);
+        }
+    }
+}
+
+void StrategyManager::setOrderListener(IOrderListener* listener)
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [id, engine] : m_engines) {
+        if (engine) {
+            engine->setOrderListener(listener);
+        }
+    }
 }
 
 std::size_t StrategyManager::count() const {
