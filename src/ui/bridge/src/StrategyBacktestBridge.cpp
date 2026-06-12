@@ -9,8 +9,11 @@
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
 #include "DataServiceCache.h"
+#include "FactorService.h"
+#include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/strategy/include/IStrategyService.h"
 #include "../../domain/strategy/include/StrategyManager.h"
+#include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
 #include <QDebug>
 #include <QJsonArray>
@@ -136,11 +139,34 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
         return;
     }
 
-    // 获取引擎
-    auto* engine = domain::strategy::StrategyManager::instance().get(strategyId.toStdString());
+    // 获取或创建引擎（复用 StrategyBridge::start() 的注入逻辑）
+    auto& mgr = domain::strategy::StrategyManager::instance();
+    auto* engine = mgr.get(strategyId.toStdString());
+    if (!engine) {
+        std::shared_ptr<domain::strategy::IFactorSvc> factorSvc;
+        auto* factorSvcBridge = FactorService::instance();
+        if (factorSvcBridge && factorSvcBridge->isInitialized()) {
+            auto* instanceMgr = factorSvcBridge->instanceManager();
+            if (instanceMgr) {
+                auto symbolResolver = [](std::uint32_t id) -> std::string {
+                    char buf[16];
+                    std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+                    return buf;
+                };
+                auto factorNameResolver = [](std::uint64_t fid) -> std::string {
+                    return std::to_string(fid);
+                };
+                factorSvc = std::make_shared<domain::strategy::RuntimeFactorSvc>(
+                    *instanceMgr,
+                    std::move(symbolResolver),
+                    std::move(factorNameResolver));
+            }
+        }
+        engine = mgr.createEngine(strategyId.toStdString(), std::move(factorSvc));
+    }
     if (!engine) {
         m_isRunning.store(false);
-        emit backtestFailed(QStringLiteral("Strategy engine not found. Start the strategy first."));
+        emit backtestFailed(QStringLiteral("Strategy engine not available"));
         return;
     }
 
