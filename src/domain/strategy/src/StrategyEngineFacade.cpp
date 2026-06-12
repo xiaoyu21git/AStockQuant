@@ -3,6 +3,9 @@
 #include "../include/RuntimeFactorSvc.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../backtest/include/BacktestRequest.h"
+#include "../../factor/include/factor_compute/FactorEngine.h"
+#include "../../factor/include/factor_compute/IMarketDataView.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -475,6 +478,184 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
         engine->setAsyncExecutor(std::move(asyncExecutor_));
     }
     return engine;
+}
+
+StrategyBacktestResult StrategyEngine::backtest(
+    const domain::backtest::BacktestRequest& req,
+    const std::string& datasetJson,
+    const std::function<void(double)>& onProgress)
+{
+    StrategyBacktestResult result;
+
+    // 1. 加载数据
+    factor::compute::BacktestDataService dataSvc;
+    dataSvc.storeRawJson(datasetJson);
+    dataSvc.buildViewForFields({});
+    auto batch = dataSvc.loadBatch(0);
+    const auto* view = batch.marketView;
+    if (!view) {
+        result.errorMessage = "Failed to load market data view";
+        return result;
+    }
+
+    const auto& dates = view->dates();
+    const auto& instruments = view->instruments();
+    const auto closeMat = view->close();
+    const auto volumeMat = view->volume();
+    const int totalDays = static_cast<int>(dates.size());
+    const int colCount = static_cast<int>(instruments.size());
+
+    if (totalDays == 0 || colCount == 0) {
+        result.errorMessage = "Empty market data";
+        return result;
+    }
+
+    // 2. 账户初始化
+    double cash = req.costSpec.initialCapital.value;
+    std::unordered_map<std::uint32_t, int> positions;  // instrumentId → 持仓数量
+    std::vector<double> equityCurve;
+    equityCurve.reserve(totalDays);
+
+    const double commissionRate = req.costSpec.commissionRate.value;
+    const double taxRate = req.costSpec.taxRate.value;
+    const double slippageRate = req.costSpec.slippageRate.value;
+
+    // 3. 逐日驱动
+    for (int r = 0; r < totalDays; ++r) {
+        // 构建当天的 MarketDataPoint 批
+        std::vector<MarketDataPoint> mdpBatch;
+        mdpBatch.reserve(colCount);
+        const std::size_t rowOffset = static_cast<std::size_t>(r) * static_cast<std::size_t>(colCount);
+        for (int c = 0; c < colCount; ++c) {
+            const std::uint32_t instrumentId = instruments[static_cast<std::size_t>(c)].value;
+            const double price = static_cast<double>(closeMat.data[rowOffset + static_cast<std::size_t>(c)]);
+            const double volume = static_cast<double>(volumeMat.data[rowOffset + static_cast<std::size_t>(c)]);
+            if (price > 0.0) {
+                mdpBatch.emplace_back(
+                    InstrumentId(instrumentId),
+                    price,
+                    volume,
+                    dates[static_cast<std::size_t>(r)].value);
+            }
+        }
+
+        // 调引擎管线
+        auto orders = stepBatch(mdpBatch);
+
+        // 模拟成交
+        if (orders.has_value()) {
+            for (const auto& order : *orders) {
+                const std::uint32_t instrumentId = order.instrumentId().value();
+                const std::uint32_t quantity = order.quantity();
+                // 找该标的收盘价
+                double closePrice = 0.0;
+                for (const auto& mdp : mdpBatch) {
+                    if (mdp.instrumentId().value() == instrumentId) {
+                        closePrice = mdp.lastPrice();
+                        break;
+                    }
+                }
+                if (closePrice <= 0.0) continue;
+
+                const double notional = closePrice * static_cast<double>(quantity);
+                const double commission = notional * commissionRate;
+                const double slippage = notional * slippageRate;
+
+                if (order.side() == RuntimeOrderSide::Buy) {
+                    const double cost = notional + commission + slippage;
+                    if (cash >= cost) {
+                        cash -= cost;
+                        positions[instrumentId] += static_cast<int>(quantity);
+                    }
+                } else {
+                    auto it = positions.find(instrumentId);
+                    const int held = (it != positions.end()) ? it->second : 0;
+                    const int sellQty = std::min(static_cast<int>(quantity), held);
+                    if (sellQty > 0) {
+                        const double sellNotional = closePrice * static_cast<double>(sellQty);
+                        const double tax = sellNotional * taxRate;
+                        const double income = sellNotional - commission - slippage - tax;
+                        cash += income;
+                        positions[instrumentId] = held - sellQty;
+                        if (positions[instrumentId] <= 0) {
+                            positions.erase(instrumentId);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 计算当日权益
+        double equity = cash;
+        for (const auto& [instId, qty] : positions) {
+            if (qty > 0) {
+                double closePrice = 0.0;
+                for (const auto& mdp : mdpBatch) {
+                    if (mdp.instrumentId().value() == instId) {
+                        closePrice = mdp.lastPrice();
+                        break;
+                    }
+                }
+                equity += closePrice * static_cast<double>(qty);
+            }
+        }
+        equityCurve.push_back(equity);
+
+        // 进度
+        if (onProgress) {
+            const double progress = 100.0 * static_cast<double>(r + 1) / static_cast<double>(totalDays);
+            onProgress(progress);
+        }
+    }
+
+    // 4. 指标计算
+    if (!equityCurve.empty()) {
+        const double initialCapital = req.costSpec.initialCapital.value;
+        result.metrics.totalReturn = (equityCurve.back() - initialCapital) / initialCapital;
+
+        // 年化收益
+        const double years = static_cast<double>(totalDays) / 250.0;
+        if (years > 0.0 && initialCapital > 0.0) {
+            result.metrics.annualizedReturn =
+                std::pow(equityCurve.back() / initialCapital, 1.0 / years) - 1.0;
+        }
+
+        // 日收益率序列
+        std::vector<double> dailyReturns;
+        dailyReturns.reserve(equityCurve.size() - 1);
+        for (std::size_t i = 1; i < equityCurve.size(); ++i) {
+            if (equityCurve[i - 1] > 0.0) {
+                dailyReturns.push_back(equityCurve[i] / equityCurve[i - 1] - 1.0);
+            }
+        }
+
+        // 波动率
+        if (!dailyReturns.empty()) {
+            double sum = 0.0;
+            for (double ret : dailyReturns) sum += ret;
+            const double mean = sum / static_cast<double>(dailyReturns.size());
+            double sqSum = 0.0;
+            for (double ret : dailyReturns) sqSum += (ret - mean) * (ret - mean);
+            const double stdDev = std::sqrt(sqSum / static_cast<double>(dailyReturns.size()));
+            result.metrics.volatility = stdDev * std::sqrt(250.0);
+            if (result.metrics.volatility > 0.0) {
+                result.metrics.sharpeRatio = result.metrics.annualizedReturn / result.metrics.volatility;
+            }
+        }
+
+        // 最大回撤
+        double peak = equityCurve[0];
+        double maxDD = 0.0;
+        for (double eq : equityCurve) {
+            if (eq > peak) peak = eq;
+            const double dd = (peak > 0.0) ? (peak - eq) / peak : 0.0;
+            if (dd > maxDD) maxDD = dd;
+        }
+        result.metrics.maxDrawdown = maxDD;
+    }
+
+    result.success = true;
+    return result;
 }
 
 } // namespace domain::strategy

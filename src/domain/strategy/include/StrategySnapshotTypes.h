@@ -571,4 +571,13 @@ struct StrategyPerformanceSummary final {
     PerformanceSummaryMetrics latestMetrics;
 };
 
+/// @brief 策略回测结果（纯域层，无 Qt 依赖）
+struct StrategyBacktestResult final {
+    PerformanceSummaryMetrics metrics;
+    TimeSeriesSnapshot timeSeries;
+    TradeStatistics tradeStats;
+    bool success{false};
+    std::string errorMessage;
+};
+
 } // namespace domain::strategy

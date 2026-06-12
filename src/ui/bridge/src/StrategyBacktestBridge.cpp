@@ -8,9 +8,13 @@
 
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
+#include "DataServiceCache.h"
 #include "../../domain/strategy/include/IStrategyService.h"
+#include "../../domain/strategy/include/StrategyManager.h"
 
 #include <QDebug>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QMetaObject>
 
 namespace {
@@ -132,20 +136,70 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
         return;
     }
 
-    Q_UNUSED(request);
+    // 获取引擎
+    auto* engine = domain::strategy::StrategyManager::instance().get(strategyId.toStdString());
+    if (!engine) {
+        m_isRunning.store(false);
+        emit backtestFailed(QStringLiteral("Strategy engine not found. Start the strategy first."));
+        return;
+    }
+
+    // 获取数据集 JSON
+    const int datasetId = params.value("datasetCacheId", -1).toInt();
+    std::string datasetJson;
+    if (datasetId >= 0) {
+        QVariantList data = DataServiceCache::getInstance().getDataSetById(datasetId);
+        if (!data.isEmpty()) {
+            QJsonDocument doc(QJsonArray::fromVariantList(data));
+            datasetJson = doc.toJson(QJsonDocument::Compact).toStdString();
+        }
+    }
+    if (datasetJson.empty()) {
+        m_isRunning.store(false);
+        emit backtestFailed(QStringLiteral("No backtest dataset selected"));
+        return;
+    }
 
     if (!m_workerPool) {
         m_workerPool = std::make_unique<foundation::thread::ThreadPoolExecutor>(
             1, 1, std::chrono::milliseconds(120000), "StrategyBacktestBridge");
     }
 
-    m_workerPool->post([this, strategyId]() {
+    m_workerPool->post([this, engine, request = std::move(request), datasetJson = std::move(datasetJson)]() {
         try {
+            auto result = engine->backtest(request, datasetJson,
+                [this](double progress) {
+                    QMetaObject::invokeMethod(this, [this, progress]() {
+                        m_progress = progress;
+                        emit progressChanged();
+                    }, Qt::QueuedConnection);
+                });
+
+            if (!result.success) {
+                QMetaObject::invokeMethod(this, [this, msg = QString::fromStdString(result.errorMessage)]() {
+                    m_isRunning.store(false);
+                    emit backtestFailed(msg);
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            // 序列化结果到 QVariantMap
             QVariantMap qResult;
             qResult["status"] = QStringLiteral("SUCCESS");
             QVariantMap metricsMap;
-            metricsMap["execution"] = QVariantMap{};
-            metricsMap["groups"] = QVariantList{};
+            metricsMap["totalReturn"] = result.metrics.totalReturn;
+            metricsMap["annualizedReturn"] = result.metrics.annualizedReturn;
+            metricsMap["volatility"] = result.metrics.volatility;
+            metricsMap["sharpeRatio"] = result.metrics.sharpeRatio;
+            metricsMap["maxDrawdown"] = result.metrics.maxDrawdown;
+            metricsMap["sortinoRatio"] = result.metrics.sortinoRatio;
+            metricsMap["calmarRatio"] = result.metrics.calmarRatio;
+            metricsMap["winRate"] = result.metrics.winRate;
+            metricsMap["profitFactor"] = result.metrics.profitFactor;
+            metricsMap["alpha"] = result.metrics.alpha;
+            metricsMap["beta"] = result.metrics.beta;
+            metricsMap["informationRatio"] = result.metrics.informationRatio;
+            metricsMap["trackingError"] = result.metrics.trackingError;
             qResult["metrics"] = metricsMap;
 
             QMetaObject::invokeMethod(this, [this, qResult]() {

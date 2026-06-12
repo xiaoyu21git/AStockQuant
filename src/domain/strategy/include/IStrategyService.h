@@ -1,6 +1,7 @@
 #pragma once
 
 #include "StrategyServiceTypes.h"
+#include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
 
 #include <atomic>
@@ -22,6 +23,10 @@ class IExecutor;
 }
 
 namespace astock { namespace database { class ISqlDatabase; } }
+
+namespace domain::backtest {
+struct BacktestRequest;
+}
 
 namespace domain::strategy {
 
@@ -501,6 +506,13 @@ public:
     [[nodiscard]] IStrategyService& service() noexcept;
     [[nodiscard]] const IStrategyService& service() const noexcept;
     void setAsyncExecutor(std::shared_ptr<foundation::thread::IExecutor> executor);
+
+    // ─── 回测接口 ───
+
+    /// @brief 执行策略回测（逐日驱动引擎 → 模拟成交 → 指标计算）
+    [[nodiscard]] StrategyBacktestResult backtest(const domain::backtest::BacktestRequest& req,
+                                                   const std::string& datasetJson,
+                                                   const std::function<void(double)>& onProgress);
 
     // ─── 实盘异步专有接口 ───
 
