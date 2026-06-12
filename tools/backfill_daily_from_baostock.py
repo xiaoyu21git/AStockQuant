@@ -177,9 +177,7 @@ def backfill_year(symbols: list[str], year: int):
         if end > today:
             end = today
 
-        # 每月重新登录
-        bs.logout()
-        bs.login()
+        # 不重新登录，保持单一 session
 
         start_str = start.strftime("%Y-%m-%d")
         end_str = end.strftime("%Y-%m-%d")
