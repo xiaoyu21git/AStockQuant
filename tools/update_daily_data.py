@@ -1204,8 +1204,8 @@ def process_market_update_task(task: dict[str, Any], target_date: dt.date) -> di
         # 优先使用 Baostock 缓存
         if symbol in _baostock_cache:
             raw_df = _baostock_cache[symbol][
-                (_baostock_cache[symbol]["date"] >= pd.Timestamp(start_date))
-                & (_baostock_cache[symbol]["date"] <= pd.Timestamp(target_date))
+                (_baostock_cache[symbol]["trade_date"] >= pd.Timestamp(start_date))
+                & (_baostock_cache[symbol]["trade_date"] <= pd.Timestamp(target_date))
             ].copy()
             if not raw_df.empty:
                 raw_df["symbol"] = symbol
