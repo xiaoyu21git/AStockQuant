@@ -4,10 +4,13 @@
 #include "../include/StrategyListModel.h"
 
 #include "database/StrategyRepository.h"
+#include "FactorService.h"
 
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
+#include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 #include "../../domain/strategy/include/StrategyManager.h"
+#include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -534,7 +537,29 @@ bool StrategyBridge::start(const QString& strategyId)
 
     auto& mgr = domain::strategy::StrategyManager::instance();
     if (!mgr.get(repositoryId.toStdString())) {
-        mgr.createEngine(repositoryId.toStdString());
+        // 创建 RuntimeFactorSvc 注入因子服务
+        std::shared_ptr<domain::strategy::IFactorSvc> factorSvc;
+        auto* factorSvcBridge = FactorService::instance();
+        if (factorSvcBridge && factorSvcBridge->isInitialized()) {
+            auto* instanceMgr = factorSvcBridge->instanceManager();
+            if (instanceMgr) {
+                // 符号解析器：uint32_t InstrumentId → 股票代码字符串
+                // 因子名解析器：uint64_t FactorId → 因子名称字符串
+                auto symbolResolver = [](std::uint32_t id) -> std::string {
+                    char buf[16];
+                    std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+                    return buf;
+                };
+                auto factorNameResolver = [](std::uint64_t fid) -> std::string {
+                    return std::to_string(fid);
+                };
+                factorSvc = std::make_shared<domain::strategy::RuntimeFactorSvc>(
+                    *instanceMgr,
+                    std::move(symbolResolver),
+                    std::move(factorNameResolver));
+            }
+        }
+        mgr.createEngine(repositoryId.toStdString(), std::move(factorSvc));
     }
     auto* engine = mgr.get(repositoryId.toStdString());
     if (!engine) {

@@ -1,4 +1,6 @@
 #include "../include/IStrategyService.h"
+#include "../include/RuntimeStrategyFactory.h"
+#include "../include/RuntimeFactorSvc.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "foundation/json/json_facade.h"
@@ -30,7 +32,8 @@ std::vector<::domain::strategies::FactorId> parseFactorIds(const std::string& js
 }
 } // anonymous namespace
 
-std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId)
+std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId,
+                                                         std::shared_ptr<IFactorSvc> factorSvc)
 {
     auto& pool = astock::database::NativeMySQLConnectionPool::instance();
     if (!pool.isInitialized()) return nullptr;
@@ -65,7 +68,59 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     }
 
     params.factorIds = parseFactorIds(row.getString("factor_ids"));
-    return fromParams(params);
+
+    // 注入因子回调：使用 buildFactorCallbacks + RuntimeFactorSvc
+    if (factorSvc && !params.factorIds.empty()) {
+        auto cbs = buildFactorCallbacks(params.factorIds, std::move(factorSvc));
+        params.onIncremental = std::move(cbs.updateIncremental);
+        params.onBatch       = std::move(cbs.updateBatch);
+        params.onCopySnapshots = std::move(cbs.copySnapshots);
+    }
+
+    auto engine = fromParams(params);
+    if (!engine) return nullptr;
+
+    // 构建并注册运行时策略实例
+    if (!params.factorIds.empty()) {
+        ::domain::strategies::StrategyCommonConfig commonCfg;
+        commonCfg.allowShort          = params.allowShort;
+        commonCfg.maxPositions         = params.maxPositions;
+        commonCfg.maxWeightPerStock    = params.maxWeightPerStock;
+        commonCfg.minWeightPerStock    = params.minWeightPerStock;
+        commonCfg.weightScheme         = ::domain::strategies::WeightScheme::EQUAL;
+        commonCfg.rebalanceFrequency   = ::domain::strategies::RebalanceFrequency::DAILY;
+
+        ::domain::strategies::StrategyMetadata meta;
+        meta.name         = params.strategyName;
+        meta.description  = params.description;
+        meta.behaviorKind = params.behaviorKind;
+        meta.factorIds    = params.factorIds;
+        meta.enabled      = true;
+
+        ::domain::strategies::MultiFactorSelectionStrategySpec spec;
+        spec.topN           = params.topN > 0 ? params.topN : params.maxPositions;
+        spec.industryNeutral = false;
+
+        auto strategyDef = std::make_shared<::domain::strategies::MultiFactorSelectionStrategy>(
+            commonCfg, meta, spec);
+
+        constexpr StrategyInstanceId kDefaultInstanceId = 1;
+        RuntimeStrategyContext ctx(kDefaultInstanceId,
+                                    1,                    // snapshotVersion
+                                    params.maxOrderQuantity,
+                                    params.maxWeightPerStock,
+                                    false);               // autoExecutionEnabled
+
+        auto runtimeStrategy = createMultiFactorSelectionRuntimeStrategy(
+            strategyDef, kDefaultInstanceId, CallbackRuntimeFactorServiceAdapter::Callbacks{});
+
+        const auto regResult = engine->registerStrategy(std::move(runtimeStrategy), ctx);
+        if (!regResult.isOk()) {
+            return nullptr;
+        }
+    }
+
+    return engine;
 }
 
 StrategyEngine::Builder StrategyEngine::builder()

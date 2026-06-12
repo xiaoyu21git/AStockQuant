@@ -1,6 +1,7 @@
 #pragma once
 
 #include "IStrategyService.h"
+#include "IFactorSvc.h"
 
 #include <memory>
 #include <mutex>
@@ -17,7 +18,8 @@ public:
 
     static StrategyManager& instance();
 
-    [[nodiscard]] StrategyEngine* createEngine(const std::string& strategyId);
+    [[nodiscard]] StrategyEngine* createEngine(const std::string& strategyId,
+                                               std::shared_ptr<IFactorSvc> factorSvc = nullptr);
     [[nodiscard]] StrategyEngine* get(const std::string& id) const;
     void remove(const std::string& id);
 

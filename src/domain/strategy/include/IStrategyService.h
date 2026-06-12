@@ -466,7 +466,9 @@ public:
     static Builder builder();
 
     /// @brief 从数据库通过 strategyId 加载参数并构建引擎（内部自己获取连接）
-    [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId);
+    /// @param factorSvc 因子服务，若为 nullptr 则不注入因子回调
+    [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId,
+                                                                 std::shared_ptr<IFactorSvc> factorSvc = nullptr);
 
     /// @brief 从策略参数构建完整的引擎实例
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromParams(const StrategyCreationParams& params);

@@ -1,4 +1,5 @@
 #include "../include/StrategyManager.h"
+#include "../include/RuntimeFactorSvc.h"
 
 namespace domain::strategy {
 
@@ -7,8 +8,9 @@ StrategyManager& StrategyManager::instance() {
     return s_instance;
 }
 
-StrategyEngine* StrategyManager::createEngine(const std::string& strategyId) {
-    auto engine = StrategyEngine::fromDb(strategyId);
+StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
+                                               std::shared_ptr<IFactorSvc> factorSvc) {
+    auto engine = StrategyEngine::fromDb(strategyId, std::move(factorSvc));
     if (!engine) return nullptr;
 
     const std::lock_guard<std::mutex> lock(m_mutex);

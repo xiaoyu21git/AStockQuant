@@ -11,11 +11,9 @@
 #include <utility>
 #include <vector>
 
-namespace {
-
 // 纯 C++ 因子回调构建（接受 IFactorSvc）
 domain::strategy::CallbackRuntimeFactorServiceAdapter::Callbacks
-buildFactorCallbacks(
+domain::strategy::buildFactorCallbacks(
     const std::vector<::domain::strategies::FactorId>& factorIds,
     std::shared_ptr<domain::strategy::IFactorSvc> factorSvc)
 {
@@ -96,6 +94,7 @@ buildFactorCallbacks(
     return cbs;
 }
 
+namespace {
 constexpr double kZeroValue = 0.0;
 constexpr double kFullWeight = 1.0;
 constexpr double kMagnitudeEpsilon = 1e-12;

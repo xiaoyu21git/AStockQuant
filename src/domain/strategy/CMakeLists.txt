@@ -1,6 +1,7 @@
 add_library(domain_strategy_runtime STATIC)
 
 target_sources(domain_strategy_runtime PRIVATE
+    src/RuntimeFactorSvc.cpp
     src/RuntimeStrategyFactory.cpp
     src/StrategyServiceContracts.cpp
     src/StrategySnapshotTypes.cpp
@@ -23,6 +24,7 @@ target_link_libraries(domain_strategy_runtime
     PUBLIC
         foundation
     PRIVATE
+        factor
         domain_strategies
 )
 
