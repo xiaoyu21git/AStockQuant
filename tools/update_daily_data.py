@@ -18,6 +18,7 @@ from typing import Any, Iterable, Optional
 
 import akshare as ak
 import pandas as pd
+import tools.import_from_baostock as baostock
 import pymysql
 from sqlalchemy.exc import DBAPIError, OperationalError as SQLAlchemyOperationalError
 
@@ -92,6 +93,7 @@ DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ = "AKSHARE_STOCK_DAILY_GM_ADJ"
 DATA_SOURCE_JUEJIN_STOCK_DAILY = "JUEJIN_GM_STOCK_DAILY"
 DATA_SOURCE_JUEJIN_BENCHMARK_DAILY = "JUEJIN_GM_BENCHMARK_INDEX_DAILY"
 DATA_SOURCE_JUEJIN_INDUSTRY_DAILY = "JUEJIN_GM_INDUSTRY_INDEX_DAILY"
+DATA_SOURCE_BAOSTOCK_STOCK_DAILY = "BAOSTOCK_STOCK_DAILY"
 PE_PB_DB_LIMIT = 999999.9999
 MARKET_CAP_DB_LIMIT = 9999999999999999.9999
 MAX_DB_WRITE_RETRIES = 3
@@ -1150,6 +1152,43 @@ def sanitize_market_valuation_fields(symbol: str, df: pd.DataFrame) -> pd.DataFr
     return pd.DataFrame(sanitized_rows)
 
 
+# Baostock 批量预取缓存
+_baostock_cache: dict[str, pd.DataFrame] = {}
+
+def prefetch_baostock_data(symbols: list[str], start_date: dt.date, end_date: dt.date) -> int:
+    """批量拉取全 A 股日线数据并缓存到内存"""
+    global _baostock_cache
+    _baostock_cache.clear()
+    
+    if not symbols:
+        return 0
+    
+    print(f"[stage] Baostock batch fetch: {len(symbols)} symbols, {start_date}..{end_date}", flush=True)
+    
+    try:
+        if not baostock.login():
+            return 0
+        
+        df = baostock.fetch_daily_k_data_all_stocks(symbols, start_date, end_date)
+        baostock.logout()
+        
+        if df.empty:
+            return 0
+        
+        # 按 symbol 分组缓存
+        for symbol, group in df.groupby('symbol'):
+            _baostock_cache[symbol] = group.copy()
+        
+        print(f"[stage] Baostock cached: {len(_baostock_cache)} symbols, {len(df)} rows", flush=True)
+        return len(df)
+    except Exception as e:
+        print(f"[warn] Baostock batch fetch failed: {e}", flush=True)
+        try:
+            baostock.logout()
+        except:
+            pass
+        return 0
+
 def process_market_update_task(task: dict[str, Any], target_date: dt.date) -> dict[str, Any]:
     symbol = task["symbol"]
     category = task["category"]
@@ -1157,7 +1196,17 @@ def process_market_update_task(task: dict[str, Any], target_date: dt.date) -> di
     data_source = task["data_source"]
 
     if category == "stock":
-        raw_df = fetch_symbol_daily(symbol, start_date, target_date)
+        # 优先使用 Baostock 缓存
+        if symbol in _baostock_cache:
+            raw_df = _baostock_cache[symbol][
+                (_baostock_cache[symbol]["date"] >= pd.Timestamp(start_date))
+                & (_baostock_cache[symbol]["date"] <= pd.Timestamp(target_date))
+            ].copy()
+            if not raw_df.empty:
+                raw_df["symbol"] = symbol
+                raw_df["data_source"] = DATA_SOURCE_BAOSTOCK_STOCK_DAILY
+        else:
+            raw_df = fetch_symbol_daily(symbol, start_date, target_date)
     else:
         raw_df = fetch_reference_daily_from_juejin(symbol, start_date, target_date, data_source)
 
@@ -1457,6 +1506,13 @@ def main() -> None:
 
     if benchmark_targets or industry_targets:
         earliest_start = min(earliest_start, *(list(benchmark_targets.values()) + list(industry_targets.values())))
+
+    # Baostock 批量预取全 A 股数据（替代逐只请求）
+    stock_symbols = [t["symbol"] for t in market_tasks if t["category"] == "stock"]
+    if stock_symbols:
+        baostock_rows = prefetch_baostock_data(stock_symbols, earliest_start, target_date)
+        if baostock_rows > 0:
+            print(f"[stage] Baostock batch prefetch done: {baostock_rows} rows", flush=True)
 
     if market_tasks:
         resolved_market_workers = resolve_market_worker_count(args.market_workers, len(market_tasks))
