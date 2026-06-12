@@ -1,7 +1,11 @@
+#!/usr/bin/env python
 """
 backfill_daily_from_baostock.py
 使用 Baostock 批量回填 daily_bar 缺失字段（PE/PB/复权/振幅/涨跌额）
-注意: Baostock API 不支持逗号分隔批量查询，只能逐只请求
+支持 tqdm 进度条，逐只请求（Baostock 不支持批量拼接）
+用法:
+  python tools/backfill_daily_from_baostock.py --start-year 2015
+  python tools/backfill_daily_from_baostock.py --start-year 2015 --end-year 2024
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from typing import Any
 import baostock as bs
 import pandas as pd
 import pymysql
+import tqdm
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -32,13 +37,14 @@ MYSQL_CONFIG = {
     "charset": "utf8mb4",
 }
 
-WRITE_WORKERS = 4
-PROGRESS_INTERVAL = 100
-FETCH_WORKERS = 4   # 并发拉取线程数
+DB_WRITE_WORKERS = 4      # 并发写 DB 线程
+PROGRESS_BAR_WIDTH = 80   # tqdm 宽度
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
+# ── 代码转换 ───────────────────────────────────────────────
 def to_bs_code(symbol: str) -> str:
     code, ex = symbol.split(".")
     return f"{ex.lower()}.{code}"
@@ -49,6 +55,7 @@ def from_bs_code(bs_code: str) -> str:
     return f"{code}.{ex.upper()}"
 
 
+# ── DB 连接 ────────────────────────────────────────────────
 def get_db_connection() -> pymysql.Connection:
     return pymysql.connect(**MYSQL_CONFIG)
 
@@ -58,40 +65,66 @@ def get_all_active_symbols() -> list[str]:
     try:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT symbol FROM symbol_info WHERE asset_class='STOCK' AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol")
+                "SELECT symbol FROM symbol_info WHERE asset_class='STOCK' "
+                "AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol"
+            )
             return [r[0] for r in cur.fetchall()]
     finally:
         conn.close()
 
 
-# ── 单只股票拉取 ──
+# ── 单只股票拉取 ────────────────────────────────────────────
 def fetch_one_stock(symbol: str, start: dt.date, end: dt.date) -> pd.DataFrame:
+    """
+    从 Baostock 拉取一只股票的数据
+    返回包含 date, code, open, high, low, close, preclose,
+              volume, amount, turn, tradestatus, pctChg, peTTM, pbMRQ, isST 的 DataFrame
+    """
     bs_code = to_bs_code(symbol)
-    fields = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,isST"
+    fields = (
+        "date,code,open,high,low,close,preclose,"
+        "volume,amount,adjustflag,turn,tradestatus,"
+        "pctChg,peTTM,pbMRQ,isST"
+    )
     rs = bs.query_history_k_data_plus(
-        bs_code, fields,
+        bs_code,
+        fields,
         start_date=start.strftime("%Y-%m-%d"),
         end_date=end.strftime("%Y-%m-%d"),
-        frequency="d", adjustflag="2",
+        frequency="d",
+        adjustflag="2",
     )
+
     if rs.error_code != "0":
         return pd.DataFrame()
+
     rows = []
     while rs.next():
         rows.append(rs.get_row_data())
+
     if not rows:
         return pd.DataFrame()
+
     return pd.DataFrame(rows, columns=rs.fields)
 
 
 def normalize_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """将 Baostock 原始数据转换为 daily_bar 标准字段"""
     if df.empty:
         return df
+
     norm = df.copy()
-    num = ["open","high","low","close","preclose","volume","amount","turn","pctChg","peTTM","pbMRQ"]
-    for c in num:
-        if c in norm.columns:
-            norm[c] = pd.to_numeric(norm[c], errors="coerce")
+
+    # 数值转换
+    num_cols = [
+        "open", "high", "low", "close", "preclose",
+        "volume", "amount", "turn", "pctChg", "peTTM", "pbMRQ",
+    ]
+    for col in num_cols:
+        if col in norm.columns:
+            norm[col] = pd.to_numeric(norm[col], errors="coerce")
+
+    # 映射字段
     norm["trade_date"] = pd.to_datetime(norm["date"]).dt.date
     norm["symbol"] = norm["code"].apply(from_bs_code)
     norm["pre_close"] = norm["preclose"]
@@ -100,132 +133,250 @@ def normalize_frame(df: pd.DataFrame) -> pd.DataFrame:
     norm["turnover_rate"] = norm["turn"]
     norm["pe_ratio"] = norm["peTTM"]
     norm["pb_ratio"] = norm["pbMRQ"]
-    vp = norm["pre_close"].notna() & (norm["pre_close"] > 0)
+
+    # 可推算字段
+    valid_pre = norm["pre_close"].notna() & (norm["pre_close"] > 0)
     norm["change_amt"] = (norm["close"] - norm["pre_close"]).round(4)
     norm["amplitude"] = None
-    norm.loc[vp, "amplitude"] = ((norm.loc[vp,"high"] - norm.loc[vp,"low"]) / norm.loc[vp,"pre_close"] * 100).round(4)
+    norm.loc[valid_pre, "amplitude"] = (
+        (norm.loc[valid_pre, "high"] - norm.loc[valid_pre, "low"])
+        / norm.loc[valid_pre, "pre_close"]
+        * 100
+    ).round(4)
+
+    # Baostock 不提供的字段
     norm["market_cap"] = None
     norm["circulating_market_cap"] = None
     norm["pre_adjust_factor"] = None
     norm["post_adjust_factor"] = None
+
+    # 只保留交易日
     if "tradestatus" in norm.columns:
         norm = norm[norm["tradestatus"] == "1"]
-    cols = ["symbol","trade_date","open","high","low","close","pre_close","volume","turnover",
-            "change_pct","change_amt","amplitude","turnover_rate","pe_ratio","pb_ratio",
-            "market_cap","circulating_market_cap","pre_adjust_factor","post_adjust_factor"]
-    return norm[[c for c in cols if c in norm.columns]].copy()
+
+    output_cols = [
+        "symbol", "trade_date",
+        "open", "high", "low", "close", "pre_close",
+        "volume", "turnover", "change_pct", "change_amt", "amplitude",
+        "turnover_rate", "pe_ratio", "pb_ratio",
+        "market_cap", "circulating_market_cap",
+        "pre_adjust_factor", "post_adjust_factor",
+    ]
+    return norm[[c for c in output_cols if c in norm.columns]].copy()
 
 
-# ── DB ──
+# ── DB 写入 ────────────────────────────────────────────────
 def get_missing_dates(cur, symbol: str, trade_dates: list) -> set:
     if not trade_dates:
         return set()
     ph = ",".join(["%s"] * len(trade_dates))
-    cur.execute(f"""
+    cur.execute(
+        f"""
         SELECT trade_date FROM daily_bar
-        WHERE symbol=%s AND trade_date IN ({ph})
-          AND (pe_ratio IS NULL OR pe_ratio=0
-               OR pb_ratio IS NULL OR pb_ratio=0
-               OR pre_adjust_factor IS NULL OR pre_adjust_factor=0
-               OR post_adjust_factor IS NULL OR post_adjust_factor=0)
-    """, [symbol] + trade_dates)
+        WHERE symbol = %s AND trade_date IN ({ph})
+          AND (pe_ratio IS NULL OR pe_ratio = 0
+               OR pb_ratio IS NULL OR pb_ratio = 0
+               OR pre_adjust_factor IS NULL OR pre_adjust_factor = 0
+               OR post_adjust_factor IS NULL OR post_adjust_factor = 0)
+        """,
+        [symbol] + trade_dates,
+    )
     return {r[0] for r in cur.fetchall()}
 
 
-def update_stock(symbol: str, group: pd.DataFrame) -> dict:
+def update_stock(symbol: str, group: pd.DataFrame) -> dict[str, int]:
+    """更新单只股票的缺失字段"""
     conn = get_db_connection()
-    checked = 0; updated = 0
+    checked = 0
+    updated = 0
     try:
         with conn.cursor() as cur:
             missing = get_missing_dates(cur, symbol, group["trade_date"].tolist())
             for _, row in group.iterrows():
                 td = row["trade_date"]
-                if isinstance(td, pd.Timestamp): td = td.date()
-                if td not in missing: continue
+                if isinstance(td, pd.Timestamp):
+                    td = td.date()
+                if td not in missing:
+                    continue
                 checked += 1
-                ups = []; prs = []
-                for f,c in [("pe_ratio","pe_ratio"),("pb_ratio","pb_ratio"),
-                            ("pre_adjust_factor","pre_adjust_factor"),
-                            ("post_adjust_factor","post_adjust_factor"),
-                            ("change_amt","change_amt"),("amplitude","amplitude")]:
-                    v = row.get(c)
-                    if v is not None and pd.notna(v): ups.append(f"{f}=%s"); prs.append(float(v))
-                if ups:
-                    cur.execute(f"UPDATE daily_bar SET {','.join(ups)} WHERE symbol=%s AND trade_date=%s",
-                                prs + [symbol, td])
-                    updated += 1
+
+                updates = []
+                params = []
+                field_map = [
+                    ("pe_ratio", "pe_ratio"),
+                    ("pb_ratio", "pb_ratio"),
+                    ("pre_adjust_factor", "pre_adjust_factor"),
+                    ("post_adjust_factor", "post_adjust_factor"),
+                    ("change_amt", "change_amt"),
+                    ("amplitude", "amplitude"),
+                ]
+                for field, col in field_map:
+                    val = row.get(col)
+                    if val is not None and pd.notna(val):
+                        updates.append(f"{field} = %s")
+                        params.append(float(val))
+
+                if updates:
+                    sql = f"UPDATE daily_bar SET {', '.join(updates)} WHERE symbol = %s AND trade_date = %s"
+                    params.extend([symbol, td])
+                    try:
+                        cur.execute(sql, params)
+                        updated += 1
+                    except Exception:
+                        pass
+
             conn.commit()
-    except Exception: conn.rollback()
-    finally: conn.close()
-    return {"symbol":symbol,"checked":checked,"updated":updated}
+    except Exception:
+        conn.rollback()
+    finally:
+        conn.close()
+
+    return {"checked": checked, "updated": updated}
 
 
-def backfill_year(symbols: list[str], year: int) -> dict:
-    logger.info(f"=== Year {year}: {len(symbols)} stocks ===")
+# ── 回填主流程 ──────────────────────────────────────────────
+def backfill_year(symbols: list[str], year: int) -> dict[str, int]:
+    """
+    回填指定年份的数据
+    返回: {"fetched": int, "updated": int, "checked": int}
+    """
     start = dt.date(year, 1, 1)
     end = min(dt.date(year, 12, 31), dt.date.today())
-    if start > end: return {"fetched":0,"updated":0,"checked":0}
+    if start > end:
+        return {"fetched": 0, "updated": 0, "checked": 0}
 
+    logger.info(f"Year {year}: fetching {len(symbols)} stocks...")
+
+    # ── Step 1: 逐只拉取 (带进度条) ──
+    all_groups = []
+    fetch_errors = 0
     t0 = time.time()
 
-    # Step 1: 并发拉取
-    all_groups = []
-    completed_fetch = 0; total_sym = len(symbols)
-    with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as ex:
-        futures = {ex.submit(fetch_one_stock, s, start, end): s for s in symbols}
-        for f in as_completed(futures):
-            s = futures[f]
-            completed_fetch += 1
-            df = f.result()
-            if not df.empty:
-                df = normalize_frame(df)
-                if not df.empty:
-                    all_groups.append((s, df))
-            if completed_fetch % PROGRESS_INTERVAL == 0:
-                logger.info(f"Fetch: {completed_fetch}/{total_sym} ({completed_fetch/total_sym*100:.1f}%)")
+    with tqdm.tqdm(
+        total=len(symbols),
+        desc=f"Fetch {year}",
+        unit="stock",
+        ncols=PROGRESS_BAR_WIDTH,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+    ) as pbar:
+        for symbol in symbols:
+            try:
+                raw_df = fetch_one_stock(symbol, start, end)
+                if not raw_df.empty:
+                    norm_df = normalize_frame(raw_df)
+                    if not norm_df.empty:
+                        all_groups.append((symbol, norm_df))
+                else:
+                    fetch_errors += 1
+            except Exception:
+                fetch_errors += 1
+            pbar.update(1)
+            pbar.set_postfix_str(f"got={len(all_groups)} err={fetch_errors}")
 
     t1 = time.time()
-    fetched = sum(len(g[1]) for g in all_groups)
-    logger.info(f"Fetch done in {t1-t0:.1f}s: {fetched} rows, {len(all_groups)} symbols")
+    fetched_rows = sum(len(g[1]) for g in all_groups)
+    logger.info(
+        f"Year {year}: fetched {fetched_rows} rows from {len(all_groups)} stocks "
+        f"({fetch_errors} errors) in {t1 - t0:.1f}s"
+    )
 
-    if not all_groups: return {"fetched":0,"updated":0,"checked":0}
+    if not all_groups:
+        logger.warning(f"Year {year}: no data fetched")
+        return {"fetched": 0, "updated": 0, "checked": 0}
 
-    # Step 2: 并发写入 DB
-    total_checked = 0; total_updated = 0; completed = 0; total = len(all_groups)
-    with ThreadPoolExecutor(max_workers=WRITE_WORKERS) as ex:
-        futures = {ex.submit(update_stock, s, g): s for s, g in all_groups}
-        for f in as_completed(futures):
-            r = f.result()
-            total_checked += r["checked"]; total_updated += r["updated"]; completed += 1
-            if completed % PROGRESS_INTERVAL == 0 or completed == total:
-                ela = time.time() - t1
-                eta = ela / completed * (total - completed) if completed > 0 else 0
-                logger.info(f"Write: {completed}/{total} ({completed/total*100:.1f}%) "
-                            f"checked={total_checked} updated={total_updated} elapsed={ela:.0f}s eta={eta:.0f}s")
+    # ── Step 2: 多线程写入 DB (带进度条) ──
+    total_checked = 0
+    total_updated = 0
+    t2 = time.time()
 
-    logger.info(f"Year {year} done: fetched={fetched} checked={total_checked} updated={total_updated}")
-    return {"fetched":fetched,"updated":total_updated,"checked":total_checked}
+    with tqdm.tqdm(
+        total=len(all_groups),
+        desc=f"Write {year}",
+        unit="stock",
+        ncols=PROGRESS_BAR_WIDTH,
+        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
+    ) as pbar:
+        with ThreadPoolExecutor(max_workers=DB_WRITE_WORKERS) as executor:
+            futures = {
+                executor.submit(update_stock, sym, grp): sym
+                for sym, grp in all_groups
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                total_checked += result["checked"]
+                total_updated += result["updated"]
+                pbar.update(1)
+                pbar.set_postfix_str(
+                    f"checked={total_checked} updated={total_updated}"
+                )
+
+    t3 = time.time()
+    logger.info(
+        f"Year {year}: checked {total_checked}, updated {total_updated} "
+        f"in {t3 - t2:.1f}s"
+    )
+
+    return {"fetched": fetched_rows, "updated": total_updated, "checked": total_checked}
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--start-year", type=int, default=2015)
-    parser.add_argument("--end-year", type=int, default=None)
-    parser.add_argument("--symbols", type=str, default=None)
+    parser = argparse.ArgumentParser(
+        description="Baostock 批量回填 daily_bar 缺失字段"
+    )
+    parser.add_argument(
+        "--start-year", type=int, default=2015, help="起始年份 (默认 2015)"
+    )
+    parser.add_argument(
+        "--end-year", type=int, default=None, help="结束年份 (默认今年)"
+    )
+    parser.add_argument(
+        "--symbols", type=str, default=None, help="仅处理指定股票 (逗号分隔)"
+    )
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    print("=" * 60)
+    print("  Baostock daily_bar 回填工具")
+    print("  回填字段: PE, PB, 复权因子, 振幅, 涨跌额")
+    print("=" * 60)
+    print()
+
     logger.info("Starting Baostock backfill...")
-    bs.login()
+
+    # 登录
+    lg = bs.login()
+    if lg.error_code != "0":
+        print(f"[ERROR] Baostock login failed: {lg.error_msg}")
+        return
+
     try:
-        symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else get_all_active_symbols()
+        # 获取符号列表
+        if args.symbols:
+            symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+        else:
+            symbols = get_all_active_symbols()
+
         logger.info(f"Target: {len(symbols)} symbols")
+
         end_year = args.end_year or dt.date.today().year
-        totals = {"fetched":0,"updated":0,"checked":0}
-        for y in range(args.start_year, end_year + 1):
-            r = backfill_year(symbols, y)
-            for k in totals: totals[k] += r.get(k,0)
-        logger.info(f"=== DONE: fetched={totals['fetched']} checked={totals['checked']} updated={totals['updated']} ===")
+        totals = {"fetched": 0, "updated": 0, "checked": 0}
+
+        years = list(range(args.start_year, end_year + 1))
+        print(f"Years to process: {years[0]} ~ {years[-1]} ({len(years)} years)")
+        print()
+
+        for y in years:
+            result = backfill_year(symbols, y)
+            for k in totals:
+                totals[k] += result.get(k, 0)
+            print()
+
+        print("=" * 60)
+        print(f"  ALL DONE")
+        print(f"  Fetched:  {totals['fetched']:>12,} rows")
+        print(f"  Checked:  {totals['checked']:>12,} records")
+        print(f"  Updated:  {totals['updated']:>12,} fields")
+        print("=" * 60)
+
     finally:
         bs.logout()
 
