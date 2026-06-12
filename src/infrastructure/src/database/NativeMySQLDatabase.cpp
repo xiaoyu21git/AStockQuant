@@ -218,6 +218,43 @@ int NativeMySQLDatabase::executeUpdate(const std::string& sql, const std::vector
     return affectedRows;
 }
 
+int NativeMySQLDatabase::executeBatchUpdate(const std::string& sql,
+                                             const std::vector<std::vector<SqlParam>>& batchParams)
+{
+    if (!impl_->conn || !impl_->open_) {
+        impl_->lastError_ = "Connection not open";
+        return -1;
+    }
+
+    if (batchParams.empty()) {
+        return 0;
+    }
+
+    int totalAffected = 0;
+    for (const auto& params : batchParams) {
+        const std::string boundSql = bindParams(sql, params);
+        if (mysql_query(impl_->conn, boundSql.c_str()) != 0) {
+            impl_->lastError_ = mysql_error(impl_->conn);
+            return -1;
+        }
+
+        totalAffected += static_cast<int>(mysql_affected_rows(impl_->conn));
+
+        MYSQL_RES* mysqlResult = mysql_store_result(impl_->conn);
+        if (mysqlResult) {
+            mysql_free_result(mysqlResult);
+        }
+        while (mysql_next_result(impl_->conn) == 0) {
+            MYSQL_RES* extra = mysql_store_result(impl_->conn);
+            if (extra) {
+                mysql_free_result(extra);
+            }
+        }
+    }
+
+    return totalAffected;
+}
+
 bool NativeMySQLDatabase::beginTransaction()
 {
     return executeUpdate("START TRANSACTION") >= 0;

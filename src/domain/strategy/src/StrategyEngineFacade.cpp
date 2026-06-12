@@ -1,3 +1,5 @@
+#include "../../strategies/include/MultiFactorSelectionStrategy.h"
+
 #include "../include/IStrategyService.h"
 #include "../include/RuntimeStrategyFactory.h"
 #include "../include/RuntimeFactorSvc.h"

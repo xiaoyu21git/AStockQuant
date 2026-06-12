@@ -107,6 +107,9 @@ public:
     virtual int executeUpdate(const std::string& sql,
                               const std::vector<SqlParam>& params = {}) = 0;
 
+    virtual int executeBatchUpdate(const std::string& sql,
+                                   const std::vector<std::vector<SqlParam>>& batchParams) = 0;
+
     virtual bool beginTransaction() = 0;
     virtual bool commitTransaction() = 0;
     virtual bool rollbackTransaction() = 0;

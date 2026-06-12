@@ -673,18 +673,6 @@ ApplicationWindow {
     }
     
     // === 页面映射表 ===
-    function getPageSource(menuCode) {
-         if (menuCode === "trade_execution") {
-            return "qrc:/page/trading/TradingPage.qml";
-        }
-        if (menuCode === "strategy_library" || menuCode === "strategy_creation") {
-            return "qrc:/page/strategies/StrategyLibraryPage.qml";
-        }
-        if (menuCode === "factor_analysis" || menuCode === "factor_library") {
-            return "qrc:/ConsoleUi/Qml/page/FactorWorkbench.qml";
-        }
-        return "qrc:/page/dashboard/MainContent.qml";
-    }
 
     function showDepositDialog() {
         depositDialog.open()

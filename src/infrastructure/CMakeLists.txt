@@ -1,4 +1,4 @@
-# CMakeLists.txt for infrastructure module
+﻿# CMakeLists.txt for infrastructure module
 cmake_minimum_required(VERSION 3.15)
 
 project(infrastructure LANGUAGES CXX)
@@ -7,9 +7,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 查找Qt6（如果项目使用Qt）
 if(NOT TARGET Qt6::Core)
-    find_package(Qt6 COMPONENTS Core Sql QUIET)
+    find_package(Qt6 COMPONENTS Core Sql REQUIRED)
 endif()
 
 if (WIN32)
@@ -42,7 +41,6 @@ find_path(MYSQL_INCLUDE_DIR
         "/usr/local/include/mysql"
 )
 
-# 如果本模块未单独找到 MYSQL_INCLUDE_DIR，则复用 domain/market 中已经找到的 MARKET_MYSQL_INCLUDE_DIR
 if(NOT MYSQL_INCLUDE_DIR AND MARKET_MYSQL_INCLUDE_DIR)
     set(MYSQL_INCLUDE_DIR ${MARKET_MYSQL_INCLUDE_DIR})
 endif()
@@ -59,42 +57,35 @@ add_library(infrastructure STATIC
     src/database/ConnectionPool.cpp
     src/database/NativeMySQLConnectionPool.cpp
     src/database/NativeMySQLDatabase.cpp
-    src/database/MarketDataRepository.cpp
     src/database/QtMySQLDatabase.cpp
+    src/database/MarketDataRepository.cpp
     src/database/QueryBuilder.cpp
     src/database/FactorRepository.cpp
     src/database/StrategyRepository.cpp
-    # 其他数据源/缓存实现如需启用可在此追加
 )
 
-# 启用Qt元对象编译器（MOC）
+# MarketDataRepository 仍依赖 Qt -> AUTOMOC ON
 set_target_properties(infrastructure PROPERTIES
     AUTOMOC ON
-    INTERPROCEDURAL_OPTIMIZATION TRUE
 )
 
 target_link_libraries(infrastructure
     PUBLIC
         foundation
     PRIVATE
+        Qt6::Core
+        Qt6::Sql
         OpenSSL::SSL
         OpenSSL::Crypto
 )
-
-# 如果找到Qt6，链接Qt库
-if(TARGET Qt6::Core AND TARGET Qt6::Sql)
-    target_link_libraries(infrastructure PRIVATE Qt6::Core Qt6::Sql)
-endif()
 
 if(MYSQL_LIB)
     target_link_libraries(infrastructure PRIVATE ${MYSQL_LIB})
 endif()
 
-# 线程库支持
 find_package(Threads REQUIRED)
 target_link_libraries(infrastructure PRIVATE Threads::Threads)
 
-# 头文件搜索路径
 target_include_directories(infrastructure
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include

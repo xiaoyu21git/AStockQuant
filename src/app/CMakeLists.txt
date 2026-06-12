@@ -35,6 +35,7 @@ set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ConsoleUi")
 
 # 濞ｈ濮炵€涙劗娲拌ぐ鏇礄閸嬪洩顔?src/ 娑擃厽婀?CMakeLists.txt閿?
 #add_subdirectory(src)
+add_subdirectory(adapters)
 
 # 閸掓稑缂撴稉璇茬氨閻╊喗鐖?
 add_library(astockquantapp SHARED
@@ -78,6 +79,7 @@ target_link_libraries(astockquantapp
         engine
         domain
         bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
+        app_adapters
         foundation
         factor
         factor

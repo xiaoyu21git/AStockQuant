@@ -27,6 +27,9 @@ public:
     int executeUpdate(const std::string& sql,
                       const std::vector<SqlParam>& params = {}) override;
 
+    int executeBatchUpdate(const std::string& sql,
+                           const std::vector<std::vector<SqlParam>>& batchParams) override;
+
     bool beginTransaction() override;
     bool commitTransaction() override;
     bool rollbackTransaction() override;

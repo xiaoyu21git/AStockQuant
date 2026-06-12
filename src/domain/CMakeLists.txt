@@ -7,9 +7,9 @@ add_subdirectory(data)
 add_subdirectory(market)
 add_subdirectory(backtest)
 add_subdirectory(factor)
-add_subdirectory(trading)
 add_subdirectory(strategy)
 add_subdirectory(scheduler)
+add_subdirectory(trading)
 
 if(TARGET astock_ta_lib)
     target_link_libraries(domain_indicators PUBLIC astock_ta_lib)
@@ -17,18 +17,14 @@ endif()
 
 set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
 
-# 创建一个聚合库，添加一个虚拟源文件
 add_library(domain STATIC
-    # 添加一个虚拟源文件，避免空库错误
     ${DOMAIN_DUMMY_SOURCE}
 )
 
-# 如果dummy.cpp不存在，创建一个
 if(NOT EXISTS "${DOMAIN_DUMMY_SOURCE}")
     file(WRITE "${DOMAIN_DUMMY_SOURCE}" "// Dummy source file for domain library\n")
 endif()
 
-# link 子模块库
 target_link_libraries(domain
     PUBLIC
         engine
@@ -40,12 +36,11 @@ target_link_libraries(domain
         domain_data
         domain_backtest
         domain_scheduler
-        domain_trading
         domain_strategy_runtime
         factor
+        domain_trading
 )
 
-# 暴露 include 目录
 target_include_directories(domain
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/types/include>
@@ -56,24 +51,17 @@ target_include_directories(domain
          $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backtest/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/market/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/factor/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/trading/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategy/include>
-        $<INSTALL_INTERFACE:include>   # 安装时路径
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/trading>
+        $<INSTALL_INTERFACE:include>
 )
 
-
-
-# 最简单直接的配置
 set(LIBS_ROOT "C:/libs")
 
-
-
-# 测试
 add_executable(domain_test 
     test/test_backtest.cpp
-    )
+)
 
-# 测试需要所有包含路径
 target_include_directories(domain_test
     PUBLIC
         include
@@ -95,4 +83,3 @@ target_link_libraries(domain_test
 )
 
 enable_testing()
-#add_test(NAME domain_test COMMAND domain_test)

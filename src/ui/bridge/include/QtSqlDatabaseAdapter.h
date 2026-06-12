@@ -83,6 +83,36 @@ public:
         return db_->executeUpdate(QString::fromStdString(sql), qtParams);
     }
 
+    int executeBatchUpdate(const std::string& sql,
+                           const std::vector<std::vector<SqlParam>>& batchParams) override
+    {
+        if (!db_) return -1;
+        if (batchParams.empty()) return 0;
+
+        std::vector<std::map<QString, QVariant>> qtBatchParams;
+        qtBatchParams.reserve(batchParams.size());
+
+        for (const auto& params : batchParams) {
+            std::map<QString, QVariant> qtParams;
+            int index = 0;
+            for (const auto& param : params) {
+                QString key = QStringLiteral("__pos_%1").arg(index++, 8, 10, QLatin1Char('0'));
+                if (std::holds_alternative<std::int32_t>(param)) {
+                    qtParams[key] = QVariant::fromValue(std::get<std::int32_t>(param));
+                } else if (std::holds_alternative<std::int64_t>(param)) {
+                    qtParams[key] = QVariant::fromValue(static_cast<qlonglong>(std::get<std::int64_t>(param)));
+                } else if (std::holds_alternative<double>(param)) {
+                    qtParams[key] = QVariant::fromValue(std::get<double>(param));
+                } else if (std::holds_alternative<std::string>(param)) {
+                    qtParams[key] = QVariant::fromValue(QString::fromStdString(std::get<std::string>(param)));
+                }
+            }
+            qtBatchParams.push_back(std::move(qtParams));
+        }
+
+        return db_->executeBatchUpdate(QString::fromStdString(sql), qtBatchParams);
+    }
+
     bool beginTransaction() override { return db_ ? db_->beginTransaction() != nullptr : false; }
     bool commitTransaction() override { return db_ ? db_->commitTransaction() : false; }
     bool rollbackTransaction() override { return db_ ? db_->rollbackTransaction() : false; }
