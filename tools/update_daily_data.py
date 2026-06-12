@@ -1175,6 +1175,11 @@ def prefetch_baostock_data(symbols: list[str], start_date: dt.date, end_date: dt
         if df.empty:
             return 0
         
+        # 字段规范化映射
+        df = baostock.normalize_baostock_frame(df)
+        if df.empty:
+            return 0
+        
         # 按 symbol 分组缓存
         for symbol, group in df.groupby('symbol'):
             _baostock_cache[symbol] = group.copy()
