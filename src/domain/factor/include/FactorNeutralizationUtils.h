@@ -1,7 +1,6 @@
 #pragma once
 
 #include "BaseFactor.h"
-#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <cmath>
 #include <numeric>
@@ -14,11 +13,11 @@ namespace factor::neutralization {
 inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
                                             std::unordered_map<std::string, double>& values,
                                             std::string* errorMessage,
-                                            const factor::bridge::FieldKey& industryField = factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE,
-                                            const factor::bridge::FieldKey& marketCapField = factor::bridge::MarketBarFieldKeys::MARKET_CAP)
+                                             const char* industryField = field_names::INDUSTRY_CODE,
+                                             const char* marketCapField = field_names::MARKET_CAP)
 {
-    const std::string industryFieldName = industryField.c_str();
-    const std::string marketCapFieldName = marketCapField.c_str();
+    const std::string industryFieldName = industryField;
+    const std::string marketCapFieldName = marketCapField;
 
     if (!context.historicalView) {
         if (errorMessage) {

@@ -155,9 +155,7 @@ set(FACTOR_SOURCES
     src/SizeFactor.cpp
     src/LowVolFactor.cpp
     src/QualityFactor.cpp
-    src/ConfigurableFactor.cpp
-    src/ConfigurableFactorParams.cpp
-    src/ConfigurableFactorDetail.cpp
+    src/FactorMetricConfig.cpp
     src/GrowthFactor.cpp
     src/LiquidityFactor.cpp
     src/TechnicalFactor.cpp
@@ -167,16 +165,12 @@ set(FACTOR_SOURCES
     src/SentimentFactor.cpp
     src/CustomFactor.cpp
     src/CompositeFactor.cpp
-    src/ConfigurableFactorGrowth.cpp
-    src/ConfigurableFactorLiquidity.cpp
-    src/ConfigurableFactorTechnical.cpp
-    src/ConfigurableFactorDividend.cpp
-    src/ConfigurableFactorMacro.cpp
-    src/ConfigurableFactorIndustry.cpp
-    src/ConfigurableFactorSentiment.cpp
-    src/ConfigurableFactorCustom.cpp
     src/FactorConfigAccess.cpp
     src/FactorInstanceManager.cpp
+    src/FactorRatingEngine.cpp
+    src/FactorTypeRegistry.cpp
+    src/FactorBacktestOrchestrator.cpp
+    src/FactorParamsStubs.cpp
     src/factor_compute/FactorSignalSetAssembler.cpp
     src/factor_compute/FactorComputeEngine.cpp
     src/factor_compute/FactorRegistry.cpp
@@ -189,7 +183,6 @@ set(FACTOR_SOURCES
     src/factor_compute/AnalysisModule.cpp
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
-    src/FactorBacktestOrchestrator.cpp
 )
 
 # 因子系统头文件
@@ -203,7 +196,7 @@ set(FACTOR_HEADERS
     include/SizeFactor.h
     include/LowVolFactor.h
     include/QualityFactor.h
-    include/ConfigurableFactor.h
+    include/FactorMetricConfig.h
     include/GrowthFactor.h
     include/LiquidityFactor.h
     include/TechnicalFactor.h

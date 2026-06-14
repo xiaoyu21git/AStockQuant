@@ -38,6 +38,8 @@ MYSQL_CONFIG = {
 }
 
 DB_WRITE_WORKERS = 4      # 并发写 DB 线程
+BATCH_SIZE = 200           # 每批处理的股票数量（控制内存）
+BAOSTOCK_RECONNECT_INTERVAL = 300  # 每 N 只股票重连一次 Baostock（防止连接超时断开）
 PROGRESS_BAR_WIDTH = 80   # tqdm 宽度
 
 logger = logging.getLogger(__name__)
@@ -234,10 +236,86 @@ def update_stock(symbol: str, group: pd.DataFrame) -> dict[str, int]:
     return {"checked": checked, "updated": updated}
 
 
+# ── Baostock 连接管理 ──────────────────────────────────────
+_bs_reconnect_counter = 0
+
+
+def ensure_bs_connected():
+    """检测 Baostock 连接状态，超时/断开时自动重连"""
+    global _bs_reconnect_counter
+    _bs_reconnect_counter += 1
+    if _bs_reconnect_counter % BAOSTOCK_RECONNECT_INTERVAL == 0:
+        try:
+            bs.logout()
+        except Exception:
+            pass
+        lg = bs.login()
+        if lg.error_code != "0":
+            logger.warning(f"Baostock reconnect failed: {lg.error_msg}")
+        else:
+            logger.info(f"Baostock reconnected after {_bs_reconnect_counter} queries")
+
+
+def fetch_one_stock_safe(symbol: str, start: dt.date, end: dt.date) -> pd.DataFrame:
+    """带重连保护的 fetch_one_stock 包装"""
+    ensure_bs_connected()
+    try:
+        return fetch_one_stock(symbol, start, end)
+    except Exception as e:
+        logger.warning(f"fetch_one_stock failed for {symbol}: {e}, retrying after reconnect...")
+        try:
+            bs.logout()
+        except Exception:
+            pass
+        lg = bs.login()
+        if lg.error_code != "0":
+            logger.error(f"Baostock reconnect after error failed: {lg.error_msg}")
+            return pd.DataFrame()
+        time.sleep(1)
+        try:
+            return fetch_one_stock(symbol, start, end)
+        except Exception as e2:
+            logger.error(f"fetch_one_stock retry failed for {symbol}: {e2}")
+            return pd.DataFrame()
+
+
+def update_stock_safe(symbol: str, group: pd.DataFrame) -> dict[str, int]:
+    """带重试的 update_stock 包装"""
+    try:
+        return update_stock(symbol, group)
+    except Exception as e:
+        logger.warning(f"update_stock failed for {symbol}: {e}")
+        return {"checked": 0, "updated": 0}
+
+
 # ── 回填主流程 ──────────────────────────────────────────────
+def process_batch(batch_groups: list[tuple[str, pd.DataFrame]],
+                  batch_index: int,
+                  year: int) -> tuple[int, int]:
+    """处理一批股票的 DB 写入，返回 (checked, updated)"""
+    if not batch_groups:
+        return 0, 0
+
+    total_checked = 0
+    total_updated = 0
+
+    with ThreadPoolExecutor(max_workers=DB_WRITE_WORKERS) as executor:
+        futures = {
+            executor.submit(update_stock_safe, sym, grp): sym
+            for sym, grp in batch_groups
+        }
+        for future in as_completed(futures):
+            result = future.result()
+            total_checked += result["checked"]
+            total_updated += result["updated"]
+
+    return total_checked, total_updated
+
+
 def backfill_year(symbols: list[str], year: int) -> dict[str, int]:
     """
-    回填指定年份的数据
+    回填指定年份的数据，使用分批加载策略避免内存溢出。
+    每 BATCH_SIZE 只股票拉取后立即写入 DB，释放内存后再处理下一批。
     返回: {"fetched": int, "updated": int, "checked": int}
     """
     start = dt.date(year, 1, 1)
@@ -245,78 +323,87 @@ def backfill_year(symbols: list[str], year: int) -> dict[str, int]:
     if start > end:
         return {"fetched": 0, "updated": 0, "checked": 0}
 
-    logger.info(f"Year {year}: fetching {len(symbols)} stocks...")
+    total_symbols = len(symbols)
+    logger.info(f"Year {year}: fetching {total_symbols} stocks (batch_size={BATCH_SIZE})...")
 
-    # ── Step 1: 逐只拉取 (带进度条) ──
-    all_groups = []
-    fetch_errors = 0
-    t0 = time.time()
-
-    with tqdm.tqdm(
-        total=len(symbols),
-        desc=f"Fetch {year}",
-        unit="stock",
-        ncols=PROGRESS_BAR_WIDTH,
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
-    ) as pbar:
-        for symbol in symbols:
-            try:
-                raw_df = fetch_one_stock(symbol, start, end)
-                if not raw_df.empty:
-                    norm_df = normalize_frame(raw_df)
-                    if not norm_df.empty:
-                        all_groups.append((symbol, norm_df))
-                else:
-                    fetch_errors += 1
-            except Exception:
-                fetch_errors += 1
-            pbar.update(1)
-            pbar.set_postfix_str(f"got={len(all_groups)} err={fetch_errors}")
-
-    t1 = time.time()
-    fetched_rows = sum(len(g[1]) for g in all_groups)
-    logger.info(
-        f"Year {year}: fetched {fetched_rows} rows from {len(all_groups)} stocks "
-        f"({fetch_errors} errors) in {t1 - t0:.1f}s"
-    )
-
-    if not all_groups:
-        logger.warning(f"Year {year}: no data fetched")
-        return {"fetched": 0, "updated": 0, "checked": 0}
-
-    # ── Step 2: 多线程写入 DB (带进度条) ──
+    total_fetched_rows = 0
     total_checked = 0
     total_updated = 0
-    t2 = time.time()
+    total_fetch_errors = 0
+    batch_count = (total_symbols + BATCH_SIZE - 1) // BATCH_SIZE
+    t0 = time.time()
 
+    # 外层进度条：批次
     with tqdm.tqdm(
-        total=len(all_groups),
-        desc=f"Write {year}",
+        total=total_symbols,
+        desc=f"Year {year}",
         unit="stock",
         ncols=PROGRESS_BAR_WIDTH,
         bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}]",
     ) as pbar:
-        with ThreadPoolExecutor(max_workers=DB_WRITE_WORKERS) as executor:
-            futures = {
-                executor.submit(update_stock, sym, grp): sym
-                for sym, grp in all_groups
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                total_checked += result["checked"]
-                total_updated += result["updated"]
+        for batch_idx in range(batch_count):
+            batch_start = batch_idx * BATCH_SIZE
+            batch_end = min(batch_start + BATCH_SIZE, total_symbols)
+            batch_symbols = symbols[batch_start:batch_end]
+
+            # Step 1: 逐只拉取当前批次（不累积全局列表），每只股票更新进度条
+            batch_groups: list[tuple[str, pd.DataFrame]] = []
+            batch_fetch_errors = 0
+
+            for i, symbol in enumerate(batch_symbols):
+                try:
+                    raw_df = fetch_one_stock_safe(symbol, start, end)
+                    if not raw_df.empty:
+                        norm_df = normalize_frame(raw_df)
+                        if not norm_df.empty:
+                            batch_groups.append((symbol, norm_df))
+                        else:
+                            batch_fetch_errors += 1
+                    else:
+                        batch_fetch_errors += 1
+                except Exception as e:
+                    batch_fetch_errors += 1
+                    logger.debug(f"fetch error {symbol}: {e}")
+
+                # 每只股票立即更新进度条，避免长间隔无响应
                 pbar.update(1)
+                batch_fetched = sum(len(g[1]) for g in batch_groups)
                 pbar.set_postfix_str(
-                    f"checked={total_checked} updated={total_updated}"
+                    f"rows={total_fetched_rows + batch_fetched} "
+                    f"got={len(batch_groups)} err={total_fetch_errors + batch_fetch_errors}"
                 )
 
-    t3 = time.time()
+            total_fetch_errors += batch_fetch_errors
+            batch_fetched_rows = sum(len(g[1]) for g in batch_groups)
+            total_fetched_rows += batch_fetched_rows
+
+            # Step 2: 立即写入本批次
+            if batch_groups:
+                batch_checked, batch_updated = process_batch(
+                    batch_groups, batch_idx, year
+                )
+                total_checked += batch_checked
+                total_updated += batch_updated
+
+            # 释放批次内存
+            del batch_groups
+
+            # 更新批次汇总信息（per-stock 循环已更新 pbar，这里只刷新状态文字）
+            logger.info(
+                f"Year {year} batch {batch_idx + 1}/{batch_count} done: "
+                f"fetched_rows={batch_fetched_rows} checked={batch_checked} updated={batch_updated}"
+            )
+
+    t1 = time.time()
     logger.info(
-        f"Year {year}: checked {total_checked}, updated {total_updated} "
-        f"in {t3 - t2:.1f}s"
+        f"Year {year}: fetched {total_fetched_rows} rows from "
+        f"{total_symbols - total_fetch_errors} stocks "
+        f"({total_fetch_errors} errors), "
+        f"checked {total_checked}, updated {total_updated} "
+        f"in {t1 - t0:.1f}s"
     )
 
-    return {"fetched": fetched_rows, "updated": total_updated, "checked": total_checked}
+    return {"fetched": total_fetched_rows, "updated": total_updated, "checked": total_checked}
 
 
 def main():

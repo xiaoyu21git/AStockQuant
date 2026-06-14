@@ -39,9 +39,9 @@ add_subdirectory(adapters)
 
 # 閸掓稑缂撴稉璇茬氨閻╊喗鐖?
 add_library(astockquantapp SHARED
-    # 婵″倹鐏夐張澶嬬爱閺傚洣娆㈤崣顖欎簰閸︺劏绻栭柌灞惧潑閸旂媴绱濋崥锕€鍨崷?src/CMakeLists.txt 娑擃厼顦╅悶?
     src/AppBootstrap.cpp
     src/VasAurora.cpp
+    facade/MarketDataFacade.cpp
 )
 
 if(ENABLE_JUJIN_MARKET)
@@ -302,6 +302,8 @@ target_include_directories(astockquantapp
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${CMAKE_CURRENT_SOURCE_DIR}/facade/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/facade
         ${CMAKE_CURRENT_SOURCE_DIR}/foundation/thread
         ${CMAKE_CURRENT_SOURCE_DIR}/foundation/public
 )
@@ -351,7 +353,7 @@ if(ENABLE_JUJIN_MARKET)
             domain_data
             domain_backtest
             domain_strategies
-            domain_signals
+           # domain_signals
             domain_indicators
             factor
             infrastructure

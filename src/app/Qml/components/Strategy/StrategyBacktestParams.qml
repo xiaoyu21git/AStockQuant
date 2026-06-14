@@ -383,7 +383,7 @@ Rectangle {
             root.isBacktesting = backtestController.isRunning
         }
         onProgressChanged: {
-            root.backtestProgress = 0.0
+            root.backtestProgress = backtestController.progress / 100.0
         }
         onStatusChanged: {
             root.backtestStatus = backtestController.status

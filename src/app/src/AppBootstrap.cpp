@@ -25,13 +25,17 @@
 #include <QTimer>
 #include <QtGlobal>
 #include "VasAurora.hpp"
-#include "../../ui/bridge/include/MarketDataService.h"
-#include "../../ui/bridge/include/PositionAccountService.h"
+// #include "../../ui/bridge/include/MarketDataService.h" -- deleted, replaced by MarketDataBridge
+#include "../../ui/bridge/include/PositionAccountBridge.h"
 #include "../../ui/bridge/include/TradingMarketCalendarService.h"
 #include "../../ui/bridge/include/TradingRuntimeStatusService.h"
-#include "../../ui/bridge/include/RiskMonitorService.h"
-#include "../../ui/bridge/include/TradeExecutionService.h"
+#include "../../ui/bridge/include/TradeExecutionBridge.h"
 #include "../../ui/bridge/include/TradingConnectionConfigService.h"
+#include "../../domain/trading/TradeExecutionEngine.h"
+#include "../../app/adapters/SimulatedBrokerGateway.h"
+#include "../../ui/bridge/include/MarketDataBridge.h"
+#include "../../ui/bridge/include/DatabaseConnectionManager.h"
+// MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinMarketConnector.h"
 #endif
@@ -461,14 +465,19 @@ void AppBootstrap::initializeDeferredUiServices()
         runtimeStatusService->initializeAsync();
     }
 
-    if (MarketDataService* marketDataService = MarketDataService::instance()) {
-        marketDataService->initializeAsync();
-        std::cout << "[AppBootstrap] Deferred startup phase 1/3 initialized MarketDataService asynchronously\n";
-    } else {
-        std::cout << "[AppBootstrap] Deferred startup phase 1/3 skipped: MarketDataService unavailable\n";
-    }
+    // MarketDataFacade 已移除，MarketDataBridge 改为预留接口（实时行情后续接入）
+    std::cout << "[AppBootstrap] Deferred startup: MarketDataBridge uses stub interface\n";
 
     m_deferredUiServicesInitialized = true;
+
+    // 链式调度 phase 2/3
+    if (QObject* context = QCoreApplication::instance()) {
+        QTimer::singleShot(0, context, [this]() {
+            initializeDeferredDomainServices();
+        });
+    } else {
+        initializeDeferredDomainServices();
+    }
 }
 
 void AppBootstrap::initializeDeferredDomainServices()
@@ -477,7 +486,9 @@ void AppBootstrap::initializeDeferredDomainServices()
         return;
     }
 
-    std::cout << "[AppBootstrap] Deferred startup phase 2/3 skipped: domain services stay lazy until first use\n";
+    initializeDeferredTradingServices();
+
+    std::cout << "[AppBootstrap] Deferred startup phase 2/3: domain & trading services initialized\n";
 
     m_deferredDomainServicesInitialized = true;
 }
@@ -488,7 +499,18 @@ void AppBootstrap::initializeDeferredTradingServices()
         return;
     }
 
-    std::cout << "[AppBootstrap] Deferred startup phase 3/3 skipped: trading services and broker connector stay lazy until first use\n";
+    // ── 创建交易引擎 + 注入 SimulatedBrokerGateway ──
+    m_tradeEngine = std::make_unique<domain::trading::TradeExecutionEngine>();
+
+    auto simGateway = std::make_unique<app::adapters::SimulatedBrokerGateway>();
+    simGateway->connect("{}"); // 模拟网关无需配置
+    m_tradeEngine->setGateway(std::move(simGateway));
+
+    // ── 注入引擎到桥接层 ──
+    TradeExecutionBridge::instance()->setEngine(m_tradeEngine.get());
+    TradeExecutionBridge::instance()->initialize();
+
+    std::cout << "[AppBootstrap] Deferred startup phase 3/3: trading engine initialized with simulated gateway\n";
 
     m_deferredTradingServicesInitialized = true;
 }

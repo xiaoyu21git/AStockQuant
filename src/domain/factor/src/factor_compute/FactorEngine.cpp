@@ -4,10 +4,8 @@
 #include "FactorInstanceManager.h"
 #include "BaseFactor.h"
 #include "HistoricalView.h"
-
-#include "../../ui/bridge/include/CachedMarketDataView.h"
 #include "foundation/json/json_facade.h"
-
+#include "factor_compute/CachedMarketDataView.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

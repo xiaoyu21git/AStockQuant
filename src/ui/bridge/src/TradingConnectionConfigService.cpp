@@ -1,7 +1,6 @@
 #include "TradingConnectionConfigService.h"
 #include "../../ui/bridge/include/DatabaseConnectionManager.h"
-#include "PositionAccountService.h"
-#include "RiskMonitorService.h"
+#include "PositionAccountBridge.h"
 #include "database/StrategyRepository.h"
 
 #include <QCoreApplication>
@@ -417,13 +416,13 @@ QStringList boundStrategyIds(const QVariantList& boundStrategies)
 
 QStringList loadCurrentHoldingSymbols()
 {
-    PositionAccountService* positionAccountService = PositionAccountService::instance();
-    if (!positionAccountService) {
+    PositionAccountBridge* positionBridge = PositionAccountBridge::instance();
+    if (!positionBridge) {
         return {};
     }
 
     QStringList symbols;
-    const QVariantList positions = positionAccountService->positions();
+    const QVariantList positions = positionBridge->positions();
     for (const QVariant& rawPosition : positions) {
         const QVariantMap position = rawPosition.toMap();
         const QString symbol = position.value(QStringLiteral("symbol")).toString().trimmed().toUpper();

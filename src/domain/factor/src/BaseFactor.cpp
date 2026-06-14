@@ -534,8 +534,8 @@ void BaseFactor::appendHistoricalNeutralizationRequirements(
         return;
     }
 
-    appendRequiredField(requirements, std::string(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str()));
-    appendRequiredField(requirements, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
+    appendRequiredField(requirements, field_names::INDUSTRY_CODE);
+    appendRequiredField(requirements, field_names::MARKET_CAP);
     requirements.sourceTable = SourceTable::UNKNOWN;
 }
 
@@ -581,7 +581,7 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     return true;
 }
 
-std::unordered_map<std::string, double> BaseFactor::applyBoundaryRules(
+std::unordered_map<std::string, double> BaseFactor::applyBoundaryRules(///处新股停盘的逻辑为什么放这里
     const std::unordered_map<std::string, double>& rawValues,
     const CalculationContext& context) {
     
@@ -654,6 +654,105 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
     if (config::hasBoundaryRulesConfig(config)) {
         loadBoundaryRulesFromJson(boundaryRules_, config::boundaryRulesConfig(config));
     }
+}
+
+// ── 运行时辅助方法 ──
+std::vector<std::string> BaseFactor::effectiveSymbols(const CalculationContext& context) const {
+    if (!context.symbols.empty()) {
+        return context.symbols;
+    }
+    if (context.historicalView) {
+        return context.historicalView->getAvailableSymbols(context.date);
+    }
+    return {};
+}
+
+std::unordered_map<std::string, double> BaseFactor::currentFieldCrossSection(
+    const CalculationContext& context, const std::string& field) const {
+    std::unordered_map<std::string, double> result;
+    if (!context.historicalView || field.empty()) {
+        return result;
+    }
+    const auto symbols = effectiveSymbols(context);
+    const auto crossSection = context.historicalView->getCrossSection(context.date, field, symbols);
+    for (const auto& entry : crossSection) {
+        result[entry.first] = entry.second;
+    }
+    return result;
+}
+
+std::vector<double> BaseFactor::seriesForField(
+    const CalculationContext& context, const std::string& symbol,
+    const std::string& field, int window) const {
+    if (!context.historicalView || symbol.empty() || field.empty()) {
+        return {};
+    }
+    const auto series = context.historicalView->getSeries(symbol, context.date, context.date, field);
+    std::vector<double> result;
+    result.reserve(series.size());
+    for (const auto& dp : series) {
+        result.push_back(dp.value);
+    }
+    if (window > 0 && static_cast<int>(result.size()) > window) {
+        result.erase(result.begin(), result.end() - window);
+    }
+    return result;
+}
+
+std::unordered_map<std::string, double> BaseFactor::latestFinancialMetric(
+    const CalculationContext& context, const std::string& field,
+    const std::string& date) const {
+    std::unordered_map<std::string, double> result;
+    if (!context.historicalView || field.empty()) {
+        return result;
+    }
+    const std::string effectiveDate = date.empty() ? context.date : date;
+    const auto symbols = effectiveSymbols(context);
+    const auto crossSection = context.historicalView->getCrossSection(effectiveDate, field, symbols);
+    for (const auto& entry : crossSection) {
+        result[entry.first] = entry.second;
+    }
+    return result;
+}
+
+std::unordered_map<std::string, std::vector<double>> BaseFactor::latestFinancialSeries(
+    const CalculationContext& context, const std::string& field,
+    const std::string& date, int limit) const {
+    std::unordered_map<std::string, std::vector<double>> result;
+    if (!context.historicalView || field.empty()) {
+        return result;
+    }
+    const std::string effectiveDate = date.empty() ? context.date : date;
+    const auto symbols = effectiveSymbols(context);
+    const int effectiveLimit = (limit > 0) ? limit : 1;
+    for (const auto& symbol : symbols) {
+        const auto series = context.historicalView->getSeries(symbol, effectiveDate, effectiveDate, field);
+        std::vector<double>& values = result[symbol];
+        values.reserve(series.size());
+        for (const auto& dp : series) {
+            values.push_back(dp.value);
+        }
+        if (effectiveLimit > 0 && static_cast<int>(values.size()) > effectiveLimit) {
+            values.erase(values.begin(), values.end() - effectiveLimit);
+        }
+    }
+    return result;
+}
+
+std::unordered_map<std::string, std::string> BaseFactor::industryBySymbol(
+    const CalculationContext& context) const {
+    std::unordered_map<std::string, std::string> result;
+    if (!context.historicalView) {
+        return result;
+    }
+    const auto symbols = effectiveSymbols(context);
+    const auto crossSection = context.historicalView->getCrossSection(context.date, field_names::INDUSTRY_CODE, symbols);
+    for (const auto& entry : crossSection) {
+        if (entry.second != 0.0) {
+            result[entry.first] = std::to_string(static_cast<int>(entry.second));
+        }
+    }
+    return result;
 }
 
 } // namespace factor

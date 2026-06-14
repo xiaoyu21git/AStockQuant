@@ -67,7 +67,7 @@ Item {
     property var externalRiskContext: ({})
     property bool parametersLoaded: false
     readonly property var riskConfigService: Bridge.RiskConfigService
-    readonly property var riskMonitorService: Bridge.RiskMonitorService
+    readonly property var riskMonitorService: Bridge.RiskControlBridge
     readonly property var strategyService: null
     readonly property int loadedParamCount: dynamicParamConfigs.length
     readonly property real varUsagePercent: riskMonitorService ? riskMonitorService.varUsagePercent : 68

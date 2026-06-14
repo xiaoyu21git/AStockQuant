@@ -1,200 +1,71 @@
-#ifndef ASTOCK_INFRASTRUCTURE_DATABASE_MARKETDATAREPOSITORY_H
-#define ASTOCK_INFRASTRUCTURE_DATABASE_MARKETDATAREPOSITORY_H
+#pragma once
 
-#include "IRepository.h"
-#include "MarketDataModels.h"
-#include "QtMySQLDatabase.h"
-#include <vector>
-#include <optional>
+#include "ISqlDatabase.h"
+
 #include <memory>
+#include <string>
+#include <vector>
 
-namespace astock {
-namespace database {
+namespace astock::infrastructure::database {
 
-class MarketDataRepositoryTestAccess;
+// ═══ 值对象：日K线行 ═══
 
-/**
- * @brief 市场数据仓储
- * 
- * 提供统一的市场数据CRUD接口
- */
+struct DailyBarRow {
+    std::string symbol;
+    std::string tradeDate;  // "YYYY-MM-DD"
+    double open   = 0.0;
+    double high   = 0.0;
+    double low    = 0.0;
+    double close  = 0.0;
+    double volume = 0.0;
+    double turnover = 0.0;
+};
+
+struct FieldRow {
+    std::string symbol;
+    std::string tradeDate;
+    std::string fieldName;
+    double value = 0.0;
+};
+
+// ═══ 行情数据仓储：封装所有行情相关 SQL 查询 ═══
+
 class MarketDataRepository {
 public:
-    explicit MarketDataRepository(std::shared_ptr<QtMySQLDatabase> database);
-    ~MarketDataRepository() = default;
-    
-    // ============ Symbol Info 操作 ============
-    
-    /**
-     * @brief 保存或更新标的信息
-     */
-    bool saveSymbol(const SymbolInfo& symbol);
-    
-    /**
-     * @brief 获取标的信息
-     */
-    std::optional<SymbolInfo> getSymbol(const std::string& symbol);
-    
-    /**
-     * @brief 获取所有标的
-     * @param symbol_type 标的类型过滤（空表示全部）
-     * @param status 状态过滤
-     */
-    std::vector<SymbolInfo> getAllSymbols(
-        std::optional<SymbolType> symbol_type = std::nullopt,
-        const std::string& status = "active");
-    
-    // ============ Daily Bar 操作 ============
-    
-    /**
-     * @brief 批量保存日线数据
-     * @return 保存的记录数
-     */
-    size_t saveDailyBars(const std::vector<DailyBar>& bars);
-    
-    /**
-     * @brief 获取日线数据
-     * @param symbol 标的代码
-     * @param start_date 开始日期
-     * @param end_date 结束日期
-     */
-    std::vector<DailyBar> getDailyBars(
-        const std::string& symbol,
-        std::time_t start_date,
-        std::time_t end_date);
-    
-    /**
-     * @brief 获取最新日线数据
-     */
-    std::optional<DailyBar> getLatestBar(const std::string& symbol);
-    
-    // ============ Minute Bar 操作 ============
-    
-    /**
-     * @brief 批量保存分钟线数据
-     * @param bars 分钟线数据
-     * @param frequency 频率（1/5/15/30/60）
-     */
-    size_t saveMinuteBars(const std::vector<MinuteBar>& bars);
-    
-    /**
-     * @brief 获取分钟线数据
-     */
-    std::vector<MinuteBar> getMinuteBars(
-        const std::string& symbol,
-        std::time_t start_datetime,
-        std::time_t end_datetime,
-        int frequency = 1);
-    
-    // ============ Tick Data 操作 ============
-    
-    /**
-     * @brief 批量保存Tick数据
-     */
-    size_t saveTickData(const std::vector<TickData>& ticks);
-    
-    /**
-     * @brief 获取Tick数据
-     */
-    std::vector<TickData> getTickData(
-        const std::string& symbol,
-        std::time_t start_datetime,
-        std::time_t end_datetime);
+    explicit MarketDataRepository(std::shared_ptr<astock::database::ISqlDatabase> db)
+        : db_(std::move(db)) {}
 
-    // ============ 衍生数据：资金流向 & 龙虎榜 ============
-
-    /**
-     * @brief 获取日度资金流向数据
-     */
-    std::vector<MoneyFlowDaily> getMoneyFlowDaily(
+    /// 日K线查询（单标的）
+    std::vector<DailyBarRow> queryDailyBar(
         const std::string& symbol,
-        std::time_t start_date,
-        std::time_t end_date);
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& extraFields = {});
 
-    /**
-     * @brief 获取日度龙虎榜上榜记录
-     */
-    std::vector<DragonTigerRecord> getDragonTigerRecords(
-        const std::string& symbol,
-        std::time_t start_date,
-        std::time_t end_date);
-    
-    // ============ 工具方法 ============
-    
-    /**
-     * @brief 执行原始SQL查询
-     */
-    bool executeQuery(const std::string& sql);
-    
-    /**
-     * @brief 开始事务
-     */
-    bool beginTransaction();
-    
-    /**
-     * @brief 提交事务
-     */
-    bool commit();
-    
-    /**
-     * @brief 回滚事务
-     */
-    bool rollback();
+    /// 日K线查询（多标的批量）
+    std::vector<DailyBarRow> queryDailyBarBatch(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
 
-    friend class MarketDataRepositoryTestAccess;
-    
+    /// 因子字段横截面查询
+    std::vector<FieldRow> queryFieldCrossSection(
+        const std::string& field,
+        const std::string& date,
+        const std::vector<std::string>& symbols = {});
+
+    /// 指数成分股查询
+    std::vector<std::string> queryIndexConstituents(
+        const std::string& indexSymbol,
+        const std::string& date);
+
+    /// 下一个交易日查询
+    std::string queryNextTradingDay(const std::string& anchorDate);
+
 private:
-    std::shared_ptr<QtMySQLDatabase> database_;
-    
-    /**
-     * @brief 从查询结果构建SymbolInfo
-     */
-    SymbolInfo buildSymbolInfo(const QueryResultRow& row);
-    
-    /**
-     * @brief 从查询结果构建DailyBar
-     */
-    DailyBar buildDailyBar(const QueryResultRow& row);
-    
-    /**
-     * @brief 从查询结果构建MinuteBar
-     */
-    MinuteBar buildMinuteBar(const QueryResultRow& row);
-    
-    /**
-     * @brief 从查询结果构建TickData
-     */
-    TickData buildTickData(const QueryResultRow& row);
+    static DailyBarRow rowToBar(const astock::database::SqlQueryResultRow& row);
 
-    /**
-     * @brief 从查询结果构建 MoneyFlowDaily
-     */
-    MoneyFlowDaily buildMoneyFlowDaily(const QueryResultRow& row);
-
-    /**
-     * @brief 从查询结果构建 DragonTigerRecord
-     */
-    DragonTigerRecord buildDragonTigerRecord(const QueryResultRow& row);
-    
-    /**
-     * @brief 将time_t转换为QString日期格式
-     */
-    QString timeToDateString(std::time_t time);
-    
-    /**
-     * @brief 将time_t转换为QString日期时间格式
-     */
-    QString timeToDateTimeString(std::time_t time);
+    std::shared_ptr<astock::database::ISqlDatabase> db_;
 };
 
-class MarketDataRepositoryTestAccess {
-public:
-    static DailyBar buildDailyBar(MarketDataRepository& repository, const QueryResultRow& row) {
-        return repository.buildDailyBar(row);
-    }
-};
-
-} // namespace database
-} // namespace astock
-
-#endif // ASTOCK_INFRASTRUCTURE_DATABASE_MARKETDATAREPOSITORY_H
+} // namespace astock::infrastructure::database

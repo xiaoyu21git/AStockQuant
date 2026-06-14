@@ -1744,6 +1744,13 @@ Rectangle {
                             console.log("StrategyBacktestParams: 用户点击开始回测")
                         })
                     }
+                    if (typeof item.backtestFinished !== "undefined") {
+                        item.backtestFinished.connect(function(result) {
+                            console.log("策略回测完成, 结果:", result ? Object.keys(result) : "null")
+                            strategyLibraryPage.backtestResult = result || ({})
+                            strategyLibraryPage.backtestResultReceived()
+                        })
+                    }
                 }
 
                 onStatusChanged: {

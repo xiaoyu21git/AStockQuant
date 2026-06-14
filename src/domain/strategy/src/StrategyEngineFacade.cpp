@@ -116,8 +116,12 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                                     params.maxWeightPerStock,
                                     false);               // autoExecutionEnabled
 
+        CallbackRuntimeFactorServiceAdapter::Callbacks cbs;
+        cbs.updateIncremental = params.onIncremental;
+        cbs.updateBatch      = params.onBatch;
+        cbs.copySnapshots    = params.onCopySnapshots;
         auto runtimeStrategy = createMultiFactorSelectionRuntimeStrategy(
-            strategyDef, kDefaultInstanceId, CallbackRuntimeFactorServiceAdapter::Callbacks{});
+            strategyDef, kDefaultInstanceId, std::move(cbs));
 
         const auto regResult = engine->registerStrategy(std::move(runtimeStrategy), ctx);
         if (!regResult.isOk()) {

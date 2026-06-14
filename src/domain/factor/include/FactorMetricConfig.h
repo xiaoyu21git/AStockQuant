@@ -2,6 +2,9 @@
 
 #include <cstdint>
 #include <vector>
+#include <string>
+
+namespace foundation::json { class JsonFacade; }
 
 namespace factor {
 
@@ -85,6 +88,12 @@ struct CustomMetricDefinition {
     uint32_t metricId{0};
     std::vector<StandardField> dependencies;
     std::vector<uint32_t> dependentMetricIds;
+};
+
+struct CommonParams : CommonMetricParams {
+    uint16_t window = 20;
+
+    void fromJson(const foundation::json::JsonFacade& json);
 };
 
 struct FactorMetricConfig {

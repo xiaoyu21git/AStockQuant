@@ -1,13 +1,13 @@
 #include "domain/factor/include/ValueFactor.h"
 
-#include "domain/factor/include/ConfigurableFactor.h"
+//#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/factor_enums.h"
-#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 namespace factor {
 
@@ -191,11 +191,11 @@ std::string ValueFactor::valuationMetricField(ValuationMetric metric)
 {
     switch (metric) {
     case ValuationMetric::BP:
-        return std::string(factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str());
+        return F_PB_RATIO;
     case ValuationMetric::EP:
-        return std::string(factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str());
+        return F_PE_RATIO;
     case ValuationMetric::DIVIDEND_YIELD:
-        return std::string(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str());
+        return F_DIVIDEND_YIELD;
     default:
         return "";
     }
@@ -253,8 +253,8 @@ std::vector<std::string> ValueFactor::collectDateResolutionFields(const std::vec
     std::vector<std::string> fields;
     for (const ValuationMetric metric : metrics) {
         if (metric == ValuationMetric::CFP) {
-            appendUniqueField(fields, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
-            appendUniqueField(fields, std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()));
+            appendUniqueField(fields, F_MARKET_CAP);
+            appendUniqueField(fields, F_OPERATING_CASH_FLOW);
             continue;
         }
 
@@ -272,11 +272,11 @@ ValueFactor::MetricContribution ValueFactor::computeCFPContribution(const Calcul
 
     const auto marketCaps = context.historicalView->getCrossSection(
         runtime.effectiveDate,
-        std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()),
+        field_names::MARKET_CAP,
         context.symbols);
     const auto cashFlows = context.historicalView->getCrossSection(
         runtime.effectiveDate,
-        std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()),
+        F_OPERATING_CASH_FLOW,
         context.symbols);
 
     for (const auto& [symbol, marketCap] : marketCaps) {
@@ -385,17 +385,17 @@ DataRequirements ValueFactor::getDataRequirements() const
     for (const ValuationMetric metric : params_.valuationMetrics) {
         switch (metric) {
         case ValuationMetric::BP:
-            appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str()));
+            appendRequiredField(req, F_PB_RATIO);
             break;
         case ValuationMetric::EP:
-            appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str()));
+            appendRequiredField(req, F_PE_RATIO);
             break;
         case ValuationMetric::DIVIDEND_YIELD:
-            appendRequiredField(req, std::string(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str()));
+            appendRequiredField(req, F_DIVIDEND_YIELD);
             break;
         case ValuationMetric::CFP:
-            appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str()));
-            appendRequiredField(req, std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()));
+            appendRequiredField(req, F_MARKET_CAP);
+            appendRequiredField(req, F_OPERATING_CASH_FLOW);
             break;
         default:
             break;
@@ -446,13 +446,14 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
             std::vector<MetricContribution> contributions;
             contributions.reserve(metrics.size());
 
-            qDebug() << "[ValueFactor] 指标数=" << metrics.size()
-                     << " effectiveDate=" << QString::fromStdString(runtime.effectiveDate);
+            fprintf(stderr, "[ValueFactor] 指标数=%zu effectiveDate=%s\n",
+                    metrics.size(), runtime.effectiveDate.c_str());
             for (const ValuationMetric metric : metrics) {
                 const double weight = valuationMetricWeight(params_, metric);
-                qDebug() << "[ValueFactor] 指标=" << (int)metric << " weight=" << weight;
+                fprintf(stderr, "[ValueFactor] 指标=%d weight=%.4f\n",
+                        (int)metric, weight);
                 if (weight <= 0.0) {
-                    qDebug() << "[ValueFactor] 跳过: weight<=0";
+                    fprintf(stderr, "[ValueFactor] 跳过: weight<=0\n");
                     continue;
                 }
 
@@ -466,8 +467,8 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                     contributions.push_back(computeCFPContribution(context, runtime, weight));
                 } else {
                     const std::string field = valuationMetricField(metric);
-                    qDebug() << "[ValueFactor]   field=" << QString::fromStdString(field)
-                             << " hasField=" << context.historicalView->hasField(field);
+                    fprintf(stderr, "[ValueFactor]   field=%s hasField=%d\n",
+                            field.c_str(), (int)context.historicalView->hasField(field));
                     if (field.empty() || !context.historicalView->hasField(field)) {
                         const std::string errorMessage = "缓存数据集缺少字段 "
                             + (field.empty() ? valuationMetricToJsonString(metric) : field)
@@ -477,9 +478,8 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                         return;
                     }
                     auto contrib = computeStandardContribution(context, runtime, metric, weight);
-                    qDebug() << "[ValueFactor]   贡献: scores=" << contrib.scores.size()
-                             << " rawSample=" << contrib.rawSampleCount
-                             << " invalid=" << contrib.invalidSampleCount;
+                    fprintf(stderr, "[ValueFactor]   贡献: scores=%zu rawSample=%d invalid=%d\n",
+                            contrib.scores.size(), contrib.rawSampleCount, contrib.invalidSampleCount);
                     contributions.push_back(std::move(contrib));
                 }
             }

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "ConfigurableFactor.h"
+#include "BaseFactor.h"
+#include "FactorMetricConfig.h"
 #include "factor_enums.h"
 
 #include <string>
@@ -11,7 +12,42 @@ namespace factor {
 
 class ValueFactor : public BaseFactor {
 public:
-    struct Params : ConfigurableFactorBase::CommonParams {
+    static constexpr const char* F_OPEN = "open";
+    static constexpr const char* F_HIGH = "high";
+    static constexpr const char* F_LOW = "low";
+    static constexpr const char* F_CLOSE = "close";
+    static constexpr const char* F_PRE_CLOSE = "pre_close";
+    static constexpr const char* F_VOLUME = "volume";
+    static constexpr const char* F_TURNOVER = "turnover";
+    static constexpr const char* F_CHANGE_PCT = "change_pct";
+    static constexpr const char* F_AMPLITUDE = "amplitude";
+    static constexpr const char* F_TURNOVER_RATE = "turnover_rate";
+    static constexpr const char* F_PRE_ADJ_FACTOR = "pre_adjust_factor";
+    static constexpr const char* F_POST_ADJ_FACTOR = "post_adjust_factor";
+    static constexpr const char* F_MARKET_CAP = "market_cap";
+    static constexpr const char* F_CIRCULATING_MARKET_CAP = "circulating_market_cap";
+    static constexpr const char* F_TOTAL_MARKET_CAP = "total_market_cap";
+    static constexpr const char* F_PE_RATIO = "pe_ratio";
+    static constexpr const char* F_PB_RATIO = "pb_ratio";
+    static constexpr const char* F_EPS = "eps";
+    static constexpr const char* F_BPS = "bps";
+    static constexpr const char* F_ROE = "roe";
+    static constexpr const char* F_ROA = "roa";
+    static constexpr const char* F_NET_PROFIT = "net_profit";
+    static constexpr const char* F_TOTAL_REVENUE = "total_revenue";
+    static constexpr const char* F_TOTAL_ASSETS = "total_assets";
+    static constexpr const char* F_TOTAL_LIABILITIES = "total_liabilities";
+    static constexpr const char* F_EQUITY = "equity";
+    static constexpr const char* F_PROFIT_MARGIN = "profit_margin";
+    static constexpr const char* F_GROSS_MARGIN = "gross_margin";
+    static constexpr const char* F_OPERATING_MARGIN = "operating_margin";
+    static constexpr const char* F_DEBT_TO_EQUITY = "debt_to_equity";
+    static constexpr const char* F_CURRENT_RATIO = "current_ratio";
+    static constexpr const char* F_QUICK_RATIO = "quick_ratio";
+    static constexpr const char* F_OPERATING_CASH_FLOW = "operating_cash_flow";
+    static constexpr const char* F_DIVIDEND_YIELD = "dividend_yield";
+
+    struct Params : CommonParams {
         std::vector<ValuationMetric> valuationMetrics{ValuationMetric::BP, ValuationMetric::EP};
         Params() { lagEnabled = true; }
         double bpWeight = 25.0;

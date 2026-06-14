@@ -1,9 +1,7 @@
 #include "domain/factor/include/SizeFactor.h"
-#include "domain/factor/include/ConfigurableFactor.h"
+//#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
-#include "ui/bridge/include/DataFetchFieldContractUtils.h"
-
 #include <algorithm>
 #include <cmath>
 #include <vector>

@@ -1,6 +1,5 @@
-﻿# bridge搴撶殑CMake閰嶇疆 - 绮剧畝鐗堟湰
+﻿# bridge库的CMake配置 - 精简版本
 
-# 鏍囧噯璁剧疆 - 鏍圭洰褰曞凡缁忚缃簡AUTOMOC
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +9,6 @@ find_package(Qt6 REQUIRED COMPONENTS
 )
 find_package(yaml-cpp CONFIG REQUIRED)
 
-# 鍙寘鍚疄闄呴渶瑕佺殑澶存枃浠讹紝閬垮厤閾炬帴閿欒
 set(BRIDGE_HEADERS
     include/cleaning/CleaningRuleContract.h
     include/cleaning/CleaningEngine.h
@@ -31,40 +29,17 @@ set(BRIDGE_HEADERS
     include/cleaning/rules/LimitMoveTagRule.h
     include/cleaning/rules/FieldStandardizationRule.h
     include/field_traits.h
-    include/DataManager.h
-    include/DataRuleService.h
-    include/DataService.h
-    include/DataUIController.h
-    include/DataServiceCache.h
-    include/PreviewDataModel.h
-    include/CacheDetailPreviewModel.h
-    include/DataFetchController.h
-    include/MetaData.h
-    include/ExecutionSchedulingRuleChain.h
-    include/RuleTemplateRuntimeEvaluator.h
-    include/RuleTemplateDetailHelper.h
-    include/FactorViewModel.h
-    include/FactorDebugController.h
-    include/FactorDetectionService.h
-    include/factor_check/FactorSupportCheckCore.h
-    include/factor_check/FactorDetectionCoreService.h
-    include/factor_check/FactorSupportScopeCacheCore.h
-    include/factor_check/FactorSupportScopeKeyCore.h
-    include/FactorMetaService.h
-    include/CleanedDataController.h
-    include/MarketDataService.h
-    include/RiskConfigService.h
-    include/RiskMonitorService.h
-    include/PositionAccountService.h
-    include/TradeExecutionService.h
+    include/MarketDataBridge.h
     include/TradingConnectionConfigService.h
     include/TradingMarketCalendarService.h
-    include/TradingFormPanelHelper.h
     include/TradingRuntimeStatusService.h
-    include/UiLifecycleCoordinator.h
-    include/StrategyBridge.h
-    include/StrategyListModel.h
-    include/StrategyStructureResolvers.h
+    include/RuleTemplateDetailHelper.h
+    include/RuleTemplateSuggestionService.h
+    include/CleanedDataController.h
+    include/TradeExecutionBridge.h
+    include/DataManager.h
+    include/RiskConfigService.h
+    include/DataRuleService.h
 )
 
 add_library(bridge STATIC
@@ -119,6 +94,3 @@ target_include_directories(bridge
     PRIVATE
         src
 )
-
-# 杈撳嚭璋冭瘯淇℃伅
-message(STATUS "bridge搴撳ご鏂囦欢: ${BRIDGE_HEADERS}")

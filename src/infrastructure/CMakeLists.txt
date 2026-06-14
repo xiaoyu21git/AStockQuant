@@ -59,14 +59,26 @@ add_library(infrastructure STATIC
     src/database/NativeMySQLDatabase.cpp
     src/database/QtMySQLDatabase.cpp
     src/database/MarketDataRepository.cpp
+    src/database/SymbolMapper.cpp
+    # src/database/MarketDataLoader.cpp -- removed (database builder deleted)
     src/database/QueryBuilder.cpp
     src/database/FactorRepository.cpp
     src/database/StrategyRepository.cpp
 )
 
-# MarketDataRepository 仍依赖 Qt -> AUTOMOC ON
 set_target_properties(infrastructure PROPERTIES
     AUTOMOC ON
+)
+
+# 添加 domain/factor include 路径（仅供 SymbolMapper/MarketDataLoader 依赖 IMarketDataView）
+target_include_directories(infrastructure
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${MYSQL_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src/domain/market/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(infrastructure
@@ -85,11 +97,3 @@ endif()
 
 find_package(Threads REQUIRED)
 target_link_libraries(infrastructure PRIVATE Threads::Threads)
-
-target_include_directories(infrastructure
-    PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${MYSQL_INCLUDE_DIR}
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)

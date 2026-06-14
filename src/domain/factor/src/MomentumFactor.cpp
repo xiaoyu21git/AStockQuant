@@ -1,10 +1,8 @@
 #include "domain/factor/include/MomentumFactor.h"
-#include "domain/factor/include/ConfigurableFactor.h"
+//#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
-#include "ui/bridge/include/DataFetchFieldContractUtils.h"
-
 #include <ta_libc.h>
 
 #include <algorithm>
@@ -223,7 +221,7 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         params_.neutralizationEnabled);
 
     try {
-        std::vector<std::string> dateResolutionFields{std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str())};
+        std::vector<std::string> dateResolutionFields{F_CLOSE};
         dateResolutionFields.push_back(adjustField);
 
         return executeWithCommonParams(
@@ -310,14 +308,14 @@ DataRequirements MomentumFactor::getDataRequirements() const {
     if (adjustField.empty()) {
         throw std::runtime_error("动量因子 adjustPriceType 配置非法");
     }
-    appendRequiredField(req, std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str()));
+    appendRequiredField(req, F_CLOSE);
     appendRequiredField(req, adjustField);
     appendHistoricalNeutralizationRequirements(req,
                                                params_.neutralizationEnabled,
                                                SourceTable::DAILY_BAR);
     
     if (params_.useVolume) {
-        req.optionalFields.push_back(std::string(factor::bridge::MarketBarFieldKeys::VOLUME.c_str()));
+        req.optionalFields.push_back(F_VOLUME);
     }
 
     return req;

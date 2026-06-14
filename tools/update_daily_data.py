@@ -18,13 +18,14 @@ from typing import Any, Iterable, Optional
 
 import akshare as ak
 import pandas as pd
-import tools.import_from_baostock as baostock
 import pymysql
 from sqlalchemy.exc import DBAPIError, OperationalError as SQLAlchemyOperationalError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+import tools.import_from_baostock as baostock
 
 
 def disable_proxy_env() -> None:

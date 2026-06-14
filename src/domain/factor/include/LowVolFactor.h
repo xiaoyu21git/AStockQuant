@@ -1,6 +1,7 @@
 #pragma once
 
-#include "ConfigurableFactor.h"
+#include "BaseFactor.h"
+#include "FactorMetricConfig.h"
 
 #include <optional>
 
@@ -10,7 +11,11 @@ class LowVolFactorTestAccess;
 
 class LowVolFactor : public BaseFactor {
 public:
-    struct Params : ConfigurableFactorBase::CommonParams {
+    static constexpr const char* F_CLOSE = "close";
+    static constexpr const char* F_HIGH = "high";
+    static constexpr const char* F_LOW = "low";
+
+    struct Params : CommonParams {
         int window = 20;
         std::vector<LowVolComponent> components = {LowVolComponent::VOLATILITY, LowVolComponent::DRAWDOWN, LowVolComponent::BETA};
         std::string benchmarkSymbol = "000300.SH";

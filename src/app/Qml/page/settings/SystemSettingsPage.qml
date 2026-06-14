@@ -7,7 +7,7 @@ import "../../utils/StartupGateFormatter.js" as StartupGateFormatter
 Item {
     id: root
     property var configService
-    property var marketDataService: Bridge.MarketDataService
+    property var marketDataService: Bridge.MarketDataBridge
     property var marketCalendarService: Bridge.TradingMarketCalendarService
     property var runtimeStatusService: Bridge.TradingRuntimeStatusService
     property var draftConfiguration: ({})

@@ -339,9 +339,9 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         pageMode: "live-trading"
                         currentMenuCode: window.currentMenuCode
-                        marketDataService: Bridge.MarketDataService
-                        positionAccountService: Bridge.PositionAccountService
-                        tradeExecutionService: Bridge.TradeExecutionService
+                        marketDataService: Bridge.MarketDataBridge
+                        positionAccountService: Bridge.PositionAccountBridge
+                        tradeExecutionService: Bridge.TradeExecutionBridge
                         strategyService: null
                         marketData: window.marketData
                         statusCards: window.statusCards

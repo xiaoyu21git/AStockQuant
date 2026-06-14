@@ -1,8 +1,10 @@
 #include "FactorBacktestOrchestrator.h"
 #include "factor_compute/FactorEngine.h"
 #include "BacktestScheduler.h"
+#include "CompositeFactorConfig.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include <string>
 #include <vector>
@@ -69,6 +71,7 @@ void FactorBacktestOrchestrator::run(
     // 缓存最近批次的 marketView，用于提取价格矩阵
     const factor::compute::IMarketDataView* lastMarketView = nullptr;
 
+    const bool isComposite = (config.factorMode == FactorMode::Composite && !config.compositeChildren.empty());
     const auto& factorIdList = config.factorIds.empty()
         ? std::vector<std::string>{"backtest_factor"}
         : config.factorIds;
@@ -76,16 +79,71 @@ void FactorBacktestOrchestrator::run(
     m_scheduler->forEachBatch(plan,
         [&](const factor::compute::MarketMatrixBatch& marketMatrix) {
             lastMarketView = marketMatrix.marketView;
-            for (const auto& factorId : factorIdList) {
-                if (m_engine) {
-                    factor::compute::FactorCacheKey cacheKey;
-                    cacheKey.factorName = factorId;
-                    auto factorResult = m_engine->compute(marketMatrix, cacheKey);
 
-                    // 汇总因子值到 Reporter
-                    for (const auto& [date, symbolValues] : factorResult.factorValues) {
-                        for (const auto& [symbol, value] : symbolValues) {
-                            reporterInput.factorValuesByDate[date][symbol] = value;
+            if (isComposite) {
+                // ── 组合因子路径：逐个子因子计算 → 加权合并 ──
+                // 收集所有子因子的原始结果
+                std::vector<std::map<std::string, std::map<std::string, double>>> childResults;
+                childResults.reserve(config.compositeChildren.size());
+                double totalWeight = 0.0;
+
+                for (const auto& child : config.compositeChildren) {
+                    factor::compute::FactorCacheKey cacheKey;
+                    cacheKey.factorName = child.instanceId;
+                    auto factorResult = m_engine->compute(marketMatrix, cacheKey);
+                    childResults.push_back(std::move(factorResult.factorValues));
+                    totalWeight += child.weight;
+                }
+
+                if (totalWeight <= 0.0) {
+                    return;  // 总权重为0，跳过
+                }
+
+                // 收集所有日期和标号的并集
+                std::map<std::string, std::map<std::string, double>> combinedValues;
+                for (const auto& childFV : childResults) {
+                    for (const auto& [date, symMap] : childFV) {
+                        for (const auto& [symbol, _] : symMap) {
+                            combinedValues[date][symbol] = 0.0;  // 占位
+                        }
+                    }
+                }
+
+                // 加权合并
+                for (const auto& [date, symMap] : combinedValues) {
+                    for (const auto& [symbol, _] : symMap) {
+                        double weightedSum = 0.0;
+                        double presentWeight = 0.0;
+                        for (size_t ci = 0; ci < childResults.size(); ++ci) {
+                            const auto& childFV = childResults[ci];
+                            auto dateIt = childFV.find(date);
+                            if (dateIt == childFV.end()) continue;
+                            auto symIt = dateIt->second.find(symbol);
+                            if (symIt == dateIt->second.end()) continue;
+                            const double value = symIt->second;
+                            if (!std::isfinite(value)) continue;
+                            const double directedValue = config.compositeChildren[ci].ascending ? value : -value;
+                            weightedSum += config.compositeChildren[ci].weight * directedValue;
+                            presentWeight += config.compositeChildren[ci].weight;
+                        }
+                        if (presentWeight / totalWeight >= config.compositeMinCoverageRatio) {
+                            reporterInput.factorValuesByDate[date][symbol] =
+                                presentWeight > 0.0 ? weightedSum / presentWeight : 0.0;
+                        }
+                    }
+                }
+            } else {
+                for (const auto& factorId : factorIdList) {
+                    if (m_engine) {
+                        factor::compute::FactorCacheKey cacheKey;
+                        cacheKey.factorName = factorId;
+                        auto factorResult = m_engine->compute(marketMatrix, cacheKey);
+
+                        // 汇总因子值到 Reporter
+                        for (const auto& [date, symbolValues] : factorResult.factorValues) {
+                            for (const auto& [symbol, value] : symbolValues) {
+                                reporterInput.factorValuesByDate[date][symbol] = value;
+                            }
                         }
                     }
                 }

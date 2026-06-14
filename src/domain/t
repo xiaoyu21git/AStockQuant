@@ -1,0 +1,246 @@
+#pragma once
+// ---------------------------------------------------------------------------
+// TradingEvents.hpp -- trading event Tags and Payloads (pure C++, zero Qt)
+//
+// Each Tag defines: name, Payload, pack_to_format, unpack.
+// Domain layer subscribes/publishes StrongEvent<Tag>.
+// ---------------------------------------------------------------------------
+
+#include "TypedEvent.hpp"
+#include "TradingTypes.h"
+#include <cstdint>
+#include <string>
+
+namespace domain::trading {
+
+// ============================================================================
+// OrderSubmitRequest
+// ============================================================================
+struct OrderSubmitRequestTag {
+    static constexpr std::string_view name = "trading.order.submit.request";
+
+    struct Payload {
+        StrategyId strategyId;
+        SymbolCode symbol;
+        OrderSide side{OrderSide::Buy};
+        OrderType orderType{OrderType::Limit};
+        double price{0.0};
+        std::int64_t quantity{0};
+        CorrelationId correlationId;
+        double cashAmount{0.0};
+        double signalStrength{1.0};
+        // Execution batch metadata
+        std::string batchId;
+        int batchIndex{0};
+        std::string executionScopeId;
+        std::string previousBatchId;
+        int previousBatchOrderCount{0};
+        bool requiresPreviousBatchFilled{false};
+        bool pauseOnConflict{false};
+        bool pauseOnAbnormalReject{false};
+        bool requiresManualCheckpoint{false};
+        int manualCheckpointBatchIndex{-1};
+    };
+
+    static engine::EventFormat pack_to_format(const Payload& p) {
+        engine::EventFormat f;
+        f.type = std::string(name);
+        f.set("strategy_id", p.strategyId.text());
+        f.set("symbol", p.symbol.text());
+        f.set("side", p.side == OrderSide::Buy ? "BUY" : "SELL");
+        f.set("order_type", p.orderType == OrderType::Limit ? "LIMIT" : "MARKET");
+        f.set("price", p.price);
+        f.set("quantity", static_cast<std::int64_t>(p.quantity));
+        f.set("correlation_id", p.correlationId.text());
+        if (p.cashAmount > 0.0) f.set("cash_amount", p.cashAmount);
+        f.set("signal_strength", p.signalStrength);
+        if (!p.batchId.empty()) f.set("batch_id", p.batchId);
+        f.set("batch_index", p.batchIndex);
+        if (!p.executionScopeId.empty()) f.set("execution_scope_id", p.executionScopeId);
+        if (!p.previousBatchId.empty()) f.set("previous_batch_id", p.previousBatchId);
+        if (p.requiresPreviousBatchFilled) f.set("requires_previous_batch_filled", true);
+        return f;
+    }
+
+    static void unpack(const engine::EventFormat& f, Payload& p) {
+        p.strategyId = StrategyId(f.get<std::string>("strategy_id").value_or(""));
+        p.symbol = SymbolCode(f.get<std::string>("symbol").value_or(""));
+        auto sideStr = f.get<std::string>("side").value_or("BUY");
+        p.side = (sideStr == "SELL") ? OrderSide::Sell : OrderSide::Buy;
+        p.price = f.get<double>("price").value_or(0.0);
+        p.quantity = static_cast<std::int64_t>(f.get<double>("quantity").value_or(0.0));
+        p.correlationId = CorrelationId(f.get<std::string>("correlation_id").value_or(""));
+        p.cashAmount = f.get<double>("cash_amount").value_or(0.0);
+        p.signalStrength = f.get<double>("signal_strength").value_or(1.0);
+        p.batchId = f.get<std::string>("batch_id").value_or("");
+        p.batchIndex = static_cast<int>(f.get<double>("batch_index").value_or(0.0));
+        p.executionScopeId = f.get<std::string>("execution_scope_id").value_or("");
+    }
+};
+
+using OrderSubmitRequestEvent = StrongEvent<OrderSubmitRequestTag>;
+
+// ============================================================================
+// OrderStatusUpdate
+// ============================================================================
+struct OrderStatusUpdateTag {
+    static constexpr std::string_view name = "trading.order.updated";
+
+    struct Payload {
+        BrokerOrderId brokerOrderId;
+        CorrelationId correlationId;
+        OrderStatusValue status{OrderStatusValue::Pending};
+        double filledPrice{0.0};
+        std::int64_t filledQuantity{0};
+        std::int64_t remainingQuantity{0};
+        std::string message;
+        std::string statusOrigin; // "runtime" | "broker_submit" | "risk_reject" | ...
+    };
+
+    static engine::EventFormat pack_to_format(const Payload& p) {
+        engine::EventFormat f;
+        f.type = std::string(name);
+        f.set("broker_order_id", p.brokerOrderId.text());
+        f.set("correlation_id", p.correlationId.text());
+        f.set("status", static_cast<int>(p.status));
+        f.set("filled_price", p.filledPrice);
+        f.set("filled_quantity", p.filledQuantity);
+        f.set("remaining_quantity", p.remainingQuantity);
+        f.set("message", p.message);
+        f.set("status_origin", p.statusOrigin);
+        return f;
+    }
+
+    static void unpack(const engine::EventFormat& f, Payload& p) {
+        p.brokerOrderId = BrokerOrderId(f.get<std::string>("broker_order_id").value_or(""));
+        p.correlationId = CorrelationId(f.get<std::string>("correlation_id").value_or(""));
+        p.status = static_cast<OrderStatusValue>(static_cast<int>(f.get<double>("status").value_or(0.0)));
+        p.filledPrice = f.get<double>("filled_price").value_or(0.0);
+        p.filledQuantity = static_cast<std::int64_t>(f.get<double>("filled_quantity").value_or(0.0));
+        p.remainingQuantity = static_cast<std::int64_t>(f.get<double>("remaining_quantity").value_or(0.0));
+        p.message = f.get<std::string>("message").value_or("");
+        p.statusOrigin = f.get<std::string>("status_origin").value_or("");
+    }
+};
+
+using OrderStatusUpdateEvent = StrongEvent<OrderStatusUpdateTag>;
+
+// ============================================================================
+// TradeFill
+// ============================================================================
+struct TradeFillTag {
+    static constexpr std::string_view name = "order.fill";
+
+    struct Payload {
+        FillId fillId;
+        BrokerOrderId brokerOrderId;
+        double fillPrice{0.0};
+        std::int64_t fillQuantity{0};
+        double filledNotional{0.0};
+        double commission{0.0};
+    };
+
+    static engine::EventFormat pack_to_format(const Payload& p) {
+        engine::EventFormat f;
+        f.type = std::string(name);
+        f.set("fill_id", p.fillId.text());
+        f.set("broker_order_id", p.brokerOrderId.text());
+        f.set("fill_price", p.fillPrice);
+        f.set("fill_quantity", p.fillQuantity);
+        f.set("filled_notional", p.filledNotional);
+        f.set("commission", p.commission);
+        return f;
+    }
+
+    static void unpack(const engine::EventFormat& f, Payload& p) {
+        p.fillId = FillId(f.get<std::string>("fill_id").value_or(""));
+        p.brokerOrderId = BrokerOrderId(f.get<std::string>("broker_order_id").value_or(""));
+        p.fillPrice = f.get<double>("fill_price").value_or(0.0);
+        p.fillQuantity = static_cast<std::int64_t>(f.get<double>("fill_quantity").value_or(0.0));
+        p.filledNotional = f.get<double>("filled_notional").value_or(0.0);
+        p.commission = f.get<double>("commission").value_or(0.0);
+    }
+};
+
+using TradeFillEvent = StrongEvent<TradeFillTag>;
+
+// ============================================================================
+// RiskApproval — 风控审批通过
+// ============================================================================
+struct RiskApprovalTag {
+    static constexpr std::string_view name = "risk.approval";
+
+    struct Payload {
+        StrategyId strategyId;
+        SymbolCode symbol;
+        OrderSide side{OrderSide::Buy};
+        double price{0.0};
+        std::int64_t quantity{0};
+        double cashAmount{0.0};
+        double signalStrength{1.0};
+        CorrelationId correlationId;
+    };
+
+    static engine::EventFormat pack_to_format(const Payload& p) {
+        engine::EventFormat f;
+        f.type = std::string(name);
+        f.set("strategy_id", p.strategyId.text());
+        f.set("symbol", p.symbol.text());
+        f.set("side", p.side == OrderSide::Buy ? "BUY" : "SELL");
+        f.set("price", p.price);
+        f.set("quantity", static_cast<std::int64_t>(p.quantity));
+        if (p.cashAmount > 0.0) f.set("cash_amount", p.cashAmount);
+        f.set("signal_strength", p.signalStrength);
+        f.set("correlation_id", p.correlationId.text());
+        return f;
+    }
+
+    static void unpack(const engine::EventFormat& f, Payload& p) {
+        p.strategyId = StrategyId(f.get<std::string>("strategy_id").value_or(""));
+        p.symbol = SymbolCode(f.get<std::string>("symbol").value_or(""));
+        auto sideStr = f.get<std::string>("side").value_or("BUY");
+        p.side = (sideStr == "SELL") ? OrderSide::Sell : OrderSide::Buy;
+        p.price = f.get<double>("price").value_or(0.0);
+        p.quantity = static_cast<std::int64_t>(f.get<double>("quantity").value_or(0.0));
+        p.cashAmount = f.get<double>("cash_amount").value_or(0.0);
+        p.signalStrength = f.get<double>("signal_strength").value_or(1.0);
+        p.correlationId = CorrelationId(f.get<std::string>("correlation_id").value_or(""));
+    }
+};
+
+using RiskApprovalEvent = StrongEvent<RiskApprovalTag>;
+
+// ============================================================================
+// RiskReject — 风控拒绝
+// ============================================================================
+struct RiskRejectTag {
+    static constexpr std::string_view name = "risk.reject";
+
+    struct Payload {
+        CorrelationId correlationId;
+        std::string reason;
+        StrategyId strategyId;
+        SymbolCode symbol;
+    };
+
+    static engine::EventFormat pack_to_format(const Payload& p) {
+        engine::EventFormat f;
+        f.type = std::string(name);
+        f.set("correlation_id", p.correlationId.text());
+        f.set("reason", p.reason);
+        f.set("strategy_id", p.strategyId.text());
+        f.set("symbol", p.symbol.text());
+        return f;
+    }
+
+    static void unpack(const engine::EventFormat& f, Payload& p) {
+        p.correlationId = CorrelationId(f.get<std::string>("correlation_id").value_or(""));
+        p.reason = f.get<std::string>("reason").value_or("");
+        p.strategyId = StrategyId(f.get<std::string>("strategy_id").value_or(""));
+        p.symbol = SymbolCode(f.get<std::string>("symbol").value_or(""));
+    }
+};
+
+using RiskRejectEvent = StrongEvent<RiskRejectTag>;
+
+} // namespace domain::trading

@@ -1,7 +1,7 @@
 ﻿# domain/CMakeLists.txt
 add_subdirectory(types)
-add_subdirectory(indicators)
-add_subdirectory(signals)
+# add_subdirectory(indicators) -- removed (dead code, depended on deleted Bar.h)
+# add_subdirectory(signals)   -- removed (dead code, depended on deleted Bar.h)
 add_subdirectory(strategies)
 add_subdirectory(data)
 add_subdirectory(market)
@@ -11,9 +11,7 @@ add_subdirectory(strategy)
 add_subdirectory(scheduler)
 add_subdirectory(trading)
 
-if(TARGET astock_ta_lib)
-    target_link_libraries(domain_indicators PUBLIC astock_ta_lib)
-endif()
+    # indicators/signals removed — astock_ta_lib link removed
 
 set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
 
@@ -30,8 +28,6 @@ target_link_libraries(domain
         engine
         foundation
         domain_types
-        domain_indicators
-        domain_signals
         domain_strategies
         domain_data
         domain_backtest

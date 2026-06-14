@@ -259,31 +259,5 @@ protected:
     EventSystem* system_ = nullptr;
 };
 
-// ============ 全局事件总线单例 ============
-class GlobalEventBus {
-public:
-    /**
-     * @brief 获取全局事件总线实例
-     */
-    static EventBus& instance();
-    
-    /**
-     * @brief 启动全局事件总线
-     */
-    static void start_default();
-    
-    /**
-     * @brief 停止全局事件总线
-     */
-    static void stop_default();
-    
-    /**
-     * @brief 检查全局事件总线是否运行
-     */
-    static bool is_running();
-    
-private:
-    GlobalEventBus() = delete;
-};
 
 } // namespace engine

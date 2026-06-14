@@ -11,6 +11,10 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyServer.cpp
     src/StrategyEngineFacade.cpp
     src/StrategyManager.cpp
+    src/RiskEvaluator.cpp
+    src/RiskControl.cpp
+    src/StrategyFactory.cpp
+    src/StrategyLifecycleManager.cpp
 )
 
 target_include_directories(domain_strategy_runtime
@@ -18,6 +22,9 @@ target_include_directories(domain_strategy_runtime
         include
     PRIVATE
         src
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src/domain/trading
+        ${CMAKE_SOURCE_DIR}/src/domain/trading/include
 )
 
 target_link_libraries(domain_strategy_runtime

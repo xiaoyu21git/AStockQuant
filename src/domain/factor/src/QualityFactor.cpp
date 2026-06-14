@@ -1,8 +1,7 @@
 #include "domain/factor/include/QualityFactor.h"
-#include "domain/factor/include/ConfigurableFactor.h"
+//#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
-#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <unordered_set>
 
@@ -67,28 +66,27 @@ QualityFactor::Params qualityParamsFromJson(const foundation::json::JsonFacade& 
     return params;
 }
 
-std::string resolveMetricColumn(QualityMetric metric)
-{
-    if (metric == QualityMetric::ROE) {
-        return std::string(factor::bridge::FinancialFieldKeys::ROE.c_str());
-    }
-    if (metric == QualityMetric::ROA) {
-        return std::string(factor::bridge::FinancialFieldKeys::ROA.c_str());
-    }
-    if (metric == QualityMetric::GROSS_MARGIN) {
-        return std::string(factor::bridge::FinancialFieldKeys::GROSS_MARGIN.c_str());
-    }
-    if (metric == QualityMetric::OPERATING_MARGIN) {
-        return std::string(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN.c_str());
-    }
-    return "";
-}
-
 double normalizeThreshold(double threshold)
 {
     return threshold > 1.0 ? threshold / 100.0 : threshold;
 }
 
+}
+
+std::string QualityFactor::resolveMetricColumn(QualityMetric metric) {
+    if (metric == QualityMetric::ROE) {
+        return F_ROE;
+    }
+    if (metric == QualityMetric::ROA) {
+        return F_ROA;
+    }
+    if (metric == QualityMetric::GROSS_MARGIN) {
+        return F_GROSS_MARGIN;
+    }
+    if (metric == QualityMetric::OPERATING_MARGIN) {
+        return F_OPERATING_MARGIN;
+    }
+    return "";
 }
 
 QualityFactor::QualityFactor() {
@@ -98,8 +96,8 @@ QualityFactor::QualityFactor() {
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     const QualityMetric metric = params_.metric;
     const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
-    const std::string netProfitField = std::string(factor::bridge::FinancialFieldKeys::NET_PROFIT.c_str());
-    const std::string operatingCashFlowField = std::string(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str());
+    const std::string netProfitField = F_NET_PROFIT;
+    const std::string operatingCashFlowField = F_OPERATING_CASH_FLOW;
 
     std::vector<std::string> requiredFields;
     if (metric == QualityMetric::EARNINGS_QUALITY) {
@@ -229,21 +227,21 @@ DataRequirements QualityFactor::getDataRequirements() const {
     DataRequirements req;
     switch (params_.metric) {
     case QualityMetric::ROE:
-        appendRequiredField(req, "roe");
+        appendRequiredField(req, F_ROE);
         break;
     case QualityMetric::ROA:
-        appendRequiredField(req, "roa");
+        appendRequiredField(req, F_ROA);
         break;
     case QualityMetric::GROSS_MARGIN:
-        appendRequiredField(req, "gross_margin");
+        appendRequiredField(req, F_GROSS_MARGIN);
         break;
     case QualityMetric::OPERATING_MARGIN:
-        appendRequiredField(req, "operating_margin");
+        appendRequiredField(req, F_OPERATING_MARGIN);
         break;
     case QualityMetric::EARNINGS_QUALITY:
     default:
-        appendRequiredField(req, "net_profit");
-        appendRequiredField(req, "operating_cash_flow");
+        appendRequiredField(req, F_NET_PROFIT);
+        appendRequiredField(req, F_OPERATING_CASH_FLOW);
         break;
     }
     appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "CompositeFactorConfig.h"
 
 namespace Factor::backtest {
 
@@ -33,6 +34,12 @@ struct BacktestRunConfig {
     // ── 因子配置 ──
     FactorMode factorMode = FactorMode::Single;
     std::vector<std::string> factorIds;  // 只传 ID, 底层用 FactorInstanceManager 查数据库取配置
+
+    // ── 组合因子配置 (仅 FactorMode::Composite 时有效) ──
+    std::vector<factor::CompositeChildSpec> compositeChildren;
+    int compositeCombineMode = 0;      // CompositeCombineMode 枚举值
+    int compositeMissingPolicy = 2;    // CompositeMissingPolicy 枚举值
+    double compositeMinCoverageRatio = 0.5;
 
     // ── 回测参数 (从 QML 参数对话框传入) ──
     int numGroups = 5;

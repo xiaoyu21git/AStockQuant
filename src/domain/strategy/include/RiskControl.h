@@ -4,6 +4,7 @@
 #include "../../factor/include/factor_compute/IMarketDataView.h"
 #include <cstdint>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <memory>
 
@@ -71,22 +72,28 @@ public:
 class PositionLimitRule final : public IRiskRule {
     double maxQty_;
     int tc_, ic_;
+    std::unordered_map<int, double> posQty_{};
 public:
     PositionLimitRule(double maxQuantity, int, int);
+    void setPositionMap(const std::unordered_map<int, double>& posQty);
     [[nodiscard]] RiskEvaluationResult evaluate(int, int, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const override;
 };
 class MaxDrawdownRule final : public IRiskRule {
     double maxDD_, peak_;
     int tc_, ic_;
+    double currentEquity_{0.0};
 public:
     MaxDrawdownRule(double, double, int, int);
+    void setCurrentEquity(double equity);
     [[nodiscard]] RiskEvaluationResult evaluate(int, int, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const override;
 };
 class LeverageLimitRule final : public IRiskRule {
     double maxLev_, eq_;
     int tc_, ic_;
+    double currentMargin_{0.0};
 public:
     LeverageLimitRule(double, double, int, int);
+    void setCurrentMarginUsage(double margin);
     [[nodiscard]] RiskEvaluationResult evaluate(int, int, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const override;
 };
 

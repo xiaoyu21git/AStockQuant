@@ -1,10 +1,8 @@
 #include "domain/factor/include/LowVolFactor.h"
-#include "domain/factor/include/ConfigurableFactor.h"
+//#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
-#include "ui/bridge/include/DataFetchFieldContractUtils.h"
-
 #include <ta_libc.h>
 
 #include <algorithm>
@@ -253,7 +251,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             return resolveCommonEffectiveDateForFields(
                 context,
                 commonParams,
-                std::vector<std::string>{std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str())},
+                std::vector<std::string>{F_CLOSE},
                 CommonFieldRequirementMode::AllFields);
         },
         [this, &context](const CommonRuntimeState& runtime, CalculationResult& result) {
@@ -264,7 +262,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                 result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
             };
 
-            if (!context.historicalView->hasField(std::string(factor::bridge::MarketBarFieldKeys::CLOSE.c_str()))) {
+            if (!context.historicalView->hasField(F_CLOSE)) {
                 failWithMessage("缓存数据集缺少字段 close，无法计算低波因子");
                 return;
             }

@@ -61,22 +61,63 @@ RiskEvaluationResult SecurityListRule::evaluate(int, int ii, const factor::compu
 // ── PositionLimitRule ──
 PositionLimitRule::PositionLimitRule(double mq, int tc, int ic) : maxQty_(mq), tc_(tc), ic_(ic) {}
 
-RiskEvaluationResult PositionLimitRule::evaluate(int, int, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
-    return {}; // 需要持仓数据
+void PositionLimitRule::setPositionMap(const std::unordered_map<int, double>& posQty) {
+    posQty_ = posQty;
+}
+
+RiskEvaluationResult PositionLimitRule::evaluate(int /*t*/, int n, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
+    RiskEvaluationResult r;
+    if (posQty_.empty()) {
+        return r; // 没有持仓数据，放行
+    }
+    auto it = posQty_.find(n);
+    if (it != posQty_.end() && it->second >= maxQty_) {
+        r.tradable = false;
+        r.blockReason = "仓位超限（当前 " + std::to_string(static_cast<int>(it->second)) + " >= 上限 " + std::to_string(static_cast<int>(maxQty_)) + "）";
+    }
+    return r;
 }
 
 // ── MaxDrawdownRule ──
 MaxDrawdownRule::MaxDrawdownRule(double dd, double pk, int tc, int ic) : maxDD_(dd), peak_(pk), tc_(tc), ic_(ic) {}
 
-RiskEvaluationResult MaxDrawdownRule::evaluate(int, int, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
-    return {}; // 需要净值序列
+void MaxDrawdownRule::setCurrentEquity(double equity) {
+    currentEquity_ = equity;
+}
+
+RiskEvaluationResult MaxDrawdownRule::evaluate(int /*t*/, int /*n*/, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
+    RiskEvaluationResult r;
+    if (currentEquity_ <= 0.0 || peak_ <= 0.0) {
+        return r; // 无有效权益数据，放行
+    }
+    double dd = (peak_ - currentEquity_) / peak_;
+    if (dd >= maxDD_) {
+        r.tradable = false;
+        r.blockReason = "回撤超限（当前回撤 " + std::to_string(static_cast<int>(dd * 100)) + "% >= 上限 " + std::to_string(static_cast<int>(maxDD_ * 100)) + "%）";
+    }
+    return r;
 }
 
 // ── LeverageLimitRule ──
 LeverageLimitRule::LeverageLimitRule(double ml, double eq, int tc, int ic) : maxLev_(ml), eq_(eq), tc_(tc), ic_(ic) {}
 
-RiskEvaluationResult LeverageLimitRule::evaluate(int, int, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
-    return {}; // 需要保证金数据
+void LeverageLimitRule::setCurrentMarginUsage(double margin) {
+    currentMargin_ = margin;
+}
+
+RiskEvaluationResult LeverageLimitRule::evaluate(int /*t*/, int /*n*/, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
+    RiskEvaluationResult r;
+    if (currentMargin_ <= 0.0 || eq_ <= 0.0) {
+        return r; // 无有效保证金数据，放行
+    }
+    double lev = currentMargin_ / eq_;
+    if (lev >= maxLev_) {
+        r.tradable = false;
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "杠杆超限（当前杠杆 %.2fx >= 上限 %.1fx）", lev, maxLev_);
+        r.blockReason = buf;
+    }
+    return r;
 }
 
 // ── AccountManager ──

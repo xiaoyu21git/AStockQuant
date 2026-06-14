@@ -1,6 +1,7 @@
 #pragma once
 
-#include "ConfigurableFactor.h"
+#include "BaseFactor.h"
+#include "FactorMetricConfig.h"
 
 #include <string>
 
@@ -8,7 +9,10 @@ namespace factor {
 
 class SizeFactor : public BaseFactor {
 public:
-    struct Params : ConfigurableFactorBase::CommonParams {
+    static constexpr const char* F_MARKET_CAP = "market_cap";
+    static constexpr const char* F_CIRCULATING_MARKET_CAP = "circulating_market_cap";
+
+    struct Params : CommonParams {
         SizeMetric sizeMetric = SizeMetric::MARKET_CAP;
         bool logTransform = true;
     };

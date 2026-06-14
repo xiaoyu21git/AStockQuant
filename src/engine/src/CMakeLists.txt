@@ -12,6 +12,5 @@ target_sources(engine PRIVATE
    # Event/EventQueue.cpp
     ICock.cpp
     Trigger.cpp
-    Event/EventSystem.cpp
     ${ENGINE_SOURCES_CXX}
 )

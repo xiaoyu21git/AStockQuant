@@ -1,0 +1,217 @@
+#pragma once
+// ─────────────────────────────────────────────────────────────────────
+// PositionAccountEngine — 持仓账户引擎 (纯 C++, 零 Qt)
+// 职责：持仓追踪、成交应用、账户PnL聚合、仓位类型解析
+// ─────────────────────────────────────────────────────────────────────
+
+#include "TradingTypes.h"
+
+#include <cstdint>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace domain::trading {
+
+// ══════════════════════════════════════════════════════════
+// 枚举 — 替代全部 QVariantMap 字符串比较
+// ══════════════════════════════════════════════════════════
+
+enum class PositionSide { Long, Short };
+
+enum class PositionType { Stock, MarginBuy, MarginSell, Futures, Options };
+
+enum class TradeAction { None, MarginSell, CloseShort };
+
+// ══════════════════════════════════════════════════════════
+// 持仓项
+// ══════════════════════════════════════════════════════════
+
+class Position final {
+public:
+    Position() = default;
+
+    [[nodiscard]] const std::string& symbol() const noexcept { return m_symbol; }
+    void setSymbol(std::string v) { m_symbol = std::move(v); }
+
+    [[nodiscard]] const std::string& exchange() const noexcept { return m_exchange; }
+    void setExchange(std::string v) { m_exchange = std::move(v); }
+
+    [[nodiscard]] PositionSide side() const noexcept { return m_side; }
+    void setSide(PositionSide v) noexcept { m_side = v; }
+
+    [[nodiscard]] PositionType type() const noexcept { return m_type; }
+    void setType(PositionType v) noexcept { m_type = v; }
+
+    [[nodiscard]] std::int64_t quantity() const noexcept { return m_quantity; }
+    void setQuantity(std::int64_t v) noexcept { m_quantity = v; }
+
+    [[nodiscard]] std::int64_t availableQuantity() const noexcept { return m_availableQuantity; }
+    void setAvailableQuantity(std::int64_t v) noexcept { m_availableQuantity = v; }
+
+    [[nodiscard]] std::int64_t closeableQuantity() const noexcept { return m_closeableQuantity; }
+    void setCloseableQuantity(std::int64_t v) noexcept { m_closeableQuantity = v; }
+
+    [[nodiscard]] double costBasis() const noexcept { return m_costBasis; }
+    void setCostBasis(double v) noexcept { m_costBasis = v; }
+
+    [[nodiscard]] double lastPrice() const noexcept { return m_lastPrice; }
+    void setLastPrice(double v) noexcept { m_lastPrice = v; }
+
+    [[nodiscard]] double marketValue() const noexcept { return m_marketValue; }
+    void setMarketValue(double v) noexcept { m_marketValue = v; }
+
+    [[nodiscard]] double unrealizedPnl() const noexcept { return m_unrealizedPnl; }
+    void setUnrealizedPnl(double v) noexcept { m_unrealizedPnl = v; }
+
+    // 期权/期货扩展
+    [[nodiscard]] const std::string& positionEffect() const noexcept { return m_positionEffect; }
+    void setPositionEffect(std::string v) { m_positionEffect = std::move(v); }
+
+    [[nodiscard]] const std::string& underlying() const noexcept { return m_underlying; }
+    void setUnderlying(std::string v) { m_underlying = std::move(v); }
+
+    [[nodiscard]] const std::string& optionType() const noexcept { return m_optionType; }
+    void setOptionType(std::string v) { m_optionType = std::move(v); }
+
+    [[nodiscard]] const std::string& expiry() const noexcept { return m_expiry; }
+    void setExpiry(std::string v) { m_expiry = std::move(v); }
+
+private:
+    std::string m_symbol;
+    std::string m_exchange;
+    PositionSide m_side{PositionSide::Long};
+    PositionType m_type{PositionType::Stock};
+    std::int64_t m_quantity{0};
+    std::int64_t m_availableQuantity{0};
+    std::int64_t m_closeableQuantity{0};
+    double m_costBasis{0.0};
+    double m_lastPrice{0.0};
+    double m_marketValue{0.0};
+    double m_unrealizedPnl{0.0};
+
+    std::string m_positionEffect;
+    std::string m_underlying;
+    std::string m_optionType;
+    std::string m_expiry;
+};
+
+// ══════════════════════════════════════════════════════════
+// 账户快照
+// ══════════════════════════════════════════════════════════
+
+class AccountSnapshot final {
+public:
+    AccountSnapshot() = default;
+
+    static AccountSnapshot createDefault(const std::string& accountId);
+
+    [[nodiscard]] const std::string& accountId() const noexcept { return m_accountId; }
+    void setAccountId(std::string v) { m_accountId = std::move(v); }
+
+    [[nodiscard]] double availableCash() const noexcept { return m_availableCash; }
+    void setAvailableCash(double v) noexcept { m_availableCash = v; }
+
+    [[nodiscard]] double marketValue() const noexcept { return m_marketValue; }
+    void setMarketValue(double v) noexcept { m_marketValue = v; }
+
+    [[nodiscard]] double realizedPnl() const noexcept { return m_realizedPnl; }
+    void setRealizedPnl(double v) noexcept { m_realizedPnl = v; }
+
+    [[nodiscard]] double unrealizedPnl() const noexcept { return m_unrealizedPnl; }
+    void setUnrealizedPnl(double v) noexcept { m_unrealizedPnl = v; }
+
+    [[nodiscard]] double totalAsset() const noexcept { return m_totalAsset; }
+    void setTotalAsset(double v) noexcept { m_totalAsset = v; }
+
+    [[nodiscard]] double dailyTurnoverNotional() const noexcept { return m_dailyTurnoverNotional; }
+    void setDailyTurnoverNotional(double v) noexcept { m_dailyTurnoverNotional = v; }
+    void addDailyTurnoverNotional(double v) noexcept { m_dailyTurnoverNotional += v; }
+
+    void recalculateTotals(double netMarketValue);
+
+private:
+    std::string m_accountId;
+    double m_availableCash{1000000.0};
+    double m_marketValue{0.0};
+    double m_realizedPnl{0.0};
+    double m_unrealizedPnl{0.0};
+    double m_totalAsset{1000000.0};
+    double m_dailyTurnoverNotional{0.0};
+};
+
+// ══════════════════════════════════════════════════════════
+// 成交摘要（引擎内部使用）
+// ══════════════════════════════════════════════════════════
+
+class TradeFillSummary final {
+public:
+    std::string symbol;
+    OrderSide side{OrderSide::Buy};
+    double fillPrice{0.0};
+    std::int64_t fillQuantity{0};
+    double fillNotional{0.0};
+    std::string positionEffect;   // "OPEN" / "CLOSE"
+    std::string action;           // "marginSell" / "closeShort"
+    std::string exchange;
+    std::string optionType;
+    std::string underlying;
+    std::string expiry;
+    std::string strategyId;
+};
+
+// ══════════════════════════════════════════════════════════
+// 引擎
+// ══════════════════════════════════════════════════════════
+
+class PositionAccountEngine final {
+public:
+    PositionAccountEngine();
+
+    // ── 查询 ──
+    [[nodiscard]] const std::unordered_map<std::string, Position>& positions() const noexcept;
+    [[nodiscard]] const AccountSnapshot& account() const noexcept;
+
+    // ── 成交应用 ──
+    void applyTradeFill(const TradeFillSummary& fill);
+
+    // ── 快照覆盖 ──
+    void applyPositionEvent(const std::string& symbol, const Position& pos);
+    void applyAccountEvent(const AccountSnapshot& acc);
+    void applyBrokerSnapshot(const std::vector<Position>& positions,
+                             const AccountSnapshot& acc);
+
+    // ── 重置 ──
+    void reset();
+
+    // ── 枚举解析 (纯静态，零字符串比较) ──
+    [[nodiscard]] static PositionSide positionSideFromString(const std::string& raw);
+    [[nodiscard]] static PositionType resolvePositionType(
+        const std::string& rawType,
+        const std::string& exchange,
+        const std::string& optionType,
+        const std::string& underlying,
+        bool isMarginAccount,
+        std::optional<PositionSide> existingSide);
+    [[nodiscard]] static bool isMarginShortOpenFill(
+        PositionType resolvedType,
+        OrderSide fillSide,
+        const std::string& positionEffect,
+        const std::string& action);
+    [[nodiscard]] static bool isMarginShortCoverFill(
+        PositionType resolvedType,
+        OrderSide fillSide,
+        const std::string& positionEffect,
+        const std::string& action);
+
+private:
+    [[nodiscard]] static double unrealizedPnlForPosition(
+        const Position& pos) noexcept;
+
+    std::unordered_map<std::string, Position> m_positions; // key = symbol
+    AccountSnapshot m_account;
+    mutable std::mutex m_mutex;
+};
+
+} // namespace domain::trading

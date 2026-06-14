@@ -22,6 +22,10 @@ class StrategyEngine;
 
 class StrategyListModel;
 
+namespace domain::strategy {
+class IOrderListener;
+}
+
 namespace astock::database {
 class IStrategyRepository;
 struct PersistedStrategyData;
@@ -196,4 +200,5 @@ private:
     QString m_selId;
     std::unique_ptr<astock::database::IStrategyRepository> m_repo;
     StrategyListModel* m_listModel{nullptr};
+    std::unique_ptr<domain::strategy::IOrderListener> m_orderListener;
 };

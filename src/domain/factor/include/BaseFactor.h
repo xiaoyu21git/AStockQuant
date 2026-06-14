@@ -315,6 +315,22 @@ protected:
     // 加载配置
     virtual void loadConfig(const foundation::json::JsonFacade& config);
 
+    // ── 运行时辅助方法（原 ConfigurableFactorBase）──
+    std::vector<std::string> effectiveSymbols(const CalculationContext& context) const;
+    std::unordered_map<std::string, double> currentFieldCrossSection(
+        const CalculationContext& context, const std::string& field) const;
+    std::vector<double> seriesForField(
+        const CalculationContext& context, const std::string& symbol,
+        const std::string& field, int window) const;
+    std::unordered_map<std::string, double> latestFinancialMetric(
+        const CalculationContext& context, const std::string& field,
+        const std::string& date) const;
+    std::unordered_map<std::string, std::vector<double>> latestFinancialSeries(
+        const CalculationContext& context, const std::string& field,
+        const std::string& date, int limit) const;
+    std::unordered_map<std::string, std::string> industryBySymbol(
+        const CalculationContext& context) const;
+
 private:
     bool applyCommonNeutralization(const CalculationContext& context,
                                    const CommonMetricParams& params,
@@ -322,5 +338,17 @@ private:
                                    CalculationResult& result,
                                    NeutralizationStatus& neutralizationMode) const;
 };
+
+// ── 框架公共字段名（中性化、边界规则、元数据）──
+namespace field_names {
+inline constexpr const char SYMBOL[] = "symbol";
+inline constexpr const char TRADE_DATE[] = "trade_date";
+inline constexpr const char DATA_SOURCE[] = "data_source";
+inline constexpr const char INDUSTRY_CODE[] = "industry_code";
+inline constexpr const char MARKET_CAP[] = "market_cap";
+inline constexpr const char IS_SUSPENDED[] = "is_suspended";
+inline constexpr const char LIMIT_UP[] = "limit_up";
+inline constexpr const char LIMIT_DOWN[] = "limit_down";
+}  // namespace field_names
 
 } // namespace factor

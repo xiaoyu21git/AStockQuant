@@ -32,23 +32,12 @@ if(NOT MARKET_MYSQL_INCLUDE_DIR)
 endif()
 # 添加源码
 add_library(astock_market STATIC
-    src/core/DataTypes.cpp
-    src/core/MarketData.cpp
-    src/core/DataProviderFactory.cpp
-    src/providers/SimProvider.cpp
-    # src/providers/FileProvider.cpp
-    # src/providers/ApiProvider.cpp
+    src/AdjustableMarketDataView.cpp
+    # Old core/providers removed — depend on deleted DataTypes.h/IDataProvider.h/MarketData.h
+    # src/core/DataTypes.cpp
+    # src/core/DataProviderFactory.cpp
+    # src/providers/SimProvider.cpp
     # src/providers/DatabaseProvider.cpp
-    # src/observer/data_observer.cpp
-    # src/observer/data_observer_base.cpp
-    # src/observer/kline_observer.cpp
-    # src/observer/tick_observer.cpp
-    # src/observer/storage_observer.cpp
-    # src/observer/AlertObserver.cpp
-    # src/observer/ObserverFactory.cpp
-    # src/repository/BaseMarketDataRepository.cpp
-    # src/repository/MemoryMarketDataRepository.cpp
-    src/providers/DatabaseProvider.cpp
 )
 
 target_link_libraries(astock_market
@@ -62,6 +51,8 @@ target_link_libraries(astock_market
 target_include_directories(astock_market
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src/domain/market/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
         ${MARKET_MYSQL_INCLUDE_DIR}

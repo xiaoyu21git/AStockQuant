@@ -49,9 +49,9 @@ Item {
     property bool holdingsBootstrapCompleted: false
     readonly property real pageContentMaxWidth: 1360
     readonly property real tradingSectionMaxWidth: 1180
-    readonly property var marketDataService: Bridge.MarketDataService
-    readonly property var positionAccountService: Bridge.PositionAccountService
-    readonly property var tradeExecutionService: Bridge.TradeExecutionService
+    readonly property var marketDataService: Bridge.MarketDataBridge
+    readonly property var positionAccountService: Bridge.PositionAccountBridge
+    readonly property var tradeExecutionService: Bridge.TradeExecutionBridge
     readonly property var tradingConnectionConfigService: Bridge.TradingConnectionConfigService
     readonly property var tradingRuntimeStatusService: Bridge.TradingRuntimeStatusService
     readonly property var strategyService: null

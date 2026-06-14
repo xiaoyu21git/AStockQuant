@@ -1,21 +1,40 @@
 #include "domain/factor/include/DividendFactor.h"
+#include "domain/factor/include/BaseFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
+
+#include <cmath>
 
 namespace factor {
 
 DividendFactor::DividendFactor()
-    : ConfigurableFactorBase(FactorType::DIVIDEND)
 {
+    factorType_ = FactorType::DIVIDEND;
 }
 
 CalculationResult DividendFactor::calculate(const CalculationContext& context)
 {
     if (!context.historicalView) {
-        return createHistoricalViewRuntimeError(
-            context,
-            "已移除因子运行期数据库取数路径，请由引擎提供 HistoricalView");
+        return createHistoricalViewRuntimeError(context, "红利因子需要 HistoricalView");
     }
-    return calculateDividend(context);
+    const CommonParams& common = params_;
+    const auto symbols = effectiveSymbols(context);
+
+    return executeWithCommonParams(
+        context,
+        common,
+        [&]() { return context.date; },
+        [&](const CommonRuntimeState& runtime, CalculationResult& result) {
+            const auto crossSection = context.historicalView->getCrossSection(
+                runtime.effectiveDate, "dividend_yield", symbols);
+            for (const auto& [symbol, value] : crossSection) {
+                if (!std::isfinite(value) || value < 0) continue;
+                result.values[symbol] = value > 1.0 ? value / 100.0 : value;
+            }
+        },
+        [](const CommonRuntimeState&, CalculationResult&) {},
+        [](const CommonRuntimeState&, CalculationResult& result) {
+            result.metadata.set("metricSourceTable", json_helper::toJsonValue(static_cast<int>(SourceTable::FINANCIAL_INDICATOR)));
+        });
 }
 
 std::shared_ptr<DividendFactor> DividendFactor::create(
@@ -29,6 +48,27 @@ std::shared_ptr<DividendFactor> DividendFactor::create(
     factor->description_ = info.description;
     factor->loadConfig(info.config);
     return factor;
+}
+
+DataRequirements DividendFactor::getDataRequirements() const
+{
+    DataRequirements req;
+    appendRequiredField(req, "dividend_yield");
+    appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
+    return req;
+}
+
+BoundaryRules DividendFactor::getBoundaryRules() const
+{
+    BoundaryRules rules = boundaryRules_;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, 1);
+    return rules;
+}
+
+void DividendFactor::loadConfig(const foundation::json::JsonFacade& config)
+{
+    BaseFactor::loadConfig(config);
+    if (config.has("common")) params_.fromJson(config.get("common"));
 }
 
 } // namespace factor

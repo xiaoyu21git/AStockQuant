@@ -723,25 +723,6 @@ std::unique_ptr<EventBus> EventBus::create(
     return std::make_unique<EventBusImpl>(actual_config);
 }
 
-// ============ 全局事件总线实现 ============
-
-EventBus& GlobalEventBus::instance() {
-    static auto global_bus = EventBus::create();
-    return *global_bus;
-}
-
-void GlobalEventBus::start_default() {
-    instance().start();
-}
-
-void GlobalEventBus::stop_default() {
-    instance().stop();
-}
-
-bool GlobalEventBus::is_running() {
-    return instance().is_running();
-}
-
 // ============ 批量处理优化 ============
 
 void EventBusImpl::process_batch_events() {
