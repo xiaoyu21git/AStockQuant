@@ -9,6 +9,11 @@ find_package(Qt6 REQUIRED COMPONENTS
 )
 find_package(yaml-cpp CONFIG REQUIRED)
 
+# 精简头文件列表 — 只加对 MOC 生成有必要的 Q_OBJECT 类型
+# 包含：原始 cleaning 头文件 + 原始 7 个基础头文件
+#        + registerQmlTypes.cpp 中注册的 13 个类型
+# 注意：排除 DataServiceCache.h, DataCleaningPersistence.h 等不在 QML 注册列表中的，
+#       因其信号使用了自定义 struct 可能导致 Qt 运行时断言崩溃
 set(BRIDGE_HEADERS
     include/cleaning/CleaningRuleContract.h
     include/cleaning/CleaningEngine.h
@@ -30,16 +35,31 @@ set(BRIDGE_HEADERS
     include/cleaning/rules/FieldStandardizationRule.h
     include/field_traits.h
     include/MarketDataBridge.h
-    include/TradingConnectionConfigService.h
-    include/TradingMarketCalendarService.h
-    include/TradingRuntimeStatusService.h
-    include/RuleTemplateDetailHelper.h
-    include/RuleTemplateSuggestionService.h
+    include/TradingBridges.h
     include/CleanedDataController.h
-    include/TradeExecutionBridge.h
     include/DataManager.h
-    include/RiskConfigService.h
     include/DataRuleService.h
+    # ── 仅 registerQmlTypes.cpp 中注册的类型 ──
+    include/DataService.h
+    include/CacheDetailPreviewModel.h
+    include/PreviewDataModel.h
+    include/DataFetchController.h
+    include/FactorViewModel.h
+    include/FactorDebugController.h
+    include/FactorMetaService.h
+    include/FactorService.h
+    include/FactorBacktestBridge.h
+    include/StrategyBridge.h
+    include/StrategyBacktestBridge.h
+    include/StrategyListModel.h
+    include/DataServiceCache.h
+    # ── 新增桥接类型 (TradingConnectionConfig 等) ──
+    include/TradingConnectionConfigService.h
+    include/TradingRuntimeStatusService.h
+    include/TradingMarketCalendarService.h
+    include/RiskConfigService.h
+    include/TradingFormPanelHelper.h
+    include/UiLifecycleCoordinator.h
 )
 
 add_library(bridge STATIC

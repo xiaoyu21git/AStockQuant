@@ -9,10 +9,6 @@ namespace engine {
 class EventBus;
 }
 
-namespace domain::trading {
-class TradeExecutionEngine;
-}
-
 namespace wang {
 class VasAurora;
 }
@@ -64,7 +60,6 @@ private:
     
     std::shared_ptr<IExecutor> executor_;
     std::unique_ptr<engine::EventBus> m_eventBus;
-    std::unique_ptr<domain::trading::TradeExecutionEngine> m_tradeEngine;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     std::unique_ptr<wang::VasAurora> m_vasAurora;
     bool m_deferredStartupScheduled = false;

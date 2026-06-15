@@ -1,49 +1,40 @@
 #pragma once
+// ═════════════════════════════════════════════════════════════════════════
+// TradingMarketCalendarService — 交易日历服务桥接
+// 提供当前交易时段快照（阶段标签、假期感知、开市状态等）
+// ═════════════════════════════════════════════════════════════════════════
 
 #include <QObject>
-#include <QMutex>
+#include <QString>
 #include <QVariantMap>
 
-class QTimer;
+namespace bridge {
 
 class TradingMarketCalendarService : public QObject {
     Q_OBJECT
-    Q_PROPERTY(bool initialized READ isInitialized NOTIFY initializedChanged)
-    Q_PROPERTY(QVariantMap currentSessionSnapshot READ currentSessionSnapshot NOTIFY currentSessionSnapshotChanged)
-    Q_PROPERTY(bool holidayAware READ isHolidayAware NOTIFY currentSessionSnapshotChanged)
-
+    Q_PROPERTY(QVariantMap currentSessionSnapshot READ currentSessionSnapshot
+               NOTIFY currentSessionSnapshotChanged)
 public:
-    static TradingMarketCalendarService* instance();
+    explicit TradingMarketCalendarService(QObject* parent = nullptr);
 
-    TradingMarketCalendarService(const TradingMarketCalendarService&) = delete;
-    TradingMarketCalendarService& operator=(const TradingMarketCalendarService&) = delete;
+    QVariantMap currentSessionSnapshot() const;
 
-    Q_INVOKABLE void initialize();
-    Q_INVOKABLE void initializeAsync();
-    Q_INVOKABLE bool isInitialized() const;
-    Q_INVOKABLE QVariantMap currentSessionSnapshot() const;
-    Q_INVOKABLE bool isHolidayAware() const;
+    /// @brief 检查当前是否在交易时段内
     Q_INVOKABLE bool isTradingSessionOpen() const;
+
+    /// @brief 检查是否支持假期感知
+    Q_INVOKABLE bool isHolidayAware() const;
+
+    /// @brief 刷新交易日历快照
     Q_INVOKABLE void refresh();
-    Q_INVOKABLE void refreshAsync();
-    Q_INVOKABLE void setSessionSnapshotOverrideForTesting(const QVariantMap& snapshot);
-    Q_INVOKABLE void clearSessionSnapshotOverrideForTesting();
 
 signals:
-    void initializedChanged();
     void currentSessionSnapshotChanged();
 
 private:
-    explicit TradingMarketCalendarService(QObject* parent = nullptr);
+    void refreshCalendar();
 
-    static TradingMarketCalendarService* m_instance;
-    static QMutex m_instanceMutex;
-
-    mutable QMutex m_mutex;
-    bool m_initialized;
-    QVariantMap m_calendarBase;
-    QVariantMap m_currentSessionSnapshot;
-    QVariantMap m_testingSessionSnapshotOverride;
-    bool m_hasTestingSessionSnapshotOverride;
-    QTimer* m_refreshTimer;
+    QVariantMap m_sessionSnapshot;
 };
+
+} // namespace bridge

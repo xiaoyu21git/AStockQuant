@@ -4,29 +4,11 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include "../../types/InstrumentId.h"
 
 namespace astock::domain::backtest::grouping_allocation {
 
-struct InstrumentId final {
-    static constexpr uint32_t kInvalidValue = 0U;
-
-    uint32_t value{kInvalidValue};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value != kInvalidValue;
-    }
-
-    friend bool operator==(InstrumentId left, InstrumentId right) noexcept
-    {
-        return left.value == right.value;
-    }
-
-    friend bool operator<(InstrumentId left, InstrumentId right) noexcept
-    {
-        return left.value < right.value;
-    }
-};
+using ::domain::InstrumentId;
 
 struct GroupId final {
     static constexpr int32_t kInvalidValue = 0;

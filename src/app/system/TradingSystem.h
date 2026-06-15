@@ -1,0 +1,76 @@
+#pragma once
+// ─────────────────────────────────────────────────────────────────────
+// TradingSystem — 订单风控交易底层单例 (纯 C++，零 Qt)
+// 统一管理 TradeExecutionEngine / PositionAccountEngine / RiskEvaluator
+// ─────────────────────────────────────────────────────────────────────
+
+#include "../../domain/trading/TradeExecutionEngine.h"
+#include "../../domain/trading/PositionAccountEngine.h"
+#include "../../domain/strategy/include/RiskEvaluator.h"
+
+#include <memory>
+#include <mutex>
+#include <functional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+namespace app::system {
+
+class TradingSystem final {
+public:
+    static TradingSystem& instance();
+
+    // ── 初始化 ──
+    void initialize();
+    bool initialized() const noexcept { return m_initialized; }
+
+    // ── 交易引擎 ──
+    domain::trading::TradeExecutionEngine* tradeEngine() noexcept { return m_tradeEngine.get(); }
+    domain::trading::SubmitResult submitOrder(const domain::trading::TradeOrder& order);
+
+    // ── 持仓账户 ──
+    domain::trading::PositionAccountEngine* positionEngine() noexcept { return m_positionEngine.get(); }
+    const domain::trading::AccountSnapshot& accountSnapshot() const;
+    const std::unordered_map<std::string, domain::trading::Position>& positions() const;
+
+    // ── 风控配置 ──
+    const domain::strategy::RiskConfig& riskConfig() const noexcept { return m_riskConfig; }
+    void setRiskConfig(const domain::strategy::RiskConfig& config);
+
+    // ── 风控审批 ──
+    domain::strategy::RiskResult evaluateOrderRisk(const domain::strategy::RiskInput& input);
+
+    // ── 引擎回调（桥接层注册，用于转发成交/状态到 QML） ──
+    using OrderUpdateHandler = std::function<void(const domain::trading::TradeOrder&)>;
+    using TradeFillHandler = std::function<void(const domain::trading::TradeFill&)>;
+    void setOnOrderUpdate(OrderUpdateHandler handler);
+    void setOnTradeFill(TradeFillHandler handler);
+
+    // ── 事件回调 ──
+    using DataChangedCallback = std::function<void()>;
+    void setOnDataChanged(DataChangedCallback cb);
+    void notifyDataChanged();
+
+private:
+    /// @brief 从当前状态填充完整的 RiskInput
+    domain::strategy::RiskInput buildRiskInput(const domain::trading::TradeOrder& order) const;
+
+    /// @brief 查找指定标的的持仓信息
+    const domain::trading::Position* findPosition(const std::string& symbol) const;
+
+    TradingSystem() = default;
+    ~TradingSystem() = default;
+    TradingSystem(const TradingSystem&) = delete;
+    TradingSystem& operator=(const TradingSystem&) = delete;
+
+    bool m_initialized{false};
+    std::unique_ptr<domain::trading::TradeExecutionEngine> m_tradeEngine;
+    std::unique_ptr<domain::trading::PositionAccountEngine> m_positionEngine;
+    domain::strategy::RiskConfig m_riskConfig{domain::strategy::RiskConfig::defaults()};
+    mutable double m_peakTotalAsset{0.0};
+    mutable std::mutex m_mutex;
+    DataChangedCallback m_onDataChanged;
+};
+
+} // namespace app::system

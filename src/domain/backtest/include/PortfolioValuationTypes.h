@@ -2,19 +2,11 @@
 
 #include <cstdint>
 #include <vector>
+#include "../../types/InstrumentId.h"
 
 namespace astock::domain::backtest::portfolio_valuation {
 
-struct InstrumentId final {
-    static constexpr uint32_t kInvalidValue = 0U;
-
-    uint32_t value{kInvalidValue};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value != kInvalidValue;
-    }
-};
+using ::domain::InstrumentId;
 
 struct QuantityLots final {
     static constexpr int32_t kMinValue = 0;

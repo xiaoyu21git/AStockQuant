@@ -1588,11 +1588,12 @@ Item {
                                         property var chartData: modelData
 
                                         width: metricSpanWidth(3)
-                                        height: 220
+                                        height: 180
                                         radius: 16
                                         color: panelBackground
                                         border.width: 1
                                         border.color: panelBorder
+                                        clip: true
                                         visible: chartData.series.length > 0
 
                                         Column {
@@ -1684,11 +1685,12 @@ Item {
 
                                 Rectangle {
                                     width: parent.width
-                                    height: 320
+                                    height: 280
                                     radius: 16
                                     color: panelBackground
                                     border.width: 1
                                     border.color: panelBorder
+                                    clip: true
 
                                     Canvas {
                                         id: returnCurveCanvas
@@ -1717,66 +1719,107 @@ Item {
                                                 return
                                             }
 
-                                            var leftPadding = 54
-                                            var rightPadding = 14
+                                            var leftPadding = 60
+                                            var rightPadding = 20
                                             var topPadding = 16
-                                            var bottomPadding = 28
-                                            var minValue = Math.min(0.8, curveMinValue(visibleSeries))
-                                            var maxValue = Math.max(1.05, curveMaxValue(visibleSeries))
+                                            var bottomPadding = 36
+                                            var allMin = curveMinValue(visibleSeries)
+                                            var allMax = curveMaxValue(visibleSeries)
+                                            var range = allMax - allMin
+                                            var margin = Math.max(0.02, range * 0.15)
+                                            var minValue = Math.min(0.85, allMin - margin)
+                                            var maxValue = Math.max(1.05, allMax + margin)
                                             var baselineY = curvePointY(1.0, minValue, maxValue, canvasHeight, topPadding, bottomPadding)
 
-                                            context.strokeStyle = Qt.rgba(panelBorder.r, panelBorder.g, panelBorder.b, 0.65)
-                                            context.lineWidth = 1
+                                            // ── 网格线 ──
+                                            var step = Math.pow(10, Math.floor(Math.log10(range))) / 2
+                                            if (range / step < 3) step /= 2
+                                            if (range / step > 8) step *= 2
+                                            if (step < 0.01) step = 0.05
+                                            context.strokeStyle = Qt.rgba(0.55, 0.62, 0.73, 0.18)
+                                            context.lineWidth = 0.7
+                                            context.font = "10px sans-serif"
+                                            context.fillStyle = textSecondary
+                                            for (var tickVal = Math.ceil(minValue / step) * step; tickVal <= maxValue + step / 2; tickVal += step) {
+                                                var tickY = curvePointY(tickVal, minValue, maxValue, canvasHeight, topPadding, bottomPadding)
+                                                context.beginPath()
+                                                context.moveTo(leftPadding, tickY)
+                                                context.lineTo(canvasWidth - rightPadding, tickY)
+                                                context.stroke()
+                                                context.fillText(tickVal.toFixed(2), 4, tickY + 4)
+                                            }
+
+                                            // ── 1.0 基线加粗 ──
+                                            context.strokeStyle = Qt.rgba(0.55, 0.62, 0.73, 0.55)
+                                            context.lineWidth = 1.2
                                             context.beginPath()
                                             context.moveTo(leftPadding, baselineY)
                                             context.lineTo(canvasWidth - rightPadding, baselineY)
                                             context.stroke()
 
+                                            // ── Y轴标签 ──
+                                            context.save()
+                                            context.fillStyle = textSecondary
+                                            context.font = "11px sans-serif"
+                                            context.translate(10, canvasHeight / 2)
+                                            context.rotate(-Math.PI / 2)
+                                            context.fillText("累计净值", -30, 0)
+                                            context.restore()
+
                                             var labels = ["原始", "成本后", "风控后"]
-                                            var colors = [riseColor, accentStrong, positiveColor]
+                                            // A股: 红涨绿跌; 三条线用可区分颜色
+                                            var lineColors = ["#EF4444", "#F97316", "#3B82F6"]  // 红/橙/蓝
+                                            var areaFills   = ["rgba(239,68,68,0.08)", "rgba(249,115,22,0.06)", "rgba(59,130,246,0.06)"]
+                                            var lineWidths  = [3.0, 2.0, 2.0]
+                                            var dashPatterns = [[], [8, 3], [3, 3]]
                                             var seriesList = [rawCumulative, costAdjustedCumulative, riskAdjustedCumulative]
 
-                                            context.font = "11px sans-serif"
-                                            context.fillStyle = textSecondary
-                                            context.fillText("累计净值", 8, 16)
+                                            for (var si = 0; si < seriesList.length; si++) {
+                                                var series = seriesList[si]
+                                                if (series.length === 0) continue
 
-                                            for (var seriesIndex = 0; seriesIndex < seriesList.length; seriesIndex++) {
-                                                var series = seriesList[seriesIndex]
-                                                if (series.length === 0) {
-                                                    continue
-                                                }
-
-                                                context.strokeStyle = colors[seriesIndex]
-                                                context.fillStyle = colors[seriesIndex]
-                                                context.lineWidth = 2
+                                                // ── 面积填充 ──
+                                                context.fillStyle = areaFills[si]
                                                 context.beginPath()
-                                                for (var pointIndex = 0; pointIndex < series.length; pointIndex++) {
-                                                    var x = curvePointX(pointIndex, series.length, canvasWidth, leftPadding, rightPadding)
-                                                    var y = curvePointY(series[pointIndex], minValue, maxValue, canvasHeight, topPadding, bottomPadding)
-                                                    if (pointIndex === 0) {
-                                                        context.moveTo(x, y)
-                                                    } else {
-                                                        context.lineTo(x, y)
-                                                    }
+                                                for (var pi = 0; pi < series.length; pi++) {
+                                                    var fx = curvePointX(pi, series.length, canvasWidth, leftPadding, rightPadding)
+                                                    var fy = curvePointY(series[pi], minValue, maxValue, canvasHeight, topPadding, bottomPadding)
+                                                    if (pi === 0) context.moveTo(fx, baselineY)
+                                                    context.lineTo(fx, fy)
+                                                }
+                                                context.lineTo(curvePointX(series.length - 1, series.length, canvasWidth, leftPadding, rightPadding), baselineY)
+                                                context.closePath()
+                                                context.fill()
+
+                                                // ── 曲线 ──
+                                                context.strokeStyle = lineColors[si]
+                                                context.lineWidth = lineWidths[si]
+                                                if (dashPatterns[si].length > 0) {
+                                                    context.setLineDash(dashPatterns[si])
+                                                } else {
+                                                    context.setLineDash([])
+                                                }
+                                                context.beginPath()
+                                                for (var pi2 = 0; pi2 < series.length; pi2++) {
+                                                    var x = curvePointX(pi2, series.length, canvasWidth, leftPadding, rightPadding)
+                                                    var y = curvePointY(series[pi2], minValue, maxValue, canvasHeight, topPadding, bottomPadding)
+                                                    if (pi2 === 0) context.moveTo(x, y)
+                                                    else context.lineTo(x, y)
                                                 }
                                                 context.stroke()
-
-                                                for (var pointIndex2 = 0; pointIndex2 < series.length; pointIndex2++) {
-                                                    var x2 = curvePointX(pointIndex2, series.length, canvasWidth, leftPadding, rightPadding)
-                                                    var y2 = curvePointY(series[pointIndex2], minValue, maxValue, canvasHeight, topPadding, bottomPadding)
-                                                    context.beginPath()
-                                                    context.arc(x2, y2, 2.5, 0, Math.PI * 2)
-                                                    context.fill()
-                                                }
+                                                context.setLineDash([])
                                             }
 
-                                            for (var legendIndex = 0; legendIndex < labels.length; legendIndex++) {
-                                                var legendX = leftPadding + legendIndex * 110
-                                                var legendY = canvasHeight - 10
-                                                context.fillStyle = colors[legendIndex]
-                                                context.fillRect(legendX, legendY - 8, 10, 10)
+                                            // ── 图例 ──
+                                            var legendStartX = leftPadding
+                                            for (var li = 0; li < labels.length; li++) {
+                                                var lx = legendStartX + li * 100
+                                                var ly = canvasHeight - 14
+                                                context.fillStyle = lineColors[li]
+                                                context.fillRect(lx, ly - 8, 12, 12)
                                                 context.fillStyle = textSecondary
-                                                context.fillText(labels[legendIndex], legendX + 16, legendY)
+                                                context.font = "11px sans-serif"
+                                                context.fillText(labels[li], lx + 18, ly + 2)
                                             }
                                         }
 

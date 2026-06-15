@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../strategies/include/StrategyDefinitionTypes.h"
+#include "../../types/InstrumentId.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -178,27 +179,7 @@ public:
     }
 };
 
-struct InstrumentId final {
-private:
-    std::uint32_t value_{0};
-
-public:
-    InstrumentId() = default;
-    explicit InstrumentId(std::uint32_t value)
-        : value_(value)
-    {
-    }
-
-    [[nodiscard]] std::uint32_t value() const noexcept
-    {
-        return value_;
-    }
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value_ > 0;
-    }
-};
+using InstrumentId = ::domain::InstrumentId;
 
 using RuntimeFactorId = ::domain::strategies::FactorId;
 using RuntimeFactorSnapshot = ::domain::strategies::FactorSnapshot;

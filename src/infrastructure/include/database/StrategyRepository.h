@@ -3,7 +3,7 @@
 
 #include "database/ConnectionPool.h"
 #include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
-#include "../../../domain/backtest/include/ResolvedStrategyBehavior.h"
+#include "../../../domain/types/ResolvedStrategyBehavior.h"
 #include "../../../domain/strategies/include/StrategyDefinitionTypes.h"
 #include <QDateTime>
 #include <QString>

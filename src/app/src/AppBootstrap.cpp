@@ -25,14 +25,7 @@
 #include <QTimer>
 #include <QtGlobal>
 #include "VasAurora.hpp"
-// #include "../../ui/bridge/include/MarketDataService.h" -- deleted, replaced by MarketDataBridge
-#include "../../ui/bridge/include/PositionAccountBridge.h"
-#include "../../ui/bridge/include/TradingMarketCalendarService.h"
-#include "../../ui/bridge/include/TradingRuntimeStatusService.h"
-#include "../../ui/bridge/include/TradeExecutionBridge.h"
-#include "../../ui/bridge/include/TradingConnectionConfigService.h"
-#include "../../domain/trading/TradeExecutionEngine.h"
-#include "../../app/adapters/SimulatedBrokerGateway.h"
+#include "../../app/system/TradingSystem.h"
 #include "../../ui/bridge/include/MarketDataBridge.h"
 #include "../../ui/bridge/include/DatabaseConnectionManager.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
@@ -441,36 +434,14 @@ void AppBootstrap::initializeDeferredUiServices()
         return;
     }
 
-    if (TradingConnectionConfigService* tradingConnectionConfigService = TradingConnectionConfigService::instance()) {
-        tradingConnectionConfigService->initializeAsync();
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
-        if (!m_tradingConfigurationChangedConnection) {
-            m_tradingConfigurationChangedConnection = QObject::connect(
-                tradingConnectionConfigService,
-                &TradingConnectionConfigService::currentConfigurationChanged,
-                QCoreApplication::instance(),
-                [this]() {
-                    scheduleOptionalConnectorReconcile();
-                });
-        }
-        scheduleOptionalConnectorReconcile();
+    scheduleOptionalConnectorReconcile();
 #endif
-    }
 
-    if (TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance()) {
-        marketCalendarService->initializeAsync();
-    }
-
-    if (TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance()) {
-        runtimeStatusService->initializeAsync();
-    }
-
-    // MarketDataFacade 已移除，MarketDataBridge 改为预留接口（实时行情后续接入）
     std::cout << "[AppBootstrap] Deferred startup: MarketDataBridge uses stub interface\n";
 
     m_deferredUiServicesInitialized = true;
 
-    // 链式调度 phase 2/3
     if (QObject* context = QCoreApplication::instance()) {
         QTimer::singleShot(0, context, [this]() {
             initializeDeferredDomainServices();
@@ -499,18 +470,10 @@ void AppBootstrap::initializeDeferredTradingServices()
         return;
     }
 
-    // ── 创建交易引擎 + 注入 SimulatedBrokerGateway ──
-    m_tradeEngine = std::make_unique<domain::trading::TradeExecutionEngine>();
+    // ── 初始化交易系统单例 (纯C++底层) ──
+    app::system::TradingSystem::instance().initialize();
 
-    auto simGateway = std::make_unique<app::adapters::SimulatedBrokerGateway>();
-    simGateway->connect("{}"); // 模拟网关无需配置
-    m_tradeEngine->setGateway(std::move(simGateway));
-
-    // ── 注入引擎到桥接层 ──
-    TradeExecutionBridge::instance()->setEngine(m_tradeEngine.get());
-    TradeExecutionBridge::instance()->initialize();
-
-    std::cout << "[AppBootstrap] Deferred startup phase 3/3: trading engine initialized with simulated gateway\n";
+    std::cout << "[AppBootstrap] Deferred startup phase 3/3: trading system initialized\n";
 
     m_deferredTradingServicesInitialized = true;
 }

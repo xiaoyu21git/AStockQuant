@@ -4,14 +4,9 @@
 #include <string>
 #include <vector>
 
-#include "FactorBacktestExecutor.h"
+#include "FactorBacktestTypes.h"
 
 namespace factor {
-
-struct BacktestConfig;
-struct BacktestResult;
-struct ICIRResult;
-struct GroupBacktestResult;
 
 class FactorBacktestMetricsCalculator final
 {

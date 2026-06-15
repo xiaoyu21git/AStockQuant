@@ -276,6 +276,27 @@ public:
 
     /// @brief 浮动熔断阈值计算（第三层级）
     [[nodiscard]] static double clampMaxTotalExposure(double rawPct);
+
+    /// @brief 将 RiskConfig 填充到 RiskInput 的配置字段
+    static void applyConfig(RiskInput& input, const struct RiskConfig& config);
+};
+
+// ── 风控配置 (纯 C++，零 Qt) ──
+struct RiskConfig final {
+    double orderSizeLimitWan{0.0};
+    double slippageLimitPercent{0.0};
+    double turnoverLimitWan{0.0};
+    double stopLossPercent{0.0};
+    double takeProfitPercent{0.0};
+    double maxDrawdownLimitPercent{0.0};
+    double breakerLevel1Percent{0.0};
+    double breakerLevel2Percent{0.0};
+    double breakerLevel3Percent{0.0};
+    double maxPositionPercent{0.0};
+    double maxTotalExposurePercent{0.0};
+
+    /// @brief 构建默认风控配置（开发/模拟环境）
+    static RiskConfig defaults() noexcept;
 };
 
 } // namespace domain::strategy

@@ -356,7 +356,7 @@ Rectangle {
                     // 取消按钮
                     Rectangle { width: 60; height: 30; radius: 6; color: "#475569"; border.width: 1; border.color: "#64748B"; anchors.verticalCenter: parent.verticalCenter
                         Text { anchors.centerIn: parent; text: "取消"; font.pixelSize: 12; color: "#F1F5F9" }
-                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { root.isBacktesting = false } } }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { backtestController.cancelBacktest(); root.isBacktesting = false } } }
                 }
                 // 状态文字行
                 Row { width: parent.width; height: root.isBacktesting && root.backtestStatus !== "" ? 20 : 0; visible: root.isBacktesting && root.backtestStatus !== ""

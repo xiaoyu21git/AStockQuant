@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 #include <utility>
 
 namespace factor::compute {
@@ -44,14 +45,28 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
 
     std::vector<double> groupAccumReturns(nGroups, 0.0);
     std::vector<int32_t> groupValidDays(nGroups, 0);
+    std::vector<int64_t> groupTotalStocks(nGroups, 0);
+    std::vector<int32_t> groupPeriodCount(nGroups, 0);
     std::vector<double> strategyDailyReturns;
 
-    double equity = 1.0;
-    double maxEquity = 1.0;
+    // 换手追踪：记录上期各组股票集合
+    std::vector<std::unordered_set<std::string>> prevGroupStocks(nGroups);
+    double totalTurnover = 0.0;
+    int32_t turnoverPeriods = 0;
 
-    // 仅在 rebalanceDays 周期的交易日重新分组
+    double equity = params_.initialCapital;
+    double maxEquity = params_.initialCapital;
+
+    const size_t totalSteps = sortedDates.size() > static_cast<size_t>(forwardDays)
+        ? (sortedDates.size() - forwardDays + rebalanceDays - 1) / rebalanceDays : 0;
+    size_t stepIndex = 0;
+
     for (size_t di = 0; di + forwardDays < sortedDates.size(); di += rebalanceDays) {
-        // forwardDays 后的日期作为卖出日
+        if (params_.onProgress && totalSteps > 0) {
+            params_.onProgress(static_cast<double>(stepIndex) / static_cast<double>(totalSteps));
+        }
+        ++stepIndex;
+
         size_t sellDayIdx = di + forwardDays;
         const std::string& curDate = sortedDates[di];
         const std::string& sellDate = sortedDates[sellDayIdx];
@@ -99,6 +114,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         }
 
         std::vector<double> dayGroupReturns(nGroups, 0.0);
+        std::vector<std::unordered_set<std::string>> curGroupStocks(nGroups);
         int32_t validGroups = 0;
 
         for (int32_t g = 0; g < nGroups; ++g) {
@@ -109,6 +125,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
 
             for (size_t i = start; i < end; ++i) {
                 const auto& sym = ranked[i].first;
+                curGroupStocks[g].insert(sym);
                 auto buyIt = buyPrice.find(sym);
                 auto sellIt = sellPrice.find(sym);
                 if (buyIt != buyPrice.end() && sellIt != sellPrice.end()
@@ -127,12 +144,36 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                 avgRet -= costPerTrade;  // 交易成本
                 groupAccumReturns[g] += avgRet;
                 groupValidDays[g]++;
+                groupTotalStocks[g] += cnt;
+                groupPeriodCount[g]++;
                 dayGroupReturns[g] = avgRet;
                 ++validGroups;
             }
         }
 
         if (validGroups > 0) {
+            // 计算本期换手率：对比当期各组股票 vs 上期
+            if (turnoverPeriods > 0) {
+                double periodTurnover = 0.0;
+                for (int32_t g = 0; g < nGroups; ++g) {
+                    if (prevGroupStocks[g].empty() || curGroupStocks[g].empty()) continue;
+                    int32_t stayed = 0;
+                    for (const auto& sym : curGroupStocks[g]) {
+                        if (prevGroupStocks[g].count(sym)) ++stayed;
+                    }
+                    int32_t left = static_cast<int32_t>(prevGroupStocks[g].size()) - stayed;
+                    int32_t entered = static_cast<int32_t>(curGroupStocks[g].size()) - stayed;
+                    int32_t total = static_cast<int32_t>(curGroupStocks[g].size());
+                    if (total > 0) {
+                        periodTurnover += static_cast<double>(entered + left) / (2.0 * total);
+                    }
+                }
+                totalTurnover += periodTurnover / nGroups;
+                result.periodTurnovers.push_back(periodTurnover / nGroups);
+            }
+            ++turnoverPeriods;
+            prevGroupStocks = std::move(curGroupStocks);
+
             double dailyStrategyRet = 0.0;
             for (int32_t g = 0; g < nGroups; ++g) {
                 dailyStrategyRet += dayGroupReturns[g];
@@ -152,6 +193,9 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     for (int32_t g = 0; g < nGroups; ++g) {
         GroupBacktestMetrics& gm = result.groups[g];
         gm.groupIndex = g + 1;
+        gm.stockCount = groupPeriodCount[g] > 0
+            ? static_cast<int32_t>(groupTotalStocks[g] / groupPeriodCount[g])
+            : 0;
         if (groupValidDays[g] > 0) {
             gm.returnRate = groupAccumReturns[g] / groupValidDays[g];
             gm.annualizedReturn = gm.returnRate * 252.0;
@@ -161,7 +205,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     // 计算执行指标
     const int32_t nPeriods = static_cast<int32_t>(strategyDailyReturns.size());
     if (nPeriods > 0) {
-        result.totalReturn = equity - 1.0;
+        result.totalReturn = (equity - params_.initialCapital) / params_.initialCapital;
         result.finalEquity = equity;
 
         // 年化：每个 period 代表 rebalanceDays 个交易日
@@ -187,6 +231,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         result.sharpeRatio = (result.annualStdDev > 1e-12)
             ? ((result.annualizedReturn - riskFreeRate) / result.annualStdDev) : 0.0;
         result.validSampleCount = nPeriods;
+        result.turnoverRate = turnoverPeriods > 0 ? totalTurnover / turnoverPeriods : 0.0;
     }
 
     // 计算分组因子值 min/max
@@ -212,6 +257,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         }
     }
 
+    result.strategyDailyReturns = std::move(strategyDailyReturns);
     return result;
 }
 

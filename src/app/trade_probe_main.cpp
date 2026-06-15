@@ -18,9 +18,8 @@
 #include "foundation.h"
 #include "foundation/config/ConfigManager.hpp"
 
-#include "../ui/bridge/include/MarketDataService.h"
-#include "../ui/bridge/include/PositionAccountService.h"
-#include "../ui/bridge/include/TradeExecutionService.h"
+#include "../ui/bridge/include/MarketDataBridge.h"
+#include "../ui/bridge/include/TradingBridges.h"
 #include "../ui/bridge/include/TradingConnectionConfigService.h"
 #include "../ui/bridge/include/TradingRuntimeStatusService.h"
 

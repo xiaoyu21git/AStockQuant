@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../../types/DomainDate.h"
-#include "../../backtest/include/ResolvedStrategyBehavior.h"
+#include "../../types/ResolvedStrategyBehavior.h"
 #include "../../factor/include/factor_enums.h"
 
 #include <cstdint>

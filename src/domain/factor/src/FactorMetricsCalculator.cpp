@@ -1,6 +1,5 @@
 ﻿#include "domain/factor/include/FactorMetricsCalculator.h"
 
-#include "domain/factor/include/FactorBacktestExecutor.h"
 #include "domain/factor/include/FactorIcUtils.h"
 
 #include <algorithm>

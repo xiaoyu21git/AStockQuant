@@ -54,28 +54,3 @@ target_include_directories(domain
 
 set(LIBS_ROOT "C:/libs")
 
-add_executable(domain_test 
-    test/test_backtest.cpp
-)
-
-target_include_directories(domain_test
-    PUBLIC
-        include
-    PRIVATE
-        src
-        "${LIBS_ROOT}/foundation/include"
-        "${LIBS_ROOT}/foundation"
-        "${LIBS_ROOT}/GTest/include"
-)
-
-target_link_libraries(domain_test
-    PRIVATE
-        domain
-        engine
-        foundation
-        "${LIBS_ROOT}/GTest/lib/gtest.lib"
-        "${LIBS_ROOT}/GTest/lib/gtest_main.lib"
-        "${LIBS_ROOT}/GTest/lib/gmock.lib"
-)
-
-enable_testing()

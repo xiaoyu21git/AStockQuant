@@ -109,4 +109,17 @@ inline void diagnosticSet(DiagnosticMap& map, const std::string& key, const std:
     map.push_back({key, value});
 }
 
+// ── 交易日（与 DomainDate 语义相同，作为独立类型增加代码可读性） ──
+using TradingDay = DomainDate;
+
+// ── 日期区间 ──
+struct DayRange final {
+    TradingDay start{};
+    TradingDay end{};
+
+    [[nodiscard]] bool isValid() const noexcept {
+        return start.isValid() && end.isValid() && start <= end;
+    }
+};
+
 } // namespace domain

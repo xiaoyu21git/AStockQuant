@@ -3,58 +3,17 @@
 #include <cstdint>
 #include <optional>
 #include <vector>
+#include "../../types/DomainDate.h"
 
 namespace astock::domain::backtest::rebalancing {
 
-struct TradingDay final {
+using ::domain::TradingDay;
+using ::domain::DayRange;
+
+struct DayCount final {
     static constexpr int32_t kInvalidValue = 0;
-
     int32_t value{kInvalidValue};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value > kInvalidValue;
-    }
-
-    friend bool operator==(TradingDay left, TradingDay right) noexcept
-    {
-        return left.value == right.value;
-    }
-
-    friend bool operator!=(TradingDay left, TradingDay right) noexcept
-    {
-        return !(left == right);
-    }
-
-    friend bool operator<(TradingDay left, TradingDay right) noexcept
-    {
-        return left.value < right.value;
-    }
-
-    friend bool operator<=(TradingDay left, TradingDay right) noexcept
-    {
-        return left.value <= right.value;
-    }
-
-    friend bool operator>(TradingDay left, TradingDay right) noexcept
-    {
-        return right < left;
-    }
-
-    friend bool operator>=(TradingDay left, TradingDay right) noexcept
-    {
-        return right <= left;
-    }
-};
-
-struct DayRange final {
-    TradingDay start{};
-    TradingDay end{};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return start.isValid() && end.isValid() && start <= end;
-    }
+    [[nodiscard]] bool isValid() const noexcept { return value > kInvalidValue; }
 };
 
 struct RebalanceIntervalDays final {

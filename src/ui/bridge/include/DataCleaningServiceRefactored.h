@@ -128,5 +128,7 @@ private:
     bool m_initialized{false};
 };
 
+Q_DECLARE_METATYPE(RefactoredCleaningStats)
+
 // 工厂函数：创建DataCleaningServiceRefactored实例
 std::shared_ptr<DataCleaningServiceRefactored> createDataCleaningServiceRefactored(QObject* parent = nullptr);

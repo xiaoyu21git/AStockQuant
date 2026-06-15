@@ -4,60 +4,14 @@
 #include <optional>
 #include <unordered_map>
 #include <vector>
+#include "../../types/DomainDate.h"
+#include "../../types/InstrumentId.h"
 
 namespace astock::domain::backtest::dynamic_universe {
 
-struct TradingDay final {
-    static constexpr int32_t kInvalidValue = 0;
-
-    int32_t value{kInvalidValue};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value > kInvalidValue;
-    }
-
-    friend bool operator==(TradingDay left, TradingDay right) noexcept
-    {
-        return left.value == right.value;
-    }
-
-    friend bool operator!=(TradingDay left, TradingDay right) noexcept
-    {
-        return !(left == right);
-    }
-
-    friend bool operator<(TradingDay left, TradingDay right) noexcept
-    {
-        return left.value < right.value;
-    }
-
-    friend bool operator<=(TradingDay left, TradingDay right) noexcept
-    {
-        return left.value <= right.value;
-    }
-};
-
-struct InstrumentId final {
-    static constexpr uint32_t kInvalidValue = 0U;
-
-    uint32_t value{kInvalidValue};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value != kInvalidValue;
-    }
-
-    friend bool operator==(InstrumentId left, InstrumentId right) noexcept
-    {
-        return left.value == right.value;
-    }
-
-    friend bool operator<(InstrumentId left, InstrumentId right) noexcept
-    {
-        return left.value < right.value;
-    }
-};
+using ::domain::TradingDay;
+using ::domain::DayRange;
+using ::domain::InstrumentId;
 
 struct IndexId final {
     static constexpr uint32_t kInvalidValue = 0U;
@@ -67,16 +21,6 @@ struct IndexId final {
     [[nodiscard]] bool isValid() const noexcept
     {
         return value != kInvalidValue;
-    }
-};
-
-struct DayRange final {
-    TradingDay start{};
-    TradingDay end{};
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return start.isValid() && end.isValid() && start <= end;
     }
 };
 

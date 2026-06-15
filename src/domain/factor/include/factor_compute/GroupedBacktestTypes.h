@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace factor::compute {
@@ -8,12 +9,14 @@ namespace factor::compute {
 /// 模拟成交参数
 struct SimulatedTradingParams final {
     int32_t numGroups{5};
-    int32_t forwardDays{1};          // 持仓天数（T+N 日收益）
-    int32_t rebalanceDays{1};        // 调仓周期（每隔 N 天重新分组）
-    double commissionRate{0.001};    // 手续费率（每笔交易）
-    double slippageRate{0.001};      // 滑点率（每笔交易）
-    double riskFreeRate{0.02};       // 无风险利率（年化）
-    double maxFwdRetAbsLimit{0.5};   // 过滤极端日收益
+    int32_t forwardDays{1};
+    int32_t rebalanceDays{1};
+    double commissionRate{0.001};
+    double slippageRate{0.001};
+    double riskFreeRate{0.02};
+    double initialCapital{1000000.0};
+    double maxFwdRetAbsLimit{0.5};
+    std::function<void(double)> onProgress; // 进度回调 (0.0-1.0)
 };
 
 /// 单个分组的回测指标
@@ -29,11 +32,14 @@ struct GroupBacktestMetrics final {
 /// 模拟成交的完整回测结果
 struct SimulatedTradingResult final {
     std::vector<GroupBacktestMetrics> groups;
+    std::vector<double> strategyDailyReturns;
     double annualizedReturn{0.0};
     double maxDrawdown{0.0};
     double annualStdDev{0.0};
     double sharpeRatio{0.0};
     double totalReturn{0.0};
+    double turnoverRate{0.0};
+    std::vector<double> periodTurnovers; // 每期换手率序列
     double finalEquity{1.0};
     int32_t validSampleCount{0};
 };

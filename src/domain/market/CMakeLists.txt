@@ -64,22 +64,10 @@ set_target_properties(astock_market PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION TRUE
 )
 
-# 简单的数据库链路演示程序：从 minute_bar 读取部分 K 线
-add_executable(market_db_demo
-    test/market_db_demo.cpp
-)
-
-target_link_libraries(market_db_demo
-    PRIVATE
-        astock_market
-        foundation
-    ${MYSQL_LIB}
-)
-
-target_include_directories(market_db_demo
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+# market_db_demo 引用了已删除的 market/core/MarketData.h，暂时禁用
+#add_executable(market_db_demo
+#    test/market_db_demo.cpp
+#)
 
 # # 测试可执行文件
 # if(BUILD_TESTS)

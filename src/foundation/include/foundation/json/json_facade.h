@@ -75,7 +75,29 @@ public:
     std::string toString() const;
     std::string toPrettyString(int indent = 2) const;
     bool saveToFile(const std::string& filename) const;
-    
+
+    // ── 类型化数组构建（供域层构造结构化数据，零 Qt 依赖）──
+
+    /// @brief 向数组追加数值对象 {key: double, ...}
+    void push_back_object(const std::map<std::string, double>& fields);
+
+    /// @brief 向数组追加字符串对象 {key: string, ...}
+    void push_back_object(const std::map<std::string, std::string>& fields);
+
+    /// @brief 从 JSON 构建数值映射 {string → double}
+    static JsonFacade fromNumericMap(const std::map<std::string, double>& map);
+
+    // ── 类型化提取（供桥接层消费，无需字符串解析）──
+
+    /// @brief 将数组提取为 vector<map<string, double>>
+    [[nodiscard]] std::vector<std::map<std::string, double>> toNumericObjectArray() const;
+
+    /// @brief 将数组提取为 vector<map<string, string>>
+    [[nodiscard]] std::vector<std::map<std::string, std::string>> toStringObjectArray() const;
+
+    /// @brief 将对象提取为 map<string, double>
+    [[nodiscard]] std::map<std::string, double> toNumericMap() const;
+
     // Internal access
     JsonValue* getValue() const;
     bool empty() const { return !root_; }

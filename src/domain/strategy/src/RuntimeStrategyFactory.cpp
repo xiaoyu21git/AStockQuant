@@ -37,7 +37,7 @@ domain::strategy::buildFactorCallbacks(
                 domain::strategy::StrategyServiceFlowCode::InvalidInput);
         const std::lock_guard<std::mutex> lock(state->mutex);
         state->latestTradeDay = point.tradingDay();
-        state->latestSymbols = { point.instrumentId().value() };
+        state->latestSymbols = { point.instrumentId().value };
         return domain::strategy::StrategyServiceFlowResult(
             domain::strategy::StrategyServiceFlowCode::Ok);
     };
@@ -51,7 +51,7 @@ domain::strategy::buildFactorCallbacks(
         for (const auto& p : batch) {
             if (!p.isValid()) continue;
             latestDay = p.tradingDay();
-            syms.push_back(p.instrumentId().value());
+            syms.push_back(p.instrumentId().value);
         }
         if (latestDay == 0 || syms.empty())
             return domain::strategy::StrategyServiceFlowResult(

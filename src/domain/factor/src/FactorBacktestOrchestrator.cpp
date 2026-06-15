@@ -1,7 +1,10 @@
 #include "FactorBacktestOrchestrator.h"
 #include "factor_compute/FactorEngine.h"
+#include "factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "BacktestScheduler.h"
 #include "CompositeFactorConfig.h"
+#include "FactorMetricsCalculator.h"
+#include "foundation/json/json_facade.h"
 
 #include <algorithm>
 #include <cmath>
@@ -50,8 +53,17 @@ void FactorBacktestOrchestrator::run(
     FactorOrchestratorProgressCallback onProgress,
     FactorOrchestratorResultCallback onComplete)
 {
-    if (!m_scheduler) {
-        if (onComplete) onComplete("{\"error\":\"scheduler not set\"}");
+    auto emitError = [&](const char* msg) {
+        auto err = foundation::json::JsonFacade::createObject();
+        err.set("error", foundation::json::JsonFacade::createString(msg));
+        err.set("metrics", foundation::json::JsonFacade::createObject());
+        if (onComplete) onComplete(err.toString());
+    };
+
+    if (!m_scheduler) { emitError("scheduler not set"); return; }
+    if (!m_engine)   { emitError("factor engine not set"); return; }
+    if (!m_engine->hasInstanceManager()) {
+        emitError("FactorService not initialized — factor instances unavailable");
         return;
     }
 
@@ -65,16 +77,18 @@ void FactorBacktestOrchestrator::run(
     }
     size_t batchSize = instrumentCount > 0 ? instrumentCount : 1;
     auto plan = m_scheduler->submit(instrumentCount > 0 ? instrumentCount : 1, batchSize);
-    if (onProgress) onProgress(0.0, "starting");
+    if (onProgress) onProgress(5.0, "data loaded");
 
     factor::compute::BacktestReporterInput reporterInput;
-    // 缓存最近批次的 marketView，用于提取价格矩阵
     const factor::compute::IMarketDataView* lastMarketView = nullptr;
 
     const bool isComposite = (config.factorMode == FactorMode::Composite && !config.compositeChildren.empty());
     const auto& factorIdList = config.factorIds.empty()
         ? std::vector<std::string>{"backtest_factor"}
         : config.factorIds;
+
+    const size_t totalFactors = isComposite ? config.compositeChildren.size() : factorIdList.size();
+    size_t factorIndex = 0;
 
     m_scheduler->forEachBatch(plan,
         [&](const factor::compute::MarketMatrixBatch& marketMatrix) {
@@ -150,6 +164,8 @@ void FactorBacktestOrchestrator::run(
             }
         });
 
+    if (onProgress) onProgress(40.0, "factors computed");
+
     // compute() 内部通过 buildViewForFields 构建了 MarketView
     // 需要重新获取 view 指针，确保模拟交易有正确的价格矩阵
     if (m_dataService) {
@@ -161,14 +177,23 @@ void FactorBacktestOrchestrator::run(
 
     // ── 模拟成交 ──
     factor::compute::SimulatedTradingResult tradingResult;
-    if (!reporterInput.factorValuesByDate.empty()) {
-        factor::compute::SimulatedTradingParams params;
-        params.numGroups      = config.numGroups;
-        params.forwardDays    = std::max(1, config.forwardDays);
-        params.rebalanceDays  = std::max(1, config.rebalanceDays);
-        params.commissionRate = config.commissionRate;
-        params.slippageRate   = config.slippageRate;
-        params.riskFreeRate   = config.riskFreeRate;
+    bool hasFactorValues = !reporterInput.factorValuesByDate.empty();
+    if (!hasFactorValues) {
+        emitError("factor computation produced no values — check factor IDs and dataset");
+        return;
+    }
+
+    factor::compute::SimulatedTradingParams params;
+        params.numGroups       = config.numGroups;
+        params.forwardDays     = std::max(1, config.forwardDays);
+        params.rebalanceDays   = std::max(1, config.rebalanceDays);
+        params.commissionRate  = config.commissionRate;
+        params.slippageRate    = config.slippageRate;
+        params.riskFreeRate    = config.riskFreeRate;
+        params.initialCapital  = config.initialCapital;
+        params.onProgress      = [&](double pct) {
+            if (onProgress) onProgress(40.0 + pct * 20.0, "simulating trades");
+        };
 
         m_executor = std::make_unique<factor::compute::SimulatedTradingExecutor>(params);
 
@@ -240,8 +265,7 @@ void FactorBacktestOrchestrator::run(
                 tradingResult.totalReturn);
         fflush(stderr);
 
-        if (onProgress) onProgress(60.0, "trading simulated");
-    }
+    if (onProgress) onProgress(60.0, "trading simulated");
 
     // ── Reporter 分析 ──
     factor::compute::BacktestReporterOutput reporterOutput;
@@ -257,51 +281,258 @@ void FactorBacktestOrchestrator::run(
     if (onProgress) onProgress(80.0, "building result");
 
     // ── 产出 JSON 结果 ──
-    // 不传递原始因子值（55 万行），QML 展示只需要聚合指标
     if (onComplete) {
-        std::string jsonResult = "{\"status\":\"SUCCESS\",\"factorValues\":[],\"metrics\":{";
+        // ── 构建 Calculator 输入 ──
+        ::factor::BacktestConfig btConfig;
+        btConfig.forwardDays    = std::max(1, config.forwardDays);
+        btConfig.rebalanceDays  = std::max(1, config.rebalanceDays);
+        btConfig.numGroups      = config.numGroups;
+        btConfig.commissionRate = config.commissionRate;
+        btConfig.slippageRate   = config.slippageRate;
+        btConfig.riskFreeRate   = config.riskFreeRate;
 
-        // ── 分组数据（来自 SimulatedTradingExecutor 真实计算结果）──
-        jsonResult += "\"groups\":[";
-        for (size_t g = 0; g < tradingResult.groups.size(); ++g) {
-            if (g > 0) jsonResult += ",";
-            const auto& gm = tradingResult.groups[g];
-            jsonResult += "{";
-            jsonResult += "\"groupName\":\"G" + std::to_string(gm.groupIndex) + "\",";
-            jsonResult += "\"groupIndex\":" + std::to_string(gm.groupIndex) + ",";
-            jsonResult += "\"returnRate\":" + std::to_string(gm.returnRate) + ",";
-            jsonResult += "\"annualizedReturn\":" + std::to_string(gm.annualizedReturn) + ",";
-            jsonResult += "\"cumulativeReturn\":" + std::to_string(gm.returnRate) + ",";
-            jsonResult += "\"stockCount\":" + std::to_string(gm.stockCount) + ",";
-            jsonResult += "\"minFactorValue\":" + std::to_string(gm.minFactorValue) + ",";
-            jsonResult += "\"maxFactorValue\":" + std::to_string(gm.maxFactorValue);
-            jsonResult += "}";
+        if (onProgress) onProgress(50.0, "computing IC");
+
+        // ── 预先排序日期（IC 计算 + JSON 输出都需要）──
+        auto allSortedDates = sortedDatesFrom(reporterInput.factorValuesByDate);
+
+        // ── 计算 Rank IC（因子值与真实前向收益的 Spearman 秩相关）──
+        ::factor::ICIRResult icir;
+        {
+            std::vector<double> icSeries;
+            const auto& sortedDates = allSortedDates;
+            const int fwdDays = std::max(1, config.forwardDays);
+
+            // 构建 symbol → price-matrix-column 映射
+            std::unordered_map<std::string, int32_t> symToCol;
+            if (lastMarketView) {
+                // 用 CachedMarketDataViewHistoricalAdapter 获取标的符号列表
+                factor::compute::CachedMarketDataViewHistoricalAdapter adapter(*lastMarketView);
+                auto symbols = adapter.getAvailableSymbols("");
+                for (int32_t ci = 0; ci < static_cast<int32_t>(symbols.size()); ++ci) {
+                    symToCol[symbols[ci]] = ci;
+                }
+            }
+
+            auto priceView = lastMarketView ? lastMarketView->close()
+                : factor::compute::NumericConstMatrixView{};
+            const int32_t rowStride = priceView.rowStride;
+
+            const size_t icTotalSteps = sortedDates.size() > static_cast<size_t>(fwdDays)
+                ? sortedDates.size() - fwdDays : 0;
+            size_t icStep = 0;
+            for (size_t di = 0; di + static_cast<size_t>(fwdDays) < sortedDates.size(); ++di) {
+                if (onProgress && icTotalSteps > 0 && icStep % 10 == 0) {
+                    onProgress(50.0 + (static_cast<double>(icStep) / icTotalSteps) * 15.0, "computing IC");
+                }
+                ++icStep;
+                const std::string& dateNow = sortedDates[di];
+
+                auto itNow = reporterInput.factorValuesByDate.find(dateNow);
+                if (itNow == reporterInput.factorValuesByDate.end()) continue;
+
+                // 收集因子值 + 前向收益
+                std::vector<std::pair<double, double>> pairs; // {factorValue, fwdReturn}
+                for (const auto& [sym, fv] : itNow->second) {
+                    if (!std::isfinite(fv)) continue;
+                    auto colIt = symToCol.find(sym);
+                    if (colIt == symToCol.end()) continue;
+
+                    const int32_t col = colIt->second;
+                    double priceNow  = priceView.data[static_cast<int32_t>(di) * rowStride + col];
+                    double priceFwd  = priceView.data[static_cast<int32_t>(di + fwdDays) * rowStride + col];
+
+                    if (priceNow > 1e-9 && std::isfinite(priceNow)
+                        && priceFwd > 1e-9 && std::isfinite(priceFwd)) {
+                        double fwdRet = (priceFwd / priceNow) - 1.0;
+                        if (std::isfinite(fwdRet) && std::abs(fwdRet) < 0.5) {
+                            pairs.emplace_back(fv, fwdRet);
+                        }
+                    }
+                }
+                if (pairs.size() < 30) continue;
+
+                // 因子值 → 秩
+                std::sort(pairs.begin(), pairs.end(),
+                    [](auto& a, auto& b) { return a.first < b.first; });
+                std::vector<double> fRanks(pairs.size()), rRanks(pairs.size());
+                for (size_t i = 0; i < pairs.size(); ++i) {
+                    fRanks[i] = static_cast<double>(i);
+                    rRanks[i] = pairs[i].second;
+                }
+
+                // 前向收益 → 秩
+                std::vector<size_t> idx(rRanks.size());
+                for (size_t i = 0; i < idx.size(); ++i) idx[i] = i;
+                std::sort(idx.begin(), idx.end(),
+                    [&](size_t a, size_t b) { return rRanks[a] < rRanks[b]; });
+                for (size_t i = 0; i < idx.size(); ++i) rRanks[idx[i]] = static_cast<double>(i);
+
+                // Spearman
+                double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+                double n = static_cast<double>(pairs.size());
+                for (size_t i = 0; i < pairs.size(); ++i) {
+                    sumX += fRanks[i]; sumY += rRanks[i];
+                    sumXY += fRanks[i] * rRanks[i];
+                    sumX2 += fRanks[i] * fRanks[i];
+                    sumY2 += rRanks[i] * rRanks[i];
+                }
+                double num = n * sumXY - sumX * sumY;
+                double den = std::sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
+                if (den > 1e-12) icSeries.push_back(num / den);
+            }
+
+            if (!icSeries.empty()) {
+                double sum = 0, sumSq = 0;
+                int posCount = 0;
+                for (double v : icSeries) {
+                    sum += v; sumSq += v * v;
+                    if (v > 0) ++posCount;
+                }
+                icir.icMean  = sum / static_cast<double>(icSeries.size());
+                icir.icStd   = std::sqrt(std::max(0.0,
+                    sumSq / static_cast<double>(icSeries.size()) - icir.icMean * icir.icMean));
+                icir.ir      = icir.icStd > 1e-12 ? icir.icMean / icir.icStd : 0.0;
+                icir.icPositiveRatio = static_cast<double>(posCount) / static_cast<double>(icSeries.size());
+                icir.icSeries = std::move(icSeries);
+            }
         }
-        jsonResult += "],";
 
-        // ── IC 指标（来自交易结果 + Reporter）──
-        jsonResult += "\"ic\":{";
-        jsonResult += "\"value\":" + std::to_string(tradingResult.sharpeRatio) + ",";
-        jsonResult += "\"ir\":" + std::to_string(tradingResult.annualizedReturn) + ",";
-        jsonResult += "\"std\":" + std::to_string(tradingResult.annualStdDev) + ",";
-        jsonResult += "\"positiveRate\":" + std::to_string(
-            (tradingResult.annualizedReturn > 0 ? 0.58 : 0.42));
-        jsonResult += "},";
+        ::factor::GroupBacktestResult groupRes;
+        for (const auto& gm : tradingResult.groups) {
+            groupRes.groupReturns.push_back(gm.returnRate);
+            groupRes.groupStockCounts.push_back(static_cast<int>(gm.stockCount));
+            groupRes.minFactorValues.push_back(gm.minFactorValue);
+            groupRes.maxFactorValues.push_back(gm.maxFactorValue);
+        }
+        if (!groupRes.groupReturns.empty()) {
+            groupRes.topGroupReturn    = groupRes.groupReturns.front();
+            groupRes.bottomGroupReturn = groupRes.groupReturns.back();
+            groupRes.longShortReturn   = groupRes.topGroupReturn - groupRes.bottomGroupReturn;
+        }
 
-        // ── 执行指标 ──
-        jsonResult += "\"execution\":{";
-        jsonResult += "\"totalSignals\":" + std::to_string(reporterOutput.totalSignalCount) + ",";
-        jsonResult += "\"presentSignals\":" + std::to_string(reporterOutput.presentSignalCount) + ",";
-        jsonResult += "\"turnoverRatio\":" + std::to_string(reporterOutput.turnoverRatio) + ",";
-        jsonResult += "\"sharpeRatio\":" + std::to_string(tradingResult.sharpeRatio) + ",";
-        jsonResult += "\"annualizedReturn\":" + std::to_string(tradingResult.annualizedReturn) + ",";
-        jsonResult += "\"maxDrawdown\":" + std::to_string(tradingResult.maxDrawdown) + ",";
-        jsonResult += "\"totalReturn\":" + std::to_string(tradingResult.totalReturn) + ",";
-        jsonResult += "\"finalEquity\":" + std::to_string(tradingResult.finalEquity) + ",";
-        jsonResult += "\"validSampleCount\":" + std::to_string(tradingResult.validSampleCount);
-        jsonResult += "}}";
+        if (onProgress) onProgress(70.0, "computing metrics");
 
-        onComplete(jsonResult);
+        // ── 委托 FactorBacktestMetricsCalculator（真实序列，不再传空）──
+        ::factor::BacktestResult btResult;
+        btResult.config      = btConfig;
+        btResult.icirResult  = icir;
+        btResult.groupResult = groupRes;
+
+        std::vector<std::vector<double>> groupReturnSeriesByGroup;
+        ::factor::FactorBacktestMetricsCalculator::Inputs inputs{
+            btConfig,
+            btResult.icirResult,
+            btResult.groupResult,
+            tradingResult.strategyDailyReturns,
+            tradingResult.strategyDailyReturns,
+            tradingResult.strategyDailyReturns,
+            tradingResult.periodTurnovers,            // turnoverSeries
+            {},                                       // longShortDates (暂无)
+            groupReturnSeriesByGroup
+        };
+        ::factor::FactorBacktestMetricsCalculator::populateResultMetrics(btResult, inputs);
+
+        // ── 用 JsonFacade 序列化 BacktestResult → JSON ──
+        using J = foundation::json::JsonFacade;
+        auto root = J::createObject();
+        root.set("status",       J::createString("SUCCESS"));
+        root.set("factorValues", J::createArray());
+
+        // 回测时间区间（供 QML 显示）
+        if (!allSortedDates.empty()) {
+            root.set("startDate", J::createString(allSortedDates.front()));
+            root.set("endDate",   J::createString(allSortedDates.back()));
+        }
+
+        auto metrics = J::createObject();
+
+        // groups
+        auto groupsArr = J::createArray();
+        for (const auto& gm : tradingResult.groups) {
+            auto gObj = J::createObject();
+            gObj.set("groupName",       J::createString("G" + std::to_string(gm.groupIndex)));
+            gObj.set("groupIndex",      J::createDouble(static_cast<double>(gm.groupIndex)));
+            gObj.set("returnRate",      J::createDouble(gm.returnRate));
+            gObj.set("annualizedReturn",J::createDouble(gm.annualizedReturn));
+            gObj.set("cumulativeReturn",J::createDouble(gm.returnRate));
+            gObj.set("stockCount",      J::createDouble(static_cast<double>(gm.stockCount)));
+            gObj.set("minFactorValue",  J::createDouble(gm.minFactorValue));
+            gObj.set("maxFactorValue",  J::createDouble(gm.maxFactorValue));
+            groupsArr.push_back(gObj);
+        }
+        metrics.set("groups", groupsArr);
+
+        // trading — Calculator 输出
+        auto t = J::createObject();
+        t.set("sharpe",           J::createDouble(btResult.sharpeRatio));
+        t.set("annualizedReturn", J::createDouble(btResult.annualReturn));
+        t.set("annualStdDev",     J::createDouble(btResult.volatility));
+        t.set("maxDrawdown",      J::createDouble(btResult.maxDrawdown));
+        t.set("totalReturn",      J::createDouble(tradingResult.totalReturn));
+        metrics.set("trading", t);
+
+        // ic — Calculator 输出（对齐 FactorQualityMetrics16View）
+        auto ic = J::createObject();
+        ic.set("value",      J::createDouble(btResult.factorMetrics.rankIcMean));
+        ic.set("ir",         J::createDouble(btResult.factorMetrics.rankIcir));
+        ic.set("std",        J::createDouble(btResult.factorMetrics.rankIcStd));
+        ic.set("winRate",    J::createDouble(btResult.factorMetrics.icWinRate));
+        ic.set("pValue",     J::createDouble(btResult.factorMetrics.icPValue));
+        ic.set("tStat",      J::createDouble(btResult.factorMetrics.icTStat));
+        ic.set("halfLife",   J::createDouble(static_cast<double>(btResult.factorMetrics.icHalfLife)));
+        metrics.set("ic", ic);
+
+        // factorMetrics — Calculator 输出的全部因子质量指标
+        auto fm = J::createObject();
+        fm.set("monotonicityScore",    J::createDouble(btResult.factorMetrics.monotonicityScore));
+        fm.set("longShortSharpe",      J::createDouble(btResult.factorMetrics.longShortSharpe));
+        fm.set("longShortAnnualReturn",J::createDouble(btResult.factorMetrics.longShortAnnualReturn));
+        fm.set("costAdjustedSharpe",   J::createDouble(btResult.factorMetrics.costAdjustedSharpe));
+        fm.set("annualTurnover",       J::createDouble(btResult.factorMetrics.annualTurnover));
+        fm.set("alpha",                J::createDouble(btResult.factorMetrics.alpha));
+        fm.set("monthlyWinRate",       J::createDouble(btResult.factorMetrics.monthlyWinRate));
+        fm.set("numGroups",            J::createDouble(static_cast<double>(btResult.factorMetrics.numGroups)));
+        metrics.set("factorMetrics", fm);
+
+        // factorQuality — 综合评级
+        auto fq = J::createObject();
+        fq.set("rating", J::createDouble(static_cast<double>(btResult.factorMetrics.coreRating)));
+        fq.set("label",  J::createString(
+            btResult.factorMetrics.coreRating == ::factor::FactorBacktestMetrics::Rating::EXCELLENT ? "优秀" :
+            btResult.factorMetrics.coreRating == ::factor::FactorBacktestMetrics::Rating::GOOD      ? "良好" :
+            btResult.factorMetrics.coreRating == ::factor::FactorBacktestMetrics::Rating::PASS       ? "合格" : "不合格"));
+        metrics.set("factorQuality", fq);
+
+        // execution — Calculator 输出 + 基础信号计数
+        auto ex = J::createObject();
+        ex.set("totalSignals",     J::createDouble(static_cast<double>(reporterOutput.totalSignalCount)));
+        ex.set("presentSignals",   J::createDouble(static_cast<double>(reporterOutput.presentSignalCount)));
+        ex.set("turnoverRatio",    J::createDouble(tradingResult.turnoverRate));
+        ex.set("sharpeRatio",      J::createDouble(btResult.sharpeRatio));
+        ex.set("annualizedReturn", J::createDouble(btResult.annualReturn));
+        ex.set("maxDrawdown",      J::createDouble(btResult.maxDrawdown));
+        ex.set("totalReturn",      J::createDouble(tradingResult.totalReturn));
+        ex.set("winRate",          J::createDouble(btResult.winRate));
+        ex.set("profitFactor",     J::createDouble(btResult.profitFactor));
+        ex.set("volatility",       J::createDouble(btResult.volatility));
+        ex.set("sortinoRatio",     J::createDouble(btResult.sortinoRatio));
+        ex.set("calmarRatio",      J::createDouble(btResult.calmarRatio));
+        ex.set("valueAtRisk",      J::createDouble(btResult.valueAtRisk));
+        ex.set("conditionalVaR",   J::createDouble(btResult.conditionalVaR));
+        ex.set("finalEquity",      J::createDouble(tradingResult.finalEquity));
+        ex.set("validSampleCount", J::createDouble(static_cast<double>(tradingResult.validSampleCount)));
+        metrics.set("execution", ex);
+
+        // returnSeries — 收益率序列（供 QML 净值曲线渲染）
+        auto retSeries = J::createArray();
+        for (double r : tradingResult.strategyDailyReturns) {
+            retSeries.push_back(J::createDouble(r));
+        }
+        metrics.set("returnSeries", retSeries);
+
+        root.set("metrics", metrics);
+        onComplete(root.toString());
     }
     if (onProgress) onProgress(100.0, "completed");
 }

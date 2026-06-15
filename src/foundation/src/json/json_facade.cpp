@@ -469,4 +469,87 @@ JsonValue* JsonFacade::getValue() const {
     return root_.get();
 }
 
+// ── 类型化数组构建 ──
+
+void JsonFacade::push_back_object(const std::map<std::string, double>& fields) {
+    if (!root_ || !root_->isArray()) return;
+    auto obj = JsonValue::createObject();
+    for (const auto& [key, val] : fields) {
+        obj->set(key, JsonValue::createDouble(val));
+    }
+    root_->push_back(std::move(obj));
+}
+
+void JsonFacade::push_back_object(const std::map<std::string, std::string>& fields) {
+    if (!root_ || !root_->isArray()) return;
+    auto obj = JsonValue::createObject();
+    for (const auto& [key, val] : fields) {
+        obj->set(key, JsonValue::createString(val));
+    }
+    root_->push_back(std::move(obj));
+}
+
+JsonFacade JsonFacade::fromNumericMap(const std::map<std::string, double>& map) {
+    auto obj = JsonValue::createObject();
+    for (const auto& [key, val] : map) {
+        obj->set(key, JsonValue::createDouble(val));
+    }
+    return JsonFacade(std::move(obj));
+}
+
+// ── 类型化提取 ──
+
+std::vector<std::map<std::string, double>> JsonFacade::toNumericObjectArray() const {
+    std::vector<std::map<std::string, double>> result;
+    if (!root_ || !root_->isArray()) return result;
+
+    const size_t n = root_->size();
+    result.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        auto elem = root_->at(i);
+        if (!elem || !elem->isObject()) continue;
+        std::map<std::string, double> item;
+        for (const auto& key : elem->keys()) {
+            auto val = elem->get(key);
+            if (val && val->isNumber()) {
+                item[key] = val->asDouble();
+            }
+        }
+        if (!item.empty()) result.push_back(std::move(item));
+    }
+    return result;
+}
+
+std::vector<std::map<std::string, std::string>> JsonFacade::toStringObjectArray() const {
+    std::vector<std::map<std::string, std::string>> result;
+    if (!root_ || !root_->isArray()) return result;
+
+    const size_t n = root_->size();
+    result.reserve(n);
+    for (size_t i = 0; i < n; ++i) {
+        auto elem = root_->at(i);
+        if (!elem || !elem->isObject()) continue;
+        std::map<std::string, std::string> item;
+        for (const auto& key : elem->keys()) {
+            auto val = elem->get(key);
+            if (val) item[key] = val->asString();
+        }
+        if (!item.empty()) result.push_back(std::move(item));
+    }
+    return result;
+}
+
+std::map<std::string, double> JsonFacade::toNumericMap() const {
+    std::map<std::string, double> result;
+    if (!root_ || !root_->isObject()) return result;
+
+    for (const auto& key : root_->keys()) {
+        auto val = root_->get(key);
+        if (val && val->isNumber()) {
+            result[key] = val->asDouble();
+        }
+    }
+    return result;
+}
+
 } // namespace foundation::json

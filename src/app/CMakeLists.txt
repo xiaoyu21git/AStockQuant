@@ -42,6 +42,7 @@ add_library(astockquantapp SHARED
     src/AppBootstrap.cpp
     src/VasAurora.cpp
     facade/MarketDataFacade.cpp
+    system/TradingSystem.cpp
 )
 
 if(ENABLE_JUJIN_MARKET)
@@ -78,10 +79,10 @@ target_link_libraries(astockquantapp
     PRIVATE
         engine
         domain
-        bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
+        domain_strategy_runtime
+        bridge
         app_adapters
         foundation
-        factor
         factor
 )
 

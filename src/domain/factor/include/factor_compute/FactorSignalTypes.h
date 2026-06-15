@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "AnalysisReportTypes.h"
+#include "../../../types/InstrumentId.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -50,11 +51,7 @@ enum class Frequency : uint8_t {
     Yearly = 4
 };
 
-struct InstrumentId final {
-    uint32_t value{0U};
-
-    [[nodiscard]] bool isValid() const noexcept { return value != 0U; }
-};
+using InstrumentId = ::domain::InstrumentId; // 规范定义在 domain/types/InstrumentId.h
 
 struct DateKey final {
     int32_t value{0};

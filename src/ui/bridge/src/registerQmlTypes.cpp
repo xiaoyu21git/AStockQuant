@@ -12,21 +12,18 @@
 #include "FactorDebugController.h" // 新增：因子调试控制器
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
-#include "MarketDataBridge.h"         // 新增：行情桥接服务
-#include "RiskControlBridge.h"        // 新增：风险控制服务
-#include "PositionAccountBridge.h"   // 新增：持仓账户服务
-#include "TradeExecutionBridge.h"    // 新增：交易执行服务
-#include "TradingConnectionConfigService.h" // 新增：交易连接配置服务
-#include "TradingMarketCalendarService.h" // 新增：交易市场日历桥接服务
-#include "TradingFormPanelHelper.h"
-#include "RuleTemplateDetailHelper.h"
-#include "RuleTemplateSuggestionService.h" // 新增：规则模板建议桥接服务
-#include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
-//#include "UiLifecycleCoordinator.h"
+#include "MarketDataBridge.h"
 #include "StrategyBridge.h"
 #include "FactorService.h"
 #include "FactorBacktestBridge.h"
 #include "StrategyBacktestBridge.h"
+#include "TradingBridges.h"
+#include "TradingConnectionConfigService.h"
+#include "TradingRuntimeStatusService.h"
+#include "TradingMarketCalendarService.h"
+#include "RiskConfigService.h"
+#include "TradingFormPanelHelper.h"
+#include "UiLifecycleCoordinator.h"
 
 namespace wang{
 
@@ -80,110 +77,15 @@ namespace wang{
          }
       );
 
-      // RiskConfigService - 风险配置服务（单例模式，复用 RiskControlBridge）
-      qmlRegisterSingletonType<RiskControlBridge>(
-         url, 1, 0, "RiskConfigService",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return RiskControlBridge::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<MarketDataBridge>(
+      qmlRegisterSingletonType<bridge::MarketDataBridge>(
          url, 1, 0, "MarketDataBridge",
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
-            // MarketDataBridge 由 AppBootstrap 通过 setFacade 注入，无单例
-            auto* bridge = new MarketDataBridge();
+            auto* bridge = new bridge::MarketDataBridge();
             return bridge;
          }
       );
-
-      qmlRegisterSingletonType<RiskControlBridge>(
-         url, 1, 0, "RiskControlBridge",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return RiskControlBridge::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<PositionAccountBridge>(
-         url, 1, 0, "PositionAccountBridge",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return PositionAccountBridge::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<TradeExecutionBridge>(
-         url, 1, 0, "TradeExecutionBridge",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return TradeExecutionBridge::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<TradingConnectionConfigService>(
-         url, 1, 0, "TradingConnectionConfigService",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return TradingConnectionConfigService::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<TradingMarketCalendarService>(
-         url, 1, 0, "TradingMarketCalendarService",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return TradingMarketCalendarService::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<TradingFormPanelHelper>(
-         url, 1, 0, "TradingFormPanelHelper",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return TradingFormPanelHelper::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<RuleTemplateSuggestionService>(
-         url, 1, 0, "RuleTemplateSuggestionService",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return RuleTemplateSuggestionService::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<RuleTemplateDetailHelper>(
-         url, 1, 0, "RuleTemplateDetailHelper",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return RuleTemplateDetailHelper::instance();
-         }
-      );
-
-      qmlRegisterSingletonType<TradingRuntimeStatusService>(
-         url, 1, 0, "TradingRuntimeStatusService",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            return TradingRuntimeStatusService::instance();
-         }
-      );
-
-      // UiLifecycleCoordinator - UI生命周期协调器（待实现）
-      // qmlRegisterSingletonType<UiLifecycleCoordinator>(...);
 
        qmlRegisterType<StrategyBridge>(url, 1, 0, "StrategyBridge");
 
@@ -208,5 +110,61 @@ namespace wang{
        // StrategyBacktestController - 策略回测控制器（QML 内联组件）
        qmlRegisterType<StrategyBacktestBridge>(
           url, 1, 0, "StrategyBacktestController");
+
+       // ── 交易系统桥接层 (单例) ──
+       qmlRegisterSingletonType<bridge::TradeExecutionBridge>(
+          url, 1, 0, "TradeExecutionBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::TradeExecutionBridge();
+          });
+
+       qmlRegisterSingletonType<bridge::PositionAccountBridge>(
+          url, 1, 0, "PositionAccountBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::PositionAccountBridge();
+          });
+
+       qmlRegisterSingletonType<bridge::RiskControlBridge>(
+          url, 1, 0, "RiskControlBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::RiskControlBridge();
+          });
+
+       // ── 新增桥接类型 (单例) ──
+       qmlRegisterSingletonType<bridge::TradingConnectionConfigService>(
+          url, 1, 0, "TradingConnectionConfigService",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::TradingConnectionConfigService();
+          });
+
+       qmlRegisterSingletonType<bridge::TradingRuntimeStatusService>(
+          url, 1, 0, "TradingRuntimeStatusService",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::TradingRuntimeStatusService();
+          });
+
+       qmlRegisterSingletonType<bridge::TradingMarketCalendarService>(
+          url, 1, 0, "TradingMarketCalendarService",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::TradingMarketCalendarService();
+          });
+
+       qmlRegisterSingletonType<bridge::RiskConfigService>(
+          url, 1, 0, "RiskConfigService",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::RiskConfigService();
+          });
+
+       qmlRegisterSingletonType<bridge::TradingFormPanelHelper>(
+          url, 1, 0, "TradingFormPanelHelper",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::TradingFormPanelHelper();
+          });
+
+       qmlRegisterSingletonType<bridge::UiLifecycleCoordinator>(
+          url, 1, 0, "UiLifecycleCoordinator",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new bridge::UiLifecycleCoordinator();
+          });
    }
 }

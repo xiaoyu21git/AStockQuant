@@ -102,12 +102,22 @@ BacktestRequest buildBacktestRequest(const QString& strategyId, const QVariantMa
         domain::strategy::ShortSellingMode::Disabled;
     req.strategySpec.factorOverlay.enabled = false;
 
+    // 从数据集提取股票池（若已加载）
+    const QString symbolsJson = params.value("datasetSymbols").toString();
+    if (!symbolsJson.isEmpty()) {
+        const QStringList symbols = symbolsJson.split(",", Qt::SkipEmptyParts);
+        for (const QString& sym : symbols) {
+            const std::string s = sym.trimmed().toStdString();
+            if (!s.empty()) {
+                req.universeSpec.explicitSymbols.push_back(domain::strategy::SymbolCode(s));
+            }
+        }
+    }
+    if (req.universeSpec.explicitSymbols.empty()) {
+        req.universeSpec.explicitSymbols.push_back(domain::strategy::SymbolCode("000001.SZ"));
+    }
     req.universeSpec.universeMode = domain::strategy::UniverseMode::ExplicitSymbols;
-    req.universeSpec.explicitSymbols.push_back(domain::strategy::SymbolCode("000001"));
-    req.strategySpec.strategyScopeContext.universe.universeMode =
-        domain::strategy::UniverseMode::ExplicitSymbols;
-    req.strategySpec.strategyScopeContext.universe.explicitSymbols.push_back(
-        domain::strategy::SymbolCode("000001"));
+    req.strategySpec.strategyScopeContext.universe = req.universeSpec;
 
     return req;
 }
@@ -212,21 +222,52 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             // 序列化结果到 QVariantMap
             QVariantMap qResult;
             qResult["status"] = QStringLiteral("SUCCESS");
+
+            // 指标
             QVariantMap metricsMap;
-            metricsMap["totalReturn"] = result.metrics.totalReturn;
+            metricsMap["totalReturn"]      = result.metrics.totalReturn;
             metricsMap["annualizedReturn"] = result.metrics.annualizedReturn;
-            metricsMap["volatility"] = result.metrics.volatility;
-            metricsMap["sharpeRatio"] = result.metrics.sharpeRatio;
-            metricsMap["maxDrawdown"] = result.metrics.maxDrawdown;
-            metricsMap["sortinoRatio"] = result.metrics.sortinoRatio;
-            metricsMap["calmarRatio"] = result.metrics.calmarRatio;
-            metricsMap["winRate"] = result.metrics.winRate;
-            metricsMap["profitFactor"] = result.metrics.profitFactor;
-            metricsMap["alpha"] = result.metrics.alpha;
-            metricsMap["beta"] = result.metrics.beta;
+            metricsMap["volatility"]       = result.metrics.volatility;
+            metricsMap["sharpeRatio"]      = result.metrics.sharpeRatio;
+            metricsMap["maxDrawdown"]      = result.metrics.maxDrawdown;
+            metricsMap["sortinoRatio"]     = result.metrics.sortinoRatio;
+            metricsMap["calmarRatio"]      = result.metrics.calmarRatio;
+            metricsMap["winRate"]          = result.metrics.winRate;
+            metricsMap["profitFactor"]     = result.metrics.profitFactor;
+            metricsMap["alpha"]            = result.metrics.alpha;
+            metricsMap["beta"]             = result.metrics.beta;
             metricsMap["informationRatio"] = result.metrics.informationRatio;
-            metricsMap["trackingError"] = result.metrics.trackingError;
+            metricsMap["trackingError"]    = result.metrics.trackingError;
             qResult["metrics"] = metricsMap;
+
+            // 交易统计
+            // 交易统计
+            QVariantMap tradeStats;
+            tradeStats["totalTrades"]   = static_cast<int>(result.tradeStats.totalTrades);
+            tradeStats["winningTrades"] = static_cast<int>(result.tradeStats.winningTrades);
+            tradeStats["losingTrades"]  = static_cast<int>(result.tradeStats.losingTrades);
+            tradeStats["totalProfit"]   = result.tradeStats.totalProfit.value;
+            tradeStats["totalLoss"]     = result.tradeStats.totalLoss.value;
+            tradeStats["largestWin"]    = result.tradeStats.largestWin.value;
+            tradeStats["largestLoss"]   = result.tradeStats.largestLoss.value;
+            qResult["tradeStats"] = tradeStats;
+
+            // 时序数据（TimeSeriesSnapshot 字段: portfolioValues, dates, returns, drawdowns）
+            QVariantMap timeSeries;
+            QVariantList equityList, dateList, returnList, drawdownList;
+            for (size_t i = 0; i < result.timeSeries.portfolioValues.size(); ++i) {
+                equityList.append(result.timeSeries.portfolioValues[i]);
+                if (i < result.timeSeries.returns.size()) returnList.append(result.timeSeries.returns[i]);
+                if (i < result.timeSeries.drawdowns.size()) drawdownList.append(result.timeSeries.drawdowns[i]);
+            }
+            for (const auto& d : result.timeSeries.dates) {
+                dateList.append(d.value);
+            }
+            timeSeries["equityCurve"] = equityList;
+            timeSeries["dates"]       = dateList;
+            timeSeries["returns"]     = returnList;
+            timeSeries["drawdowns"]   = drawdownList;
+            qResult["timeSeries"] = timeSeries;
 
             QMetaObject::invokeMethod(this, [this, qResult]() {
                 m_isRunning.store(false); m_progress = 100.0;

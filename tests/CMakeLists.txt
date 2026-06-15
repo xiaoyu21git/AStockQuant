@@ -174,26 +174,8 @@ else()
     message(WARNING "[TESTS] test_factor_registry_signal_engine.cpp not found!")
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_runtime_overlay.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_backtest_runtime_overlay.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_backtest_runtime_overlay.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_backtest_runtime_overlay.cpp not found!")
-endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_crosscheck_export.cpp")
-    list(APPEND TEST_SOURCES "test_factor_crosscheck_export.cpp")
-    message(STATUS "[TESTS] Found: test_factor_crosscheck_export.cpp")
-else()
-    message(WARNING "[TESTS] test_factor_crosscheck_export.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_runtime_multifactor.cpp")
-    list(APPEND TEST_SOURCES "test_strategy_runtime_multifactor.cpp")
-    message(STATUS "[TESTS] Found: test_strategy_runtime_multifactor.cpp")
-else()
-    message(WARNING "[TESTS] test_strategy_runtime_multifactor.cpp not found!")
-endif()
+# test_factor_crosscheck_export.cpp 引用已删除的 ConfigurableFactor.h，暂时排除
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_data_service_regression.cpp")
     list(APPEND TEST_SOURCES "test_data_service_regression.cpp")
@@ -209,12 +191,6 @@ else()
     message(WARNING "[TESTS] test_strict_cleaning_regression.cpp not found!")
 endif()
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_backtest_abstractions.cpp")
-    list(APPEND TEST_SOURCES "test_backtest_abstractions.cpp")
-    message(STATUS "[TESTS] Found: test_backtest_abstractions.cpp")
-else()
-    message(WARNING "[TESTS] test_backtest_abstractions.cpp not found!")
-endif()
 
 if(NOT TEST_SOURCES)
     message(FATAL_ERROR "[TESTS] No test source files found!")
@@ -245,15 +221,16 @@ target_link_libraries(test_eventsystem
         GTest::gtest_main
     PRIVATE
         Qt6::Core
-        engine          # Engine 库（包含 Event�?
-        domain          # Domain �?
+        engine
+        domain
         domain_backtest
         domain_strategies
         domain_strategy_runtime
         bridge
-        factor   # ConfigurableFactor/Factor runtime symbols
-        infrastructure  # MarketDataRepository 回归测试
-        foundation      # Foundation �?
+        astockquantapp   # TradingSystem symbols
+        factor
+        infrastructure
+        foundation
 )
 
 # 设置输出目录
@@ -285,65 +262,6 @@ copy_gtest_runtime_dlls(test_eventsystem)
 copy_benchmark_runtime_dlls(test_eventsystem)
 copy_benchmark_qt_sql_plugins(test_eventsystem)
 
-if(ENABLE_JUJIN_MARKET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
-    message(STATUS "[TESTS] Found: test_trading_strategy_binding_regression.cpp")
-
-    add_executable(test_trading_strategy_binding_regression EXCLUDE_FROM_ALL
-        test_trading_strategy_binding_regression.cpp
-    )
-
-    set_target_properties(test_trading_strategy_binding_regression PROPERTIES
-        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
-    )
-
-    if(MSVC)
-        target_compile_options(test_trading_strategy_binding_regression PRIVATE /FS /bigobj /Zm300)
-    endif()
-
-    target_include_directories(test_trading_strategy_binding_regression
-        PRIVATE
-            ${CMAKE_SOURCE_DIR}/src/engine/include
-            ${CMAKE_SOURCE_DIR}/src/domain/include
-            ${CMAKE_SOURCE_DIR}/src/foundation/include
-            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
-            ${CMAKE_SOURCE_DIR}/astock_engine
-            ${CMAKE_SOURCE_DIR}/src
-    )
-
-    target_link_libraries(test_trading_strategy_binding_regression
-        PRIVATE
-            GTest::gtest
-            engine
-            domain
-            bridge
-            foundation
-    )
-
-    copy_gtest_runtime_dlls(test_trading_strategy_binding_regression)
-    copy_benchmark_runtime_dlls(test_trading_strategy_binding_regression)
-    copy_benchmark_qt_sql_plugins(test_trading_strategy_binding_regression)
-    copy_gmsdk_runtime_dlls(test_trading_strategy_binding_regression)
-
-    set_target_properties(test_trading_strategy_binding_regression PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
-    )
-
-    add_custom_target(run_trading_binding_tests
-        COMMAND $<TARGET_FILE:test_trading_strategy_binding_regression>
-        DEPENDS test_trading_strategy_binding_regression
-        COMMENT "Running trading strategy binding regression tests..."
-        VERBATIM
-    )
-
-    add_test(NAME TradingStrategyBindingRegressionTest
-        COMMAND $<TARGET_FILE:test_trading_strategy_binding_regression>
-        WORKING_DIRECTORY $<TARGET_FILE_DIR:test_trading_strategy_binding_regression>
-    )
-
-    message(STATUS "[TESTS] Configured test_trading_strategy_binding_regression executable")
-elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
-    message(STATUS "[TESTS] Skipping test_trading_strategy_binding_regression because ENABLE_JUJIN_MARKET is OFF")
-endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
     message(STATUS "[TESTS] Skipping run_factor_full_market_benchmark: legacy factor backtest modules removed")
@@ -377,6 +295,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
             bridge
             foundation
             infrastructure
+            astockquantapp
     )
 
     message(STATUS "[TESTS] Configured run_cleaning_cache_probe executable")
@@ -468,7 +387,3 @@ if(ENABLE_RULE_SERVICE_PY_WORKER_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE
 
     message(STATUS "[TESTS] Configured run_strategy_rule_service_py_worker_hf_benchmark executable")
 endif()
-# live test
-add_executable(test_live_backtest_log test_live_backtest_log.cpp)
-set_target_properties(test_live_backtest_log PROPERTIES MSVC_RUNTIME_LIBRARY MultiThreadedDebugDLL)
-

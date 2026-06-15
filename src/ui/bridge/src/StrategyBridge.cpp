@@ -6,6 +6,7 @@
 #include "database/StrategyRepository.h"
 #include "FactorService.h"
 
+#include "../../app/system/TradingSystem.h"
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
@@ -120,6 +121,39 @@ TValue readScalarByKeys(const QVariantMap& payload,
         static_assert(std::is_same_v<TValue, void>, "unsupported scalar read type");
     }
 }
+
+} // namespace
+
+// ── 策略订单监听器：将策略引擎信号转发到 TradingSystem 执行管道 ──
+namespace {
+
+using SymbolResolver = std::function<std::string(std::uint32_t instrumentId)>;
+
+class StrategyOrderForwarder final : public domain::strategy::IOrderListener {
+public:
+    explicit StrategyOrderForwarder(SymbolResolver resolver)
+        : m_resolver(std::move(resolver)) {}
+
+    void onOrders(const std::vector<domain::strategy::OrderRequest>& orders) override {
+        for (const auto& req : orders) {
+            if (!req.isValid()) continue;
+
+            domain::trading::TradeOrder order;
+            order.setSymbol(m_resolver(req.instrumentId().value));
+            order.setSide(req.side() == domain::strategy::RuntimeOrderSide::Buy
+                              ? domain::strategy::OrderDirection::Buy
+                              : domain::strategy::OrderDirection::Sell);
+            order.setQuantity(static_cast<std::int64_t>(req.quantity()));
+            // 策略实例 ID 作为策略标识
+            order.setStrategyId(std::to_string(req.strategyInstanceId()));
+
+            app::system::TradingSystem::instance().submitOrder(order);
+        }
+    }
+
+private:
+    SymbolResolver m_resolver;
+};
 
 } // namespace
 
@@ -577,6 +611,18 @@ bool StrategyBridge::start(const QString& strategyId)
 
     // 启动实盘异步后台线程（每个引擎独立线程，自循环等待行情）
     engine->startLiveLoop();
+
+    // ── 注册订单转发器：策略引擎信号 → TradingSystem 执行管道 ──
+    if (!m_orderListener) {
+        // 符号解析器：uint32_t InstrumentId → 股票代码字符串（复用 start() 中的解析逻辑）
+        auto symResolver = [](std::uint32_t id) -> std::string {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+            return buf;
+        };
+        m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
+    }
+    mgr.setOrderListener(m_orderListener.get());
 
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
     refreshModel();

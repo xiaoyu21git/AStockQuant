@@ -7,7 +7,7 @@
 #include <QVariantMap>
 
 #include "StrategyLifecycleStatus.h"
-#include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
+#include "../../domain/types/ResolvedStrategyBehavior.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 
 #include <initializer_list>

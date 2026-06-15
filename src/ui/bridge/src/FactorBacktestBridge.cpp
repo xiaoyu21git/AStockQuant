@@ -286,12 +286,17 @@ m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
 
 void FactorBacktestBridge::startBacktestWithFactors(
     const QVariantList& factorIds,
-    const QString& /*groupText*/,
+    const QString& groupText,
     const QString& /*startDate*/,
     const QString& /*endDate*/,
     const QVariantMap& /*cacheSnapshot*/)
 {
     if (m_isRunning.load()) return;
+
+    // 解析 QML 分组选择 ("5组"/"10组"/"20组") → 整数
+    bool ok = false;
+    int parsedGroups = groupText.toInt(&ok);
+    if (ok && parsedGroups > 0) m_numGroups = parsedGroups;
 
     // 懒初始化: 确保 Orchestrator 等组件已创建
     if (!m_orchestrator) {
@@ -335,6 +340,10 @@ void FactorBacktestBridge::startBacktestWithFactors(
     config.commissionRate = m_backtestRuntimeParams.value("commissionRate", 0.001).toDouble();
     config.slippageRate = m_backtestRuntimeParams.value("slippageRate", 0.001).toDouble();
     config.riskFreeRate = m_backtestRuntimeParams.value("riskFreeRate", 0.02).toDouble();
+    config.initialCapital = m_backtestRuntimeParams.value("initialCapital", 1000000.0).toDouble();
+    config.benchmarkSymbol = m_backtestRuntimeParams.value("benchmarkSymbol", "000300.SH").toString().toUpper().toStdString();
+    config.adjustPriceType = m_backtestRuntimeParams.value("adjustPriceType", "pre").toString().toStdString();
+    config.marketEnvironmentProfile = m_backtestRuntimeParams.value("marketEnvironmentProfile", 0).toInt();
     for (const QVariant& id : factorIds) {
         config.factorIds.push_back(id.toString().toStdString());
     }
@@ -342,6 +351,12 @@ void FactorBacktestBridge::startBacktestWithFactors(
     // 异步: 全部重操作移到 worker 线程，不阻塞 UI
     int capturedDatasetId = m_selectedDatasetId;
     m_workerPool->post([this, config, capturedDatasetId]() {
+        // 初始化阶段进度
+        QMetaObject::invokeMethod(this, [this]() {
+            m_progress = 2.0; m_statusText = QStringLiteral("初始化中...");
+            emit progressChanged(); emit backtestProgress(m_progress, m_statusText);
+        }, Qt::QueuedConnection);
+
         // ① 在 worker 线程中加载缓存数据集 + 构建 MarketView
         if (capturedDatasetId > 0 && m_backtestDataSvc) {
             QVariantList data = DataServiceCache::getInstance().getDataSetById(capturedDatasetId);
@@ -380,35 +395,239 @@ void FactorBacktestBridge::startBacktestWithFactors(
                 }, Qt::QueuedConnection);
             },
             // 结果回调
-            [this](const std::string& serializedResult) {
-                QMetaObject::invokeMethod(this, [this, serializedResult]() {
-                    QVariantMap result;
-                    result["status"] = QStringLiteral("SUCCESS");
+            [this, config](const std::string& serializedResult) {
+                QMetaObject::invokeMethod(this, [this, serializedResult, config]() {
                     QString jsonStr = QString::fromStdString(serializedResult);
-
-                    // 解析 JSON 并正确填充 metrics（QML 通过 result.metrics.execution 取值）
                     QJsonParseError parseError;
                     QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &parseError);
+
+                    // 检查 orchestrator 是否返回了错误
                     if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
                         QJsonObject rootObj = doc.object();
-                        if (rootObj.contains("metrics") && rootObj["metrics"].isObject()) {
-                            QVariantMap metrics = rootObj["metrics"].toVariant().toMap();
-                            m_resultMetrics = metrics;
-                            result["metrics"] = metrics;
-                            emit resultMetricsChanged();
+                        if (rootObj.contains("error") && !rootObj["error"].toString().isEmpty()) {
+                            emit backtestFailed(rootObj["error"].toString());
+                            m_isRunning.store(false); emit isRunningChanged();
+                            return;
                         }
                     }
-                    // results 保持空数组（QML 展开分析结果列表用）
-                    result["results"] = QVariantList();
+
+                    // 解析失败或缺少 metrics 时使用空对象
+                    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+                        emit backtestFailed(QStringLiteral("回测结果解析失败: ") + parseError.errorString());
+                        m_isRunning.store(false); emit isRunningChanged();
+                        return;
+                    }
+
+                    QJsonObject rootObj = doc.object();
+                    QJsonObject metricsObj = rootObj.value("metrics").toObject();
+
+                    // ── 手动构建 QVariantMap 确保深层嵌套正确 ──
+                    QVariantMap result;
+                    result["status"]  = QStringLiteral("SUCCESS");
+                    result["results"] = QVariantList(); // 单结果模式
+
+                    // groups
+                    QJsonArray groupsArr = metricsObj.value("groups").toArray();
+                    QVariantList groupsList;
+                    for (int i = 0; i < groupsArr.size(); ++i) {
+                        groupsList.append(groupsArr[i].toObject().toVariantMap());
+                    }
+
+                    // trading
+                    QVariantMap tradingMap = metricsObj.value("trading").toObject().toVariantMap();
+
+                    // ic
+                    QVariantMap icMap = metricsObj.value("ic").toObject().toVariantMap();
+
+                    // execution
+                    QVariantMap execMap = metricsObj.value("execution").toObject().toVariantMap();
+
+                    // factorMetrics — Calculator 输出的全部因子质量指标
+                    QVariantMap fmMap = metricsObj.value("factorMetrics").toObject().toVariantMap();
+
+                    // ── 构建 factorQuality（AnalysisPage 需要的富结构）──
+                    QJsonObject fqRaw = metricsObj.value("factorQuality").toObject();
+                    int rating = fqRaw.value("rating").toInt(1);
+                    QString ratingLabel = fqRaw.value("label").toString(QStringLiteral("合格"));
+
+                    // tier: "core"=大卡152px, "optional"=标准114px, "auxiliary"=紧凑108px
+                    auto mk = [](const QString& key, const QString& title, const QString& subtitle,
+                                 double val, const QString& format, bool emphasize,
+                                 const QString& tier, int units = 1) {
+                        QVariantMap m;
+                        m["key"] = key; m["title"] = title; m["subtitle"] = subtitle;
+                        m["label"] = title; m["value"] = val; m["format"] = format;
+                        m["emphasize"] = emphasize; m["tier"] = tier; m["units"] = units;
+                        return m;
+                    };
+
+                    // ══ 核心指标：判断因子是否合格（5 张，刚好一行）══
+                    QVariantList coreMetrics;
+                    coreMetrics.append(mk("rankIcMean", "IC 均值", "Rank IC 均值",
+                        icMap.value("value").toDouble(), "number", true, "core"));
+                    coreMetrics.append(mk("rankIcir",   "ICIR", "IC 信息比率",
+                        icMap.value("ir").toDouble(), "number", true, "core"));
+                    coreMetrics.append(mk("icWinRate",  "IC 胜率", "IC>0 的期数占比",
+                        icMap.value("winRate").toDouble(), "percent", false, "core"));
+                    coreMetrics.append(mk("monotonicity","单调性", "分组收益单调变化程度",
+                        fmMap.value("monotonicityScore").toDouble(), "number", false, "core"));
+                    coreMetrics.append(mk("longShortSharpe","多空夏普", "多空组合风险调整收益",
+                        fmMap.value("longShortSharpe").toDouble(), "ratio", true, "core"));
+
+                    // ══ 扩展指标：辅助判断因子质量 ══
+                    QVariantList optionalMetrics;
+                    optionalMetrics.append(mk("rankIcStd", "IC 标准差", "IC 波动幅度",
+                        icMap.value("std").toDouble(), "number", false, "optional"));
+                    optionalMetrics.append(mk("icPValue", "IC P 值", "IC 显著性检验 P 值，<0.05 显著",
+                        icMap.value("pValue").toDouble(), "number", false, "optional"));
+                    optionalMetrics.append(mk("icTStat", "IC T 统计", "IC 显著性 T 统计量",
+                        icMap.value("tStat").toDouble(), "number", false, "optional"));
+                    optionalMetrics.append(mk("icHalfLife","IC 半衰期", "IC 自相关衰减至一半的天数",
+                        icMap.value("halfLife").toDouble(), "number", false, "optional"));
+                    optionalMetrics.append(mk("longShortRet","多空年化", "多空组合年化收益",
+                        fmMap.value("longShortAnnualReturn").toDouble(), "percent", false, "optional"));
+                    optionalMetrics.append(mk("costAdjSharpe","成本夏普", "扣除交易成本后的多空夏普",
+                        fmMap.value("costAdjustedSharpe").toDouble(), "ratio", false, "optional"));
+                    optionalMetrics.append(mk("monthlyWinRate","月度胜率", "月度正收益占比",
+                        fmMap.value("monthlyWinRate").toDouble(), "percent", false, "optional"));
+                    optionalMetrics.append(mk("annualTurnover","年化换手", "因子持仓的年化换手率",
+                        fmMap.value("annualTurnover").toDouble(), "percent", false, "optional"));
+                    optionalMetrics.append(mk("alpha","Alpha", "因子超额收益",
+                        fmMap.value("alpha").toDouble(), "number", false, "optional"));
+
+                    // ══ 辅助指标：参考信息（可折叠）══
+                    QVariantList auxiliaryMetrics;
+                    auxiliaryMetrics.append(mk("numGroups","分组数", "回测分组数量",
+                        fmMap.value("numGroups").toDouble(), "number", false, "auxiliary"));
+                    auxiliaryMetrics.append(mk("totalSignals","总信号数", "回测期总信号量",
+                        execMap.value("totalSignals").toDouble(), "number", false, "auxiliary"));
+                    auxiliaryMetrics.append(mk("validSamples","有效样本", "有效回测周期数",
+                        execMap.value("validSampleCount").toDouble(), "number", false, "auxiliary"));
+
+                    // groupCharts — 从 groups 构建 QML 期望的 {title, subtitle, series, isPercent} 格式
+                    QVariantList groupCharts;
+                    if (groupsArr.size() > 0) {
+                        QVariantMap chart;
+                        chart["title"]     = QStringLiteral("分组收益");
+                        chart["subtitle"]  = QStringLiteral("各组年化收益与平均股票数");
+                        chart["isPercent"] = true;
+                        QVariantList series;
+                        for (int i = 0; i < groupsArr.size(); ++i) {
+                            QJsonObject g = groupsArr[i].toObject();
+                            QVariantMap bar;
+                            bar["label"] = g.value("groupName").toString();
+                            bar["value"] = g.value("annualizedReturn").toDouble();
+                            series.append(bar);
+                        }
+                        chart["series"] = series;
+                        groupCharts.append(chart);
+                    }
+
+                    // returnSeries — 从 orchestrator JSON 提取收益率序列
+                    QJsonArray retArr = metricsObj.value("returnSeries").toArray();
+                    QVariantList rawReturns, costAdjusted, riskAdjusted;
+                    for (int i = 0; i < retArr.size(); ++i) {
+                        double v = retArr[i].toDouble();
+                        rawReturns.append(v);
+                        costAdjusted.append(v);   // MVP: 同源数据
+                        riskAdjusted.append(v);
+                    }
+                    QVariantMap returnSeries;
+                    returnSeries["rawReturns"]            = rawReturns;
+                    returnSeries["costAdjustedReturns"]   = costAdjusted;
+                    returnSeries["riskAdjustedReturns"]   = riskAdjusted;
+
+                    // 评级检查项
+                    QVariantList ratingChecks;
+                    auto addCheck = [&](const QString& label, bool passed) {
+                        QVariantMap c;
+                        c["label"]  = label;
+                        c["passed"] = passed;
+                        ratingChecks.append(c);
+                    };
+                    bool hasGroups = groupsArr.size() >= 2;
+                    bool monotonic = true;
+                    if (hasGroups) {
+                        for (int i = 1; i < groupsArr.size(); ++i) {
+                            if (groupsArr[i].toObject().value("returnRate").toDouble() >
+                                groupsArr[i-1].toObject().value("returnRate").toDouble())
+                                { monotonic = false; break; }
+                        }
+                    }
+                    addCheck(QStringLiteral("分组单调性"), monotonic);
+                    addCheck(QStringLiteral("夏普比率 > 0"), tradingMap.value("sharpe").toDouble() > 0.0);
+                    addCheck(QStringLiteral("IC 均值 > 0"), icMap.value("value").toDouble() > 0.0);
+                    addCheck(QStringLiteral("IC 胜率 > 50%"), icMap.value("winRate").toDouble() > 0.5);
+
+                    // 组装完整 factorQuality
+                    QVariantMap fq;
+                    fq["coreRating"]        = rating;
+                    fq["coreRatingLabel"]   = ratingLabel;
+                    fq["coreRatingTitle"]   = QStringLiteral("因子质量评级");
+                    fq["coreRatingSummary"] = rating >= 3 ? QStringLiteral("因子表现优秀，分组单调且风险调整收益良好")
+                                             : rating >= 2 ? QStringLiteral("因子表现良好，具备选股能力")
+                                             : rating >= 1 ? QStringLiteral("因子基本合格，可考虑与其他因子复合使用")
+                                             : QStringLiteral("因子表现不佳，建议重新审视因子逻辑");
+                    fq["coreRatingChecks"]  = ratingChecks;
+                    fq["coreMetrics"]       = coreMetrics;
+                    fq["groupCharts"]       = groupCharts;
+                    fq["returnSeries"]      = returnSeries;
+                    fq["optionalMetrics"]   = optionalMetrics;
+                    fq["auxiliaryMetrics"]  = auxiliaryMetrics;
+
+                    QVariantMap coreSection;
+                    coreSection["title"]    = QStringLiteral("核心指标");
+                    coreSection["subtitle"] = QStringLiteral("因子回测关键绩效与质量指标");
+                    fq["coreSection"]       = coreSection;
+
+                    QVariantMap optSection;
+                    optSection["title"]    = QStringLiteral("扩展指标");
+                    optSection["subtitle"] = QStringLiteral("补充风险与统计指标");
+                    fq["optionalSection"]  = optSection;
+
+                    QVariantMap auxSection;
+                    auxSection["title"]              = QStringLiteral("辅助指标");
+                    auxSection["subtitle"]           = QStringLiteral("其他参考指标");
+                    auxSection["expandedSubtitle"]   = QStringLiteral("收起辅助指标");
+                    auxSection["collapsedSubtitle"]  = QStringLiteral("展开辅助指标");
+                    fq["auxiliarySection"]           = auxSection;
+
+                    // 组装 metrics
+                    QVariantMap metrics;
+                    metrics["groups"]        = groupsList;
+                    metrics["trading"]       = tradingMap;
+                    metrics["ic"]            = icMap;
+                    metrics["execution"]     = execMap;
+                    metrics["factorQuality"] = fq;
+
+                    m_resultMetrics = metrics;
+                    result["metrics"] = metrics;
+
+                    // config — QML 读取 config.factorId / startDate / endDate / benchmarkSymbol
+                    QVariantMap cfgMap;
+                    if (!config.factorIds.empty()) {
+                        cfgMap["factorId"] = QString::fromStdString(config.factorIds.front());
+                        result["factorId"] = cfgMap["factorId"];
+                    }
+                    cfgMap["benchmarkSymbol"] = QString::fromStdString(config.benchmarkSymbol);
+                    cfgMap["initialCapital"]  = config.initialCapital;
+                    cfgMap["startDate"] = rootObj.value("startDate").toString();
+                    cfgMap["endDate"]   = rootObj.value("endDate").toString();
+                    result["config"] = cfgMap;
+
+                    // 先结束 isRunning（让 onBacktestResultChanged 的 guard 通过）
+                    m_progress = 100.0;
+                    m_statusText = QStringLiteral("回测完成");
+                    m_isRunning.store(false);
+                    emit progressChanged(); emit statusChanged();
+                    emit isRunningChanged();
+
+                    emit resultMetricsChanged();
 
                     m_backtestResult = result;
                     emit backtestResultChanged();
                     emit backtestCompleted(result);
-                    m_progress = 100.0;
-                    m_statusText = QStringLiteral("回测完成");
-                    emit progressChanged(); emit statusChanged();
                     emit backtestProgress(100.0, m_statusText);
-                    m_isRunning.store(false); emit isRunningChanged();
                 }, Qt::QueuedConnection);
             }
         );

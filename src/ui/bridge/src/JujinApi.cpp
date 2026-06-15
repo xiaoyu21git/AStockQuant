@@ -3,7 +3,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
-#include "TradingRuntimeManager.h"
+// TradingRuntimeManager.h deleted — references migrated to app::system::TradingSystem
 
 #include <QDateTime>
 #include <QCoreApplication>

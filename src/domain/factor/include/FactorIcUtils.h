@@ -1,6 +1,7 @@
 #pragma once
 
-#include "FactorBacktestExecutor.h"
+#include "FactorBacktestTypes.h"
+#include "BaseFactor.h"
 
 #include <algorithm>
 #include <cmath>

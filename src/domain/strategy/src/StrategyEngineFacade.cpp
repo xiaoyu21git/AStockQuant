@@ -551,12 +551,12 @@ StrategyBacktestResult StrategyEngine::backtest(
         // 模拟成交
         if (orders.has_value()) {
             for (const auto& order : *orders) {
-                const std::uint32_t instrumentId = order.instrumentId().value();
+                const std::uint32_t instrumentId = order.instrumentId().value;
                 const std::uint32_t quantity = order.quantity();
                 // 找该标的收盘价
                 double closePrice = 0.0;
                 for (const auto& mdp : mdpBatch) {
-                    if (mdp.instrumentId().value() == instrumentId) {
+                    if (mdp.instrumentId().value == instrumentId) {
                         closePrice = mdp.lastPrice();
                         break;
                     }
@@ -597,7 +597,7 @@ StrategyBacktestResult StrategyEngine::backtest(
             if (qty > 0) {
                 double closePrice = 0.0;
                 for (const auto& mdp : mdpBatch) {
-                    if (mdp.instrumentId().value() == instId) {
+                    if (mdp.instrumentId().value == instId) {
                         closePrice = mdp.lastPrice();
                         break;
                     }

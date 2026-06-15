@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../../domain/backtest/include/ResolvedStrategyBehavior.h"
+#include "../../../domain/types/ResolvedStrategyBehavior.h"
 
 #include <QMetaType>
 #include <QString>

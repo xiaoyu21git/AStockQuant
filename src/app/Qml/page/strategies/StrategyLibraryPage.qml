@@ -30,6 +30,7 @@ Rectangle {
     property bool showBacktestWorkbench: false
     property string backtestWorkbenchStatusText: ""
     property bool backtestWorkbenchLoadedOnce: false
+    property var backtestResult: ({})
     property string backtestWorkbenchMode: "workbench"
     readonly property bool hasSelectedStrategy: selectedStrategyIndex >= 0
         && strategyViewModel
@@ -74,7 +75,7 @@ Rectangle {
     readonly property var tradingConnectionConfigService: TradingConnectionConfigService
     readonly property var tradingMarketCalendarService: TradingMarketCalendarService
     readonly property var tradingRuntimeStatusService: TradingRuntimeStatusService
-    readonly property var tradeExecutionService: TradeExecutionService
+    readonly property var tradeExecutionBridge: TradeExecutionBridge
     readonly property var uiLifecycleCoordinator: UiLifecycleCoordinator
     property int marketSessionRevision: 0
     property int runtimeSnapshotRevision: 0
@@ -524,11 +525,11 @@ Rectangle {
             return
         }
 
-        if (wantsLiveTrading && (!tradeExecutionService || !tradeExecutionService.isLiveBridgeReady
-                || !tradeExecutionService.isLiveBridgeReady())) {
+        if (wantsLiveTrading && (!tradeExecutionBridge || !tradeExecutionBridge.isLiveBridgeReady
+                || !tradeExecutionBridge.isLiveBridgeReady())) {
             clearStartRequest(strategyId)
-            var liveBridgeError = (tradeExecutionService && tradeExecutionService.liveBridgeStatusMessage)
-                ? String(tradeExecutionService.liveBridgeStatusMessage() || "").trim()
+            var liveBridgeError = (tradeExecutionBridge && tradeExecutionBridge.liveBridgeStatusMessage)
+                ? String(tradeExecutionBridge.liveBridgeStatusMessage() || "").trim()
                 : ""
             showActionFeedback(liveBridgeError || ("策略“" + strategyName + "”绑定成功，但共享交易会话未就绪"), true)
             return
@@ -1006,6 +1007,14 @@ Rectangle {
 
         }
     }
+
+    function showBacktestResult() {
+        var r = backtestResult || ({})
+        var m = r.metrics || ({})
+        console.log("策略回测完成: 年化=" + (Number(m.annualizedReturn || 0)*100).toFixed(2) + "% 夏普=" + Number(m.sharpeRatio || 0).toFixed(2))
+        showActionFeedback("回测完成", false)
+    }
+
 
     function openBacktestWorkbench(strategyId, modeValue) {
         if (strategyId) {
@@ -1746,9 +1755,8 @@ Rectangle {
                     }
                     if (typeof item.backtestFinished !== "undefined") {
                         item.backtestFinished.connect(function(result) {
-                            console.log("策略回测完成, 结果:", result ? Object.keys(result) : "null")
                             strategyLibraryPage.backtestResult = result || ({})
-                            strategyLibraryPage.backtestResultReceived()
+                            strategyLibraryPage.showBacktestResult()
                         })
                     }
                 }

@@ -48,6 +48,10 @@ struct BacktestRunConfig {
     double commissionRate = 0.001;
     double slippageRate = 0.001;
     double riskFreeRate = 0.02;
+    double initialCapital = 1000000.0;
+    std::string benchmarkSymbol = "000300.SH";
+    std::string adjustPriceType = "pre";   // "pre" / "post"
+    int marketEnvironmentProfile = 0;
 };
 
 } // namespace Factor::backtest

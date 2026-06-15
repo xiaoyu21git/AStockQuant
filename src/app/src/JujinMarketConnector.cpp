@@ -17,8 +17,8 @@
 #include "JujinApi.h"
 #include "JujinTypes.h"
 #include "MarketSubscriptionStatusRegistry.h"
-#include "TradingConnectionConfigService.h"
-#include "TradingMarketCalendarService.h"
+#include "../ui/bridge/include/TradingConnectionConfigService.h"
+#include "../ui/bridge/include/TradingMarketCalendarService.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/config/ConfigManager.hpp"
 

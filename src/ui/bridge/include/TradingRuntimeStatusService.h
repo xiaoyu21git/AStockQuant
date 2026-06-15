@@ -1,44 +1,45 @@
 #pragma once
+// ═════════════════════════════════════════════════════════════════════════
+// TradingRuntimeStatusService — 运行时状态服务桥接
+// 提供策略/账户运行时会话快照查询
+// 委托给 app::system::TradingSystem
+// ═════════════════════════════════════════════════════════════════════════
 
 #include <QObject>
-#include <QMutex>
-#include <QVariantList>
+#include <QString>
 #include <QVariantMap>
+#include <QVariantList>
 
-class QTimer;
+namespace bridge {
 
 class TradingRuntimeStatusService : public QObject {
     Q_OBJECT
-    Q_PROPERTY(bool initialized READ isInitialized NOTIFY initializedChanged)
-    Q_PROPERTY(QVariantList sessionSnapshots READ sessionSnapshots NOTIFY sessionSnapshotsChanged)
-
 public:
-    static TradingRuntimeStatusService* instance();
+    explicit TradingRuntimeStatusService(QObject* parent = nullptr);
 
-    TradingRuntimeStatusService(const TradingRuntimeStatusService&) = delete;
-    TradingRuntimeStatusService& operator=(const TradingRuntimeStatusService&) = delete;
+    /// @brief 按策略 ID 查询运行时会话快照
+    Q_INVOKABLE QVariantMap sessionSnapshotForStrategy(const QString& strategyId);
 
-    Q_INVOKABLE void initialize();
-    Q_INVOKABLE void initializeAsync();
-    Q_INVOKABLE bool isInitialized() const;
-    Q_INVOKABLE QVariantList sessionSnapshots() const;
-    Q_INVOKABLE QVariantMap sessionSnapshotForStrategy(const QString& strategyId) const;
-    Q_INVOKABLE QVariantMap sessionSnapshotForAccount(const QString& accountId) const;
+    /// @brief 按账户 ID 查询运行时会话快照
+    Q_INVOKABLE QVariantMap sessionSnapshotForAccount(const QString& accountId);
+
+    /// @brief 同步刷新
     Q_INVOKABLE void refresh();
+
+    /// @brief 异步刷新
     Q_INVOKABLE void refreshAsync();
 
+    /// @brief 获取所有会话快照
+    Q_INVOKABLE QVariantList sessionSnapshots() const;
+
 signals:
-    void initializedChanged();
     void sessionSnapshotsChanged();
 
 private:
-    explicit TradingRuntimeStatusService(QObject* parent = nullptr);
+    QVariantMap buildDefaultSnapshot(const QString& sessionId) const;
+    QVariantMap buildTradingSystemSnapshot() const;
 
-    static TradingRuntimeStatusService* m_instance;
-    static QMutex m_instanceMutex;
-
-    mutable QMutex m_mutex;
-    bool m_initialized;
     QVariantList m_sessionSnapshots;
-    QTimer* m_refreshTimer;
 };
+
+} // namespace bridge

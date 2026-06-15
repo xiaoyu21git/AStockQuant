@@ -170,7 +170,9 @@ set(FACTOR_SOURCES
     src/FactorRatingEngine.cpp
     src/FactorTypeRegistry.cpp
     src/FactorBacktestOrchestrator.cpp
+    src/CachedMarketDataView.cpp
     src/FactorParamsStubs.cpp
+    src/FactorMetricsCalculator.cpp
     src/factor_compute/FactorSignalSetAssembler.cpp
     src/factor_compute/FactorComputeEngine.cpp
     src/factor_compute/FactorRegistry.cpp
@@ -235,6 +237,8 @@ set(FACTOR_HEADERS
     include/factor_compute/SimulatedTradingExecutor.h
     include/factor_compute/SignalSetBuilder.h
     include/FactorBacktestOrchestrator.h
+    include/FactorBacktestTypes.h
+    include/FactorMetricsCalculator.h
     include/BacktestRunConfig.h
 )
 

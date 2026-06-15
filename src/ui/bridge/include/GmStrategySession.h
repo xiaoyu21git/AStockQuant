@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "JujinApi.h"
-#include "TradingCommandQueue.h"
 
 #include <map>
 #include <memory>
@@ -18,6 +17,10 @@ class EventBus;
 namespace thirdparty {
 
 class RuntimeStrategy;
+
+// Forward declarations for types previously in deleted TradingCommandQueue.h
+struct TradingCommand;
+class TradingCommandQueue;
 
 enum class TradingSessionState {
     Created,

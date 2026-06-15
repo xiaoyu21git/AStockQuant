@@ -1,79 +1,100 @@
 #pragma once
+// ═════════════════════════════════════════════════════════════════════════
+// TradingConnectionConfigService — 交易连接配置服务桥接
+// 管理策略绑定、启动门控、配置持久化和客户端进程状态
+// 配置以 JSON 文件持久化存储
+// ═════════════════════════════════════════════════════════════════════════
 
 #include <QObject>
-#include <QMutex>
-#include <QStringList>
+#include <QString>
+#include <QVariantList>
 #include <QVariantMap>
+#include <QMutex>
+
+namespace bridge {
 
 class TradingConnectionConfigService : public QObject {
     Q_OBJECT
-    Q_PROPERTY(bool initialized READ isInitialized NOTIFY initializedChanged)
-    Q_PROPERTY(QVariantMap currentConfiguration READ currentConfiguration NOTIFY currentConfigurationChanged)
-    Q_PROPERTY(QString configFilePath READ configFilePath CONSTANT)
-    Q_PROPERTY(bool hasToken READ hasToken NOTIFY currentConfigurationChanged)
-    Q_PROPERTY(bool marketConnectorCompiled READ marketConnectorCompiled CONSTANT)
-    Q_PROPERTY(QString marketConnectorBuildStatus READ marketConnectorBuildStatus CONSTANT)
-    Q_PROPERTY(bool clientProcessRunning READ clientProcessRunning NOTIFY clientProcessStatusChanged)
-    Q_PROPERTY(QString clientProcessStatus READ clientProcessStatus NOTIFY clientProcessStatusChanged)
-    Q_PROPERTY(QStringList clientProcessNames READ clientProcessNames NOTIFY currentConfigurationChanged)
-
+    Q_PROPERTY(QVariantMap currentConfiguration READ currentConfiguration
+               NOTIFY currentConfigurationChanged)
+    Q_PROPERTY(QString configFilePath READ configFilePath
+               NOTIFY configFilePathChanged)
 public:
-    static TradingConnectionConfigService* instance();
+    explicit TradingConnectionConfigService(QObject* parent = nullptr);
 
-    TradingConnectionConfigService(const TradingConnectionConfigService&) = delete;
-    TradingConnectionConfigService& operator=(const TradingConnectionConfigService&) = delete;
-
-    Q_INVOKABLE void initialize();
-    Q_INVOKABLE void initializeAsync();
-    Q_INVOKABLE QVariantMap loadConfiguration();
-    Q_INVOKABLE QVariantMap defaultConfiguration() const;
-    Q_INVOKABLE QStringList defaultClientProcessNames() const;
-    Q_INVOKABLE bool saveConfiguration(const QVariantMap& configuration);
-    Q_INVOKABLE QVariantMap evaluateStartupGate(bool requireClientProcess = false) const;
-    Q_INVOKABLE QVariantMap bindStrategyConfiguration(const QString& strategyId,
-                                                     const QString& strategyName,
-                                                     bool enableTrading = true,
-                                                     bool readOnly = false);
-    Q_INVOKABLE QVariantMap addBoundStrategyConfiguration(const QString& strategyId,
-                                                         const QString& strategyName,
-                                                         bool enableTrading = true,
-                                                         bool readOnly = false);
-    Q_INVOKABLE QVariantMap removeBoundStrategyConfiguration(const QString& strategyId);
-    Q_INVOKABLE void refreshClientProcessStatus();
-    Q_INVOKABLE void refreshClientProcessStatusAsync();
-
-    bool isInitialized() const;
     QVariantMap currentConfiguration() const;
     QString configFilePath() const;
-    bool hasToken() const;
-    bool marketConnectorCompiled() const;
-    QString marketConnectorBuildStatus() const;
-    bool clientProcessRunning() const;
-    QString clientProcessStatus() const;
-    QStringList clientProcessNames() const;
+
+    // ── 配置持久化 ──
+
+    /// @brief 从文件加载配置
+    Q_INVOKABLE QVariantMap loadConfiguration();
+
+    /// @brief 保存配置到文件
+    Q_INVOKABLE bool saveConfiguration(const QVariantMap& payload);
+
+    /// @brief 获取默认配置
+    Q_INVOKABLE QVariantMap defaultConfiguration() const;
+
+    // ── 策略绑定管理 ──
+
+    /// @brief 绑定策略配置（主绑定）
+    Q_INVOKABLE QVariantMap bindStrategyConfiguration(const QString& strategyId,
+                                                        const QString& strategyName,
+                                                        bool isPrimary,
+                                                        bool autoStart);
+
+    /// @brief 添加绑定策略配置（附加绑定）
+    Q_INVOKABLE QVariantMap addBoundStrategyConfiguration(const QString& strategyId,
+                                                            const QString& strategyName,
+                                                            bool isPrimary,
+                                                            bool autoStart);
+
+    /// @brief 移除绑定策略配置
+    Q_INVOKABLE QVariantMap removeBoundStrategyConfiguration(const QString& strategyId);
+
+    // ── 启动门控 ──
+
+    /// @brief 评估启动门控条件
+    /// @return {ready: bool, reasonCode: string, reasons: [...]}
+    Q_INVOKABLE QVariantMap evaluateStartupGate(bool forceRecheck);
+
+    // ── 客户端进程状态 ──
+
+    /// @brief 同步刷新客户端进程状态
+    Q_INVOKABLE QVariantMap refreshClientProcessStatus();
+
+    /// @brief 异步刷新客户端进程状态
+    Q_INVOKABLE void refreshClientProcessStatusAsync();
 
 signals:
-    void initializedChanged();
     void currentConfigurationChanged();
-    void clientProcessStatusChanged();
-    void configurationSaved(const QVariantMap& configuration);
+    void configFilePathChanged();
+    void clientProcessStatusChanged(const QVariantMap& status);
     void errorOccurred(const QString& message);
 
 private:
-    explicit TradingConnectionConfigService(QObject* parent = nullptr);
+    // ── 内部辅助 ──
 
-    void loadPersistedState();
-    bool persistState();
-    QVariantMap evaluateStartupGateLocked(bool requireClientProcess) const;
-    QVariantMap normalizedConfiguration(const QVariantMap& rawConfiguration) const;
-    bool detectClientProcessLocked(QString* matchedProcessName = nullptr) const;
+    QVariantMap normalizeConfiguration(const QVariantMap& raw) const;
+    QString resolveConfigFilePath() const;
+    bool writeConfigFile(const QVariantMap& config) const;
+    QVariantMap readConfigFile() const;
+    QVariantMap buildStartupGateResult(bool ready, const QString& reasonCode,
+                                        const QStringList& reasons) const;
+    QVariantMap detectClientProcesses() const;
+    QString sanitizeStrategyId(const QString& raw) const;
 
-    static TradingConnectionConfigService* m_instance;
-    static QMutex m_instanceMutex;
+    // ── 绑定的策略列表操作 ──
+    QVariantList boundStrategies() const;
+    void setBoundStrategies(const QVariantList& strategies);
+    void mergeBoundStrategy(const QVariantMap& entry);
+    bool removeBoundStrategy(const QString& strategyId);
 
     mutable QMutex m_mutex;
-    bool m_initialized;
-    bool m_clientProcessRunning;
-    QString m_clientProcessStatus;
-    QVariantMap m_currentConfiguration;
+    QVariantMap m_currentConfig;
+    QString m_configFilePath;
+    bool m_initialized{false};
 };
+
+} // namespace bridge
