@@ -14,6 +14,7 @@
 #include "../../domain/strategy/include/IStrategyService.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
+#include "../../domain/factor/include/factor_compute/FactorEngine.h"
 
 #include <QDebug>
 #include <QJsonArray>
@@ -139,71 +140,103 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 {
     if (m_isRunning.load()) return;
     m_isRunning.store(true);
+    emit isRunningChanged();
     m_progress = 0.0; emit progressChanged();
-    m_statusText = QStringLiteral("Running..."); emit statusChanged();
+    m_statusText = QStringLiteral("Preparing..."); emit statusChanged();
 
-    BacktestRequest request = buildBacktestRequest(strategyId, params);
-    if (!request.isValid()) {
+    // 快速校验（UI 线程，无 I/O）
+    if (strategyId.isEmpty()) {
         m_isRunning.store(false);
-        emit backtestFailed(QStringLiteral("Invalid backtest parameters"));
+        emit isRunningChanged();
+        emit backtestFailed(QStringLiteral("Strategy ID is empty"));
         return;
     }
 
-    // 获取或创建引擎（复用 StrategyBridge::start() 的注入逻辑）
-    auto& mgr = domain::strategy::StrategyManager::instance();
-    auto* engine = mgr.get(strategyId.toStdString());
-    if (!engine) {
-        std::shared_ptr<domain::strategy::IFactorSvc> factorSvc;
-        auto* factorSvcBridge = FactorService::instance();
-        if (factorSvcBridge && factorSvcBridge->isInitialized()) {
-            auto* instanceMgr = factorSvcBridge->instanceManager();
-            if (instanceMgr) {
-                auto symbolResolver = [](std::uint32_t id) -> std::string {
-                    char buf[16];
-                    std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
-                    return buf;
-                };
-                auto factorNameResolver = [](std::uint64_t fid) -> std::string {
-                    return std::to_string(fid);
-                };
-                factorSvc = std::make_shared<domain::strategy::RuntimeFactorSvc>(
-                    *instanceMgr,
-                    std::move(symbolResolver),
-                    std::move(factorNameResolver));
-            }
-        }
-        engine = mgr.createEngine(strategyId.toStdString(), std::move(factorSvc));
-    }
-    if (!engine) {
-        m_isRunning.store(false);
-        emit backtestFailed(QStringLiteral("Strategy engine not available"));
-        return;
-    }
-
-    // 获取数据集 JSON
-    const int datasetId = params.value("datasetCacheId", -1).toInt();
-    std::string datasetJson;
-    if (datasetId >= 0) {
-        QVariantList data = DataServiceCache::getInstance().getDataSetById(datasetId);
-        if (!data.isEmpty()) {
-            QJsonDocument doc(QJsonArray::fromVariantList(data));
-            datasetJson = doc.toJson(QJsonDocument::Compact).toStdString();
-        }
-    }
-    if (datasetJson.empty()) {
-        m_isRunning.store(false);
-        emit backtestFailed(QStringLiteral("No backtest dataset selected"));
-        return;
-    }
+    // 捕获所有参数到值类型，后续全部在线程池中执行
+    const std::string capturedStrategyId = strategyId.toStdString();
+    const int capturedDatasetId = params.value("datasetCacheId", -1).toInt();
 
     if (!m_workerPool) {
         m_workerPool = std::make_unique<foundation::thread::ThreadPoolExecutor>(
             1, 1, std::chrono::milliseconds(120000), "StrategyBacktestBridge");
     }
 
-    m_workerPool->post([this, engine, request = std::move(request), datasetJson = std::move(datasetJson)]() {
+    m_workerPool->post([this, capturedStrategyId, capturedDatasetId, params]() {
         try {
-            auto result = engine->backtest(request, datasetJson,
+            // ─── 1. 构建回测请求（纯 CPU，无 I/O）───
+            BacktestRequest request = buildBacktestRequest(
+                QString::fromStdString(capturedStrategyId), params);
+            if (!request.isValid()) {
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_isRunning.store(false);
+                    emit isRunningChanged();
+                    emit backtestFailed(QStringLiteral("Invalid backtest parameters"));
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            // ─── 2. 获取或创建引擎（含 MySQL 查询 — 现在在工作线程中）───
+            auto& mgr = domain::strategy::StrategyManager::instance();
+            auto* engine = mgr.get(capturedStrategyId);
+            if (!engine) {
+                std::unique_ptr<domain::strategy::RuntimeFactorSvc> factorSvc;
+                auto* factorSvcBridge = FactorService::instance();
+                if (factorSvcBridge && factorSvcBridge->isInitialized()) {
+                    auto* instanceMgr = factorSvcBridge->instanceManager();
+                    if (instanceMgr) {
+                        auto symbolResolver = [](std::uint32_t id) -> std::string {
+                            char buf[16];
+                            std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+                            return buf;
+                        };
+                        auto factorNameResolver = [](std::uint64_t fid) -> std::string {
+                            return std::to_string(fid);
+                        };
+                        factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
+                            *instanceMgr,
+                            std::move(symbolResolver),
+                            std::move(factorNameResolver));
+                    }
+                }
+                engine = mgr.createEngine(capturedStrategyId, std::move(factorSvc));
+            }
+            if (!engine) {
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_isRunning.store(false);
+                    emit isRunningChanged();
+                    emit backtestFailed(QStringLiteral("Strategy engine not available"));
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            // ─── 3. 加载数据集 JSON（缓存/磁盘 I/O — 现在在工作线程中）───
+            std::string datasetJson;
+            if (capturedDatasetId >= 0) {
+                QVariantList data = DataServiceCache::getInstance().getDataSetById(capturedDatasetId);
+                if (!data.isEmpty()) {
+                    QJsonDocument doc(QJsonArray::fromVariantList(data));
+                    datasetJson = doc.toJson(QJsonDocument::Compact).toStdString();
+                }
+            }
+            if (datasetJson.empty()) {
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_isRunning.store(false);
+                    emit isRunningChanged();
+                    emit backtestFailed(QStringLiteral("No backtest dataset selected"));
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            // ─── 4. 执行回测 ───
+            QMetaObject::invokeMethod(this, [this]() {
+                m_statusText = QStringLiteral("Running...");
+                emit statusChanged();
+            }, Qt::QueuedConnection);
+
+            auto dataSvc = std::make_unique<factor::compute::BacktestDataService>();
+            dataSvc->storeRawJson(datasetJson);
+
+            auto result = engine->backtest(request, dataSvc.get(),
                 [this](double progress) {
                     QMetaObject::invokeMethod(this, [this, progress]() {
                         m_progress = progress;
@@ -214,16 +247,16 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             if (!result.success) {
                 QMetaObject::invokeMethod(this, [this, msg = QString::fromStdString(result.errorMessage)]() {
                     m_isRunning.store(false);
+                    emit isRunningChanged();
                     emit backtestFailed(msg);
                 }, Qt::QueuedConnection);
                 return;
             }
 
-            // 序列化结果到 QVariantMap
+            // ─── 5. 序列化结果到 QVariantMap ───
             QVariantMap qResult;
             qResult["status"] = QStringLiteral("SUCCESS");
 
-            // 指标
             QVariantMap metricsMap;
             metricsMap["totalReturn"]      = result.metrics.totalReturn;
             metricsMap["annualizedReturn"] = result.metrics.annualizedReturn;
@@ -240,8 +273,6 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             metricsMap["trackingError"]    = result.metrics.trackingError;
             qResult["metrics"] = metricsMap;
 
-            // 交易统计
-            // 交易统计
             QVariantMap tradeStats;
             tradeStats["totalTrades"]   = static_cast<int>(result.tradeStats.totalTrades);
             tradeStats["winningTrades"] = static_cast<int>(result.tradeStats.winningTrades);
@@ -252,7 +283,6 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             tradeStats["largestLoss"]   = result.tradeStats.largestLoss.value;
             qResult["tradeStats"] = tradeStats;
 
-            // 时序数据（TimeSeriesSnapshot 字段: portfolioValues, dates, returns, drawdowns）
             QVariantMap timeSeries;
             QVariantList equityList, dateList, returnList, drawdownList;
             for (size_t i = 0; i < result.timeSeries.portfolioValues.size(); ++i) {
@@ -279,11 +309,13 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
         } catch (const std::exception& e) {
             QMetaObject::invokeMethod(this, [this, msg = QString::fromUtf8(e.what())]() {
                 m_isRunning.store(false);
+                emit isRunningChanged();
                 emit backtestFailed(QStringLiteral("Error: %1").arg(msg));
             }, Qt::QueuedConnection);
         } catch (...) {
             QMetaObject::invokeMethod(this, [this]() {
                 m_isRunning.store(false);
+                emit isRunningChanged();
                 emit backtestFailed(QStringLiteral("Unknown error"));
             }, Qt::QueuedConnection);
         }
@@ -293,6 +325,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 void StrategyBacktestBridge::cancelBacktest()
 {
     m_isRunning.store(false);
+    emit isRunningChanged();
     emit backtestCancelled();
 }
 
