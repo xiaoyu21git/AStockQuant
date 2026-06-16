@@ -3,9 +3,12 @@
 
 #include "DataServiceCache.h"
 #include "AppStoragePaths.h"
-#include "DataManager.h"  // 添加DataManager头文件
+#include "DataManager.h"
 #include "DataFetchFieldContractUtils.h"
+#include "factor_compute/CachedMarketDataView.h"
+#include "foundation/json/json_facade.h"
 #include <QCoreApplication>
+#include <unordered_set>
 #include <QDir>
 #include <QDebug>
 #include <QFile>
@@ -2180,7 +2183,29 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
                           std::chrono::seconds(m_config.dataCacheTTL));
         writePersistentCacheFile(persistentDataSetDataFilePath(dataId), dataBytes);
         writePersistentCacheFile(persistentDataSetInfoFilePath(dataId), infoBytes);
-        
+
+        // ── 同步生成二进制缓存 (.bin) 供回测加速 ──
+        {
+            QString binPath = bridge::storage::persistentDataSetBinFilePath(dataId);
+            // 过滤出非 OHLCV 的额外字段
+            static const std::unordered_set<std::string> kOhlcv = {"open","high","low","close","volume","symbol","trade_date"};
+            std::vector<std::string> extraFields;
+            for (const QString& f : completeInfo.availableFields) {
+                std::string fs = f.toStdString();
+                if (!kOhlcv.count(fs)) extraFields.push_back(fs);
+            }
+            QJsonDocument doc(QJsonArray::fromVariantList(data));
+            std::string jsonStr = doc.toJson(QJsonDocument::Compact).toStdString();
+            auto root = foundation::json::JsonFacade::parse(jsonStr);
+            if (root.isArray() && root.size() > 0) {
+                auto view = factor::compute::CachedMarketDataView::fromJson(root, extraFields);
+                if (view) {
+                    view->saveToBinary(binPath.toStdString());
+                    qDebug() << "  [BIN] saved" << binPath << "with" << extraFields.size() << "extra fields";
+                }
+            }
+        }
+
         // 添加到索引。这里不能在持有 m_indexMutex 时再次调用 addToIndex，
         // 否则 QMutex 会发生同线程二次加锁卡死。
         addToIndex(dataId, completeInfo);

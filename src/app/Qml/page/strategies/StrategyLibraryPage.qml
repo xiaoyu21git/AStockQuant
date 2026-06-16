@@ -28,6 +28,7 @@ Rectangle {
     property bool actionFeedbackError: false
     property var recentStartRequests: ({})
     property bool showBacktestWorkbench: false
+    property bool showPerformance: false
     property string backtestWorkbenchStatusText: ""
     property bool backtestWorkbenchLoadedOnce: false
     property var backtestResult: ({})
@@ -1011,8 +1012,18 @@ Rectangle {
     function showBacktestResult() {
         var r = backtestResult || ({})
         var m = r.metrics || ({})
-        console.log("策略回测完成: 年化=" + (Number(m.annualizedReturn || 0)*100).toFixed(2) + "% 夏普=" + Number(m.sharpeRatio || 0).toFixed(2))
-        showActionFeedback("回测完成", false)
+        var ann = (Number(m.annualizedReturn || 0) * 100).toFixed(2)
+        var sharpe = Number(m.sharpeRatio || 0).toFixed(2)
+        var dd = (Number(m.maxDrawdown || 0) * 100).toFixed(1)
+        var win = (Number(m.winRate || 0) * 100).toFixed(1)
+        var msg = "年化 " + ann + "% | 夏普 " + sharpe + " | 回撤 " + dd + "% | 胜率 " + win + "%"
+        console.log("策略回测完成: " + msg)
+        showActionFeedback(msg, false)
+        showPerformance = true
+        showBacktestWorkbench = false
+        if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
+            performanceLoader.item.refreshPerformance()
+        }
     }
 
 
@@ -1081,41 +1092,56 @@ Rectangle {
 
         NavigationComponents.ModeTitleBar {
             Layout.fillWidth: true
-            currentMode: !strategyLibraryPage.showBacktestWorkbench
+            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
                 ? "library"
-                : (strategyLibraryPage.backtestWorkbenchMode === "analysis" ? "backtest_analysis" : "backtest")
+                : (strategyLibraryPage.backtestWorkbenchMode === "analysis" ? "backtest_analysis"
+                    : strategyLibraryPage.showPerformance ? "performance" : "backtest")
             showBackButton: false
             modeOptions: [
                 { value: "library", label: "策略库" },
                 { value: "backtest", label: "策略回测" },
-                { value: "backtest_analysis", label: "回测分析" }
+                { value: "backtest_analysis", label: "回测分析" },
+                { value: "performance", label: "策略绩效" }
             ]
             modeTitleMap: {
                 "library": "策略库",
                 "backtest": "策略回测",
-                "backtest_analysis": "回测分析"
+                "backtest_analysis": "回测分析",
+                "performance": "策略绩效"
             }
             modeSubtitleMap: {
                 "library": "浏览并管理策略，新建入口保留在策略库页。",
                 "backtest": "在策略库内直接配置并运行当前策略回测。",
-                "backtest_analysis": "独立展示最近回测与历史对比结果，不承载回测配置。"
+                "backtest_analysis": "独立展示最近回测与历史对比结果，不承载回测配置。",
+                "performance": "查看策略历史回测记录与绩效对比。"
             }
             onModeSelected: function(mode) {
+                if (mode === "library") {
+                    strategyLibraryPage.showPerformance = false
+                    strategyLibraryPage.showBacktestWorkbench = false
+                    return
+                }
+                if (mode === "performance") {
+                    strategyLibraryPage.showPerformance = true
+                    strategyLibraryPage.showBacktestWorkbench = false
+                    return
+                }
                 if (mode === "backtest") {
+                    strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "workbench")
                     return
                 }
                 if (mode === "backtest_analysis") {
+                    strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "analysis")
                     return
                 }
-                strategyLibraryPage.closeBacktestWorkbench()
             }
         }
 
         ScrollView {
             id: scrollView
-            visible: !strategyLibraryPage.showBacktestWorkbench
+            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -1127,7 +1153,7 @@ Rectangle {
                 spacing: spacingLarge
 
                 Rectangle {
-                    visible: !strategyLibraryPage.showBacktestWorkbench
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
                     Layout.fillWidth: true
                     Layout.preferredHeight: 124
                     Layout.alignment: Qt.AlignHCenter
@@ -1265,7 +1291,7 @@ Rectangle {
                 }
 
                 Rectangle {
-                    visible: !strategyLibraryPage.showBacktestWorkbench
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
                     Layout.fillWidth: true
                     Layout.preferredHeight: 720
                     Layout.alignment: Qt.AlignHCenter
@@ -1395,7 +1421,7 @@ Rectangle {
                 }
 
                 Rectangle {
-                    visible: !strategyLibraryPage.showBacktestWorkbench
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
                     Layout.fillWidth: true
                     Layout.preferredHeight: hasSelectedStrategy ? 360 : 200
                     Layout.alignment: Qt.AlignHCenter
@@ -1508,7 +1534,7 @@ Rectangle {
                 }
 
                 Rectangle {
-                    visible: !strategyLibraryPage.showBacktestWorkbench && hasSelectedStrategy
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && hasSelectedStrategy
                     Layout.fillWidth: true
                     Layout.preferredHeight: runtimeDiagnosticSection.issueText.length > 0 ? 312 : 252
                     Layout.alignment: Qt.AlignHCenter
@@ -1715,7 +1741,7 @@ Rectangle {
                 }
 
                 Item {
-                    visible: !strategyLibraryPage.showBacktestWorkbench
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
                     Layout.fillWidth: true
                     Layout.preferredHeight: spacingXLarge
                 }
@@ -2118,7 +2144,28 @@ Rectangle {
         onTriggered: strategyLibraryPage.ensurePageServicesReady()
     }
 
-    StrategyBridge {
-        id: strategyService
+    property var strategyService: StrategyBridge
+
+    // ── 绩效分页 ──
+    Item {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        visible: strategyLibraryPage.showPerformance
+
+        Loader {
+            id: performanceLoader
+            anchors.fill: parent
+            active: strategyLibraryPage.showPerformance
+            source: "qrc:/components/Strategy/StrategyPerformance.qml"
+
+            onLoaded: {
+                if (item) {
+                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary()
+                        ? (strategyLibraryPage.getSelectedStrategySummary().strategyName
+                           || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                }
+            }
+        }
     }
 }

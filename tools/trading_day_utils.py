@@ -5,7 +5,7 @@ import time
 from functools import lru_cache
 from typing import Callable, Optional
 
-import akshare as ak
+from data_source_config import get_trade_calendar as _get_calendar, clear_calendar_cache
 
 
 DEFAULT_MARKET_CLOSE_TIME = "15:30"
@@ -21,20 +21,7 @@ def parse_time_text(value: str) -> dt.time:
 
 @lru_cache(maxsize=1)
 def get_trade_calendar() -> list[dt.date]:
-    df = ak.tool_trade_date_hist_sina()
-    if df is None or df.empty or "trade_date" not in df.columns:
-        raise RuntimeError("无法从 AKShare 获取交易日历")
-    trade_dates: list[dt.date] = []
-    for value in df["trade_date"].tolist():
-        if isinstance(value, dt.datetime):
-            trade_dates.append(value.date())
-            continue
-        if isinstance(value, dt.date):
-            trade_dates.append(value)
-            continue
-        trade_dates.append(dt.date.fromisoformat(str(value)))
-    trade_dates.sort()
-    return trade_dates
+    return _get_calendar()
 
 
 def resolve_latest_closed_trade_date(

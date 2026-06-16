@@ -5,6 +5,7 @@
 #include "CompositeFactorConfig.h"
 #include "FactorMetricsCalculator.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/log/logging.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -257,13 +258,10 @@ void FactorBacktestOrchestrator::run(
             instrumentIds,
             instrumentIdToSymbol);
 
-        fprintf(stderr, "[Orchestrator] tradingResult: groups=%zu sharpe=%.4f annualRet=%.4f maxDD=%.4f totalRet=%.4f\n",
-                tradingResult.groups.size(),
-                tradingResult.sharpeRatio,
-                tradingResult.annualizedReturn,
-                tradingResult.maxDrawdown,
-                tradingResult.totalReturn);
-        fflush(stderr);
+    INTERNAL_DEBUG_STREAM << "[Orchestrator] groups=" << tradingResult.groups.size()
+        << " sharpe=" << tradingResult.sharpeRatio
+        << " annualRet=" << tradingResult.annualizedReturn
+        << " maxDD=" << tradingResult.maxDrawdown;
 
     if (onProgress) onProgress(60.0, "trading simulated");
 

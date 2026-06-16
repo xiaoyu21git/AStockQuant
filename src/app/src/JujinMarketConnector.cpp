@@ -19,6 +19,7 @@
 #include "MarketSubscriptionStatusRegistry.h"
 #include "../ui/bridge/include/TradingConnectionConfigService.h"
 #include "../ui/bridge/include/TradingMarketCalendarService.h"
+#include "system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/config/ConfigManager.hpp"
 
@@ -307,6 +308,28 @@ bool JujinMarketConnector::start()
                 enqueueWatchSymbol(*symbolValue);
         });
 
+    // ── 订阅 Jujin 行情事件 → 推送到策略引擎 ──
+    m_marketTickSubscription = eventBus->subscribe("market.tick",
+        [this](const engine::EventFormat& event) {
+            auto sym  = event.get<std::string>("symbol");
+            auto price = event.get<double>("price");
+            auto vol  = event.get<double>("volume");
+            auto date = event.get<std::int32_t>("tradingDay");
+            if (sym.has_value() && price.has_value())
+                app::system::TradingSystem::instance().pushMarketData(
+                    *sym, *price, vol.value_or(0.0), date.value_or(0));
+        });
+    m_marketBarSubscription = eventBus->subscribe("market.bar",
+        [this](const engine::EventFormat& event) {
+            auto sym  = event.get<std::string>("symbol");
+            auto price = event.get<double>("close");
+            auto vol  = event.get<double>("volume");
+            auto date = event.get<std::int32_t>("tradingDay");
+            if (sym.has_value() && price.has_value())
+                app::system::TradingSystem::instance().pushMarketData(
+                    *sym, *price, vol.value_or(0.0), date.value_or(0));
+        });
+
     m_started = true;
     m_lastError.clear();
     publishSubscriptionStatus(eventBus, true);
@@ -336,6 +359,14 @@ void JujinMarketConnector::stop()
         if (m_watchRequestSubscription) {
             bus->unsubscribe(m_watchRequestSubscription);
             m_watchRequestSubscription = foundation::utils::Uuid();
+        }
+        if (m_marketTickSubscription) {
+            bus->unsubscribe(m_marketTickSubscription);
+            m_marketTickSubscription = foundation::utils::Uuid();
+        }
+        if (m_marketBarSubscription) {
+            bus->unsubscribe(m_marketBarSubscription);
+            m_marketBarSubscription = foundation::utils::Uuid();
         }
     }
 

@@ -446,40 +446,25 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
             std::vector<MetricContribution> contributions;
             contributions.reserve(metrics.size());
 
-            fprintf(stderr, "[ValueFactor] 指标数=%zu effectiveDate=%s\n",
-                    metrics.size(), runtime.effectiveDate.c_str());
             for (const ValuationMetric metric : metrics) {
                 const double weight = valuationMetricWeight(params_, metric);
-                fprintf(stderr, "[ValueFactor] 指标=%d weight=%.4f\n",
-                        (int)metric, weight);
-                if (weight <= 0.0) {
-                    fprintf(stderr, "[ValueFactor] 跳过: weight<=0\n");
-                    continue;
-                }
+                if (weight <= 0.0) continue;
 
                 if (metric == ValuationMetric::CFP) {
                     if (!context.historicalView->hasField("market_cap") || !context.historicalView->hasField("operating_cash_flow")) {
-                        const std::string errorMessage = "缓存数据集缺少 market_cap 或 operating_cash_flow 字段，无法计算价值因子CF/P";
-                        result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
-                        result.metadata.set("error", json_helper::toJsonValue(errorMessage));
+                        result.dataStatus = CalculationResult::createError(
+                            "dataset missing market_cap or operating_cash_flow for CFP").dataStatus;
                         return;
                     }
                     contributions.push_back(computeCFPContribution(context, runtime, weight));
                 } else {
                     const std::string field = valuationMetricField(metric);
-                    fprintf(stderr, "[ValueFactor]   field=%s hasField=%d\n",
-                            field.c_str(), (int)context.historicalView->hasField(field));
                     if (field.empty() || !context.historicalView->hasField(field)) {
-                        const std::string errorMessage = "缓存数据集缺少字段 "
-                            + (field.empty() ? valuationMetricToJsonString(metric) : field)
-                            + "，无法计算价值因子";
-                        result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
-                        result.metadata.set("error", json_helper::toJsonValue(errorMessage));
+                        result.dataStatus = CalculationResult::createError(
+                            "dataset missing field: " + (field.empty() ? valuationMetricToJsonString(metric) : field)).dataStatus;
                         return;
                     }
                     auto contrib = computeStandardContribution(context, runtime, metric, weight);
-                    fprintf(stderr, "[ValueFactor]   贡献: scores=%zu rawSample=%d invalid=%d\n",
-                            contrib.scores.size(), contrib.rawSampleCount, contrib.invalidSampleCount);
                     contributions.push_back(std::move(contrib));
                 }
             }

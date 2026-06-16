@@ -1,100 +1,15 @@
 #include "../include/RuntimeStrategyFactory.h"
-#include "../include/IFactorSvc.h"
 
 #include "MultiFactorSelectionStrategy.h"
 
 #include <algorithm>
 #include <cmath>
 #include <memory>
-#include <mutex>
-#include <unordered_map>
 #include <utility>
 #include <vector>
 
-// 纯 C++ 因子回调构建（接受 IFactorSvc）
-domain::strategy::CallbackRuntimeFactorServiceAdapter::Callbacks
-domain::strategy::buildFactorCallbacks(
-    const std::vector<::domain::strategies::FactorId>& factorIds,
-    std::shared_ptr<domain::strategy::IFactorSvc> factorSvc)
-{
-    struct RuntimeFactorCallbackState final {
-        std::mutex mutex;
-        std::int32_t latestTradeDay{0};
-        std::vector<std::uint32_t> latestSymbols;
-        std::vector<::domain::strategies::FactorId> factorIds;
-        std::shared_ptr<domain::strategy::IFactorSvc> factorSvc;
-    };
-
-    auto state = std::make_shared<RuntimeFactorCallbackState>();
-    state->factorIds = factorIds;
-    state->factorSvc = std::move(factorSvc);
-
-    domain::strategy::CallbackRuntimeFactorServiceAdapter::Callbacks cbs;
-
-    cbs.updateIncremental = [state](const domain::strategy::MarketDataPoint& point) {
-        if (!point.isValid())
-            return domain::strategy::StrategyServiceFlowResult(
-                domain::strategy::StrategyServiceFlowCode::InvalidInput);
-        const std::lock_guard<std::mutex> lock(state->mutex);
-        state->latestTradeDay = point.tradingDay();
-        state->latestSymbols = { point.instrumentId().value };
-        return domain::strategy::StrategyServiceFlowResult(
-            domain::strategy::StrategyServiceFlowCode::Ok);
-    };
-
-    cbs.updateBatch = [state](const std::vector<domain::strategy::MarketDataPoint>& batch) {
-        if (batch.empty())
-            return domain::strategy::StrategyServiceFlowResult(
-                domain::strategy::StrategyServiceFlowCode::InvalidInput);
-        std::int32_t latestDay{0};
-        std::vector<std::uint32_t> syms;
-        for (const auto& p : batch) {
-            if (!p.isValid()) continue;
-            latestDay = p.tradingDay();
-            syms.push_back(p.instrumentId().value);
-        }
-        if (latestDay == 0 || syms.empty())
-            return domain::strategy::StrategyServiceFlowResult(
-                domain::strategy::StrategyServiceFlowCode::InvalidInput);
-        const std::lock_guard<std::mutex> lock(state->mutex);
-        state->latestTradeDay = latestDay;
-        state->latestSymbols = std::move(syms);
-        return domain::strategy::StrategyServiceFlowResult(
-            domain::strategy::StrategyServiceFlowCode::Ok);
-    };
-
-    cbs.copySnapshots = [state](std::vector<domain::strategy::RuntimeFactorSnapshot>& output) {
-        output.clear();
-        std::int32_t tradeDay{0};
-        std::vector<std::uint32_t> syms;
-        std::vector<::domain::strategies::FactorId> fids;
-        {
-            const std::lock_guard<std::mutex> lock(state->mutex);
-            tradeDay = state->latestTradeDay;
-            syms = state->latestSymbols;
-            fids = state->factorIds;
-        }
-        if (tradeDay == 0 || syms.empty() || fids.empty()) return;
-
-        if (state->factorSvc) {
-            for (auto fid : fids) {
-                auto values = state->factorSvc->getValues(fid, tradeDay, syms);
-                for (auto& [sym, score] : values) {
-                    output.push_back(domain::strategy::RuntimeFactorSnapshot{ sym, fid, score, 1 });
-                }
-            }
-            return;
-        }
-
-        // 回退: score=0.0
-        for (auto sym : syms)
-            for (auto fid : fids)
-                output.push_back(domain::strategy::RuntimeFactorSnapshot{ sym, fid, 0.0, 1 });
-    };
-    return cbs;
-}
-
 namespace {
+
 constexpr double kZeroValue = 0.0;
 constexpr double kFullWeight = 1.0;
 constexpr double kMagnitudeEpsilon = 1e-12;
@@ -154,16 +69,17 @@ struct CandidateSignal final {
     }
 }
 
+/// @brief 多因子选择运行时策略
+///
+/// 因子快照由 StrategyService 通过 IRuntimeFactorService::copySnapshots 注入，
+/// 不再持有任何因子适配器。
 class MultiFactorSelectionRuntimeStrategy final : public domain::strategy::IRuntimeStrategy {
 public:
     MultiFactorSelectionRuntimeStrategy(
         std::shared_ptr<const domain::strategies::MultiFactorSelectionStrategy> strategyDefinition,
-        domain::strategy::StrategyInstanceId strategyInstanceId,
-        domain::strategy::CallbackRuntimeFactorServiceAdapter::Callbacks factorCallbacks)
+        domain::strategy::StrategyInstanceId strategyInstanceId)
         : strategyDefinition_(std::move(strategyDefinition))
         , strategyInstanceId_(strategyInstanceId)
-        , m_factorAdapter(std::make_unique<domain::strategy::CallbackRuntimeFactorServiceAdapter>(
-              std::move(factorCallbacks)))
     {
     }
 
@@ -200,7 +116,6 @@ public:
 private:
     std::shared_ptr<const domain::strategies::MultiFactorSelectionStrategy> strategyDefinition_;
     domain::strategy::StrategyInstanceId strategyInstanceId_{0};
-    std::unique_ptr<domain::strategy::CallbackRuntimeFactorServiceAdapter> m_factorAdapter;
 };
 
 } // anonymous namespace
@@ -209,12 +124,11 @@ namespace domain::strategy {
 
 std::shared_ptr<IRuntimeStrategy> createMultiFactorSelectionRuntimeStrategy(
     std::shared_ptr<const ::domain::strategies::MultiFactorSelectionStrategy> strategyDefinition,
-    StrategyInstanceId strategyInstanceId,
-    CallbackRuntimeFactorServiceAdapter::Callbacks factorCallbacks)
+    StrategyInstanceId strategyInstanceId)
 {
     if (!strategyDefinition || strategyInstanceId == 0) return {};
     return std::make_shared<MultiFactorSelectionRuntimeStrategy>(
-        std::move(strategyDefinition), strategyInstanceId, std::move(factorCallbacks));
+        std::move(strategyDefinition), strategyInstanceId);
 }
 
 std::unique_ptr<StrategyEngine> createMultiFactorRuntimeEngine(MultiFactorRuntimeEngineSetup setup)
@@ -224,11 +138,9 @@ std::unique_ptr<StrategyEngine> createMultiFactorRuntimeEngine(MultiFactorRuntim
         return nullptr;
 
     auto engine = StrategyEngine::builder()
-        .withFactorCallbacks(std::move(setup.factorCallbacks))
         .build();
     const auto result = engine->registerStrategy(
-        createMultiFactorSelectionRuntimeStrategy(setup.strategyDefinition, setup.strategyInstanceId,
-                                                  CallbackRuntimeFactorServiceAdapter::Callbacks{}),
+        createMultiFactorSelectionRuntimeStrategy(setup.strategyDefinition, setup.strategyInstanceId),
         setup.context);
     if (!result.isOk()) return nullptr;
     return engine;

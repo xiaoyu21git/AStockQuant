@@ -50,7 +50,7 @@ public:
 
     [[nodiscard]] const StrategyMetadata& metadata() const noexcept;
 
-    [[nodiscard]] const std::vector<FactorId>& factorIds() const noexcept;
+    [[nodiscard]] const std::vector<std::string>& factorIds() const noexcept;
 
     [[nodiscard]] const std::vector<RuleId>& ruleIds() const noexcept;
 

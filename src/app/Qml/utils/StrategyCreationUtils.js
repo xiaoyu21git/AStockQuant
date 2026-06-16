@@ -821,7 +821,8 @@ function getPositionSizingDescription(method) {
             configs.push({id: "period", type: "slider", label: "RSI 周期", default: 14, min: 5, max: 100, step: 1, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "oversoldLevel", type: "slider", label: "超卖阈值", default: 30, min: 1, max: 50, step: 1, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "overboughtLevel", type: "slider", label: "超买阈值", default: 70, min: 50, max: 99, step: 1, category: tr('strategyCreation.personalizedParameters')});
-        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactorSelection) {
+        } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactorSelection
+                   || normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactor) {
             configs.push({id: "factorWeights", type: "input", label: "因子权重", placeholder: "[{\"factorId\":\"f1\",\"weight\":0.2}]", category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "topN", type: "slider", label: "TopN", default: 50, min: 1, max: 500, step: 1, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "industryNeutral", type: "select", label: "行业中性", options: [false, true], default: false, category: tr('strategyCreation.personalizedParameters')});

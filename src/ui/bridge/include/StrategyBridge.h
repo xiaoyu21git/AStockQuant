@@ -16,6 +16,8 @@
 #include <string>
 #include <vector>
 
+namespace factor::compute { class CachedMarketDataView; }
+
 namespace domain::strategy {
 class StrategyEngine;
 }
@@ -59,6 +61,10 @@ public:
     Q_INVOKABLE bool stop(const QString& strategyId);
     Q_INVOKABLE bool saveViewCfg(const QString& strategyId, const QVariantMap& visualConfig);
 
+    /// @brief 为实盘策略设置行情视图 (QML 可调用)
+    /// @param datasetJson 包含足够回溯窗口的 OHLCV JSON 数组字符串
+    Q_INVOKABLE void setupLiveMarketView(const QString& strategyId, const QString& datasetJson);
+
     [[nodiscard]] bool busy() const;
     [[nodiscard]] QString errMsg() const;
     [[nodiscard]] QString selId() const;
@@ -98,7 +104,7 @@ private:
     };
 
     struct FactorIdListSpec final {
-        std::vector<domain::strategies::FactorId> values;
+        std::vector<std::string> values;  // instance_id 字符串
         bool valid{true};
         bool provided{false};
     };
@@ -201,4 +207,7 @@ private:
     std::unique_ptr<astock::database::IStrategyRepository> m_repo;
     StrategyListModel* m_listModel{nullptr};
     std::unique_ptr<domain::strategy::IOrderListener> m_orderListener;
+
+    // 实盘行情视图 (由 setupLiveMarketView 构建，Engine 通过 setLiveMarketView 引用)
+    std::unique_ptr<factor::compute::CachedMarketDataView> m_liveMarketView;
 };

@@ -23,7 +23,7 @@ public:
     /// @param symbolIds    需要计算的标的 ID 列表
     /// @return 因子快照列表 — 每个快照包含 { symbolId, factorId, rawValue, version }
 [[nodiscard]] virtual std::unordered_map<std::uint32_t, double> getValues(
-    ::domain::strategies::FactorId factorId,
+    const std::string& instanceId,
     std::int32_t date,
     const std::vector<std::uint32_t>& symbolIds) = 0;
 };

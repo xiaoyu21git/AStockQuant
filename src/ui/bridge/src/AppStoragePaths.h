@@ -216,6 +216,13 @@ inline QString persistentDatasetFactorSupportPassCacheFilePath(int datasetId)
     return targetPath;
 }
 
+inline QString persistentDataSetBinFilePath(int datasetId)
+{
+    if (datasetId <= 0) return {};
+    return QDir(persistentDatasetRootDir()).filePath(
+        QStringLiteral("dataset_%1_data.bin").arg(datasetId));
+}
+
 inline QString riskConfigurationFilePath()
 {
     const QString targetPath = QDir(configDir()).filePath(QStringLiteral("risk/risk_configuration.json"));

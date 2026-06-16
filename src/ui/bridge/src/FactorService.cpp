@@ -128,6 +128,7 @@ FactorService* FactorService::instance()
     std::lock_guard<std::mutex> lock(g_instanceMutex);
     if (!g_factorServiceInstance) {
         g_factorServiceInstance = new FactorService();
+        g_factorServiceInstance->initialize();
     }
     return g_factorServiceInstance;
 }
@@ -146,7 +147,7 @@ void FactorService::destroy()
 FactorService::FactorService(QObject* parent)
     : QObject(parent)
 {
-    qDebug() << "[FactorService] 实例已创建";
+    // FactorInstanceManager 在 initialize() → resolveBackend() 中延迟创建
 }
 
 FactorService::~FactorService()
@@ -177,14 +178,9 @@ bool FactorService::resolveBackend()
         m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(nativeDb);
         fprintf(stderr, "[FS] DataAvailabilityChecker OK\n"); fflush(stderr);
 
-        // 分步追踪 FactorInstanceManager 构造
         fprintf(stderr, "[FS] creating FIM...\n"); fflush(stderr);
-        {
-            auto mgr = new factor::FactorInstanceManager(nativeDb, m_dataChecker);
-            fprintf(stderr, "[FS] FIM new OK\n"); fflush(stderr);
-            m_instanceManager.reset(mgr);
-        }
-        fprintf(stderr, "[FS] FactorInstanceManager OK\n"); fflush(stderr);
+        m_instanceManager.reset(new factor::FactorInstanceManager(nativeDb, m_dataChecker));
+        fprintf(stderr, "[FS] FactorInstanceManager created\n"); fflush(stderr);
 
         m_detectionService = std::make_unique<FactorDetectionService>();
         fprintf(stderr, "[FS] DetectionService OK\n"); fflush(stderr);
@@ -215,9 +211,7 @@ void FactorService::initialize()
     }
 
     bool success = resolveBackend();
-    if (success) {
-        ensureViewModelPopulated();
-    }
+    // ViewModel 惰性填充 — QML 因子选择器打开时才加载, 启动时不预加载全部因子
 
     m_initialized.store(success);
     emit initializedChanged();

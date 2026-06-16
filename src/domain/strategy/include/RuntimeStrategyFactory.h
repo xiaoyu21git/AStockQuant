@@ -11,23 +11,19 @@ class MultiFactorSelectionStrategy;
 
 namespace domain::strategy {
 
-/// @brief 构建因子回调，桥接 IFactorSvc 到策略引擎。
-[[nodiscard]] CallbackRuntimeFactorServiceAdapter::Callbacks buildFactorCallbacks(
-    const std::vector<::domain::strategies::FactorId>& factorIds,
-    std::shared_ptr<IFactorSvc> factorSvc);
+/// @brief 创建多因子选择运行时策略
+/// @note 因子数据通过 IRuntimeFactorService::copySnapshots 注入，
+/// 不再需要 factorCallbacks 参数。
+[[nodiscard]] std::shared_ptr<IRuntimeStrategy> createMultiFactorSelectionRuntimeStrategy(
+    std::shared_ptr<const ::domain::strategies::MultiFactorSelectionStrategy> strategyDefinition,
+    StrategyInstanceId strategyInstanceId);
 
 struct MultiFactorRuntimeEngineSetup final {
     std::shared_ptr<const ::domain::strategies::MultiFactorSelectionStrategy> strategyDefinition;
     StrategyInstanceId strategyInstanceId{0};
     RuntimeStrategyContext context;
-    CallbackRuntimeFactorServiceAdapter::Callbacks factorCallbacks;
     rules::RuleSetId ruleSetId{rules::kRuleSetAllPass};
 };
-
-[[nodiscard]] std::shared_ptr<IRuntimeStrategy> createMultiFactorSelectionRuntimeStrategy(
-    std::shared_ptr<const ::domain::strategies::MultiFactorSelectionStrategy> strategyDefinition,
-    StrategyInstanceId strategyInstanceId,
-    CallbackRuntimeFactorServiceAdapter::Callbacks factorCallbacks);
 
 [[nodiscard]] std::unique_ptr<StrategyEngine> createMultiFactorRuntimeEngine(
     MultiFactorRuntimeEngineSetup setup);

@@ -571,4 +571,11 @@ void StrategyService::resetStats()
     pendingOrderBuffer_.clear();
 }
 
+void StrategyService::setContextHistoricalView(const void* view)
+{
+    for (auto& entry : strategyEntries_) {
+        entry.context.setHistoricalView(view);
+    }
+}
+
 } // namespace domain::strategy

@@ -3,8 +3,10 @@
 
 #include "FactorBacktestBridge.h"
 #include "DataServiceCache.h"
+#include "AppStoragePaths.h"
 
 #include "factor_compute/AnalysisReportTypes.h"
+#include "../../domain/factor/include/factor_compute/FactorEngine.h"
 
 #include <QDebug>
 #include <QJsonDocument>
@@ -364,8 +366,25 @@ void FactorBacktestBridge::startBacktestWithFactors(
             QJsonDocument doc(QJsonArray::fromVariantList(data));
             std::string jsonStr = doc.toJson(QJsonDocument::Compact).toStdString();
             m_backtestDataSvc->storeRawJson(jsonStr);
-            qDebug() << "[FactBacktestBridge] DataSvc 存储原始 JSON, ID=" << capturedDatasetId
-                     << "(" << data.size() << " 行, 延迟构建视图)";
+            {
+                auto binPath = bridge::storage::persistentDatasetRootDir().toStdString()
+                             + "/dataset_" + std::to_string(capturedDatasetId) + "_data.bin";
+                m_backtestDataSvc->setBinCachePath(binPath);
+            }
+            // 一次性加载全部字段，生成完整 .bin
+            {
+                auto& cache = DataServiceCache::getInstance();
+                auto info = cache.getDataSetInfo(capturedDatasetId);
+                std::vector<std::string> allFields;
+                for (const QString& f : info.availableFields) {
+                    std::string fs = f.toStdString();
+                    if (fs != "open" && fs != "high" && fs != "low" && fs != "close" && fs != "volume" && fs != "symbol" && fs != "trade_date")
+                        allFields.push_back(fs);
+                }
+                m_backtestDataSvc->buildViewForFields(allFields);
+            }
+            qDebug() << "[FactBacktestBridge] DataSvc 存储原始 JSON + .bin, ID=" << capturedDatasetId
+                     << "(" << data.size() << " 行)";
             } else {
                 QMetaObject::invokeMethod(this, [this]() {
                     emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));

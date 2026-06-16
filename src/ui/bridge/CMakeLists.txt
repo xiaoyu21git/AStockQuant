@@ -41,6 +41,7 @@ set(BRIDGE_HEADERS
     include/DataRuleService.h
     # ── 仅 registerQmlTypes.cpp 中注册的类型 ──
     include/DataService.h
+    include/DataCleaningServiceRefactored.h
     include/CacheDetailPreviewModel.h
     include/PreviewDataModel.h
     include/DataFetchController.h
@@ -60,6 +61,8 @@ set(BRIDGE_HEADERS
     include/RiskConfigService.h
     include/TradingFormPanelHelper.h
     include/UiLifecycleCoordinator.h
+    include/StrategyPerformanceModel.h
+    include/RuleTemplateDetailHelper.h
 )
 
 add_library(bridge STATIC
@@ -113,4 +116,5 @@ target_include_directories(bridge
         include
     PRIVATE
         src
+        ${CMAKE_SOURCE_DIR}/src/domain/cleaning/include
 )

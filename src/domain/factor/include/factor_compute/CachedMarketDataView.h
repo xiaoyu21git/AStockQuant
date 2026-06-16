@@ -9,6 +9,8 @@
 #include <vector>
 #include <Eigen/Dense>
 
+namespace foundation { namespace json { class JsonFacade; } }
+
 namespace factor::compute {
 
 /// @brief 基于缓存数据的行情视图（桥接 DataServiceCache）
@@ -52,6 +54,9 @@ public:
     [[nodiscard]] const std::vector<DateKey>& dates() const override;
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
 
+    /// 真实股票代码 (InstrumentId → "000001.SZ" 等)
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const;
+
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override;
 
@@ -60,6 +65,20 @@ public:
 
     /// @brief 查询是否有指定字段
     [[nodiscard]] bool hasField(const std::string& fieldName) const;
+
+    /// @brief 从 JSON 数组构建 CachedMarketDataView
+    [[nodiscard]] static std::unique_ptr<CachedMarketDataView>
+    fromJson(const foundation::json::JsonFacade& root,
+             const std::vector<std::string>& extraFields = {});
+
+    /// @brief 保存为二进制文件（快速缓存，跳过 JSON 解析）
+    /// @return 成功返回 true
+    bool saveToBinary(const std::string& filePath) const;
+
+    /// @brief 从二进制文件加载（重建 CachedMarketDataView）
+    /// @return 成功返回视图，失败返回 nullptr
+    [[nodiscard]] static std::unique_ptr<CachedMarketDataView>
+    fromBinary(const std::string& filePath);
 
 private:
     class Impl;

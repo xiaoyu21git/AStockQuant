@@ -1,6 +1,8 @@
 #include "../include/StrategyManager.h"
 #include "../include/RuntimeFactorSvc.h"
 
+#include <cstdio>
+
 namespace domain::strategy {
 
 StrategyManager& StrategyManager::instance() {
@@ -9,13 +11,20 @@ StrategyManager& StrategyManager::instance() {
 }
 
 StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
-                                               std::shared_ptr<IFactorSvc> factorSvc) {
+                                               std::unique_ptr<IRuntimeFactorService> factorSvc) {
+    fprintf(stderr, "[SM] createEngine: id=%s factorSvc=%p\n",
+            strategyId.c_str(), static_cast<void*>(factorSvc.get()));
+    fflush(stderr);
     auto engine = StrategyEngine::fromDb(strategyId, std::move(factorSvc));
+    fprintf(stderr, "[SM] createEngine: fromDb returned engine=%p\n", static_cast<void*>(engine.get()));
+    fflush(stderr);
     if (!engine) return nullptr;
 
     const std::lock_guard<std::mutex> lock(m_mutex);
     auto* ptr = engine.get();
     m_engines[strategyId] = std::move(engine);
+    fprintf(stderr, "[SM] createEngine: stored, count=%zu\n", m_engines.size());
+    fflush(stderr);
     return ptr;
 }
 
@@ -78,6 +87,9 @@ std::vector<OrderRequest> StrategyManager::stepAll(const MarketDataPoint& mdp) {
 void StrategyManager::pushMarketData(const MarketDataPoint& mdp)
 {
     const std::lock_guard<std::mutex> lock(m_mutex);
+    fprintf(stderr, "[SM] pushMarketData: engines=%zu valid=%d day=%d\n",
+            m_engines.size(), mdp.isValid() ? 1 : 0, mdp.tradingDay());
+    fflush(stderr);
     for (auto& [id, engine] : m_engines) {
         if (engine) {
             engine->enqueueMarketData(mdp);

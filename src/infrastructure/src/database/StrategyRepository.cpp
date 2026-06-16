@@ -310,8 +310,8 @@ QVariantMap metadataToVariantMap(const domain::strategies::StrategyMetadata& met
 {
     QVariantList factorIdList;
     factorIdList.reserve(static_cast<qsizetype>(metadata.factorIds.size()));
-    for (const domain::strategies::FactorId value : metadata.factorIds) {
-        factorIdList.push_back(QVariant::fromValue<qulonglong>(value));
+    for (const auto& value : metadata.factorIds) {
+        factorIdList.push_back(QString::fromStdString(value));
     }
 
     QVariantList ruleIdList;
@@ -354,19 +354,14 @@ domain::strategies::StrategyMetadata metadataFromVariantMap(const QVariantMap& m
     const QVariant rawFactorIds = map.value(QStringLiteral("factorIds"));
     if (rawFactorIds.isValid() && !rawFactorIds.isNull()) {
         const QVariantList rawFactorIdList = rawFactorIds.toList();
-        std::vector<domain::strategies::FactorId> parsedFactorIds;
+        std::vector<std::string> parsedFactorIds;
         parsedFactorIds.reserve(static_cast<size_t>(rawFactorIdList.size()));
-        bool factorIdsValid = true;
         for (const QVariant& item : rawFactorIdList) {
-            bool ok = false;
-            const qulonglong value = item.toULongLong(&ok);
-            if (!ok || value == 0ULL) {
-                factorIdsValid = false;
-                break;
-            }
-            parsedFactorIds.push_back(static_cast<domain::strategies::FactorId>(value));
+            const QString str = item.toString().trimmed();
+            if (!str.isEmpty())
+                parsedFactorIds.push_back(str.toStdString());
         }
-        if (factorIdsValid) {
+        if (!parsedFactorIds.empty()) {
             metadata.factorIds = std::move(parsedFactorIds);
         }
     }

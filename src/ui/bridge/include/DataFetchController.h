@@ -13,7 +13,7 @@
 #include "PreviewDataModel.h"
 
 // 前向声明
-class DataService;
+class DataCleaningServiceRefactored;
 class DataServiceCache;
 
 // 数据获取控制器 - QML与C++的纯转发桥接
@@ -172,9 +172,9 @@ private:
                                const QString& endDate) const;
     
 private:
-    // DataService实例
-    DataService* m_dataService;
-    
+    // 纯 C++ 清洗服务 (原 DataService 职责)
+    DataCleaningServiceRefactored* m_cleaningSvc;
+
     // QML属性
     QString m_dataSource{"juejin"};  // 数据源: juejin, akshare, tushare
     QStringList m_symbols;  // 股票代码列表，可以为空

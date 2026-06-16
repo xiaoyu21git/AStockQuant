@@ -19,148 +19,8 @@
 
 namespace factor::compute {
 
-namespace {
-
-/// @brief 从 JSON 行构建 CachedMarketDataView — 只加载指定的额外字段
-/// @param root   JSON 数组
-/// @param extraFields 因子需要的额外字段列表 (如 pb_ratio, pe_ratio, industry_code 等)
-std::unique_ptr<CachedMarketDataView> buildMarketViewFromJson(
-    const foundation::json::JsonFacade& root,
-    const std::vector<std::string>& extraFields)
-{
-    if (!root.isArray() || root.size() == 0) {
-        return nullptr;
-    }
-
-    auto view = std::make_unique<CachedMarketDataView>();
-    std::unordered_map<std::string, InstrumentId> symToId;
-    std::vector<InstrumentId> instruments;
-    uint32_t nextId = 0;
-
-    // 第一遍: 收集所有 symbol 和 trade_date
-    std::unordered_set<std::string> symbolSet;
-    std::unordered_map<std::string, int> dateIndex;
-    std::vector<std::string> sortedDates;
-    const size_t rowCount = root.size();
-
-    for (size_t i = 0; i < rowCount; ++i) {
-        const auto row = root.at(i);
-        if (!row.isObject()) continue;
-
-        std::string sym, date;
-        if (row.has("symbol"))  sym  = row.get("symbol").asString();
-        if (row.has("trade_date")) date = row.get("trade_date").asString();
-        if (sym.empty() || date.empty()) continue;
-
-        if (symbolSet.insert(sym).second) {
-            InstrumentId instId{nextId};
-            instruments.push_back(instId);
-            symToId[sym] = instId;
-            ++nextId;
-        }
-        if (dateIndex.find(date) == dateIndex.end()) {
-            dateIndex[date] = static_cast<int>(sortedDates.size());
-            sortedDates.push_back(date);
-        }
-    }
-
-    int numDates = static_cast<int>(sortedDates.size());
-    int numInsts = static_cast<int>(instruments.size());
-    if (numDates <= 0 || numInsts <= 0) {
-        return nullptr;
-    }
-
-    // 辅助: 构建列
-    auto buildColumn = [&](float nanVal = 0.0f) -> CachedMarketDataView::ColumnData {
-        CachedMarketDataView::ColumnData col;
-        col.dateCount = numDates;
-        col.instrumentCount = numInsts;
-        col.values.assign(static_cast<size_t>(numDates) * numInsts, nanVal);
-        for (const auto& d : sortedDates) {
-            int dateInt = 0;
-            try {
-                // d 格式为 "2020-01-02"，转换为 20200102
-                if (d.size() == 10 && d[4] == '-' && d[7] == '-') {
-                    dateInt = std::stoi(d) * 10000 + std::stoi(d.substr(5, 2)) * 100 + std::stoi(d.substr(8, 2));
-                } else {
-                    dateInt = std::stoi(d);
-                }
-            } catch (...) {
-                dateInt = 0;
-            }
-            col.dates.push_back(DateKey{dateInt});
-        }
-        col.instruments = instruments;
-        return col;
-    };
-
-    // 字符串 → 整数 哈希映射（用于 industry_code 等分类字段）
-    std::unordered_map<std::string, int> stringToIntMap;
-    int nextStringId = 1;
-
-    auto fillColumn = [&](CachedMarketDataView::ColumnData& col,
-                          const std::string& field) {
-        for (size_t i = 0; i < rowCount; ++i) {
-            const auto row = root.at(i);
-            if (!row.isObject()) continue;
-            if (!row.has(field)) continue;
-            const auto fieldValue = row.get(field);
-
-            double val = 0.0;
-            if (fieldValue.isNumber()) {
-                val = fieldValue.asDouble();
-            } else if (fieldValue.isString()) {
-                const std::string strVal = fieldValue.asString();
-                auto it = stringToIntMap.find(strVal);
-                if (it == stringToIntMap.end()) {
-                    it = stringToIntMap.emplace(strVal, nextStringId++).first;
-                }
-                val = static_cast<double>(it->second);
-            } else {
-                continue;  // null 等类型跳过
-            }
-
-            std::string sym, date;
-            if (row.has("symbol"))  sym  = row.get("symbol").asString();
-            if (row.has("trade_date")) date = row.get("trade_date").asString();
-            auto sit = symToId.find(sym);
-            auto dit = dateIndex.find(date);
-            if (sit == symToId.end() || dit == dateIndex.end()) continue;
-
-            int sIdx = static_cast<int>(sit->second.value);
-            int dIdx = dit->second;
-            col.values[static_cast<size_t>(dIdx) * numInsts + sIdx]
-                = static_cast<float>(val);
-        }
-    };
-
-    auto colOpen  = buildColumn();
-    auto colHigh  = buildColumn();
-    auto colLow   = buildColumn();
-    auto colClose = buildColumn();
-    auto colVol   = buildColumn();
-
-    fillColumn(colOpen,  "open");
-    fillColumn(colHigh,  "high");
-    fillColumn(colLow,   "low");
-    fillColumn(colClose, "close");
-    fillColumn(colVol,   "volume");
-
-    view->loadFromColumnData(
-        std::move(colOpen), std::move(colHigh), std::move(colLow),
-        std::move(colClose), std::move(colVol));
-
-    // 只加载因子需要的额外字段
-    for (const auto& field : extraFields) {
-        auto col = buildColumn(std::numeric_limits<float>::quiet_NaN());
-        fillColumn(col, field);
-        view->loadAdditionalField(field, std::move(col));
-    }
-
-    return view;
-}
-
-} // anonymous namespace
+// computeOneDay 调用计数器（每次 compute() 入口重置，用于限制日志输出）
+static int s_computeOneDayCounter = 0;
 
 BacktestDataService::BacktestDataService() = default;
 BacktestDataService::~BacktestDataService() = default;
@@ -173,21 +33,107 @@ void BacktestDataService::storeRawJson(const std::string& jsonContent)
     m_marketView = nullptr;
 }
 
+void BacktestDataService::setBinCachePath(const std::string& binPath)
+{
+    m_binCachePath = binPath;
+    fprintf(stderr, "[BDS] setBinCachePath: %s\n", m_binCachePath.c_str());
+    fflush(stderr);
+}
+
 void BacktestDataService::buildViewForFields(const std::vector<std::string>& extraFields)
 {
+    buildViewForFields(extraFields, nullptr);
+}
+
+void BacktestDataService::buildViewForFields(const std::vector<std::string>& extraFields,
+                                              const std::function<void(double)>& onProgress)
+{
+    // ── 优先尝试二进制缓存 ──
+    if (!m_binCachePath.empty() && !m_rawJson.empty()) {
+        // 检查 .bin 是否存在且更新
+        FILE* testf = nullptr;
+#ifdef _MSC_VER
+        fopen_s(&testf, m_binCachePath.c_str(), "rb");
+#else
+        testf = std::fopen(m_binCachePath.c_str(), "rb");
+#endif
+        if (testf) {
+            std::fclose(testf);
+            fprintf(stderr, "[BDS] buildViewForFields: loading from binary cache %s...\n", m_binCachePath.c_str());
+            fflush(stderr);
+            if (onProgress) onProgress(10.0);
+            m_ownedView = CachedMarketDataView::fromBinary(m_binCachePath);
+            if (m_ownedView) {
+                m_marketView = m_ownedView.get();
+                // 检查需要的额外字段是否都存在
+                bool missingField = false;
+                for (const auto& f : extraFields) {
+                    if (!m_ownedView->hasField(f)) {
+                        fprintf(stderr, "[BDS] buildViewForFields: bin cache missing field '%s', will re-parse\n", f.c_str());
+                        missingField = true;
+                        break;
+                    }
+                }
+                if (!missingField) {
+                    fprintf(stderr, "[BDS] buildViewForFields: binary cache loaded OK, dates=%zu instruments=%zu\n",
+                            m_ownedView->dates().size(), m_ownedView->instruments().size());
+                    if (onProgress) onProgress(100.0);
+                    fflush(stderr);
+                    return;
+                }
+            }
+            fprintf(stderr, "[BDS] buildViewForFields: binary cache corrupted, will re-parse JSON\n");
+            fflush(stderr);
+        }
+    }
+
+    // ── 回退：JSON 解析 ──
     if (!m_jsonStored || m_rawJson.empty()) {
+        fprintf(stderr, "[BDS] buildViewForFields: no JSON stored, skip\n"); fflush(stderr);
         return;
     }
 
+    // 合并已有字段 + 新请求字段，确保 .bin 逐步积累完整
+    std::vector<std::string> allFields;
+    {
+        std::unordered_set<std::string> fieldSet(m_loadedExtraFields.begin(), m_loadedExtraFields.end());
+        for (const auto& f : extraFields) fieldSet.insert(f);
+        allFields.assign(fieldSet.begin(), fieldSet.end());
+    }
+
+    fprintf(stderr, "[BDS] buildViewForFields: parsing JSON (%zu bytes) for %zu extra fields (accumulated: %zu)...\n",
+            m_rawJson.size(), extraFields.size(), allFields.size()); fflush(stderr);
+    for (const auto& f : allFields)
+        fprintf(stderr, "[BDS]   extra field: %s\n", f.c_str());
+    fflush(stderr);
+
+    if (onProgress) onProgress(20.0);
     auto root = foundation::json::JsonFacade::parse(m_rawJson);
     if (!root.isArray() || root.size() == 0) {
+        fprintf(stderr, "[BDS] buildViewForFields: JSON parse failed or empty\n"); fflush(stderr);
         return;
     }
+    if (onProgress) onProgress(50.0);
 
-    m_ownedView = buildMarketViewFromJson(root, extraFields);
+    m_ownedView = CachedMarketDataView::fromJson(root, allFields);
+    if (onProgress) onProgress(90.0);
     if (m_ownedView) {
         m_marketView = m_ownedView.get();
+        m_loadedExtraFields = allFields;  // 记录已加载的全部字段
+        fprintf(stderr, "[BDS] buildViewForFields: view built OK, dates=%zu instruments=%zu extraFields=%zu\n",
+                m_ownedView->dates().size(), m_ownedView->instruments().size(), allFields.size());
+
+        // ── 保存二进制缓存供下次快速加载 ──
+        if (!m_binCachePath.empty()) {
+            bool ok = m_ownedView->saveToBinary(m_binCachePath);
+            fprintf(stderr, "[BDS] saveToBinary: %s -> %s\n", m_binCachePath.c_str(), ok ? "OK" : "FAILED");
+            fflush(stderr);
+        }
+    } else {
+        fprintf(stderr, "[BDS] buildViewForFields: view build FAILED (nullptr)\n");
     }
+    if (onProgress) onProgress(100.0);
+    fflush(stderr);
 }
 
 void BacktestDataService::setMarketView(IMarketDataView* view) {
@@ -220,15 +166,27 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
     FactorMatrix result;
     result.batchIndex = marketData.batchIndex;
 
+    s_computeOneDayCounter = 0;  // 每个因子重置计数器
+
+    fprintf(stderr, "[FE] compute ENTER: factorName=%s m_instanceManager=%p m_dataSvc=%p marketView=%p\n",
+            cacheKey.factorName.c_str(),
+            static_cast<void*>(m_instanceManager),
+            static_cast<void*>(m_dataSvc),
+            static_cast<const void*>(marketData.marketView));
+    fflush(stderr);
+
     if (!m_instanceManager) {
-        fprintf(stderr, "[BacktestFactorEngine] m_instanceManager is null, aborting compute\n");
+        fprintf(stderr, "[FE] compute ABORT: m_instanceManager is null\n");
         fflush(stderr);
         return result;
     }
 
     auto factor = m_instanceManager->createInstance(cacheKey.factorName);
+    fprintf(stderr, "[FE] compute: createInstance(%s) = %p\n",
+            cacheKey.factorName.c_str(), static_cast<void*>(factor.get()));
+    fflush(stderr);
     if (!factor) {
-        fprintf(stderr, "[BacktestFactorEngine] createInstance returned null for: %s\n", cacheKey.factorName.c_str());
+        fprintf(stderr, "[FE] compute ABORT: createInstance returned null\n");
         fflush(stderr);
         return result;
     }
@@ -236,59 +194,141 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
     // 获取因子需要的字段 → 按需构建 MarketView
     if (m_dataSvc) {
         auto fieldReqs = factor->getDataRequirements();
+        fprintf(stderr, "[FE] compute: requiredFields=%zu optionalFields=%zu\n",
+                fieldReqs.requiredFields.size(), fieldReqs.optionalFields.size());
+        for (const auto& f : fieldReqs.requiredFields)
+            fprintf(stderr, "[FE] compute:   required: %s\n", f.c_str());
+        for (const auto& f : fieldReqs.optionalFields)
+            fprintf(stderr, "[FE] compute:   optional: %s\n", f.c_str());
+        fflush(stderr);
         std::vector<std::string> neededFields = fieldReqs.requiredFields;
         for (const auto& f : fieldReqs.optionalFields) {
             neededFields.push_back(f);
         }
+        fprintf(stderr, "[FE] compute: calling buildViewForFields (may take a while for large datasets)...\n");
+        fflush(stderr);
         m_dataSvc->buildViewForFields(neededFields);
+        fprintf(stderr, "[FE] compute: buildViewForFields DONE\n");
+        fflush(stderr);
+    } else {
+        fprintf(stderr, "[FE] compute: no m_dataSvc, skipping buildViewForFields\n");
+        fflush(stderr);
     }
 
-    auto boundary = factor->getBoundaryRules();
-    unsigned int numThreads = std::max(1u,
-        std::thread::hardware_concurrency() > 2
-            ? std::thread::hardware_concurrency() - 2 : 1u);
-    (void)boundary;
-    (void)numThreads;
-
-    // 从 DataSvc 获取数据视图 (已由 buildViewForFields 构建)
+    // 从 DataSvc 获取数据视图
     const IMarketDataView* view = marketData.marketView;
     if (!view && m_dataSvc) {
         MarketMatrixBatch batch = m_dataSvc->loadBatch(0);
         view = batch.marketView;
     }
+    fprintf(stderr, "[FE] compute: view=%p dates=%zu instruments=%zu\n",
+            static_cast<const void*>(view),
+            view ? view->dates().size() : 0,
+            view ? view->instruments().size() : 0);
+    fflush(stderr);
 
     if (!view) {
-        fprintf(stderr, "[BacktestFactorEngine] view is null, no data to compute\n");
+        fprintf(stderr, "[FE] compute ABORT: view is null\n");
         fflush(stderr);
         return result;
     }
 
     CachedMarketDataViewHistoricalAdapter adapter(*view);
     auto symbols = adapter.getAvailableSymbols("");
+    fprintf(stderr, "[FE] compute: symbols=%zu\n", symbols.size());
+    fflush(stderr);
 
     int dateCount = 0, valueCount = 0;
     for (const auto& date : view->dates()) {
-        std::string dateStr = std::to_string(date.value);
-        factor::CalculationContext ctx(dateStr, symbols,
-            std::make_shared<CachedMarketDataViewHistoricalAdapter>(*view));
-        auto cr = factor->calculate(ctx);
-        std::map<std::string, double> dateValues;
-        for (const auto& [sym, val] : cr.values) {
-            if (std::isfinite(val)) {
+        // date.value 是 YYYYMMDD int，转为 "YYYY-MM-DD" 以匹配 getValues 的查找格式
+        const int dv = date.value;
+        char dateBuf[16];
+        std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
+        std::string dateStr(dateBuf);
+        auto raw = computeOneDay(*factor, dateStr, symbols, *view);
+        if (!raw.empty()) {
+            std::map<std::string, double> dateValues;
+            for (auto& [sym, val] : raw) {
                 dateValues[sym] = val;
                 ++valueCount;
             }
-        }
-        if (!dateValues.empty()) {
             result.factorValues[dateStr] = std::move(dateValues);
             ++dateCount;
         }
     }
-    fprintf(stderr, "[BacktestFactorEngine] compute done: dates=%zu symbols=%zu validDates=%d values=%d\n",
+    fprintf(stderr, "[FE] compute DONE: dates=%zu symbols=%zu validDates=%d values=%d\n",
             view->dates().size(), symbols.size(), dateCount, valueCount);
     fflush(stderr);
 
     return result;
+}
+
+// ── 公共的单日计算入口：所有调用方（compute / computeSingleDate / RuntimeFactorSvc）共享 ──
+
+std::unordered_map<std::string, double> FactorEngine::computeOneDay(
+    factor::BaseFactor& factor,
+    const std::string& dateStr,
+    const std::vector<std::string>& symbols,
+    const IMarketDataView& view)
+{
+    std::unordered_map<std::string, double> result;
+    auto historicalView = std::make_shared<CachedMarketDataViewHistoricalAdapter>(view);
+    factor::CalculationContext ctx(dateStr, symbols, historicalView);
+    auto cr = factor.calculate(ctx);
+    int nanCount = 0, infCount = 0, finiteCount = 0;
+    double firstFinite = 0.0;
+    for (const auto& [sym, val] : cr.values) {
+        if (std::isfinite(val)) {
+            result[sym] = val;
+            if (finiteCount == 0) firstFinite = val;
+            ++finiteCount;
+        } else if (std::isnan(val)) {
+            ++nanCount;
+        } else if (std::isinf(val)) {
+            ++infCount;
+        }
+    }
+    // 输出前 3 个日期的详细统计（计数器在 compute() 入口重置）
+    if (++s_computeOneDayCounter <= 3) {
+        fprintf(stderr, "[FE] computeOneDay #%d: date=%s symbols=%zu total=%zu finite=%d nan=%d inf=%d firstFinite=%.6f\n",
+                s_computeOneDayCounter, dateStr.c_str(), symbols.size(), cr.values.size(),
+                finiteCount, nanCount, infCount, firstFinite);
+        if (nanCount > 0 || infCount > 0) {
+            int printed = 0;
+            for (const auto& [sym, val] : cr.values) {
+                if (!std::isfinite(val) && printed < 3) {
+                    fprintf(stderr, "[FE]   bad sample: sym=%s val=%.6f\n", sym.c_str(), val);
+                    fflush(stderr);
+                    ++printed;
+                }
+            }
+        }
+        fflush(stderr);
+    }
+    return result;
+}
+
+std::unordered_map<std::string, double> FactorEngine::computeSingleDate(
+    const std::string& factorName,
+    const std::string& date,
+    const std::vector<std::string>& symbols,
+    const IMarketDataView* view)
+{
+    if (!m_instanceManager) {
+        fprintf(stderr, "[FactorEngine] computeSingleDate: m_instanceManager is null\n"); fflush(stderr);
+        return {};
+    }
+    if (!view) {
+        fprintf(stderr, "[FactorEngine] computeSingleDate: view is null\n"); fflush(stderr);
+        return {};
+    }
+    auto factor = m_instanceManager->createInstance(factorName);
+    if (!factor) {
+        fprintf(stderr, "[FactorEngine] computeSingleDate: factor not found: %s\n", factorName.c_str());
+        fflush(stderr);
+        return {};
+    }
+    return computeOneDay(*factor, date, symbols, *view);
 }
 
 BacktestReporter::BacktestReporter() = default;

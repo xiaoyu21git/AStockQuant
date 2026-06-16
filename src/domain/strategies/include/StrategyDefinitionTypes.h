@@ -18,13 +18,13 @@ using StrategyId = std::uint64_t;
 
 struct FactorSnapshot final {
     SymbolId symbolId{0};
-    FactorId factorId{0};
+    std::string factorId;  // instance_id 字符串
     double factorValue{0.0};
     std::int32_t industryBucket{0};
 
     [[nodiscard]] bool isValid() const noexcept
     {
-        return symbolId != 0 && factorId > 0;
+        return symbolId != 0 && !factorId.empty();
     }
 };
 
@@ -63,13 +63,13 @@ struct StrategyMetadata final {
     std::string name;
     std::string description;
     StrategyBehaviorKind behaviorKind{StrategyBehaviorKind::Custom};
-    std::vector<FactorId> factorIds;
+    std::vector<std::string> factorIds;  // instance_id 字符串
     std::vector<RuleId> ruleIds;
     bool enabled{true};
 };
 
 struct FactorWeight final {
-    FactorId factorId{0};
+    std::string factorId;  // instance_id 字符串
     double weight{0.0};
 };
 
@@ -202,6 +202,15 @@ struct StrategyCommonConfig final {
     double minWeightPerStock{0.0};
     WeightScheme weightScheme{WeightScheme::EQUAL};
     RebalanceFrequency rebalanceFrequency{RebalanceFrequency::DAILY};
+    // 策略自定义参数 (从 parameters JSON 读取)
+    int fastPeriod{5};
+    int slowPeriod{20};
+    int signalPeriod{14};
+    int macdFast{12};
+    int macdSlow{26};
+    int macdSignal{9};
+    int bbPeriod{20};
+    double bbStdDev{2.0};
 };
 
 struct DoubleMovingAverageStrategySpec final {

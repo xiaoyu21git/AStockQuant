@@ -1,4 +1,5 @@
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
+#include "factor_compute/CachedMarketDataView.h"
 
 namespace factor::compute {
 
@@ -17,10 +18,19 @@ CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     }
 
     symbols_.reserve(viewInstruments.size());
-    for (size_t i = 0; i < viewInstruments.size(); ++i) {
-        std::string symStr = std::to_string(viewInstruments[i].value);
-        symbols_.push_back(symStr);
-        symbolToIndex_[symStr] = static_cast<int32_t>(i);
+    // 优先使用 CachedMarketDataView::symbolStrings() 获取真实股票代码
+    auto* cachedView = dynamic_cast<const CachedMarketDataView*>(&marketDataView);
+    if (cachedView && !cachedView->symbolStrings().empty()) {
+        for (size_t i = 0; i < viewInstruments.size() && i < cachedView->symbolStrings().size(); ++i) {
+            symbols_.push_back(cachedView->symbolStrings()[i]);
+            symbolToIndex_[cachedView->symbolStrings()[i]] = static_cast<int32_t>(i);
+        }
+    } else {
+        for (size_t i = 0; i < viewInstruments.size(); ++i) {
+            std::string symStr = std::to_string(viewInstruments[i].value);
+            symbols_.push_back(symStr);
+            symbolToIndex_[symStr] = static_cast<int32_t>(i);
+        }
     }
 }
 

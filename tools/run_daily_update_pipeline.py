@@ -134,6 +134,16 @@ def parse_args() -> argparse.Namespace:
         default=0.15,
         help="估值回填每只股票之间的休眠秒数，默认 0.15",
     )
+    parser.add_argument(
+        "--baostock",
+        action="store_true",
+        help="日线更新使用 Baostock 单线程 (替代默认 Juejin 多线程)",
+    )
+    parser.add_argument(
+        "--baostock-only",
+        action="store_true",
+        help="仅运行 Baostock 单线程全量更新 (跳过所有回填步骤)",
+    )
     return parser.parse_args()
 
 
@@ -325,6 +335,12 @@ def build_mode_update_command(args: argparse.Namespace, mode: str) -> list[str]:
     command.extend(["--mode", mode])
     return command
 
+def build_baostock_update_command(args: argparse.Namespace) -> list[str]:
+    """单线程 Baostock 全量日线更新"""
+    command = [sys.executable, "tools/daily_pipeline.py", "--phase3-only"]
+    if args.target_date:
+        command.extend(["--date", args.target_date])
+    return command
 
 def build_verify_command(args: argparse.Namespace) -> list[str]:
     command = [sys.executable, "tools/verify_daily_update.py", "--sample-limit", str(args.sample_limit)]
@@ -464,6 +480,17 @@ def main() -> int:
 
     step_results: list[dict] = []
 
+    # --baostock-only: 仅 Baostock 全量更新, 跳过所有其他步骤
+    if args.baostock_only:
+        if not execute_step("baostock single-threaded update", build_baostock_update_command(args),
+                           required=True, continue_on_failure=False, results=step_results):
+            return step_results[-1]["exit_code"]
+        return 0
+
+    # --baostock: 用 Baostock 替代默认的 Juejin 日线更新
+    update_cmd_builder = build_baostock_update_command if args.baostock else (
+        lambda a: build_mode_update_command(a, "latest"))
+
     def finalize(exit_code: int) -> int:
         optional_failures = [item for item in step_results if item["status"] == "failed_optional"]
         required_failures = [item for item in step_results if item["status"] == "failed_required"]
@@ -499,7 +526,7 @@ def main() -> int:
 
     if not execute_step(
         "daily latest supplement",
-        build_mode_update_command(args, "latest"),
+        update_cmd_builder(args),
         required=True,
         continue_on_failure=args.continue_on_step_failure,
         results=step_results,

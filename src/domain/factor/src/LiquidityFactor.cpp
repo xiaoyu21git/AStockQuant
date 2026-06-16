@@ -1,5 +1,6 @@
 #include "domain/factor/include/LiquidityFactor.h"
 #include "domain/factor/include/BaseFactor.h"
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include <numeric>
 #include <chrono>
@@ -157,12 +158,28 @@ BoundaryRules LiquidityFactor::getBoundaryRules() const
 void LiquidityFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
-    if (config.has("common")) {
-        params_.fromJson(config.get("common"));
+    // 与 ValueFactor 一致：从 calculation 子对象解析因子参数
+    if (config::hasCalculationConfig(config)) {
+        const auto& calc = config::calculationConfig(config);
+        if (calc.has("liquidityMetric")) {
+            const auto& val = calc.get("liquidityMetric");
+            if (val.isNumber()) {
+                params_.liquidityMetric = static_cast<LiquidityMetric>(val.asInt());
+            }
+        }
+        if (calc.has("metric")) {
+            const auto& val = calc.get("metric");
+            if (val.isNumber()) {
+                params_.liquidityMetric = static_cast<LiquidityMetric>(val.asInt());
+            }
+        }
+        if (calc.has("window")) {
+            const auto& val = calc.get("window");
+            if (val.isNumber()) params_.window = static_cast<int>(val.asInt());
+        }
     }
-    if (config.has("liquidity")) {
-        params_.fromJson(config.get("liquidity"));
-    }
+    // 更新 dataRequirements 以反映解析后的参数
+    dataRequirements_ = getDataRequirements();
 }
 
 } // namespace factor

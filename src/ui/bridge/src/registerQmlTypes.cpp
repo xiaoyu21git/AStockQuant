@@ -3,7 +3,6 @@
 #include <QQmlEngine>
 #include <QStringList>
 #include <QTimer>
-#include "DataService.h"
 #include "DataRuleService.h"
 #include "CacheDetailPreviewModel.h"
 #include "PreviewDataModel.h"
@@ -24,6 +23,8 @@
 #include "RiskConfigService.h"
 #include "TradingFormPanelHelper.h"
 #include "UiLifecycleCoordinator.h"
+#include "StrategyPerformanceModel.h"
+#include "RuleTemplateDetailHelper.h"
 
 namespace wang{
 
@@ -35,9 +36,6 @@ namespace wang{
       qmlRegisterType<PreviewDataModel>(url, 1, 0, "PreviewDataModel");
       qmlRegisterType<CacheDetailPreviewModel>(url, 1, 0, "CacheDetailPreviewModel");
           
-      // 数据服务（替代旧的DataFetchController）- 使用新的极简DataService
-      qmlRegisterType<DataService>(url, 1, 0, "DataService");
-      
       // 规则服务
       qmlRegisterType<DataRuleService>(url, 1, 0, "DataRuleService");
       
@@ -87,7 +85,12 @@ namespace wang{
          }
       );
 
-       qmlRegisterType<StrategyBridge>(url, 1, 0, "StrategyBridge");
+       qmlRegisterSingletonType<StrategyBridge>(
+          url, 1, 0, "StrategyBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             auto* bridge = new StrategyBridge();
+             return bridge;
+          });
 
       // FactorService - 因子服务桥接层（单例模式）
       qmlRegisterSingletonType<FactorService>(
@@ -166,5 +169,11 @@ namespace wang{
           [](QQmlEngine*, QJSEngine*) -> QObject* {
              return new bridge::UiLifecycleCoordinator();
           });
+
+       qmlRegisterType<StrategyPerformanceModel>(
+          url, 1, 0, "StrategyPerformanceModel");
+
+       qmlRegisterType<RuleTemplateDetailHelper>(
+          url, 1, 0, "RuleTemplateDetailHelper");
    }
 }

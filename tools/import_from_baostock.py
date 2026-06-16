@@ -79,7 +79,7 @@ def fetch_daily_k_data_batch(
     bs_codes = [convert_symbol_to_baostock_code(s) for s in symbols]
     code_str = ','.join(bs_codes)
     
-    fields = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,isST"
+    fields = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST"
     
     rs = bs.query_history_k_data_plus(
         code_str,
@@ -188,7 +188,8 @@ def normalize_baostock_frame(df: pd.DataFrame) -> pd.DataFrame:
     normalized["trade_date"] = pd.to_datetime(normalized["date"]).dt.date
 
     # 数值转换
-    numeric_fields = ["open", "high", "low", "close", "preclose", "volume", "amount", "turn", "pctChg", "peTTM", "pbMRQ"]
+    numeric_fields = ["open", "high", "low", "close", "preclose", "volume", "amount", "turn", "pctChg",
+                      "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM"]
     for col in numeric_fields:
         if col in normalized.columns:
             normalized[col] = pd.to_numeric(normalized[col], errors="coerce")
@@ -200,6 +201,13 @@ def normalize_baostock_frame(df: pd.DataFrame) -> pd.DataFrame:
     normalized["turnover_rate"] = normalized["turn"]
     normalized["pe_ratio"] = normalized["peTTM"]
     normalized["pb_ratio"] = normalized["pbMRQ"]
+    # 新增: 市销率, 市现率, ST标记
+    if "psTTM" in normalized.columns:
+        normalized["ps_ratio"] = normalized["psTTM"]
+    if "pcfNcfTTM" in normalized.columns:
+        normalized["pcf_ratio"] = normalized["pcfNcfTTM"]
+    if "isST" in normalized.columns:
+        normalized["is_st"] = normalized["isST"]
 
     # 可推算字段
     valid_preclose = normalized["pre_close"].notna() & (normalized["pre_close"] > 0)
@@ -233,6 +241,10 @@ def normalize_baostock_frame(df: pd.DataFrame) -> pd.DataFrame:
         "pre_adjust_factor", "post_adjust_factor",
         "data_source",
     ]
+    # 可选新增字段
+    for opt_col in ["ps_ratio", "pcf_ratio", "is_st"]:
+        if opt_col in normalized.columns:
+            output_columns.append(opt_col)
     available_columns = [col for col in output_columns if col in normalized.columns]
     return normalized[available_columns].copy()
 

@@ -1,0 +1,3 @@
+add_library(domain_cleaning INTERFACE)
+target_include_directories(domain_cleaning INTERFACE include)
+target_link_libraries(domain_cleaning INTERFACE foundation)

@@ -1,4 +1,5 @@
 #include "MarketDataBridge.h"
+#include "../../../app/system/TradingSystem.h"
 
 #include <QDate>
 #include <QDebug>

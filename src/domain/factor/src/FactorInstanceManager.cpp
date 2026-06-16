@@ -199,8 +199,8 @@ FactorInstanceManager::FactorInstanceManager(
     threadPool_ = std::make_shared<foundation::thread::ThreadPoolExecutor>(4);
     fprintf(stderr, "[FIM] threadpool OK\n"); fflush(stderr);
 
-    refreshCache();
-    fprintf(stderr, "[FIM] ctor DONE\n"); fflush(stderr);
+    // refreshCache() 移除 — 策略需要的因子由 createInstance() 按需加载+缓存
+    fprintf(stderr, "[FIM] ctor DONE (lazy load)\n"); fflush(stderr);
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
@@ -312,13 +312,15 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::listAvailableInstances() 
 std::vector<FactorInstanceInfo> FactorInstanceManager::listAllInstances() {
     std::lock_guard<std::mutex> lock(cacheMutex_);
 
-    std::vector<FactorInstanceInfo> allInstances;
-    allInstances.reserve(infoCache_.size());
-
-    for (const auto& [id, info] : infoCache_) {
-        allInstances.push_back(info);
+    // 延迟加载: QML 因子选择窗口需要全量列表
+    if (infoCache_.empty()) {
+        auto all = loadAllInstancesFromDB();
+        for (auto& info : all) infoCache_[info.instanceId] = info;
     }
 
+    std::vector<FactorInstanceInfo> allInstances;
+    allInstances.reserve(infoCache_.size());
+    for (const auto& [id, info] : infoCache_) allInstances.push_back(info);
     return allInstances;
 }
 

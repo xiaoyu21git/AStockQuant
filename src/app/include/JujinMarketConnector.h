@@ -61,4 +61,6 @@ private:
     size_t m_maxMarketSubscriptions = 32;
     size_t m_marketSubscriptionBatchSize = 4;
     foundation::utils::Uuid m_watchRequestSubscription;
+    foundation::utils::Uuid m_marketTickSubscription;
+    foundation::utils::Uuid m_marketBarSubscription;
 };

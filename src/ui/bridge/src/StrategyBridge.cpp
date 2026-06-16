@@ -9,7 +9,9 @@
 #include "../../app/system/TradingSystem.h"
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
+#include "../../domain/factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
+#include "foundation/json/json_facade.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
@@ -144,8 +146,8 @@ public:
                               ? domain::strategy::OrderDirection::Buy
                               : domain::strategy::OrderDirection::Sell);
             order.setQuantity(static_cast<std::int64_t>(req.quantity()));
-            // 策略实例 ID 作为策略标识
             order.setStrategyId(std::to_string(req.strategyInstanceId()));
+            order.setPrice(1.0);  // 实盘由券商网关确定实际成交价
 
             app::system::TradingSystem::instance().submitOrder(order);
         }
@@ -203,10 +205,9 @@ StrategyBridge::FactorIdListSpec StrategyBridge::readFactorIds(const QVariantMap
     const QVariantList rawList = rawValue.toList();
     spec.values.reserve(static_cast<size_t>(rawList.size()));
     for (const QVariant& item : rawList) {
-        bool ok = false;
-        const qulonglong value = item.toULongLong(&ok);
-        if (!ok || value == 0) { spec.valid = false; return spec; }
-        spec.values.push_back(static_cast<domain::strategies::FactorId>(value));
+        const QString str = item.toString().trimmed();
+        if (str.isEmpty()) { spec.valid = false; return spec; }
+        spec.values.push_back(str.toStdString());
     }
     return spec;
 }
@@ -567,35 +568,55 @@ bool StrategyBridge::start(const QString& strategyId)
         return false;
     }
     init();
-    if (!m_inited) return false;
+    if (!m_inited) {
+        fprintf(stderr, "[Bridge] start: init FAILED\n"); fflush(stderr);
+        return false;
+    }
+
+    fprintf(stderr, "[Bridge] start: strategyId=%s\n", repositoryId.toStdString().c_str());
+    fflush(stderr);
 
     auto& mgr = domain::strategy::StrategyManager::instance();
     if (!mgr.get(repositoryId.toStdString())) {
-        // 创建 RuntimeFactorSvc 注入因子服务
-        std::shared_ptr<domain::strategy::IFactorSvc> factorSvc;
+        fprintf(stderr, "[Bridge] start: engine not cached, creating...\n"); fflush(stderr);
+        // 创建 RuntimeFactorSvc 注入因子服务 (Engine 接管所有权)
+        std::unique_ptr<domain::strategy::IRuntimeFactorService> factorSvc;
         auto* factorSvcBridge = FactorService::instance();
+        fprintf(stderr, "[Bridge] start: factorSvcBridge=%p init=%d\n",
+                static_cast<void*>(factorSvcBridge),
+                factorSvcBridge ? factorSvcBridge->isInitialized() : 0);
+        fflush(stderr);
         if (factorSvcBridge && factorSvcBridge->isInitialized()) {
             auto* instanceMgr = factorSvcBridge->instanceManager();
+            fprintf(stderr, "[Bridge] start: instanceMgr=%p\n", static_cast<void*>(instanceMgr));
+            fflush(stderr);
             if (instanceMgr) {
-                // 符号解析器：uint32_t InstrumentId → 股票代码字符串
-                // 因子名解析器：uint64_t FactorId → 因子名称字符串
                 auto symbolResolver = [](std::uint32_t id) -> std::string {
                     char buf[16];
-                    std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+                    const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
+                    std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
                     return buf;
                 };
                 auto factorNameResolver = [](std::uint64_t fid) -> std::string {
                     return std::to_string(fid);
                 };
-                factorSvc = std::make_shared<domain::strategy::RuntimeFactorSvc>(
+                factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
                     *instanceMgr,
                     std::move(symbolResolver),
                     std::move(factorNameResolver));
+                fprintf(stderr, "[Bridge] start: RuntimeFactorSvc created=%p\n",
+                        static_cast<void*>(factorSvc.get()));
+                fflush(stderr);
             }
         }
+        fprintf(stderr, "[Bridge] start: calling createEngine...\n"); fflush(stderr);
         mgr.createEngine(repositoryId.toStdString(), std::move(factorSvc));
+        fprintf(stderr, "[Bridge] start: createEngine returned\n"); fflush(stderr);
+    } else {
+        fprintf(stderr, "[Bridge] start: engine already cached, reusing\n"); fflush(stderr);
     }
     auto* engine = mgr.get(repositoryId.toStdString());
+    fprintf(stderr, "[Bridge] start: engine=%p\n", static_cast<void*>(engine)); fflush(stderr);
     if (!engine) {
         setErr(QStringLiteral("startStrategy engine not available"));
         emit operationFailed(kRepositoryErrorCode, m_err);
@@ -617,7 +638,8 @@ bool StrategyBridge::start(const QString& strategyId)
         // 符号解析器：uint32_t InstrumentId → 股票代码字符串（复用 start() 中的解析逻辑）
         auto symResolver = [](std::uint32_t id) -> std::string {
             char buf[16];
-            std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+            const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
+            std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
             return buf;
         };
         m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
@@ -664,6 +686,20 @@ bool StrategyBridge::stop(const QString& strategyId)
     refreshModel();
     emit stopped(repositoryId);
     return true;
+}
+
+void StrategyBridge::setupLiveMarketView(const QString& strategyId, const QString& datasetJson)
+{
+    const std::string id = strategyId.trimmed().toStdString();
+    if (id.empty() || datasetJson.isEmpty()) return;
+
+    auto* engine = domain::strategy::StrategyManager::instance().get(id);
+    if (!engine) return;
+
+    // 从 JSON 构建 CachedMarketDataView（公用 fromJson 工厂）
+    auto root = foundation::json::JsonFacade::parse(datasetJson.toStdString());
+    m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
+    engine->setLiveMarketView(m_liveMarketView.get());
 }
 
 bool StrategyBridge::saveViewCfg(const QString& strategyId, const QVariantMap& visualConfig)

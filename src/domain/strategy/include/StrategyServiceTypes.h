@@ -128,6 +128,7 @@ private:
     std::uint32_t maxOrderQuantity_{0};
     double maxTargetWeight_{0.0};
     bool autoExecutionEnabled_{false};
+    const void* m_historicalView{nullptr};
 
 public:
     RuntimeStrategyContext() = default;
@@ -148,6 +149,10 @@ public:
     {
         return strategyInstanceId_;
     }
+
+    // ── 非因子策略：OHLCV 历史数据视图 (回测传入, 实盘为 nullptr) ──
+    void setHistoricalView(const void* view) { m_historicalView = view; }
+    [[nodiscard]] const void* historicalViewPtr() const noexcept { return m_historicalView; }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
     {
@@ -509,11 +514,21 @@ struct StrategyCreationParams final {
     double maxWeightPerStock{0.1};
     double minWeightPerStock{0.0};
     std::uint32_t maxOrderQuantity{100};
+    double stopLossPercent{10.0};
+    double takeProfitPercent{20.0};
+    int fastPeriod{5};
+    int slowPeriod{20};
+    int signalPeriod{14};
+    int macdFast{12};
+    int macdSlow{26};
+    int macdSignal{9};
+    int bbPeriod{20};
+    double bbStdDev{2.0};
     std::uint64_t snapshotVersion{1};
     std::string strategyName;
     std::string description;
     ::domain::strategies::StrategyBehaviorKind behaviorKind{::domain::strategies::StrategyBehaviorKind::Custom};
-    std::vector<::domain::strategies::FactorId> factorIds;
+    std::vector<std::string> factorIds;  // instance_id 字符串
 
     // 因子回调（桥接层填充）
     std::function<StrategyServiceFlowResult(const MarketDataPoint&)> onIncremental;

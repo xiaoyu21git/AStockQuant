@@ -142,6 +142,7 @@
         <file>components/Strategy/StrategySummaryHeaderCard.qml</file>
         <file>components/Strategy/ViewModeToggle.qml</file>
         <file>components/Strategy/StrategyBacktestParams.qml</file>
+        <file>components/Strategy/StrategyPerformance.qml</file>
         <file>components/StrategyCard.qml</file>
         <file>components/ThemeSwitcher.qml</file>
         <file>components/TopNavigation/BreadcrumbItem.qml</file>

@@ -10,6 +10,7 @@ add_subdirectory(factor)
 add_subdirectory(strategy)
 add_subdirectory(scheduler)
 add_subdirectory(trading)
+add_subdirectory(cleaning)
 
     # indicators/signals removed — astock_ta_lib link removed
 
@@ -35,6 +36,7 @@ target_link_libraries(domain
         domain_strategy_runtime
         factor
         domain_trading
+        domain_cleaning
 )
 
 target_include_directories(domain
@@ -49,6 +51,7 @@ target_include_directories(domain
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/factor/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategy/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/trading>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cleaning/include>
         $<INSTALL_INTERFACE:include>
 )
 

@@ -38,6 +38,11 @@ public:
     const domain::strategy::RiskConfig& riskConfig() const noexcept { return m_riskConfig; }
     void setRiskConfig(const domain::strategy::RiskConfig& config);
 
+    // ── 行情推送 ──
+    /// @brief 推送实时行情到所有运行中的策略引擎（数据源无关）
+    void pushMarketData(const std::string& symbol, double price,
+                        double volume, std::int32_t tradingDay);
+
     // ── 风控审批 ──
     domain::strategy::RiskResult evaluateOrderRisk(const domain::strategy::RiskInput& input);
 

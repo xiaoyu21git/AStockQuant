@@ -6,6 +6,7 @@
     CleanedDataController.cpp
     DataRuleService.cpp
     DataServiceCache.cpp
+    DataCleaningServiceRefactored.cpp
     DataService.cpp
     CacheDetailPreviewModel.cpp
     PreviewDataModel.cpp
@@ -33,6 +34,7 @@
     RiskConfigService.cpp
     TradingFormPanelHelper.cpp
     UiLifecycleCoordinator.cpp
+    StrategyPerformanceModel.cpp
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})

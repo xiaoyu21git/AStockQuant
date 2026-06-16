@@ -74,6 +74,7 @@ public:
     
     // 列出所有实例（不过滤）
     std::vector<FactorInstanceInfo> listAllInstances();
+
     
     // 批量检查实例可用性
     std::map<std::string, DataStatus> batchCheckAvailability(

@@ -348,13 +348,16 @@ Rectangle {
             // === START/CANCEL BUTTONS WITH PROGRESS BAR ===
             Column { width: parent.width; spacing: 10
                 // 进度条行（只在回测进行中显示）
-                Row { width: parent.width; height: root.isBacktesting ? 34 : 0; spacing: 12; visible: root.isBacktesting
+                // 进度条行
+                Row { width: parent.width; height: root.isBacktesting || root.backtestProgress >= 1.0 ? 34 : 0; spacing: 12
+                    visible: root.isBacktesting || root.backtestProgress >= 1.0
                     Rectangle { width: parent.width - 124; height: 8; radius: 4; color: "#334155"; anchors.verticalCenter: parent.verticalCenter
-                        Rectangle { width: Math.max(2, parent.parent.width === 0 ? 0 : (parent.width - 124) * Math.min(1.0, Math.max(0.0, root.backtestProgress))); height: 8; radius: 4; color: "#3B82F6"
+                        Rectangle { width: Math.max(2, Math.min(parent.width, (parent.width - 124) * Math.min(1.0, Math.max(0.0, root.backtestProgress)))); height: 8; radius: 4; color: "#3B82F6"
                             Behavior on width { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } } } }
                     Text { text: Math.round(root.backtestProgress * 100) + "%"; font.pixelSize: 12; font.weight: Font.Medium; color: "#3B82F6"; width: 40; anchors.verticalCenter: parent.verticalCenter }
-                    // 取消按钮
-                    Rectangle { width: 60; height: 30; radius: 6; color: "#475569"; border.width: 1; border.color: "#64748B"; anchors.verticalCenter: parent.verticalCenter
+                    // 取消按钮（回测中才显示）
+                    Rectangle { width: root.isBacktesting ? 60 : 0; height: 30; radius: 6; color: "#475569"; border.width: 1; border.color: "#64748B"; anchors.verticalCenter: parent.verticalCenter
+                        visible: root.isBacktesting
                         Text { anchors.centerIn: parent; text: "取消"; font.pixelSize: 12; color: "#F1F5F9" }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { backtestController.cancelBacktest(); root.isBacktesting = false } } }
                 }

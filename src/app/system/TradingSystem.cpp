@@ -1,6 +1,7 @@
 #include "TradingSystem.h"
 #include "../../app/adapters/SimulatedBrokerGateway.h"
 #include "../../domain/strategy/include/StrategyManager.h"
+#include "../../domain/strategy/include/MarketDataAdapter.h"
 
 #include <algorithm>
 #include <cmath>
@@ -41,6 +42,12 @@ void TradingSystem::initialize() {
 
 void TradingSystem::setRiskConfig(const domain::strategy::RiskConfig& config) {
     m_riskConfig = config;
+}
+
+void TradingSystem::pushMarketData(const std::string& symbol, double price,
+                                    double volume, std::int32_t tradingDay) {
+    domain::strategy::MarketDataAdapter adapter;
+    adapter.pushTick(symbol, price, volume, tradingDay);
 }
 
 // ── 构建完整的 RiskInput（从订单 + 当前状态 + 配置） ──
@@ -92,8 +99,8 @@ domain::strategy::RiskInput TradingSystem::buildRiskInput(
                 pos->side() == domain::trading::PositionSide::Short ? -returnPct : returnPct);
         }
     } else {
-        // 无持仓时，买入不需要检查持仓快照，卖出需要
-        input.setPositionSnapshotReady(!input.isBuyOrder());
+        // 无持仓时：买入不需要快照（新开仓），卖出必须检查可卖量
+        input.setPositionSnapshotReady(input.isBuyOrder());
     }
 
     // ── 市场字段 ──
@@ -127,7 +134,33 @@ domain::trading::SubmitResult TradingSystem::submitOrder(const domain::trading::
     }
 
     domain::strategy::RiskInput riskInput = buildRiskInput(order);
-    return m_tradeEngine->submitOrder(order, riskInput);
+    auto result = m_tradeEngine->submitOrder(order, riskInput);
+
+    // 模拟成交场景：委托受理后直接更新持仓（实盘需券商回调）
+    if (result.succeeded() && m_positionEngine) {
+        const auto& posMap = m_positionEngine->positions();
+        auto it = posMap.find(order.symbol());
+        std::int64_t existingQty = (it != posMap.end()) ? it->second.quantity() : 0LL;
+
+        domain::trading::Position pos;
+        pos.setSymbol(order.symbol());
+        pos.setLastPrice(order.price());
+        pos.setSide(order.side() == domain::strategy::OrderDirection::Buy
+            ? domain::trading::PositionSide::Long : domain::trading::PositionSide::Short);
+        pos.setQuantity(order.side() == domain::strategy::OrderDirection::Buy
+            ? existingQty + order.quantity() : std::max(0LL, existingQty - order.quantity()));
+        m_positionEngine->applyPositionEvent(order.symbol(), pos);
+
+        double cashDelta = order.side() == domain::strategy::OrderDirection::Buy
+            ? -(order.price() * static_cast<double>(order.quantity()))
+            : order.price() * static_cast<double>(order.quantity());
+        auto acc = m_positionEngine->account();
+        acc.setAvailableCash(acc.availableCash() + cashDelta);
+        acc.setTotalAsset(acc.totalAsset() + cashDelta);
+        m_positionEngine->applyAccountEvent(acc);
+        notifyDataChanged();
+    }
+    return result;
 }
 
 const domain::trading::AccountSnapshot& TradingSystem::accountSnapshot() const {

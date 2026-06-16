@@ -1141,7 +1141,7 @@ public:
     
     // 数据库连接
     std::shared_ptr<QtMySQLDatabase> database;
-    
+
     // 私有方法
     std::shared_ptr<QueryBuilder> createQueryBuilder();
     bool checkDatabaseConnection();
@@ -1275,14 +1275,11 @@ bool DataService::Impl::initializeDatabaseIfNeeded() {
         
         // 创建数据库对象 - 禁用连接池以避免"device or resource busy"错误
         database = std::shared_ptr<QtMySQLDatabase>(new QtMySQLDatabase(config, false));
-        
-        // 打开连接
         if (!database->open()) {
             QString error = database->getLastError();
             qCritical() << "DataService::Impl::initializeDatabaseIfNeeded: 数据库连接失败:" << error;
             return false;
         }
-        
         return true;
         
     } catch (const std::exception& e) {

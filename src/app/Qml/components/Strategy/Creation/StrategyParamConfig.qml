@@ -2855,8 +2855,11 @@ Rectangle {
         var normalizedFactorOverlay = normalizeFactorOverlay(root.factorOverlay, merged)
         if (normalizedFactorOverlay.enabled && normalizedFactorOverlay.allocations.length > 0) {
             merged.factor_overlay = normalizedFactorOverlay
+            // 同时提取顶层 factorIds — C++ readFactorIds 读的是顶层 key
+            merged.factorIds = normalizedFactorOverlay.allocations.map(function(a) { return String(a.factor_id || "").trim() })
         } else {
             delete merged.factor_overlay
+            delete merged.factorIds
         }
         delete merged.stopLoss
         delete merged.takeProfit
@@ -3531,7 +3534,7 @@ Rectangle {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactorSelection) {
+        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactorSelection || normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)

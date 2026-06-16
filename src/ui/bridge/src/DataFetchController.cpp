@@ -1,7 +1,7 @@
 // DataFetchController.cpp - 改进版本，支持模型和数据缓存
 #include "DataFetchController.h"
 #include "DataFetchFieldContractUtils.h"
-#include "DataService.h"
+#include "DataCleaningServiceRefactored.h"
 #include "cleaning/CleaningEngine.h"
 #include "DataServiceCache.h"
 #include "CacheDetailPreviewModel.h"
@@ -643,43 +643,46 @@ bool hasLatestFullDailyBarFields(const QStringList& availableFields)
 
 DataFetchController::DataFetchController(QObject* parent)
     : QObject(parent)
-    , m_dataService(new DataService(this))
+    , m_cleaningSvc(new DataCleaningServiceRefactored(this))
     , m_previewModel(new PreviewDataModel(this))
     , m_cachePreviewModel(new PreviewDataModel(this))
     , m_cacheDetailPreviewModel(new CacheDetailPreviewModel(this))
 {
-    // 设置默认日期（最近30天）
     QDateTime currentDate = QDateTime::currentDateTime();
     QDateTime startDate = currentDate.addDays(-30);
-    
     m_startDate = startDate.toString("yyyy-MM-dd");
     m_endDate = currentDate.toString("yyyy-MM-dd");
-    
-    connect(this, &DataFetchController::requestCleanData,
-            m_dataService, &DataService::cleanDataAsync);
-    
-    // 连接信号：服务 -> 控制器
-    // 注意：DataService使用queryProgress而不是dataLoadProgress
-    connect(m_dataService, &DataService::queryProgress,
-            this, &DataFetchController::onDataLoadProgress);
-    // DataService使用queryCompleted而不是dataLoadCompleted
-    connect(m_dataService, &DataService::queryCompleted,
-            this, &DataFetchController::onDataLoadCompleted);
-    // DataService使用error而不是dataLoadError
-    connect(m_dataService, &DataService::error,
-            this, &DataFetchController::onDataLoadError);
-        connect(m_dataService, &DataService::cleaningProgressDetail,
-            this, &DataFetchController::onDataCleaningProgressDetail);
-    // DataService使用cleaningCompleted而不是dataCleaningCompleted
-    connect(m_dataService, &DataService::cleaningCompleted,
-            this, &DataFetchController::onDataCleaningCompleted);
-    
-    // 初始化数据库（异步）- DataService会自动初始化
-    // 简单的定时器调用，不使用lambda避免语法问题
+
+    m_cleaningSvc->initialize();
+
+    // 纯 C++ 清洗服务信号 → 控制器转发
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::cleaningProgress,
+            this, [this](const QString&, int progress, const QString& msg) {
+        m_progress = progress;
+        m_statusMessage = msg;
+        emit progressChanged();
+        emit statusMessageChanged();
+    });
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::cleaningCompleted,
+            this, [this](const QString&, bool success, const QString& msg, const QVariantList& data) {
+        m_operationInProgress = false;
+        emit operationInProgressChanged();
+        if (success) {
+            m_fetchedData = data;
+            emit fetchedDataChanged();
+            emit dataCleaningCompleted(success, msg, data);
+        } else {
+            emit dataCleaningError(msg);
+        }
+    });
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::cleaningError,
+            this, [this](const QString&, const QString& err) {
+        m_operationInProgress = false;
+        emit operationInProgressChanged();
+        emit dataCleaningError(err);
+    });
+
     QTimer::singleShot(1000, this, SLOT(logInitMessage()));
-    
-    // 不需要连接延迟清洗槽函数，因为它是通过SLOT()调用的
-    // 只需要确保delayedCleanData()在public slots中声明
 }
 
 DataFetchController::~DataFetchController()
@@ -813,13 +816,16 @@ void DataFetchController::startNextBatchFetch()
     }
 
     m_activeBatchDataType = m_pendingFetchDataTypes.takeFirst();
-    updateStatus(QString("开始获取%1数据...").arg(describeDataTypeLabel(m_activeBatchDataType)), 0);
-    m_dataService->fetchDataByType(m_activeBatchDataSource,
-                                   m_activeBatchSymbol,
-                                   m_activeBatchDataType,
-                                   m_activeBatchStartDate,
-                                   m_activeBatchEndDate,
-                                   m_activeBatchOptions);
+    // 数据获取已迁移到纯 C++ 后端 (MarketDataService)，此处由 DataServiceCache 提供
+    QString cacheKey = buildBatchCacheKey(m_activeBatchDataSource, m_activeBatchSymbol, m_activeBatchStartDate, m_activeBatchEndDate);
+    auto& cache = DataServiceCache::getInstance();
+    QVariantList cachedData = cache.getData(cacheKey);
+    if (!cachedData.isEmpty()) {
+        onDataLoadCompleted(true, QStringLiteral("从缓存加载"), cachedData);
+    } else {
+        updateStatus(QStringLiteral("数据获取需通过数据集导入完成"), 100);
+        onDataLoadCompleted(false, QStringLiteral("无缓存数据，请先导入数据集"), QVariantList());
+    }
 }
 
 void DataFetchController::finishBatchFetch()
@@ -866,7 +872,7 @@ void DataFetchController::cleanDataAsync(const QVariantMap& rules)
     if (!m_fetchedData.isEmpty()) {
         updateCleanStats(m_fetchedData.size(), 0);
         updateStatus("正在使用当前数据集进行清洗...", 0);
-        emit requestCleanData(m_fetchedData, rules);
+        m_cleaningSvc->executeCleaningAsync(QStringLiteral("ui_clean"), m_fetchedData, rules);
         return;
     }
 

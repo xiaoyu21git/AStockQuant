@@ -1,5 +1,6 @@
 #include "domain/factor/include/CustomFactor.h"
 #include "domain/factor/include/BaseFactor.h"
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 
 namespace factor {
@@ -67,7 +68,9 @@ void CustomFactor::Params::fromJson(const foundation::json::JsonFacade& json) {
 void CustomFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
-    if (config.has("common")) params_.fromJson(config.get("common"));
+    if (config::hasCalculationConfig(config))
+        params_.fromJson(config::calculationConfig(config));
+    dataRequirements_ = getDataRequirements();
 }
 
 } // namespace factor

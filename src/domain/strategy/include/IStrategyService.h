@@ -268,30 +268,8 @@ public:
     [[nodiscard]] virtual StrategyExecutionStats lastExecutionStats() const = 0;
     [[nodiscard]] virtual StrategyCount pendingOrderCount() const = 0;
     virtual void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const = 0;
-};
 
-class CallbackRuntimeFactorServiceAdapter final : public IRuntimeFactorService {
-public:
-    struct Callbacks final {
-        std::function<StrategyServiceFlowResult(const MarketDataPoint&)> updateIncremental;
-        std::function<StrategyServiceFlowResult(const std::vector<MarketDataPoint>&)> updateBatch;
-        std::function<void(std::vector<RuntimeFactorSnapshot>&)> copySnapshots;
-    };
-
-    explicit CallbackRuntimeFactorServiceAdapter(Callbacks callbacks);
-
-    [[nodiscard]] StrategyServiceFlowResult updateIncremental(
-        const MarketDataPoint& marketDataPoint) override;
-    [[nodiscard]] StrategyServiceFlowResult updateBatch(
-        const std::vector<MarketDataPoint>& batch) override;
-
-    void copySnapshots(std::vector<RuntimeFactorSnapshot>& outputSnapshots) const override;
-
-private:
-    [[nodiscard]] bool isValid() const;
-
-private:
-    Callbacks callbacks_;
+    virtual void setContextHistoricalView(const void* view) = 0;
 };
 
 class LocalRuleEvaluationService final : public IRuleEvaluationService,
@@ -429,6 +407,9 @@ private:
     void reserveWorkingBuffers();
     void resetStats();
 
+    /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
+    void setContextHistoricalView(const void* view);
+
 private:
     IRuntimeFactorService& factorService_;
     IRuleEvaluationService& ruleEvaluationService_;
@@ -470,10 +451,10 @@ public:
 
     static Builder builder();
 
-    /// @brief 从数据库通过 strategyId 加载参数并构建引擎（内部自己获取连接）
-    /// @param factorSvc 因子服务，若为 nullptr 则不注入因子回调
+    /// @brief 从数据库通过 strategyId 加载参数并构建引擎（接管 factorSvc 所有权）
+    /// @param factorSvc 因子服务 (unique_ptr, 传 nullptr 则只支持非因子策略)
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId,
-                                                                 std::shared_ptr<IFactorSvc> factorSvc = nullptr);
+                                                                 std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr);
 
     /// @brief 从策略参数构建完整的引擎实例
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromParams(const StrategyCreationParams& params);
@@ -510,9 +491,10 @@ public:
     // ─── 回测接口 ───
 
     /// @brief 执行策略回测（逐日驱动引擎 → 模拟成交 → 指标计算）
+    /// @param dataSvc 已加载数据的数据服务（由调用方构建，避免重复解析 JSON）
     [[nodiscard]] StrategyBacktestResult backtest(const domain::backtest::BacktestRequest& req,
-                                                   const std::string& datasetJson,
-                                                   const std::function<void(double)>& onProgress);
+                                                   void* dataSvc,
+                                                   const std::function<void(double)>& onProgress = {});
 
     // ─── 实盘异步专有接口 ───
 
@@ -528,11 +510,29 @@ public:
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
 
+    /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
+    void setContextHistoricalView(const void* view);
+
+    /// @brief 设置实盘行情视图，供因子计算时提供 HistoricalView
+    /// @param view 包含足够回溯窗口的行情数据视图 (不为 Engine 所有，调用方保证生命周期)
+    void setLiveMarketView(const void* view);
+
+    /// @brief 丢弃的 tick 计数（队列满时触发）
+    [[nodiscard]] std::int64_t droppedTicks() const noexcept {
+        return m_droppedTicks.load(std::memory_order_acquire);
+    }
+
+    /// @brief 距上次处理 tick 的毫秒数（>5000 可能卡死）
+    [[nodiscard]] std::int64_t lastProcessedMsAgo() const noexcept {
+        auto last = m_lastProcessedAt.load(std::memory_order_acquire);
+        if (last == 0) return -1;
+        auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+        return (now - last) / 1'000'000;
+    }
+
 private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
-
-    void setFactorSvc(std::shared_ptr<IFactorSvc> svc);
 
     /// @brief 后台线程主函数：阻塞等待行情 → step() → 通知订单。
     void drainQueue();
@@ -548,10 +548,11 @@ private:
     std::queue<MarketDataPoint> m_mdpQueue;
     std::mutex m_queueMutex;
     std::condition_variable m_queueCv;
+    static constexpr size_t kMaxQueueSize = 5000;
     std::atomic<bool> m_loopRunning{false};
+    std::atomic<std::int64_t> m_droppedTicks{0};
+    std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
-
-    std::shared_ptr<IFactorSvc> m_factorSvc;
 };
 
 class StrategyEngine::Builder final {
@@ -559,7 +560,6 @@ public:
     Builder();
 
     Builder& withFactorService(std::unique_ptr<IRuntimeFactorService> factorService);
-    Builder& withFactorCallbacks(CallbackRuntimeFactorServiceAdapter::Callbacks callbacks);
     Builder& withRuleEvaluationService(std::unique_ptr<IRuleEvaluationService> ruleEvaluationService);
     Builder& withOrderSink(IRuntimeOrderSink& orderSink);
     Builder& withDiagnosticsSink(IDiagnosticsSink& diagnosticsSink);

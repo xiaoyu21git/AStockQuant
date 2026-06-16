@@ -72,13 +72,13 @@ bool MultiFactorSelectionStrategy::hasUsableParameters() const noexcept
 std::vector<MultiFactorScore> MultiFactorSelectionStrategy::buildCompositeScores(
     const std::vector<FactorSnapshot>& factorSnapshots) const
 {
-    std::unordered_map<std::uint64_t, double> factorWeightById;
+    std::unordered_map<std::string, double> factorWeightById;
     factorWeightById.reserve(spec_.factorWeights.size());
     for (const FactorWeight& factorWeight : spec_.factorWeights) {
         factorWeightById[factorWeight.factorId] = factorWeight.weight;
     }
 
-    std::unordered_map<std::uint64_t, FactorStats> factorStatsById;
+    std::unordered_map<std::string, FactorStats> factorStatsById;
     factorStatsById.reserve(spec_.factorWeights.size());
     for (const FactorSnapshot& snapshot : factorSnapshots) {
         const auto weightIt = factorWeightById.find(snapshot.factorId);
@@ -92,8 +92,8 @@ std::vector<MultiFactorScore> MultiFactorSelectionStrategy::buildCompositeScores
         ++stats.count;
     }
 
-    std::unordered_map<std::uint64_t, double> factorMeanById;
-    std::unordered_map<std::uint64_t, double> factorInverseStandardDeviationById;
+    std::unordered_map<std::string, double> factorMeanById;
+    std::unordered_map<std::string, double> factorInverseStandardDeviationById;
     factorMeanById.reserve(factorStatsById.size());
     factorInverseStandardDeviationById.reserve(factorStatsById.size());
     for (const auto& entry : factorStatsById) {
@@ -113,7 +113,7 @@ std::vector<MultiFactorScore> MultiFactorSelectionStrategy::buildCompositeScores
                                                    kZeroValue == denominator ? kZeroValue : (1.0 / denominator));
     }
 
-    std::unordered_map<std::uint64_t, std::unordered_map<std::int32_t, IndustryStats>> industryStatsByFactor;
+    std::unordered_map<std::string, std::unordered_map<std::int32_t, IndustryStats>> industryStatsByFactor;
     if (spec_.industryNeutral) {
         industryStatsByFactor.reserve(factorMeanById.size());
     }

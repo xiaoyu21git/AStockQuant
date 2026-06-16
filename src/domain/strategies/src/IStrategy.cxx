@@ -110,7 +110,7 @@ const StrategyMetadata& IStrategy::metadata() const noexcept
     return metadata_;
 }
 
-const std::vector<FactorId>& IStrategy::factorIds() const noexcept
+const std::vector<std::string>& IStrategy::factorIds() const noexcept
 {
     return metadata_.factorIds;
 }

@@ -6,7 +6,6 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyServiceContracts.cpp
     src/StrategySnapshotTypes.cpp
     src/StrategyPseudoServices.cpp
-    src/StrategyRealFactorAdapter.cpp
     src/StrategyPythonRuleService.cpp
     src/StrategyServer.cpp
     src/StrategyEngineFacade.cpp

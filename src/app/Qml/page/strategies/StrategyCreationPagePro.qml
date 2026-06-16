@@ -998,6 +998,19 @@ Page {
     }
 
     // 创建策略
+    function extractFactorIdsFromOverlay(parameters) {
+        if (!parameters || typeof parameters !== "object") return []
+        var fo = parameters.factor_overlay
+        if (!fo || !fo.enabled) return []
+        var allocations = Array.isArray(fo.allocations) ? fo.allocations : []
+        var ids = []
+        for (var i = 0; i < allocations.length; i++) {
+            var fid = String(allocations[i].factor_id || "").trim()
+            if (fid) ids.push(fid)
+        }
+        return ids
+    }
+
     function createStrategy() {
         console.log("开始创建策略...")
 
@@ -1067,6 +1080,7 @@ Page {
             riskLevelIndex: strategyData.riskLevelIndex,
             optimization_method: strategyData.optimizationMethod,
             parameters: strategyData.parameters,
+            factorIds: extractFactorIdsFromOverlay(strategyData.parameters),
             status: true,
             tags: strategyData.tags || []
         }
