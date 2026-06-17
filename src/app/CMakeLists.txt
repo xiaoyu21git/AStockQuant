@@ -307,6 +307,8 @@ target_include_directories(astockquantapp
         ${CMAKE_CURRENT_SOURCE_DIR}/facade
         ${CMAKE_CURRENT_SOURCE_DIR}/foundation/thread
         ${CMAKE_CURRENT_SOURCE_DIR}/foundation/public
+        ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
+        ${CMAKE_BINARY_DIR}/src/ui/bridge/bridge_autogen/include_Debug
 )
 
 # 閸掓稑缂撻崣顖涘⒔鐞涘本鏋冩禒?
@@ -342,6 +344,8 @@ if(ENABLE_JUJIN_MARKET)
         PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/include
             ${CMAKE_CURRENT_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
+            ${CMAKE_BINARY_DIR}/src/ui/bridge/bridge_autogen/include_$<CONFIG>
     )
 
     target_link_libraries(astockquant_tradeprobe

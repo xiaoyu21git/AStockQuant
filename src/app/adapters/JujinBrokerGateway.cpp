@@ -1,170 +1,177 @@
 #include "JujinBrokerGateway.h"
 
-namespace app {
-namespace adapters {
+#include <cstring>
 
-using namespace domain::trading;
+namespace app::adapters {
+namespace {
 
-class JujinBrokerGateway::Impl {
-public:
-    bool connected{false};
-    std::string lastError_;
-    BrokerCapability capability_;
-    OrderCallback orderCallback;
-    TradeCallback tradeCallback;
-    ErrorCallback errorCallback;
-
-    Impl()
-    {
-        capability_.setBrokerName(BrokerName("jujin"));
-        capability_.setSupportsAlgo(true);
-        capability_.setSupportsBasket(false);
-        capability_.setSupportsConditional(false);
-        capability_.setSupportsShortSelling(true);
-        capability_.setSupportsFutures(false);
-        capability_.setSupportsOptions(false);
-    }
-};
-
-JujinBrokerGateway::JujinBrokerGateway()
-    : m_impl(std::make_unique<Impl>()) {}
-
-JujinBrokerGateway::~JujinBrokerGateway()
-{
-    if (m_impl && m_impl->connected) {
-        disconnect();
-    }
+std::string jsonGet(const std::string& json, const char* key) {
+    std::string search = "\"";
+    search += key;
+    search += "\"";
+    auto pos = json.find(search);
+    if (pos == std::string::npos) return {};
+    pos = json.find(':', pos + search.size());
+    if (pos == std::string::npos) return {};
+    pos = json.find('"', pos + 1);
+    if (pos == std::string::npos) return {};
+    auto end = json.find('"', pos + 1);
+    if (end == std::string::npos) return {};
+    return json.substr(pos + 1, end - pos - 1);
 }
 
-bool JujinBrokerGateway::connect(const std::string& /*configJson*/)
-{
-    m_impl->connected = true;
+} // anonymous namespace
+
+JujinBrokerGateway::JujinBrokerGateway()
+    : m_session(std::make_unique<JujinSession>()) {}
+
+JujinBrokerGateway::~JujinBrokerGateway() = default;
+
+bool JujinBrokerGateway::connect(const std::string& configJson) {
+    std::string token = jsonGet(configJson, "token");
+    std::string accountId = jsonGet(configJson, "accountId");
+    if (token.empty()) {
+        m_lastError = "token not found in config";
+        return false;
+    }
+    if (!m_session->initialize(token.c_str(), accountId.c_str())) {
+        m_lastError = m_session->last_error();
+        return false;
+    }
+    if (!m_session->connect()) {
+        m_lastError = m_session->last_error();
+        return false;
+    }
     return true;
 }
 
-void JujinBrokerGateway::disconnect()
-{
-    m_impl->connected = false;
-}
+void JujinBrokerGateway::disconnect() { m_session->disconnect(); }
 
-bool JujinBrokerGateway::isConnected() const
-{
-    return m_impl->connected;
-}
+bool JujinBrokerGateway::isConnected() const { return m_session->is_connected(); }
 
-BrokerCapability JujinBrokerGateway::capability() const
-{
-    return m_impl->capability_;
+domain::trading::BrokerCapability JujinBrokerGateway::capability() const {
+    domain::trading::BrokerCapability c;
+    c.setBrokerName(domain::trading::BrokerName("jujin"));
+    return c;
 }
 
 void JujinBrokerGateway::submitOrder(
-    const OrderRequest& /*request*/,
-    OrderCallback onResult)
-{
-    OrderStatus status;
-    status.setBrokerOrderId(BrokerOrderId("jujin-pending"));
-    status.setCorrelationId(CorrelationId("placeholder"));
-    status.setStatusValue(OrderStatusValue::Submitted);
-    if (onResult) {
-        onResult(status);
+    const domain::trading::OrderRequest& request,
+    domain::trading::OrderCallback onResult) {
+    if (!onResult) return;
+    domain::trading::OrderStatus status;
+    int side = (request.side() == domain::trading::OrderSide::Buy) ? 1 : 2;
+    int type = (request.orderType() == domain::trading::OrderType::Limit) ? 2 : 1;
+    std::string oid = m_session->place_order(
+        request.symbol().text().c_str(), side, type,
+        request.quantity(), request.price());
+    if (!oid.empty()) {
+        status.setBrokerOrderId(domain::trading::BrokerOrderId(oid));
+        status.setStatusValue(domain::trading::OrderStatusValue::Submitted);
+    } else {
+        status.setStatusValue(domain::trading::OrderStatusValue::Rejected);
+        status.setAttribute("error", m_session->last_error());
     }
+    onResult(status);
 }
 
 void JujinBrokerGateway::cancelOrder(
-    BrokerOrderId /*brokerOrderId*/,
-    OrderCallback onResult)
-{
-    if (onResult) {
-        OrderStatus status;
-        status.setStatusValue(OrderStatusValue::Cancelled);
-        onResult(status);
+    domain::trading::BrokerOrderId brokerOrderId,
+    domain::trading::OrderCallback onResult) {
+    if (!onResult) return;
+    domain::trading::OrderStatus status;
+    status.setBrokerOrderId(brokerOrderId);
+    if (m_session->cancel_order(brokerOrderId.text().c_str())) {
+        status.setStatusValue(domain::trading::OrderStatusValue::Cancelled);
+    } else {
+        status.setStatusValue(domain::trading::OrderStatusValue::Rejected);
+        status.setAttribute("error", m_session->last_error());
     }
+    onResult(status);
 }
 
 void JujinBrokerGateway::queryOrder(
-    BrokerOrderId /*brokerOrderId*/,
-    OrderQueryCallback onResult)
-{
-    if (onResult) {
-        onResult(std::nullopt);
+    domain::trading::BrokerOrderId brokerOrderId,
+    domain::trading::OrderQueryCallback onResult) {
+    if (!onResult) return;
+    auto orders = m_session->query_orders();
+    for (auto& o : orders) {
+        if (o->order_id() == brokerOrderId.text()) {
+            domain::trading::OrderStatus status;
+            status.setBrokerOrderId(brokerOrderId);
+            status.setStatusValue(static_cast<domain::trading::OrderStatusValue>(o->status()));
+            onResult(status);
+            return;
+        }
     }
+    onResult(std::nullopt);
 }
 
 void JujinBrokerGateway::queryPositions(
-    PositionsQueryCallback onResult)
-{
-    if (onResult) {
-        onResult({});
+    domain::trading::PositionsQueryCallback onResult) {
+    if (!onResult) return;
+    std::vector<domain::trading::PositionSnapshot> result;
+    auto positions = m_session->query_positions();
+    for (auto& p : positions) {
+        domain::trading::PositionSnapshot ps;
+        ps.setSymbol(domain::trading::SymbolCode(p->symbol()));
+        if (p->volume() > 0) ps.setLongQuantity(p->volume());
+        else ps.setShortQuantity(-p->volume());
+        ps.setAverageCost(p->price());
+        ps.setMarketValue(p->market_value());
+        result.push_back(ps);
     }
+    onResult(result);
 }
 
 void JujinBrokerGateway::queryAccount(
-    AccountQueryCallback onResult)
-{
-    if (onResult) {
-        onResult(std::nullopt);
-    }
+    domain::trading::AccountQueryCallback onResult) {
+    if (!onResult) return;
+    auto acc = m_session->query_account();
+    if (!acc) { onResult(std::nullopt); return; }
+    domain::trading::AccountInfo info;
+    info.setAvailableCash(acc->available_cash());
+    info.setTotalAssets(acc->total_asset());
+    info.setMarketValue(acc->market_value());
+    onResult(info);
 }
 
+void JujinBrokerGateway::setTradeCallback(domain::trading::TradeCallback) {}
+void JujinBrokerGateway::setErrorCallback(domain::trading::ErrorCallback) {}
+
+std::string JujinBrokerGateway::lastError() const { return m_lastError; }
+
 void JujinBrokerGateway::submitAlgoOrFail(
-    const AlgoOrderRequest& /*request*/,
-    OrderCallback onResult)
-{
-    if (!m_impl->capability_.supportsAlgo()) {
-        if (onResult) {
-            OrderStatus status;
-            status.setStatusValue(OrderStatusValue::Rejected);
-            status.setAttribute("error", "Algo trading not supported");
-            onResult(status);
-        }
-        return;
+    const domain::trading::AlgoOrderRequest&,
+    domain::trading::OrderCallback onResult) {
+    if (onResult) {
+        domain::trading::OrderStatus st;
+        st.setStatusValue(domain::trading::OrderStatusValue::Rejected);
+        st.setAttribute("error", "algo not supported");
+        onResult(st);
     }
-    // TODO: real implementation
 }
 
 void JujinBrokerGateway::submitAlgoOrder(
-    const AlgoOrderRequest& /*request*/,
-    OrderCallback onResult)
-{
+    const domain::trading::AlgoOrderRequest&,
+    domain::trading::OrderCallback onResult) {
     if (onResult) {
-        OrderStatus status;
-        status.setStatusValue(OrderStatusValue::Submitted);
-        onResult(status);
+        domain::trading::OrderStatus st;
+        st.setStatusValue(domain::trading::OrderStatusValue::Rejected);
+        st.setAttribute("error", "algo not supported");
+        onResult(st);
     }
 }
 
 void JujinBrokerGateway::submitBasket(
-    const std::vector<OrderRequest>& /*orders*/,
-    OrderCallback /*onResult*/)
-{
-    m_impl->lastError_ = "Basket orders not supported by Jujin";
-    if (m_impl->errorCallback) {
-        m_impl->errorCallback(m_impl->lastError_);
-    }
-}
+    const std::vector<domain::trading::OrderRequest>&,
+    domain::trading::OrderCallback) {}
 
 void JujinBrokerGateway::queryTrades(
-    foundation::utils::Timestamp /*startDate*/,
-    foundation::utils::Timestamp /*endDate*/,
-    TradeCallback /*onResult*/)
-{
-    // TODO: query trades
+    foundation::utils::Timestamp,
+    foundation::utils::Timestamp,
+    domain::trading::TradeCallback onResult) {
+    if (onResult) onResult({});
 }
 
-void JujinBrokerGateway::setTradeCallback(TradeCallback callback)
-{
-    m_impl->tradeCallback = std::move(callback);
-}
-
-void JujinBrokerGateway::setErrorCallback(ErrorCallback callback)
-{
-    m_impl->errorCallback = std::move(callback);
-}
-
-std::string JujinBrokerGateway::lastError() const
-{
-    return m_impl->lastError_;
-}
-
-} // namespace adapters
-} // namespace app
+} // namespace app::adapters

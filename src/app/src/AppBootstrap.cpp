@@ -470,10 +470,10 @@ void AppBootstrap::initializeDeferredTradingServices()
         return;
     }
 
-    // ── 初始化交易系统单例 (纯C++底层) ──
-    app::system::TradingSystem::instance().initialize();
+    // ── 交易系统由 TradeExecutionBridge::ensureInitialized 延迟初始化 ──
+    // (需 QML 加载配置后，通过 isLiveBridgeReady() 触发掘金网关连接)
 
-    std::cout << "[AppBootstrap] Deferred startup phase 3/3: trading system initialized\n";
+    std::cout << "[AppBootstrap] Deferred startup phase 3/3: ready\n";
 
     m_deferredTradingServicesInitialized = true;
 }

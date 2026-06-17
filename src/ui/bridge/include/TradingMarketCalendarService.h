@@ -17,6 +17,8 @@ class TradingMarketCalendarService : public QObject {
 public:
     explicit TradingMarketCalendarService(QObject* parent = nullptr);
 
+    static TradingMarketCalendarService* instance();
+
     QVariantMap currentSessionSnapshot() const;
 
     /// @brief 检查当前是否在交易时段内

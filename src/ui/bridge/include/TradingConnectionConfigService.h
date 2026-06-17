@@ -22,6 +22,8 @@ class TradingConnectionConfigService : public QObject {
 public:
     explicit TradingConnectionConfigService(QObject* parent = nullptr);
 
+    static TradingConnectionConfigService* instance();
+
     QVariantMap currentConfiguration() const;
     QString configFilePath() const;
 

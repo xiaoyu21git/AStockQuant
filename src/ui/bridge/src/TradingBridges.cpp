@@ -1,9 +1,16 @@
 #include "TradingBridges.h"
 #include "../../../app/system/TradingSystem.h"
+#include "../../../app/adapters/JujinBrokerGateway.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
+#include "foundation/log/logging.hpp"
 
 #include <QVariantMap>
 #include <QVariantList>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QFile>
+#include <QDir>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
 
@@ -17,9 +24,12 @@ TradeExecutionBridge::TradeExecutionBridge(QObject* parent)
 
 bool TradeExecutionBridge::initialized() const { return m_initialized; }
 bool TradeExecutionBridge::liveBridgeReady() const {
-    return app::system::TradingSystem::instance().initialized();
+    return m_initialized && app::system::TradingSystem::instance().initialized();
 }
-bool TradeExecutionBridge::isLiveBridgeReady() const { return liveBridgeReady(); }
+bool TradeExecutionBridge::isLiveBridgeReady() {
+    const_cast<TradeExecutionBridge*>(this)->ensureInitialized();
+    return liveBridgeReady();
+}
 QVariantList TradeExecutionBridge::recentRuleHits() const { return {}; }
 QVariantList TradeExecutionBridge::recentOrders() const { return m_recentOrders; }
 QString TradeExecutionBridge::lastErrorMessage() const { return m_lastErrorMessage; }
@@ -29,10 +39,58 @@ void TradeExecutionBridge::ensureInitialized() {
     auto& sys = app::system::TradingSystem::instance();
 
     if (!sys.initialized()) {
-        // ── 读取交易配置：实盘/掘金模式通过配置切换 ──
-        // TODO: 掘金实盘适配器应在 bridge 层实现 (桥接层有 Qt)，包装 JujinApi 为 IBrokerGatewayEx
-        // 然后通过 sys.setBrokerGateway() 注入。当前默认使用模拟网关。
+        // 读取交易配置 → 掘金实盘 / 模拟网关
+        QString configPath = QDir(QCoreApplication::applicationDirPath())
+                             .filePath("config/trading_connection.json");
+        QFile f(configPath);
+        QVariantMap cfg;
+        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
+            if (doc.isObject()) cfg = doc.object().toVariantMap();
+        }
+        if (cfg.isEmpty()) {
+            INTERNAL_ERROR_STREAM << "[Live] config file not found";
+            return;
+        }
+        auto gw = std::make_unique<app::adapters::JujinBrokerGateway>();
+        QJsonObject obj;
+        obj["token"] = cfg.value("token").toString();
+        obj["accountId"] = cfg.value("accountId", cfg.value("account_id")).toString();
+        QJsonDocument doc(obj);
+        if (!gw->connect(doc.toJson(QJsonDocument::Compact).toStdString())) {
+            INTERNAL_ERROR_STREAM << "[Live] Jujin gateway connect failed: " << gw->lastError();
+            return;
+        }
+        sys.setBrokerGateway(std::move(gw));
+        INTERNAL_INFO_STREAM << "[Live] Jujin gateway connected";
         sys.initialize();
+
+        // 同步初始持仓和账户
+        auto* engine = sys.tradeEngine();
+        if (engine) {
+            engine->gateway()->queryPositions([&sys](const std::vector<domain::trading::PositionSnapshot>& snapshots) {
+                std::vector<domain::trading::Position> positions;
+                domain::trading::AccountSnapshot acc;
+                for (auto& s : snapshots) {
+                    domain::trading::Position p;
+                    p.setSymbol(s.symbol().text());
+                    p.setQuantity(s.longQuantity() - s.shortQuantity());
+                    p.setCostBasis(s.averageCost());
+                    p.setLastPrice(s.averageCost());
+                    p.setMarketValue(s.marketValue());
+                    positions.push_back(p);
+                }
+                sys.positionEngine()->applyBrokerSnapshot(positions, acc);
+            });
+            engine->gateway()->queryAccount([&sys](std::optional<domain::trading::AccountInfo> info) {
+                if (!info) return;
+                domain::trading::AccountSnapshot acc;
+                acc.setAvailableCash(info->availableCash());
+                acc.setTotalAsset(info->totalAssets());
+                acc.setMarketValue(info->marketValue());
+                sys.positionEngine()->applyAccountEvent(acc);
+            });
+        }
     }
 
     // ── 注册引擎回调：将领域层成交/状态事件转发到 QML 信号 ──
@@ -429,5 +487,9 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
 
     return snapshot;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// 掘金实盘网关 (bridge 层，有 Qt)
+// ═══════════════════════════════════════════════════════════════════
 
 } // namespace bridge

@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.15)
 
 add_library(app_adapters STATIC
     JujinBrokerGateway.cpp
+    JujinSession.cpp
     SimulatedBrokerGateway.cpp
 )
 
@@ -11,6 +12,7 @@ target_include_directories(app_adapters
         ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../ui/bridge/include
+        ${CMAKE_SOURCE_DIR}/thirdparty/gmsdk
 )
 
 target_link_libraries(app_adapters

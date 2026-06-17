@@ -1,5 +1,4 @@
 #include "TradingSystem.h"
-#include "../../app/adapters/SimulatedBrokerGateway.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/MarketDataAdapter.h"
 
@@ -14,6 +13,10 @@ TradingSystem& TradingSystem::instance() {
     return sys;
 }
 
+void TradingSystem::setBrokerGateway(std::unique_ptr<domain::trading::IBrokerGatewayEx> gw) {
+    m_brokerGateway = std::move(gw);
+}
+
 void TradingSystem::initialize() {
     if (m_initialized) return;
 
@@ -22,10 +25,12 @@ void TradingSystem::initialize() {
     m_tradeEngine = std::make_unique<domain::trading::TradeExecutionEngine>();
     m_positionEngine = std::make_unique<domain::trading::PositionAccountEngine>();
 
-    // 注入模拟券商网关（掘金实盘适配器在 bridge 层实现后替换此处）
-    auto simGateway = std::make_unique<app::adapters::SimulatedBrokerGateway>();
-    simGateway->connect("{}");
-    m_tradeEngine->setGateway(std::move(simGateway));
+    // 必须通过 setBrokerGateway 预先注入网关，不走回退
+    if (!m_brokerGateway) {
+        std::cerr << "[TradingSystem] FATAL: no broker gateway set, call setBrokerGateway first\n";
+        return;
+    }
+    m_tradeEngine->setGateway(std::move(m_brokerGateway));
 
     // 连接持仓变更回调：同步更新峰值资产
     m_positionEngine->setOnDataChanged([this]() {

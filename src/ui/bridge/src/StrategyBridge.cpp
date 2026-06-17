@@ -4,6 +4,8 @@
 #include "../include/StrategyListModel.h"
 
 #include "database/StrategyRepository.h"
+#include "database/MarketDataRepository.h"
+#include "database/NativeMySQLConnectionPool.h"
 #include "FactorService.h"
 
 #include "../../app/system/TradingSystem.h"
@@ -14,10 +16,13 @@
 #include "foundation/json/json_facade.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 
+#include <chrono>
+#include <ctime>
 #include <exception>
 #include "foundation/log/logging.hpp"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLoggingCategory>
@@ -584,7 +589,7 @@ bool StrategyBridge::start(const QString& strategyId)
         return false;
     }
 
-    INTERNAL_INFO_STREAM << "[StrategyBridge] start: " << repositoryId.toStdString();
+    INTERNAL_INFO_STREAM << "[Live] start strategy: " << repositoryId.toStdString();
 
     // 不设中间状态，等 worker 完成后直接切"运行中"
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
@@ -638,8 +643,54 @@ bool StrategyBridge::start(const QString& strategyId)
             return;
         }
 
-        engine->startLiveLoop();
+        // 加载历史 MarketView（因子策略必需，非因子策略无害）
+        {
+            auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+            if (pool.isInitialized()) {
+                auto db = pool.getConnection();
+                if (db && db->isOpen()) {
+                    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+                    // 获取当前日期 YYYY-MM-DD
+                    auto now = std::chrono::system_clock::now();
+                    auto tt = std::chrono::system_clock::to_time_t(now);
+                    char endBuf[16];
+                    std::strftime(endBuf, sizeof(endBuf), "%Y-%m-%d", std::localtime(&tt));
+                    // 往前推足够交易日 (MySQL DATE_SUB 用日历日近似)
+                    constexpr int kLookbackDays = 365;  // 约 250 个交易日
+                    char startBuf[16];
+                    {
+                        auto tp = std::chrono::system_clock::now() - std::chrono::hours(24 * kLookbackDays);
+                        auto t = std::chrono::system_clock::to_time_t(tp);
+                        std::strftime(startBuf, sizeof(startBuf), "%Y-%m-%d", std::localtime(&t));
+                    }
+                    INTERNAL_INFO_STREAM << "[StrategyBridge] loading live market data: " << startBuf << " ~ " << endBuf;
+                    auto rows = repo->queryDailyBarWithFields({}, startBuf, endBuf, {});
+                    if (!rows.empty()) {
+                        // 转 QVariantList → JSON → CachedMarketDataView
+                        QVariantList data;
+                        for (auto& r : rows) {
+                            QVariantMap row;
+                            row["symbol"] = QString::fromStdString(r.symbol);
+                            row["trade_date"] = QString::fromStdString(r.tradeDate);
+                            row["open"] = r.open;
+                            row["high"] = r.high;
+                            row["low"] = r.low;
+                            row["close"] = r.close;
+                            row["volume"] = r.volume;
+                            data.append(row);
+                        }
+                        QJsonDocument doc(QJsonArray::fromVariantList(data));
+                        auto root = foundation::json::JsonFacade::parse(doc.toJson(QJsonDocument::Compact).toStdString());
+                        m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
+                        engine->setLiveMarketView(m_liveMarketView.get());
+                        INTERNAL_INFO_STREAM << "[Live] history loaded: " << rows.size() << " rows, "
+                                         << m_liveMarketView->instruments().size() << " 标的";
+                    }
+                }
+            }
+        }
 
+        // 先注册订单监听器，再启动 loop，避免漏单
         if (!m_orderListener) {
             auto symResolver = [](std::uint32_t id) -> std::string {
                 char buf[16];
@@ -651,11 +702,14 @@ bool StrategyBridge::start(const QString& strategyId)
         }
         mgr.setOrderListener(m_orderListener.get());
 
+        engine->startLiveLoop();
+
         QMetaObject::invokeMethod(this, [this, repositoryId]() {
             m_runtimeStatus[repositoryId] = QStringLiteral("运行中");
             if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("运行中"));
             emit strategiesChanged();
             emit started(repositoryId);
+            INTERNAL_INFO_STREAM << "[Live] engine started: " << repositoryId.toStdString();
         }, Qt::QueuedConnection);
 
         } catch (const std::exception& e) {
@@ -683,7 +737,7 @@ bool StrategyBridge::stop(const QString& strategyId)
     init();
     if (!m_inited) return false;
 
-    INTERNAL_INFO_STREAM << "[StrategyBridge] stop: " << repositoryId.toStdString();
+    INTERNAL_INFO_STREAM << "[Live] 停止策略: " << repositoryId.toStdString();
 
     // 立即显示"停止中"，然后异步执行 stop 避免阻塞 UI
     m_runtimeStatus[repositoryId] = QStringLiteral("停止中");

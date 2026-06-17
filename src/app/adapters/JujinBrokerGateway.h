@@ -1,61 +1,54 @@
 #pragma once
+// JujinBrokerGateway — 掘金券商网关 (纯 C++, 零 Qt)
+// 实现 IBrokerGatewayEx 接口, 内部使用 JujinSession 封装 SDK
 
-#include "IBrokerGateway.h"
+#include "../../domain/trading/IBrokerGateway.h"
+#include "JujinSession.h"
 
-#include <atomic>
 #include <memory>
-#include <mutex>
 #include <string>
 
-namespace thirdparty {
-class JujinApi;
-struct ConfigParams;
-} // namespace thirdparty
+namespace app::adapters {
 
-namespace app {
-namespace adapters {
-
-using namespace domain::trading;
-
-class JujinBrokerGateway : public IBrokerGatewayEx {
+class JujinBrokerGateway final : public domain::trading::IBrokerGatewayEx {
 public:
     JujinBrokerGateway();
     ~JujinBrokerGateway() override;
 
+    // ── IBrokerGateway ──
     bool connect(const std::string& configJson) override;
     void disconnect() override;
     bool isConnected() const override;
-    BrokerCapability capability() const override;
+    domain::trading::BrokerCapability capability() const override;
 
-    void submitOrder(const OrderRequest& request,
-                     OrderCallback onResult) override;
-    void cancelOrder(BrokerOrderId brokerOrderId,
-                     OrderCallback onResult) override;
+    void submitOrder(const domain::trading::OrderRequest& request,
+                     domain::trading::OrderCallback onResult) override;
+    void cancelOrder(domain::trading::BrokerOrderId brokerOrderId,
+                     domain::trading::OrderCallback onResult) override;
 
-    void queryOrder(BrokerOrderId brokerOrderId,
-                    OrderQueryCallback onResult) override;
-    void queryPositions(PositionsQueryCallback onResult) override;
-    void queryAccount(AccountQueryCallback onResult) override;
+    void queryOrder(domain::trading::BrokerOrderId brokerOrderId,
+                    domain::trading::OrderQueryCallback onResult) override;
+    void queryPositions(domain::trading::PositionsQueryCallback onResult) override;
+    void queryAccount(domain::trading::AccountQueryCallback onResult) override;
 
-    void submitAlgoOrFail(const AlgoOrderRequest& request,
-                          OrderCallback onResult) override;
-    void submitAlgoOrder(const AlgoOrderRequest& request,
-                         OrderCallback onResult) override;
-    void submitBasket(const std::vector<OrderRequest>& orders,
-                      OrderCallback onResult) override;
-    void queryTrades(foundation::utils::Timestamp startDate,
-                     foundation::utils::Timestamp endDate,
-                     TradeCallback onResult) override;
-
-    void setTradeCallback(TradeCallback callback) override;
-    void setErrorCallback(ErrorCallback callback) override;
-
+    void setTradeCallback(domain::trading::TradeCallback callback) override;
+    void setErrorCallback(domain::trading::ErrorCallback callback) override;
     std::string lastError() const override;
 
+    // ── IBrokerGatewayEx ──
+    void submitAlgoOrFail(const domain::trading::AlgoOrderRequest& request,
+                          domain::trading::OrderCallback onResult) override;
+    void submitAlgoOrder(const domain::trading::AlgoOrderRequest& request,
+                         domain::trading::OrderCallback onResult) override;
+    void submitBasket(const std::vector<domain::trading::OrderRequest>& orders,
+                      domain::trading::OrderCallback onResult) override;
+    void queryTrades(foundation::utils::Timestamp startDate,
+                     foundation::utils::Timestamp endDate,
+                     domain::trading::TradeCallback onResult) override;
+
 private:
-    class Impl;
-    std::unique_ptr<Impl> m_impl;
+    std::unique_ptr<JujinSession> m_session;
+    mutable std::string m_lastError;
 };
 
-} // namespace adapters
-} // namespace app
+} // namespace app::adapters

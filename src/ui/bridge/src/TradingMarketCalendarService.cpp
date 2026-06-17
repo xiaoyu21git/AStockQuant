@@ -78,4 +78,9 @@ void TradingMarketCalendarService::refreshCalendar() {
     emit currentSessionSnapshotChanged();
 }
 
+TradingMarketCalendarService* TradingMarketCalendarService::instance() {
+    static TradingMarketCalendarService s_instance;
+    return &s_instance;
+}
+
 } // namespace bridge

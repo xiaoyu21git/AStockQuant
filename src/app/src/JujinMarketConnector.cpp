@@ -17,10 +17,9 @@
 #include "JujinApi.h"
 #include "JujinTypes.h"
 #include "MarketSubscriptionStatusRegistry.h"
-#include "../ui/bridge/include/TradingConnectionConfigService.h"
-#include "../ui/bridge/include/TradingMarketCalendarService.h"
 #include "system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
+#include <ctime>
 #include "foundation/config/ConfigManager.hpp"
 
 namespace {
@@ -48,24 +47,22 @@ std::string toUpper(std::string s) noexcept
     return s;
 }
 
-// ========== 市场时段检测 ==========
+// ========== 市场时段检测（纯时间判断，不依赖桥接层） ==========
 bool marketSessionAllowsSubscriptions()
 {
-    auto* srv = TradingMarketCalendarService::instance();
-    if (!srv) return true;
-    auto snap = srv->currentSessionSnapshot();
-    if (snap.isEmpty()) return true;
-    std::string phase = snap.value("sessionPhase").toString().trimmed().toStdString();
-    return phase == "PRE_OPEN" || phase == "TRADING" || phase == "LUNCH_BREAK";
+    auto now = std::chrono::system_clock::now();
+    auto tt = std::chrono::system_clock::to_time_t(now);
+    auto* tm = std::localtime(&tt);
+    int h = tm->tm_hour, m = tm->tm_min;
+    int minutes = h * 60 + m;
+    // A股交易时段: 9:15-11:30, 13:00-15:00
+    return (minutes >= 9*60+15 && minutes <= 11*60+30)
+        || (minutes >= 13*60 && minutes <= 15*60);
 }
 
 std::string marketSessionPhaseText()
 {
-    auto* srv = TradingMarketCalendarService::instance();
-    if (!srv) return "UNKNOWN";
-    auto snap = srv->currentSessionSnapshot();
-    std::string phase = snap.value("sessionPhase").toString().trimmed().toStdString();
-    return phase.empty() ? "UNKNOWN" : phase;
+    return marketSessionAllowsSubscriptions() ? "TRADING" : "CLOSED";
 }
 
 // ========== 配置读取（纯 C++） ==========
@@ -314,7 +311,7 @@ bool JujinMarketConnector::start()
             auto sym  = event.get<std::string>("symbol");
             auto price = event.get<double>("price");
             auto vol  = event.get<double>("volume");
-            auto date = event.get<std::int32_t>("tradingDay");
+            auto date = event.get<std::int64_t>("tradingDay");
             if (sym.has_value() && price.has_value())
                 app::system::TradingSystem::instance().pushMarketData(
                     *sym, *price, vol.value_or(0.0), date.value_or(0));
@@ -324,7 +321,7 @@ bool JujinMarketConnector::start()
             auto sym  = event.get<std::string>("symbol");
             auto price = event.get<double>("close");
             auto vol  = event.get<double>("volume");
-            auto date = event.get<std::int32_t>("tradingDay");
+            auto date = event.get<std::int64_t>("tradingDay");
             if (sym.has_value() && price.has_value())
                 app::system::TradingSystem::instance().pushMarketData(
                     *sym, *price, vol.value_or(0.0), date.value_or(0));
@@ -456,7 +453,7 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
         }
 
         if (!subscribeSymbolBatch(batch, eventBus)) {
-            qWarning() << "JujinMarketConnector: failed to subscribe market batch, size=" << static_cast<qulonglong>(batch.size());
+            std::cerr << "[JMC] " "JujinMarketConnector: failed to subscribe market batch, size=" << static_cast<unsigned long long>(batch.size());
         }
     }
 }
@@ -481,9 +478,9 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
                 continue;
             }
             if (m_subscribedSymbols.size() + normalizedSymbols.size() >= m_maxMarketSubscriptions) {
-                qWarning() << "JujinMarketConnector: market subscription limit reached, skip symbol"
-                           << QString::fromStdString(normalizedSymbol)
-                           << "limit=" << static_cast<qulonglong>(m_maxMarketSubscriptions);
+                std::cerr << "[JMC] " "JujinMarketConnector: market subscription limit reached, skip symbol"
+                           << (normalizedSymbol)
+                           << "limit=" << static_cast<unsigned long long>(m_maxMarketSubscriptions);
                 continue;
             }
             normalizedSymbols.push_back(normalizedSymbol);
@@ -494,12 +491,12 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
         return true;
     }
 
-    qDebug() << "JujinMarketConnector: subscribe market batch size=" << static_cast<qulonglong>(normalizedSymbols.size());
+    std::cerr << "[JMC] " "JujinMarketConnector: subscribe market batch size=" << static_cast<unsigned long long>(normalizedSymbols.size());
 
     if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::TICK, {})) {
         for (const std::string& symbol : normalizedSymbols) {
             if (!subscribeSymbol(symbol, eventBus)) {
-                qWarning() << "JujinMarketConnector: failed to subscribe tick fallback symbol" << QString::fromStdString(symbol);
+                std::cerr << "[JMC] " "JujinMarketConnector: failed to subscribe tick fallback symbol" << (symbol);
             }
         }
         return false;
@@ -507,7 +504,7 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
     if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::BAR_1M, {})) {
         for (const std::string& symbol : normalizedSymbols) {
             if (!subscribeSymbol(symbol, eventBus)) {
-                qWarning() << "JujinMarketConnector: failed to subscribe bar fallback symbol" << QString::fromStdString(symbol);
+                std::cerr << "[JMC] " "JujinMarketConnector: failed to subscribe bar fallback symbol" << (symbol);
             }
         }
         return false;
@@ -543,8 +540,8 @@ bool JujinMarketConnector::subscribeSymbol(const std::string& symbol, engine::Ev
         }
     }
 
-    qDebug() << "JujinMarketConnector: subscribe market symbol" << QString::fromStdString(symbol)
-             << "->" << QString::fromStdString(normalizedSymbol);
+    std::cerr << "[JMC] " "JujinMarketConnector: subscribe market symbol" << (symbol)
+             << "->" << (normalizedSymbol);
 
     const std::vector<std::string> symbols{normalizedSymbol};
     if (!m_api->subscribe_market_data(symbols, thirdparty::MarketDataType::TICK, {})) {
@@ -593,8 +590,8 @@ void JujinMarketConnector::publishSubscriptionStatus(engine::EventBus* eventBus,
     event.metadata["active"] = active ? "true" : "false";
     const auto result = eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     if (!result) {
-        qWarning() << "JujinMarketConnector: failed to publish subscription status"
-                   << QString::fromStdString(result.message);
+        std::cerr << "[JMC] " "JujinMarketConnector: failed to publish subscription status"
+                   << (result.message);
     }
 }
 

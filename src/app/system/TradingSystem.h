@@ -23,6 +23,7 @@ public:
 
     // ── 初始化 ──
     void initialize();
+    void setBrokerGateway(std::unique_ptr<domain::trading::IBrokerGatewayEx> gw);
     bool initialized() const noexcept { return m_initialized; }
 
     // ── 交易引擎 ──
@@ -72,6 +73,7 @@ private:
     bool m_initialized{false};
     std::unique_ptr<domain::trading::TradeExecutionEngine> m_tradeEngine;
     std::unique_ptr<domain::trading::PositionAccountEngine> m_positionEngine;
+    std::unique_ptr<domain::trading::IBrokerGatewayEx> m_brokerGateway;
     domain::strategy::RiskConfig m_riskConfig{domain::strategy::RiskConfig::defaults()};
     mutable double m_peakTotalAsset{0.0};
     mutable std::mutex m_mutex;

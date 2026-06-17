@@ -227,6 +227,7 @@ target_link_libraries(test_eventsystem
         domain_strategies
         domain_strategy_runtime
         bridge
+        app_adapters
         astockquantapp   # TradingSystem symbols
         factor
         infrastructure
@@ -293,6 +294,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
     target_link_libraries(run_cleaning_cache_probe
         PRIVATE
             bridge
+            app_adapters
             foundation
             infrastructure
             astockquantapp

@@ -373,4 +373,9 @@ bool TradingConnectionConfigService::removeBoundStrategy(const QString& strategy
     return false;
 }
 
+TradingConnectionConfigService* TradingConnectionConfigService::instance() {
+    static TradingConnectionConfigService s_instance;
+    return &s_instance;
+}
+
 } // namespace bridge

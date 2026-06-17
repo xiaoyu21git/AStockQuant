@@ -37,7 +37,7 @@ public:
     Q_INVOKABLE QVariantMap submitOrder(const QVariantMap& orderMap);
     Q_INVOKABLE bool cancelOrder(const QString& brokerOrderId);
     Q_INVOKABLE QString liveBridgeStatusMessage() const;
-    Q_INVOKABLE bool isLiveBridgeReady() const;
+    Q_INVOKABLE bool isLiveBridgeReady();
 
     /// @brief 设置交易配置（由系统设置页调用，在 ensureInitialized 前配置）
     void setTradingConfig(const QVariantMap& config) { m_tradingConfig = config; }
