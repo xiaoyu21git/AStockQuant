@@ -507,6 +507,9 @@ public:
     /// @brief 安全停止后台线程并等待完成。
     void stopLiveLoop();
 
+    /// @brief 查询实盘循环是否正在运行
+    [[nodiscard]] bool isLiveLoopRunning() const noexcept;
+
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
 

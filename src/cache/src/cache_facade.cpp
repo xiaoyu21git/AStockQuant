@@ -312,7 +312,7 @@ public:
         }
 
         if (redisCacheManager_ && redisCacheManager_->isEnabled()) {
-            std::cout << "Cache invalidation for Redis backend is not implemented: " << pattern << std::endl;
+            std::cerr << "[CacheFacade] WARNING: Redis cache invalidation not implemented, pattern ignored: " << pattern << std::endl;
         }
     }
     

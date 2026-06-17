@@ -228,6 +228,9 @@ void FactorBacktestOrchestrator::run(
             priceView = lastMarketView->close();
         } else {
             // 无真实价格时，构建全 1.0 的临时矩阵（避免空指针）
+            // 警告：价格为 1.0 意味着成交模拟完全失真，应在上游校验数据完整性
+            INTERNAL_WARN_STREAM << "[FactorBacktestOrchestrator] No real price data available, "
+                                 << "using default price 1.0 — fill simulation will be inaccurate";
             static constexpr float kDefaultPrice = 1.0f;
             static std::vector<factor::compute::signal_value_t> s_defaultPrices;
             const size_t needed = static_cast<size_t>(std::max(1, numDates))

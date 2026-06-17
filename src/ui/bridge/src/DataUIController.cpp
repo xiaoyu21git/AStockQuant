@@ -1,4 +1,10 @@
-// DataUIController.cpp - 简化的占位符实现
+// DataUIController.cpp — 简化实现
+// 注意：数据库操作方法（initialize/connect/disconnect/query 等）均未实现，
+// 仅属性存取器正常工作。当前 DataUIController 未被编译进任何可执行 target。
+// 如需使用，请先实现数据库操作方法。
+#if defined(_MSC_VER)
+#pragma message("Warning: DataUIController.cpp has unimplemented database methods")
+#endif
 #include "DataUIController.h"
 
 #include <QDebug>

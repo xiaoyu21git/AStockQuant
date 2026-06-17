@@ -13,6 +13,9 @@
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 #include "foundation/json/json_facade.h"
 #include "../../domain/strategy/include/StrategyManager.h"
+
+#include <exception>
+#include "foundation/log/logging.hpp"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
 #include <QJsonDocument>
@@ -545,7 +548,10 @@ QVariantMap StrategyBridge::get(const QString& strategyId)
     init();
     if (!m_inited) return {};
     const auto strategy = m_repo->findById(repositoryId);
-    return strategy.has_value() ? strategy->toVariantMap() : QVariantMap{};
+    if (!strategy.has_value()) return {};
+    auto map = strategy->toVariantMap();
+    map["displayStatus"] = m_runtimeStatus.value(repositoryId, QStringLiteral("已停止"));
+    return map;
 }
 
 QVariantList StrategyBridge::list()
@@ -555,7 +561,12 @@ QVariantList StrategyBridge::list()
     QVariantList list;
     const std::vector<PersistedStrategyData> all = m_repo->findAll();
     list.reserve(static_cast<int>(all.size()));
-    for (const PersistedStrategyData& data : all) list.push_back(data.toVariantMap());
+    for (const PersistedStrategyData& data : all) {
+        auto map = data.toVariantMap();
+        QString sid = QString::fromStdString(data.strategyId);
+        map["displayStatus"] = m_runtimeStatus.value(sid, QStringLiteral("已停止"));
+        list.push_back(map);
+    }
     return list;
 }
 
@@ -569,86 +580,95 @@ bool StrategyBridge::start(const QString& strategyId)
     }
     init();
     if (!m_inited) {
-        fprintf(stderr, "[Bridge] start: init FAILED\n"); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[StrategyBridge] init FAILED";
         return false;
     }
 
-    fprintf(stderr, "[Bridge] start: strategyId=%s\n", repositoryId.toStdString().c_str());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[StrategyBridge] start: " << repositoryId.toStdString();
 
-    auto& mgr = domain::strategy::StrategyManager::instance();
-    if (!mgr.get(repositoryId.toStdString())) {
-        fprintf(stderr, "[Bridge] start: engine not cached, creating...\n"); fflush(stderr);
-        // 创建 RuntimeFactorSvc 注入因子服务 (Engine 接管所有权)
-        std::unique_ptr<domain::strategy::IRuntimeFactorService> factorSvc;
-        auto* factorSvcBridge = FactorService::instance();
-        fprintf(stderr, "[Bridge] start: factorSvcBridge=%p init=%d\n",
-                static_cast<void*>(factorSvcBridge),
-                factorSvcBridge ? factorSvcBridge->isInitialized() : 0);
-        fflush(stderr);
-        if (factorSvcBridge && factorSvcBridge->isInitialized()) {
-            auto* instanceMgr = factorSvcBridge->instanceManager();
-            fprintf(stderr, "[Bridge] start: instanceMgr=%p\n", static_cast<void*>(instanceMgr));
-            fflush(stderr);
-            if (instanceMgr) {
-                auto symbolResolver = [](std::uint32_t id) -> std::string {
-                    char buf[16];
-                    const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
-                    std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
-                    return buf;
-                };
-                auto factorNameResolver = [](std::uint64_t fid) -> std::string {
-                    return std::to_string(fid);
-                };
-                factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
-                    *instanceMgr,
-                    std::move(symbolResolver),
-                    std::move(factorNameResolver));
-                fprintf(stderr, "[Bridge] start: RuntimeFactorSvc created=%p\n",
-                        static_cast<void*>(factorSvc.get()));
-                fflush(stderr);
-            }
-        }
-        fprintf(stderr, "[Bridge] start: calling createEngine...\n"); fflush(stderr);
-        mgr.createEngine(repositoryId.toStdString(), std::move(factorSvc));
-        fprintf(stderr, "[Bridge] start: createEngine returned\n"); fflush(stderr);
-    } else {
-        fprintf(stderr, "[Bridge] start: engine already cached, reusing\n"); fflush(stderr);
-    }
-    auto* engine = mgr.get(repositoryId.toStdString());
-    fprintf(stderr, "[Bridge] start: engine=%p\n", static_cast<void*>(engine)); fflush(stderr);
-    if (!engine) {
-        setErr(QStringLiteral("startStrategy engine not available"));
-        emit operationFailed(kRepositoryErrorCode, m_err);
-        return false;
-    }
-
-    const auto result = engine->start();
-    if (!result.isOk()) {
-        setErr(QStringLiteral("startStrategy engine->start() failed"));
-        emit operationFailed(kRepositoryErrorCode, m_err);
-        return false;
-    }
-
-    // 启动实盘异步后台线程（每个引擎独立线程，自循环等待行情）
-    engine->startLiveLoop();
-
-    // ── 注册订单转发器：策略引擎信号 → TradingSystem 执行管道 ──
-    if (!m_orderListener) {
-        // 符号解析器：uint32_t InstrumentId → 股票代码字符串（复用 start() 中的解析逻辑）
-        auto symResolver = [](std::uint32_t id) -> std::string {
-            char buf[16];
-            const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
-            std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
-            return buf;
-        };
-        m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
-    }
-    mgr.setOrderListener(m_orderListener.get());
-
+    // 不设中间状态，等 worker 完成后直接切"运行中"
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
-    refreshModel();
-    emit started(repositoryId);
+
+    // ── 异步执行引擎创建（工作线程：MySQL 查询 → 启动实盘循环）──
+    if (!m_startupPool) {
+        m_startupPool = std::make_unique<foundation::thread::ThreadPoolExecutor>(
+            1, 4, std::chrono::seconds(120), "StrategyBridgeStartup");
+    }
+    m_startupPool->post([this, repositoryId]() {
+        try {
+        auto& mgr = domain::strategy::StrategyManager::instance();
+        if (!mgr.get(repositoryId.toStdString())) {
+            std::unique_ptr<domain::strategy::IRuntimeFactorService> factorSvc;
+            auto* factorSvcBridge = FactorService::instance();
+            if (factorSvcBridge && factorSvcBridge->isInitialized()) {
+                auto* instanceMgr = factorSvcBridge->instanceManager();
+                if (instanceMgr) {
+                    auto symbolResolver = [](std::uint32_t id) -> std::string {
+                        char buf[16];
+                        const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
+                        std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
+                        return buf;
+                    };
+                    auto factorNameResolver = [](std::uint64_t fid) -> std::string {
+                        return std::to_string(fid);
+                    };
+                    factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
+                        *instanceMgr,
+                        std::move(symbolResolver),
+                        std::move(factorNameResolver));
+                }
+            }
+            mgr.createEngine(repositoryId.toStdString(), std::move(factorSvc));
+        }
+        auto* engine = mgr.get(repositoryId.toStdString());
+        if (!engine) {
+            QMetaObject::invokeMethod(this, [this]() {
+                setErr(QStringLiteral("引擎创建失败"));
+                emit operationFailed(kRepositoryErrorCode, m_err);
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        const auto result = engine->start();
+        if (!result.isOk()) {
+            QMetaObject::invokeMethod(this, [this]() {
+                setErr(QStringLiteral("引擎启动失败"));
+                emit operationFailed(kRepositoryErrorCode, m_err);
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        engine->startLiveLoop();
+
+        if (!m_orderListener) {
+            auto symResolver = [](std::uint32_t id) -> std::string {
+                char buf[16];
+                const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
+                std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
+                return buf;
+            };
+            m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
+        }
+        mgr.setOrderListener(m_orderListener.get());
+
+        QMetaObject::invokeMethod(this, [this, repositoryId]() {
+            m_runtimeStatus[repositoryId] = QStringLiteral("运行中");
+            if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("运行中"));
+            emit strategiesChanged();
+            emit started(repositoryId);
+        }, Qt::QueuedConnection);
+
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[StrategyBridge] start worker exception: " << e.what();
+            QMetaObject::invokeMethod(this, [this, repositoryId, msg = QString::fromUtf8(e.what())]() {
+                m_runtimeStatus[repositoryId] = QStringLiteral("启动失败");
+                emit strategiesChanged();
+                setErr(QStringLiteral("引擎启动异常: %1").arg(msg));
+                emit operationFailed(kRepositoryErrorCode, m_err);
+            }, Qt::QueuedConnection);
+        }
+    });
+
     return true;
 }
 
@@ -663,28 +683,28 @@ bool StrategyBridge::stop(const QString& strategyId)
     init();
     if (!m_inited) return false;
 
-    auto& mgr = domain::strategy::StrategyManager::instance();
-    auto* engine = mgr.get(repositoryId.toStdString());
-    if (!engine) {
-        setErr(QStringLiteral("stopStrategy engine not found"));
-        emit operationFailed(kRepositoryErrorCode, m_err);
-        return false;
-    }
+    INTERNAL_INFO_STREAM << "[StrategyBridge] stop: " << repositoryId.toStdString();
 
-    // 先停止异步后台线程（如已启动）
-    engine->stopLiveLoop();
-
-    const auto result = engine->stop();
-    if (!result.isOk()) {
-        setErr(QStringLiteral("stopStrategy engine->stop() failed"));
-        emit operationFailed(kRepositoryErrorCode, m_err);
-        return false;
-    }
-
-    mgr.remove(repositoryId.toStdString());
+    // 立即显示"停止中"，然后异步执行 stop 避免阻塞 UI
+    m_runtimeStatus[repositoryId] = QStringLiteral("停止中");
+    if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("停止中"));
+    emit strategiesChanged();
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Inactive);
-    refreshModel();
-    emit stopped(repositoryId);
+
+    // 用 QueuedConnection 让 QML 先渲染"停止中"，再执行阻塞的 stopLiveLoop
+    QMetaObject::invokeMethod(this, [this, repositoryId]() {
+        auto& mgr = domain::strategy::StrategyManager::instance();
+        auto* engine = mgr.get(repositoryId.toStdString());
+        if (engine) {
+            engine->stopLiveLoop();
+            engine->stop();
+        }
+        m_runtimeStatus[repositoryId] = QStringLiteral("已停止");
+        if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("已停止"));
+        emit strategiesChanged();
+        emit stopped(repositoryId);
+    }, Qt::QueuedConnection);
+
     return true;
 }
 

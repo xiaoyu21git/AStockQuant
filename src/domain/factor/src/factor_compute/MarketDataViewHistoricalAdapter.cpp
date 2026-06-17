@@ -121,6 +121,18 @@ std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::
     return result;
 }
 
+std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::getSeries(
+    const std::string& symbol,
+    const std::string& anchorDate,
+    int window,
+    const std::string& field) const
+{
+    int32_t anchorIdx = findDateIndex(anchorDate);
+    if (anchorIdx < 0 || window <= 0) return {};
+    int32_t startIdx = std::max(0, anchorIdx - window + 1);
+    return getSeries(symbol, dates_[static_cast<size_t>(startIdx)], anchorDate, field);
+}
+
 std::vector<std::string> CachedMarketDataViewHistoricalAdapter::getAvailableSymbols(const std::string&) const
 {
     return symbols_;
@@ -178,45 +190,6 @@ CachedMarketDataViewHistoricalAdapter::getBatchCrossSections(
         result[field] = getCrossSection(date, field, symbols);
     }
     return result;
-}
-
-std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>>
-CachedMarketDataViewHistoricalAdapter::getBatchTimeSeries(
-    const std::vector<std::string>& symbols,
-    const std::string& startDate,
-    const std::string& endDate,
-    const std::vector<std::string>& fields) const
-{
-    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> result;
-    for (const auto& sym : symbols) {
-        for (const auto& field : fields) {
-            auto series = getSeries(sym, startDate, endDate, field);
-            std::vector<double> values;
-            values.reserve(series.size());
-            for (const auto& dp : series) {
-                values.push_back(dp.value);
-            }
-            result[sym][field] = std::move(values);
-        }
-    }
-    return result;
-}
-
-std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>>
-CachedMarketDataViewHistoricalAdapter::getBatchTimeSeries(
-    const std::vector<std::string>& symbols,
-    const std::string& anchorDate,
-    int window,
-    const std::vector<std::string>& fields) const
-{
-    // Build date range from anchorDate and window
-    int32_t anchorIdx = findDateIndex(anchorDate);
-    if (anchorIdx < 0) return {};
-
-    int32_t startIdx = std::max(0, anchorIdx - window + 1);
-    std::string startDate = dates_[static_cast<size_t>(startIdx)];
-
-    return getBatchTimeSeries(symbols, startDate, anchorDate, fields);
 }
 
 } // namespace factor::compute

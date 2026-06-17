@@ -8,6 +8,7 @@
 
 #include "StrategyLifecycleStatus.h"
 #include "../../domain/types/ResolvedStrategyBehavior.h"
+#include "foundation/thread/ThreadPoolExecutor.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 
 #include <initializer_list>
@@ -208,6 +209,12 @@ private:
     StrategyListModel* m_listModel{nullptr};
     std::unique_ptr<domain::strategy::IOrderListener> m_orderListener;
 
-    // 实盘行情视图 (由 setupLiveMarketView 构建，Engine 通过 setLiveMarketView 引用)
+    // 实盘行情视图
     std::unique_ptr<factor::compute::CachedMarketDataView> m_liveMarketView;
+
+    // 异步启动线程池
+    std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_startupPool;
+
+    // 策略运行时状态（内存单向控制，不查 DB/引擎）
+    QHash<QString, QString> m_runtimeStatus;
 };

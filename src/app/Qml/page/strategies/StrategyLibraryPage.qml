@@ -7,7 +7,7 @@ import "../../components/FactorWorkbench/Navigation" as NavigationComponents
 import "../../components/Strategy" as StrategyComponents
 import "../../components/Base" as BaseComponents
 import "../../components" as Components
-import "../../utils/StrategyDataAdapter.js" as StrategyAdapter
+
 import "../../utils/StartupGateFormatter.js" as StartupGateFormatter
 
 Rectangle {
@@ -80,6 +80,7 @@ Rectangle {
     readonly property var uiLifecycleCoordinator: UiLifecycleCoordinator
     property int marketSessionRevision: 0
     property int runtimeSnapshotRevision: 0
+    property int statusRefreshCounter: 0
     
     // 初始化策略服务 - 确保数据自动加载
     function initializeStrategyViewModel() {
@@ -91,6 +92,7 @@ Rectangle {
 
                 strategyService.strategiesChanged.connect(function() {
                     console.log("策略数据已更新，刷新列表")
+                    statusRefreshCounter++
                     rebuildStrategyVisibleModel()
                     syncSelectedStrategy()
                 })
@@ -229,20 +231,8 @@ Rectangle {
     }
 
     function getStrategyDisplayStatus(strategy) {
-        runtimeSnapshotRevision
-        marketSessionRevision
-        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.resolveStrategyRuntimeStatus) {
-            return StrategyAdapter.resolveStrategyRuntimeStatus(
-                strategy,
-                currentTradingConfiguration(),
-                currentRuntimeSnapshot(strategy),
-                currentMarketCalendarSnapshot(),
-                new Date())
-        }
-        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.resolveStrategyBusinessStatus) {
-            return StrategyAdapter.resolveStrategyBusinessStatus(strategy) || "STOPPED"
-        }
-        return "STOPPED"
+        // 由 C++ StrategyBridge::get/list 中的 computeDisplayStatus 计算，查询实际引擎状态
+        return (strategy && strategy.displayStatus) ? strategy.displayStatus : "已停止"
     }
 
     function currentRuntimeSnapshot(strategy) {
@@ -272,11 +262,7 @@ Rectangle {
     }
 
     function isRunningStrategy(strategy) {
-        var displayStatus = getStrategyDisplayStatus(strategy)
-        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.isRunningDisplayStatus) {
-            return StrategyAdapter.isRunningDisplayStatus(displayStatus)
-        }
-        return displayStatus === "RUNNING"
+        return (strategy && strategy.displayStatus) === "运行中"
     }
 
     function hasRuntimeSnapshotData(snapshot) {
@@ -304,32 +290,8 @@ Rectangle {
     }
 
     function getStrategyDisplayStatusLabel(status) {
-        switch (status) {
-        case "RUNNING":
-            return "运行中"
-        case "WAIT_OPEN":
-            return "待开盘"
-        case "STARTING":
-            return "启动中"
-        case "STOPPING":
-            return "停止中"
-        case "ERROR":
-            return "异常"
-        case "STOPPED":
-            return "已停止"
-        case "ACTIVE":
-            return "已启用"
-        case "TESTING":
-            return "测试中"
-        case "PAUSED":
-            return "已暂停"
-        case "INACTIVE":
-            return "未启用"
-        case "ARCHIVED":
-            return "已归档"
-        default:
-            return normalizeRuntimeDisplayValue(status)
-        }
+        // displayStatus 已经是中文，直接返回
+        return status || "已停止"
     }
 
     function getRuntimeDiagnosticColor(status) {
@@ -371,27 +333,15 @@ Rectangle {
     }
 
     function isStrategyBoundToTradingConfiguration(strategy, configuration) {
-        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.isStrategyBoundToTradingConfiguration) {
-            return StrategyAdapter.isStrategyBoundToTradingConfiguration(strategy, configuration)
-        }
-
         var strategyId = strategy ? (strategy.strategyId || "") : ""
-        if (!strategyId) {
-            return false
-        }
-
+        if (!strategyId) return false
         var config = configuration || ({})
         var boundStrategies = config.boundStrategies || []
-        for (var index = 0; index < boundStrategies.length; ++index) {
-            var entry = boundStrategies[index] || ({})
-            var boundStrategyId = typeof entry === "string"
-                ? String(entry || "").trim()
-                : String(entry.strategyId || "").trim()
-            if (boundStrategyId === strategyId) {
-                return true
-            }
+        for (var i = 0; i < boundStrategies.length; ++i) {
+            var entry = boundStrategies[i] || ({})
+            var bid = typeof entry === "string" ? String(entry).trim() : String(entry.strategyId || "").trim()
+            if (bid === strategyId) return true
         }
-
         return String(config.boundStrategyId || "").trim() === strategyId
     }
 
@@ -543,32 +493,22 @@ Rectangle {
         }
 
         syncSelectedStrategy()
-        showActionFeedback(bindingResult.message || ("已从策略卡片启动“" + strategyName + "”"), false)
+        console.log("StrategyLibraryPage: 启动策略", strategyName)
     }
 
     function stopStrategyFromCard(strategyCandidate) {
         var strategyId = resolveStrategyIdentifier(strategyCandidate)
         var strategyName = resolveStrategyName(strategyCandidate, strategyId)
         if (!strategyId) {
-            showActionFeedback("当前策略缺少 ID，无法停止", true)
+            console.log("StrategyLibraryPage: 停止失败，缺少策略ID")
             return
         }
 
-        if (strategyService && strategyService.stop && !strategyService.stop(strategyId)) {
-            showActionFeedback("策略“" + strategyName + "”停止失败", true)
-            return
+        if (strategyService && strategyService.stop) {
+            strategyService.stop(strategyId)
         }
-
-        if (tradingConnectionConfigService && tradingConnectionConfigService.removeBoundStrategyConfiguration) {
-            var removalResult = tradingConnectionConfigService.removeBoundStrategyConfiguration(strategyId) || ({})
-            if (!removalResult.success) {
-                showActionFeedback(removalResult.message || ("策略“" + strategyName + "”已停用，但交易绑定移除失败"), true)
-                return
-            }
-        }
-
         syncSelectedStrategy()
-        showActionFeedback("已停止策略“" + strategyName + "”", false)
+        console.log("StrategyLibraryPage: 停止策略", strategyName)
     }
 
     function truncateDisplayText(value, maxLength) {
@@ -1349,7 +1289,10 @@ Rectangle {
                                 displayName: sourceStrategy ? (sourceStrategy.strategyName || sourceStrategy.name || "未命名策略") : "未命名策略"
                                 strategyType: sourceStrategy ? (sourceStrategy.strategyType || "趋势策略") : "趋势策略"
                                 description: sourceStrategy ? strategyLibraryPage.buildStrategyCardDescription(sourceStrategy) : "暂无描述"
-                                status: sourceStrategy ? strategyLibraryPage.getStrategyDisplayStatus(sourceStrategy) : "STOPPED"
+                                status: {
+                                    var s = strategyLibraryPage.getStrategyData(sourceIndex)
+                                    return (s && s.displayStatus) || "已停止"
+                                }
                                 tags: sourceStrategy ? strategyLibraryPage.buildStrategyRuntimeTags(sourceStrategy) : []
                                 startActionAvailable: sourceStrategy ? strategyLibraryPage.getStrategyStartGateState(sourceStrategy).canStart : false
                                 startActionLabel: sourceStrategy ? strategyLibraryPage.getStrategyStartActionLabel(sourceStrategy) : "启动实盘"
@@ -1370,12 +1313,6 @@ Rectangle {
                                 cardWidth: strategyGridView.cellWidth - 12
                                 cardHeight: 260
                                 enableCardClick: true
-
-                                Component.onCompleted: {
-                                    if (typeof StrategyAdapter !== "undefined") {
-                                        categoryColor = StrategyAdapter.getStrategyTypeColor(strategyType)
-                                    }
-                                }
 
                                 onClicked: {
                                     strategyLibraryPage.selectStrategyAt(sourceIndex)
@@ -1467,14 +1404,18 @@ Rectangle {
                             Layout.fillHeight: true
                             visible: hasSelectedStrategy
 
-                            property var selectedStrategy: strategyLibraryPage.getSelectedStrategySummary()
+                            property var selectedStrategy: { strategyLibraryPage.statusRefreshCounter; return strategyLibraryPage.getSelectedStrategySummary() }
 
                             strategyId: selectedStrategy ? (selectedStrategy.strategyId || "") : ""
                             strategyName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
                             displayName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
                             strategyType: selectedStrategy ? (selectedStrategy.strategyType || "趋势策略") : "趋势策略"
                             description: selectedStrategy ? strategyLibraryPage.buildStrategyCardDescription(selectedStrategy) : "暂无描述"
-                            status: selectedStrategy ? strategyLibraryPage.getStrategyDisplayStatus(selectedStrategy) : "STOPPED"
+                            status: {
+                                strategyLibraryPage.statusRefreshCounter
+                                var s = strategyLibraryPage.getSelectedStrategySummary()
+                                return (s && s.displayStatus) || "已停止"
+                            }
                             tags: selectedStrategy ? strategyLibraryPage.buildStrategyRuntimeTags(selectedStrategy) : []
                             startActionAvailable: selectedStrategy ? strategyLibraryPage.getStrategyStartGateState(selectedStrategy).canStart : false
                             startActionLabel: selectedStrategy ? strategyLibraryPage.getStrategyStartActionLabel(selectedStrategy) : "启动实盘"
@@ -1492,12 +1433,6 @@ Rectangle {
                             showParameterPanel: true
                             cardWidth: parent.width - 32
                             cardHeight: parent.height - 32
-
-                            Component.onCompleted: {
-                                if (typeof StrategyAdapter !== "undefined" && selectedStrategy) {
-                                    categoryColor = StrategyAdapter.getStrategyTypeColor(selectedStrategy.strategyType || "趋势策略")
-                                }
-                            }
 
                             onStartClicked: {
                                 strategyLibraryPage.startStrategyFromCard(selectedStrategy)
@@ -1602,19 +1537,8 @@ Rectangle {
                                 accent: textPrimary
                             },
                             {
-                                label: "业务策略 ID",
-                                value: strategyLibraryPage.normalizeRuntimeDisplayValue(selectedStrategyId),
-                                accent: textPrimary
-                            },
-                            {
-                                label: "运行时策略 ID",
-                                value: strategyLibraryPage.normalizeRuntimeDisplayValue(
-                                    hasRuntimeSnapshot ? runtimeSnapshot.runtimeStrategyId : (isBoundStrategy ? tradingConfiguration.runtimeStrategyId : "")),
-                                accent: textPrimary
-                            },
-                            {
-                                label: "会话 ID",
-                                value: strategyLibraryPage.normalizeRuntimeDisplayValue(hasRuntimeSnapshot ? runtimeSnapshot.sessionId : ""),
+                                label: "策略名称",
+                                value: selectedStrategySummary ? (selectedStrategySummary.strategyName || selectedStrategySummary.name || "--") : "--",
                                 accent: textPrimary
                             },
                             {

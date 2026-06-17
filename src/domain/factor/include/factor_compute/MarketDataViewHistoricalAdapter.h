@@ -44,6 +44,13 @@ public:
         const std::string& endDate,
         const std::string& field) const override;
 
+    /// @brief 便捷方法：从 anchorDate 往前取 window 个交易日的数据
+    [[nodiscard]] std::vector<factor::HistoricalDataPoint> getSeries(
+        const std::string& symbol,
+        const std::string& anchorDate,
+        int window,
+        const std::string& field) const override;
+
     [[nodiscard]] std::vector<std::string> getAvailableSymbols(
         const std::string& date) const override;
 
@@ -56,20 +63,6 @@ public:
     getBatchCrossSections(
         const std::string& date,
         const std::vector<std::string>& symbols,
-        const std::vector<std::string>& fields) const override;
-
-    [[nodiscard]] std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>>
-    getBatchTimeSeries(
-        const std::vector<std::string>& symbols,
-        const std::string& startDate,
-        const std::string& endDate,
-        const std::vector<std::string>& fields) const override;
-
-    [[nodiscard]] std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>>
-    getBatchTimeSeries(
-        const std::vector<std::string>& symbols,
-        const std::string& anchorDate,
-        int window,
         const std::vector<std::string>& fields) const override;
 
 private:

@@ -22,7 +22,7 @@ void TradingSystem::initialize() {
     m_tradeEngine = std::make_unique<domain::trading::TradeExecutionEngine>();
     m_positionEngine = std::make_unique<domain::trading::PositionAccountEngine>();
 
-    // 注入模拟券商网关
+    // 注入模拟券商网关（掘金实盘适配器在 bridge 层实现后替换此处）
     auto simGateway = std::make_unique<app::adapters::SimulatedBrokerGateway>();
     simGateway->connect("{}");
     m_tradeEngine->setGateway(std::move(simGateway));

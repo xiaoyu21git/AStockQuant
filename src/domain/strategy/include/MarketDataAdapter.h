@@ -31,19 +31,16 @@ public:
     }
 
     /// @brief 从 symbol 字符串解析 InstrumentId
-    /// "000001.SZ" → 1, "600000.SH" → 600000, "000001" → 1
+    /// ⚠️ 已知问题: 去前导零后 SZ/SH 相同代码会碰撞 ("000001.SZ" 和 "000001.SH" 都是 1)
+    /// 实盘应通过 RuntimeFactorSvc 的 symbol resolver 做反向查找，或使用 symbol → ID 映射表
     static InstrumentId resolveInstrumentId(const std::string& symbol) {
         if (symbol.empty()) return InstrumentId{};
-        // 去除交易所后缀
         std::string code = symbol;
         auto dotPos = code.find('.');
         if (dotPos != std::string::npos) code = code.substr(0, dotPos);
-        // 去除前导零
         while (code.size() > 1 && code[0] == '0') code.erase(0, 1);
-        // 解析为 uint32_t
         try {
-            std::uint32_t id = static_cast<std::uint32_t>(std::stoul(code));
-            return InstrumentId{id};
+            return InstrumentId{static_cast<std::uint32_t>(std::stoul(code))};
         } catch (...) {
             return InstrumentId{};
         }

@@ -18,7 +18,8 @@ public:
         StatusRole,
         StatusTextRole,
         UpdatedAtRole,
-        RunningRole
+        RunningRole,
+        DisplayStatusRole   // 综合 DB 状态 + 引擎实际运行状态
     };
     Q_ENUM(Roles)
 
@@ -35,6 +36,9 @@ public:
     Q_INVOKABLE void clear();
     Q_INVOKABLE QVariantMap getRow(int index) const;
 
+    /// @brief 直接更新单行 displayStatus，不查 DB
+    void updateDisplayStatus(const QString& strategyId, const QString& status);
+
 signals:
     void countChanged();
 
@@ -46,6 +50,7 @@ private:
         QString statusText;
         QString updatedAt;
         bool running{false};
+        QString displayStatus;
     };
 
     static StrategyRow fromVariantMap(const QVariantMap& map);

@@ -180,6 +180,12 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         ::domain::strategies::MultiFactorSelectionStrategySpec spec;
         spec.topN           = params.topN > 0 ? params.topN : params.maxPositions;
         spec.industryNeutral = false;
+        if (!params.factorIds.empty()) {
+            double equalWeight = 1.0 / static_cast<double>(params.factorIds.size());
+            for (const auto& fid : params.factorIds) {
+                spec.factorWeights.push_back({fid, equalWeight});
+            }
+        }
 
         auto strategyDef = std::make_shared<::domain::strategies::MultiFactorSelectionStrategy>(
             commonCfg, meta, spec);
@@ -439,9 +445,12 @@ void StrategyEngine::stopLiveLoop()
 
     if (m_dedicatedExecutor) {
         m_dedicatedExecutor->shutdown(false);
-        // 等待线程池终止（最多 5 秒）
         m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
     }
+}
+
+bool StrategyEngine::isLiveLoopRunning() const noexcept {
+    return m_loopRunning.load(std::memory_order_acquire);
 }
 
 void StrategyEngine::setOrderListener(IOrderListener* listener)
@@ -479,6 +488,13 @@ void StrategyEngine::drainQueue()
         m_lastProcessedAt.store(
             std::chrono::steady_clock::now().time_since_epoch().count(),
             std::memory_order_release);
+    }
+    // 循环退出时报告丢 tick 统计
+    auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
+    if (dropped > 0) {
+        fprintf(stderr, "[StrategyEngine] drainQueue stopped: %llu ticks dropped during session\n",
+                static_cast<unsigned long long>(dropped));
+        fflush(stderr);
     }
 }
 
@@ -596,10 +612,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     if (orderBuilder_) {
         strategyService->setOrderBuilder(orderBuilder_);
     }
-    const StrategyServiceFlowResult startResult = strategyService->start();
-    if (!startResult.isOk()) {
-        std::abort();
-    }
+    // 不在此处自动启动——回测由 backtest() 内部启动，实盘由 StrategyBridge::start() 手动启动
 
     auto engine = std::make_unique<StrategyEngine>(
         std::move(factorService),
@@ -632,6 +645,14 @@ StrategyBacktestResult StrategyEngine::backtest(
     if (!view) {
         result.errorMessage = "Failed to load market data view";
         return result;
+    }
+
+    // ── 将 DataSvc 注入 RuntimeFactorSvc，使因子计算能访问市场数据 ──
+    if (factorService_) {
+        auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
+        if (rfs) {
+            rfs->setDataService(dataSvc);
+        }
     }
 
     if (onProgress) onProgress(2.0);
@@ -703,7 +724,9 @@ StrategyBacktestResult StrategyEngine::backtest(
         auto volumeMat = view->volume();
 
         if (r == 0 || r == totalDays-1 || r % 100 == 0) {
-            fprintf(stderr, "[backtest] day %d/%d start equity=%zu\n", r, totalDays, equityCurve.size());
+            fprintf(stderr, "[backtest] day %d/%d equity=%.2f positions=%zu\n",
+                    r, totalDays, posEngine.account().totalAsset(),
+                    posEngine.positions().size());
             fflush(stderr);
         }
 
@@ -839,7 +862,9 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    fprintf(stderr, "[backtest] loop done: days=%d equity=%zu\n", totalDays, equityCurve.size());
+    fprintf(stderr, "[backtest] loop done: days=%d finalEquity=%.2f trades=%zu riskRejected=%d\n",
+            totalDays, posEngine.account().totalAsset(),
+            equityCurve.size(), riskRejectedCount);
     fflush(stderr);
 
     if (onProgress) onProgress(kLoopEnd);

@@ -17,7 +17,7 @@ TradeExecutionBridge::TradeExecutionBridge(QObject* parent)
 
 bool TradeExecutionBridge::initialized() const { return m_initialized; }
 bool TradeExecutionBridge::liveBridgeReady() const {
-    return m_initialized && app::system::TradingSystem::instance().initialized();
+    return app::system::TradingSystem::instance().initialized();
 }
 bool TradeExecutionBridge::isLiveBridgeReady() const { return liveBridgeReady(); }
 QVariantList TradeExecutionBridge::recentRuleHits() const { return {}; }
@@ -27,7 +27,13 @@ QString TradeExecutionBridge::lastErrorMessage() const { return m_lastErrorMessa
 void TradeExecutionBridge::ensureInitialized() {
     if (m_initialized) return;
     auto& sys = app::system::TradingSystem::instance();
-    if (!sys.initialized()) sys.initialize();
+
+    if (!sys.initialized()) {
+        // ── 读取交易配置：实盘/掘金模式通过配置切换 ──
+        // TODO: 掘金实盘适配器应在 bridge 层实现 (桥接层有 Qt)，包装 JujinApi 为 IBrokerGatewayEx
+        // 然后通过 sys.setBrokerGateway() 注入。当前默认使用模拟网关。
+        sys.initialize();
+    }
 
     // ── 注册引擎回调：将领域层成交/状态事件转发到 QML 信号 ──
     sys.setOnTradeFill([this](const domain::trading::TradeFill& fill) {

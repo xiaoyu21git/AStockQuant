@@ -9,7 +9,7 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
-#include <QMutex>
+#include <QRecursiveMutex>
 
 namespace bridge {
 
@@ -91,7 +91,7 @@ private:
     void mergeBoundStrategy(const QVariantMap& entry);
     bool removeBoundStrategy(const QString& strategyId);
 
-    mutable QMutex m_mutex;
+    mutable QRecursiveMutex m_mutex;
     QVariantMap m_currentConfig;
     QString m_configFilePath;
     bool m_initialized{false};

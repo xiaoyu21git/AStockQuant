@@ -29,7 +29,9 @@ RuntimeFactorSvc::RuntimeFactorSvc(
     fflush(stderr);
 }
 
-void RuntimeFactorSvc::setMarketView(const factor::compute::IMarketDataView*) {}
+void RuntimeFactorSvc::setMarketView(const factor::compute::IMarketDataView*) {
+    // 实盘路径使用 setLiveMarketView() 替代；此接口保留向后兼容
+}
 
 void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView* view) {
     m_liveMarketView = view;
@@ -187,8 +189,8 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         return result;
     }
 
-    // ── 回退: 无 MarketView 时无法计算 ──
-    fprintf(stderr, "[RFS] getValues NO-SOURCE: instance=%s m_dataSvc=%p m_liveMarketView=%p\n",
+    // ── 回退: 无 MarketView 时无法计算。实盘启动前必须调用 setLiveMarketView()，回测须注入 setDataService() ──
+    fprintf(stderr, "[RFS] getValues NO-SOURCE: instance=%s m_dataSvc=%p m_liveMarketView=%p — 因子值全部返回空!\n",
             instanceId.c_str(), static_cast<void*>(m_dataSvc),
             static_cast<const void*>(m_liveMarketView));
     fflush(stderr);

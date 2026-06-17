@@ -54,13 +54,13 @@ Item {
 
                 header: Row {
                     width: historyList.width
-                    Text { width: 140; text: "回测时间"; font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
-                    Text { width: 70; text: "总收益";  font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
-                    Text { width: 70; text: "年化";    font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
-                    Text { width: 70; text: "夏普";    font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
-                    Text { width: 70; text: "回撤";    font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
-                    Text { width: 60; text: "胜率";    font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
-                    Text { width: 50; text: "类型";    font.size: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 140; text: "回测时间"; font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 70; text: "总收益";  font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 70; text: "年化";    font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 70; text: "夏普";    font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 70; text: "回撤";    font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 60; text: "胜率";    font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
+                    Text { width: 50; text: "类型";    font.pixelSize: 11; color: "#94A3B8"; font.weight: Font.DemiBold }
                 }
 
                 delegate: Rectangle {
@@ -76,15 +76,15 @@ Item {
                     }
                     Row {
                         anchors.verticalCenter: parent.verticalCenter
-                        Text { width: 140; text: runAt || "--"; font.size: 12; color: "#CBD5E1" }
-                        Text { width: 70; text: (totalReturn * 100).toFixed(2) + "%"; font.size: 12
+                        Text { width: 140; text: runAt || "--"; font.pixelSize: 12; color: "#CBD5E1" }
+                        Text { width: 70; text: (totalReturn * 100).toFixed(2) + "%"; font.pixelSize: 12
                             color: totalReturn >= 0 ? "#EF4444" : "#22C55E" }
-                        Text { width: 70; text: (annualizedReturn * 100).toFixed(2) + "%"; font.size: 12
+                        Text { width: 70; text: (annualizedReturn * 100).toFixed(2) + "%"; font.pixelSize: 12
                             color: annualizedReturn >= 0 ? "#EF4444" : "#22C55E" }
-                        Text { width: 70; text: sharpeRatio.toFixed(3); font.size: 12; color: "#F1F5F9" }
-                        Text { width: 70; text: (maxDrawdown * 100).toFixed(1) + "%"; font.size: 12; color: "#22C55E" }
-                        Text { width: 60; text: (winRate * 100).toFixed(1) + "%"; font.size: 12; color: "#F1F5F9" }
-                        Text { width: 50; text: behaviorLabel(behaviorKind); font.size: 11; color: "#94A3B8" }
+                        Text { width: 70; text: sharpeRatio.toFixed(3); font.pixelSize: 12; color: "#F1F5F9" }
+                        Text { width: 70; text: (maxDrawdown * 100).toFixed(1) + "%"; font.pixelSize: 12; color: "#22C55E" }
+                        Text { width: 60; text: (winRate * 100).toFixed(1) + "%"; font.pixelSize: 12; color: "#F1F5F9" }
+                        Text { width: 50; text: behaviorLabel(behaviorKind); font.pixelSize: 11; color: "#94A3B8" }
                     }
                 }
             }
@@ -97,14 +97,17 @@ Item {
             visible: selectedResult !== null
 
             RowLayout {
+                id: detailRow
                 anchors.fill: parent; anchors.margins: 16; spacing: 20
-                detailCard("夏普",       (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.SharpeRatioRole) : 0).toFixed(3), true)
-                detailCard("年化收益",   ((selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.AnnualizedReturnRole) : 0) * 100).toFixed(2) + "%", false)
-                detailCard("最大回撤",   ((selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.MaxDrawdownRole) : 0) * 100).toFixed(1) + "%", false)
-                detailCard("胜率",       ((selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.WinRateRole) : 0) * 100).toFixed(1) + "%", false)
-                detailCard("Sortino",    (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.SortinoRatioRole) : 0).toFixed(3), false)
-                detailCard("Calmar",     (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.CalmarRatioRole) : 0).toFixed(3), false)
-                detailCard("利润因子",   (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.ProfitFactorRole) : 0).toFixed(2), false)
+                Component.onCompleted: {
+                    detailCard("夏普",     (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.SharpeRatioRole) : 0).toFixed(3), true)
+                    detailCard("年化收益", ((selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.AnnualizedReturnRole) : 0) * 100).toFixed(2) + "%", false)
+                    detailCard("最大回撤", ((selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.MaxDrawdownRole) : 0) * 100).toFixed(1) + "%", false)
+                    detailCard("胜率",     ((selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.WinRateRole) : 0) * 100).toFixed(1) + "%", false)
+                    detailCard("Sortino",  (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.SortinoRatioRole) : 0).toFixed(3), false)
+                    detailCard("Calmar",   (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.CalmarRatioRole) : 0).toFixed(3), false)
+                    detailCard("利润因子", (selectedResult ? perfModel.data(perfModel.index(selectedRow,0), StrategyPerformanceModel.ProfitFactorRole) : 0).toFixed(2), false)
+                }
             }
         }
 
@@ -118,7 +121,7 @@ Item {
     }
 
     function detailCard(lbl, val, emph) {
-        var c = detailCardComp.createObject(null, { cardLabel: lbl, cardValue: val, cardEmphasize: emph })
+        var c = detailCardComp.createObject(detailRow, { cardLabel: lbl, cardValue: val, cardEmphasize: emph })
         return c
     }
 

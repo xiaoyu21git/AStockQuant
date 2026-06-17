@@ -388,8 +388,8 @@ bool AppBootstrap::initDatabase()
     // 当前项目保留按需初始化数据库入口
     // 如果需要显式初始化，可以在这里添加
     
-    std::cout << "[AppBootstrap] Database initialization skipped (handled by services)\n";
-    return true; // 暂时返回成功，数据库初始化可能不是必需的
+    std::cout << "[AppBootstrap] Database initialization deferred to service layer\n";
+    return true; // 数据库由 NativeMySQLConnectionPool / 各 Repository 按需初始化
 }
 
 bool AppBootstrap::initQmlEngine()

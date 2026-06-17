@@ -48,46 +48,42 @@ CalculationResult LiquidityFactor::calculate(const CalculationContext& context)
             effectiveContext.date = runtime.effectiveDate;
             effectiveContext.symbols = symbols;
 
-            const auto closesBySymbol = context.historicalView->getBatchTimeSeries(
-                symbols, runtime.effectiveDate, window + 1, {std::string("close")});
-            const auto volumesBySymbol = context.historicalView->getBatchTimeSeries(
-                symbols, runtime.effectiveDate, window + 1, {std::string("volume")});
-            const auto metricBySymbol = context.historicalView->getBatchTimeSeries(
-                symbols, runtime.effectiveDate, window, {metric});
-
-            const auto& closeMap = closesBySymbol.find("close") != closesBySymbol.end() 
-                ? closesBySymbol.at("close") : std::unordered_map<std::string, std::vector<double>>{};
-            const auto& volumeMap = volumesBySymbol.find("volume") != volumesBySymbol.end()
-                ? volumesBySymbol.at("volume") : std::unordered_map<std::string, std::vector<double>>{};
-            const auto& metricMap = metricBySymbol.find(metric) != metricBySymbol.end()
-                ? metricBySymbol.at(metric) : std::unordered_map<std::string, std::vector<double>>{};
-
             for (const auto& symbol : symbols) {
-                const auto metricIt = metricMap.find(symbol);
-                if (metricIt == metricMap.end() || metricIt->second.empty()) {
-                    continue;
+                auto metricSeries = context.historicalView->getSeries(
+                    symbol, runtime.effectiveDate, window, metric);
+                if (metricSeries.empty()) continue;
+
+                std::vector<double> metricVals;
+                metricVals.reserve(metricSeries.size());
+                for (const auto& dp : metricSeries) metricVals.push_back(dp.value);
+
+                // AMIHUD 额外需要 close + volume
+                std::vector<double> closeVals, volumeVals;
+                if (metricKind == LiquidityMetric::AMIHUD_ILLIQUIDITY) {
+                    auto cs = context.historicalView->getSeries(
+                        symbol, runtime.effectiveDate, window + 1, "close");
+                    auto vs = context.historicalView->getSeries(
+                        symbol, runtime.effectiveDate, window + 1, "volume");
+                    if (cs.size() < 2 || vs.size() < 2) continue;
+                    for (const auto& dp : cs) closeVals.push_back(dp.value);
+                    for (const auto& dp : vs) volumeVals.push_back(dp.value);
                 }
+
                 double value = 0.0;
-                const auto& vals = metricIt->second;
-                if (metricKind == LiquidityMetric::VOLUME) {
-                    value = std::accumulate(vals.begin(), vals.end(), 0.0) / static_cast<double>(vals.size());
-                } else if (metricKind == LiquidityMetric::AMPLITUDE) {
-                    double avg = std::accumulate(vals.begin(), vals.end(), 0.0) / static_cast<double>(vals.size());
-                    value = -avg;
-                } else if (metricKind == LiquidityMetric::AMIHUD_ILLIQUIDITY) {
-                    const auto cIt = closeMap.find(symbol);
-                    const auto vIt = volumeMap.find(symbol);
-                    if (cIt != closeMap.end() && vIt != volumeMap.end() && cIt->second.size() >= 2 && vIt->second.size() >= 2) {
-                        double sum = 0.0;
-                        for (size_t i = 1; i < cIt->second.size() && i < vIt->second.size(); ++i) {
-                            double ret = std::abs(cIt->second[i] - cIt->second[i-1]) / (std::max)(1e-12, cIt->second[i-1]);
-                            double vol = (std::max)(1e-12, vIt->second[i]);
-                            sum += ret / vol;
-                        }
-                        value = -sum / static_cast<double>((std::min)(cIt->second.size(), vIt->second.size()) - 1);
+                if (metricKind == LiquidityMetric::AMIHUD_ILLIQUIDITY) {
+                    double sum = 0.0;
+                    for (size_t i = 1; i < closeVals.size() && i < volumeVals.size(); ++i) {
+                        double ret = std::abs(closeVals[i] - closeVals[i-1])
+                                   / (std::max)(1e-12, closeVals[i-1]);
+                        double vol = (std::max)(1e-12, volumeVals[i]);
+                        sum += ret / vol;
                     }
+                    value = -sum / static_cast<double>(
+                        (std::min)(closeVals.size(), volumeVals.size()) - 1);
                 } else {
-                    value = std::accumulate(vals.begin(), vals.end(), 0.0) / static_cast<double>(vals.size());
+                    value = std::accumulate(metricVals.begin(), metricVals.end(), 0.0)
+                          / static_cast<double>(metricVals.size());
+                    if (metricKind == LiquidityMetric::AMPLITUDE) value = -value;
                 }
                 if (std::isfinite(value)) {
                     result.values[symbol] = value;

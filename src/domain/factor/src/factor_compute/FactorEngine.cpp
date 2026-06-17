@@ -48,6 +48,24 @@ void BacktestDataService::buildViewForFields(const std::vector<std::string>& ext
 void BacktestDataService::buildViewForFields(const std::vector<std::string>& extraFields,
                                               const std::function<void(double)>& onProgress)
 {
+    // ── 已加载且字段齐全 → 跳过重复加载 ──
+    if (m_ownedView) {
+        bool missingField = false;
+        for (const auto& f : extraFields) {
+            if (!m_ownedView->hasField(f)) {
+                missingField = true;
+                break;
+            }
+        }
+        if (!missingField) {
+            fprintf(stderr, "[BDS] buildViewForFields: view already loaded, skip reload\n");
+            fflush(stderr);
+            if (onProgress) onProgress(100.0);
+            return;
+        }
+        // 请求了新字段 → 需要重新构建
+    }
+
     // ── 优先尝试二进制缓存 ──
     if (!m_binCachePath.empty() && !m_rawJson.empty()) {
         // 检查 .bin 是否存在且更新

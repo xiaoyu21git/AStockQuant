@@ -24,15 +24,11 @@ CalculationResult TechnicalFactor::calculate(const CalculationContext& context)
         common,
         [&]() { return context.date; },
         [&](const CommonRuntimeState& runtime, CalculationResult& result) {
-            const auto closesBySymbol = context.historicalView->getBatchTimeSeries(
-                symbols, runtime.effectiveDate, window + 1, {std::string("close")});
-            const auto& closeMap = closesBySymbol.find("close") != closesBySymbol.end()
-                ? closesBySymbol.at("close") : std::unordered_map<std::string, std::vector<double>>{};
             for (const auto& symbol : symbols) {
-                auto it = closeMap.find(symbol);
-                if (it == closeMap.end() || it->second.size() < 2) continue;
-                const auto& vals = it->second;
-                double ret = vals.back() / vals.front() - 1.0;
+                auto closeSeries = context.historicalView->getSeries(
+                    symbol, runtime.effectiveDate, window + 1, "close");
+                if (closeSeries.size() < 2) continue;
+                double ret = closeSeries.back().value / closeSeries.front().value - 1.0;
                 if (std::isfinite(ret)) result.values[symbol] = ret;
             }
         },

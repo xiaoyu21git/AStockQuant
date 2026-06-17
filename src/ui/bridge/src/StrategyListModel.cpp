@@ -45,6 +45,8 @@ QVariant StrategyListModel::data(const QModelIndex& index, int role) const
         return row.updatedAt;
     case RunningRole:
         return row.running;
+    case DisplayStatusRole:
+        return row.displayStatus.isEmpty() ? QStringLiteral("已停止") : row.displayStatus;
     default:
         return {};
     }
@@ -58,7 +60,8 @@ QHash<int, QByteArray> StrategyListModel::roleNames() const
         {StatusRole, "status"},
         {StatusTextRole, "statusText"},
         {UpdatedAtRole, "updatedAt"},
-        {RunningRole, "running"}
+        {RunningRole, "running"},
+        {DisplayStatusRole, "displayStatus"}
     };
 }
 
@@ -174,6 +177,7 @@ StrategyListModel::StrategyRow StrategyListModel::fromVariantMap(const QVariantM
     row.statusText = map.value(QStringLiteral("statusText")).toString().trimmed();
     row.updatedAt = map.value(QStringLiteral("updatedAt")).toString().trimmed();
     row.running = map.value(QStringLiteral("running")).toBool();
+    row.displayStatus = map.value(QStringLiteral("displayStatus")).toString();
 
     if (row.name.isEmpty()) {
         qWarning().noquote() << QStringLiteral("[StrategyListModel] mapped empty name for strategyId=%1 raw=%2")
@@ -194,7 +198,17 @@ QVariantMap StrategyListModel::toVariantMap(const StrategyRow& row) const
     map.insert(QStringLiteral("statusText"), row.statusText);
     map.insert(QStringLiteral("updatedAt"), row.updatedAt);
     map.insert(QStringLiteral("running"), row.running);
+    map.insert(QStringLiteral("displayStatus"), row.displayStatus.isEmpty() ? QStringLiteral("已停止") : row.displayStatus);
     return map;
+}
+
+void StrategyListModel::updateDisplayStatus(const QString& strategyId, const QString& status)
+{
+    const int idx = findRow(strategyId);
+    if (idx < 0) return;
+    m_rows[idx].displayStatus = status;
+    const QModelIndex changed = index(idx);
+    emit dataChanged(changed, changed, {DisplayStatusRole});
 }
 
 int StrategyListModel::findRow(const QString& strategyId) const

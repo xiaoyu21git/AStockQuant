@@ -207,9 +207,14 @@ function resolveStrategyRuntimeStatus(strategy, tradingConfiguration, runtimeSna
     if (businessStatus === "ARCHIVED") {
         return "DEPRECATED";
     }
-    if (businessStatus === "RUNNING" || businessStatus === "PAUSED" || businessStatus === "STOPPED"
+    if (businessStatus === "PAUSED" || businessStatus === "STOPPED"
         || businessStatus === "DEPRECATED" || businessStatus === "PENDING") {
         return businessStatus;
+    }
+    // RUNNING 必须有运行时快照证实，否则降级为 ACTIVE
+    if (businessStatus === "RUNNING") {
+        var rt = resolveRuntimeSnapshotStatus(runtimeSnapshot);
+        return rt === "RUNNING" ? "RUNNING" : "ACTIVE";
     }
 
     var runtimeStatus = resolveRuntimeSnapshotStatus(runtimeSnapshot);
@@ -226,10 +231,8 @@ function resolveStrategyRuntimeStatus(strategy, tradingConfiguration, runtimeSna
             return "STOPPED";
         }
 
-        if (hasMarketCalendarSnapshot(marketCalendarSnapshot)) {
-            return isMarketCalendarSessionOpen(marketCalendarSnapshot) ? "RUNNING" : "WAIT_OPEN";
-        }
-        return isChinaTradingSessionOpen(nowDate) ? "RUNNING" : "WAIT_OPEN";
+        // 状态由运行时快照决定，不根据时间推断
+        return businessStatus;
     }
 
     return businessStatus;

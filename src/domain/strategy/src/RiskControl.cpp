@@ -88,7 +88,9 @@ void MaxDrawdownRule::setCurrentEquity(double equity) {
 RiskEvaluationResult MaxDrawdownRule::evaluate(int /*t*/, int /*n*/, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
     RiskEvaluationResult r;
     if (currentEquity_ <= 0.0 || peak_ <= 0.0) {
-        return r; // 无有效权益数据，放行
+        r.tradable = false;
+        r.blockReason = "风控数据缺失：无有效权益/峰值数据，拒绝交易";
+        return r;
     }
     double dd = (peak_ - currentEquity_) / peak_;
     if (dd >= maxDD_) {
@@ -108,7 +110,9 @@ void LeverageLimitRule::setCurrentMarginUsage(double margin) {
 RiskEvaluationResult LeverageLimitRule::evaluate(int /*t*/, int /*n*/, const factor::compute::SignalSet&, const factor::compute::IMarketDataView&) const {
     RiskEvaluationResult r;
     if (currentMargin_ <= 0.0 || eq_ <= 0.0) {
-        return r; // 无有效保证金数据，放行
+        r.tradable = false;
+        r.blockReason = "风控数据缺失：无有效保证金/权益数据，拒绝交易";
+        return r;
     }
     double lev = currentMargin_ / eq_;
     if (lev >= maxLev_) {

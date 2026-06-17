@@ -367,9 +367,9 @@ void FactorBacktestBridge::startBacktestWithFactors(
             std::string jsonStr = doc.toJson(QJsonDocument::Compact).toStdString();
             m_backtestDataSvc->storeRawJson(jsonStr);
             {
-                auto binPath = bridge::storage::persistentDatasetRootDir().toStdString()
-                             + "/dataset_" + std::to_string(capturedDatasetId) + "_data.bin";
-                m_backtestDataSvc->setBinCachePath(binPath);
+                m_backtestDataSvc->setBinCachePath(
+                    bridge::storage::persistentDataSetBinFilePath(
+                        capturedDatasetId).toStdString());
             }
             // 一次性加载全部字段，生成完整 .bin
             {

@@ -1,5 +1,6 @@
 #include "TradingRuntimeStatusService.h"
 #include "../../../app/system/TradingSystem.h"
+#include "../../../domain/strategy/include/StrategyManager.h"
 
 #include <QDebug>
 #include <QTimer>
@@ -20,8 +21,10 @@ QVariantMap TradingRuntimeStatusService::sessionSnapshotForStrategy(const QStrin
     if (sys.initialized()) {
         snapshot["initialized"] = true;
         snapshot["connected"] = true;
-        snapshot["state"] = "Running";
-        snapshot["stateLabel"] = QStringLiteral("运行中");
+        auto* engine = domain::strategy::StrategyManager::instance().get(strategyId.toStdString());
+        bool running = engine && engine->isLiveLoopRunning();
+        snapshot["state"] = running ? "Running" : "Ready";
+        snapshot["stateLabel"] = running ? QStringLiteral("运行中") : QStringLiteral("已创建");
     }
 
     return snapshot;
@@ -36,8 +39,8 @@ QVariantMap TradingRuntimeStatusService::sessionSnapshotForAccount(const QString
     if (sys.initialized()) {
         snapshot["initialized"] = true;
         snapshot["connected"] = true;
-        snapshot["state"] = "Running";
-        snapshot["stateLabel"] = QStringLiteral("运行中");
+        snapshot["state"] = "Ready";
+        snapshot["stateLabel"] = QStringLiteral("已创建");
     }
 
     return snapshot;
@@ -91,8 +94,8 @@ QVariantMap TradingRuntimeStatusService::buildTradingSystemSnapshot() const {
 
     const auto& sys = app::system::TradingSystem::instance();
     if (sys.initialized()) {
-        snap["state"] = "Running";
-        snap["stateLabel"] = QStringLiteral("运行中");
+        snap["state"] = "Ready";
+        snap["stateLabel"] = QStringLiteral("已创建");
         snap["connected"] = true;
         snap["initialized"] = true;
     }

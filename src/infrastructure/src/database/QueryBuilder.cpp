@@ -143,23 +143,20 @@ QueryResult QueryBuilder::execute()
 
 int QueryBuilder::executeUpdate()
 {
-    // 简化实现，实际项目中需要完整的UPDATE语句构建
-    qWarning() << "executeUpdate() is not implemented in this simplified version";
-    return 0;
+    qCritical() << "QueryBuilder::executeUpdate() is not implemented — returning -1 (failure)";
+    return -1;
 }
 
 int QueryBuilder::executeInsert()
 {
-    // 简化实现，实际项目中需要完整的INSERT语句构建
-    qWarning() << "executeInsert() is not implemented in this simplified version";
-    return 0;
+    qCritical() << "QueryBuilder::executeInsert() is not implemented — returning -1 (failure)";
+    return -1;
 }
 
 int QueryBuilder::executeDelete()
 {
-    // 简化实现，实际项目中需要完整的DELETE语句构建
-    qWarning() << "executeDelete() is not implemented in this simplified version";
-    return 0;
+    qCritical() << "QueryBuilder::executeDelete() is not implemented — returning -1 (failure)";
+    return -1;
 }
 
 int QueryBuilder::count()

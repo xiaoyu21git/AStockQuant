@@ -39,6 +39,9 @@ public:
     Q_INVOKABLE QString liveBridgeStatusMessage() const;
     Q_INVOKABLE bool isLiveBridgeReady() const;
 
+    /// @brief 设置交易配置（由系统设置页调用，在 ensureInitialized 前配置）
+    void setTradingConfig(const QVariantMap& config) { m_tradingConfig = config; }
+
     /// @brief 提交订单（QML 兼容入口），返回 true=已受理 false=已拒绝
     /// 错误详情通过 lastErrorMessage 属性获取
     Q_INVOKABLE bool submitBridgeOrder(const QVariantMap& request);
@@ -73,6 +76,7 @@ private:
     void setLastError(const QString& message);
 
     bool m_initialized{false};
+    QVariantMap m_tradingConfig;
     QVariantList m_recentOrders;
     QString m_lastErrorMessage;
 };

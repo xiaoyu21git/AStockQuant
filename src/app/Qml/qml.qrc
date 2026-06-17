@@ -190,7 +190,6 @@
         <file>utils/TradingPageAdapter.js</file>
         <file>utils/TradeTestingPageAdapter.js</file>
         <file>utils/StrategyCreationUtils.js</file>
-        <file>utils/StrategyDataAdapter.js</file>
         <file>components/Base/qmldir</file>
     </qresource>
 </RCC>

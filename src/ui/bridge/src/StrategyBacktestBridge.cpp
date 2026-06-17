@@ -10,6 +10,7 @@
 #include "StrategyBridge.h"
 #include "DataServiceCache.h"
 #include "FactorService.h"
+#include "AppStoragePaths.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/strategy/include/IStrategyService.h"
 #include "../../domain/strategy/include/StrategyManager.h"
@@ -235,6 +236,14 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 
             auto dataSvc = std::make_unique<factor::compute::BacktestDataService>();
             dataSvc->storeRawJson(datasetJson);
+
+            // ── 启用二进制缓存加速：设置 .bin 路径，
+            // engine->backtest() 内部会调用 buildViewForFields 自动加载或生成 .bin ──
+            if (capturedDatasetId >= 0) {
+                dataSvc->setBinCachePath(
+                    bridge::storage::persistentDataSetBinFilePath(
+                        capturedDatasetId).toStdString());
+            }
 
             auto result = engine->backtest(request, dataSvc.get(),
                 [this](double progress) {

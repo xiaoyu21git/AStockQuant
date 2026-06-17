@@ -1,5 +1,7 @@
 #include "../include/IStrategyService.h"
 
+#include "foundation/log/logging.hpp"
+
 #include <algorithm>
 
 namespace domain::strategy {
@@ -64,7 +66,7 @@ StrategyServiceFlowResult StrategyService::start()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (state_ == StrategyServiceState::Running) {
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::InvalidState);
+        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);  // 幂等：已在运行中
     }
     state_ = StrategyServiceState::Running;
     publishDiagnostics(DiagnosticsEvent(
@@ -217,7 +219,8 @@ StrategyServiceFlowResult StrategyService::onMarketDataPoint(
             marketDataPoint.instrumentId(),
             0.0,
             0.0));
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::InvalidInput);
+        // 实盘单 tick 路径：无效行情仅跳过当次评估，不中断策略运行
+        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
     // 因子服务是运行时因子快照的唯一写入路径。
@@ -253,14 +256,20 @@ StrategyServiceFlowResult StrategyService::onMarketDataBatch(
     if (batch.size() > plan_.maxMarketDataPerBatch()) {
         return StrategyServiceFlowResult(StrategyServiceFlowCode::CapacityExceeded);
     }
-    for (const MarketDataPoint& marketDataPoint : batch) {
-        if (!marketDataPoint.isValid()) {
-            return StrategyServiceFlowResult(StrategyServiceFlowCode::InvalidInput);
-        }
+
+    // 过滤无效 MarketDataPoint（如 InstrumentId=0），避免因个别无效条目拒绝整批
+    std::vector<MarketDataPoint> validBatch;
+    validBatch.reserve(batch.size());
+    for (const auto& mdp : batch) {
+        if (mdp.isValid()) validBatch.push_back(mdp);
+    }
+    if (validBatch.empty()) {
+        resetStats();
+        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
     // 批量更新因子可保持数据访问连续，并减少重复调度开销。
-    const StrategyServiceFlowResult updateResult = factorService_.updateBatch(batch);
+    const StrategyServiceFlowResult updateResult = factorService_.updateBatch(validBatch);
     if (!updateResult.isOk()) {
         return updateResult;
     }
@@ -530,8 +539,11 @@ StrategyServiceFlowResult StrategyService::flushPendingOrders()
     if (pendingOrderBuffer_.empty()) {
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
-    // 未配置下单出口时进入仿真模式：仅在内存中保留订单供上层读取。
+    // 未配置下单出口：回测/仿真模式下由上层通过 copyPendingOrders 读取订单；
+    // 实盘场景下必须配置 orderSink_，否则订单将被丢弃。
     if (!orderSink_) {
+        INTERNAL_WARN_STREAM << "[StrategyService] flushPendingOrders: orderSink_ is null, "
+                             << pendingOrderBuffer_.size() << " orders will not be submitted";
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 

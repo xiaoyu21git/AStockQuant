@@ -162,21 +162,17 @@ BaseQuantCard {
     property string startActionLabel: "启动实盘"
     property string startActionHint: ""
 
-    readonly property bool runtimeActive: status === "RUNNING"
-    readonly property bool runtimePending: status === "ACTIVE" || status === "WAIT_OPEN" || status === "STARTING" || status === "STOPPING"
-    readonly property bool startActionEnabled: startActionAvailable && !runtimeActive && !runtimePending
-    readonly property string primaryActionLabel: runtimeActive
-        ? "运行中"
-        : (status === "ACTIVE"
-            ? "已启用"
-            : (status === "WAIT_OPEN"
-            ? "待开盘"
-            : (status === "STARTING"
-                ? "启动中"
-                : (status === "STOPPING" ? "停止中" : startActionLabel))))
-    readonly property color primaryActionColor: runtimeActive
-        ? baseConstants.warningAmber
-        : (runtimePending ? baseConstants.accentBlue : (startActionAvailable ? baseConstants.profitGreen : baseConstants.warningAmber))
+    property bool confirmStop: false
+
+    readonly property bool runtimeActive: status === "运行中"
+    readonly property bool isStopping: status === "停止中"
+    readonly property bool isStopped: status === "已停止" || status === "STOPPED" || !status
+    readonly property bool startActionEnabled: startActionAvailable && !isStopping
+    readonly property string primaryActionLabel: runtimeActive ? "停止"
+        : (isStopping ? "停止中" : "启动")
+    readonly property color primaryActionColor: runtimeActive ? baseConstants.lossRed
+        : (isStopping ? baseConstants.warningAmber
+        : (startActionAvailable ? baseConstants.profitGreen : baseConstants.warningAmber))
     
     // ============ 卡片布局调整以对齐因子卡片 ============
     
@@ -241,36 +237,13 @@ BaseQuantCard {
                     cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                     enabled: startActionEnabled
                     onClicked: {
-                        startClicked()
+                        if (isStopping) return
+                        if (runtimeActive) stopClicked()
+                        else if (isStopped) confirmStop = true
                     }
                 }
             }
-            
-            // 停止按钮（仅在运行或暂停时显示）
-            Rectangle {
-                visible: status === "ACTIVE" || status === "RUNNING" || status === "PAUSED" || status === "WAIT_OPEN" || status === "STARTING" || status === "STOPPING"
-                width: 60
-                height: 32
-                radius: 8
-                color: Qt.rgba(baseConstants.lossRed.r, baseConstants.lossRed.g, baseConstants.lossRed.b, 0.2)
-                border.width: 1
-                border.color: Qt.rgba(baseConstants.lossRed.r, baseConstants.lossRed.g, baseConstants.lossRed.b, 0.75)
-                
-                Text {
-                    anchors.centerIn: parent
-                    text: "停止"
-                    font.pixelSize: 12
-                    font.weight: Font.Medium
-                    color: baseConstants.lossRed
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: stopClicked()
-                }
-            }
-            
+
             // 优化按钮
             Rectangle {
                 width: 32
@@ -525,10 +498,41 @@ BaseQuantCard {
         
         // 状态闪烁动画（如果是运行中状态）
         SequentialAnimation on opacity {
-            running: status === "RUNNING"
+            running: runtimeActive
             loops: Animation.Infinite
             PropertyAnimation { to: 0.5; duration: 1000 }
             PropertyAnimation { to: 1.0; duration: 1000 }
+        }
+    }
+
+    // 停止确认遮罩
+    Rectangle {
+        anchors.fill: parent
+        color: "#80000000"
+        visible: confirmStop
+        z: 100
+        MouseArea { anchors.fill: parent }  // 阻止点击穿透
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 240; height: 120; radius: 12
+            color: "#1E293B"; border.width: 1; border.color: "#EF4444"
+            Column {
+                anchors.centerIn: parent; spacing: 12
+                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "确认启动实盘策略？"; font.pixelSize: 14; color: "#F1F5F9" }
+                Row { anchors.horizontalCenter: parent.horizontalCenter; spacing: 16
+                    Rectangle { width: 80; height: 32; radius: 6; color: "#334155"
+                        Text { anchors.centerIn: parent; text: "取消"; font.pixelSize: 13; color: "#94A3B8" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: confirmStop = false }
+                    }
+                    Rectangle { width: 80; height: 32; radius: 6; color: "#10B981"
+                        Text { anchors.centerIn: parent; text: "启动"; font.pixelSize: 13; color: "white" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: { confirmStop = false; startClicked() } }
+                    }
+                }
+            }
         }
     }
 }
