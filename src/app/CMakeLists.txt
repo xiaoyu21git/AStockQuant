@@ -155,7 +155,6 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
         Qml/page/strategies/StrategyCreationPagePro.qml
-        Qml/page/strategies/StrategyBacktestAnalysisPage.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/DataAnalysis/CacheManagementPage.qml
             Qml/page/risk/RiskConfigurationPage.qml

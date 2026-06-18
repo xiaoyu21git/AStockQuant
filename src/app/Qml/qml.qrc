@@ -175,7 +175,6 @@
         <file>page/leftSidebar/SecondaryMenu.qml</file>
         <file>page/risk/RiskConfigurationPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
-        <file>page/strategies/StrategyBacktestAnalysisPage.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>

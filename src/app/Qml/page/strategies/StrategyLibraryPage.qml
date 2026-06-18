@@ -979,7 +979,7 @@ Rectangle {
 
     function showBacktestResult() {
         var r = backtestResult || ({})
-        var m = r.metrics || ({})
+        var m = r.performance || r.metrics || ({})
         var ann = (Number(m.annualizedReturn || 0) * 100).toFixed(2)
         var sharpe = Number(m.sharpeRatio || 0).toFixed(2)
         var dd = (Number(m.maxDrawdown || 0) * 100).toFixed(1)
