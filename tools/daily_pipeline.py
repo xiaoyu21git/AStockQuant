@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import import_from_baostock as baostock
 
 DB = {"host":"127.0.0.1","port":3306,"user":"root","password":"123456a","database":"astock_quant","charset":"utf8mb4"}
-BATCH = 500
+BATCH = 50
 SLEEP = 0.2
 
 def conn(): return pymysql.connect(**DB)
@@ -205,13 +205,13 @@ def main():
         if not args.skip_phase1:
             print("--- Phase 1: Multi-threaded non-Baostock backfill ---", flush=True)
             with c.cursor() as cur:
-                cur.execute("SELECT DISTINCT symbol FROM daily_bar WHERE (market_cap IS NULL OR market_cap=0) AND symbol LIKE '%.%' LIMIT 1000")
+                cur.execute("SELECT DISTINCT symbol FROM daily_bar WHERE (market_cap IS NULL OR market_cap=0) AND symbol LIKE '%.%'")
                 mcap_need = [r[0] for r in cur.fetchall()]
             if mcap_need:
                 backfill_market_cap_akshare(mcap_need)
 
             with c.cursor() as cur:
-                cur.execute("SELECT DISTINCT symbol FROM daily_bar WHERE (pre_adjust_factor IS NULL OR pre_adjust_factor=0) AND symbol LIKE '%.%' LIMIT 1000")
+                cur.execute("SELECT DISTINCT symbol FROM daily_bar WHERE (pre_adjust_factor IS NULL OR pre_adjust_factor=0) AND symbol LIKE '%.%'")
                 adj_need = [r[0] for r in cur.fetchall()]
             if adj_need:
                 backfill_adjust_factors_juejin(adj_need)

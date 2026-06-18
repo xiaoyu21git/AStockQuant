@@ -103,6 +103,7 @@ struct BacktestRequest final {
     DataSourceSpec dataSourceSpec;
     RuntimeOptionSpec runtimeOptions;
     DateWindow window;
+    std::string benchmarkIndex{"000300.SH"};  // 基准指数代码
 
     [[nodiscard]] bool isValid() const
     {

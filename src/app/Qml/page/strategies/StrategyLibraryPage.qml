@@ -987,8 +987,9 @@ Rectangle {
         var msg = "年化 " + ann + "% | 夏普 " + sharpe + " | 回撤 " + dd + "% | 胜率 " + win + "%"
         console.log("策略回测完成: " + msg)
         showActionFeedback(msg, false)
-        showPerformance = true
-        showBacktestWorkbench = false
+        showPerformance = false
+        showBacktestWorkbench = true
+        backtestWorkbenchMode = "analysis"
         if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
             performanceLoader.item.refreshPerformance()
         }
@@ -1717,18 +1718,36 @@ Rectangle {
                 asynchronous: true
                 active: backtestWorkbenchLoadedOnce
                 visible: status === Loader.Ready && strategyLibraryPage.showBacktestWorkbench
-                source: "qrc:/components/Strategy/StrategyBacktestParams.qml"
+                source: strategyLibraryPage.backtestWorkbenchMode === "analysis"
+                    ? "qrc:/page/strategies/BacktestResultAnalysisView.qml"
+                    : "qrc:/components/Strategy/StrategyBacktestParams.qml"
 
                 onLoaded: {
                     strategyLibraryPage.backtestWorkbenchStatusText = ""
                     if (!item) {
                         return
                     }
-                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
-                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                    if (typeof item.selectedStrategyId !== "undefined") {
+                        item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                        item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                    }
+                    if (typeof item.strategyId !== "undefined") {
+                        item.strategyId = strategyLibraryPage.selectedStrategyId
+                        item.strategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                    }
+                    if (typeof item.backtestResult !== "undefined") {
+                        item.backtestResult = strategyLibraryPage.backtestResult
+                    }
+                    if (typeof item.backToWorkbench !== "undefined") {
+                        item.backToWorkbench.connect(function() {
+                            strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "workbench")
+                        })
+                    }
                     var cdc = CleanedDataController
                     if (cdc && typeof cdc.initialize === "function") { cdc.initialize() }
-                    item.cleanedDataController = cdc
+                    if (typeof item.cleanedDataController !== "undefined") {
+                        item.cleanedDataController = cdc
+                    }
                     if (typeof item.startBacktestRequested !== "undefined") {
                         item.startBacktestRequested.connect(function() {
                             console.log("StrategyBacktestParams: 用户点击开始回测")
@@ -2111,7 +2130,7 @@ Rectangle {
             id: performanceLoader
             anchors.fill: parent
             active: strategyLibraryPage.showPerformance
-            source: "qrc:/components/Strategy/StrategyPerformance.qml"
+            source: "qrc:/components/Strategy/PerformanceHistoryList.qml"
 
             onLoaded: {
                 if (item) {

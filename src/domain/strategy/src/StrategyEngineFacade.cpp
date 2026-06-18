@@ -20,9 +20,9 @@
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <chrono>
 #include <exception>
 #include <string>
 #include <utility>
@@ -706,6 +706,10 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     double cash = req.costSpec.initialCapital.value;
     int riskRejectedCount = 0;
+    int totalFills = 0, winningFills = 0, losingFills = 0;
+    double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
+    std::unordered_map<std::string, double> buyPriceMap;
+    std::unordered_map<std::string, double> symbolPnl;  // 逐标的累计盈亏
     std::vector<double> equityCurve;
     equityCurve.reserve(totalDays);
 
@@ -810,6 +814,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         const auto& buyPosMap = posEngine.positions();
                         std::int64_t existingQty = buyPosMap.count(symbol)
                             ? buyPosMap.at(symbol).quantity() : 0LL;
+                        if (existingQty == 0) buyPriceMap[symbol] = closePrice;
                         pos.setQuantity(existingQty + static_cast<std::int64_t>(order.quantity()));
                         pos.setLastPrice(closePrice);
                         posEngine.applyPositionEvent(symbol, pos);
@@ -823,6 +828,14 @@ StrategyBacktestResult StrategyEngine::backtest(
                     if (sellQty > 0) {
                         auto fr = fillSim.simulateSell(closePrice, sellQty);
                         cash += fr.income;
+                        ++totalFills;
+                        double bp = closePrice;
+                        auto bpIt = buyPriceMap.find(symbol);
+                        if (bpIt != buyPriceMap.end()) { bp = bpIt->second; buyPriceMap.erase(bpIt); }
+                        double pnl = (fr.income / sellQty - bp) * sellQty;
+                        if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
+                        else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
+                        symbolPnl[symbol] += pnl;
                         domain::trading::Position pos;
                         pos.setSymbol(symbol);
                         pos.setSide(domain::trading::PositionSide::Long);
@@ -831,8 +844,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (pos.quantity() > 0) posEngine.applyPositionEvent(symbol, pos);
                         else {
                             domain::trading::Position empty;
-                            empty.setSymbol(symbol);
-                            empty.setQuantity(0);
+                            empty.setSymbol(symbol); empty.setQuantity(0);
                             posEngine.applyPositionEvent(symbol, empty);
                         }
                     }
@@ -868,19 +880,28 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    fprintf(stderr, "[backtest] loop done: days=%d finalEquity=%.2f trades=%zu riskRejected=%d\n",
-            totalDays, posEngine.account().totalAsset(),
-            equityCurve.size(), riskRejectedCount);
+    fprintf(stderr, "[backtest] loop done: days=%d finalEquity=%.2f fills=%d riskRejected=%d\n",
+            totalDays, posEngine.account().totalAsset(), totalFills, riskRejectedCount);
+    // 逐标的盈亏 top5
+    std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
+    std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });
+    int showN = std::min(5, static_cast<int>(topStocks.size()));
+    if (showN > 0) {
+        fprintf(stderr, "[backtest] top%d winners: ", showN);
+        for (int i = 0; i < showN; ++i) fprintf(stderr, "%s(%.0f) ", topStocks[i].first.c_str(), topStocks[i].second);
+        fprintf(stderr, "\n[backtest] top%d losers:  ", showN);
+        for (int i = 0; i < showN; ++i) fprintf(stderr, "%s(%.0f) ", topStocks[topStocks.size()-1-i].first.c_str(), topStocks[topStocks.size()-1-i].second);
+        fprintf(stderr, "\n");
+    }
     fflush(stderr);
 
     if (onProgress) onProgress(kLoopEnd);
 
-    // 4. 指标计算 — 委托 FactorBacktestMetricsCalculator
+    // 4. 指标计算
+    std::vector<double> dailyReturns;
     if (!equityCurve.empty()) {
         const double initialCapital = req.costSpec.initialCapital.value;
         result.metrics.totalReturn = (equityCurve.back() - initialCapital) / initialCapital;
-
-        std::vector<double> dailyReturns;
         dailyReturns.reserve(equityCurve.size() - 1);
         for (std::size_t i = 1; i < equityCurve.size(); ++i) {
             if (equityCurve[i - 1] > 0.0)
@@ -899,11 +920,72 @@ StrategyBacktestResult StrategyEngine::backtest(
         result.metrics.annualizedReturn = (initialCapital > 0.0)
             ? std::pow(equityCurve.back() / initialCapital, 250.0 / std::max(1, totalDays)) - 1.0
             : 0.0;
-        result.metrics.sortinoRatio  = 0.0;
+        double downsideDev = ::factor::FactorBacktestMetricsCalculator::calculateDownsideDeviation(dailyReturns);
+        result.metrics.sortinoRatio = (downsideDev > 1e-12)
+            ? result.metrics.annualizedReturn / (downsideDev * std::sqrt(250.0)) : 0.0;
         result.metrics.calmarRatio   = (result.metrics.maxDrawdown > 1e-9)
             ? result.metrics.annualizedReturn / result.metrics.maxDrawdown : 0.0;
         if (result.metrics.volatility > 1e-12)
             result.metrics.sharpeRatio = result.metrics.annualizedReturn / result.metrics.volatility;
+    }
+
+    // 交易统计
+    result.tradeStats.totalTrades   = static_cast<int>(totalFills);
+    result.tradeStats.winningTrades = static_cast<int>(winningFills);
+    result.tradeStats.losingTrades  = static_cast<int>(losingFills);
+    result.tradeStats.totalProfit   = domain::strategy::Money{totalProfit};
+    result.tradeStats.totalLoss     = domain::strategy::Money{totalLoss};
+    result.tradeStats.largestWin    = domain::strategy::Money{largestWin};
+    result.tradeStats.largestLoss   = domain::strategy::Money{largestLoss};
+
+    // 时间序列
+    for (const auto& dk : view->dates()) result.timeSeries.dates.push_back(domain::DomainDate{dk.value});
+    result.timeSeries.portfolioValues = equityCurve;
+    result.timeSeries.returns         = dailyReturns;
+    {
+        std::vector<double> dds; dds.reserve(equityCurve.size()); double pk = equityCurve.empty()?0:equityCurve[0];
+        for (double e : equityCurve) { if (e > pk) pk = e; dds.push_back(pk > 0 ? (e-pk)/pk : 0); }
+        result.timeSeries.drawdowns = dds;
+    }
+
+    // 基准对比 (沪深300), 优先 View 后 DB
+    {
+        std::vector<double> bmRet;
+        // 从 View 找
+        bool fromView = false;
+        for (size_t c = 0; c < view->instruments().size(); ++c) {
+            if (view->instruments()[c].value == 300) { fromView = true; break; }
+        }
+        if (!fromView) {
+            auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+            if (pool.isInitialized()) {
+                auto db = pool.getConnection();
+                if (db && db->isOpen()) {
+                    auto& vd = view->dates();
+                    std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
+                    std::string sql = "SELECT close FROM daily_bar WHERE symbol='" + bmSym + "' AND trade_date BETWEEN "
+                        + std::to_string(vd.front().value) + " AND " + std::to_string(vd.back().value) + " ORDER BY trade_date";
+                    auto rs = db->executeQuery(sql);
+                    for (int i = 1; i < static_cast<int>(rs.rowCount()); ++i) {
+                        double prev = rs.getRow(i-1).getDouble("close");
+                        double curr = rs.getRow(i).getDouble("close");
+                        if (prev > 0) bmRet.push_back(curr/prev - 1.0);
+                    }
+                }
+            }
+        }
+        if (!bmRet.empty()) {
+            size_t n = std::min(dailyReturns.size(), bmRet.size());
+            double sSum=0, bSum=0;
+            for (size_t i=0;i<n;++i){sSum+=dailyReturns[i];bSum+=bmRet[i];}
+            double sM=sSum/n, bM=bSum/n, cov=0, bVar=0;
+            for (size_t i=0;i<n;++i){cov+=(dailyReturns[i]-sM)*(bmRet[i]-bM);bVar+=(bmRet[i]-bM)*(bmRet[i]-bM);}
+            result.metrics.beta = (bVar>1e-12)?cov/bVar:0;
+            result.metrics.alpha = (sM - result.metrics.beta * bM) * 250.0;  // 年化
+            double te2=0; for(size_t i=0;i<n;++i){double d=dailyReturns[i]-bmRet[i];te2+=d*d;}
+            result.metrics.trackingError = std::sqrt(te2/n)*std::sqrt(250.0);
+            result.metrics.informationRatio = (result.metrics.trackingError>1e-12)?(sM-bM)/(result.metrics.trackingError/std::sqrt(250.0)):0;
+        }
     }
 
     if (riskRejectedCount > 0) {

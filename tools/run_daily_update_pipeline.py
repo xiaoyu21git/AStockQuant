@@ -135,9 +135,14 @@ def parse_args() -> argparse.Namespace:
         help="估值回填每只股票之间的休眠秒数，默认 0.15",
     )
     parser.add_argument(
+        "--juejin",
+        action="store_true",
+        help="日线更新使用掘金多线程 (替代默认 Baostock 全市场)",
+    )
+    parser.add_argument(
         "--baostock",
         action="store_true",
-        help="日线更新使用 Baostock 单线程 (替代默认 Juejin 多线程)",
+        help="(已废弃，Baostock 现为默认) 日线更新使用 Baostock 单线程",
     )
     parser.add_argument(
         "--baostock-only",
@@ -487,8 +492,8 @@ def main() -> int:
             return step_results[-1]["exit_code"]
         return 0
 
-    # --baostock: 用 Baostock 替代默认的 Juejin 日线更新
-    update_cmd_builder = build_baostock_update_command if args.baostock else (
+    # 默认用 Baostock 全市场更新；--juejin 切回掘金多线程
+    update_cmd_builder = build_baostock_update_command if not args.juejin else (
         lambda a: build_mode_update_command(a, "latest"))
 
     def finalize(exit_code: int) -> int:

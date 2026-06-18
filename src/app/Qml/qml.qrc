@@ -142,7 +142,7 @@
         <file>components/Strategy/StrategySummaryHeaderCard.qml</file>
         <file>components/Strategy/ViewModeToggle.qml</file>
         <file>components/Strategy/StrategyBacktestParams.qml</file>
-        <file>components/Strategy/StrategyPerformance.qml</file>
+        <file>components/Strategy/PerformanceHistoryList.qml</file>
         <file>components/StrategyCard.qml</file>
         <file>components/ThemeSwitcher.qml</file>
         <file>components/TopNavigation/BreadcrumbItem.qml</file>
@@ -176,6 +176,7 @@
         <file>page/risk/RiskConfigurationPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
+        <file>page/strategies/BacktestResultAnalysisView.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>

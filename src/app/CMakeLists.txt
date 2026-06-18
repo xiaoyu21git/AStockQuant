@@ -205,6 +205,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategyFilter.qml
         Qml/components/Strategy/StrategySorter.qml
         Qml/components/Strategy/StrategySummaryHeaderCard.qml
+        Qml/components/Strategy/PerformanceHistoryList.qml
+        Qml/page/strategies/BacktestResultAnalysisView.qml
         # 缁涙牜鏆愰崚娑樼紦缂佸嫪娆?
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml

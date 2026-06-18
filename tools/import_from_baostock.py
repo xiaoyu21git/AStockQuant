@@ -75,30 +75,26 @@ def fetch_daily_k_data_batch(
     """
     if not symbols:
         return pd.DataFrame()
-    
-    bs_codes = [convert_symbol_to_baostock_code(s) for s in symbols]
-    code_str = ','.join(bs_codes)
-    
+
     fields = "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST"
-    
-    rs = bs.query_history_k_data_plus(
-        code_str,
-        fields,
-        start_date=start_date.strftime("%Y-%m-%d"),
-        end_date=end_date.strftime("%Y-%m-%d"),
-        frequency="d",
-        adjustflag=adjustflag
-    )
-    
-    rows = []
-    while (rs.error_code == '0') and rs.next():
-        rows.append(rs.get_row_data())
-    
-    if not rows:
+
+    all_rows = []
+    for sym in symbols:
+        bs_code = convert_symbol_to_baostock_code(sym)
+        rs = bs.query_history_k_data_plus(
+            bs_code, fields,
+            start_date=start_date.strftime("%Y-%m-%d"),
+            end_date=end_date.strftime("%Y-%m-%d"),
+            frequency="d", adjustflag=adjustflag
+        )
+        while (rs.error_code == '0') and rs.next():
+            all_rows.append(rs.get_row_data())
+
+    if not all_rows:
         return pd.DataFrame()
-    
-    df = pd.DataFrame(rows, columns=rs.fields)
-    
+
+    df = pd.DataFrame(all_rows, columns=rs.fields)
+
     numeric_cols = ['open', 'high', 'low', 'close', 'preclose', 'volume', 'amount', 'turn', 'pctChg', 'peTTM', 'pbMRQ']
     for col in numeric_cols:
         if col in df.columns:

@@ -224,6 +224,7 @@ Item {
                             currentIndex: 0
                             model: ListModel {
                                 id: indexListModel
+                                ListElement { displayName: "全市场"; symbol: "000001.SH" }
                                 ListElement { displayName: "沪深300"; symbol: "000300.SH" }
                                 ListElement { displayName: "中证500"; symbol: "000905.SH" }
                                 ListElement { displayName: "上证50"; symbol: "000016.SH" }

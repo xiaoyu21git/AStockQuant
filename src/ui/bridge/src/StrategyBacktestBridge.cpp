@@ -56,6 +56,8 @@ BacktestRequest buildBacktestRequest(const QString& strategyId, const QVariantMa
     req.window.endDate = foundation::utils::Timestamp::from_string(
         endDate.toStdString(), "%Y-%m-%d");
 
+    req.benchmarkIndex = params.value("benchmarkIndex", "000300.SH").toString().toStdString();
+
     req.costSpec.initialCapital = Money{params.value("initialCapital", 1000000.0).toDouble()};
     req.costSpec.commissionRate = Ratio{params.value("commissionRate", 0.0003).toDouble()};
     req.costSpec.slippageRate = Ratio{params.value("slippageRate", 0.001).toDouble()};
