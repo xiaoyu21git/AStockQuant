@@ -282,7 +282,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             metricsMap["beta"]             = result.metrics.beta;
             metricsMap["informationRatio"] = result.metrics.informationRatio;
             metricsMap["trackingError"]    = result.metrics.trackingError;
-            qResult["metrics"] = metricsMap;
+            qResult["performance"] = metricsMap;
 
             QVariantMap tradeStats;
             tradeStats["totalTrades"]   = static_cast<int>(result.tradeStats.totalTrades);
@@ -292,7 +292,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             tradeStats["totalLoss"]     = result.tradeStats.totalLoss.value;
             tradeStats["largestWin"]    = result.tradeStats.largestWin.value;
             tradeStats["largestLoss"]   = result.tradeStats.largestLoss.value;
-            qResult["tradeStats"] = tradeStats;
+            qResult["trades"] = tradeStats;
 
             QVariantMap timeSeries;
             QVariantList equityList, dateList, returnList, drawdownList;
@@ -304,11 +304,29 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             for (const auto& d : result.timeSeries.dates) {
                 dateList.append(d.value);
             }
-            timeSeries["equityCurve"] = equityList;
-            timeSeries["dates"]       = dateList;
-            timeSeries["returns"]     = returnList;
-            timeSeries["drawdowns"]   = drawdownList;
+            timeSeries["portfolioValues"]  = equityList;
+            timeSeries["dates"]            = dateList;
+            timeSeries["returns"]          = returnList;
+            timeSeries["drawdowns"]        = drawdownList;
             qResult["timeSeries"] = timeSeries;
+
+            // 回传参数供面板展示
+            QVariantMap qParams;
+            qParams["startDate"]       = params.value("startDate");
+            qParams["endDate"]         = params.value("endDate");
+            qParams["benchmarkIndex"]  = params.value("benchmarkIndex");
+            qParams["priceAdjustment"] = params.value("priceAdjustment");
+            qParams["initialCapital"]  = params.value("initialCapital");
+            qParams["commissionRate"]  = params.value("commissionRate");
+            qParams["slippageRate"]    = params.value("slippageRate");
+            qParams["dataFrequency"]   = params.value("dataFrequency");
+            qResult["parameters"] = qParams;
+
+            // 风险指标（引擎暂未计算，预留 0 值）
+            QVariantMap riskMap;
+            riskMap["var95"] = 0.0; riskMap["cvar95"] = 0.0;
+            riskMap["downsideDeviation"] = 0.0; riskMap["maxConsecutiveLosses"] = 0;
+            qResult["risk"] = riskMap;
 
             // 持久化到 DB
             {
@@ -321,11 +339,11 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         domain::backtest::StoredStrategyBacktest record;
                         record.strategyId = capturedStrategyId;
                         record.metricsJson = QJsonDocument(QJsonObject::fromVariantMap(
-                            qResult["metrics"].toMap())).toJson(QJsonDocument::Compact).toStdString();
+                            qResult["performance"].toMap())).toJson(QJsonDocument::Compact).toStdString();
                         record.timeSeriesJson = QJsonDocument(QJsonObject::fromVariantMap(
                             qResult["timeSeries"].toMap())).toJson(QJsonDocument::Compact).toStdString();
                         record.tradeStatsJson = QJsonDocument(QJsonObject::fromVariantMap(
-                            qResult["tradeStats"].toMap())).toJson(QJsonDocument::Compact).toStdString();
+                            qResult["trades"].toMap())).toJson(QJsonDocument::Compact).toStdString();
                         repo.saveStrategyBacktest(record);
                     }
                 }
