@@ -18,6 +18,7 @@
 #include "JujinTypes.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "MarketSubscriptionStatusRegistry.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
 #include <ctime>
@@ -51,13 +52,8 @@ std::string toUpper(std::string s) noexcept
 // ========== 市场时段检测（纯时间判断，不依赖桥接层） ==========
 bool marketSessionAllowsSubscriptions()
 {
-    auto now = std::chrono::system_clock::now();
-    auto tt = std::chrono::system_clock::to_time_t(now);
-    auto* tm = std::localtime(&tt);
-    int h = tm->tm_hour, m = tm->tm_min;
-    int minutes = h * 60 + m;
-    return (minutes >= 9*60+15 && minutes <= 11*60+30)
-        || (minutes >= 13*60 && minutes <= 15*60);
+    // SDK 的 subscribe() 随时可调用；券商只在交易时段推送数据
+    return true;
 }
 
 std::string marketSessionPhaseText()
@@ -309,8 +305,14 @@ bool JujinMarketConnector::start()
         for (const auto& symbol : watchlist) enqueueWatchSymbol(symbol);
     } else if (marketSessionAllowsSubscriptions()) {
         // 自动获取全市场标的并订阅
+        std::cerr << "[JMC] calling get_instruments...\n";
         auto* inst = ::get_instruments("SZSE,SSE", "stock", "symbol");
-        if (inst && inst->status() == 0) {
+        if (!inst) {
+            std::cerr << "[JMC] get_instruments returned null\n";
+        } else if (inst->status() != 0) {
+            std::cerr << "[JMC] get_instruments status=" << inst->status() << "\n";
+            inst->release();
+        } else {
             int cnt = 0;
             while (!inst->is_end()) {
                 const char* sym = inst->get_string("symbol");
@@ -330,29 +332,45 @@ bool JujinMarketConnector::start()
                 enqueueWatchSymbol(*symbolValue);
         });
 
-    // ── 订阅 Jujin 行情事件 → 推送到策略引擎 ──
-    m_marketTickSubscription = eventBus->subscribe("market.tick",
+    // ── 订阅 C++ SDK 行情事件 → 推送到策略引擎 ──
+    // GmStrategySession::on_tick() 发布 "trading.market.tick"
+    // 字段: symbol, price(double), volume(double, 瞬时成交量), tradingDay(int64, YYYYMMDD)
+    m_tradingTickSubscription = eventBus->subscribe("trading.market.tick",
         [this](const engine::EventFormat& event) {
-            auto sym  = event.get<std::string>("symbol");
+            auto sym   = event.get<std::string>("symbol");
             auto price = event.get<double>("price");
-            auto vol  = event.get<double>("volume");
-            auto date = event.get<std::int64_t>("tradingDay");
+            auto vol   = event.get<double>("volume");
+            auto date  = event.get<std::int64_t>("tradingDay");
             static int tickCount = 0;
             if (++tickCount % 100 == 0)
-                std::cerr << "[JMC] tick #" << tickCount << " sym=" << sym.value_or("?") << "\n";
-            if (sym.has_value() && price.has_value())
+                std::cerr << "[JMC] tick #" << tickCount << " sym=" << sym.value_or("?")
+                          << " price=" << price.value_or(-1.0) << "\n";
+            if (sym.has_value() && price.has_value()) {
+                static int jmcLog = 0;
+                if (++jmcLog <= 3)
+                    std::cerr << "[JMC] tick/bar: " << *sym << " price=" << *price << "\n" << std::flush;
                 app::system::TradingSystem::instance().pushMarketData(
-                    *sym, *price, vol.value_or(0.0), date.value_or(0));
+                    *sym, *price, vol.value_or(0.0),
+                    date.has_value() ? static_cast<std::int32_t>(*date) : 0);
+            }
         });
-    m_marketBarSubscription = eventBus->subscribe("market.bar",
+
+    // GmStrategySession::on_bar() 发布 "trading.market.bar"
+    // 字段: symbol, close(double), volume(double, bar成交量), tradingDay(int64, YYYYMMDD)
+    m_tradingBarSubscription = eventBus->subscribe("trading.market.bar",
         [this](const engine::EventFormat& event) {
-            auto sym  = event.get<std::string>("symbol");
+            auto sym   = event.get<std::string>("symbol");
             auto price = event.get<double>("close");
-            auto vol  = event.get<double>("volume");
-            auto date = event.get<std::int64_t>("tradingDay");
-            if (sym.has_value() && price.has_value())
+            auto vol   = event.get<double>("volume");
+            auto date  = event.get<std::int64_t>("tradingDay");
+            if (sym.has_value() && price.has_value()) {
+                static int jmcLog = 0;
+                if (++jmcLog <= 3)
+                    std::cerr << "[JMC] tick/bar: " << *sym << " price=" << *price << "\n" << std::flush;
                 app::system::TradingSystem::instance().pushMarketData(
-                    *sym, *price, vol.value_or(0.0), date.value_or(0));
+                    *sym, *price, vol.value_or(0.0),
+                    date.has_value() ? static_cast<std::int32_t>(*date) : 0);
+            }
         });
 
     m_started = true;
@@ -385,13 +403,13 @@ void JujinMarketConnector::stop()
             bus->unsubscribe(m_watchRequestSubscription);
             m_watchRequestSubscription = foundation::utils::Uuid();
         }
-        if (m_marketTickSubscription) {
-            bus->unsubscribe(m_marketTickSubscription);
-            m_marketTickSubscription = foundation::utils::Uuid();
+        if (m_tradingTickSubscription) {
+            bus->unsubscribe(m_tradingTickSubscription);
+            m_tradingTickSubscription = foundation::utils::Uuid();
         }
-        if (m_marketBarSubscription) {
-            bus->unsubscribe(m_marketBarSubscription);
-            m_marketBarSubscription = foundation::utils::Uuid();
+        if (m_tradingBarSubscription) {
+            bus->unsubscribe(m_tradingBarSubscription);
+            m_tradingBarSubscription = foundation::utils::Uuid();
         }
     }
 
@@ -424,6 +442,12 @@ void JujinMarketConnector::stop()
     std::cout << "[JujinMarketConnector] stopped\n";
 }
 
+std::string JujinMarketConnector::symbolName(const std::string& gmSymbol) const {
+    std::lock_guard<std::mutex> lk(m_symbolNameMutex);
+    auto it = m_symbolNames.find(gmSymbol);
+    return it != m_symbolNames.end() ? it->second : "";
+}
+
 void JujinMarketConnector::enqueueWatchSymbol(const std::string& symbol)
 {
     const std::string normalizedSymbol = toGmMarketSymbol(symbol);
@@ -451,6 +475,41 @@ void JujinMarketConnector::enqueueWatchSymbol(const std::string& symbol)
 
 void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBus)
 {
+    std::cerr << "[JMC] subscription thread started\n" << std::flush;
+
+    // 从数据库 symbol_info 表拉全市场标的（SDK 的 get_instruments 实盘模式不可用）
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+        if (pool.isInitialized()) {
+            auto db = pool.getConnection();
+            if (db && db->isOpen()) {
+                auto result = db->executeQuery(
+                    "SELECT symbol, name FROM symbol_info WHERE asset_class='STOCK' AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol");
+                int rows = static_cast<int>(result.rowCount());
+                std::cerr << "[JMC] DB query returned " << rows << " symbols\n" << std::flush;
+                for (int i = 0; i < rows; ++i) {
+                    const auto& row = result.getRow(i);
+                    std::string sym = row.getString("symbol");
+                    std::string name = row.getString("name");
+                    if (!sym.empty()) {
+                        {
+                            std::lock_guard<std::mutex> lk(m_symbolNameMutex);
+                            m_symbolNames[toGmMarketSymbol(sym)] = name;
+                        }
+                        enqueueWatchSymbol(sym);
+                    }
+                }
+                std::cerr << "[JMC] enqueued " << rows << " instruments, names="
+                          << m_symbolNames.size() << "\n" << std::flush;
+            } else {
+                std::cerr << "[JMC] DB connection failed\n" << std::flush;
+            }
+        } else {
+            std::cerr << "[JMC] DB pool not initialized\n" << std::flush;
+        }
+    }
+
     while (true) {
         std::vector<std::string> batch;
 
@@ -476,12 +535,8 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
             continue;
         }
 
-        if (!marketSessionAllowsSubscriptions()) {
-            continue;
-        }
-
         if (!subscribeSymbolBatch(batch, eventBus)) {
-            std::cerr << "[JMC] " "JujinMarketConnector: failed to subscribe market batch, size=" << static_cast<unsigned long long>(batch.size());
+            std::cerr << "[JMC] subscribe batch failed size=" << batch.size() << "\n" << std::flush;
         }
     }
 }

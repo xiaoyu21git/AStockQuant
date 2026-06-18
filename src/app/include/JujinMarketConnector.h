@@ -58,9 +58,15 @@ private:
     std::condition_variable m_pendingWatchCv;
     std::deque<std::string> m_pendingWatchQueue;
     std::unordered_set<std::string> m_pendingWatchSymbols;
-    size_t m_maxMarketSubscriptions = 32;
+    size_t m_maxMarketSubscriptions = 512;
     size_t m_marketSubscriptionBatchSize = 4;
     foundation::utils::Uuid m_watchRequestSubscription;
-    foundation::utils::Uuid m_marketTickSubscription;
-    foundation::utils::Uuid m_marketBarSubscription;
+    foundation::utils::Uuid m_tradingTickSubscription;
+    foundation::utils::Uuid m_tradingBarSubscription;
+
+    // 标的代码 → 中文名映射
+    mutable std::mutex m_symbolNameMutex;
+    std::unordered_map<std::string, std::string> m_symbolNames;
+public:
+    std::string symbolName(const std::string& gmSymbol) const;
 };

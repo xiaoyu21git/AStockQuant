@@ -40,6 +40,9 @@ public:
     void disconnect() override;
     [[nodiscard]] bool is_connected() const override;
 
+    /// @brief 设置掘金策略 ID（SDK 构造后、connect 前调用）
+    void set_gm_strategy_id(const char* strategy_id);
+
     [[nodiscard]] std::string place_order(
         const char* symbol, int side, int order_type,
         int64_t volume, double price) override;

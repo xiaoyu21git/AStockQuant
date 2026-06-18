@@ -1,20 +1,61 @@
 #include "MarketDataBridge.h"
-#include "../../../app/system/TradingSystem.h"
+#include "Event/EventBus.hpp"
+#include "Event/EventFormat.hpp"
+#include "GlobalEventBusRegistry.h"
+#include "../../../thirdparty/gmsdk/gmapi.h"
 
-#include <QDate>
+#include <QDateTime>
 #include <QDebug>
 #include <QTimer>
 
 namespace bridge {
 
-MarketDataBridge::MarketDataBridge(QObject* parent)
-    : QObject(parent) {}
+MarketDataBridge::MarketDataBridge(QObject* parent) : QObject(parent) {}
 
-// ── 初始化 ──
 void MarketDataBridge::initialize() {
     if (m_initialized) return;
     m_initialized = true;
     m_connected = true;
+
+    auto* bus = engine::get_engine_event_bus();
+    if (bus) {
+        m_tickSub = bus->subscribe("trading.market.tick",
+            [this](const engine::EventFormat& event) {
+                auto sym = event.get<std::string>("symbol");
+                if (!sym.has_value()) return;
+                QString key = QString::fromStdString(*sym);
+
+                QVariantMap snap;
+                snap["symbol"]  = key;
+                snap["price"]   = event.get<double>("price").value_or(0.0);
+                snap["open"]    = event.get<double>("open").value_or(0.0);
+                snap["high"]    = event.get<double>("high").value_or(0.0);
+                snap["low"]     = event.get<double>("low").value_or(0.0);
+                snap["volume"]  = event.get<double>("volume").value_or(0.0);
+                snap["source"]  = QStringLiteral("掘金实时");
+                snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+                QVariantList bids, asks;
+                auto bp = event.get<std::vector<double>>("bid_prices");
+                auto bv = event.get<std::vector<double>>("bid_volumes");
+                if (bp.has_value() && bv.has_value())
+                    for (size_t i = 0; i < bp->size() && i < bv->size(); ++i)
+                        bids.append(QVariantMap{{"price", (*bp)[i]}, {"volume", static_cast<qint64>((*bv)[i])}});
+                auto ap = event.get<std::vector<double>>("ask_prices");
+                auto av = event.get<std::vector<double>>("ask_volumes");
+                if (ap.has_value() && av.has_value())
+                    for (size_t i = 0; i < ap->size() && i < av->size(); ++i)
+                        asks.append(QVariantMap{{"price", (*ap)[i]}, {"volume", static_cast<qint64>((*av)[i])}});
+                snap["depthSnapshot"] = QVariantMap{{"bids", bids}, {"asks", asks}};
+
+                m_marketSnapshots[key] = snap;
+                static int mdLog = 0;
+                if (++mdLog <= 3)
+                    qDebug() << "[MktBridge] tick snapshot:" << key << snap["price"].toDouble();
+                emit marketSnapshotsChanged();
+            });
+    }
+
     emit initializedChanged();
     emit connectedChanged();
 }
@@ -23,107 +64,122 @@ void MarketDataBridge::initializeAsync() {
     QTimer::singleShot(0, this, [this]() { initialize(); });
 }
 
-// ── 自选股 ──
 void MarketDataBridge::activateDefaultWatchlist() {
-    if (m_watchlist.isEmpty()) {
-        // MVP 默认自选列表
-        m_watchlist = QStringList{
-            "000001.SZ", "600000.SH", "600519.SH",
-            "000858.SZ", "601318.SH", "000333.SZ"
-        };
-    }
+    if (m_watchlist.isEmpty())
+        m_watchlist = QStringList{"000001.SZ", "600000.SH", "600519.SH", "000858.SZ", "601318.SH", "000333.SZ"};
     m_primarySymbol = m_watchlist.first();
-    for (const auto& sym : m_watchlist) {
-        m_marketSnapshots[sym] = buildMockSnapshot(sym);
-    }
     emit primarySymbolChanged();
-    emit marketSnapshotsChanged();
 }
 
 void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     if (symbol.isEmpty()) return;
+
+    // 通过 SDK 全局函数直接获取最新快照（收盘后也能查到）
     if (!m_marketSnapshots.contains(symbol)) {
-        m_marketSnapshots[symbol] = buildMockSnapshot(symbol);
-        emit marketSnapshotsChanged();
+        QVariantMap snap = queryLastTick(symbol);
+        if (!snap.isEmpty()) {
+            m_marketSnapshots[symbol] = snap;
+            emit marketSnapshotsChanged();
+        }
+    }
+
+    // 同时通过 EventBus 通知 JMC 订阅实时推送
+    auto* bus = engine::get_engine_event_bus();
+    if (bus && bus->is_running()) {
+        engine::EventFormat event = engine::EventFormat::create_from_strings(
+            "market.watch.ensure", "MarketDataBridge", 0);
+        event.set("symbol", symbol.toStdString());
+        bus->publish(event, 0);
     }
 }
 
-// ── 标的解析 ──
-QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
-    if (m_marketSnapshots.contains(symbol)) {
-        return m_marketSnapshots[symbol].toMap();
-    }
-    return buildMockSnapshot(symbol);
-}
-
-// ── MVP 模拟行情快照 ──
-QVariantMap MarketDataBridge::buildMockSnapshot(const QString& symbol) const {
+QVariantMap MarketDataBridge::queryLastTick(const QString& symbol) const {
     QVariantMap snap;
-    snap["symbol"]  = symbol;
-    snap["name"]    = symbol; // MVP: 无真实名称映射
-    snap["price"]   = 10.0;
-    snap["change"]  = 0.0;
-    snap["preClose"] = 10.0;
-    snap["source"]  = QStringLiteral("模拟数据");
+
+    QString s = symbol.toUpper();
+    int dot = s.indexOf('.');
+    if (dot <= 0) return snap;
+    QString code = s.left(dot), exchange = s.mid(dot + 1);
+    QString gmSym;
+    if (exchange == "SH") gmSym = "SHSE." + code;
+    else if (exchange == "SZ") gmSym = "SZSE." + code;
+    else if (exchange == "BJ") gmSym = "BSE." + code;
+    else return snap;
+
+    auto gs = gmSym.toStdString();
+
+    // 开盘时用 current()，收盘/非交易日回退 last_tick()
+    auto* arr = ::current(gs.c_str(), false);
+    const char* source = "实时快照";
+    if (!arr || arr->status() != 0 || arr->count() == 0) {
+        if (arr) arr->release();
+        arr = ::last_tick(gs.c_str(), false);
+        source = "盘后快照";
+    }
+    if (!arr || arr->status() != 0 || arr->count() == 0) {
+        if (arr) arr->release();
+        return snap;
+    }
+
+    auto& tick = arr->at(0);
+    snap["symbol"]    = symbol;
+    snap["price"]     = static_cast<double>(tick.price);
+    snap["open"]      = static_cast<double>(tick.open);
+    snap["high"]      = static_cast<double>(tick.high);
+    snap["low"]       = static_cast<double>(tick.low);
+    snap["volume"]    = tick.cum_volume;
+    snap["source"]    = QString::fromLatin1(source);
     snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
 
-    // 模拟盘口
-    QVariantList bids;
-    QVariantMap bid1;
-    bid1["price"] = 9.99; bid1["volume"] = 10000;
-    bids.append(bid1);
-    QVariantList asks;
-    QVariantMap ask1;
-    ask1["price"] = 10.01; ask1["volume"] = 10000;
-    asks.append(ask1);
-
-    QVariantMap depth;
-    depth["bids"] = bids;
-    depth["asks"] = asks;
-    snap["depthSnapshot"] = depth;
-    snap["recentTicks"] = QVariantList();
+    QVariantList bids, asks;
+    for (int i = 0; i < DEPTH_OF_QUOTE && i < 5; ++i) {
+        auto& q = tick.quotes[i];
+        if (q.bid_price > 0)
+            bids.append(QVariantMap{{"price", static_cast<double>(q.bid_price)},
+                                    {"volume", static_cast<qint64>(q.bid_volume)}});
+        if (q.ask_price > 0)
+            asks.append(QVariantMap{{"price", static_cast<double>(q.ask_price)},
+                                    {"volume", static_cast<qint64>(q.ask_volume)}});
+    }
+    snap["depthSnapshot"] = QVariantMap{{"bids", bids}, {"asks", asks}};
+    arr->release();
     return snap;
 }
 
-// ── 历史数据 ──
-void MarketDataBridge::loadBars(const QStringList& symbols,
-                                 const QString& startDate,
-                                 const QString& endDate) {
-    Q_UNUSED(symbols); Q_UNUSED(startDate); Q_UNUSED(endDate);
-    emit barsChanged();
+QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
+    if (m_marketSnapshots.contains(symbol))
+        return m_marketSnapshots[symbol].toMap();
+    QVariantMap empty;
+    empty["symbol"] = symbol;
+    empty["price"]  = 0.0;
+    empty["source"] = QStringLiteral("等待行情");
+    empty["depthSnapshot"] = QVariantMap{{"bids", QVariantList()}, {"asks", QVariantList()}};
+    return empty;
 }
 
-QVariantMap MarketDataBridge::getCrossSection(const QString& field,
-                                                const QString& date,
-                                                const QStringList& symbols) {
-    Q_UNUSED(field); Q_UNUSED(date); Q_UNUSED(symbols);
-    return {};
+void MarketDataBridge::loadBars(const QStringList& s, const QString& sd, const QString& ed) {
+    Q_UNUSED(s); Q_UNUSED(sd); Q_UNUSED(ed); emit barsChanged();
 }
 
-QVariantList MarketDataBridge::getIndexConstituents(const QString& indexSymbol,
-                                                      const QString& snapshotDate) {
-    Q_UNUSED(indexSymbol); Q_UNUSED(snapshotDate);
-    return {};
+QVariantMap MarketDataBridge::getCrossSection(const QString& a, const QString& b, const QStringList& c) {
+    Q_UNUSED(a); Q_UNUSED(b); Q_UNUSED(c); return {};
 }
 
-// ── 交易日 ──
+QVariantList MarketDataBridge::getIndexConstituents(const QString& a, const QString& b) {
+    Q_UNUSED(a); Q_UNUSED(b); return {};
+}
+
 QString MarketDataBridge::getNextTradingDay(const QString& anchorDate) {
     QDate date = QDate::fromString(anchorDate, "yyyy-MM-dd");
     if (!date.isValid()) date = QDate::currentDate();
-    // 简单跳过周末
     do { date = date.addDays(1); } while (date.dayOfWeek() > 5);
     return date.toString("yyyy-MM-dd");
 }
 
-// ── 实时订阅 ──
 void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
-    for (const auto& sym : symbols) {
-        ++m_subRefCount[sym];
-    }
+    for (const auto& sym : symbols) ++m_subRefCount[sym];
 }
 
-void MarketDataBridge::unsubscribeRealtime() {
-    m_subRefCount.clear();
-}
+void MarketDataBridge::unsubscribeRealtime() { m_subRefCount.clear(); }
 
 } // namespace bridge

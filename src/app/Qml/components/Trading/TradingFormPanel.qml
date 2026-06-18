@@ -45,6 +45,7 @@ Rectangle {
     property string lastPublishedSymbolContext: ""
 
     property string stockCode: "000001"
+    property string stockDisplayName: ""
     property string stockShares: "100"
     property string stockPriceType: "limit"
     property string stockPrice: ""
@@ -1575,10 +1576,10 @@ Rectangle {
                             }
 
                             TextField {
+                                id: stockCodeField
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: compactInputHeight
-                                text: root.stockCode
-                                placeholderText: "如 000001"
+                                placeholderText: "输代码/名称搜索"
                                 color: "#f8fafc"
                                 font.pixelSize: compactInputFont
                                 horizontalAlignment: TextInput.AlignHCenter
@@ -1587,7 +1588,18 @@ Rectangle {
                                 bottomPadding: compactInputVerticalPadding
                                 leftPadding: compactInputHorizontalPadding
                                 rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.stockCode = text
+                                property bool suppressTextChange: false
+                                text: root.stockDisplayName || root.stockCode
+                                onTextChanged: {
+                                    if (suppressTextChange) return
+                                    var t = text.trim()
+                                    root.stockDisplayName = ""
+                                    root.stockCode = t
+                                    symbolSearch.search(t)
+                                    Qt.callLater(function() {
+                                        searchPopup.visible = symbolSearch.count > 0
+                                    })
+                                }
                                 background: Rectangle {
                                     radius: compactInputRadius
                                     color: "#0f2238"
@@ -2299,6 +2311,66 @@ Rectangle {
             text: root.toastMessage
             color: root.toastError ? "#ffd5d5" : "#b6feff"
             font.pixelSize: compactMetaFont
+        }
+    }
+
+    Bridge.SymbolSearchModel { id: symbolSearch; Component.onCompleted: init() }
+
+    Popup {
+        id: searchPopup
+        parent: Overlay.overlay
+        visible: false
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        padding: 2
+        opacity: 0.92
+        background: Rectangle { radius: 6; color: "#080E1A"; border.color: "#38BDF8"; border.width: 1.5 }
+
+        onVisibleChanged: {
+            if (visible) {
+                var pt = stockCodeField.mapToItem(null, 0, stockCodeField.height)
+                x = pt.x
+                y = pt.y
+                width = Math.max(220, stockCodeField.width)
+                var rows = Math.min(symbolSearch.count, 3)
+                height = rows > 0 ? rows * 34 + 8 : 40
+            }
+        }
+
+        ListView {
+            id: searchList
+            anchors.fill: parent; anchors.margins: 2
+            model: symbolSearch
+            clip: true; spacing: 1
+            delegate: Rectangle {
+                id: row
+                width: searchList.width; height: 34
+                color: rowMa.containsMouse ? "#1E3A5F" : "transparent"; radius: 4
+                property var item: symbolSearch.getRow(index)
+                Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    anchors.left: parent.left; anchors.leftMargin: 8
+                    text: {
+                        var it = row.item || {}
+                        var sym = it.symbol || ""; var nm = it.secName || ""
+                        var dot = sym.indexOf('.'); var code = dot > 0 ? sym.substring(0, dot) : sym
+                        return code + "  " + nm
+                    }
+                    color: "#E2E8F0"; font.pixelSize: 12
+                }
+                MouseArea {
+                    id: rowMa
+                    anchors.fill: parent; hoverEnabled: true
+                    onClicked: {
+                        var it = row.item || {}
+                        root.stockCode = it.symbol || ""
+                        root.stockDisplayName = it.secName || ""
+                        stockCodeField.suppressTextChange = true
+                        stockCodeField.text = root.stockDisplayName
+                        stockCodeField.suppressTextChange = false
+                        searchPopup.visible = false
+                    }
+                }
+            }
         }
     }
 }

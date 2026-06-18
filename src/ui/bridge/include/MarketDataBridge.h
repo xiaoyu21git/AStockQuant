@@ -11,6 +11,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QHash>
+#include "foundation/Utils/Uuid.h"
 
 namespace bridge {
 
@@ -68,7 +69,7 @@ signals:
     void errorOccurred(const QString& message);
 
 private:
-    QVariantMap buildMockSnapshot(const QString& symbol) const;
+    QVariantMap queryLastTick(const QString& symbol) const;
 
     bool m_initialized{false};
     bool m_connected{false};
@@ -77,6 +78,7 @@ private:
     QStringList m_watchlist;
     QVariantList m_bars;
     QHash<QString, int> m_subRefCount;
+    foundation::utils::Uuid m_tickSub;
 };
 
 } // namespace bridge

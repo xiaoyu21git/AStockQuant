@@ -35,6 +35,7 @@
     TradingFormPanelHelper.cpp
     UiLifecycleCoordinator.cpp
     StrategyPerformanceModel.cpp
+    SymbolSearchModel.cpp
     JujinApi.cpp
     GmStrategySession.cpp
     TradingCommandQueue.cpp

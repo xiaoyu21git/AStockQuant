@@ -1,6 +1,10 @@
 #include "TradingBridges.h"
+#include "TradingConnectionConfigService.h"
+#include "TradingRuntimeStatusService.h"
+#include "JujinApi.h"
 #include "../../../app/system/TradingSystem.h"
 #include "../../../app/adapters/JujinBrokerGateway.h"
+#include "../../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
 #include "foundation/log/logging.hpp"
 
@@ -68,6 +72,37 @@ void TradeExecutionBridge::ensureInitialized() {
         sys.setBrokerGateway(std::move(gw));
         INTERNAL_INFO_STREAM << "[Live] Jujin gateway connected";
         sys.initialize();
+
+        // 从 SDK 同步账户/持仓到 PositionAccountEngine（QML 从这里读数据）
+        if (auto* api = engine::get_shared_jujin_api()) {
+            auto acc = api->query_account();
+            std::cerr << "[TradingBridge] SDK account: total=" << acc.total_asset
+                      << " available=" << acc.available << " mv=" << acc.market_value << "\n";
+            domain::trading::AccountSnapshot snap;
+            snap.setAccountId(cfg.value("accountId",
+                               cfg.value("liveAccountId",
+                               cfg.value("simAccountId"))).toString().toStdString());
+            snap.setAvailableCash(acc.available);
+            snap.setTotalAsset(acc.total_asset);
+            snap.setMarketValue(acc.market_value);
+            if (auto* pe = sys.positionEngine()) {
+                pe->applyAccountEvent(snap);
+                std::cerr << "[TradingBridge] account synced to PositionEngine\n";
+            }
+            for (auto& p : api->query_positions()) {
+                domain::trading::Position pos;
+                pos.setSymbol(p.symbol);
+                pos.setLastPrice(p.price);
+                pos.setQuantity(p.quantity);
+                pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
+                                            : domain::trading::PositionSide::Short);
+                if (auto* pe = sys.positionEngine()) {
+                    pe->applyPositionEvent(p.symbol, pos);
+                }
+            }
+        }
+
+        bridge::TradingRuntimeStatusService::instance()->refresh();
     }
 
     // ── 注册引擎回调：将领域层成交/状态事件转发到 QML 信号 ──
@@ -110,7 +145,14 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     ensureInitialized();
 
     domain::trading::TradeOrder order;
-    order.setStrategyId(orderMap.value("strategyId").toString().toStdString());
+    QString strategyId = orderMap.value("strategyId").toString().trimmed();
+    if (strategyId.isEmpty()) {
+        // QML 没传就从底层配置服务取 boundStrategyId
+        strategyId = TradingConnectionConfigService::instance()
+                         ->currentConfiguration()
+                         .value("boundStrategyId").toString().trimmed();
+    }
+    order.setStrategyId(strategyId.toStdString());
     order.setSymbol(orderMap.value("symbol").toString().toStdString());
     order.setPrice(orderMap.value("price").toDouble());
     order.setQuantity(static_cast<std::int64_t>(orderMap.value("quantity").toDouble()));
@@ -278,8 +320,8 @@ bool PositionAccountBridge::initialized() const { return m_initialized; }
 
 void PositionAccountBridge::initialize() {
     if (m_initialized) return;
-    auto& sys = app::system::TradingSystem::instance();
-    if (!sys.initialized()) sys.initialize();
+    // 不在此处调 TradingSystem::initialize()——gateway 可能还没设置
+    // TradeExecutionBridge::ensureInitialized() 是唯一正确的初始化入口
     m_initialized = true;
     emit initializedChanged();
     refresh();
@@ -377,8 +419,7 @@ double RiskControlBridge::varBudgetAmount() const { return m_varBudget; }
 double RiskControlBridge::estimatedVarAmount() const { return m_estimatedVar; }
 
 void RiskControlBridge::initializeAsync() {
-    auto& sys = app::system::TradingSystem::instance();
-    if (!sys.initialized()) sys.initialize();
+    // 不在此处调 TradingSystem::initialize()——gateway 可能还没设置
     refresh();
     m_timer.start();
 }

@@ -383,13 +383,15 @@ bool AppBootstrap::initServices()
 bool AppBootstrap::initDatabase()
 {
     std::cout << "[AppBootstrap] Initializing database...\n";
-    
-    // 这里可以添加数据库连接初始化
-    // 当前项目保留按需初始化数据库入口
-    // 如果需要显式初始化，可以在这里添加
-    
-    std::cout << "[AppBootstrap] Database initialization deferred to service layer\n";
-    return true; // 数据库由 NativeMySQLConnectionPool / 各 Repository 按需初始化
+
+    // 提前初始化原生 MySQL 连接池，避免 QML 层首次查询时等待
+    auto& dbMgr = astock::database::DatabaseConnectionManager::instance();
+    auto conn = dbMgr.getNativeConnection();
+    if (conn) {
+        std::cout << "[AppBootstrap] Native MySQL pool initialized\n";
+    }
+
+    return true;
 }
 
 bool AppBootstrap::initQmlEngine()

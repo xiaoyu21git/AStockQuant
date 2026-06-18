@@ -24,6 +24,7 @@
 #include "TradingFormPanelHelper.h"
 #include "UiLifecycleCoordinator.h"
 #include "StrategyPerformanceModel.h"
+#include "SymbolSearchModel.h"
 #include "RuleTemplateDetailHelper.h"
 
 namespace wang{
@@ -137,7 +138,7 @@ namespace wang{
        qmlRegisterSingletonType<bridge::TradingConnectionConfigService>(
           url, 1, 0, "TradingConnectionConfigService",
           [](QQmlEngine*, QJSEngine*) -> QObject* {
-             return new bridge::TradingConnectionConfigService();
+             return bridge::TradingConnectionConfigService::instance();
           });
 
        qmlRegisterSingletonType<bridge::TradingRuntimeStatusService>(
@@ -172,6 +173,9 @@ namespace wang{
 
        qmlRegisterType<StrategyPerformanceModel>(
           url, 1, 0, "StrategyPerformanceModel");
+
+       qmlRegisterType<SymbolSearchModel>(
+          url, 1, 0, "SymbolSearchModel");
 
        qmlRegisterType<RuleTemplateDetailHelper>(
           url, 1, 0, "RuleTemplateDetailHelper");

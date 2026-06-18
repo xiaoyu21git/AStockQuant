@@ -27,6 +27,7 @@ Rectangle {
     property string actionFeedbackMessage: ""
     property bool actionFeedbackError: false
     property var recentStartRequests: ({})
+    property var localStatusOverrides: ({})     // {strategyId: "启动中"|"停止中"} QML 本地即时状态
     property bool showBacktestWorkbench: false
     property bool showPerformance: false
     property string backtestWorkbenchStatusText: ""
@@ -92,6 +93,18 @@ Rectangle {
 
                 strategyService.strategiesChanged.connect(function() {
                     console.log("策略数据已更新，刷新列表")
+                    // 清除 QML 本地即时状态，让 C++ 真实状态透出
+                    var overrides = localStatusOverrides
+                    var changed = false
+                    for (var i = 0; i < strategyViewModel.count; ++i) {
+                        var row = strategyViewModel.getRow(i)
+                        var sid = row ? (row.strategyId || "") : ""
+                        if (sid && overrides.hasOwnProperty(sid) && row.displayStatus) {
+                            delete overrides[sid]
+                            changed = true
+                        }
+                    }
+                    if (changed) localStatusOverrides = overrides
                     statusRefreshCounter++
                     rebuildStrategyVisibleModel()
                     syncSelectedStrategy()
@@ -486,8 +499,18 @@ Rectangle {
             return
         }
 
+        // 先切 QML 按钮状态，不等待 C++
+        var overrides = localStatusOverrides
+        overrides[strategyId] = "启动中"
+        localStatusOverrides = overrides
+        statusRefreshCounter = statusRefreshCounter + 1
+
         if (strategyService && strategyService.start && !strategyService.start(strategyId)) {
             clearStartRequest(strategyId)
+            var failOverrides = localStatusOverrides
+            delete failOverrides[strategyId]
+            localStatusOverrides = failOverrides
+            statusRefreshCounter = statusRefreshCounter + 1
             showActionFeedback("策略“" + strategyName + "”已绑定，但激活失败", true)
             return
         }
@@ -503,6 +526,11 @@ Rectangle {
             console.log("StrategyLibraryPage: 停止失败，缺少策略ID")
             return
         }
+
+        var overrides = localStatusOverrides
+        overrides[strategyId] = "停止中"
+        localStatusOverrides = overrides
+        statusRefreshCounter = statusRefreshCounter + 1
 
         if (strategyService && strategyService.stop) {
             strategyService.stop(strategyId)
@@ -627,7 +655,7 @@ Rectangle {
 
         var configSymbols = getConfigurationSymbols(config)
         if (configSymbols.length === 0) {
-            return "未配置"
+            return "全市场"   // SDK 自动订阅全市场，无需手动配置 symbols
         }
 
         return "已配置"
@@ -1413,6 +1441,9 @@ Rectangle {
                             description: selectedStrategy ? strategyLibraryPage.buildStrategyCardDescription(selectedStrategy) : "暂无描述"
                             status: {
                                 strategyLibraryPage.statusRefreshCounter
+                                var sid = strategyLibraryPage.selectedStrategyId
+                                var local = strategyLibraryPage.localStatusOverrides[sid] || ""
+                                if (local) return local
                                 var s = strategyLibraryPage.getSelectedStrategySummary()
                                 return (s && s.displayStatus) || "已停止"
                             }

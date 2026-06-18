@@ -5,6 +5,7 @@ target_sources(foundation PRIVATE
     config/ConfigManager.cpp
     config/JsonConfigProvider.cpp
     config/YamlConfigProvider.cpp
+    config/TradingConfig.cpp
     core/exception.cpp
     Fs/Fs.cpp
     Fs/file.cpp

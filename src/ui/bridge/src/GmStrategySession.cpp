@@ -1293,6 +1293,12 @@ public:
         }
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(tick->symbol));
+        // 从 UTC 时间戳推导交易日 (YYYYMMDD int32)
+        const auto tickTime = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(tick->created_at), Qt::UTC)
+                                  .toLocalTime();
+        const int64_t tradingDay = static_cast<int64_t>(tickTime.date().year()) * 10000
+                                 + static_cast<int64_t>(tickTime.date().month()) * 100
+                                 + static_cast<int64_t>(tickTime.date().day());
         std::vector<double> bidPrices;
         std::vector<double> bidVolumes;
         std::vector<double> askPrices;
@@ -1329,6 +1335,8 @@ public:
         event.set("cum_position", static_cast<int64_t>(tick->cum_position));
         event.set("last_amount", tick->last_amount);
         event.set("last_volume", static_cast<int64_t>(tick->last_volume));
+        event.set("volume", static_cast<double>(tick->last_volume));   // 统一字段：瞬时成交量
+        event.set("tradingDay", tradingDay);                            // 统一字段：交易日
         event.set("trade_type", static_cast<int64_t>(tick->trade_type));
         if (!bidPrices.empty()) {
             event.set("bid_price", bidPrices.front());
@@ -1344,6 +1352,10 @@ public:
         }
         event.set("created_at", timestamp_to_string(static_cast<long long>(tick->created_at)));
         eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+        static int tickLogCount = 0;
+        if (++tickLogCount <= 5)
+            std::cerr << "[GmSession] on_tick #" << tickLogCount << " sym=" << symbol
+                      << " price=" << tick->price << "\n" << std::flush;
     }
 
     void on_bar(GmBar* bar) override
@@ -1373,6 +1385,13 @@ public:
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(bar->symbol));
 
+        // 从 bar 起始时间 (UTC epoch) 推导交易日
+        const auto barTime = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(bar->bob), Qt::UTC)
+                                 .toLocalTime();
+        const int64_t tradingDay = static_cast<int64_t>(barTime.date().year()) * 10000
+                                 + static_cast<int64_t>(barTime.date().month()) * 100
+                                 + static_cast<int64_t>(barTime.date().day());
+
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_BAR, "TRADING_RUNTIME", 0);
         event.set("session_id", sessionId);
         event.set("account_id", accountId);
@@ -1386,6 +1405,7 @@ public:
         event.set("low", static_cast<double>(bar->low));
         event.set("volume", bar->volume);
         event.set("amount", bar->amount);
+        event.set("tradingDay", tradingDay);                     // 统一字段：交易日
         event.set("bob", bar->bob);
         event.set("eob", bar->eob);
         eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
@@ -2054,7 +2074,12 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                 subscriptions_.push_back(key);
             }
             if (strategy_) {
-                strategy_->subscribe(gm_symbol_from_internal(command.symbol).c_str(), frequency.c_str(), false);
+                std::string gmSym = gm_symbol_from_internal(command.symbol);
+                int ret = strategy_->subscribe(gmSym.c_str(), frequency.c_str(), false);
+                static int subLogCount = 0;
+                if (++subLogCount <= 5)
+                    std::cerr << "[GmSession] subscribe(" << gmSym << "," << frequency
+                              << ") ret=" << ret << " subsTotal=" << subscriptions_.size() << "\n" << std::flush;
             }
             publish_event("trading.subscription.changed", &command);
         }
@@ -2437,17 +2462,32 @@ void GmStrategySession::mark_runtime_stopped_locked(const std::string& error_mes
 void GmStrategySession::sync_initial_state_locked()
 {
     if (!strategy_) {
+        std::cerr << "[GmSession] sync_initial_state: strategy_ is null\n";
         return;
     }
 
     std::string error_message;
-    consume_array(strategy_->get_cash(config_.account_id.c_str()), &error_message, [this](const GmCash& cash) {
+    auto* cashArr = strategy_->get_cash(config_.account_id.c_str());
+    std::cerr << "[GmSession] get_cash(" << config_.account_id << ") -> "
+              << (cashArr ? std::to_string(cashArr->count()) + " records, status=" + std::to_string(cashArr->status()) : "null") << "\n";
+    consume_array(cashArr, &error_message, [this](const GmCash& cash) {
         cache_account_locked(to_runtime_account(cash));
     });
+    if (!error_message.empty()) {
+        std::cerr << "[GmSession] get_cash error: " << error_message << "\n";
+    }
 
-    consume_array(strategy_->get_position(config_.account_id.c_str()), &error_message, [this](const GmPosition& position) {
+    auto* posArr = strategy_->get_position(config_.account_id.c_str());
+    std::cerr << "[GmSession] get_position(" << config_.account_id << ") -> "
+              << (posArr ? std::to_string(posArr->count()) + " records, status=" + std::to_string(posArr->status()) : "null") << "\n";
+    consume_array(posArr, &error_message, [this](const GmPosition& position) {
         cache_position_locked(to_runtime_position(position));
     });
+    if (!error_message.empty()) {
+        std::cerr << "[GmSession] get_position error: " << error_message << "\n";
+    }
+    std::cerr << "[GmSession] sync done: account=" << (has_account_snapshot_ ? "yes" : "no")
+              << " positions=" << positions_.size() << "\n";
 
     consume_array(strategy_->get_orders(config_.account_id.c_str()), &error_message, [this](const GmOrder& order) {
         cache_runtime_order_alias(order, order_aliases_, order_contexts_);

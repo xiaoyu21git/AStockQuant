@@ -62,6 +62,7 @@ set(BRIDGE_HEADERS
     include/TradingFormPanelHelper.h
     include/UiLifecycleCoordinator.h
     include/StrategyPerformanceModel.h
+    include/SymbolSearchModel.h
     include/RuleTemplateDetailHelper.h
 )
 

@@ -2400,6 +2400,10 @@ Item {
     }
 
     function submitTrade(mode, action, payload) {
+        if (!root.boundStrategyId) {
+            showPageToast("未绑定策略，请先在策略库中启动策略", true)
+            return
+        }
         var realBridgeAction = isBridgeManagedTrade(mode, action)
         var quote
         var requestSymbol
@@ -2500,6 +2504,7 @@ Item {
             }
 
             var bridgeRequest = {
+                strategyId: root.boundStrategyId,
                 symbol: requestSymbol,
                 side: requestSide,
                 price: requestPrice,

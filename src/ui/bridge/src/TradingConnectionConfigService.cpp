@@ -16,6 +16,13 @@ namespace bridge {
 TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
     : QObject(parent) {
     m_configFilePath = resolveConfigFilePath();
+    m_currentConfig = readConfigFile();
+    if (m_currentConfig.isEmpty()) {
+        m_currentConfig = defaultConfiguration();
+    }
+    m_initialized = true;
+    qDebug() << "[TradingConnectionConfig] created, boundStrategyId ="
+             << m_currentConfig.value("boundStrategyId").toString();
 }
 
 QVariantMap TradingConnectionConfigService::currentConfiguration() const {
@@ -38,6 +45,16 @@ QVariantMap TradingConnectionConfigService::loadConfiguration() {
         m_currentConfig = defaultConfiguration();
     }
     m_initialized = true;
+
+    qDebug() << "[TradingConnectionConfig] loaded config:"
+             << "\n  boundStrategyId =" << m_currentConfig.value("boundStrategyId").toString()
+             << "\n  gmStrategyId   =" << m_currentConfig.value("gmStrategyId").toString()
+             << "\n  strategyId     =" << m_currentConfig.value("strategyId").toString()
+             << "\n  runtimeStrategyId =" << m_currentConfig.value("runtimeStrategyId").toString()
+             << "\n  accountId      =" << m_currentConfig.value("accountId").toString()
+             << "\n  token          =" << m_currentConfig.value("token").toString().left(8) + "..."
+             << "\n  boundStrategies count =" << m_currentConfig.value("boundStrategies").toList().size();
+
     emit currentConfigurationChanged();
     return m_currentConfig;
 }

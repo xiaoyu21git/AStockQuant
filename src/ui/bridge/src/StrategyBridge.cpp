@@ -592,14 +592,8 @@ bool StrategyBridge::start(const QString& strategyId)
 
     INTERNAL_INFO_STREAM << "[Live] start strategy: " << repositoryId.toStdString();
 
-    // 即时更新内存状态但不立即 emit strategiesChanged
-    // （避免在 QML 点击信号处理器内嵌套触发 ListView delegate 销毁/重建导致 QHash 迭代器崩溃）
-    m_runtimeStatus[repositoryId] = QStringLiteral("启动中");
-    if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("启动中"));
-    // 延迟到事件循环下个迭代 emit，避免嵌套信号处理
-    QMetaObject::invokeMethod(this, [this]() {
-        emit strategiesChanged();
-    }, Qt::QueuedConnection);
+    // QML 侧 startStrategyFromCard 已通过 localStatusOverrides 直接切按钮为"启动中"，
+    // C++ 不设中间态，等 worker 完成后 emit strategiesChanged 切换到"运行中"
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
 
     // ── 异步执行引擎创建（工作线程：MySQL 查询 → 启动实盘循环）──

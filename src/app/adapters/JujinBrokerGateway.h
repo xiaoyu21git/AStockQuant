@@ -1,12 +1,12 @@
 #pragma once
 // JujinBrokerGateway — 掘金券商网关 (纯 C++, 零 Qt)
-// 实现 IBrokerGatewayEx 接口, 内部使用 JujinSession 封装 SDK
+// 复用 JMC 已创建的 JujinApi（共享 GmStrategySession），不重复建 SDK 实例
 
 #include "../../domain/trading/IBrokerGateway.h"
-#include "JujinSession.h"
 
-#include <memory>
 #include <string>
+
+namespace thirdparty { class JujinApi; }
 
 namespace app::adapters {
 
@@ -15,7 +15,6 @@ public:
     JujinBrokerGateway();
     ~JujinBrokerGateway() override;
 
-    // ── IBrokerGateway ──
     bool connect(const std::string& configJson) override;
     void disconnect() override;
     bool isConnected() const override;
@@ -35,7 +34,6 @@ public:
     void setErrorCallback(domain::trading::ErrorCallback callback) override;
     std::string lastError() const override;
 
-    // ── IBrokerGatewayEx ──
     void submitAlgoOrFail(const domain::trading::AlgoOrderRequest& request,
                           domain::trading::OrderCallback onResult) override;
     void submitAlgoOrder(const domain::trading::AlgoOrderRequest& request,
@@ -47,7 +45,7 @@ public:
                      domain::trading::TradeCallback onResult) override;
 
 private:
-    std::unique_ptr<JujinSession> m_session;
+    thirdparty::JujinApi* m_api = nullptr;  // 共享实例，不持有所有权
     mutable std::string m_lastError;
 };
 

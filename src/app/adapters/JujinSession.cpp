@@ -136,6 +136,7 @@ bool JujinSession::initialize(const char* token, const char* account_id) {
     }
     m_token = token;
     m_account_id = account_id;
+
     try {
         m_strategy = std::make_unique<Strategy>(token, "", kSdkModeLive);
     } catch (...) {
@@ -143,6 +144,13 @@ bool JujinSession::initialize(const char* token, const char* account_id) {
         return false;
     }
     return true;
+}
+
+void JujinSession::set_gm_strategy_id(const char* strategy_id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_strategy && strategy_id && std::strlen(strategy_id) > 0) {
+        m_strategy->set_strategy_id(strategy_id);
+    }
 }
 
 bool JujinSession::connect() {
