@@ -269,6 +269,7 @@ FactorViewModel* FactorService::getViewModel()
     if (!m_viewModel) {
         m_viewModel = new FactorViewModel(this);
     }
+    ensureViewModelPopulated();
     return m_viewModel;
 }
 

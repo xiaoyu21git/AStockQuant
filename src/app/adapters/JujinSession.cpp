@@ -151,7 +151,11 @@ bool JujinSession::connect() {
         m_last_error = "not initialized";
         return false;
     }
-    m_connected = 1;
+    // SDK::run() 是阻塞调用，后台线程执行
+    m_runFuture = std::async(std::launch::async, [this]() {
+        m_strategy->run();
+    });
+    m_connected = 1;  // SDK 已启动（后台线程运行），标记为已连接
     return true;
 }
 
@@ -166,17 +170,21 @@ bool JujinSession::is_connected() const {
     return m_connected != 0 && m_strategy != nullptr;
 }
 
+void JujinSession::ensureRun() {
+    // SDK::run() 在 connect() 中已通过 std::async 启动，m_connected 已设为 1
+    // 此处仅做防御性检查，不阻塞等待（run() 是事件循环永不返回）
+    if (m_connected == 0 && m_strategy && m_runFuture.valid()) {
+        // 异常情况：connect() 没设 m_connected，补设并记录
+        m_connected = 1;
+    }
+}
+
 std::string JujinSession::place_order(
     const char* symbol, int side, int order_type,
     int64_t volume, double price) {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_strategy) { m_last_error = "not initialized"; return {}; }
-    if (m_connected == 0) {
-        // 懒启动 SDK
-        int ret = m_strategy->run();
-        if (ret != 0) { m_last_error = "run() failed"; return {}; }
-        m_connected = 1;
-    }
+    ensureRun();
 
     int sdk_side = (side == kSdkOrderSideBuy) ? kSdkOrderSideBuy : kSdkOrderSideSell;
     int sdk_type = (order_type == kSdkOrderTypeMarket) ? kSdkOrderTypeMarket : kSdkOrderTypeLimit;
@@ -210,6 +218,7 @@ JujinSession::query_orders() {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<std::unique_ptr<domain::trading::OrderRecord>> result;
     if (!m_strategy) return result;
+    ensureRun();
 
     auto* arr = m_strategy->get_orders();
     if (!arr || arr->status() != 0) return result;
@@ -225,6 +234,7 @@ JujinSession::query_execution_reports() {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<std::unique_ptr<domain::trading::ExecutionReport>> result;
     if (!m_strategy) return result;
+    ensureRun();
 
     auto* arr = m_strategy->get_execution_reports();
     if (!arr || arr->status() != 0) return result;
@@ -240,6 +250,7 @@ JujinSession::query_positions() {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<std::unique_ptr<domain::trading::PositionInfo>> result;
     if (!m_strategy) return result;
+    ensureRun();
 
     auto* arr = m_strategy->get_position();
     if (!arr || arr->status() != 0) return result;
@@ -255,6 +266,7 @@ JujinSession::query_cash() {
     std::lock_guard<std::mutex> lock(m_mutex);
     std::vector<std::unique_ptr<domain::trading::CashRecord>> result;
     if (!m_strategy) return result;
+    ensureRun();
 
     auto* arr = m_strategy->get_cash();
     if (!arr || arr->status() != 0) return result;
@@ -269,6 +281,7 @@ std::unique_ptr<domain::trading::BrokerAccountInfo>
 JujinSession::query_account() {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_strategy) return {};
+    ensureRun();
 
     auto* arr = m_strategy->get_cash();
     if (!arr || arr->status() != 0 || arr->count() == 0) return {};

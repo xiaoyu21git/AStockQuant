@@ -17,7 +17,7 @@ Rectangle {
     property var pendingOrders: []
     property string toastMessage: ""
     property bool toastError: false
-    property string positionAvailabilitySummary: ""
+    property var positionAvailabilitySummary: ({})
     property bool positionAvailabilityError: false
     property bool compactMode: false
     readonly property var tradingFormHelper: Bridge.TradingFormPanelHelper
@@ -102,45 +102,15 @@ Rectangle {
     readonly property string currentReferenceText: String(headerDisplay.referenceText || "")
     readonly property var quickButtonModel: tradingFormHelper.quickButtonsForMode(currentMode)
     readonly property var equityQuickPriceButtonModel: tradingFormHelper.equityQuickPriceButtons()
-    readonly property var stockEquityDisplay: tradingFormHelper.buildEquityDisplay(
-        "stock",
-        currentMode,
-        stockCode,
-        stockShares,
-        stockPriceType,
-        stockPrice,
-        marketSnapshot || ({}),
-        depthSnapshot || ({}),
-        availableCapital,
-        positionAvailabilitySummary,
-        positionAvailabilityError
-    )
-    readonly property var marginBuyEquityDisplay: tradingFormHelper.buildEquityDisplay(
-        "margin_buy",
-        currentMode,
-        marginBuyCode,
-        marginBuyShares,
-        marginBuyPriceType,
-        marginBuyPrice,
-        marketSnapshot || ({}),
-        depthSnapshot || ({}),
-        availableCapital,
-        positionAvailabilitySummary,
-        positionAvailabilityError
-    )
-    readonly property var marginSellEquityDisplay: tradingFormHelper.buildEquityDisplay(
-        "margin_sell",
-        currentMode,
-        marginSellCode,
-        marginSellShares,
-        marginSellPriceType,
-        marginSellPrice,
-        marketSnapshot || ({}),
-        depthSnapshot || ({}),
-        availableCapital,
-        positionAvailabilitySummary,
-        positionAvailabilityError
-    )
+    function equityDisplay(eqMode, code, shares, priceType, price) {
+        if (!code) return ({})
+        return tradingFormHelper.buildEquityDisplay(
+            eqMode, currentMode, code, shares, priceType, price,
+            marketSnapshot, ({}), availableCapital, ({}), false)
+    }
+    readonly property var stockEquityDisplay: equityDisplay("stock", stockCode, stockShares, stockPriceType, stockPrice)
+    readonly property var marginBuyEquityDisplay: equityDisplay("margin_buy", marginBuyCode, marginBuyShares, marginBuyPriceType, marginBuyPrice)
+    readonly property var marginSellEquityDisplay: equityDisplay("margin_sell", marginSellCode, marginSellShares, marginSellPriceType, marginSellPrice)
 
     signal modeContextChanged(string mode, string symbol)
     signal executeTrade(string mode, string action, var payload)
@@ -251,7 +221,7 @@ Rectangle {
             root.currentPriceInputForMode(targetMode),
             root.currentAutoPriceForMode(targetMode),
             root.currentAutoPriceTypeForMode(targetMode),
-            marketSnapshot || ({}),
+            marketSnapshot, ({}),
             root.openingMarketWindow
         )
         if (!state || !state.priceType) {

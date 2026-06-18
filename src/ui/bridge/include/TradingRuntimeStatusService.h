@@ -17,6 +17,8 @@ class TradingRuntimeStatusService : public QObject {
 public:
     explicit TradingRuntimeStatusService(QObject* parent = nullptr);
 
+    static TradingRuntimeStatusService* instance();
+
     /// @brief 按策略 ID 查询运行时会话快照
     Q_INVOKABLE QVariantMap sessionSnapshotForStrategy(const QString& strategyId);
 

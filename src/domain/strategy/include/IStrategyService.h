@@ -463,6 +463,9 @@ public:
                    std::unique_ptr<IRuleEvaluationService> ruleEvaluationService,
                    std::unique_ptr<IStrategyService> strategyService);
 
+    /// @brief 析构时自动停止实盘循环，避免后台线程访问已销毁对象
+    ~StrategyEngine();
+
     [[nodiscard]] StrategyServiceFlowResult registerStrategy(
         std::shared_ptr<IRuntimeStrategy> strategy,
         const RuntimeStrategyContext& context);

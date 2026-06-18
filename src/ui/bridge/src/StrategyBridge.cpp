@@ -15,6 +15,7 @@
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 #include "foundation/json/json_facade.h"
 #include "../../domain/strategy/include/StrategyManager.h"
+#include "../include/TradingRuntimeStatusService.h"
 
 #include <chrono>
 #include <ctime>
@@ -591,7 +592,14 @@ bool StrategyBridge::start(const QString& strategyId)
 
     INTERNAL_INFO_STREAM << "[Live] start strategy: " << repositoryId.toStdString();
 
-    // 不设中间状态，等 worker 完成后直接切"运行中"
+    // 即时更新内存状态但不立即 emit strategiesChanged
+    // （避免在 QML 点击信号处理器内嵌套触发 ListView delegate 销毁/重建导致 QHash 迭代器崩溃）
+    m_runtimeStatus[repositoryId] = QStringLiteral("启动中");
+    if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("启动中"));
+    // 延迟到事件循环下个迭代 emit，避免嵌套信号处理
+    QMetaObject::invokeMethod(this, [this]() {
+        emit strategiesChanged();
+    }, Qt::QueuedConnection);
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
 
     // ── 异步执行引擎创建（工作线程：MySQL 查询 → 启动实盘循环）──
@@ -655,16 +663,15 @@ bool StrategyBridge::start(const QString& strategyId)
                     auto tt = std::chrono::system_clock::to_time_t(now);
                     char endBuf[16];
                     std::strftime(endBuf, sizeof(endBuf), "%Y-%m-%d", std::localtime(&tt));
-                    // 往前推足够交易日 (MySQL DATE_SUB 用日历日近似)
-                    constexpr int kLookbackDays = 365;  // 约 250 个交易日
+                    constexpr int kLookbackDays = 90;  // 约 60 个交易日，因子计算够用
                     char startBuf[16];
                     {
                         auto tp = std::chrono::system_clock::now() - std::chrono::hours(24 * kLookbackDays);
                         auto t = std::chrono::system_clock::to_time_t(tp);
                         std::strftime(startBuf, sizeof(startBuf), "%Y-%m-%d", std::localtime(&t));
                     }
-                    INTERNAL_INFO_STREAM << "[StrategyBridge] loading live market data: " << startBuf << " ~ " << endBuf;
-                    auto rows = repo->queryDailyBarWithFields({}, startBuf, endBuf, {});
+                    INTERNAL_INFO_STREAM << "[Live] loading market data: " << startBuf << " ~ " << endBuf;
+                    auto rows = repo->queryAllMarketDailyBar(startBuf, endBuf);
                     if (!rows.empty()) {
                         // 转 QVariantList → JSON → CachedMarketDataView
                         QVariantList data;
@@ -709,7 +716,23 @@ bool StrategyBridge::start(const QString& strategyId)
             if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("运行中"));
             emit strategiesChanged();
             emit started(repositoryId);
+            bridge::TradingRuntimeStatusService::instance()->refresh();
             INTERNAL_INFO_STREAM << "[Live] engine started: " << repositoryId.toStdString();
+
+            // 延迟查询账户（等 SDK run() 就绪）
+            QTimer::singleShot(2000, this, [this]() {
+                auto& sys = app::system::TradingSystem::instance();
+                auto* engine = sys.tradeEngine();
+                if (!engine || !engine->gateway()) return;
+                engine->gateway()->queryAccount([](std::optional<domain::trading::AccountInfo> info) {
+                    if (!info) return;
+                    INTERNAL_INFO_STREAM << "[Live] account: available=" << info->availableCash()
+                                         << " total=" << info->totalAssets();
+                });
+                engine->gateway()->queryPositions([](const std::vector<domain::trading::PositionSnapshot>& pos) {
+                    INTERNAL_INFO_STREAM << "[Live] positions: " << pos.size() << " holdings";
+                });
+            });
         }, Qt::QueuedConnection);
 
         } catch (const std::exception& e) {

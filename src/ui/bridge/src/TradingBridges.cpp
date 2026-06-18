@@ -52,6 +52,10 @@ void TradeExecutionBridge::ensureInitialized() {
             INTERNAL_ERROR_STREAM << "[Live] config file not found";
             return;
         }
+        if (cfg.value("token").toString().isEmpty()) {
+            INTERNAL_ERROR_STREAM << "[Live] token not configured";
+            return;
+        }
         auto gw = std::make_unique<app::adapters::JujinBrokerGateway>();
         QJsonObject obj;
         obj["token"] = cfg.value("token").toString();
@@ -64,33 +68,6 @@ void TradeExecutionBridge::ensureInitialized() {
         sys.setBrokerGateway(std::move(gw));
         INTERNAL_INFO_STREAM << "[Live] Jujin gateway connected";
         sys.initialize();
-
-        // 同步初始持仓和账户
-        auto* engine = sys.tradeEngine();
-        if (engine) {
-            engine->gateway()->queryPositions([&sys](const std::vector<domain::trading::PositionSnapshot>& snapshots) {
-                std::vector<domain::trading::Position> positions;
-                domain::trading::AccountSnapshot acc;
-                for (auto& s : snapshots) {
-                    domain::trading::Position p;
-                    p.setSymbol(s.symbol().text());
-                    p.setQuantity(s.longQuantity() - s.shortQuantity());
-                    p.setCostBasis(s.averageCost());
-                    p.setLastPrice(s.averageCost());
-                    p.setMarketValue(s.marketValue());
-                    positions.push_back(p);
-                }
-                sys.positionEngine()->applyBrokerSnapshot(positions, acc);
-            });
-            engine->gateway()->queryAccount([&sys](std::optional<domain::trading::AccountInfo> info) {
-                if (!info) return;
-                domain::trading::AccountSnapshot acc;
-                acc.setAvailableCash(info->availableCash());
-                acc.setTotalAsset(info->totalAssets());
-                acc.setMarketValue(info->marketValue());
-                sys.positionEngine()->applyAccountEvent(acc);
-            });
-        }
     }
 
     // ── 注册引擎回调：将领域层成交/状态事件转发到 QML 信号 ──

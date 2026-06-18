@@ -329,55 +329,6 @@ add_custom_command(TARGET astockquantapp-exe POST_BUILD
         $<TARGET_FILE_DIR:astockquantapp-exe>
 )
 
-if(ENABLE_JUJIN_MARKET)
-    add_executable(astockquant_tradeprobe
-        trade_probe_main.cpp
-        src/JujinMarketConnector.cpp
-    )
-
-    target_compile_definitions(astockquant_tradeprobe
-        PRIVATE
-            ASTOCK_ENABLE_JUJIN_MARKET=1
-    )
-
-    target_include_directories(astockquant_tradeprobe
-        PRIVATE
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
-            ${CMAKE_CURRENT_SOURCE_DIR}/src
-            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
-            ${CMAKE_BINARY_DIR}/src/ui/bridge/bridge_autogen/include_$<CONFIG>
-    )
-
-    target_link_libraries(astockquant_tradeprobe
-        PRIVATE
-            bridge
-            engine
-            foundation
-            cache_module
-            domain
-            domain_data
-            domain_backtest
-            domain_strategies
-           # domain_signals
-            domain_indicators
-            factor
-            infrastructure
-            astock_market
-            thirdParty
-            Qt6::Core
-            Qt6::Concurrent
-            Qt6::Network
-            Qt6::Widgets
-            Qt6::Gui
-            Qt6::Quick
-            Qt6::Qml
-            Qt6::Multimedia
-            Qt6::Sql
-            Qt6::QuickWidgets
-    )
-else()
-    message(STATUS "Skipping astockquant_tradeprobe because ENABLE_JUJIN_MARKET is OFF")
-endif()
 
 # 濞村鐦?
 include(CTest)

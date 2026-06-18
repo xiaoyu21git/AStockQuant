@@ -6,6 +6,7 @@
 #include "../../../thirdparty/gmsdk/strategy.h"
 #include "../../../thirdparty/gmsdk/gmdef.h"
 
+#include <future>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -63,8 +64,10 @@ public:
     [[nodiscard]] const char* last_error() const override;
 
 private:
+    void ensureRun();
     std::unique_ptr<Strategy> m_strategy;
     mutable std::mutex m_mutex;
+    std::future<void> m_runFuture;
     std::string m_token;
     std::string m_account_id;
     std::string m_last_error;

@@ -16,6 +16,7 @@
 #include "GlobalEventBusRegistry.h"
 #include "JujinApi.h"
 #include "JujinTypes.h"
+#include "../../../thirdparty/gmsdk/gmapi.h"
 #include "MarketSubscriptionStatusRegistry.h"
 #include "system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
@@ -55,7 +56,6 @@ bool marketSessionAllowsSubscriptions()
     auto* tm = std::localtime(&tt);
     int h = tm->tm_hour, m = tm->tm_min;
     int minutes = h * 60 + m;
-    // A股交易时段: 9:15-11:30, 13:00-15:00
     return (minutes >= 9*60+15 && minutes <= 11*60+30)
         || (minutes >= 13*60 && minutes <= 15*60);
 }
@@ -211,8 +211,8 @@ JujinMarketConnector::~JujinMarketConnector()
 
 bool JujinMarketConnector::isEnabledByEnvironment() const
 {
-    auto obj = cfg::loadConfigObject();
-    return cfg::readBool(obj, "enabled", "ASTOCK_ENABLE_JUJIN_MARKET");
+    // 编译时已启用 ASTOCK_ENABLE_JUJIN_MARKET
+    return true;
 }
 
 bool JujinMarketConnector::start()
@@ -244,36 +244,48 @@ bool JujinMarketConnector::start()
                                    "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE", 4)));
     std::cout << "[JujinMarketConnector] start requested\n";
 
-    std::string token = cfg::readString(configObj, "token", "ASTOCK_GM_TOKEN");
+    // 直接读 trading_connection.json
+    std::string token, accountId, gmStrategyId, accountRuntimeId;
+    {
+        std::ifstream tc("./config/trading_connection.json");
+        if (tc.is_open()) {
+            std::string j((std::istreambuf_iterator<char>(tc)), std::istreambuf_iterator<char>());
+            auto root = foundation::json::JsonFacade::parse(j);
+            if (root.isObject()) {
+                token    = root.has("token")    ? root.get("token").asString()    : "";
+                accountId= root.has("accountId")? root.get("accountId").asString(): "";
+                gmStrategyId = root.has("gmStrategyId") ? root.get("gmStrategyId").asString() : "";
+                accountRuntimeId = root.has("accountRuntimeStrategyId") ? root.get("accountRuntimeStrategyId").asString() : "";
+            }
+        }
+    }
+
     if (token.empty()) {
         m_lastError = "jujin token is empty";
+        return false;
+    }
+
+    std::string resolvedId = trim(accountRuntimeId);
+    if (resolvedId.empty()) resolvedId = trim(gmStrategyId);
+    if (resolvedId.empty()) {
+        m_lastError = "JMC: missing gmStrategyId";
         return false;
     }
 
     thirdparty::ConfigParams config;
     config.platform = thirdparty::PlatformType::JUJIN;
     config.token = token;
-    config.account_id = cfg::readString(configObj, "accountId", "ASTOCK_GM_ACCOUNT_ID");
-    config.server_url = cfg::readString(configObj, "serverUrl", "ASTOCK_GM_SERVER_URL");
-
-    std::string boundStrategyId = cfg::readString(configObj, "boundStrategyId", "ASTOCK_GM_BOUND_STRATEGY_ID");
-    std::string accountRuntimeId = cfg::readString(configObj, "accountRuntimeStrategyId",
-                                                    "ASTOCK_GM_ACCOUNT_RUNTIME_STRATEGY_ID");
-    std::string gmStrategyId = cfg::readString(configObj, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID");
-
-    std::string resolvedId = trim(accountRuntimeId);
-    if (resolvedId.empty()) resolvedId = trim(gmStrategyId);
-    if (resolvedId.empty())
-        throw std::runtime_error("JujinMarketConnector requires accountRuntimeStrategyId or gmStrategyId");
+    config.account_id = accountId;
+    config.server_url = "";
 
     config.extra_params["runtime_strategy_id"] = resolvedId;
     config.extra_params["mode"] = "1";
     config.extra_params["simtrade_only"] = "false";
-    config.extra_params["read_only"] = cfg::readBool(configObj, "readOnly", "ASTOCK_GM_READ_ONLY") ? "true" : "false";
+    config.extra_params["read_only"] = "false";
 
     std::cout << "[JujinMarketConnector] accountId=" << config.account_id
-              << " boundStrategyId=" << boundStrategyId
-              << " connectorRuntimeId=" << resolvedId
+              << " gmStrategyId=" << gmStrategyId
+              << " resolvedId=" << resolvedId
               << " mode=" << config.extra_params["mode"]
               << " simtradeOnly=" << config.extra_params["simtrade_only"]
               << " readOnly=" << config.extra_params["read_only"] << "\n";
@@ -290,11 +302,24 @@ bool JujinMarketConnector::start()
     if (m_marketSubscriptionThread.joinable()) m_marketSubscriptionThread.join();
     m_marketSubscriptionThread = std::thread([this, eventBus]() { processSubscriptionRequests(eventBus); });
 
-    std::cout << "[JujinMarketConnector] API connected successfully\n";
+    std::cerr << "[JMC] API connected. watchlist size=" << watchlistFromEnvironment().size() << "\n";
 
     const std::vector<std::string> watchlist = watchlistFromEnvironment();
     if (!watchlist.empty() && marketSessionAllowsSubscriptions()) {
         for (const auto& symbol : watchlist) enqueueWatchSymbol(symbol);
+    } else if (marketSessionAllowsSubscriptions()) {
+        // 自动获取全市场标的并订阅
+        auto* inst = ::get_instruments("SZSE,SSE", "stock", "symbol");
+        if (inst && inst->status() == 0) {
+            int cnt = 0;
+            while (!inst->is_end()) {
+                const char* sym = inst->get_string("symbol");
+                if (sym && std::strlen(sym) > 0) { enqueueWatchSymbol(sym); ++cnt; }
+                inst->next();
+            }
+            inst->release();
+            std::cerr << "[JMC] auto-subscribed " << cnt << " instruments\n";
+        }
     }
 
     m_watchRequestSubscription = eventBus->subscribe("market.watch.ensure",
@@ -312,6 +337,9 @@ bool JujinMarketConnector::start()
             auto price = event.get<double>("price");
             auto vol  = event.get<double>("volume");
             auto date = event.get<std::int64_t>("tradingDay");
+            static int tickCount = 0;
+            if (++tickCount % 100 == 0)
+                std::cerr << "[JMC] tick #" << tickCount << " sym=" << sym.value_or("?") << "\n";
             if (sym.has_value() && price.has_value())
                 app::system::TradingSystem::instance().pushMarketData(
                     *sym, *price, vol.value_or(0.0), date.value_or(0));
@@ -780,13 +808,27 @@ print(json.dumps(result, ensure_ascii=True))
 
 std::vector<std::string> JujinMarketConnector::watchlistFromEnvironment() const
 {
-    auto obj = cfg::loadConfigObject();
-    std::string raw = cfg::readString(obj, "symbols", "ASTOCK_GM_SYMBOLS");
-
-    if (!trim(raw).empty()) {
-        std::cerr << "[JujinMarketConnector] startup symbol watchlist disabled, ignoring configured symbols\n";
+    // 从 trading_connection.json 读
+    std::string raw;
+    {
+        std::ifstream tc("./config/trading_connection.json");
+        if (tc.is_open()) {
+            std::string j((std::istreambuf_iterator<char>(tc)), std::istreambuf_iterator<char>());
+            auto root = foundation::json::JsonFacade::parse(j);
+            if (root.isObject() && root.has("symbols"))
+                raw = root.get("symbols").asString();
+        }
     }
-
+    if (!trim(raw).empty()) {
+        std::vector<std::string> result;
+        std::istringstream ss(raw);
+        std::string sym;
+        while (std::getline(ss, sym, ',')) {
+            sym = trim(sym);
+            if (!sym.empty()) result.push_back(sym);
+        }
+        return result;
+    }
     return {};
 }
 

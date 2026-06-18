@@ -103,4 +103,9 @@ QVariantMap TradingRuntimeStatusService::buildTradingSystemSnapshot() const {
     return snap;
 }
 
+TradingRuntimeStatusService* TradingRuntimeStatusService::instance() {
+    static TradingRuntimeStatusService s;
+    return &s;
+}
+
 } // namespace bridge

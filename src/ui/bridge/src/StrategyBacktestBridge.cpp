@@ -9,6 +9,8 @@
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
 #include "DataServiceCache.h"
+#include "../../../infrastructure/include/database/BacktestResultRepository.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "FactorService.h"
 #include "AppStoragePaths.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
@@ -307,6 +309,27 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             timeSeries["returns"]     = returnList;
             timeSeries["drawdowns"]   = drawdownList;
             qResult["timeSeries"] = timeSeries;
+
+            // 持久化到 DB
+            {
+                auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+                if (pool.isInitialized()) {
+                    auto db = pool.getConnection();
+                    if (db && db->isOpen()) {
+                        domain::backtest::BacktestResultRepository repo(*db);
+                        repo.ensureTables();
+                        domain::backtest::StoredStrategyBacktest record;
+                        record.strategyId = capturedStrategyId;
+                        record.metricsJson = QJsonDocument(QJsonObject::fromVariantMap(
+                            qResult["metrics"].toMap())).toJson(QJsonDocument::Compact).toStdString();
+                        record.timeSeriesJson = QJsonDocument(QJsonObject::fromVariantMap(
+                            qResult["timeSeries"].toMap())).toJson(QJsonDocument::Compact).toStdString();
+                        record.tradeStatsJson = QJsonDocument(QJsonObject::fromVariantMap(
+                            qResult["tradeStats"].toMap())).toJson(QJsonDocument::Compact).toStdString();
+                        repo.saveStrategyBacktest(record);
+                    }
+                }
+            }
 
             QMetaObject::invokeMethod(this, [this, qResult]() {
                 m_isRunning.store(false); m_progress = 100.0;

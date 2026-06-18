@@ -504,10 +504,12 @@ void AppBootstrap::reconcileOptionalConnectors()
         m_jujinMarketConnector = std::make_unique<JujinMarketConnector>();
     }
 
+    std::cerr << "[AppBootstrap] JMC enabled, starting...\n";
     if (m_jujinMarketConnector->isEnabledByEnvironment()) {
         if (!m_jujinMarketConnector->start()) {
-            std::cerr << "[AppBootstrap] WARNING: Jujin market connector failed: "
-                      << m_jujinMarketConnector->lastError() << "\n";
+            std::cerr << "[AppBootstrap] JMC start FAILED: " << m_jujinMarketConnector->lastError() << "\n";
+        } else {
+            std::cerr << "[AppBootstrap] JMC started OK\n";
         }
         return;
     }

@@ -37,6 +37,10 @@ StrategyEngine* StrategyManager::get(const std::string& id) const {
 void StrategyManager::remove(const std::string& id) {
     if (id.empty()) return;
     const std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_engines.find(id);
+    if (it != m_engines.end() && it->second) {
+        it->second->stopLiveLoop();  // 先停后台线程再销毁
+    }
     m_engines.erase(id);
 }
 
@@ -64,7 +68,10 @@ void StrategyManager::resumeAll() {
 void StrategyManager::stopAll() {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (auto& [id, engine] : m_engines) {
-        if (engine) engine->stop();
+        if (engine) {
+            engine->stopLiveLoop();  // 先停后台 drainQueue 线程
+            engine->stop();          // 再停策略服务状态
+        }
     }
     m_engines.clear();
 }

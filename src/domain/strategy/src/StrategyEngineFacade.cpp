@@ -295,6 +295,12 @@ StrategyEngine::StrategyEngine(std::unique_ptr<IRuntimeFactorService> factorServ
 {
 }
 
+StrategyEngine::~StrategyEngine()
+{
+    // 析构前必须停止实盘循环，避免后台线程访问已销毁的 this
+    stopLiveLoop();
+}
+
 StrategyServiceFlowResult StrategyEngine::registerStrategy(
     std::shared_ptr<IRuntimeStrategy> strategy,
     const RuntimeStrategyContext& context)
