@@ -93,7 +93,8 @@ def fetch_daily_k_data_batch(
     if not all_rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(all_rows, columns=rs.fields)
+    field_names = fields.split(',')
+    df = pd.DataFrame(all_rows, columns=field_names)
 
     numeric_cols = ['open', 'high', 'low', 'close', 'preclose', 'volume', 'amount', 'turn', 'pctChg', 'peTTM', 'pbMRQ']
     for col in numeric_cols:

@@ -143,11 +143,16 @@ def phase3_baostock_update(c, target_date: str):
         for i in range(0, len(need), BATCH):
             batch = need[i:i+BATCH]
             sd = str(latest.get(batch[0], '2015-01-01'))
+            print(f"  DEBUG batch0={batch[0]} sd={sd}", flush=True)
             start = min(sd, target_date)
             df = baostock.fetch_daily_k_data_batch(batch, dt.date.fromisoformat(start), dt.date.fromisoformat(target_date))
             if not df.empty:
                 df = baostock.normalize_baostock_frame(df)
-                df = df[df['trade_date'] <= pd.Timestamp(target_date)]
+                if 'trade_date' not in df.columns:
+                    print(f"  WARN: trade_date missing, cols={list(df.columns)[:10]}", flush=True)
+                    continue
+                df['_target'] = pd.to_datetime(target_date)
+                df = df[pd.to_datetime(df['trade_date']) <= df['_target']].drop(columns=['_target'])
                 fetched += len(df)
                 w = upsert_baostock(c, df)
                 written += w
