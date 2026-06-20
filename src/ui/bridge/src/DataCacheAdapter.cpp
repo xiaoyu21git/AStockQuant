@@ -77,20 +77,10 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
 
     // 直写 Arrow，无 QVariant 中转
     m_cache->saveDataSetFile(dataId, rows);
-
-    auto fullInfo = m_cache->getDataSetInfo(dataId);
-    fullInfo.rowCount = static_cast<int>(rows.size());
-    auto metaJson = fullInfo.toJson();
-    std::string infoPath = m_cache->infoFilePath(dataId);
-    FILE* fi = fopen(infoPath.c_str(), "wb");
-    if (fi) {
-        std::string metaStr = metaJson.toString();
-        fwrite(metaStr.data(), 1, metaStr.size(), fi);
-        fclose(fi);
-    }
+    m_cache->updateDataSetRowCount(dataId, static_cast<int>(rows.size()));
 
     fprintf(stderr, "[DataCacheAdapter] stored dataset %d (from rows): %s (%zu rows)\n",
-            dataId, fullInfo.displayName.c_str(), rows.size());
+            dataId, info.displayName.c_str(), rows.size());
     fflush(stderr);
 
     emit dataSetStored(dataId, cppInfoToMap(info));
