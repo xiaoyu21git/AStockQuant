@@ -392,3 +392,27 @@ void DataFetchController::delayedCleanData() {
 void DataFetchController::updateStatus(const QString& m, int p) { if (p >= 0) { m_progress = p; emit progressChanged(); } m_statusMessage = m; emit statusMessageChanged(); }
 void DataFetchController::resetProgressState() { updateBoolProperty(m_operationInProgress, false, [this]() { emit operationInProgressChanged(); }); updateStringProperty(m_operationPhase, QString(), [this]() { emit operationPhaseChanged(); }); updateStringProperty(m_currentProgressStock, QString(), [this]() { emit currentProgressStockChanged(); }); updateStatus("就绪", 0); }
 void DataFetchController::updateCleanStats(int in, int out) { m_cleanInputRecordCount = in; m_cleanOutputRecordCount = out; m_cleanRemovedRecordCount = in - out; emit cleanStatsChanged(); }
+
+// ---- 清洗 ----
+
+void DataFetchController::cleanDataFromDataSet(int dataSetId, const QVariantMap& rules)
+{
+    m_operationInProgress = true; emit operationInProgressChanged();
+    m_operationPhase = "清洗数据"; emit operationPhaseChanged();
+    emit dataCleaningStarted();
+
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::dataSetCleaned,
+            this, [this](int inputId, int resultId, const QString& msg, int in, int out) {
+        m_operationInProgress = false; emit operationInProgressChanged();
+        if (resultId > 0) { updateCleanStats(in, out); emit dataSetCleaned(inputId, resultId, msg, in, out); }
+        else emit dataCleaningError(msg);
+    }, Qt::SingleShotConnection);
+
+    m_cleaningSvc->cleanDataFromDataSet(dataSetId, rules);
+}
+
+void DataFetchController::cleanDataAsync(const QVariantMap& rules)
+{
+    if (m_lastStoredDataSetId <= 0) { emit dataCleaningError("请先查询数据生成数据集"); return; }
+    cleanDataFromDataSet(m_lastStoredDataSetId, rules);
+}
