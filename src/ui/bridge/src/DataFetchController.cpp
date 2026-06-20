@@ -224,8 +224,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             std::string sql = "SELECT * FROM " + table.toStdString()
                 + " WHERE " + dateColForType(dt).toStdString()
                 + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
-            if (allSymbols.size() > 0 && allSymbols.size() <= 1000) {
-                sql += " AND " + symColForType(dt).toStdString() + " IN (";
+            if (allSymbols.size() > 0 && allSymbols.size() <= 1000 && symColForType(dt) == "symbol") {
+                sql += " AND symbol IN (";
                 for (size_t si = 0; si < allSymbols.size(); ++si) {
                     if (si > 0) sql += ",";
                     sql += "'" + allSymbols[si].toStdString() + "'";
