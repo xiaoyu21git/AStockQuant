@@ -214,8 +214,12 @@ public:
 
 #ifdef ASTOCK_HAS_PARQUET
 
-    /// @brief 保存数据集数据到 Arrow 文件（一次性）
+    /// @brief 保存数据集数据到 Arrow 文件（自动扫描字段）
     void saveDataSetFile(int dataId, const std::vector<J>& rows);
+    /// @brief 保存数据集数据到 Arrow 文件（显式字段，不扫描）
+    void saveDataSetFile(int dataId, const std::vector<J>& rows,
+        const std::vector<std::string>& fieldNames,
+        const std::unordered_set<std::string>& numericFields);
 
     /// @brief 从 Arrow 文件加载数据集数据
     std::vector<J> loadDataSetFile(int dataId);

@@ -145,11 +145,17 @@ namespace cleaning {
 void DataCache::saveDataSetFile(int dataId, const std::vector<J>& rows)
 {
     if (rows.empty()) return;
-
     std::vector<std::string> fieldNames;
     std::unordered_set<std::string> numericFields;
     scanFields(rows, fieldNames, numericFields);
+    saveDataSetFile(dataId, rows, fieldNames, numericFields);
+}
 
+void DataCache::saveDataSetFile(int dataId, const std::vector<J>& rows,
+    const std::vector<std::string>& fieldNames,
+    const std::unordered_set<std::string>& numericFields)
+{
+    if (rows.empty()) return;
     auto table = buildArrowTable(rows, fieldNames, numericFields);
 
     std::string path = dataFilePath(dataId);

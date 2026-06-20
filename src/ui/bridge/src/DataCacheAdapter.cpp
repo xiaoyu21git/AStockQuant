@@ -75,8 +75,21 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     int dataId = m_cache->storeDataSet({}, info, progressCallback);
     if (dataId <= 0) return -1;
 
-    // 直写 Arrow，无 QVariant 中转
-    m_cache->saveDataSetFile(dataId, rows);
+    // 直写 Arrow，自动检测字段类型
+    std::vector<std::string> fieldNames;
+    std::unordered_set<std::string> numericFields;
+    if (!rows.empty() && rows[0].isObject()) {
+        // 遍历首行所有字段，用 strtod 判断数值类型
+        for (const auto& row : rows) {
+            if (!row.isObject()) continue;
+            for (const char* known : {"symbol","code","stock_code","name","trade_date","report_date","disclosure_date","report_type","industry_code","industry","status","data_source","asset_class","trade_status"})
+                if (row.has(known) && std::find(fieldNames.begin(),fieldNames.end(),known)==fieldNames.end()) fieldNames.push_back(known);
+            for (const char* num : {"open","high","low","close","pre_close","volume","turnover","change_pct","change_amt","amplitude","turnover_rate","pe_ratio","pb_ratio","market_cap","circulating_market_cap","pre_adj_factor","post_adj_factor","symbol_id","indicator_id","eps","bps","roa","roe","profit_margin","gross_margin","operating_margin","debt_to_equity","current_ratio","quick_ratio","operating_cash_flow","investing_cash_flow","financing_cash_flow","total_revenue","net_profit","total_assets","total_liabilities","equity","dividend_yield","payout_ratio","dividend_stability","effective_disclosure_date","created_at","updated_at"})
+                if (row.has(num)) { if(std::find(fieldNames.begin(),fieldNames.end(),num)==fieldNames.end()) fieldNames.push_back(num); numericFields.insert(num); }
+            break;
+        }
+    }
+    m_cache->saveDataSetFile(dataId, rows, fieldNames, numericFields);
     m_cache->updateDataSetRowCount(dataId, static_cast<int>(rows.size()));
 
     fprintf(stderr, "[DataCacheAdapter] stored dataset %d (from rows): %s (%zu rows)\n",
