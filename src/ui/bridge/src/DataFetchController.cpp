@@ -200,7 +200,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
             for (const QString& dt : dataTypes) {
-                auto* src = cleaning::sourceByName(dt.toStdString()); if (src.tableName.isEmpty()) continue;
+                auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
                 std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
                 std::string sql = src->buildDataQuery(ms, me, sv);
                 auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
