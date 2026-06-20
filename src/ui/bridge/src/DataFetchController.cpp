@@ -164,10 +164,6 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                     + " BETWEEN '" + startDate.toStdString() + "' AND '"
                     + endDate.toStdString() + "' GROUP BY symbol";
             }
-                              "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
-                              "FROM " + table.toStdString() + " WHERE " + dateCol.toStdString()
-                              + " BETWEEN '" + startDate.toStdString() + "' AND '"
-                              + endDate.toStdString() + "' GROUP BY symbol";
             auto result = db->executeQuery(sql, {});
             for (const auto& row : result.getRows()) {
                 QString sym = QString::fromStdString(row.getString("symbol"));
@@ -222,62 +218,43 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         }, Qt::QueuedConnection);
 
         int totalDownloaded = 0;
-        int doneUnits = 0;
 
-        QMetaObject::invokeMethod(self.get(), [self, symbolList, total]() {
-            if (!self) return;
-            self->m_fetchedData = symbolList;
-            self->m_isFetching = false; emit self->isFetchingChanged(); emit self->fetchedDataChanged();
-            if (total == 0) {
-                self->updateStatus("查询结果为空", 100);
-                emit self->dataFetchError("查询结果为空");
-                return;
-            }
-            if (self->m_previewModel) {
-                QVector<QVariantMap> pv;
-                for (const auto& item : symbolList) pv.append(item.toMap());
-                self->m_previewModel->updateData(pv);
-            }
-            self->m_pendingDoneTotal = total;
-            self->updateStatus(QString("共 %1 只标的").arg(total), 20);
-        });
-
-        if (allSymbols.isEmpty()) return;
-        QVariantMap infoMap;
-        infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate);
-        infoMap["sourceType"] = dataSource;
-        infoMap["stockCodes"] = allSymbols;
-        infoMap["startDate"] = startDate;
-        infoMap["endDate"] = endDate;
-        int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
-        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
-
-        // 辅助函数: SqlQueryResultRow → JsonFacade
-        auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
-            auto j = foundation::json::JsonFacade::createObject();
-            for (const auto& [col, val] : r.getValues()) {
-                if (val.empty()) continue;
-                char* end = nullptr;
-                double d = strtod(val.c_str(), &end);
-                if (end && static_cast<size_t>(end - val.c_str()) == val.size())
-                    j.set(col, foundation::json::JsonFacade::createDouble(d));
-                else
-                    j.set(col, foundation::json::JsonFacade::createString(val));
-            }
-            return j;
-        };
+        // 按月分片下载，每月更新进度
+        auto y1 = startDate.mid(0,4).toInt(), m1 = startDate.mid(5,2).toInt(), d1 = startDate.mid(8,2).toInt();
+        auto y2 = endDate.mid(0,4).toInt(),   m2 = endDate.mid(5,2).toInt(),   d2 = endDate.mid(8,2).toInt();
+        int totalMonths = (y2 - y1) * 12 + (m2 - m1) + 1;
+        int monthCount = totalMonths * static_cast<int>(dataTypes.size());
+        int doneMonths = 0;
+        QMetaObject::invokeMethod(self.get(), [self, monthCount]() { if (self) self->updateStatus(QString("开始下载 %1 个批次...").arg(monthCount), 30); }, Qt::BlockingQueuedConnection);
 
         int totalRows = 0;
-        for (const QString& dt : dataTypes) {
-            QString table = tableForType(dt);
-            if (table.isEmpty()) continue;
-            QString joinClause = symTableJoinClause(dt);
-            std::string fromClause = joinClause.isEmpty()
-                ? ("FROM " + table.toStdString())
-                : ("FROM " + table.toStdString() + " fi" + joinClause.toStdString());
-            std::string selectCols = joinClause.isEmpty() ? "*" : "si.symbol, fi.*";
-            std::string sql = "SELECT " + selectCols + " " + fromClause
-                + " WHERE " + (joinClause.isEmpty() ? "" : "fi.") + dateColForType(dt).toStdString()
+        static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
+        for (int mi = 0; mi < totalMonths; mi++) {
+            int cm = m1 + mi, cy = y1 + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
+            int cs = (cy == y1 && cm == m1) ? d1 : 1;
+            int ce = (cy == y2 && cm == m2) ? d2 : dtab[cm] + (cm==2 && cy%4==0 && (cy%100!=0||cy%400==0) ? 1 : 0);
+            char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
+            snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
+            for (const QString& dt : dataTypes) {
+                QString table = tableForType(dt); if (table.isEmpty()) continue;
+                QString jc = symTableJoinClause(dt);
+                std::string fc = jc.isEmpty() ? ("FROM "+table.toStdString()) : ("FROM "+table.toStdString()+" fi"+jc.toStdString());
+                std::string sc = jc.isEmpty() ? "*" : "si.symbol, fi.*";
+                std::string pf = jc.isEmpty() ? "" : "fi.";
+                std::string sql = "SELECT "+sc+" "+fc+" WHERE "+pf+dateColForType(dt).toStdString()+" BETWEEN '"+ms+"' AND '"+me+"'";
+                if (allSymbols.size()>0 && allSymbols.size()<=1000 && symColForType(dt)=="symbol") {
+                    sql += " AND symbol IN ("; for (size_t si=0; si<allSymbols.size(); ++si) { if (si>0) sql+=","; sql+="'"+allSymbols[si].toStdString()+"'"; } sql+=")";
+                }
+                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
+                auto result = db2->executeQuery(sql, {});
+                std::vector<foundation::json::JsonFacade> batch;
+                for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
+                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += (int)batch.size(); }
+            }
+            doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalRows;
+            QMetaObject::invokeMethod(self.get(), [self,dm,tm,tr](){ if(!self)return; int pct=30+(dm*68)/qMax(1,tm); self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr),pct); emit self->dataFetchProgress(pct,QString("下载 %1/%2 月").arg(dm).arg(tm)); }, Qt::BlockingQueuedConnection);
+        }
+        dl_end:
                 + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
             if (allSymbols.size() > 0 && allSymbols.size() <= 1000 && symColForType(dt) == "symbol") {
                 sql += " AND symbol IN (";
