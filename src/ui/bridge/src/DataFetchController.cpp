@@ -290,58 +290,55 @@ void DataFetchController::fetchDataByType(const QString& dataSource,
 
 // ---- 按需预览 ----
 
+
 void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
 {
     auto& pool = astock::database::NativeMySQLConnectionPool::instance();
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) return;
 
-    std::string escaped = "'" + symbol.toStdString() + "'";
-    std::string sql = "SELECT symbol, trade_date, open, high, low, close, volume, turnover "
-                      "FROM daily_bar WHERE symbol=" + escaped
-                      + " AND trade_date BETWEEN '" + m_startDate.toStdString()
-                      + "' AND '" + m_endDate.toStdString() + "' "
-                      "ORDER BY trade_date LIMIT " + std::to_string(kPageSize)
-                      + " OFFSET " + std::to_string(page * kPageSize);
-    auto result = db->executeQuery(sql, {});
+    std::string sym = "'" + symbol.toStdString() + "'";
+    std::string sd = "'" + m_startDate.toStdString() + "'";
+    std::string ed = "'" + m_endDate.toStdString() + "'";
+    std::string limit = std::to_string(kPageSize);
+    std::string offset = std::to_string(page * kPageSize);
+
     QVariantList data;
-    for (const auto& row : result.getRows()) {
+
+    // K线
+    std::string kSql = "SELECT symbol, trade_date, open, high, low, close, volume, turnover "
+                       "FROM daily_bar WHERE symbol=" + sym + " AND trade_date BETWEEN " + sd
+                       + " AND " + ed + " ORDER BY trade_date LIMIT " + limit + " OFFSET " + offset;
+    auto kResult = db->executeQuery(kSql, {});
+    for (const auto& row : kResult.getRows()) {
         QVariantMap m;
         m["symbol"] = QString::fromStdString(row.getString("symbol"));
         m["trade_date"] = QString::fromStdString(row.getString("trade_date"));
         m["open"] = row.getDouble("open"); m["high"] = row.getDouble("high");
         m["low"] = row.getDouble("low"); m["close"] = row.getDouble("close");
         m["volume"] = row.getDouble("volume"); m["turnover"] = row.getDouble("turnover");
+        m["dataType"] = "kline_daily";
         data.append(m);
     }
+
+    // 财务
+    std::string fSql = "SELECT * FROM financial_statement WHERE symbol=" + sym
+                       + " AND report_date BETWEEN " + sd + " AND " + ed
+                       + " ORDER BY report_date LIMIT " + limit + " OFFSET " + offset;
+    auto fResult = db->executeQuery(fSql, {});
+    for (const auto& row : fResult.getRows()) {
+        QVariantMap m;
+        for (const auto& col : row.getValues()) {
+            const auto& val = col.second;
+            try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { m[QString::fromStdString(col.first)] = d; continue; } } catch(...) {}
+            m[QString::fromStdString(col.first)] = QString::fromStdString(val);
+        }
+        m["dataType"] = "financial";
+        data.append(m);
+    }
+
     emit symbolDetailLoaded(symbol, page, data);
 }
-
-// ---- 清洗 ----
-
-void DataFetchController::cleanDataFromDataSet(int dataSetId, const QVariantMap& rules)
-{
-    m_operationInProgress = true; emit operationInProgressChanged();
-    m_operationPhase = "清洗数据"; emit operationPhaseChanged();
-    emit dataCleaningStarted();
-
-    connect(m_cleaningSvc, &DataCleaningServiceRefactored::dataSetCleaned,
-            this, [this](int inputId, int resultId, const QString& msg, int in, int out) {
-        m_operationInProgress = false; emit operationInProgressChanged();
-        if (resultId > 0) { updateCleanStats(in, out); emit dataSetCleaned(inputId, resultId, msg, in, out); }
-        else emit dataCleaningError(msg);
-    }, Qt::SingleShotConnection);
-
-    m_cleaningSvc->cleanDataFromDataSet(dataSetId, rules);
-}
-
-void DataFetchController::cleanDataAsync(const QVariantMap& rules)
-{
-    if (m_lastStoredDataSetId <= 0) { emit dataCleaningError("请先查询数据生成数据集"); return; }
-    cleanDataFromDataSet(m_lastStoredDataSetId, rules);
-}
-
-// ---- 数据集刷新 ----
 
 void DataFetchController::refreshDataSetInfos()
 {
