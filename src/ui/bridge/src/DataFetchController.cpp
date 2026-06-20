@@ -95,7 +95,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     m_isFetching = true; m_fetchedData.clear();
     if (m_previewModel) m_previewModel->clearData();
     emit isFetchingChanged();
-    updateStatus("查询标的列表...", 10);
+    updateStatus("分析数据范围...", 0);
 
     QPointer<DataFetchController> self(this);
     FOUNDATION_THREADS.post([self, dataSource, startDate, endDate, dataTypes]() {
@@ -154,7 +154,18 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
 
-        QMetaObject::invokeMethod(self.get(), [self, symbolList, total]() {
+        // 先计算总工作量，再发标的列表和初始进度
+        auto sD = QDate::fromString(startDate, "yyyy-MM-dd");
+        auto eD = QDate::fromString(endDate, "yyyy-MM-dd");
+        int doneUnits = dataTypes.size();
+        int totalUnits = doneUnits;
+        for (const QString& dt : dataTypes) {
+            if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
+                for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) totalUnits++;
+            }
+        }
+
+        QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
             if (!self) return;
             self->m_fetchedData = symbolList;
             self->m_isFetching = false; emit self->isFetchingChanged(); emit self->fetchedDataChanged();
@@ -169,25 +180,15 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 self->m_previewModel->updateData(pv);
             }
             self->m_pendingDoneTotal = total;
-            self->updateStatus(QString("共 %1 只标的").arg(total), 100);
-            emit self->dataFetchProgress(100, QString("共 %1 只标的").arg(total));
+            int pct = doneUnits * 100 / qMax(1, totalUnits);
+            self->updateStatus(QString("共 %1 只标的, 下载中 0/%2").arg(total).arg(totalUnits), pct);
+            emit self->dataFetchProgress(pct, QString("共 %1 只标的, 下载中...").arg(total));
         });
 
         if (allSymbols.isEmpty()) return;
         std::vector<foundation::json::JsonFacade> allRows;
-        auto sD = QDate::fromString(startDate, "yyyy-MM-dd");
-        auto eD = QDate::fromString(endDate, "yyyy-MM-dd");
         std::vector<std::string> symVec;
         for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
-
-        // 动态计算总工作量：每种类型的 GROUP BY (1单位) + 每月 (1单位)
-        int doneUnits = dataTypes.size(); // GROUP BY 阶段已完成
-        int totalUnits = doneUnits;
-        for (const QString& dt : dataTypes) {
-            if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
-                for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) totalUnits++;
-            }
-        }
 
         for (const QString& dt : dataTypes) {
             if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
@@ -232,7 +233,11 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             infoMap["endDate"] = endDate;
             infoMap["rowCount"] = static_cast<int>(allRows.size());
             int id = DataCacheAdapter::instance().storeDataSetFromRows(allRows, infoMap);
-            QMetaObject::invokeMethod(self.get(), [self, id]() {
+            auto total = allRows.size();
+            QMetaObject::invokeMethod(self.get(), [self, id, total]() {
+                if (!self || id <= 0) return;
+                self->updateStatus(QString("查询完成，共 %1 行").arg(total), 100);
+                emit self->dataFetchProgress(100, QString("查询完成，共 %1 行").arg(total));
                 if (!self || id <= 0) return;
                 self->m_lastStoredDataSetId = id;
                 emit self->dataSetReadyForCleaning(id);
