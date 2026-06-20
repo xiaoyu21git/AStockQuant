@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <memory>
+#include <thread>
 
 namespace {
 
@@ -162,7 +163,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         std::unordered_set<std::string> fieldSet;
         for (const QString& dt : dataTypes) {
             auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-            std::string sql = std::vector<std::string> sv; for(autosrc->buildDataQuery(startDate.toStdString(), endDate.toStdString()) s:allSymbols) sv.push_back(s.toStdString()); src->buildDataQuery(startDate.toStdString(), endDate.toStdString(), sv) + " LIMIT 1";
+            std::vector<std::string> sv; for(const auto& s : allSymbols) sv.push_back(s.toStdString());
+            std::string sql = src->buildDataQuery(startDate.toStdString(), endDate.toStdString(), sv) + " LIMIT 1";
             auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
             if (!dbr||!dbr->isOpen()) continue;
             auto rr = dbr->executeQuery(sql,{});
@@ -179,11 +181,11 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             if (dbr && dbr->isOpen()) {
                 for (const QString& dt : dataTypes) {
                     auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-                    std::string sql = src->buildDataQuery(startDate.toStdString(),endDate.toStdString()) + " LIMIT 1";
+                    std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
+                    std::string sql = src->buildDataQuery(startDate.toStdString(),endDate.toStdString(),sv) + " LIMIT 1";
                     auto rr = dbr->executeQuery(sql,{});
                     for (const auto& row : rr.getRows())
-                        for (const auto& [col,val] : row.getValues())
-                            if (testNumeric(val)) numericFields.insert(col);
+                        for (const auto& [col,val] : row.getValues()) {}
                 }
             }
         }
@@ -199,9 +201,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
             for (const QString& dt : dataTypes) {
                 auto* src = cleaning::sourceByName(dt.toStdString()); if (src.tableName.isEmpty()) continue;
-                std::vector<std::string> symVec;
-                for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
-                std::string sql = src->buildDataQuery(ms, me, &symVec);
+                std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
+                std::string sql = src->buildDataQuery(ms, me, sv);
                 auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
