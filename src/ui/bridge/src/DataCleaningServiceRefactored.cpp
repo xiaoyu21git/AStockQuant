@@ -187,7 +187,6 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                 if (rule) engine.addRule(std::move(rule));
             }
 
-            int lastPct = -1;
             auto lastPct = std::make_shared<int>(-1);
             engine.setOnProgress([self, dataSetId, lastPct](int current, int totalRows, const std::string& stage) {
                 int pct = totalRows > 0 ? (5 + (current * 90) / totalRows) : 5;
