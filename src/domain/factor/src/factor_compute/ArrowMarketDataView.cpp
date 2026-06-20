@@ -198,6 +198,7 @@ ArrowMarketDataView::getField(const std::string& name) const {
 
 const std::vector<DateKey>& ArrowMarketDataView::dates() const { return impl_->dateKeys_; }
 const std::vector<InstrumentId>& ArrowMarketDataView::instruments() const { return impl_->instruments_; }
+const std::vector<std::string>& ArrowMarketDataView::symbolStrings() const { return impl_->symbolStrings_; }
 
 std::unique_ptr<IMarketDataView> ArrowMarketDataView::slice(DateRange range) const {
     auto ds = std::vector<DateKey>();

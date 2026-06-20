@@ -359,33 +359,15 @@ void FactorBacktestBridge::startBacktestWithFactors(
             emit progressChanged(); emit backtestProgress(m_progress, m_statusText);
         }, Qt::QueuedConnection);
 
-        // ① 在 worker 线程中加载缓存数据集 + 构建 MarketView
+        // ① 直接注入 Arrow 列式视图，零拷贝
         if (capturedDatasetId > 0 && m_backtestDataSvc) {
-            QVariantList data = DataCacheAdapter::instance().getDataSetById(capturedDatasetId);
-            if (!data.isEmpty()) {
-            QJsonDocument doc(QJsonArray::fromVariantList(data));
-            std::string jsonStr = doc.toJson(QJsonDocument::Compact).toStdString();
-            m_backtestDataSvc->storeRawJson(jsonStr);
-            {
-                m_backtestDataSvc->setBinCachePath(
-                    bridge::storage::persistentDataSetBinFilePath(
-                        capturedDatasetId).toStdString());
-            }
-            // 一次性加载全部字段，生成完整 .bin
-            {
-                auto& cache = DataCacheAdapter::instance();
-                auto info = cache.getDataSetInfo(capturedDatasetId);
-                std::vector<std::string> allFields;
-                for (const QString& f : info.value("availableFields").toStringList()) {
-                    std::string fs = f.toStdString();
-                    if (fs != "open" && fs != "high" && fs != "low" && fs != "close" && fs != "volume" && fs != "symbol" && fs != "trade_date")
-                        allFields.push_back(fs);
-                }
-                m_backtestDataSvc->buildViewForFields(allFields);
-            }
-            qDebug() << "[FactBacktestBridge] DataSvc 存储原始 JSON + .bin, ID=" << capturedDatasetId
-                     << "(" << data.size() << " 行)";
-            } else {
+            std::string arrowPath = cleaning::DataCache::instance().dataFilePath(capturedDatasetId);
+            auto arrowView = std::make_unique<factor::compute::ArrowMarketDataView>(arrowPath);
+            m_arrowView = std::move(arrowView);
+            m_backtestDataSvc->setMarketView(m_arrowView.get());
+            m_backtestDataSvc->buildViewForFields({});
+            qDebug() << "[FactBacktestBridge] Arrow view injected, ID=" << capturedDatasetId;
+            if (!m_arrowView || m_arrowView->instruments().empty()) {
                 QMetaObject::invokeMethod(this, [this]() {
                     emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));
                     m_isRunning.store(false); emit isRunningChanged();

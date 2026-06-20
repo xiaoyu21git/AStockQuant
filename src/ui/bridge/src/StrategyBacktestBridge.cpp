@@ -214,41 +214,24 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 return;
             }
 
-            // ─── 3. 加载数据集 JSON（缓存/磁盘 I/O — 现在在工作线程中）───
-            std::string datasetJson;
+            // ─── 3. 直接注入 Arrow 列式视图 ───
+            auto dataSvc = std::make_unique<factor::compute::BacktestDataService>();
             if (capturedDatasetId >= 0) {
-                QVariantList data = DataCacheAdapter::instance().getDataSetById(capturedDatasetId);
-                if (!data.isEmpty()) {
-                    QJsonDocument doc(QJsonArray::fromVariantList(data));
-                    datasetJson = doc.toJson(QJsonDocument::Compact).toStdString();
+                std::string arrowPath = cleaning::DataCache::instance().dataFilePath(capturedDatasetId);
+                auto arrowView = std::make_unique<factor::compute::ArrowMarketDataView>(arrowPath);
+                if (arrowView->instruments().empty()) {
+                    QMetaObject::invokeMethod(this, [this]() {
+                        m_isRunning.store(false); emit isRunningChanged();
+                        emit backtestFailed(QStringLiteral("数据集为空"));
+                    }, Qt::QueuedConnection);
+                    return;
                 }
-            }
-            if (datasetJson.empty()) {
-                QMetaObject::invokeMethod(this, [this]() {
-                    m_isRunning.store(false);
-                    emit isRunningChanged();
-                    emit backtestFailed(QStringLiteral("No backtest dataset selected"));
-                }, Qt::QueuedConnection);
-                return;
+                dataSvc->setMarketView(arrowView.get());
+                dataSvc->buildViewForFields({});
+                m_strategyDataSvc = std::move(arrowView);
             }
 
             // ─── 4. 执行回测 ───
-            QMetaObject::invokeMethod(this, [this]() {
-                m_statusText = QStringLiteral("Running...");
-                emit statusChanged();
-            }, Qt::QueuedConnection);
-
-            auto dataSvc = std::make_unique<factor::compute::BacktestDataService>();
-            dataSvc->storeRawJson(datasetJson);
-
-            // ── 启用二进制缓存加速：设置 .bin 路径，
-            // engine->backtest() 内部会调用 buildViewForFields 自动加载或生成 .bin ──
-            if (capturedDatasetId >= 0) {
-                dataSvc->setBinCachePath(
-                    bridge::storage::persistentDataSetBinFilePath(
-                        capturedDatasetId).toStdString());
-            }
-
             auto result = engine->backtest(request, dataSvc.get(),
                 [this](double progress) {
                     QMetaObject::invokeMethod(this, [this, progress]() {

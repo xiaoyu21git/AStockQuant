@@ -6,6 +6,7 @@
 #include <QVariantMap>
 #include <QVariantList>
 #include <QTimer>
+#include "factor_compute/ArrowMarketDataView.h"
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🧊 FROZEN — 因子回测桥接层 (2026-06-04)
@@ -192,6 +193,7 @@ private:
     std::unique_ptr<Factor::backtest::FactorBacktestOrchestrator> m_orchestrator;
     std::unique_ptr<domain::scheduler::BacktestScheduler>   m_scheduler;
     std::unique_ptr<factor::compute::BacktestDataService>   m_backtestDataSvc;
+    std::unique_ptr<class factor::compute::ArrowMarketDataView> m_arrowView;
 std::unique_ptr<factor::compute::FactorEngine>  m_factorEngine;
     std::unique_ptr<factor::compute::BacktestReporter>      m_reporter;
 

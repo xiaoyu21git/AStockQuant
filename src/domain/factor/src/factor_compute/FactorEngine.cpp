@@ -25,140 +25,23 @@ static int s_computeOneDayCounter = 0;
 BacktestDataService::BacktestDataService() = default;
 BacktestDataService::~BacktestDataService() = default;
 
-void BacktestDataService::storeRawJson(const std::string& jsonContent)
-{
-    m_rawJson = jsonContent;
-    m_jsonStored = true;
-    m_ownedView.reset();
-    m_marketView = nullptr;
-}
-
-void BacktestDataService::setBinCachePath(const std::string& binPath)
-{
-    m_binCachePath = binPath;
-    fprintf(stderr, "[BDS] setBinCachePath: %s\n", m_binCachePath.c_str());
-    fflush(stderr);
-}
-
 void BacktestDataService::buildViewForFields(const std::vector<std::string>& extraFields)
 {
     buildViewForFields(extraFields, nullptr);
 }
 
-void BacktestDataService::buildViewForFields(const std::vector<std::string>& extraFields,
+void BacktestDataService::buildViewForFields(const std::vector<std::string>&,
                                               const std::function<void(double)>& onProgress)
 {
-    // ── 已加载且字段齐全 → 跳过重复加载 ──
-    if (m_ownedView) {
-        bool missingField = false;
-        for (const auto& f : extraFields) {
-            if (!m_ownedView->hasField(f)) {
-                missingField = true;
-                break;
-            }
-        }
-        if (!missingField) {
-            fprintf(stderr, "[BDS] buildViewForFields: view already loaded, skip reload\n");
-            fflush(stderr);
-            if (onProgress) onProgress(100.0);
-            return;
-        }
-        // 请求了新字段 → 需要重新构建
-    }
-
-    // ── 优先尝试二进制缓存 ──
-    if (!m_binCachePath.empty() && !m_rawJson.empty()) {
-        // 检查 .bin 是否存在且更新
-        FILE* testf = nullptr;
-#ifdef _MSC_VER
-        fopen_s(&testf, m_binCachePath.c_str(), "rb");
-#else
-        testf = std::fopen(m_binCachePath.c_str(), "rb");
-#endif
-        if (testf) {
-            std::fclose(testf);
-            fprintf(stderr, "[BDS] buildViewForFields: loading from binary cache %s...\n", m_binCachePath.c_str());
-            fflush(stderr);
-            if (onProgress) onProgress(10.0);
-            m_ownedView = CachedMarketDataView::fromBinary(m_binCachePath);
-            if (m_ownedView) {
-                m_marketView = m_ownedView.get();
-                // 检查需要的额外字段是否都存在
-                bool missingField = false;
-                for (const auto& f : extraFields) {
-                    if (!m_ownedView->hasField(f)) {
-                        fprintf(stderr, "[BDS] buildViewForFields: bin cache missing field '%s', will re-parse\n", f.c_str());
-                        missingField = true;
-                        break;
-                    }
-                }
-                if (!missingField) {
-                    fprintf(stderr, "[BDS] buildViewForFields: binary cache loaded OK, dates=%zu instruments=%zu\n",
-                            m_ownedView->dates().size(), m_ownedView->instruments().size());
-                    if (onProgress) onProgress(100.0);
-                    fflush(stderr);
-                    return;
-                }
-            }
-            fprintf(stderr, "[BDS] buildViewForFields: binary cache corrupted, will re-parse JSON\n");
-            fflush(stderr);
-        }
-    }
-
-    // ── 回退：JSON 解析 ──
-    if (!m_jsonStored || m_rawJson.empty()) {
-        fprintf(stderr, "[BDS] buildViewForFields: no JSON stored, skip\n"); fflush(stderr);
+    if (m_marketView) {
+        if (onProgress) onProgress(100.0);
         return;
-    }
-
-    // 合并已有字段 + 新请求字段，确保 .bin 逐步积累完整
-    std::vector<std::string> allFields;
-    {
-        std::unordered_set<std::string> fieldSet(m_loadedExtraFields.begin(), m_loadedExtraFields.end());
-        for (const auto& f : extraFields) fieldSet.insert(f);
-        allFields.assign(fieldSet.begin(), fieldSet.end());
-    }
-
-    fprintf(stderr, "[BDS] buildViewForFields: parsing JSON (%zu bytes) for %zu extra fields (accumulated: %zu)...\n",
-            m_rawJson.size(), extraFields.size(), allFields.size()); fflush(stderr);
-    for (const auto& f : allFields)
-        fprintf(stderr, "[BDS]   extra field: %s\n", f.c_str());
-    fflush(stderr);
-
-    if (onProgress) onProgress(20.0);
-    auto root = foundation::json::JsonFacade::parse(m_rawJson);
-    if (!root.isArray() || root.size() == 0) {
-        fprintf(stderr, "[BDS] buildViewForFields: JSON parse failed or empty\n"); fflush(stderr);
-        return;
-    }
-    if (onProgress) onProgress(50.0);
-
-    m_ownedView = CachedMarketDataView::fromJson(root, allFields);
-    if (onProgress) onProgress(90.0);
-    if (m_ownedView) {
-        m_marketView = m_ownedView.get();
-        m_loadedExtraFields = allFields;  // 记录已加载的全部字段
-        fprintf(stderr, "[BDS] buildViewForFields: view built OK, dates=%zu instruments=%zu extraFields=%zu\n",
-                m_ownedView->dates().size(), m_ownedView->instruments().size(), allFields.size());
-
-        // ── 保存二进制缓存供下次快速加载 ──
-        if (!m_binCachePath.empty()) {
-            bool ok = m_ownedView->saveToBinary(m_binCachePath);
-            fprintf(stderr, "[BDS] saveToBinary: %s -> %s\n", m_binCachePath.c_str(), ok ? "OK" : "FAILED");
-            fflush(stderr);
-        }
-    } else {
-        fprintf(stderr, "[BDS] buildViewForFields: view build FAILED (nullptr)\n");
     }
     if (onProgress) onProgress(100.0);
-    fflush(stderr);
 }
 
-void BacktestDataService::setMarketView(IMarketDataView* view) {
-    m_marketView = view;
-}
-
-MarketMatrixBatch BacktestDataService::loadBatch(std::size_t batchIndex) {
+MarketMatrixBatch BacktestDataService::loadBatch(std::size_t batchIndex)
+{
     MarketMatrixBatch batch;
     batch.batchIndex = batchIndex;
     batch.marketView = m_marketView;

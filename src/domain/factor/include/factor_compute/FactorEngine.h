@@ -74,30 +74,17 @@ public:
     BacktestDataService(const BacktestDataService&) = delete;
     BacktestDataService& operator=(const BacktestDataService&) = delete;
 
-    /// @brief 存储原始 JSON（不构建任何视图，零内存开销）
-    void storeRawJson(const std::string& jsonContent);
-
-    /// @brief 设置二进制缓存路径（与 JSON 同目录，扩展名 .bin）
-    void setBinCachePath(const std::string& binPath);
-
-    /// @brief 按因子要求的字段构建 MarketView（只加载 OHLCV + 指定字段）
-    void buildViewForFields(const std::vector<std::string>& extraFields);
-
-    /// @brief 同上，但带进度回调 (0.0 → 100.0)
     void buildViewForFields(const std::vector<std::string>& extraFields,
                             const std::function<void(double)>& onProgress);
+    void buildViewForFields(const std::vector<std::string>& extraFields);
 
     void setMarketView(IMarketDataView* view);
+    IMarketDataView* getView() const { return m_marketView; }
     MarketMatrixBatch loadBatch(std::size_t batchIndex);
 
 private:
     IMarketDataView* m_marketView = nullptr;
     std::unique_ptr<class CachedMarketDataView> m_ownedView;
-    std::string m_rawJson;
-    std::string m_jsonFilePath;
-    std::string m_binCachePath;
-    std::vector<std::string> m_loadedExtraFields;  // 累积已加载的额外字段
-    bool m_jsonStored = false;
 };
 
 // ═══ FactorEngine (Layer 3b) ═══

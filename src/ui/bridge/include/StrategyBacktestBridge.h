@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <memory>
+#include "factor_compute/ArrowMarketDataView.h"
 
 #include "foundation/thread/ThreadPoolExecutor.h"
 
@@ -47,4 +48,5 @@ private:
     double m_progress{0.0};
     QString m_statusText;
     bool m_modulesResolved{false};
+    std::unique_ptr<class factor::compute::ArrowMarketDataView> m_strategyDataSvc;
 };
