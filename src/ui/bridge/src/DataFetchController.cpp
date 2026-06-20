@@ -230,9 +230,13 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
             auto j = foundation::json::JsonFacade::createObject();
             for (const auto& [col, val] : r.getValues()) {
-                // 尝试解析为 double，失败则当字符串
-                try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { j.set(col, foundation::json::JsonFacade::createDouble(d)); continue; } } catch(...) {}
-                j.set(col, foundation::json::JsonFacade::createString(val));
+                if (val.empty()) continue;
+                char* end = nullptr;
+                double d = strtod(val.c_str(), &end);
+                if (end && static_cast<size_t>(end - val.c_str()) == val.size())
+                    j.set(col, foundation::json::JsonFacade::createDouble(d));
+                else
+                    j.set(col, foundation::json::JsonFacade::createString(val));
             }
             return j;
         };
@@ -324,16 +328,21 @@ void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
     }
 
     // 财务
-    std::string fSql = "SELECT * FROM financial_statement WHERE symbol=" + sym
-                       + " AND report_date BETWEEN " + sd + " AND " + ed
-                       + " ORDER BY report_date LIMIT " + limit + " OFFSET " + offset;
+    std::string fSql = "SELECT si.symbol, fi.* FROM financial_indicator fi JOIN symbol_info si ON fi.symbol_id=si.symbol_id"
+                       " WHERE si.symbol=" + sym + " AND fi.report_date BETWEEN " + sd + " AND " + ed
+                       + " ORDER BY fi.report_date LIMIT " + limit + " OFFSET " + offset;
     auto fResult = db->executeQuery(fSql, {});
     for (const auto& row : fResult.getRows()) {
         QVariantMap m;
         for (const auto& col : row.getValues()) {
             const auto& val = col.second;
-            try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { m[QString::fromStdString(col.first)] = d; continue; } } catch(...) {}
-            m[QString::fromStdString(col.first)] = QString::fromStdString(val);
+            if (val.empty()) continue;
+            char* end = nullptr;
+            double d = strtod(val.c_str(), &end);
+            if (end && static_cast<size_t>(end - val.c_str()) == val.size())
+                m[QString::fromStdString(col.first)] = d;
+            else
+                m[QString::fromStdString(col.first)] = QString::fromStdString(val);
         }
         m["dataType"] = "financial";
         data.append(m);
