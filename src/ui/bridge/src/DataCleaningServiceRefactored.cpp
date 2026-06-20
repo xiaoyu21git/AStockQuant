@@ -169,6 +169,8 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
 
             // 1. 从 Arrow 加载数据
             auto rows = cleaning::DataCache::instance().loadDataSetFile(dataSetId);
+            fprintf(stderr, "[CleaningSvc] loaded: %zu rows\n", rows.size());
+            fflush(stderr);
             inputRows = static_cast<int>(rows.size());
             if (rows.empty()) {
                 QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
