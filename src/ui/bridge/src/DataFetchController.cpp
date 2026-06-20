@@ -199,9 +199,6 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         });
 
         if (allSymbols.isEmpty()) return;
-        std::vector<std::string> symVec;
-        for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
-
         QVariantMap infoMap;
         infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate);
         infoMap["sourceType"] = dataSource;
@@ -225,7 +222,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int totalRows = 0;
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
-            if (table.isEmpty()) continue;
+            if (table.isEmpty()) { fprintf(stderr, "[DFC] skip type %s (no table)\n", dt.toStdString().c_str()); fflush(stderr); continue; }
+            int dtRows = 0;
             for (int mi = 0; mi < totalMonths; mi++) {
                 int cm = sm + mi, cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
                 int cs = (cy == sy && cm == sm) ? sd : 1;
@@ -233,17 +231,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
                 auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
                 if (!db2 || !db2->isOpen()) break;
-                std::string inClause;
-                if (!symVec.empty()) {
-                    inClause = " AND symbol IN (";
-                    for (size_t si = 0; si < symVec.size(); ++si) {
-                        if (si > 0) inClause += ",";
-                        inClause += "'" + symVec[si] + "'";
-                    }
-                    inClause += ")";
-                }
                 std::string sql = "SELECT * FROM " + table.toStdString()
-                    + " WHERE " + dateColForType(dt).toStdString() + " BETWEEN '" + ms + "' AND '" + me + "'" + inClause;
+                    + " WHERE " + dateColForType(dt).toStdString() + " BETWEEN '" + ms + "' AND '" + me + "'";
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
                 for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
