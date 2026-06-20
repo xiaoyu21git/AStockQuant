@@ -195,7 +195,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                 QMetaObject::invokeMethod(self.get(), [self, dataSetId, pct, stage]() {
                     emit self->cleaningProgress(QString::number(dataSetId), pct,
                         QString::fromStdString(stage));
-                }, Qt::BlockingQueuedConnection);
+                }, Qt::QueuedConnection);
             });
 
             // 3. 清洗
