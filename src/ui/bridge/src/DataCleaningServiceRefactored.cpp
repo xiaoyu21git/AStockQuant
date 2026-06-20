@@ -209,7 +209,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             // 4. 写入新 DataSet
             auto info = DataCacheAdapter::instance().getDataSetInfo(dataSetId);
             QVariantMap infoMap;
-            infoMap["displayName"] = QString("清洗结果_%1").arg(info.value("displayName").toString());
+            infoMap["displayName"] = QString("cleaned_%1").arg(info.value("displayName").toString());
             infoMap["sourceType"] = "cleaning";
             infoMap["rowCount"] = outputRows;
             infoMap["stockCodes"] = info.value("stockCodes");
