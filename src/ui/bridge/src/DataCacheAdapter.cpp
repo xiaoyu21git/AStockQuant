@@ -108,12 +108,13 @@ void DataCacheAdapter::appendArrowBatch(void* token, const std::vector<foundatio
 
 void DataCacheAdapter::finishArrowWrite(void* token, const QVariantMap& infoMap, int rowCount) {
     m_cache->finishArrowWrite(token);
-    // 更新元数据
-    auto info = mapToCppInfo(infoMap);
-    auto fullInfo = m_cache->getDataSetInfo(info.id);
-    // find the dataSetId from the file path (stored during beginArrowWrite)
-    // use m_cache->storeDataSet to update metadata
-    fprintf(stderr, "[DataCacheAdapter] batch write finished: %d rows\n", rowCount);
+    int dataId = infoMap.value("id", -1).toInt();
+    if (dataId > 0) {
+        m_cache->updateDataSetRowCount(dataId, rowCount);
+        auto updated = m_cache->getDataSetInfo(dataId);
+        emit dataSetStored(dataId, cppInfoToMap(updated));
+    }
+    fprintf(stderr, "[DataCacheAdapter] batch write finished: dataSetId=%d rows=%d\n", dataId, rowCount);
     fflush(stderr);
 }
 

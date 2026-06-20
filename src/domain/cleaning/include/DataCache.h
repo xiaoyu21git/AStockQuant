@@ -170,6 +170,13 @@ public:
         return dataId;
     }
 
+    // ── 更新数据集行数 ──
+    void updateDataSetRowCount(int dataId, int rowCount) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_index.find(dataId);
+        if (it != m_index.end()) { it->second.rowCount = rowCount; saveCatalog(); }
+    }
+
     // ── 获取数据集信息 ──
     DataSetInfo getDataSetInfo(int dataId) const {
         std::lock_guard<std::mutex> lock(m_mutex);

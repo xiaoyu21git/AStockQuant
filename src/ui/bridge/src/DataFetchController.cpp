@@ -238,6 +238,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             self->updateStatus(QString("查询完成，共 %1 行").arg(tr), 100);
             emit self->dataFetchProgress(100, QString("查询完成，共 %1 行").arg(tr));
             self->m_lastStoredDataSetId = did;
+            self->refreshDataSetInfos();
             emit self->dataSetReadyForCleaning(did);
         }, Qt::QueuedConnection);
     });
