@@ -1038,6 +1038,11 @@ Item {
             root.handlePanelStatusRequested(`❌ ${error}`, "error")
         }
 
+        onDataSetCleaned: function(inputId, resultId, message, inputRows, outputRows) {
+            handlePanelStatusRequested("清洗完成: " + inputRows + " -> " + outputRows + " 行, 新数据集 ID=" + resultId, "success")
+            dataFetchController.refreshDataSetInfos()
+        }
+
         onDataSetInfosRefreshed: function(infos) {
             cacheDisplayModel.clear()
             for (var i = 0; i < infos.length; i++) {
