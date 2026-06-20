@@ -69,6 +69,7 @@ DataFetchController::DataFetchController(QObject* parent)
         m_operationInProgress = false; emit operationInProgressChanged();
         emit dataCleaningError(e);
     });
+    QTimer::singleShot(0, this, [this]() { refreshDataSetInfos(); });
     QTimer::singleShot(1000, this, SLOT(logInitMessage()));
 }
 
