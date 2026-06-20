@@ -294,7 +294,11 @@ Item {
         )
 
         var entry = cacheDisplayModel.get(root.currentCacheIndex)
-        var dataSetId = entry ? entry.id : -1
+        var dataSetId = (entry && entry.id > 0) ? entry.id : -1
+        if (dataSetId <= 0) {
+            handlePanelStatusRequested("请先查询数据生成数据集", "error")
+            return
+        }
         console.log("[QML] cleanDataFromDataSet dataSetId=" + dataSetId)
         dataFetchController.cleanDataFromDataSet(dataSetId, rules)
         handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
