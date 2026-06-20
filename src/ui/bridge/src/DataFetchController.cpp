@@ -20,16 +20,6 @@
 
 namespace {
 
-template <typename Func>
-void invokeOnMainThread(DataFetchController* controller, Func&& func)
-{
-    QPointer<DataFetchController> safe(controller);
-    QMetaObject::invokeMethod(controller,
-        [safe, fn = std::forward<Func>(func)]() mutable {
-            if (safe) fn(safe.data());
-        }, Qt::QueuedConnection);
-}
-
 void updateStringProperty(QString& target, const QString& value, const std::function<void()>& notifier)
 {
     if (target != value) { target = value; notifier(); }
@@ -41,6 +31,18 @@ void updateBoolProperty(bool& target, bool value, const std::function<void()>& n
 }
 
 static constexpr int kPageSize = 100;
+
+// 按数据类型获取表名和日期列
+QString tableForType(const QString& dt) {
+    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") return "daily_bar";
+    if (dt == "financial") return "financial_statement";
+    return QString();
+}
+QString dateColForType(const QString& dt) {
+    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") return "trade_date";
+    if (dt == "financial") return "report_date";
+    return "trade_date";
+}
 
 } // anonymous namespace
 
@@ -73,7 +75,7 @@ DataFetchController::DataFetchController(QObject* parent)
 
 DataFetchController::~DataFetchController() {}
 
-// ---- 数据查询（GROUP BY → 标的列表 + 后台 Arrow 存储） ----
+// ---- 数据查询（按类型动态查） ----
 
 void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                                                   const QString& symbol,
@@ -82,9 +84,12 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                                                   const QString& endDate,
                                                   const QVariantMap&)
 {
-    Q_UNUSED(dataTypes); Q_UNUSED(symbol);
+    Q_UNUSED(symbol);
     if (startDate.isEmpty() || endDate.isEmpty()) {
         updateStatus("日期未设置", 0); emit dataFetchError("日期未设置"); return;
+    }
+    if (dataTypes.isEmpty()) {
+        updateStatus("未选择数据类型", 0); emit dataFetchError("未选择数据类型"); return;
     }
 
     m_isFetching = true; m_fetchedData.clear();
@@ -93,10 +98,9 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     updateStatus("查询标的列表...", 10);
 
     QPointer<DataFetchController> self(this);
-    FOUNDATION_THREADS.post([self, dataSource, startDate, endDate]() {
+    FOUNDATION_THREADS.post([self, dataSource, startDate, endDate, dataTypes]() {
         if (!self) return;
 
-        // Step 1: GROUP BY 查标的列表
         auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) {
             QMetaObject::invokeMethod(self.get(), [self]() {
@@ -108,26 +112,48 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             return;
         }
 
-        std::string sql = "SELECT symbol, MIN(trade_date) AS start_dt, MAX(trade_date) AS end_dt, "
-                          "COUNT(*) AS cnt, MIN(close) AS first_close, MAX(close) AS last_close "
-                          "FROM daily_bar WHERE trade_date BETWEEN '" + startDate.toStdString()
-                          + "' AND '" + endDate.toStdString() + "' GROUP BY symbol ORDER BY symbol";
-        auto result = db->executeQuery(sql, {});
-        QVariantList symbolList;
-        QStringList symbols;
-        for (const auto& row : result.getRows()) {
-            QVariantMap item;
-            item["symbol"] = QString::fromStdString(row.getString("symbol"));
-            item["startDate"] = QString::fromStdString(row.getString("start_dt"));
-            item["endDate"] = QString::fromStdString(row.getString("end_dt"));
-            item["recordCount"] = row.getInt("cnt");
-            item["firstClose"] = row.getDouble("first_close");
-            item["lastClose"] = row.getDouble("last_close");
-            symbolList.append(item);
-            symbols.append(item["symbol"].toString());
+        QMap<QString, QVariantMap> merged;
+        QStringList allSymbols;
+
+        for (const QString& dt : dataTypes) {
+            QString table = tableForType(dt);
+            QString dateCol = dateColForType(dt);
+            if (table.isEmpty()) continue;
+
+            std::string sql = "SELECT symbol, MIN(" + dateCol.toStdString() + ") AS start_dt, "
+                              "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
+                              "FROM " + table.toStdString() + " WHERE " + dateCol.toStdString()
+                              + " BETWEEN '" + startDate.toStdString() + "' AND '"
+                              + endDate.toStdString() + "' GROUP BY symbol";
+            auto result = db->executeQuery(sql, {});
+            for (const auto& row : result.getRows()) {
+                QString sym = QString::fromStdString(row.getString("symbol"));
+                if (merged.contains(sym)) {
+                    QVariantMap& m = merged[sym];
+                    m["recordCount"] = m["recordCount"].toInt() + row.getInt("cnt");
+                    std::string sd = row.getString("start_dt");
+                    std::string ed = row.getString("end_dt");
+                    if (sd < m["startDate"].toString().toStdString())
+                        m["startDate"] = QString::fromStdString(sd);
+                    if (ed > m["endDate"].toString().toStdString())
+                        m["endDate"] = QString::fromStdString(ed);
+                } else {
+                    QVariantMap item;
+                    item["symbol"] = sym;
+                    item["startDate"] = QString::fromStdString(row.getString("start_dt"));
+                    item["endDate"] = QString::fromStdString(row.getString("end_dt"));
+                    item["recordCount"] = row.getInt("cnt");
+                    item["dataType"] = dt;
+                    merged[sym] = item;
+                    allSymbols.append(sym);
+                }
+            }
         }
 
+        QVariantList symbolList;
+        for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
+
         QMetaObject::invokeMethod(self.get(), [self, symbolList, total]() {
             if (!self) return;
             self->m_fetchedData = symbolList;
@@ -145,43 +171,46 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             self->m_pendingDoneTotal = total;
             self->updateStatus(QString("共 %1 只标的").arg(total), 100);
             emit self->dataFetchProgress(100, QString("共 %1 只标的").arg(total));
-        }, Qt::QueuedConnection);
+        });
 
-        // Step 2: 后台线程查全量 → Arrow
-        if (symbols.isEmpty()) return;
+        if (allSymbols.isEmpty()) return;
+        std::vector<foundation::json::JsonFacade> allRows;
         auto sD = QDate::fromString(startDate, "yyyy-MM-dd");
         auto eD = QDate::fromString(endDate, "yyyy-MM-dd");
-        std::vector<foundation::json::JsonFacade> allRows;
-        for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) {
-            QDate ms = qMax(sD, m);
-            QDate me = qMin(eD, QDate(m.year(), m.month(), m.daysInMonth()));
-            if (ms > me) continue;
-            auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-            if (!db2 || !db2->isOpen()) break;
-            astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-            std::vector<std::string> batchSyms;
-            for (const auto& s : symbols) batchSyms.push_back(s.toStdString());
-            auto bars = repo.queryDailyBarBatch(batchSyms,
-                ms.toString("yyyy-MM-dd").toStdString(),
-                me.toString("yyyy-MM-dd").toStdString());
-            for (const auto& bar : bars) {
-                auto j = foundation::json::JsonFacade::createObject();
-                j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
-                j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
-                j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
-                j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
-                j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
-                j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
-                j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
-                j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
-                allRows.push_back(std::move(j));
+        std::vector<std::string> symVec;
+        for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
+
+        for (const QString& dt : dataTypes) {
+            if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
+                for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) {
+                    QDate ms = qMax(sD, m);
+                    QDate me = qMin(eD, QDate(m.year(), m.month(), m.daysInMonth()));
+                    if (ms > me) continue;
+                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+                    if (!db2 || !db2->isOpen()) break;
+                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+                    auto bars = repo.queryDailyBarBatch(symVec, ms.toString("yyyy-MM-dd").toStdString(), me.toString("yyyy-MM-dd").toStdString());
+                    for (const auto& bar : bars) {
+                        auto j = foundation::json::JsonFacade::createObject();
+                        j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
+                        j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
+                        j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
+                        j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
+                        j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
+                        j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
+                        j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
+                        j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
+                        allRows.push_back(std::move(j));
+                    }
+                }
             }
         }
+
         if (!allRows.empty()) {
             QVariantMap infoMap;
-            infoMap["displayName"] = QString("%1:ALL:%2:%3").arg(dataSource, startDate, endDate);
+            infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate);
             infoMap["sourceType"] = dataSource;
-            infoMap["stockCodes"] = symbols;
+            infoMap["stockCodes"] = allSymbols;
             infoMap["startDate"] = startDate;
             infoMap["endDate"] = endDate;
             infoMap["rowCount"] = static_cast<int>(allRows.size());
@@ -237,7 +266,7 @@ void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
     emit symbolDetailLoaded(symbol, page, data);
 }
 
-// ---- 清洗（从 DataSet） ----
+// ---- 清洗 ----
 
 void DataFetchController::cleanDataFromDataSet(int dataSetId, const QVariantMap& rules)
 {
@@ -353,8 +382,6 @@ void DataFetchController::onDataCleaningCompleted(bool ok, const QString& m, con
     m_operationInProgress = false; emit operationInProgressChanged();
     if (!ok) emit dataCleaningError(m);
 }
-
-// ---- 属性 ----
 
 void DataFetchController::setDataSource(const QString& s) {
     if (m_dataSource != s) { m_dataSource = s; emit dataSourceChanged(); }
