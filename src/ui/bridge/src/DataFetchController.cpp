@@ -58,8 +58,13 @@ QString dateColForType(const QString& dt) {
     return "trade_date";
 }
 QString symColForType(const QString& dt) {
-    if (dt == "financial" || dt == "news") return "symbol_id";
+    if (dt == "financial" || dt == "news") return "fi.symbol_id";
     return "symbol";
+}
+QString symTableJoinClause(const QString& dt) {
+    if (dt == "financial" || dt == "news")
+        return " JOIN symbol_info si ON fi.symbol_id = si.symbol_id ";
+    return "";
 }
 
 } // anonymous namespace
@@ -138,10 +143,27 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
             QString dateCol = dateColForType(dt);
-            QString symCol = symColForType(dt);
+            QString joinClause = symTableJoinClause(dt);
             if (table.isEmpty()) continue;
 
-            std::string sql = "SELECT " + symCol.toStdString() + " AS symbol, MIN(" + dateCol.toStdString() + ") AS start_dt, "
+            std::string fromClause;
+            if (joinClause.isEmpty()) {
+                fromClause = "FROM " + table.toStdString();
+            } else {
+                fromClause = "FROM " + table.toStdString() + " fi" + joinClause.toStdString();
+            }
+            std::string sql = "SELECT si.symbol, MIN(fi." + dateCol.toStdString() + ") AS start_dt, "
+                + "MAX(fi." + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
+                + fromClause + " WHERE fi." + dateCol.toStdString()
+                + " BETWEEN '" + startDate.toStdString() + "' AND '"
+                + endDate.toStdString() + "' GROUP BY si.symbol";
+            if (joinClause.isEmpty()) {
+                sql = "SELECT symbol, MIN(" + dateCol.toStdString() + ") AS start_dt, "
+                    + "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
+                    + fromClause + " WHERE " + dateCol.toStdString()
+                    + " BETWEEN '" + startDate.toStdString() + "' AND '"
+                    + endDate.toStdString() + "' GROUP BY symbol";
+            }
                               "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
                               "FROM " + table.toStdString() + " WHERE " + dateCol.toStdString()
                               + " BETWEEN '" + startDate.toStdString() + "' AND '"
@@ -219,8 +241,13 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
             if (table.isEmpty()) continue;
-            std::string sql = "SELECT * FROM " + table.toStdString()
-                + " WHERE " + dateColForType(dt).toStdString()
+            QString joinClause = symTableJoinClause(dt);
+            std::string fromClause = joinClause.isEmpty()
+                ? ("FROM " + table.toStdString())
+                : ("FROM " + table.toStdString() + " fi" + joinClause.toStdString());
+            std::string selectCols = joinClause.isEmpty() ? "*" : "si.symbol, fi.*";
+            std::string sql = "SELECT " + selectCols + " " + fromClause
+                + " WHERE " + (joinClause.isEmpty() ? "" : "fi.") + dateColForType(dt).toStdString()
                 + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
             if (allSymbols.size() > 0 && allSymbols.size() <= 1000 && symColForType(dt) == "symbol") {
                 sql += " AND symbol IN (";
