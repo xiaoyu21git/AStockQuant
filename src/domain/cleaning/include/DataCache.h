@@ -203,11 +203,20 @@ public:
 
 #ifdef ASTOCK_HAS_PARQUET
 
-    /// @brief 保存数据集数据到 Parquet 文件
+    /// @brief 保存数据集数据到 Arrow 文件（一次性）
     void saveDataSetFile(int dataId, const std::vector<J>& rows);
 
-    /// @brief 从 Parquet 文件加载数据集数据
+    /// @brief 从 Arrow 文件加载数据集数据
     std::vector<J> loadDataSetFile(int dataId);
+
+    /// @brief 批量写入：开始新 Arrow 文件（返回 writer token，null 表示失败）
+    void* beginArrowWrite(int dataId);
+
+    /// @brief 批量写入：追加一批行（token 由 beginArrowWrite 返回）
+    void appendArrowBatch(void* token, const std::vector<J>& rows);
+
+    /// @brief 批量写入：完成并关闭文件
+    void finishArrowWrite(void* token);
 
 #endif // ASTOCK_HAS_PARQUET
 

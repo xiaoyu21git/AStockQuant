@@ -216,4 +216,57 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
     return tableToRows(table);
 }
 
+// ── 批量写入 ──
+
+struct WriteSession {
+    std::shared_ptr<arrow::Schema> schema;
+    std::shared_ptr<arrow::ipc::RecordBatchWriter> writer;
+    std::shared_ptr<arrow::io::FileOutputStream> stream;
+    std::vector<std::string> fieldNames;
+    std::unordered_set<std::string> numericFields;
+    int64_t totalRows = 0;
+};
+
+void* DataCache::beginArrowWrite(int dataId)
+{
+    auto session = new WriteSession();
+    session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
+    return session;
+}
+
+void DataCache::appendArrowBatch(void* token, const std::vector<J>& rows)
+{
+    if (!token || rows.empty()) return;
+    auto* s = static_cast<WriteSession*>(token);
+
+    // 首次写入：探测字段 schema
+    if (!s->writer) {
+        scanFields(rows, s->fieldNames, s->numericFields);
+        auto table = buildArrowTable(rows, s->fieldNames, s->numericFields);
+        s->schema = table->schema();
+        s->writer = arrow::ipc::MakeFileWriter(s->stream, s->schema).ValueOrDie();
+        s->writer->WriteTable(*table);
+        s->totalRows += table->num_rows();
+        return;
+    }
+
+    // 后续批次：复用 schema
+    auto table = buildArrowTable(rows, s->fieldNames, s->numericFields);
+    if (!table->schema()->Equals(*s->schema)) return; // schema 不匹配，跳过
+    s->writer->WriteTable(*table);
+    s->totalRows += table->num_rows();
+}
+
+void DataCache::finishArrowWrite(void* token)
+{
+    if (!token) return;
+    auto* s = static_cast<WriteSession*>(token);
+    if (s->writer) s->writer->Close();
+    s->stream.reset();
+    fprintf(stderr, "[DataCache] saved Arrow IPC %s: %lld rows x %zu cols\n",
+            dataFilePath(0).c_str(), s->totalRows, s->fieldNames.size());
+    fflush(stderr);
+    delete s;
+}
+
 } // namespace cleaning

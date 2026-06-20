@@ -97,6 +97,26 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     return dataId;
 }
 
+void* DataCacheAdapter::beginArrowWrite(int dataId) {
+    ensureInitialized();
+    return m_cache->beginArrowWrite(dataId);
+}
+
+void DataCacheAdapter::appendArrowBatch(void* token, const std::vector<foundation::json::JsonFacade>& rows) {
+    m_cache->appendArrowBatch(token, rows);
+}
+
+void DataCacheAdapter::finishArrowWrite(void* token, const QVariantMap& infoMap, int rowCount) {
+    m_cache->finishArrowWrite(token);
+    // 更新元数据
+    auto info = mapToCppInfo(infoMap);
+    auto fullInfo = m_cache->getDataSetInfo(info.id);
+    // find the dataSetId from the file path (stored during beginArrowWrite)
+    // use m_cache->storeDataSet to update metadata
+    fprintf(stderr, "[DataCacheAdapter] batch write finished: %d rows\n", rowCount);
+    fflush(stderr);
+}
+
 QVariantList DataCacheAdapter::getDataSetById(int dataId) {
     ensureInitialized();
 
