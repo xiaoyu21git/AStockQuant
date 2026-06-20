@@ -267,7 +267,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
             doneUnits++;
             int du = doneUnits, tu = totalUnits, tr = totalRows;
-            QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
+            QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::BlockingQueuedConnection);
             fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), static_cast<int>(batch.size()));
             fflush(stderr);
         }
