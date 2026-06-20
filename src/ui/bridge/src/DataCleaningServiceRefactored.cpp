@@ -188,14 +188,12 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             }
 
             int lastPct = -1;
-            engine.setOnProgress([self, dataSetId, &lastPct](int current, int totalRows, const std::string& stage) {
+            engine.setOnProgress([self, dataSetId](int current, int totalRows, const std::string& stage) {
                 int pct = totalRows > 0 ? (5 + (current * 90) / totalRows) : 5;
-                if (pct == lastPct) return;
-                lastPct = pct;
                 QMetaObject::invokeMethod(self.get(), [self, dataSetId, pct, stage]() {
                     emit self->cleaningProgress(QString::number(dataSetId), pct,
                         QString::fromStdString(stage));
-                }, Qt::QueuedConnection);
+                }, Qt::BlockingQueuedConnection);
             });
 
             // 3. 清洗
