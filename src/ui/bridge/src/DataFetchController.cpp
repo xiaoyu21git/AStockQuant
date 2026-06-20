@@ -233,6 +233,15 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 if (!db2 || !db2->isOpen()) break;
                 std::string sql = "SELECT * FROM " + table.toStdString()
                     + " WHERE " + dateColForType(dt).toStdString() + " BETWEEN '" + ms + "' AND '" + me + "'";
+                // 标的少于 1000 才加 IN 过滤，避免 SQL 过长
+                if (allSymbols.size() > 0 && allSymbols.size() <= 1000) {
+                    sql += " AND symbol IN (";
+                    for (size_t si = 0; si < allSymbols.size(); ++si) {
+                        if (si > 0) sql += ",";
+                        sql += "'" + allSymbols[si].toStdString() + "'";
+                    }
+                    sql += ")";
+                }
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
                 for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
