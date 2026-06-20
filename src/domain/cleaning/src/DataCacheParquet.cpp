@@ -165,8 +165,8 @@ void DataCache::saveDataSetFile(int dataId, const std::vector<J>& rows)
     }
     writer->Close();
 
-    fprintf(stderr, "[DataCache] saved Arrow IPC %s: %lld rows x %d cols\n",
-            path.c_str(), table->num_rows(), table->num_columns());
+    fprintf(stderr, "[DataCache] saved Arrow IPC persistentDir=%s file=%s: %lld rows x %d cols\n",
+            m_persistentDir.c_str(), path.c_str(), table->num_rows(), table->num_columns());
     fflush(stderr);
 }
 
