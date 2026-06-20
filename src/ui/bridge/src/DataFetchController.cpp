@@ -34,7 +34,7 @@ static constexpr int kPageSize = 100;
 
 QString tableForType(const QString& dt) {
     if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly" || dt == "minute_data") return "daily_bar";
-    if (dt == "financial") return "financial_statement";
+    if (dt == "financial") return "financial_indicator";
     if (dt == "news") return "news_data";
     if (dt == "realtime") return "realtime_quote";
     if (dt == "historical") return "historical_data";
@@ -56,6 +56,10 @@ QString dateColForType(const QString& dt) {
     if (dt == "alternative") return "data_date";
     if (dt == "derivatives") return "trade_date";
     return "trade_date";
+}
+QString symColForType(const QString& dt) {
+    if (dt == "financial" || dt == "news") return "symbol_id";
+    return "symbol";
 }
 
 } // anonymous namespace
@@ -134,9 +138,10 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
             QString dateCol = dateColForType(dt);
+            QString symCol = symColForType(dt);
             if (table.isEmpty()) continue;
 
-            std::string sql = "SELECT symbol, MIN(" + dateCol.toStdString() + ") AS start_dt, "
+            std::string sql = "SELECT " + symCol.toStdString() + " AS symbol, MIN(" + dateCol.toStdString() + ") AS start_dt, "
                               "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
                               "FROM " + table.toStdString() + " WHERE " + dateCol.toStdString()
                               + " BETWEEN '" + startDate.toStdString() + "' AND '"
@@ -220,7 +225,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 + " WHERE " + dateColForType(dt).toStdString()
                 + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
             if (allSymbols.size() > 0 && allSymbols.size() <= 1000) {
-                sql += " AND symbol IN (";
+                sql += " AND " + symColForType(dt).toStdString() + " IN (";
                 for (size_t si = 0; si < allSymbols.size(); ++si) {
                     if (si > 0) sql += ",";
                     sql += "'" + allSymbols[si].toStdString() + "'";
