@@ -1031,7 +1031,27 @@ Item {
         onDataCleaningError: function(error) {
             root.handlePanelStatusRequested(`❌ ${error}`, "error")
         }
-        
+
+        onDataSetInfosRefreshed: function(infos) {
+            cacheDisplayModel.clear()
+            for (var i = 0; i < infos.length; i++) {
+                var info = infos[i]
+                cacheDisplayModel.append({
+                    index: i,
+                    type: "dataset",
+                    id: info.id,
+                    displayName: info.displayName || "",
+                    description: info.displayName || "",
+                    cacheKey: "",
+                    sourceType: info.sourceType || "",
+                    rowCount: info.rowCount || 0,
+                    stockCodes: info.stockCodes || [],
+                    startDate: info.startDate || "",
+                    endDate: info.endDate || ""
+                })
+            }
+        }
+
         Component.onCompleted: {
             // 初始化完成
         }
