@@ -32,40 +32,40 @@ void updateBoolProperty(bool& target, bool value, const std::function<void()>& n
 
 static constexpr int kPageSize = 100;
 
-QString tableForType(const QString& dt) {
-    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly" || dt == "minute_data") return "daily_bar";
-    if (dt == "financial") return "financial_indicator";
-    if (dt == "news") return "news_data";
-    if (dt == "realtime") return "realtime_quote";
-    if (dt == "historical") return "historical_data";
-    if (dt == "index_constituents") return "index_constituents";
-    if (dt == "index_list") return "index_info";
-    if (dt == "policy") return "policy_data";
-    if (dt == "alternative") return "alternative_data";
-    if (dt == "derivatives") return "derivatives_data";
-    return QString();
-}
-QString dateColForType(const QString& dt) {
-    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly" || dt == "minute_data") return "trade_date";
-    if (dt == "financial" || dt == "news") return "report_date";
-    if (dt == "realtime") return "update_time";
-    if (dt == "historical") return "trade_date";
-    if (dt == "index_constituents") return "snapshot_date";
-    if (dt == "index_list") return "listing_date";
-    if (dt == "policy") return "announce_date";
-    if (dt == "alternative") return "data_date";
-    if (dt == "derivatives") return "trade_date";
-    return "trade_date";
-}
-QString symColForType(const QString& dt) {
-    if (dt == "financial" || dt == "news") return "fi.symbol_id";
-    return "symbol";
-}
-QString symTableJoinClause(const QString& dt) {
-    if (dt == "financial" || dt == "news")
-        return " JOIN symbol_info si ON fi.symbol_id = si.symbol_id ";
-    return "";
-}
+// 每种数据类型的查询和schema封装
+struct DataTypeSource {
+    QString typeName;
+    QString tableName;
+    QString dateCol;
+    QString symCol;       // SELECT 中用的列
+    bool useJoin = false; // 是否需要 JOIN symbol_info
+    QString joinClause() const { return useJoin ? QString(" JOIN symbol_info si ON fi.%1 = si.symbol_id ").arg(symCol) : QString(); }
+    std::string selectExpr() const { return useJoin ? "si.symbol, fi.*" : "*"; }
+    std::string datePrefix() const { return useJoin ? "fi." : ""; }
+    std::string buildSql(const std::string& sd, const std::string& ed, const std::vector<std::string>* symbols=nullptr) const {
+        std::string sql = "SELECT " + selectExpr() + " FROM " + tableName.toStdString();
+        if (useJoin) sql += " fi" + joinClause().toStdString();
+        sql += " WHERE " + datePrefix() + dateCol.toStdString() + " BETWEEN '" + sd + "' AND '" + ed + "'";
+        if (symbols && symbols->size() > 0 && symbols->size() <= 1000 && !useJoin)
+            { sql += " AND symbol IN ("; for(size_t i=0;i<symbols->size();++i){if(i>0)sql+=",";sql+="'"+(*symbols)[i]+"'";} sql+=")"; }
+        return sql;
+    }
+    std::string buildGroupSql(const std::string& sd, const std::string& ed) const {
+        std::string col = useJoin ? "si.symbol" : "symbol";
+        std::string from = "FROM " + tableName.toStdString();
+        if (useJoin) from += " fi" + joinClause().toStdString();
+        return "SELECT " + col + " AS symbol, MIN(" + datePrefix() + dateCol.toStdString() + ") AS start_dt, MAX(" + datePrefix() + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt " + from + " WHERE " + datePrefix() + dateCol.toStdString() + " BETWEEN '" + sd + "' AND '" + ed + "' GROUP BY " + col;
+    }
+};
+
+static const DataTypeSource g_sources[] = {
+    {"kline_daily", "daily_bar", "trade_date", "symbol", false},
+    {"kline_weekly", "daily_bar", "trade_date", "symbol", false},
+    {"kline_monthly","daily_bar", "trade_date", "symbol", false},
+    {"minute_data",  "daily_bar", "trade_date", "symbol", false},
+    {"financial",    "financial_indicator", "report_date", "fi.symbol_id", true},
+};
+DataTypeSource sourceForType(const QString& dt) { for(auto& s:g_sources) if(s.typeName==dt) return s; return {}; }
 
 } // anonymous namespace
 
@@ -141,33 +141,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         QStringList allSymbols;
 
         for (const QString& dt : dataTypes) {
-            QString table = tableForType(dt);
-            QString dateCol = dateColForType(dt);
-            QString joinClause = symTableJoinClause(dt);
-            if (table.isEmpty()) continue;
-
-            std::string fromClause;
-            if (joinClause.isEmpty()) {
-                fromClause = "FROM " + table.toStdString();
-            } else {
-                fromClause = "FROM " + table.toStdString() + " fi" + joinClause.toStdString();
-            }
-            std::string sql = "SELECT si.symbol, MIN(fi." + dateCol.toStdString() + ") AS start_dt, "
-                + "MAX(fi." + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
-                + fromClause + " WHERE fi." + dateCol.toStdString()
-                + " BETWEEN '" + startDate.toStdString() + "' AND '"
-                + endDate.toStdString() + "' GROUP BY si.symbol";
-            if (joinClause.isEmpty()) {
-                sql = "SELECT symbol, MIN(" + dateCol.toStdString() + ") AS start_dt, "
-                    + "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
-                    + fromClause + " WHERE " + dateCol.toStdString()
-                    + " BETWEEN '" + startDate.toStdString() + "' AND '"
-                    + endDate.toStdString() + "' GROUP BY symbol";
-            }
-                              "MAX(" + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt "
-                              "FROM " + table.toStdString() + " WHERE " + dateCol.toStdString()
-                              + " BETWEEN '" + startDate.toStdString() + "' AND '"
-                              + endDate.toStdString() + "' GROUP BY symbol";
+            DataTypeSource src = sourceForType(dt);
             auto result = db->executeQuery(sql, {});
             for (const auto& row : result.getRows()) {
                 QString sym = QString::fromStdString(row.getString("symbol"));
@@ -194,31 +168,6 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
 
-        // 先 COUNT 拿到每种类型的真实行数
-        std::vector<int> expectedRows;
-        int totalExpected = 0;
-        for (const QString& dt : dataTypes) {
-            QString table = tableForType(dt);
-            if (table.isEmpty()) continue;
-            QString joinClause = symTableJoinClause(dt);
-            std::string fromClause = joinClause.isEmpty()
-                ? ("FROM " + table.toStdString())
-                : ("FROM " + table.toStdString() + " fi" + joinClause.toStdString());
-            std::string prefix = joinClause.isEmpty() ? "" : "fi.";
-            std::string countSql = "SELECT COUNT(*) AS cnt " + fromClause
-                + " WHERE " + prefix + dateColForType(dt).toStdString()
-                + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
-            auto cntDb = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-            if (!cntDb || !cntDb->isOpen()) { expectedRows.push_back(-1); continue; }
-            auto cntResult = cntDb->executeQuery(countSql, {});
-            int n = cntResult.rowCount() > 0 ? cntResult.getRows()[0].getInt("cnt") : 0;
-            expectedRows.push_back(n);
-            totalExpected += n;
-            fprintf(stderr, "[DFC] COUNT %s: %d rows\n", dt.toStdString().c_str(), n);
-            fflush(stderr);
-        }
-        QMetaObject::invokeMethod(self.get(), [self, totalExpected]() {
-            if (self) self->updateStatus(QString("预计 %1 行，开始下载...").arg(totalExpected), 30);
         }, Qt::QueuedConnection);
 
         int totalDownloaded = 0;
@@ -256,12 +205,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
             if (dbr && dbr->isOpen()) {
                 for (const QString& dt : dataTypes) {
-                    QString table = tableForType(dt); if(table.isEmpty()) continue;
-                    QString jc = symTableJoinClause(dt);
-                    std::string fc = jc.isEmpty() ? ("FROM "+table.toStdString()) : ("FROM "+table.toStdString()+" fi"+jc.toStdString());
-                    std::string sc = jc.isEmpty() ? "*" : "si.symbol, fi.*";
-                    std::string pf = jc.isEmpty() ? "" : "fi.";
-                    std::string sql = "SELECT "+sc+" "+fc+" WHERE "+pf+dateColForType(dt).toStdString()+" BETWEEN '"+startDate.toStdString()+"' AND '"+endDate.toStdString()+"' LIMIT 1";
+                    DataTypeSource src = sourceForType(dt); if(src.tableName.isEmpty()) continue;
+                    std::string sql = src.buildSql(startDate.toStdString(),endDate.toStdString()) + " LIMIT 1";
                     auto rr = dbr->executeQuery(sql,{});
                     for (const auto& row : rr.getRows())
                         for (const auto& [col,val] : row.getValues())
@@ -280,15 +225,10 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
             for (const QString& dt : dataTypes) {
-                QString table = tableForType(dt); if (table.isEmpty()) continue;
-                QString jc = symTableJoinClause(dt);
-                std::string fc = jc.isEmpty() ? ("FROM "+table.toStdString()) : ("FROM "+table.toStdString()+" fi"+jc.toStdString());
-                std::string sc = jc.isEmpty() ? "*" : "si.symbol, fi.*";
-                std::string pf = jc.isEmpty() ? "" : "fi.";
-                std::string sql = "SELECT "+sc+" "+fc+" WHERE "+pf+dateColForType(dt).toStdString()+" BETWEEN '"+ms+"' AND '"+me+"'";
-                if (allSymbols.size()>0 && allSymbols.size()<=1000 && symColForType(dt)=="symbol") {
-                    sql += " AND symbol IN ("; for (size_t si=0; si<allSymbols.size(); ++si) { if (si>0) sql+=","; sql+="'"+allSymbols[si].toStdString()+"'"; } sql+=")";
-                }
+                DataTypeSource src = sourceForType(dt); if (src.tableName.isEmpty()) continue;
+                std::vector<std::string> symVec;
+                for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
+                std::string sql = src.buildSql(ms, me, &symVec);
                 auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;

@@ -23,28 +23,28 @@ void scanFields(const std::vector<J>& rows,
 {
     std::unordered_map<std::string, bool> fieldNumeric;
     // 按数据类型定义字段
-    static const char* klineFields[] = {
+    // 从数据中动态检测字段（避免硬编码）
+    static const int KNOWN_COUNT_KLINE = 30;
+    static const int KNOWN_COUNT_FINANCIAL = 22;
+    static const char* knownFieldsData[] = {
+        // K线字段
         "symbol","name","code","stock_code","industry","industry_code",
         "trade_date","open","high","low","close","pre_close",
         "volume","turnover","change_pct","change_amt","amplitude",
         "turnover_rate","pe_ratio","pb_ratio","market_cap",
         "circulating_market_cap","pre_adj_factor","post_adj_factor",
-        "asset_class","status","data_source","trade_status",nullptr
-    };
-    static const char* financialFields[] = {
-        "symbol","symbol_id","report_date","report_type",
+        "asset_class","status","data_source","trade_status",
+        "disclosure_date","report_type",
+        // 财务字段
+        "symbol_id","report_date",
         "eps","bps","roa","roe","profit_margin","gross_margin","operating_margin",
         "debt_to_equity","current_ratio","quick_ratio",
         "operating_cash_flow","investing_cash_flow","financing_cash_flow",
         "total_revenue","net_profit","total_assets","total_liabilities","equity",
         "dividend_yield","payout_ratio","dividend_stability",
-        "effective_disclosure_date","disclosure_date",
-        "indicator_id",nullptr
+        "effective_disclosure_date","indicator_id"
     };
-    // 合并所有已知 numeric/string 判断
-    std::vector<const char*> knownFields;
-    for (auto p = klineFields; *p; ++p) knownFields.push_back(*p);
-    for (auto p = financialFields; *p; ++p) knownFields.push_back(*p);
+    std::vector<const char*> knownFields(knownFieldsData, knownFieldsData + sizeof(knownFieldsData)/sizeof(knownFieldsData[0]));
     for (const auto& row : rows) {
         if (!row.isObject()) continue;
         for (const char* f : knownFields) {
