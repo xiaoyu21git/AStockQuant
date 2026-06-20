@@ -224,7 +224,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int totalDownloaded = 0;
         int doneUnits = 0;
 
-        QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
+        QMetaObject::invokeMethod(self.get(), [self, symbolList, total]() {
             if (!self) return;
             self->m_fetchedData = symbolList;
             self->m_isFetching = false; emit self->isFetchingChanged(); emit self->fetchedDataChanged();
@@ -239,8 +239,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 self->m_previewModel->updateData(pv);
             }
             self->m_pendingDoneTotal = total;
-            int pct = doneUnits * 100 / qMax(1, totalUnits);
-            self->updateStatus(QString("共 %1 只标的, 准备下载...").arg(total), pct);
+            self->updateStatus(QString("共 %1 只标的").arg(total), 20);
         });
 
         if (allSymbols.isEmpty()) return;
