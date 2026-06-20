@@ -22,21 +22,29 @@ void scanFields(const std::vector<J>& rows,
                 std::unordered_set<std::string>& numericFields)
 {
     std::unordered_map<std::string, bool> fieldNumeric;
-    static const char* knownFields[] = {
-        "symbol", "code", "stock_code", "name", "asset_class", "status",
-        "trade_date", "report_date", "disclosure_date",
-        "open", "high", "low", "close", "pre_close",
-        "volume", "turnover", "change_pct", "change_amt", "amplitude",
-        "turnover_rate", "pe_ratio", "pb_ratio", "market_cap",
-        "circulating_market_cap", "pre_adj_factor", "post_adj_factor",
-        "data_source", "industry_code", "industry", "trade_status",
-        "eps","bps","roa","roe","profit_margin","gross_margin",
-        "operating_margin","debt_to_equity","current_ratio","quick_ratio",
+    // 按数据类型定义字段
+    static const char* klineFields[] = {
+        "symbol","name","code","stock_code","industry","industry_code",
+        "trade_date","open","high","low","close","pre_close",
+        "volume","turnover","change_pct","change_amt","amplitude",
+        "turnover_rate","pe_ratio","pb_ratio","market_cap",
+        "circulating_market_cap","pre_adj_factor","post_adj_factor",
+        "asset_class","status","data_source","trade_status",nullptr
+    };
+    static const char* financialFields[] = {
+        "symbol","symbol_id","report_date","report_type",
+        "eps","bps","roa","roe","profit_margin","gross_margin","operating_margin",
+        "debt_to_equity","current_ratio","quick_ratio",
         "operating_cash_flow","investing_cash_flow","financing_cash_flow",
         "total_revenue","net_profit","total_assets","total_liabilities","equity",
         "dividend_yield","payout_ratio","dividend_stability",
-        "effective_disclosure_date","symbol_id","indicator_id","report_type"
+        "effective_disclosure_date","disclosure_date",
+        "indicator_id",nullptr
     };
+    // 合并所有已知 numeric/string 判断
+    std::vector<const char*> knownFields;
+    for (auto p = klineFields; *p; ++p) knownFields.push_back(*p);
+    for (auto p = financialFields; *p; ++p) knownFields.push_back(*p);
     for (const auto& row : rows) {
         if (!row.isObject()) continue;
         for (const char* f : knownFields) {
