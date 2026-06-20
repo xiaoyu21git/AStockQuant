@@ -163,18 +163,21 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
         int inputRows = 0, outputRows = 0;
 
         try {
+            QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
+                emit self->cleaningProgress(QString::number(dataSetId), 5, QStringLiteral("加载数据..."));
+            }, Qt::QueuedConnection);
+
             // 1. 从 Arrow 加载数据
             auto rows = cleaning::DataCache::instance().loadDataSetFile(dataSetId);
             inputRows = static_cast<int>(rows.size());
             if (rows.empty()) {
                 QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
-                    emit self->dataSetCleaned(dataSetId, -1,
-                        QStringLiteral("数据集为空"), 0, 0);
+                    emit self->dataSetCleaned(dataSetId, -1, QStringLiteral("数据集为空"), 0, 0);
                 }, Qt::QueuedConnection);
                 return;
             }
 
-            // 2. 构建清洗引擎
+            // 2. 构建清洗引擎 + 进度回调
             cleaning::CleaningEngine engine;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
                 std::string ruleKey = it.key().toStdString();
@@ -183,6 +186,15 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                 auto rule = createCppRule(ruleKey, configJson);
                 if (rule) engine.addRule(std::move(rule));
             }
+
+            int total = inputRows;
+            engine.setOnProgress([self, dataSetId, total](int current, int totalRows, const std::string& stage) {
+                int pct = totalRows > 0 ? (10 + (current * 85) / totalRows) : 10;
+                QMetaObject::invokeMethod(self.get(), [self, dataSetId, pct, stage]() {
+                    emit self->cleaningProgress(QString::number(dataSetId), pct,
+                        QString::fromStdString(stage));
+                }, Qt::QueuedConnection);
+            });
 
             // 3. 清洗
             auto cleaned = engine.clean(std::move(rows));
