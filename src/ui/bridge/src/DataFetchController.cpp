@@ -406,7 +406,7 @@ void DataFetchController::cleanDataFromDataSet(int dataSetId, const QVariantMap&
         m_operationInProgress = false; emit operationInProgressChanged();
         if (resultId > 0) { updateCleanStats(in, out); emit dataSetCleaned(inputId, resultId, msg, in, out); }
         else emit dataCleaningError(msg);
-    }, Qt::SingleShotConnection);
+    });
 
     m_cleaningSvc->cleanDataFromDataSet(dataSetId, rules);
 }
