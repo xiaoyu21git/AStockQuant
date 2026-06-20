@@ -212,15 +212,6 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
 
         // 辅助函数: SqlQueryResultRow → JsonFacade
-        auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
-            auto j = foundation::json::JsonFacade::createObject();
-            for (const auto& [col, val] : r.getValues()) {
-                // 尝试解析为 double，失败则当字符串
-                try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { j.set(col, foundation::json::JsonFacade::createDouble(d)); continue; } } catch(...) {}
-                j.set(col, foundation::json::JsonFacade::createString(val));
-            }
-            return j;
-        };
 
         auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
             auto j = foundation::json::JsonFacade::createObject();
