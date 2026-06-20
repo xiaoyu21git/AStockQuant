@@ -7,6 +7,7 @@
 #include "database/MarketDataRepository.h"
 #include "database/NativeMySQLConnectionPool.h"
 
+#include "foundation.h"
 #include <QMetaObject>
 #include <QPointer>
 #include <QDebug>
@@ -81,7 +82,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                                                   const QString& endDate,
                                                   const QVariantMap&)
 {
-    Q_UNUSED(dataTypes);
+    Q_UNUSED(dataTypes); Q_UNUSED(symbol);
     if (startDate.isEmpty() || endDate.isEmpty()) {
         updateStatus("日期未设置", 0); emit dataFetchError("日期未设置"); return;
     }
@@ -91,67 +92,75 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     emit isFetchingChanged();
     updateStatus("查询标的列表...", 10);
 
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
-    auto db = pool.getConnection();
-    if (!db || !db->isOpen()) {
-        m_isFetching = false; emit isFetchingChanged();
-        updateStatus("数据库连接失败", 100); emit dataFetchError("数据库连接失败"); return;
-    }
-
-    std::string sql = "SELECT symbol, MIN(trade_date) AS start_dt, MAX(trade_date) AS end_dt, "
-                      "COUNT(*) AS cnt, MIN(close) AS first_close, MAX(close) AS last_close "
-                      "FROM daily_bar WHERE trade_date BETWEEN '" + startDate.toStdString()
-                      + "' AND '" + endDate.toStdString() + "' "
-                      "GROUP BY symbol ORDER BY symbol";
-    auto result = db->executeQuery(sql, {});
-    QVariantList symbolList;
-    QStringList symbols;
-    for (const auto& row : result.getRows()) {
-        QVariantMap item;
-        item["symbol"] = QString::fromStdString(row.getString("symbol"));
-        item["startDate"] = QString::fromStdString(row.getString("start_dt"));
-        item["endDate"] = QString::fromStdString(row.getString("end_dt"));
-        item["recordCount"] = row.getInt("cnt");
-        item["firstClose"] = row.getDouble("first_close");
-        item["lastClose"] = row.getDouble("last_close");
-        symbolList.append(item);
-        symbols.append(item["symbol"].toString());
-    }
-
-    m_fetchedData = symbolList;
-    m_isFetching = false; emit isFetchingChanged(); emit fetchedDataChanged();
-
-    if (symbols.isEmpty()) {
-        updateStatus("查询结果为空", 100); emit dataFetchError("查询结果为空"); return;
-    }
-
-    if (m_previewModel) {
-        QVector<QVariantMap> previewVec;
-        for (const auto& item : symbolList) previewVec.append(item.toMap());
-        m_previewModel->updateData(previewVec);
-    }
-
-    m_pendingDoneTotal = symbolList.size();
-    updateStatus(QString("共 %1 只标的").arg(symbols.size()), 100);
-    emit dataFetchProgress(100, QString("共 %1 只标的").arg(symbols.size()));
-
-    // 后台查全量 → Arrow
-    auto symbolsShared = std::make_shared<QStringList>(symbols);
     QPointer<DataFetchController> self(this);
-    QTimer::singleShot(100, [self, dsSource = dataSource, dsStart = startDate, dsEnd = endDate, symbolsShared]() {
+    FOUNDATION_THREADS.post([self, dataSource, startDate, endDate]() {
         if (!self) return;
-        auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-        if (!db2 || !db2->isOpen()) { fprintf(stderr, "[DFC] Arrow: conn failed\n"); fflush(stderr); return; }
-        astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+
+        // Step 1: GROUP BY 查标的列表
+        auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+        if (!db || !db->isOpen()) {
+            QMetaObject::invokeMethod(self.get(), [self]() {
+                if (!self) return;
+                self->m_isFetching = false; emit self->isFetchingChanged();
+                self->updateStatus("数据库连接失败", 100);
+                emit self->dataFetchError("数据库连接失败");
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        std::string sql = "SELECT symbol, MIN(trade_date) AS start_dt, MAX(trade_date) AS end_dt, "
+                          "COUNT(*) AS cnt, MIN(close) AS first_close, MAX(close) AS last_close "
+                          "FROM daily_bar WHERE trade_date BETWEEN '" + startDate.toStdString()
+                          + "' AND '" + endDate.toStdString() + "' GROUP BY symbol ORDER BY symbol";
+        auto result = db->executeQuery(sql, {});
+        QVariantList symbolList;
+        QStringList symbols;
+        for (const auto& row : result.getRows()) {
+            QVariantMap item;
+            item["symbol"] = QString::fromStdString(row.getString("symbol"));
+            item["startDate"] = QString::fromStdString(row.getString("start_dt"));
+            item["endDate"] = QString::fromStdString(row.getString("end_dt"));
+            item["recordCount"] = row.getInt("cnt");
+            item["firstClose"] = row.getDouble("first_close");
+            item["lastClose"] = row.getDouble("last_close");
+            symbolList.append(item);
+            symbols.append(item["symbol"].toString());
+        }
+
+        int total = symbolList.size();
+        QMetaObject::invokeMethod(self.get(), [self, symbolList, total]() {
+            if (!self) return;
+            self->m_fetchedData = symbolList;
+            self->m_isFetching = false; emit self->isFetchingChanged(); emit self->fetchedDataChanged();
+            if (total == 0) {
+                self->updateStatus("查询结果为空", 100);
+                emit self->dataFetchError("查询结果为空");
+                return;
+            }
+            if (self->m_previewModel) {
+                QVector<QVariantMap> pv;
+                for (const auto& item : symbolList) pv.append(item.toMap());
+                self->m_previewModel->updateData(pv);
+            }
+            self->m_pendingDoneTotal = total;
+            self->updateStatus(QString("共 %1 只标的").arg(total), 100);
+            emit self->dataFetchProgress(100, QString("共 %1 只标的").arg(total));
+        }, Qt::QueuedConnection);
+
+        // Step 2: 后台线程查全量 → Arrow
+        if (symbols.isEmpty()) return;
+        auto sD = QDate::fromString(startDate, "yyyy-MM-dd");
+        auto eD = QDate::fromString(endDate, "yyyy-MM-dd");
         std::vector<foundation::json::JsonFacade> allRows;
-        QDate sD = QDate::fromString(dsStart, "yyyy-MM-dd");
-        QDate eD = QDate::fromString(dsEnd, "yyyy-MM-dd");
         for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) {
             QDate ms = qMax(sD, m);
             QDate me = qMin(eD, QDate(m.year(), m.month(), m.daysInMonth()));
             if (ms > me) continue;
+            auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (!db2 || !db2->isOpen()) break;
+            astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
             std::vector<std::string> batchSyms;
-            for (const auto& s : *symbolsShared) batchSyms.push_back(s.toStdString());
+            for (const auto& s : symbols) batchSyms.push_back(s.toStdString());
             auto bars = repo.queryDailyBarBatch(batchSyms,
                 ms.toString("yyyy-MM-dd").toStdString(),
                 me.toString("yyyy-MM-dd").toStdString());
@@ -170,17 +179,18 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         }
         if (!allRows.empty()) {
             QVariantMap infoMap;
-            infoMap["displayName"] = QString("%1:ALL:%2:%3").arg(dsSource, dsStart, dsEnd);
-            infoMap["sourceType"] = dsSource;
-            infoMap["stockCodes"] = *symbolsShared;
-            infoMap["startDate"] = dsStart;
-            infoMap["endDate"] = dsEnd;
+            infoMap["displayName"] = QString("%1:ALL:%2:%3").arg(dataSource, startDate, endDate);
+            infoMap["sourceType"] = dataSource;
+            infoMap["stockCodes"] = symbols;
+            infoMap["startDate"] = startDate;
+            infoMap["endDate"] = endDate;
             infoMap["rowCount"] = static_cast<int>(allRows.size());
             int id = DataCacheAdapter::instance().storeDataSetFromRows(allRows, infoMap);
-            if (id > 0) {
+            QMetaObject::invokeMethod(self.get(), [self, id]() {
+                if (!self || id <= 0) return;
                 self->m_lastStoredDataSetId = id;
                 emit self->dataSetReadyForCleaning(id);
-            }
+            }, Qt::QueuedConnection);
         }
     });
 }
