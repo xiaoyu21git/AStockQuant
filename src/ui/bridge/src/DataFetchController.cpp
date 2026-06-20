@@ -196,6 +196,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
 
         int doneUnits = 0;
         int totalUnits = static_cast<int>(dataTypes.size()) * 2;
+        QMetaObject::invokeMethod(self.get(), [self]() { if (self) self->updateStatus("下载数据中...", 30); }, Qt::QueuedConnection);
 
         QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
             if (!self) return;
