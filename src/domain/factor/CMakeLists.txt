@@ -171,6 +171,7 @@ set(FACTOR_SOURCES
     src/FactorTypeRegistry.cpp
     src/FactorBacktestOrchestrator.cpp
     src/CachedMarketDataView.cpp
+    src/factor_compute/ArrowMarketDataView.cpp
     src/FactorParamsStubs.cpp
     src/FactorMetricsCalculator.cpp
     src/factor_compute/FactorSignalSetAssembler.cpp
@@ -280,6 +281,7 @@ set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/AnalysisReportTypes.h
     include/factor_compute/ISignalEngine.h
     include/factor_compute/ParquetMarketDataView.h
+    include/factor_compute/ArrowMarketDataView.h
     include/factor_compute/SubMarketDataView.h
     include/factor_compute/FactorComputeDispatcher.h
     include/factor_compute/PostProcessingPipeline.h
