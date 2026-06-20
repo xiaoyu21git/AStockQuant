@@ -4,6 +4,7 @@
 #include "DataCacheAdapter.h"
 #include "PreviewDataModel.h"
 #include "foundation/json/json_facade.h"
+#include "DataSourceRegistry.h"
 #include "database/MarketDataRepository.h"
 #include "database/NativeMySQLConnectionPool.h"
 
@@ -32,40 +33,6 @@ void updateBoolProperty(bool& target, bool value, const std::function<void()>& n
 
 static constexpr int kPageSize = 100;
 
-// 每种数据类型的查询和schema封装
-struct DataTypeSource {
-    QString typeName;
-    QString tableName;
-    QString dateCol;
-    QString symCol;       // SELECT 中用的列
-    bool useJoin = false; // 是否需要 JOIN symbol_info
-    QString joinClause() const { return useJoin ? QString(" JOIN symbol_info si ON fi.%1 = si.symbol_id ").arg(symCol) : QString(); }
-    std::string selectExpr() const { return useJoin ? "si.symbol, fi.*" : "*"; }
-    std::string datePrefix() const { return useJoin ? "fi." : ""; }
-    std::string buildSql(const std::string& sd, const std::string& ed, const std::vector<std::string>* symbols=nullptr) const {
-        std::string sql = "SELECT " + selectExpr() + " FROM " + tableName.toStdString();
-        if (useJoin) sql += " fi" + joinClause().toStdString();
-        sql += " WHERE " + datePrefix() + dateCol.toStdString() + " BETWEEN '" + sd + "' AND '" + ed + "'";
-        if (symbols && symbols->size() > 0 && symbols->size() <= 1000 && !useJoin)
-            { sql += " AND symbol IN ("; for(size_t i=0;i<symbols->size();++i){if(i>0)sql+=",";sql+="'"+(*symbols)[i]+"'";} sql+=")"; }
-        return sql;
-    }
-    std::string buildGroupSql(const std::string& sd, const std::string& ed) const {
-        std::string col = useJoin ? "si.symbol" : "symbol";
-        std::string from = "FROM " + tableName.toStdString();
-        if (useJoin) from += " fi" + joinClause().toStdString();
-        return "SELECT " + col + " AS symbol, MIN(" + datePrefix() + dateCol.toStdString() + ") AS start_dt, MAX(" + datePrefix() + dateCol.toStdString() + ") AS end_dt, COUNT(*) AS cnt " + from + " WHERE " + datePrefix() + dateCol.toStdString() + " BETWEEN '" + sd + "' AND '" + ed + "' GROUP BY " + col;
-    }
-};
-
-static const DataTypeSource g_sources[] = {
-    {"kline_daily", "daily_bar", "trade_date", "symbol", false},
-    {"kline_weekly", "daily_bar", "trade_date", "symbol", false},
-    {"kline_monthly","daily_bar", "trade_date", "symbol", false},
-    {"minute_data",  "daily_bar", "trade_date", "symbol", false},
-    {"financial",    "financial_indicator", "report_date", "fi.symbol_id", true},
-};
-DataTypeSource sourceForType(const QString& dt) { for(auto& s:g_sources) if(s.typeName==dt) return s; return {}; }
 
 } // anonymous namespace
 
@@ -141,9 +108,9 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         QStringList allSymbols;
 
         for (const QString& dt : dataTypes) {
-            DataTypeSource src = sourceForType(dt);
-            if (src.tableName.isEmpty()) continue;
-            std::string sql = src.buildGroupSql(startDate.toStdString(), endDate.toStdString());
+            auto* src = cleaning::sourceByName(dt.toStdString());
+            if (!src) continue;
+            std::string sql = src->buildGroupQuery(startDate.toStdString(), endDate.toStdString());
             auto result = db->executeQuery(sql, {});
             for (const auto& row : result.getRows()) {
                 QString sym = QString::fromStdString(row.getString("symbol"));
@@ -194,8 +161,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         std::vector<std::string> allFields;
         std::unordered_set<std::string> fieldSet;
         for (const QString& dt : dataTypes) {
-            DataTypeSource src = sourceForType(dt); if(src.tableName.isEmpty()) continue;
-            std::string sql = src.buildSql(startDate.toStdString(), endDate.toStdString()) + " LIMIT 1";
+            auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
+            std::string sql = std::vector<std::string> sv; for(autosrc->buildDataQuery(startDate.toStdString(), endDate.toStdString()) s:allSymbols) sv.push_back(s.toStdString()); src->buildDataQuery(startDate.toStdString(), endDate.toStdString(), sv) + " LIMIT 1";
             auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
             if (!dbr||!dbr->isOpen()) continue;
             auto rr = dbr->executeQuery(sql,{});
@@ -211,8 +178,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
             if (dbr && dbr->isOpen()) {
                 for (const QString& dt : dataTypes) {
-                    DataTypeSource src = sourceForType(dt); if(src.tableName.isEmpty()) continue;
-                    std::string sql = src.buildSql(startDate.toStdString(),endDate.toStdString()) + " LIMIT 1";
+                    auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
+                    std::string sql = src->buildDataQuery(startDate.toStdString(),endDate.toStdString()) + " LIMIT 1";
                     auto rr = dbr->executeQuery(sql,{});
                     for (const auto& row : rr.getRows())
                         for (const auto& [col,val] : row.getValues())
@@ -231,10 +198,10 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
             for (const QString& dt : dataTypes) {
-                DataTypeSource src = sourceForType(dt); if (src.tableName.isEmpty()) continue;
+                auto* src = cleaning::sourceByName(dt.toStdString()); if (src.tableName.isEmpty()) continue;
                 std::vector<std::string> symVec;
                 for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
-                std::string sql = src.buildSql(ms, me, &symVec);
+                std::string sql = src->buildDataQuery(ms, me, &symVec);
                 auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
