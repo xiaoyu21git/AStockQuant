@@ -167,17 +167,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
 
-        // 纯 C++ 日期计算
-        auto parseDate = [](const QString& s) { int y,m,d; sscanf(s.toStdString().c_str(), "%d-%d-%d", &y, &m, &d); return std::make_tuple(y,m,d); };
-        auto dateStr = [](int y, int m, int d) { char buf[16]; snprintf(buf, 16, "%04d-%02d-%02d", y, m, d); return std::string(buf); };
-        auto monthsBetween = [](int y1, int m1, int y2, int m2) { return (y2 - y1) * 12 + (m2 - m1) + 1; };
-
-        auto [sy, sm, sd] = parseDate(startDate);
-        auto [ey, em, ed] = parseDate(endDate);
-        int totalMonths = monthsBetween(sy, sm, ey, em);
-
-        int doneUnits = dataTypes.size();
-        int totalUnits = doneUnits + totalMonths * static_cast<int>(dataTypes.size());
+        int doneUnits = 0;
+        int totalUnits = static_cast<int>(dataTypes.size()) * 2;
 
         QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
             if (!self) return;
@@ -222,36 +213,28 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int totalRows = 0;
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
-            if (table.isEmpty()) { fprintf(stderr, "[DFC] skip type %s (no table)\n", dt.toStdString().c_str()); fflush(stderr); continue; }
-            int dtRows = 0;
-            auto lastDay = [](int y, int m) { static const int d[]={0,31,28,31,30,31,30,31,31,30,31,30,31}; return m==2 && y%4==0 && (y%100!=0||y%400==0) ? 29 : d[m]; };
-            for (int mi = 0; mi < totalMonths; mi++) {
-                int cm = sm + mi, cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
-                int cs = (cy == sy && cm == sm) ? sd : 1;
-                int ce = (cy == ey && cm == em) ? ed : lastDay(cy, cm);
-                auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
-                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-                if (!db2 || !db2->isOpen()) break;
-                std::string sql = "SELECT * FROM " + table.toStdString()
-                    + " WHERE " + dateColForType(dt).toStdString() + " BETWEEN '" + ms + "' AND '" + me + "'";
-                // 标的少于 1000 才加 IN 过滤，避免 SQL 过长
-                if (allSymbols.size() > 0 && allSymbols.size() <= 1000) {
-                    sql += " AND symbol IN (";
-                    for (size_t si = 0; si < allSymbols.size(); ++si) {
-                        if (si > 0) sql += ",";
-                        sql += "'" + allSymbols[si].toStdString() + "'";
-                    }
-                    sql += ")";
+            if (table.isEmpty()) { fprintf(stderr, "[DFC] skip %s\n", dt.toStdString().c_str()); fflush(stderr); continue; }
+            auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (!db2 || !db2->isOpen()) break;
+            std::string sql = "SELECT * FROM " + table.toStdString()
+                + " WHERE " + dateColForType(dt).toStdString()
+                + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
+            if (allSymbols.size() > 0 && allSymbols.size() <= 1000) {
+                sql += " AND symbol IN (";
+                for (size_t si = 0; si < allSymbols.size(); ++si) {
+                    if (si > 0) sql += ",";
+                    sql += "'" + allSymbols[si].toStdString() + "'";
                 }
-                auto result = db2->executeQuery(sql, {});
-                std::vector<foundation::json::JsonFacade> batch;
-                for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
-                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); int n = static_cast<int>(batch.size()); totalRows += n; dtRows += n; }
-                doneUnits++;
-                int du = doneUnits, tu = totalUnits, tr = totalRows;
-                QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
+                sql += ")";
             }
-            fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), dtRows);
+            auto result = db2->executeQuery(sql, {});
+            std::vector<foundation::json::JsonFacade> batch;
+            for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
+            if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
+            doneUnits++;
+            int du = doneUnits, tu = totalUnits, tr = totalRows;
+            QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
+            fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), batch.size());
             fflush(stderr);
         }
 
