@@ -194,9 +194,35 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
 
+        // 先 COUNT 拿到每种类型的真实行数
+        std::vector<int> expectedRows;
+        int totalExpected = 0;
+        for (const QString& dt : dataTypes) {
+            QString table = tableForType(dt);
+            if (table.isEmpty()) continue;
+            QString joinClause = symTableJoinClause(dt);
+            std::string fromClause = joinClause.isEmpty()
+                ? ("FROM " + table.toStdString())
+                : ("FROM " + table.toStdString() + " fi" + joinClause.toStdString());
+            std::string prefix = joinClause.isEmpty() ? "" : "fi.";
+            std::string countSql = "SELECT COUNT(*) AS cnt " + fromClause
+                + " WHERE " + prefix + dateColForType(dt).toStdString()
+                + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
+            auto cntDb = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (!cntDb || !cntDb->isOpen()) { expectedRows.push_back(-1); continue; }
+            auto cntResult = cntDb->executeQuery(countSql, {});
+            int n = cntResult.rowCount() > 0 ? cntResult.getRows()[0].getInt("cnt") : 0;
+            expectedRows.push_back(n);
+            totalExpected += n;
+            fprintf(stderr, "[DFC] COUNT %s: %d rows\n", dt.toStdString().c_str(), n);
+            fflush(stderr);
+        }
+        QMetaObject::invokeMethod(self.get(), [self, totalExpected]() {
+            if (self) self->updateStatus(QString("预计 %1 行，开始下载...").arg(totalExpected), 30);
+        }, Qt::QueuedConnection);
+
+        int totalDownloaded = 0;
         int doneUnits = 0;
-        int totalUnits = static_cast<int>(dataTypes.size()) * 2;
-        QMetaObject::invokeMethod(self.get(), [self]() { if (self) self->updateStatus("下载数据中...", 30); }, Qt::QueuedConnection);
 
         QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
             if (!self) return;
@@ -264,10 +290,10 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             auto result = db2->executeQuery(sql, {});
             std::vector<foundation::json::JsonFacade> batch;
             for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
-            if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
+            if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); int n = static_cast<int>(batch.size()); totalRows += n; totalDownloaded += n; }
             doneUnits++;
-            int du = doneUnits, tu = totalUnits, tr = totalRows;
-            QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::BlockingQueuedConnection);
+            int td = totalDownloaded, te = totalExpected;
+            QMetaObject::invokeMethod(self.get(), [self, td, te]() { if (!self) return; int pct = te > 0 ? 30 + (td * 68) / te : 30; self->updateStatus(QString("下载 %1/%2 行").arg(td).arg(te), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2 行").arg(td).arg(te)); }, Qt::BlockingQueuedConnection);
             fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), static_cast<int>(batch.size()));
             fflush(stderr);
         }
