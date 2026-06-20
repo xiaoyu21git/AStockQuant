@@ -29,7 +29,13 @@ void scanFields(const std::vector<J>& rows,
         "volume", "turnover", "change_pct", "change_amt", "amplitude",
         "turnover_rate", "pe_ratio", "pb_ratio", "market_cap",
         "circulating_market_cap", "pre_adj_factor", "post_adj_factor",
-        "data_source", "industry_code", "industry", "trade_status"
+        "data_source", "industry_code", "industry", "trade_status",
+        "eps","bps","roa","roe","profit_margin","gross_margin",
+        "operating_margin","debt_to_equity","current_ratio","quick_ratio",
+        "operating_cash_flow","investing_cash_flow","financing_cash_flow",
+        "total_revenue","net_profit","total_assets","total_liabilities","equity",
+        "dividend_yield","payout_ratio","dividend_stability",
+        "effective_disclosure_date","symbol_id","indicator_id","report_type"
     };
     for (const auto& row : rows) {
         if (!row.isObject()) continue;
