@@ -212,10 +212,10 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
 
         // 辅助函数: SqlQueryResultRow → JsonFacade
-
         auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
             auto j = foundation::json::JsonFacade::createObject();
             for (const auto& [col, val] : r.getValues()) {
+                // 尝试解析为 double，失败则当字符串
                 try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { j.set(col, foundation::json::JsonFacade::createDouble(d)); continue; } } catch(...) {}
                 j.set(col, foundation::json::JsonFacade::createString(val));
             }
@@ -226,7 +226,6 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
             if (table.isEmpty()) continue;
-
             for (int mi = 0; mi < totalMonths; mi++) {
                 int cm = sm + mi, cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
                 int cs = (cy == sy && cm == sm) ? sd : 1;
@@ -251,13 +250,10 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
                 doneUnits++;
                 int du = doneUnits, tu = totalUnits, tr = totalRows;
-                QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() {
-                    if (!self) return; int pct = (du * 100) / qMax(1, tu);
-                    self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct);
-                    emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu));
-                }, Qt::QueuedConnection);
+                QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
             }
         }
+
         DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
         int did = dataId, tr = totalRows;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
