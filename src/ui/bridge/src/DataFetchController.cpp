@@ -232,10 +232,15 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         QMetaObject::invokeMethod(self.get(), [self, monthCount]() { if (self) self->updateStatus(QString("开始下载 %1 个批次...").arg(monthCount), 30); }, Qt::BlockingQueuedConnection);
 
         auto rowToJson = [](const astock::database::SqlQueryResultRow& r) { auto j = foundation::json::JsonFacade::createObject(); for (const auto& [col, val] : r.getValues()) { if (val.empty()) continue; char* end = nullptr; double d = strtod(val.c_str(), &end); if (end && (size_t)(end - val.c_str()) == val.size()) j.set(col, foundation::json::JsonFacade::createDouble(d)); else j.set(col, foundation::json::JsonFacade::createString(val)); } return j; };
-        QVariantMap infoMap; infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate); infoMap["sourceType"] = dataSource; infoMap["stockCodes"] = allSymbols; infoMap["startDate"] = startDate; infoMap["endDate"] = endDate;
-        int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
-        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
-        int totalRows = 0;
+        // 每种数据类型独立 Arrow 文件（schema 不同不能合并）
+        std::map<std::string, int> typeIds;
+        std::map<std::string, cleaning::DataCache::ArrowWriteToken> typeTokens;
+        std::map<std::string, int> typeRowCounts;
+        for (const QString& dt : dataTypes) {
+            QVariantMap im; im["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dt, startDate, endDate); im["sourceType"] = dt; im["stockCodes"] = allSymbols; im["startDate"] = startDate; im["endDate"] = endDate;
+            int id = DataCacheAdapter::instance().storeDataSet(QVariantList(), im);
+            if (id > 0) { typeIds[dt.toStdString()] = id; typeTokens[dt.toStdString()] = DataCacheAdapter::instance().beginArrowWrite(id); typeRowCounts[dt.toStdString()] = 0; }
+        }
         static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
         for (int mi = 0; mi < totalMonths; mi++) {
             int cm = m1 + mi, cy = y1 + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
@@ -257,14 +262,20 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
                 for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
-                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += (int)batch.size(); }
+                if (!batch.empty()) { auto t = typeTokens[dt.toStdString()]; DataCacheAdapter::instance().appendArrowBatch(t, batch); typeRowCounts[dt.toStdString()] += (int)batch.size(); }
             }
-            doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalRows;
+            int totalNow = 0; for (auto& [k,v] : typeRowCounts) totalNow += v;
+            doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalNow;
             QMetaObject::invokeMethod(self.get(), [self,dm,tm,tr](){ if(!self)return; int pct=30+(dm*68)/qMax(1,tm); self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr),pct); emit self->dataFetchProgress(pct,QString("下载 %1/%2 月").arg(dm).arg(tm)); }, Qt::BlockingQueuedConnection);
+            fprintf(stderr, "[DFC] month %d/%d: total=%d", dm, tm, totalNow); for (auto& [k,v] : typeRowCounts) fprintf(stderr, " %s=%d", k.c_str(), v); fprintf(stderr, "\n"); fflush(stderr);
         }
         dl_end:
-        DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
-        int did = dataId, tr = totalRows;
+        for (const QString& dt : dataTypes) {
+            auto t = typeTokens[dt.toStdString()]; int rows = typeRowCounts[dt.toStdString()];
+            DataCacheAdapter::instance().finishArrowWrite(t, rows);
+        }
+        int grandTotal = 0; for (auto& [k,v] : typeRowCounts) grandTotal += v;
+        int did = typeIds.begin()->second, tr = grandTotal;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
             if (!self || did <= 0) return;
             self->updateStatus(QString("查询完成，共 %1 行").arg(tr), 100);
