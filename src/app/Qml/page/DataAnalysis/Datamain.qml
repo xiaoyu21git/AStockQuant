@@ -293,8 +293,10 @@ Item {
             resolvePanelDateValue(dataSelectionPanel.endDatePicker)
         )
 
-        console.log("[QML] calling cleanDataFromCacheByIndex, index=" + root.currentCacheIndex)
-        dataFetchController.cleanDataAsync(rules)
+        var entry = cacheDisplayModel.get(root.currentCacheIndex)
+        var dataSetId = entry ? entry.id : -1
+        console.log("[QML] cleanDataFromDataSet dataSetId=" + dataSetId)
+        dataFetchController.cleanDataFromDataSet(dataSetId, rules)
         handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
     }
     
