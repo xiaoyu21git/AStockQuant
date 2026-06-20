@@ -142,6 +142,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
 
         for (const QString& dt : dataTypes) {
             DataTypeSource src = sourceForType(dt);
+            if (src.tableName.isEmpty()) continue;
+            std::string sql = src.buildGroupSql(startDate.toStdString(), endDate.toStdString());
             auto result = db->executeQuery(sql, {});
             for (const auto& row : result.getRows()) {
                 QString sym = QString::fromStdString(row.getString("symbol"));
