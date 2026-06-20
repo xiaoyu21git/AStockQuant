@@ -40,6 +40,10 @@ void BacktestDataService::buildViewForFields(const std::vector<std::string>&,
     if (onProgress) onProgress(100.0);
 }
 
+void BacktestDataService::setMarketView(IMarketDataView* view) {
+    m_marketView = view;
+}
+
 MarketMatrixBatch BacktestDataService::loadBatch(std::size_t batchIndex)
 {
     MarketMatrixBatch batch;
