@@ -10,7 +10,7 @@
 namespace astock {
 namespace database {
 
-#define POOL_TRACE(msg) do { fprintf(stderr, "%s\n", msg); fflush(stderr); } while(0)
+#define POOL_TRACE(msg) do { } while(0)
 
 static bool s_mySQLibraryInitialized = false;
 static std::mutex s_mySQLibraryMutex;

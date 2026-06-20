@@ -233,7 +233,7 @@ QHash<int, QByteArray> PreviewDataModel::roleNames() const {
 }
 
 void PreviewDataModel::updateData(const QVector<QVariantMap>& data) {
-    qDebug() << "PreviewDataModel::updateData: 更新数据，条数:" << data.size();
+    //  更新数据，条数:" << data.size();
     
     if (data.size() > m_maxDisplayCount) {
         qDebug() << "  数据量超过最大显示限制(" << m_maxDisplayCount 
@@ -268,7 +268,7 @@ void PreviewDataModel::updateData(const QVector<QVariantMap>& data) {
     
     endResetModel();
     
-    qDebug() << "PreviewDataModel::updateData: 更新完成，当前条数:" << m_allData.size();
+    //  更新完成，当前条数:" << m_allData.size();
     emit countChanged();
     emit totalCountChanged();
     emit currentCategoryChanged();
@@ -279,7 +279,7 @@ void PreviewDataModel::updateData(const QVector<QVariantMap>& data) {
 }
 
 void PreviewDataModel::clearData() {
-    qDebug() << "PreviewDataModel::clearData: 清空所有数据";
+    //  清空所有数据";
     
     beginResetModel();
     m_allData.clear();
