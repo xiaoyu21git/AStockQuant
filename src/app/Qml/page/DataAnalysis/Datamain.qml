@@ -105,7 +105,6 @@ Item {
         syncPreviewTabSelection()
         Qt.callLater(function() {
             if (dataFetchController) {
-                dataFetchController.refreshCacheKeys()
                 dataFetchController.refreshDataSetInfos()
             }
         })
@@ -231,7 +230,15 @@ Item {
             return
         }
 
-        if (selectedIndex >= 0) {
+        // "全市场"（索引 0）走 all_market 数据源，查询全市场所有股票
+        if (selectedIndex === 0) {
+            handlePanelStatusRequested("⏳ 正在查询全市场数据...", "warning")
+            dataFetchController.fetchDataTypesBySource("all_market", "", selectedDataTypes, startDate, endDate, {})
+            return
+        }
+
+        // 其他指数（索引 1+）走 index 数据源，查询指数成分股
+        if (selectedIndex > 0) {
             var indexSymbol = dataSelectionPanel.indexListModel.get(selectedIndex).symbol
             var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
             handlePanelStatusRequested("⏳ 正在加载 " + displayName + " 的数据...", "warning")
@@ -240,7 +247,8 @@ Item {
             return
         }
 
-        handlePanelStatusRequested("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
+        // selectedIndex < 0（无选择）→ all_market fallback
+        handlePanelStatusRequested("⏳ 正在查询全市场数据...", "warning")
         dataFetchController.fetchDataTypesBySource("all_market", "", selectedDataTypes, startDate, endDate, {
             market: dataSelectionPanel.marketComboBox.currentText,
             provider: provider
@@ -267,6 +275,7 @@ Item {
     }
 
     function handleExecuteDataCleaningFromCache() {
+        console.log("[QML] handleExecuteDataCleaningFromCache: currentCacheIndex=" + root.currentCacheIndex + " cacheDisplayModel.count=" + cacheDisplayModel.count)
         handlePanelStatusRequested("⏳ 执行缓存数据清洗...", "warning")
 
         if (!dataFetchController) {
@@ -284,7 +293,8 @@ Item {
             resolvePanelDateValue(dataSelectionPanel.endDatePicker)
         )
 
-        dataFetchController.cleanDataFromCacheByIndex(root.currentCacheIndex, rules)
+        console.log("[QML] calling cleanDataFromCacheByIndex, index=" + root.currentCacheIndex)
+        dataFetchController.cleanDataAsync(rules)
         handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
     }
     
@@ -990,16 +1000,6 @@ Item {
         id: cacheDisplayModel
     }
     
-    // 缓存键列表模型
-    ListModel {
-        id: cacheKeysModel
-    }
-    
-    // 数据集信息模型
-    ListModel {
-        id: dataSetInfosModel
-    }
-    
     // DataFetchController实例 - 用于数据获取和清洗（遵循不在QML中操作数据的原则）
     DataFetchController {
         id: dataFetchController
@@ -1017,10 +1017,10 @@ Item {
         }
         
         onDataCleaningCompleted: function(success, message, cleanedData) {
+            console.log("[QML] onDataCleaningCompleted: success=" + success + " message=" + message + " rows=" + (cleanedData ? cleanedData.length : 0))
             if (success) {
                 root.handlePanelStatusRequested(`✓ ${message}`, "success")
                 if (dataFetchController) {
-                    dataFetchController.refreshCacheKeys()
                     dataFetchController.refreshDataSetInfos()
                 }
             } else {
@@ -1032,44 +1032,11 @@ Item {
             root.handlePanelStatusRequested(`❌ ${error}`, "error")
         }
         
-        // 缓存键刷新完成信号
-        onCacheKeysRefreshed: function(cacheKeys) {
-            root.handlePanelStatusRequested("✓ 缓存键列表已刷新", "success")
-            cacheKeysModel.clear()
-            for (var cacheKeyIndex = 0; cacheKeyIndex < cacheKeys.length; cacheKeyIndex++) {
-                cacheKeysModel.append({
-                    index: cacheKeyIndex,
-                    type: "cache",
-                    cacheKey: cacheKeys[cacheKeyIndex]
-                })
-            }
-            rebuildMergedCacheDisplayModel()
-        }
-        
-        // 数据集信息刷新完成信号
-        onDataSetInfosRefreshed: function(dataSetInfos) {
-            root.handlePanelStatusRequested("✓ 数据集信息已刷新", "success")
-            dataSetInfosModel.clear()
-            for (var dataSetInfoIndex = 0; dataSetInfoIndex < dataSetInfos.length; dataSetInfoIndex++) {
-                var info = dataSetInfos[dataSetInfoIndex]
-                dataSetInfosModel.append({
-                    id: info.id,
-                    displayName: info.displayName,
-                    description: info.description,
-                    sourceType: info.sourceType,
-                    createdTime: info.createdTime,
-                    rowCount: info.rowCount,
-                    stockCodes: info.stockCodes || [],
-                    startDate: info.startDate,
-                    endDate: info.endDate,
-                    tags: info.tags || []
-                })
-            }
-            dataSourceCount = dataSetInfos.length
-            rebuildMergedCacheDisplayModel()
+        Component.onCompleted: {
+            // 初始化完成
         }
     }
-    
+
     // 状态栏
     Rectangle {
         id: statusBar
@@ -1334,65 +1301,6 @@ Item {
         updateStatus("⏳ 正在清洗数据...", "warning")
     }
     
-    function refreshDataSourceCount() {
-        dataSourceCount = dataSetInfosModel.count
-    }
-
-    function rebuildMergedCacheDisplayModel() {
-        cacheDisplayModel.clear()
-
-        var representedCacheKeys = {}
-        var displayIndex = 0
-
-        for (var dataSetIndex = 0; dataSetIndex < dataSetInfosModel.count; dataSetIndex++) {
-            var info = dataSetInfosModel.get(dataSetIndex)
-            cacheDisplayModel.append({
-                displayName: info.displayName || ("📊 数据集 #" + info.id),
-                index: displayIndex,
-                type: "dataset",
-                id: info.id,
-                cacheKey: "",
-                description: info.description || ""
-            })
-            displayIndex++
-
-            if (info.displayName) {
-                representedCacheKeys[String(info.displayName)] = true
-            }
-            if (String(info.description || "").indexOf("从缓存存储的数据: ") === 0) {
-                representedCacheKeys[String(info.description).substring("从缓存存储的数据: ".length)] = true
-            }
-            if (String(info.description || "").indexOf("从通用缓存存储的数据: ") === 0) {
-                representedCacheKeys[String(info.description).substring("从通用缓存存储的数据: ".length)] = true
-            }
-        }
-
-        for (var cacheKeyIndex = 0; cacheKeyIndex < cacheKeysModel.count; cacheKeyIndex++) {
-            var cacheEntry = cacheKeysModel.get(cacheKeyIndex)
-            var cacheKey = String(cacheEntry.cacheKey || "")
-            if (!cacheKey || representedCacheKeys[cacheKey]) {
-                continue
-            }
-
-            var displayName = "📁 缓存: " + cacheKey
-            if (cacheKey.startsWith("data:stock:ALL_")) {
-                displayName = "📊 数据集: " + cacheKey.substring(15)
-            } else if (cacheKey.startsWith("dataset_")) {
-                displayName = "📊 数据集: " + cacheKey.substring(8).replace(/_/g, " 至 ")
-            }
-
-            cacheDisplayModel.append({
-                displayName: displayName,
-                index: displayIndex,
-                type: "cache",
-                id: -1,
-                cacheKey: cacheKey,
-                description: cacheKey
-            })
-            displayIndex++
-        }
-    }
-    
     function executeDataCleaningFromCache() {
         // 执行数据清洗 - 使用缓存索引选择数据，遵循不在QML中操作数据的原则
         root.handlePanelStatusRequested("⏳ 执行缓存数据清洗...", "warning")
@@ -1419,7 +1327,7 @@ Item {
         
         // 调用DataFetchController的缓存索引清洗方法
         // 所有数据操作都在C++中完成，QML只传递索引和规则
-        dataFetchController.cleanDataFromCacheByIndex(root.currentCacheIndex, rules)
+        dataFetchController.cleanDataAsync(rules)
         root.handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
     }
     
@@ -1500,27 +1408,6 @@ Item {
             })
         }
         console.log("缓存显示模型（简化版）已更新，共", cacheKeys.length, "项")
-    }
-    
-    // 更新数据集信息模型
-    function updateDataSetInfosModel(dataSetInfos) {
-        dataSetInfosModel.clear()
-        for (var i = 0; i < dataSetInfos.length; i++) {
-            var info = dataSetInfos[i]
-            dataSetInfosModel.append({
-                id: info.id,
-                displayName: info.displayName,
-                description: info.description,
-                sourceType: info.sourceType,
-                createdTime: info.createdTime,
-                rowCount: info.rowCount,
-                stockCodes: info.stockCodes || [],
-                startDate: info.startDate,
-                endDate: info.endDate,
-                tags: info.tags || []
-            })
-        }
-        console.log("数据集信息模型已更新，共", dataSetInfos.length, "项")
     }
     
     // RuleConfigCard组件定义 - 与DataSourceModal对齐

@@ -7,9 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <functional>
-#include <set>
-#include <unordered_map>
-#include <unordered_set>
+#include <ankerl/unordered_dense.h>
 
 namespace cleaning {
 
@@ -81,6 +79,11 @@ public:
 
     void cleanCrossSectional(std::vector<J>& rows) override { m_seen.clear(); }
 
+    std::string validateConfig() const override {
+        if (m_keyFields.empty()) return "keyFields must not be empty";
+        return "";
+    }
+
     bool clean(J& row) override {
         if (m_keyFields.empty()) return true;
         std::string key;
@@ -93,7 +96,7 @@ public:
     }
 private:
     std::vector<std::string> m_keyFields;
-    std::unordered_set<std::string> m_seen;
+    ankerl::unordered_dense::set<std::string> m_seen;
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -103,6 +106,10 @@ class FinancialDateValidityRule final : public ICleaningRule {
 public:
     const char* ruleName() const override { return "financialDateValidity"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::FinancialDateValidity); }
+
+    bool appliesTo(const J& row) const override {
+        return row.has(FF::REPORT_DATE.c_str()) || row.has(FF::DISCLOSURE_DATE.c_str());
+    }
 
     bool clean(J& row) override {
         // 清理 report_date
@@ -139,32 +146,109 @@ public:
 };
 
 // ════════════════════════════════════════════════════════════════════
-// FinancialMetricSanitizeRule — 清除无效财务值（NaN/Inf/负值）
+// FinancialMetricSanitizeRule — 清除无效财务值（区分三种策略）
+//   sanitizeFinite:    仅清 NaN/Inf，保留负值（净利润、营收、现金流等可为负）
+//   sanitizePositive:  清 NaN/Inf 及 ≤0（总资产、流动/速动比率必须 > 0）
+//   sanitizeNonNegative: 清 NaN/Inf 及 <0（总负债可以为 0 但不能为负）
+//   同时校验 quick_ratio <= current_ratio（流动性约束）
 // ════════════════════════════════════════════════════════════════════
 class FinancialMetricSanitizeRule final : public ICleaningRule {
 public:
     const char* ruleName() const override { return "financialMetricSanitize"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::FinancialMetricSanitize); }
 
+    bool appliesTo(const J& row) const override {
+        return row.has(FF::REPORT_DATE.c_str()) || row.has(FF::EPS.c_str());
+    }
+
     bool clean(J& row) override {
-        static const FieldKey* finFields[] = {
+        // sanitizeFinite: 仅清 NaN/Inf，保留负值 — 适用于可正可负的财务指标
+        static const FieldKey* finiteFields[] = {
             &FF::EPS, &FF::BPS, &FF::ROE, &FF::ROA, &FF::NET_PROFIT,
-            &FF::TOTAL_REVENUE, &FF::TOTAL_ASSETS, &FF::TOTAL_LIABILITIES,
-            &FF::EQUITY, &FF::PROFIT_MARGIN, &FF::GROSS_MARGIN,
-            &FF::OPERATING_MARGIN, &FF::DEBT_TO_EQUITY, &FF::CURRENT_RATIO,
-            &FF::QUICK_RATIO, &FF::DIVIDEND_YIELD, &FF::PAYOUT_RATIO
+            &FF::TOTAL_REVENUE, &FF::EQUITY, &FF::PROFIT_MARGIN,
+            &FF::GROSS_MARGIN, &FF::OPERATING_MARGIN, &FF::NET_MARGIN,
+            &FF::DEBT_TO_EQUITY, &FF::DIVIDEND_YIELD, &FF::PAYOUT_RATIO,
+            &FF::OPERATING_CASH_FLOW, &FF::INVESTING_CASH_FLOW, &FF::FINANCING_CASH_FLOW
         };
-        for (auto* f : finFields) {
-            if (!row.has(f->c_str())) continue;
-            auto v = row.get(f->c_str());
-            if (v.isNumber()) {
-                double d = v.asDouble();
-                if (!std::isfinite(d) || std::isnan(d) || d < 0.0) {
-                    row.set(f->c_str(), J::createNull());
-                }
+        for (auto* f : finiteFields) {
+            sanitizeFinite(row, *f);
+        }
+
+        // sanitizePositive: 清 NaN/Inf 或 ≤0 — 这些字段必须严格为正
+        static const FieldKey* positiveFields[] = {
+            &FF::TOTAL_ASSETS, &FF::CURRENT_RATIO, &FF::QUICK_RATIO
+        };
+        for (auto* f : positiveFields) {
+            sanitizePositive(row, *f);
+        }
+
+        // sanitizeNonNegative: 清 NaN/Inf 或 <0 — 可以为 0 但不能为负
+        static const FieldKey* nonNegFields[] = {
+            &FF::TOTAL_LIABILITIES
+        };
+        for (auto* f : nonNegFields) {
+            sanitizeNonNegative(row, *f);
+        }
+
+        // quick_ratio > current_ratio 一致性校验：速动比率不应超过流动比率
+        auto cr = parseFinite(row, FF::CURRENT_RATIO);
+        auto qr = parseFinite(row, FF::QUICK_RATIO);
+        if (cr && qr && *qr > *cr) {
+            row.set(FF::QUICK_RATIO.c_str(), J::createNull());
+        }
+
+        return true;
+    }
+
+private:
+    /// @brief 提取有限数值，非数字或非有限返回 nullopt
+    static std::optional<double> parseFinite(J& row, const FieldKey& f) {
+        if (!row.has(f.c_str())) return std::nullopt;
+        auto v = row.get(f.c_str());
+        if (v.isNull()) return std::nullopt;
+        if (!v.isNumber()) return std::nullopt;
+        double d = v.asDouble();
+        if (!std::isfinite(d)) return std::nullopt;
+        return d;
+    }
+
+    /// @brief 仅清除非有限值（NaN / Inf / -Inf），保留负数
+    static void sanitizeFinite(J& row, const FieldKey& f) {
+        if (!row.has(f.c_str())) return;
+        auto v = row.get(f.c_str());
+        if (v.isNull()) return;
+        if (v.isNumber()) {
+            double d = v.asDouble();
+            if (!std::isfinite(d)) {
+                row.set(f.c_str(), J::createNull());
             }
         }
-        return true;
+    }
+
+    /// @brief 清除非有限值及 ≤0 的值
+    static void sanitizePositive(J& row, const FieldKey& f) {
+        if (!row.has(f.c_str())) return;
+        auto v = row.get(f.c_str());
+        if (v.isNull()) return;
+        if (v.isNumber()) {
+            double d = v.asDouble();
+            if (!std::isfinite(d) || d <= 0.0) {
+                row.set(f.c_str(), J::createNull());
+            }
+        }
+    }
+
+    /// @brief 清除非有限值及 <0 的值（0 保留）
+    static void sanitizeNonNegative(J& row, const FieldKey& f) {
+        if (!row.has(f.c_str())) return;
+        auto v = row.get(f.c_str());
+        if (v.isNull()) return;
+        if (v.isNumber()) {
+            double d = v.asDouble();
+            if (!std::isfinite(d) || d < 0.0) {
+                row.set(f.c_str(), J::createNull());
+            }
+        }
     }
 };
 
@@ -192,6 +276,16 @@ public:
 
     const char* ruleName() const override { return "suspensionFill"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::SuspensionFill); }
+
+    bool appliesTo(const J& row) const override {
+        return row.has(MF::VOLUME.c_str()) && row.has(CF::SYMBOL.c_str());
+    }
+
+    std::string validateConfig() const override {
+        if (m_maxForwardDays <= 0) return "maxForwardFillDays must be > 0";
+        if (m_fillFields.empty()) return "fillFields must not be empty";
+        return "";
+    }
 
     void cleanCrossSectional(std::vector<J>& rows) override {
         // 按 symbol 分组，记录最后有效值
@@ -240,8 +334,8 @@ private:
     int m_maxForwardDays;
     bool m_dropAfterMax;
     std::vector<std::string> m_fillFields;
-    std::unordered_map<std::string, std::unordered_map<std::string, double>> m_lastValid;
-    std::unordered_map<std::string, int> m_suspensionCount;
+    ankerl::unordered_dense::map<std::string, ankerl::unordered_dense::map<std::string, double>> m_lastValid;
+    ankerl::unordered_dense::map<std::string, int> m_suspensionCount;
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -302,8 +396,8 @@ public:
 private:
     int m_maxLookback;
     std::vector<std::string> m_fields;
-    std::unordered_map<std::string, std::unordered_map<std::string, double>> m_lastKnown;
-    std::unordered_map<std::string, std::unordered_map<std::string, int>> m_missCount;
+    ankerl::unordered_dense::map<std::string, ankerl::unordered_dense::map<std::string, double>> m_lastKnown;
+    ankerl::unordered_dense::map<std::string, ankerl::unordered_dense::map<std::string, int>> m_missCount;
 };
 
 // ════════════════════════════════════════════════════════════════════
@@ -313,6 +407,10 @@ class AdjustedPriceRule final : public ICleaningRule {
 public:
     const char* ruleName() const override { return "adjustedPrice"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::AdjustedPrice); }
+
+    bool appliesTo(const J& row) const override {
+        return row.has(MF::CLOSE.c_str());
+    }
 
     bool clean(J& row) override {
         double pref = detail::safeDouble(row, MF::PRE_ADJ_FACTOR, 1.0);
@@ -357,6 +455,16 @@ public:
     const char* ruleName() const override { return "priceValidity"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::PriceValidity); }
 
+    bool appliesTo(const J& row) const override {
+        return row.has(MF::OPEN.c_str()) || row.has(MF::CLOSE.c_str());
+    }
+
+    std::string validateConfig() const override {
+        if (m_minPrice < 0) return "minPrice must be >= 0";
+        if (m_maxPrice <= m_minPrice) return "maxPrice must be > minPrice";
+        return "";
+    }
+
     bool clean(J& row) override {
         double o = detail::safeDouble(row, MF::OPEN, -1.0);
         double h = detail::safeDouble(row, MF::HIGH, -1.0);
@@ -399,6 +507,16 @@ public:
     const char* ruleName() const override { return "volumeFilter"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::VolumeFilter); }
 
+    bool appliesTo(const J& row) const override {
+        return row.has(MF::VOLUME.c_str());
+    }
+
+    std::string validateConfig() const override {
+        if (m_minVolume < 0) return "minVolume must be >= 0";
+        if (m_maxVolume <= m_minVolume) return "maxVolume must be > minVolume";
+        return "";
+    }
+
     bool clean(J& row) override {
         double vol = detail::safeDouble(row, MF::VOLUME, -1.0);
         if (vol < 0.0) return false;
@@ -428,6 +546,12 @@ public:
     const char* ruleName() const override { return "limitMoveTag"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::LimitMoveTag); }
 
+    std::string validateConfig() const override {
+        if (m_downThreshold > m_upThreshold)
+            return "downThreshold must be <= upThreshold";
+        return "";
+    }
+
     bool clean(J& row) override {
         double chg = 0.0;
         if (row.has(MF::CHANGE_PCT.c_str())) {
@@ -454,6 +578,11 @@ class ValuationSanitizeRule final : public ICleaningRule {
 public:
     const char* ruleName() const override { return "valuationSanitize"; }
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::ValuationSanitize); }
+
+    bool appliesTo(const J& row) const override {
+        return row.has(MF::PE_RATIO.c_str()) || row.has(MF::PB_RATIO.c_str())
+            || row.has(MF::MARKET_CAP.c_str());
+    }
 
     bool clean(J& row) override {
         std::string invalidFields;
@@ -580,6 +709,214 @@ public:
 
 private:
     SymbolInfoProvider m_provider;
+};
+
+// ════════════════════════════════════════════════════════════════════
+// ReportDateAlignmentRule — 财报日期对齐到披露后首个交易日
+// 纯 C++ 层不依赖 SQL，通过回调注入下一交易日查询逻辑
+// ════════════════════════════════════════════════════════════════════
+class ReportDateAlignmentRule final : public ICleaningRule {
+public:
+    /// @brief 回调：给定日期，返回下一个交易日（YYYY-MM-DD）
+    /// 未注入时，fallback 使用 disclosure_date 或 report_date 自身
+    using NextTradingDayFn = std::function<std::string(const std::string& date)>;
+
+    explicit ReportDateAlignmentRule(NextTradingDayFn fn = nullptr)
+        : m_nextTradingDay(std::move(fn)) {}
+
+    const char* ruleName() const override { return "reportDateAlignment"; }
+    uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::ReportDateAlignment); }
+
+    bool appliesTo(const J& row) const override {
+        return row.has(FF::REPORT_DATE.c_str());
+    }
+
+    bool clean(J& row) override {
+        if (!row.has(FF::REPORT_DATE.c_str())) return true;
+
+        std::string rd = row.get(FF::REPORT_DATE.c_str()).asString();
+        if (rd.size() < 10) return true;
+
+        std::string effectiveDate;
+        if (row.has(FF::DISCLOSURE_DATE.c_str())) {
+            std::string dd = row.get(FF::DISCLOSURE_DATE.c_str()).asString();
+            if (dd.size() >= 10) {
+                if (m_nextTradingDay) {
+                    effectiveDate = m_nextTradingDay(dd.substr(0, 10));
+                } else {
+                    effectiveDate = dd.substr(0, 10); // 无回调时直接使用披露日
+                }
+                row.set(CF::TRADE_DATE.c_str(), J::createString(effectiveDate));
+                row.set(TF::REPORT_DATE_ALIGNED.c_str(), J::createBool(true));
+                return true;
+            }
+        }
+
+        // 无披露日时使用报告日本身作为交易日
+        row.set(CF::TRADE_DATE.c_str(), J::createString(rd.substr(0, 10)));
+        row.set(TF::REPORT_DATE_ALIGNED.c_str(), J::createBool(true));
+        return true;
+    }
+
+private:
+    NextTradingDayFn m_nextTradingDay;
+};
+
+// ════════════════════════════════════════════════════════════════════
+// SurvivorBiasRule — 生存者偏差处理：剔除退市日之后的交易数据
+// 使用 XF::DELIST_DATE 字段（"YYYY-MM-DD" 格式可直接字典序比较）
+// ════════════════════════════════════════════════════════════════════
+class SurvivorBiasRule final : public ICleaningRule {
+public:
+    const char* ruleName() const override { return "survivorBias"; }
+    uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::SurvivorBias); }
+
+    bool appliesTo(const J& row) const override {
+        return row.has(XF::DELIST_DATE.c_str());
+    }
+
+    bool clean(J& row) override {
+        // 无退市日期字段则保留
+        if (!row.has(XF::DELIST_DATE.c_str())) return true;
+        std::string delist = row.get(XF::DELIST_DATE.c_str()).asString();
+        // 退市日期为空则保留
+        if (delist.empty()) return true;
+
+        // 获取交易日期
+        std::string tradeDate;
+        if (row.has(CF::TRADE_DATE.c_str()))
+            tradeDate = row.get(CF::TRADE_DATE.c_str()).asString();
+        if (tradeDate.empty()) return true;
+
+        // "YYYY-MM-DD" 格式可直接字典序比较
+        // tradeDate > delistDate → 退市后数据，剔除
+        if (tradeDate.size() >= 10 && delist.size() >= 10) {
+            std::string td = tradeDate.substr(0, 10);
+            std::string dd = delist.substr(0, 10);
+            if (td > dd) return false;
+        }
+
+        row.set(TF::SURVIVOR_BIAS_CHECKED.c_str(), J::createBool(true));
+        return true;
+    }
+};
+
+// ════════════════════════════════════════════════════════════════════
+// STFilterRule — ST 股票剔除
+// 检查 XF::STATUS 字段（"ST"/"*ST"）、XF::NAME 前缀、is_st 标记
+// ════════════════════════════════════════════════════════════════════
+class STFilterRule final : public ICleaningRule {
+public:
+    const char* ruleName() const override { return "stFilter"; }
+    uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::STFilter); }
+
+    bool clean(J& row) override {
+        // 检查 is_st 标记
+        if (row.has("is_st")) {
+            auto v = row.get("is_st");
+            if (v.isBool() && v.asBool()) return false;
+            if (v.isNumber() && v.asInt() != 0) return false;
+            if (v.isString()) {
+                std::string s = v.asString();
+                // trim
+                s.erase(0, s.find_first_not_of(" \t\r\n"));
+                s.erase(s.find_last_not_of(" \t\r\n") + 1);
+                if (s == "1" || s == "true" || s == "True" || s == "TRUE" || s == "y" || s == "Y")
+                    return false;
+            }
+        }
+
+        // 检查 status 字段
+        if (row.has(XF::STATUS.c_str())) {
+            std::string s = row.get(XF::STATUS.c_str()).asString();
+            if (s == "ST" || s == "*ST") return false;
+        }
+
+        // 检查 name 字段（名称以 ST 或 *ST 开头）
+        if (row.has(XF::NAME.c_str())) {
+            std::string n = row.get(XF::NAME.c_str()).asString();
+            if (n.size() >= 2 && n.substr(0, 2) == "ST") return false;
+            if (n.size() >= 3 && n.substr(0, 3) == "*ST") return false;
+        }
+
+        return true;
+    }
+};
+
+// ════════════════════════════════════════════════════════════════════
+// NewStockFilterRule — 新股过滤（上市不足 N 个交易日剔除）
+// 纯 C++ 层不依赖 SQL，通过回调注入交易日计数逻辑
+// ════════════════════════════════════════════════════════════════════
+class NewStockFilterRule final : public ICleaningRule {
+public:
+    /// @brief 回调：计算 symbol 从上市日到指定交易日之间的交易天数
+    /// 返回 < 0 表示查询失败，应保留（安全策略：不确定时不剔除）
+    using TradeDayCountFn = std::function<int(const std::string& symbol,
+                                              const std::string& listDate,
+                                              const std::string& tradeDate)>;
+
+    explicit NewStockFilterRule(int minTradeDays = 60, TradeDayCountFn fn = nullptr)
+        : m_minTradeDays(minTradeDays)
+        , m_countTradingDays(std::move(fn)) {}
+
+    explicit NewStockFilterRule(const std::string& configJson, TradeDayCountFn fn = nullptr)
+        : m_minTradeDays(60), m_countTradingDays(std::move(fn)) {
+        if (!configJson.empty()) {
+            auto cfg = J::parse(configJson);
+            if (cfg.has("minTradeDays")) m_minTradeDays = cfg.get("minTradeDays").asInt();
+        }
+    }
+
+    const char* ruleName() const override { return "newStockFilter"; }
+    uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::NewStockFilter); }
+
+    std::string validateConfig() const override {
+        if (m_minTradeDays < 0) return "minTradeDays must be >= 0";
+        return "";
+    }
+
+    bool appliesTo(const J& row) const override {
+        return m_minTradeDays > 0 && row.has(XF::LIST_DATE.c_str());
+    }
+
+    bool clean(J& row) override {
+        // minTradeDays=0 时不过滤
+        if (m_minTradeDays <= 0) return true;
+
+        // 获取上市日期
+        if (!row.has(XF::LIST_DATE.c_str())) return true;
+        std::string listDate = row.get(XF::LIST_DATE.c_str()).asString();
+        if (listDate.empty()) return true;
+
+        // 获取交易日期
+        std::string tradeDate;
+        if (row.has(CF::TRADE_DATE.c_str()))
+            tradeDate = row.get(CF::TRADE_DATE.c_str()).asString();
+        if (tradeDate.empty()) return true;
+
+        // 截取前 10 字符用于比较
+        if (listDate.size() >= 10) listDate = listDate.substr(0, 10);
+        if (tradeDate.size() >= 10) tradeDate = tradeDate.substr(0, 10);
+
+        // 交易日早于上市日，剔除
+        if (tradeDate < listDate) return false;
+
+        // 有回调时精确计算交易日数
+        if (m_countTradingDays) {
+            std::string sym;
+            if (row.has(CF::SYMBOL.c_str()))
+                sym = row.get(CF::SYMBOL.c_str()).asString();
+            int days = m_countTradingDays(sym, listDate, tradeDate);
+            if (days < 0) return true;   // 查询失败 → 保留（安全策略）
+            if (days < m_minTradeDays) return false;
+        }
+
+        return true;
+    }
+
+private:
+    int m_minTradeDays;
+    TradeDayCountFn m_countTradingDays;
 };
 
 } // namespace cleaning

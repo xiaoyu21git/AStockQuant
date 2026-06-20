@@ -13,20 +13,8 @@ Module {
     }
     Component {
         file: "Bridge"
-        name: "AStock.Bridge/DataService"
         accessSemantics: "reference"
         prototype: "QObject"
-        exports: ["AStock.Bridge/DataService 1.0"]
-        exportMetaObjectRevisions: [256]
-        isCreatable: true
-        isSingleton: false
-    }
-    Component {
-        file: "Bridge"
-        name: "AStock.Bridge/DataRuleService"
-        accessSemantics: "reference"
-        prototype: "QObject"
-        exports: ["AStock.Bridge/DataRuleService 1.0"]
         exportMetaObjectRevisions: [256]
         isCreatable: true
         isSingleton: false
@@ -123,10 +111,8 @@ Module {
     }
     Component {
         file: "Bridge"
-        name: "AStock.Bridge/MarketDataService"
         accessSemantics: "reference"
         prototype: "QObject"
-        exports: ["AStock.Bridge/MarketDataService 1.0"]
         exportMetaObjectRevisions: [256]
         isCreatable: false
         isSingleton: true

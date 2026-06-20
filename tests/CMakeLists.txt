@@ -191,6 +191,13 @@ else()
     message(WARNING "[TESTS] test_strict_cleaning_regression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_cpp_cleaning_rules.cpp")
+    list(APPEND TEST_SOURCES "test_cpp_cleaning_rules.cpp")
+    message(STATUS "[TESTS] Found: test_cpp_cleaning_rules.cpp")
+else()
+    message(WARNING "[TESTS] test_cpp_cleaning_rules.cpp not found!")
+endif()
+
 
 if(NOT TEST_SOURCES)
     message(FATAL_ERROR "[TESTS] No test source files found!")
@@ -284,6 +291,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
         PRIVATE
             ${CMAKE_SOURCE_DIR}/src/engine/include
             ${CMAKE_SOURCE_DIR}/src/domain/include
+            ${CMAKE_SOURCE_DIR}/src/domain/cleaning/include
             ${CMAKE_SOURCE_DIR}/src/foundation/include
             ${CMAKE_SOURCE_DIR}/src/infrastructure/include
             ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
@@ -298,6 +306,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
             foundation
             infrastructure
             astockquantapp
+            astock_unordered_dense
     )
 
     message(STATUS "[TESTS] Configured run_cleaning_cache_probe executable")

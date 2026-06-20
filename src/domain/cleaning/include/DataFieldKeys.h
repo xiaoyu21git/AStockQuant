@@ -88,6 +88,7 @@ struct FF {
     static constexpr FieldKey CURRENT_RATIO{"current_ratio"};
     static constexpr FieldKey QUICK_RATIO{"quick_ratio"};
     static constexpr FieldKey PAYOUT_RATIO{"payout_ratio"};
+    static constexpr FieldKey NET_MARGIN{"net_margin"};
     static constexpr FieldKey DIVIDEND_STABILITY{"dividend_stability"};
 };
 

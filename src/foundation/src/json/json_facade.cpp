@@ -235,6 +235,11 @@ public:
             throw std::runtime_error("Incompatible JsonValue type");
         }
     }
+
+    void remove(const std::string& key) override {
+        if (!isObject()) return;
+        value_.erase(key);
+    }
 };
 
 // JsonValue factory helpers
@@ -444,6 +449,10 @@ void JsonFacade::set(const std::string& key, const JsonFacade& value) {
         root_ = JsonValue::createObject();
     }
     root_->set(key, value.root_->clone());
+}
+
+void JsonFacade::remove(const std::string& key) {
+    if (root_) root_->remove(key);
 }
 
 // Serialization

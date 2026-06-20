@@ -369,15 +369,6 @@ ApplicationWindow {
                         sourceComponent: settingsPageComponent
                     }
 
-                    Loader {
-                        id: cacheManagementPageLoader
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: mainStack.currentIndex === 11 || item !== null
-                        asynchronous: true
-                        sourceComponent: cacheManagementPageComponent
-                    }
-
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -386,12 +377,6 @@ ApplicationWindow {
             }
             }
         }   
-    }
-
-    Component {
-        id: cacheManagementPageComponent
-
-        CacheManagementPage {}
     }
 
     Component {

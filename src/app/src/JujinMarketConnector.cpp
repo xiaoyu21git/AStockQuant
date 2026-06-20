@@ -305,12 +305,9 @@ bool JujinMarketConnector::start()
         for (const auto& symbol : watchlist) enqueueWatchSymbol(symbol);
     } else if (marketSessionAllowsSubscriptions()) {
         // 自动获取全市场标的并订阅
-        std::cerr << "[JMC] calling get_instruments...\n";
         auto* inst = ::get_instruments("SZSE,SSE", "stock", "symbol");
         if (!inst) {
-            std::cerr << "[JMC] get_instruments returned null\n";
         } else if (inst->status() != 0) {
-            std::cerr << "[JMC] get_instruments status=" << inst->status() << "\n";
             inst->release();
         } else {
             int cnt = 0;
@@ -561,9 +558,6 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
                 continue;
             }
             if (m_subscribedSymbols.size() + normalizedSymbols.size() >= m_maxMarketSubscriptions) {
-                std::cerr << "[JMC] " "JujinMarketConnector: market subscription limit reached, skip symbol"
-                           << (normalizedSymbol)
-                           << "limit=" << static_cast<unsigned long long>(m_maxMarketSubscriptions);
                 continue;
             }
             normalizedSymbols.push_back(normalizedSymbol);

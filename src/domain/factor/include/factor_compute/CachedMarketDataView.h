@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 #include <Eigen/Dense>
+#include "database/MarketDataRepository.h"
 
 namespace foundation { namespace json { class JsonFacade; } }
 
@@ -65,6 +66,10 @@ public:
 
     /// @brief 查询是否有指定字段
     [[nodiscard]] bool hasField(const std::string& fieldName) const;
+
+    /// @brief 从 DailyBarRow 向量直接构建（零 JSON，零 QVariant，MySQL → .bin 最快路径）
+    static std::unique_ptr<CachedMarketDataView> fromDailyBarRows(
+        const std::vector<astock::infrastructure::database::DailyBarRow>& rows);
 
     /// @brief 从 JSON 数组构建 CachedMarketDataView
     [[nodiscard]] static std::unique_ptr<CachedMarketDataView>

@@ -219,6 +219,75 @@ std::vector<DailyBarRow> MarketDataRepository::queryAllMarketDailyBar(
     return rows;
 }
 
+// ═══ queryAllMarketWeeklyBar ═══
+
+std::vector<DailyBarRow> MarketDataRepository::queryAllMarketWeeklyBar(
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    std::ostringstream sql;
+    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM weekly_bar"
+        << " WHERE trade_date >= " << safeStr(startDate)
+        << " AND trade_date <= " << safeStr(endDate)
+        << " ORDER BY symbol, trade_date ASC";
+
+    auto result = db_->executeQuery(sql.str());
+    std::vector<DailyBarRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i) {
+        rows.push_back(rowToBar(result.getRow(i)));
+    }
+    return rows;
+}
+
+// ═══ queryAllMarketMonthlyBar ═══
+
+std::vector<DailyBarRow> MarketDataRepository::queryAllMarketMonthlyBar(
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    std::ostringstream sql;
+    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM monthly_bar"
+        << " WHERE trade_date >= " << safeStr(startDate)
+        << " AND trade_date <= " << safeStr(endDate)
+        << " ORDER BY symbol, trade_date ASC";
+
+    auto result = db_->executeQuery(sql.str());
+    std::vector<DailyBarRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i) {
+        rows.push_back(rowToBar(result.getRow(i)));
+    }
+    return rows;
+}
+
+// ═══ queryAllMarketFinancialData ═══
+
+std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::queryAllMarketFinancialData(
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    std::ostringstream sql;
+    sql << "SELECT symbol, report_date, disclosure_date, eps, bps, roe, roa,"
+        << " total_revenue, net_profit, total_assets, total_liabilities, equity,"
+        << " operating_cash_flow, investing_cash_flow, financing_cash_flow,"
+        << " dividend_yield"
+        << " FROM financial_statement"
+        << " WHERE report_date >= " << safeStr(startDate)
+        << " AND report_date <= " << safeStr(endDate)
+        << " ORDER BY symbol, report_date ASC";
+
+    auto result = db_->executeQuery(sql.str());
+    std::vector<astock::database::SqlQueryResultRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i) {
+        rows.push_back(result.getRow(i));
+    }
+    return rows;
+}
+
 // ═══ queryIndexList ═══
 
 std::vector<std::string> MarketDataRepository::queryIndexList() {

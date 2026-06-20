@@ -83,6 +83,21 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
+    /// 全市场周K线（按日期范围）
+    std::vector<DailyBarRow> queryAllMarketWeeklyBar(
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 全市场月K线（按日期范围）
+    std::vector<DailyBarRow> queryAllMarketMonthlyBar(
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 全市场财务数据（按日期范围）
+    std::vector<astock::database::SqlQueryResultRow> queryAllMarketFinancialData(
+        const std::string& startDate,
+        const std::string& endDate);
+
     /// 指数列表查询
     std::vector<std::string> queryIndexList();
 

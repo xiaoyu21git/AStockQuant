@@ -2,23 +2,69 @@
 #include "database/MarketDataService.h"
 #include <cstdio>
 #include <algorithm>
+#include <cmath>
 #include <sstream>
 
 namespace astock::infrastructure::database {
 
 using J = foundation::json::JsonFacade;
 
+// ── NaN/Inf 保护：将非有限浮点数转为合法 JSON 值 ──
+namespace {
+    /// @brief 检查 double 是否有限（非 NaN / Inf / -Inf）
+    inline bool isFiniteDouble(double v) noexcept {
+        return std::isfinite(v);
+    }
+
+    /// @brief 将 double 转为 JSON 数值字符串，NaN/Inf 替换为 "null"
+    /// 用于 stringstream 直接拼接 JSON 场景，比 JsonFacade::toString() 更安全
+    inline const char* safeJsonDouble(double v) noexcept {
+        // 静态缓冲区，每个值覆盖上一次结果（用于 << 链式调用场景）
+        static thread_local char buf[64];
+        if (!std::isfinite(v)) {
+            return "null";
+        }
+        // 使用足够精度，避免 snprintf 的 locale 相关行为
+        int len = snprintf(buf, sizeof(buf), "%.10g", v);
+        if (len < 0 || len >= static_cast<int>(sizeof(buf))) {
+            return "null";
+        }
+        return buf;
+    }
+
+    /// @brief 对非有限值返回 null，否则返回 createDouble
+    inline J safeCreateDouble(double v) {
+        return std::isfinite(v) ? J::createDouble(v) : J::createNull();
+    }
+
+    /// @brief 字符串转义（用于 stringstream JSON 拼接）
+    inline void appendJsonString(std::ostringstream& ss, const std::string& s) {
+        ss << '"';
+        for (char c : s) {
+            if (c == '"') ss << "\\\"";
+            else if (c == '\\') ss << "\\\\";
+            else if (c == '\n') ss << "\\n";
+            else if (c == '\r') ss << "\\r";
+            else if (c == '\t') ss << "\\t";
+            else ss << c;
+        }
+        ss << '"';
+    }
+} // anonymous namespace
+
 // ── barRowToJson ──
 J MarketDataService::barRowToJson(const DailyBarRow& row, const std::vector<std::string>& extraFields) {
     auto obj = J::createObject();
     obj.set(field::SYMBOL,     J::createString(row.symbol));
     obj.set(field::TRADE_DATE, J::createString(row.tradeDate));
-    obj.set(field::OPEN,       J::createDouble(row.open));
-    obj.set(field::HIGH,       J::createDouble(row.high));
-    obj.set(field::LOW,        J::createDouble(row.low));
-    obj.set(field::CLOSE,      J::createDouble(row.close));
-    obj.set(field::VOLUME,     J::createDouble(row.volume));
-    if (row.turnover > 0.0) obj.set(field::TURNOVER, J::createDouble(row.turnover));
+    obj.set(field::OPEN,       safeCreateDouble(row.open));
+    obj.set(field::HIGH,       safeCreateDouble(row.high));
+    obj.set(field::LOW,        safeCreateDouble(row.low));
+    obj.set(field::CLOSE,      safeCreateDouble(row.close));
+    obj.set(field::VOLUME,     safeCreateDouble(row.volume));
+    if (row.turnover > 0.0) {
+        if (isFiniteDouble(row.turnover)) obj.set(field::TURNOVER, J::createDouble(row.turnover));
+    }
     for (const auto& f : extraFields) (void)f; // extra fields stored in SQL result rows
     return obj;
 }
@@ -30,19 +76,20 @@ J MarketDataService::financialRowToJson(const astock::database::SqlQueryResultRo
     obj.set(field::REPORT_DATE,     J::createString(row.getString(field::REPORT_DATE)));
     if (row.contains(field::DISCLOSURE_DATE))
         obj.set(field::DISCLOSURE_DATE, J::createString(row.getString(field::DISCLOSURE_DATE)));
-    obj.set(field::EPS,             J::createDouble(row.getDouble(field::EPS)));
-    obj.set(field::BPS,             J::createDouble(row.getDouble(field::BPS)));
-    obj.set(field::ROE,             J::createDouble(row.getDouble(field::ROE)));
-    obj.set(field::ROA,             J::createDouble(row.getDouble(field::ROA)));
-    obj.set(field::TOTAL_REVENUE,   J::createDouble(row.getDouble(field::TOTAL_REVENUE)));
-    obj.set(field::NET_PROFIT,      J::createDouble(row.getDouble(field::NET_PROFIT)));
-    obj.set(field::TOTAL_ASSETS,    J::createDouble(row.getDouble(field::TOTAL_ASSETS)));
-    obj.set(field::TOTAL_LIABILITIES, J::createDouble(row.getDouble(field::TOTAL_LIABILITIES)));
-    obj.set(field::EQUITY,          J::createDouble(row.getDouble(field::EQUITY)));
-    obj.set(field::OPERATING_CF,    J::createDouble(row.getDouble(field::OPERATING_CF)));
-    obj.set(field::INVESTING_CF,    J::createDouble(row.getDouble(field::INVESTING_CF)));
-    obj.set(field::FINANCING_CF,    J::createDouble(row.getDouble(field::FINANCING_CF)));
-    obj.set(field::DIVIDEND_YIELD,  J::createDouble(row.getDouble(field::DIVIDEND_YIELD)));
+    // 财务字段：使用 safeCreateDouble 保护 NaN/Inf
+    obj.set(field::EPS,             safeCreateDouble(row.getDouble(field::EPS)));
+    obj.set(field::BPS,             safeCreateDouble(row.getDouble(field::BPS)));
+    obj.set(field::ROE,             safeCreateDouble(row.getDouble(field::ROE)));
+    obj.set(field::ROA,             safeCreateDouble(row.getDouble(field::ROA)));
+    obj.set(field::TOTAL_REVENUE,   safeCreateDouble(row.getDouble(field::TOTAL_REVENUE)));
+    obj.set(field::NET_PROFIT,      safeCreateDouble(row.getDouble(field::NET_PROFIT)));
+    obj.set(field::TOTAL_ASSETS,    safeCreateDouble(row.getDouble(field::TOTAL_ASSETS)));
+    obj.set(field::TOTAL_LIABILITIES, safeCreateDouble(row.getDouble(field::TOTAL_LIABILITIES)));
+    obj.set(field::EQUITY,          safeCreateDouble(row.getDouble(field::EQUITY)));
+    obj.set(field::OPERATING_CF,    safeCreateDouble(row.getDouble(field::OPERATING_CF)));
+    obj.set(field::INVESTING_CF,    safeCreateDouble(row.getDouble(field::INVESTING_CF)));
+    obj.set(field::FINANCING_CF,    safeCreateDouble(row.getDouble(field::FINANCING_CF)));
+    obj.set(field::DIVIDEND_YIELD,  safeCreateDouble(row.getDouble(field::DIVIDEND_YIELD)));
     return obj;
 }
 
@@ -168,20 +215,23 @@ std::string MarketDataService::queryDailyBarAsJson(
     auto bars = m_repo->queryDailyBarWithFields(symbols, startDate, endDate, extraFields);
 
     // 用 stringstream 直接构建 JSON，比 JsonFacade 逐行构建快 3-5x
+    // 使用 safeJsonDouble() 和 appendJsonString() 保护 NaN/Inf 和特殊字符
     std::ostringstream ss;
     ss << '[';
     bool firstRow = true;
     for (const auto& bar : bars) {
         if (!firstRow) ss << ',';
         firstRow = false;
-        ss << "{\"symbol\":\"" << bar.symbol << "\","
-           << "\"trade_date\":\"" << bar.tradeDate << "\","
-           << "\"open\":" << bar.open << ','
-           << "\"high\":" << bar.high << ','
-           << "\"low\":" << bar.low << ','
-           << "\"close\":" << bar.close << ','
-           << "\"volume\":" << bar.volume;
-        if (bar.turnover > 0.0) ss << ",\"turnover\":" << bar.turnover;
+        ss << "{\"symbol\":";
+        appendJsonString(ss, bar.symbol);
+        ss << ",\"trade_date\":";
+        appendJsonString(ss, bar.tradeDate);
+        ss << ",\"open\":" << safeJsonDouble(bar.open)
+           << ",\"high\":" << safeJsonDouble(bar.high)
+           << ",\"low\":" << safeJsonDouble(bar.low)
+           << ",\"close\":" << safeJsonDouble(bar.close)
+           << ",\"volume\":" << safeJsonDouble(bar.volume);
+        if (bar.turnover > 0.0) ss << ",\"turnover\":" << safeJsonDouble(bar.turnover);
         ss << '}';
     }
     ss << ']';

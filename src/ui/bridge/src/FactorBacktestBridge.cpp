@@ -2,7 +2,7 @@
 // 因子计算、模拟成交、分析统计等业务逻辑全部在域层执行。
 
 #include "FactorBacktestBridge.h"
-#include "DataServiceCache.h"
+#include "DataCacheAdapter.h"
 #include "AppStoragePaths.h"
 
 #include "factor_compute/AnalysisReportTypes.h"
@@ -361,7 +361,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
 
         // ① 在 worker 线程中加载缓存数据集 + 构建 MarketView
         if (capturedDatasetId > 0 && m_backtestDataSvc) {
-            QVariantList data = DataServiceCache::getInstance().getDataSetById(capturedDatasetId);
+            QVariantList data = DataCacheAdapter::instance().getDataSetById(capturedDatasetId);
             if (!data.isEmpty()) {
             QJsonDocument doc(QJsonArray::fromVariantList(data));
             std::string jsonStr = doc.toJson(QJsonDocument::Compact).toStdString();
@@ -373,10 +373,10 @@ void FactorBacktestBridge::startBacktestWithFactors(
             }
             // 一次性加载全部字段，生成完整 .bin
             {
-                auto& cache = DataServiceCache::getInstance();
+                auto& cache = DataCacheAdapter::instance();
                 auto info = cache.getDataSetInfo(capturedDatasetId);
                 std::vector<std::string> allFields;
-                for (const QString& f : info.availableFields) {
+                for (const QString& f : info.value("availableFields").toStringList()) {
                     std::string fs = f.toStdString();
                     if (fs != "open" && fs != "high" && fs != "low" && fs != "close" && fs != "volume" && fs != "symbol" && fs != "trade_date")
                         allFields.push_back(fs);

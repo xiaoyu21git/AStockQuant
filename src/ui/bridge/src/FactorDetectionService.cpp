@@ -7,6 +7,7 @@
 #include "AppStoragePaths.h"
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
+#include "DataCacheAdapter.h"
 #include "QtSqlDatabaseAdapter.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
@@ -526,7 +527,7 @@ int FactorDetectionService::uniqueTradeDateCount(const QVariantList& rows) const
 
 QSet<QString> FactorDetectionService::collectAvailableFields(
     const QVariantMap& cacheSnapshot,
-    const DataServiceCache::DataSetInfo& dataSetInfo,
+    const QVariantMap& dataSetInfo,
     const QVariantList& rows) const
 {
     QSet<QString> fields;
@@ -540,7 +541,7 @@ QSet<QString> FactorDetectionService::collectAvailableFields(
     };
 
     appendFields(cacheSnapshot.value(QStringLiteral("availableFields")).toStringList());
-    appendFields(dataSetInfo.availableFields);
+    appendFields(dataSetInfo.value("availableFields").toStringList());
 
     for (const QVariant& rowValue : rows) {
         const QVariantMap row = rowValue.toMap();
@@ -745,7 +746,7 @@ QVariantMap FactorDetectionService::detectPendingFactors(
     const QString sourceMode = normalizedDataSourceMode(request.dataSourceMode);
     const bool useCacheMode = sourceMode != QStringLiteral("database");
 
-    DataServiceCache::DataSetInfo dataSetInfo;
+    QVariantMap dataSetInfo;
     QVariantList dataSetRows;
     bool hasValidDataSet = false;
     QSet<QString> availableFields;
@@ -753,12 +754,11 @@ QVariantMap FactorDetectionService::detectPendingFactors(
     int availableTradeDateCount = 0;
 
     if (useCacheMode) {
-        auto& cache = DataServiceCache::getInstance();
-        cache.initializeCache();
+        auto& cache = DataCacheAdapter::instance();
 
         if (request.selectedDatasetId > 0) {
             dataSetInfo = cache.getDataSetInfo(request.selectedDatasetId);
-            hasValidDataSet = dataSetInfo.id > 0;
+            hasValidDataSet = dataSetInfo.value("id", -1).toInt() > 0;
 
             if (hasValidDataSet) {
                 dataSetRows = cache.getDataSetById(request.selectedDatasetId);
@@ -778,7 +778,7 @@ QVariantMap FactorDetectionService::detectPendingFactors(
         toUnusableFieldSet(fieldDiagnostics),
         fieldDiagnostics,
         availableTradeDateCount,
-        useCacheMode, hasValidDataSet, dataSetInfo.rowCount > 0 || !dataSetRows.isEmpty(), dataSetInfo
+        useCacheMode, hasValidDataSet, dataSetInfo.value("rowCount", 0).toInt() > 0 || !dataSetRows.isEmpty(), dataSetInfo
     };
 
     if (normalized.size() == 1) {

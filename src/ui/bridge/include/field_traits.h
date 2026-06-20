@@ -548,4 +548,9 @@ inline DataType inferDataType(const QVariantMap& row)
 
 #undef DEFINE_FIELD
 
+// ── 字段名一致性约定 ──
+// 本文件的字段名常量应与 src/domain/cleaning/include/DataFieldKeys.h 保持一致。
+// 数据清洗、因子计算、bin 缓存统一使用 cleaning::CF/MF/FF/XF/TF 常量作为权威来源。
+// 如需新增字段，请先在 DataFieldKeys.h 中定义，再在本文件中同步添加。
+
 }  // namespace factor::bridge

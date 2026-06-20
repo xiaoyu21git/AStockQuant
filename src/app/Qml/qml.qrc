@@ -73,7 +73,6 @@
         <file>components/DataAnalysis/CoreModule.qml</file>
         <file>components/DataAnalysis/DataOverviewCard.qml</file>
         <file>components/DataAnalysis/DataSelectionPanel.qml</file>
-        <file>components/DataAnalysis/CacheManagementPanel.qml</file>
         <file>components/DataAnalysis/DataTable.qml</file>
         <file>components/DataAnalysis/EmbeddedWorkflow.qml</file>
         <file>components/DataAnalysis/ModuleCard.qml</file>
@@ -154,7 +153,6 @@
         <file>components/UserInfoPanel.qml</file>
         <file>main.qml</file>
         <file>page/DataAnalysis/Datamain.qml</file>
-        <file>page/DataAnalysis/CacheManagementPage.qml</file>
         <file>page/FactorWorkbench.qml</file>
         <file>page/Sidebar.qml</file>
         <file>page/dashboard/ChartArea.qml</file>

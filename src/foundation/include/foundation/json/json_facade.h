@@ -70,7 +70,8 @@ public:
     JsonFacade get(const std::string& key) const;
     std::vector<std::string> keys() const;
     void set(const std::string& key, const JsonFacade& value);
-    
+    void remove(const std::string& key);
+
     // Serialization
     std::string toString() const;
     std::string toPrettyString(int indent = 2) const;
@@ -146,7 +147,8 @@ public:
     virtual std::unique_ptr<JsonValue> get(const std::string& key) const = 0;
     virtual std::vector<std::string> keys() const = 0;
     virtual void set(const std::string& key, std::unique_ptr<JsonValue> value) = 0;
-    
+    virtual void remove(const std::string& key) = 0;
+
     // Factory helpers
     static std::unique_ptr<JsonValue> createNull();
     static std::unique_ptr<JsonValue> createBool(bool value);

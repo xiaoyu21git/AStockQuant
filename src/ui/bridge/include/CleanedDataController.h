@@ -6,8 +6,8 @@
 #include <QVariantMap>
 #include <QDateTime>
 
-// 前向声明（DataServiceCache在全局命名空间中）
-class DataServiceCache;
+// DataCacheAdapter — 纯 C++ DataCache 的 Qt 适配器
+class DataCacheAdapter;
 
 namespace ui::bridge {
 
@@ -103,8 +103,8 @@ private:
     QVariantMap m_selectedDatasetFieldDiagnostics;
     int m_currentDatasetId{-1};
     
-    // 缓存实例（使用全局命名空间中的DataServiceCache）
-    ::DataServiceCache* m_cache{nullptr};
+    // 缓存实例（纯 C++ DataCache 的 Qt 适配器）
+    DataCacheAdapter* m_cache{nullptr};
 };
 
 } // namespace ui::bridge

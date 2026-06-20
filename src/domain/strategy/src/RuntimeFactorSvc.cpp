@@ -136,22 +136,6 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         }
         auto it = m_factorCache[instanceId].find(dateBuf);
         if (it != m_factorCache[instanceId].end()) {
-            // 诊断：对比查询符号 vs 缓存中该日期的符号
-            if (result.empty()) {
-                fprintf(stderr, "[RFS] getValues BACKTEST: date %s FOUND, cache has %zu symbols. Querying %zu ids:",
-                        dateBuf, it->second.size(), symbolIds.size());
-                for (uint32_t id : symbolIds) {
-                    std::string resolved = m_symbolResolver(id);
-                    bool found = it->second.count(resolved) > 0;
-                    fprintf(stderr, " [id=%u -> %s %s]", id, resolved.c_str(), found ? "HIT" : "MISS");
-                }
-                fprintf(stderr, "\n");
-                // 打印缓存中该日期的前 5 个 key
-                fprintf(stderr, "[RFS]   cache sample keys: ");
-                int sn=0; for (auto& [sk,sv] : it->second) { if (++sn>5) break; fprintf(stderr, "%s ", sk.c_str()); }
-                fprintf(stderr, "\n");
-                fflush(stderr);
-            }
             for (const auto& [sym, val] : it->second) {
                 for (uint32_t id : symbolIds)
                     if (m_symbolResolver(id) == sym) { result[id] = val; break; }
@@ -246,11 +230,6 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
             tradeDay, syms.size(), instanceIds.size(),
             static_cast<void*>(m_dataSvc),
             static_cast<const void*>(m_liveMarketView));
-    if (syms.size() <= 5) {
-        fprintf(stderr, "[RFS]   query symbol IDs: ");
-        for (auto id : syms) fprintf(stderr, "%u ", id);
-        fprintf(stderr, "\n");
-    }
     fflush(stderr);
     if (tradeDay == 0 || syms.empty() || instanceIds.empty()) {
         fprintf(stderr, "[RFS] copySnapshots SKIP: no data (day=%d syms=%zu ids=%zu)\n",

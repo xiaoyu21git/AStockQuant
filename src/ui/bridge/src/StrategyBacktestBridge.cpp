@@ -8,7 +8,7 @@
 
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
-#include "DataServiceCache.h"
+#include "DataCacheAdapter.h"
 #include "../../../infrastructure/include/database/BacktestResultRepository.h"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "FactorService.h"
@@ -217,7 +217,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             // ─── 3. 加载数据集 JSON（缓存/磁盘 I/O — 现在在工作线程中）───
             std::string datasetJson;
             if (capturedDatasetId >= 0) {
-                QVariantList data = DataServiceCache::getInstance().getDataSetById(capturedDatasetId);
+                QVariantList data = DataCacheAdapter::instance().getDataSetById(capturedDatasetId);
                 if (!data.isEmpty()) {
                     QJsonDocument doc(QJsonArray::fromVariantList(data));
                     datasetJson = doc.toJson(QJsonDocument::Compact).toStdString();

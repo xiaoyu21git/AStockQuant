@@ -3,8 +3,6 @@
 #include <QQmlEngine>
 #include <QStringList>
 #include <QTimer>
-#include "DataRuleService.h"
-#include "CacheDetailPreviewModel.h"
 #include "PreviewDataModel.h"
 #include "DataFetchController.h"  // 添加DataFetchController头文件
 #include "FactorViewModel.h"       // 因子视图模型（只负责视图）
@@ -35,11 +33,7 @@ namespace wang{
 
       // 预览数据模型 - 专为预览窗口设计
       qmlRegisterType<PreviewDataModel>(url, 1, 0, "PreviewDataModel");
-      qmlRegisterType<CacheDetailPreviewModel>(url, 1, 0, "CacheDetailPreviewModel");
           
-      // 规则服务
-      qmlRegisterType<DataRuleService>(url, 1, 0, "DataRuleService");
-      
       // DataFetchController - 用于数据获取和清洗，遵循不在QML中操作数据的原则
       qmlRegisterType<DataFetchController>(url, 1, 0, "DataFetchController");
       

@@ -55,28 +55,14 @@ public:
     
     // ============ 核心接口 ============
     
-    // 1. 同步预览清洗效果（适合小数据量）
-    // 返回清洗后的数据，不修改原始数据
-    QVariantList previewCleaning(const QVariantList& data, 
-                                const QVariantMap& rules);
-    
-    // 2. 异步执行完整清洗（使用foundation线程池）
-    Q_INVOKABLE void executeCleaningAsync(const QString& requestId,
-                                         const QVariantList& data,
-                                         const QVariantMap& rules);
-    
+    // 异步清洗——从 DataSet 加载数据，清洗后写入新 DataSet，清洗后写入新 DataSet
+    //    全程纯 C++ 类型，零 QVariant
+    Q_INVOKABLE void cleanDataFromDataSet(int dataSetId,
+                                          const QVariantMap& rules);
+
     // 3. 取消当前清洗操作
     void cancelCleaning(const QString& requestId = QString());
     
-    // 4. 带缓存的清洗（自动使用缓存）
-    QVariantList cleanWithCache(const QString& requestId,
-                               const QVariantList& data,
-                               const QVariantMap& rules);
-
-    // 纯 C++ JSON 管道 (零 QVariant 转换, 比 QVariant 路径快 3-5x)
-    std::string cleanJsonSync(const std::string& jsonData, const QVariantMap& rules);
-    Q_INVOKABLE void cleanJsonAsync(const QString& requestId, const QString& jsonData, const QVariantMap& rules);
-
     // ============ 规则管理 ============
     
     // 获取预定义规则集
@@ -100,9 +86,6 @@ public:
     
     // ============ 配置 ============
     
-    void setCacheEnabled(bool enabled);
-    bool isCacheEnabled() const;
-    
     void setMaxPreviewRecords(int maxRecords);
     int getMaxPreviewRecords() const;
     
@@ -113,9 +96,9 @@ signals:
     // 清洗进度信号 - 只转发，不包含逻辑
     void cleaningProgress(const QString& requestId, int progress, const QString& message);
     void cleaningStarted(const QString& requestId, const QString& description);
-    void cleaningCompleted(const QString& requestId, bool success, 
-                          const QString& message, const QVariantList& cleanedData);
-    
+    void dataSetCleaned(int dataSetId, int resultDataSetId,
+                        const QString& message, int inputRows, int outputRows);
+
     // 统计信号
     void cleaningStatsUpdated(const QString& requestId, const RefactoredCleaningStats& stats);
     

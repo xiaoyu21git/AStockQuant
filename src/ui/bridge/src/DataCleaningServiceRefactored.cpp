@@ -2,9 +2,8 @@
 // 使用 foundation::ThreadPoolExecutor + 纯 C++ CleaningEngine
 // 纯 C++ 引擎与 Qt 桥接层
 #include "DataCleaningServiceRefactored.h"
-#include "cleaning/CleaningRuleContract.h"
 #include "CleaningEngine.h"
-#include "DataCache.h"
+#include "DataCacheAdapter.h"
 #include "rules/CoreCleaningRules.h"
 #include "AppStoragePaths.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -22,58 +21,6 @@
 
 using J = foundation::json::JsonFacade;
 
-// ── Qt → 纯 C++ 转换工具 ──
-namespace {
-
-J qvariantToJson(const QVariant& v) {
-    switch (static_cast<int>(v.type())) {
-    case QMetaType::Bool:        return J::createBool(v.toBool());
-    case QMetaType::Int:
-    case QMetaType::LongLong:    return J::createDouble(v.toDouble());
-    case QMetaType::Double:      return J::createDouble(v.toDouble());
-    case QMetaType::QString:     return J::createString(v.toString().toStdString());
-    default: {
-        if (v.canConvert<QVariantMap>()) {
-            auto obj = J::createObject();
-            QVariantMap map = v.toMap();
-            for (auto it = map.begin(); it != map.end(); ++it)
-                obj.set(it.key().toStdString(), qvariantToJson(it.value()));
-            return obj;
-        }
-        if (v.canConvert<QVariantList>()) {
-            auto arr = J::createArray();
-            QVariantList list = v.toList();
-            for (const auto& item : list)
-                arr.push_back(qvariantToJson(item));
-            return arr;
-        }
-        return J::createString(v.toString().toStdString());
-    }
-    }
-}
-
-std::vector<J> qvariantListToJsonVec(const QVariantList& data) {
-    std::vector<J> rows;
-    rows.reserve(data.size());
-    for (const QVariant& item : data) {
-        if (item.canConvert<QVariantMap>()) {
-            rows.push_back(qvariantToJson(item));
-        }
-    }
-    return rows;
-}
-
-QVariantList jsonVecToQvariantList(const std::vector<J>& rows) {
-    QVariantList result;
-    result.reserve(static_cast<int>(rows.size()));
-    for (const auto& row : rows) {
-        QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(row.toString()));
-        if (doc.isObject()) {
-            result.append(doc.object().toVariantMap());
-        }
-    }
-    return result;
-}
 
 // 根据规则 key 名字符串创建对应的纯 C++ 规则实例
 std::unique_ptr<cleaning::ICleaningRule> createCppRule(const std::string& ruleKey, const std::string& configJson) {
@@ -90,10 +37,18 @@ std::unique_ptr<cleaning::ICleaningRule> createCppRule(const std::string& ruleKe
     if (ruleKey == "limitMoveTag")            return std::make_unique<LimitMoveTagRule>(configJson);
     if (ruleKey == "valuationSanitize")       return std::make_unique<ValuationSanitizeRule>();
     if (ruleKey == "fieldStandardization")    return std::make_unique<FieldStandardizationRule>();
+    // P0-2: 新增 4 个纯 C++ 规则（与 Qt 桥接层行为对齐）
+    if (ruleKey == "reportDateAlignment")    return std::make_unique<ReportDateAlignmentRule>();
+    if (ruleKey == "survivorBias")           return std::make_unique<SurvivorBiasRule>();
+    if (ruleKey == "newStockFilter")         return std::make_unique<NewStockFilterRule>(configJson);
+    if (ruleKey == "stFilter")               return std::make_unique<STFilterRule>();
+
+    // 未识别的规则键 — 打印警告，避免静默跳过
+    fprintf(stderr, "[CleaningSvcRefactored] WARNING: unknown cleaning rule key \"%s\", skipped. "
+                    "请检查规则名是否与 CoreCleaningRules.h 中的 ruleName() 一致\n", ruleKey.c_str());
+    fflush(stderr);
     return nullptr;
 }
-
-} // anonymous namespace
 
 // ── 内部实现 ──
 class DataCleaningServiceRefactored::Impl {
@@ -109,8 +64,8 @@ public:
 
     bool cleaningInProgress{false};
     std::map<QString, RefactoredCleaningStats> statsByRequest;
+    QSet<QString> cancelledRequests;
     QVariantMap customRules;
-    bool cacheEnabled{true};
     int maxPreviewRecords{1000};
     int asyncThreadCount{2};
 
@@ -135,12 +90,7 @@ DataCleaningServiceRefactored::~DataCleaningServiceRefactored() {
 // ── 初始化 ──
 bool DataCleaningServiceRefactored::initialize() {
     if (m_initialized) return true;
-    // 初始化纯 C++ 缓存（与 .bin 同目录）
-    auto& cache = cleaning::DataCache::instance();
-    if (!cache.isInitialized()) {
-        std::string dir = bridge::storage::persistentDatasetRootDir().toStdString();
-        cache.initialize(dir);
-    }
+    DataCacheAdapter::instance().initialize(bridge::storage::persistentDatasetRootDir());
     m_initialized = true;
     fprintf(stderr, "[CleaningSvcRefactored] initialized\n"); fflush(stderr);
     return true;
@@ -148,75 +98,50 @@ bool DataCleaningServiceRefactored::initialize() {
 
 // ── 默认规则 ──
 QVariantMap DataCleaningServiceRefactored::getDefaultRules() const {
-    using K = factor::bridge::CleaningRuleKey;
     QVariantMap rules;
     auto on = [](bool b) { QVariantMap m; m["enabled"] = b; return m; };
 
-    rules[factor::bridge::cleaningRuleKeyName(K::Completeness)]           = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::DuplicateRemoval)]       = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::FinancialDateValidity)]  = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::FinancialMetricSanitize)]= on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::SuspensionFill)]         = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::MissingValueFill)]       = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::AdjustedPrice)]          = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::PriceValidity)]          = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::VolumeFilter)]           = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::ValuationSanitize)]      = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::LimitMoveTag)]           = on(true);
-    rules[factor::bridge::cleaningRuleKeyName(K::ReportDateAlignment)]    = on(false);
-    rules[factor::bridge::cleaningRuleKeyName(K::SurvivorBias)]           = on(false);
-    rules[factor::bridge::cleaningRuleKeyName(K::NewStockFilter)]         = on(false);
-    rules[factor::bridge::cleaningRuleKeyName(K::STFilter)]               = on(false);
+    rules[QStringLiteral("completeness")]           = on(true);
+    rules[QStringLiteral("duplicateRemoval")]       = on(true);
+    rules[QStringLiteral("financialDateValidity")]  = on(true);
+    rules[QStringLiteral("financialMetricSanitize")]= on(true);
+    rules[QStringLiteral("suspensionFill")]         = on(true);
+    rules[QStringLiteral("missingValueFill")]       = on(true);
+    rules[QStringLiteral("adjustedPrice")]          = on(true);
+    rules[QStringLiteral("priceValidity")]          = on(true);
+    rules[QStringLiteral("volumeFilter")]           = on(true);
+    rules[QStringLiteral("valuationSanitize")]      = on(true);
+    rules[QStringLiteral("limitMoveTag")]           = on(true);
+    rules[QStringLiteral("reportDateAlignment")]    = on(false);
+    rules[QStringLiteral("survivorBias")]           = on(false);
+    rules[QStringLiteral("newStockFilter")]         = on(false);
+    rules[QStringLiteral("stFilter")]               = on(false);
     return rules;
 }
 
-// ── 同步预览 ──
-QVariantList DataCleaningServiceRefactored::previewCleaning(
-    const QVariantList& data, const QVariantMap& rules)
-{
-    if (data.isEmpty()) return {};
-
-    QVariantList previewData = data;
-    if (static_cast<int>(previewData.size()) > m_impl->maxPreviewRecords) {
-        previewData = previewData.mid(0, m_impl->maxPreviewRecords);
+// ── 取消 ──
+void DataCleaningServiceRefactored::cancelCleaning(const QString& requestId) {
+    {
+        QMutexLocker lock(&m_impl->stateMutex);
+        m_impl->cleaningInProgress = false;
+        // 标记此请求已取消，防止回调中重复发信号
+        if (!requestId.isEmpty()) m_impl->cancelledRequests.insert(requestId);
     }
-
-    try {
-        // 转换为纯 C++ 数据
-        auto rows = qvariantListToJsonVec(previewData);
-
-        // 构建纯 C++ 引擎
-        cleaning::CleaningEngine engine;
-        for (auto it = rules.begin(); it != rules.end(); ++it) {
-            std::string ruleKey = it.key().toStdString();
-            QJsonDocument cfgDoc(QJsonObject::fromVariantMap(it.value().toMap()));
-            std::string configJson = cfgDoc.toJson(QJsonDocument::Compact).toStdString();
-            auto rule = createCppRule(ruleKey, configJson);
-            if (rule) engine.addRule(std::move(rule));
-        }
-
-        auto cleaned = engine.clean(std::move(rows));
-        fprintf(stderr, "[CleaningSvcRefactored] preview (C++ engine): %d -> %zu rows\n",
-                previewData.size(), cleaned.size());
-        fflush(stderr);
-        return jsonVecToQvariantList(cleaned);
-    } catch (const std::exception& e) {
-        fprintf(stderr, "[CleaningSvcRefactored] preview error: %s\n", e.what());
-        fflush(stderr);
-        return data;
-    }
+    fprintf(stderr, "[CleaningSvcRefactored] cancelCleaning: %s\n", requestId.toStdString().c_str());
+    fflush(stderr);
 }
 
-// ── 异步清洗 (foundation 线程池) ──
-void DataCleaningServiceRefactored::executeCleaningAsync(
-    const QString& requestId, const QVariantList& data, const QVariantMap& rules)
+// ── 从 DataSet 清洗（纯 C++ 类型，零 QVariant） ──
+
+void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
+                                                          const QVariantMap& rules)
 {
     if (!m_impl->executor) {
-        emit cleaningError(requestId, QStringLiteral("线程池未初始化"));
+        emit dataSetCleaned(dataSetId, -1, QStringLiteral("线程池未初始化"), 0, 0);
         return;
     }
-    if (data.isEmpty()) {
-        emit cleaningCompleted(requestId, true, QStringLiteral("空数据"), {});
+    if (dataSetId <= 0) {
+        emit dataSetCleaned(dataSetId, -1, QStringLiteral("无效的数据集ID"), 0, 0);
         return;
     }
 
@@ -227,21 +152,29 @@ void DataCleaningServiceRefactored::executeCleaningAsync(
     }
 
     QVariantMap effectiveRules = rules.isEmpty() ? getDefaultRules() : rules;
-    emit cleaningStarted(requestId, QStringLiteral("开始清洗 %1 条记录").arg(data.size()));
-
-    // 拷贝数据，在 worker 线程执行
     auto executor = m_impl->executor;
     QPointer<DataCleaningServiceRefactored> self(this);
 
-    executor->post([self, requestId, data, effectiveRules]() {
+    executor->post([self, dataSetId, effectiveRules]() {
         if (!self) return;
 
-        QVariantList result;
         QString message;
-        bool success = false;
+        int resultId = -1;
+        int inputRows = 0, outputRows = 0;
 
         try {
-            // 构建纯 C++ 引擎
+            // 1. 从 Arrow 加载数据
+            auto rows = cleaning::DataCache::instance().loadDataSetFile(dataSetId);
+            inputRows = static_cast<int>(rows.size());
+            if (rows.empty()) {
+                QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
+                    emit self->dataSetCleaned(dataSetId, -1,
+                        QStringLiteral("数据集为空"), 0, 0);
+                }, Qt::QueuedConnection);
+                return;
+            }
+
+            // 2. 构建清洗引擎
             cleaning::CleaningEngine engine;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
                 std::string ruleKey = it.key().toStdString();
@@ -251,90 +184,36 @@ void DataCleaningServiceRefactored::executeCleaningAsync(
                 if (rule) engine.addRule(std::move(rule));
             }
 
-            // 纯 C++ 进度回调
-            engine.setOnProgress([self, requestId](int current, int total, const std::string& stage) {
-                if (self && total > 0) {
-                    int pct = current * 100 / total;
-                    QMetaObject::invokeMethod(self.get(), [self, requestId, pct, stage]() {
-                        if (self) emit self->cleaningProgress(requestId, pct, QString::fromStdString(stage));
-                    }, Qt::QueuedConnection);
-                }
-            });
+            // 3. 清洗
+            auto cleaned = engine.clean(std::move(rows));
+            outputRows = static_cast<int>(cleaned.size());
 
-            auto rows = qvariantListToJsonVec(data);
-            auto cleanedRows = engine.clean(std::move(rows));
-            result = jsonVecToQvariantList(cleanedRows);
-            success = true;
-            message = QStringLiteral("清洗完成: %1 -> %2 条").arg(data.size()).arg(result.size());
+            // 4. 写入新 DataSet
+            auto info = DataCacheAdapter::instance().getDataSetInfo(dataSetId);
+            QVariantMap infoMap;
+            infoMap["displayName"] = QString("清洗结果_%1").arg(info.value("displayName").toString());
+            infoMap["sourceType"] = "cleaning";
+            infoMap["rowCount"] = outputRows;
+            infoMap["stockCodes"] = info.value("stockCodes");
+            infoMap["startDate"] = info.value("startDate");
+            infoMap["endDate"] = info.value("endDate");
+
+            resultId = DataCacheAdapter::instance().storeDataSetFromRows(cleaned, infoMap);
+            message = QString("清洗完成: %1 → %2 条").arg(inputRows).arg(outputRows);
 
         } catch (const std::exception& e) {
-            message = QStringLiteral("清洗异常: %1").arg(e.what());
+            message = QString("清洗异常: %1").arg(e.what());
         } catch (...) {
             message = QStringLiteral("清洗未知异常");
         }
 
-        QMetaObject::invokeMethod(self.get(), [self, requestId, success, message, result]() {
-            if (!self) return;
-            {
-                QMutexLocker lock(&self->m_impl->stateMutex);
-                self->m_impl->cleaningInProgress = false;
-                RefactoredCleaningStats stats;
-                stats.totalRecords = 0;  // 由 CleaningEngine 填充
-                stats.cleanedRecords = result.size();
-                stats.durationMs = self->m_impl->startTimer.msecsTo(QDateTime::currentDateTime());
-                stats.startTime = self->m_impl->startTimer;
-                stats.endTime = QDateTime::currentDateTime();
-                self->m_impl->statsByRequest[requestId] = stats;
-            }
-            if (success) {
-                // 缓存清洗结果（纯 C++ DataCache）
-                if (self->m_impl->cacheEnabled && !result.isEmpty()) {
-                    auto& cache = cleaning::DataCache::instance();
-                    auto cppRows = qvariantListToJsonVec(result);
-                    cleaning::DataSetInfo info;
-                    info.displayName = QStringLiteral("清洗结果 %1").arg(requestId).toStdString();
-                    info.sourceType = "cleaning";
-                    info.rowCount = result.size();
-                    info.schemaVersion = 2;
-                    int id = cache.storeDataSet(cppRows, info);
-                    fprintf(stderr, "[CleaningSvcRefactored] cached as dataset %d\n", id);
-                    fflush(stderr);
-                }
-                emit self->cleaningCompleted(requestId, true, message, result);
-            } else {
-                emit self->cleaningError(requestId, message);
-            }
+        int ri = resultId;
+        int in = inputRows, out = outputRows;
+        QMetaObject::invokeMethod(self.get(), [self, dataSetId, ri, message, in, out]() {
+            self->m_impl->cleaningInProgress = false;
+            emit self->dataSetCleaned(dataSetId, ri, message, in, out);
         }, Qt::QueuedConnection);
     });
-}
-
-// ── 取消 ──
-void DataCleaningServiceRefactored::cancelCleaning(const QString& requestId) {
-    Q_UNUSED(requestId)
-    QMutexLocker lock(&m_impl->stateMutex);
-    m_impl->cleaningInProgress = false;
-}
-
-// ── 带缓存清洗 ──
-QVariantList DataCleaningServiceRefactored::cleanWithCache(
-    const QString& requestId, const QVariantList& data, const QVariantMap& rules)
-{
-    if (!m_impl->cacheEnabled) return previewCleaning(data, rules);
-
-    auto& cache = cleaning::DataCache::instance();
-    std::string cacheKey = "cleaned_" + requestId.toStdString();
-    auto cached = cache.getData(cacheKey);
-    if (!cached.empty()) {
-        fprintf(stderr, "[CleaningSvcRefactored] cache hit for %s\n", cacheKey.c_str());
-        fflush(stderr);
-        return jsonVecToQvariantList(cached);
-    }
-    QVariantList result = previewCleaning(data, rules);
-    if (!result.isEmpty()) {
-        auto cppRows = qvariantListToJsonVec(result);
-        cache.storeData(cacheKey, cppRows);
-    }
-    return result;
 }
 
 // ── 自定义规则 ──
@@ -387,14 +266,6 @@ QStringList DataCleaningServiceRefactored::getActiveCleaningRequests() const {
 }
 
 // ── 配置 ──
-void DataCleaningServiceRefactored::setCacheEnabled(bool enabled) {
-    m_impl->cacheEnabled = enabled;
-}
-
-bool DataCleaningServiceRefactored::isCacheEnabled() const {
-    return m_impl->cacheEnabled;
-}
-
 void DataCleaningServiceRefactored::setMaxPreviewRecords(int maxRecords) {
     m_impl->maxPreviewRecords = std::max(1, maxRecords);
 }
@@ -409,94 +280,6 @@ void DataCleaningServiceRefactored::setAsyncThreadCount(int count) {
 
 int DataCleaningServiceRefactored::getAsyncThreadCount() const {
     return m_impl->asyncThreadCount;
-}
-
-// ── 纯 C++ JSON 管道 (零 QVariant 转换) ──
-
-static void buildEngineFromQtRules(cleaning::CleaningEngine& engine, const QVariantMap& rules) {
-    for (auto it = rules.begin(); it != rules.end(); ++it) {
-        std::string ruleKey = it.key().toStdString();
-        QJsonDocument cfgDoc(QJsonObject::fromVariantMap(it.value().toMap()));
-        std::string configJson = cfgDoc.toJson(QJsonDocument::Compact).toStdString();
-        auto rule = createCppRule(ruleKey, configJson);
-        if (rule) engine.addRule(std::move(rule));
-    }
-}
-
-std::string DataCleaningServiceRefactored::cleanJsonSync(
-    const std::string& jsonData, const QVariantMap& rules)
-{
-    if (jsonData.empty()) return "[]";
-    auto root = J::parse(jsonData);
-    if (!root.isArray()) return "[]";
-
-    std::vector<J> rows;
-    rows.reserve(root.size());
-    for (size_t i = 0; i < root.size(); ++i) rows.push_back(root.at(i));
-
-    cleaning::CleaningEngine engine; buildEngineFromQtRules(engine, rules);
-    auto cleaned = engine.clean(std::move(rows));
-
-    auto result = J::createArray();
-    for (auto& row : cleaned) result.push_back(std::move(row));
-    return result.toString();
-}
-
-void DataCleaningServiceRefactored::cleanJsonAsync(
-    const QString& requestId, const QString& jsonData, const QVariantMap& rules)
-{
-    if (!m_impl->executor) {
-        emit cleaningError(requestId, QStringLiteral("线程池未初始化"));
-        return;
-    }
-    {
-        QMutexLocker lock(&m_impl->stateMutex);
-        m_impl->cleaningInProgress = true;
-        m_impl->startTimer = QDateTime::currentDateTime();
-    }
-    emit cleaningStarted(requestId, QStringLiteral("开始清洗(纯C++管道)"));
-
-    auto executor = m_impl->executor;
-    std::string jsonStr = jsonData.toStdString();
-    QVariantMap effectiveRules = rules.isEmpty() ? getDefaultRules() : rules;
-
-    executor->post([this, requestId, jsonStr, effectiveRules]() {
-        std::string result;
-        bool success = false;
-        QString message;
-        try {
-            cleaning::CleaningEngine engine; buildEngineFromQtRules(engine, effectiveRules);
-            result = this->cleanJsonSync(jsonStr, effectiveRules);
-            success = true;
-            auto cleaned = J::parse(result);
-            int count = cleaned.isArray() ? static_cast<int>(cleaned.size()) : 0;
-            message = QStringLiteral("清洗完成: %1 条").arg(count);
-        } catch (const std::exception& e) {
-            message = QStringLiteral("清洗异常: %1").arg(QString::fromStdString(e.what()));
-        }
-        QMetaObject::invokeMethod(this, [this, requestId, success, message, result]() {
-            this->m_impl->cleaningInProgress = false;
-            if (success) {
-                auto cleaned = J::parse(result);
-                QVariantList qvl;
-                if (cleaned.isArray()) {
-                    for (size_t i = 0; i < cleaned.size(); ++i)
-                        qvl.append(QJsonDocument::fromJson(QByteArray::fromStdString(cleaned.at(i).toString())).object().toVariantMap());
-                }
-                if (this->m_impl->cacheEnabled && !qvl.isEmpty()) {
-                    auto& cache = cleaning::DataCache::instance();
-                    auto cppRows = qvariantListToJsonVec(qvl);
-                    cleaning::DataSetInfo info;
-                    info.displayName = QStringLiteral("清洗结果 %1").arg(requestId).toStdString();
-                    info.sourceType = "cleaning"; info.rowCount = qvl.size(); info.schemaVersion = 2;
-                    cache.storeDataSet(cppRows, info);
-                }
-                emit this->cleaningCompleted(requestId, true, message, qvl);
-            } else {
-                emit this->cleaningError(requestId, message);
-            }
-        }, Qt::QueuedConnection);
-    });
 }
 
 // ── 工厂函数 ──

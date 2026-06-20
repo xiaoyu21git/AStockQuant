@@ -14,27 +14,13 @@ QString normalizePreviewCategory(const QString& source)
 
 QString previewDataTypeGroup(const QString& dataType)
 {
+    // 每种 dataType 保留独立分类，不再合并为粗粒度的 "kline" / "financial" / "other"
+    // 这样 QML 面板会为 kline_daily、kline_weekly、financial 等各自生成独立 Tab
     const QString normalized = dataType.trimmed().toLower();
     if (normalized.isEmpty()) {
         return QStringLiteral("other");
     }
-
-    if (normalized == QStringLiteral("kline")
-        || normalized.startsWith(QStringLiteral("kline"))
-        || normalized.contains(QStringLiteral("日线"))
-        || normalized.contains(QStringLiteral("周线"))
-        || normalized.contains(QStringLiteral("月线"))
-        || normalized.contains(QStringLiteral("分钟"))
-        || normalized.contains(QStringLiteral("实时"))) {
-        return QStringLiteral("kline");
-    }
-
-    if (normalized == QStringLiteral("financial")
-        || normalized.contains(QStringLiteral("财务"))) {
-        return QStringLiteral("financial");
-    }
-
-    return QStringLiteral("other");
+    return normalized;
 }
 
 QString previewTypeDisplayName(const QString& category)
@@ -92,8 +78,11 @@ bool isDailyFamilyPreviewCategory(const QString& category)
         return false;
     }
 
-    return normalized == QStringLiteral("kline")
-        || normalized.startsWith(QStringLiteral("kline"))
+    // 日线族：所有 K 线 + 历史 + 分钟 + 实时类型，共享日线族列布局
+    return normalized.startsWith(QStringLiteral("kline"))
+        || normalized == QStringLiteral("historical")
+        || normalized == QStringLiteral("minute_data")
+        || normalized == QStringLiteral("realtime")
         || normalized.contains(QStringLiteral("日线"))
         || normalized.contains(QStringLiteral("周线"))
         || normalized.contains(QStringLiteral("月线"))
@@ -462,17 +451,42 @@ void PreviewDataModel::setCurrentPage(int page)
 
 int PreviewDataModel::klineCount() const
 {
-    return countForCategory(QStringLiteral("kline"));
+    // 聚合所有 K 线族类型（kline_daily / kline_weekly / kline_monthly / historical / minute_data / realtime）
+    int total = 0;
+    for (const auto& item : m_allData) {
+        if (isDailyFamilyPreviewCategory(item.dataType)) {
+            ++total;
+        }
+    }
+    return total;
 }
 
 int PreviewDataModel::financialCount() const
 {
-    return countForCategory(QStringLiteral("financial"));
+    int total = 0;
+    for (const auto& item : m_allData) {
+        const QString dt = item.dataType.trimmed().toLower();
+        if (dt == QStringLiteral("financial")) {
+            ++total;
+        }
+    }
+    return total;
 }
 
 int PreviewDataModel::otherCount() const
 {
-    return countForCategory(QStringLiteral("other"));
+    int total = 0;
+    for (const auto& item : m_allData) {
+        const QString dt = item.dataType.trimmed().toLower();
+        if (dt.isEmpty()) {
+            ++total;
+            continue;
+        }
+        if (!isDailyFamilyPreviewCategory(dt) && dt != QStringLiteral("financial")) {
+            ++total;
+        }
+    }
+    return total;
 }
 
 void PreviewDataModel::setPageSize(int size)

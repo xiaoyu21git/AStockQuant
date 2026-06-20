@@ -4,11 +4,8 @@
     DataManager.cpp
     DataUIController.cpp
     CleanedDataController.cpp
-    DataRuleService.cpp
-    DataServiceCache.cpp
+    DataCacheAdapter.cpp
     DataCleaningServiceRefactored.cpp
-    DataService.cpp
-    CacheDetailPreviewModel.cpp
     PreviewDataModel.cpp
     DataFetchController.cpp
     FactorDebugController.cpp
@@ -23,7 +20,6 @@
     factor_check/FactorDetectionCoreService.cpp
     factor_check/FactorSupportScopeCacheCore.cpp
     factor_check/FactorSupportScopeKeyCore.cpp
-    cleaning/CleaningEngine.cpp
     MarketDataBridge.cpp
     TradingBridges.cpp
     DataCleaningPersistence.cpp

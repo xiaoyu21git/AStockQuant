@@ -2,7 +2,6 @@ module DataAnalysis
 CoreModule 1.0 CoreModule.qml
 DataOverviewCard 1.0 DataOverviewCard.qml
 DataSelectionPanel 1.0 DataSelectionPanel.qml
-CacheManagementPanel 1.0 CacheManagementPanel.qml
 DataTable 1.0 DataTable.qml
 EmbeddedWorkflow 1.0 EmbeddedWorkflow.qml
 ModuleCard 1.0 ModuleCard.qml

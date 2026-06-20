@@ -8,11 +8,10 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
-#include <map>
 #include <mutex>
 #include <string>
-#include <unordered_set>
 #include <vector>
+#include <ankerl/unordered_dense.h>
 
 namespace cleaning {
 
@@ -31,6 +30,8 @@ struct DataSetInfo {
     std::vector<std::string> stockCodes;
     std::string startDate;        // "YYYY-MM-DD"
     std::string endDate;
+    std::vector<std::string> tags;
+    bool isBacktestReady{false};
 
     J toJson() const {
         auto obj = J::createObject();
@@ -49,6 +50,12 @@ struct DataSetInfo {
         obj.set("stockCodes", std::move(scArr));
         obj.set("startDate", J::createString(startDate));
         obj.set("endDate", J::createString(endDate));
+        if (!tags.empty()) {
+            auto tArr = J::createArray();
+            for (const auto& t : tags) tArr.push_back(J::createString(t));
+            obj.set("tags", std::move(tArr));
+        }
+        obj.set("isBacktestReady", J::createBool(isBacktestReady));
         return obj;
     }
 
@@ -59,6 +66,11 @@ struct DataSetInfo {
         if (obj.has("description")) info.description = obj.get("description").asString();
         if (obj.has("sourceType")) info.sourceType = obj.get("sourceType").asString();
         if (obj.has("createdAt")) info.createdAt = static_cast<int64_t>(obj.get("createdAt").asDouble());
+        else if (obj.has("createdTime")) {
+            // 兼容旧 DataServiceCache 格式（QDateTime 字符串）
+            std::string ts = obj.get("createdTime").asString();
+            if (!ts.empty()) info.createdAt = static_cast<int64_t>(std::stoll(ts));
+        }
         if (obj.has("rowCount")) info.rowCount = static_cast<int>(obj.get("rowCount").asDouble());
         if (obj.has("schemaVersion")) info.schemaVersion = static_cast<int>(obj.get("schemaVersion").asDouble());
         if (obj.has("availableFields") && obj.get("availableFields").isArray()) {
@@ -69,8 +81,13 @@ struct DataSetInfo {
             auto arr = obj.get("stockCodes");
             for (size_t i = 0; i < arr.size(); ++i) info.stockCodes.push_back(arr.at(i).asString());
         }
+        if (obj.has("tags") && obj.get("tags").isArray()) {
+            auto arr = obj.get("tags");
+            for (size_t i = 0; i < arr.size(); ++i) info.tags.push_back(arr.at(i).asString());
+        }
         if (obj.has("startDate")) info.startDate = obj.get("startDate").asString();
         if (obj.has("endDate")) info.endDate = obj.get("endDate").asString();
+        if (obj.has("isBacktestReady")) info.isBacktestReady = obj.get("isBacktestReady").asBool();
         return info;
     }
 };
@@ -107,8 +124,13 @@ public:
     int storeDataSet(const std::vector<J>& data, const DataSetInfo& info,
                      ProgressCallback onProgress = {}) {
         std::lock_guard<std::mutex> lock(m_mutex);
-        if (!m_initialized || data.empty()) return -1;
+        if (!m_initialized) return -1;
 
+        // 用 max(nextId, max_existing + 1) 防止空洞，删除后 ID 可复用
+        int maxExisting = 0;
+        for (const auto& [id, _] : m_index)
+            if (id > maxExisting) maxExisting = id;
+        m_nextDataSetId = (std::max)(m_nextDataSetId, maxExisting + 1);
         int dataId = m_nextDataSetId++;
         DataSetInfo fullInfo = info;
         fullInfo.id = dataId;
@@ -134,12 +156,7 @@ public:
             fullInfo.availableFields.assign(fields.begin(), fields.end());
         }
 
-        // 序列化数据集行
-        auto dataObj = J::createArray();
-        for (const auto& row : data) dataObj.push_back(row);
-        writeFile(dataFilePath(dataId), dataObj.toString());
-
-        // 序列化元数据
+        // 持久化元数据
         auto metaJson = fullInfo.toJson();
         writeFile(infoFilePath(dataId), metaJson.toString());
 
@@ -151,21 +168,6 @@ public:
                 dataId, fullInfo.displayName.c_str(), fullInfo.rowCount, fullInfo.availableFields.size());
         fflush(stderr);
         return dataId;
-    }
-
-    // ── 读取数据集 ──
-    std::vector<J> getDataSetById(int dataId) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_index.find(dataId);
-        if (it == m_index.end()) return {};
-        std::string content = readFile(dataFilePath(dataId));
-        if (content.empty()) return {};
-        auto root = J::parse(content);
-        if (!root.isArray()) return {};
-        std::vector<J> rows;
-        rows.reserve(root.size());
-        for (size_t i = 0; i < root.size(); ++i) rows.push_back(root.at(i));
-        return rows;
     }
 
     // ── 获取数据集信息 ──
@@ -180,10 +182,10 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_index.find(dataId);
         if (it == m_index.end()) return false;
-        std::remove(dataFilePath(dataId).c_str());
         std::remove(infoFilePath(dataId).c_str());
-        std::string binPath = binFilePath(dataId);
-        std::remove(binPath.c_str());
+        std::remove(binFilePath(dataId).c_str());
+        std::remove(dataFilePath(dataId).c_str());
+        std::remove(jsonDataFilePath(dataId).c_str());
         m_index.erase(it);
         saveCatalog();
         return true;
@@ -197,19 +199,30 @@ public:
         return result;
     }
 
-    // ── 键值存储（轻量缓存） ──
-    void storeData(const std::string& key, const std::vector<J>& data) {
-        std::lock_guard<std::mutex> lock(m_mutex);
+    // ── 数据文件持久化（Parquet 列式存储） ──
+
+#ifdef ASTOCK_HAS_PARQUET
+
+    /// @brief 保存数据集数据到 Parquet 文件
+    void saveDataSetFile(int dataId, const std::vector<J>& rows);
+
+    /// @brief 从 Parquet 文件加载数据集数据
+    std::vector<J> loadDataSetFile(int dataId);
+
+#endif // ASTOCK_HAS_PARQUET
+
+    /// @brief 保存数据集数据到 JSON 文件（无 Parquet 时的回退）
+    void saveDataSetFileJson(int dataId, const std::vector<J>& rows) {
         auto arr = J::createArray();
-        for (const auto& row : data) arr.push_back(row);
-        m_kvStore[key] = arr.toString();
+        for (const auto& row : rows) arr.push_back(row);
+        writeFile(jsonDataFilePath(dataId), arr.toString());
     }
 
-    std::vector<J> getData(const std::string& key) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        auto it = m_kvStore.find(key);
-        if (it == m_kvStore.end()) return {};
-        auto root = J::parse(it->second);
+    /// @brief 从 JSON 文件加载数据集数据（无 Parquet 时的回退）
+    std::vector<J> loadDataSetFileJson(int dataId) {
+        std::string content = readFile(jsonDataFilePath(dataId));
+        if (content.empty()) return {};
+        auto root = J::parse(content);
         if (!root.isArray()) return {};
         std::vector<J> rows;
         rows.reserve(root.size());
@@ -217,30 +230,37 @@ public:
         return rows;
     }
 
-    bool hasData(const std::string& key) const {
+    /// @brief 按条件过滤数据集
+    std::vector<DataSetInfo> queryDataSets(const std::string& sourceTypeFilter = {},
+                                           const std::string& stockCodeFilter = {},
+                                           const std::string& dateFilter = {}) const {
         std::lock_guard<std::mutex> lock(m_mutex);
-        return m_kvStore.count(key) > 0;
+        std::vector<DataSetInfo> result;
+        for (const auto& [_, info] : m_index) {
+            if (!sourceTypeFilter.empty() && info.sourceType != sourceTypeFilter) continue;
+            if (!dateFilter.empty() && !(info.startDate <= dateFilter && info.endDate >= dateFilter)) continue;
+            result.push_back(info);
+        }
+        return result;
     }
 
-    void removeData(const std::string& key) {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_kvStore.erase(key);
-    }
-
-    // ── 二进制缓存路径 ──
+    // ── 文件路径（供外部直接读写） ──
     std::string binFilePath(int dataId) const {
         return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_data.bin";
     }
-
-private:
-    DataCache() = default;
-
     std::string dataFilePath(int dataId) const {
+        return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_data.arrow";
+    }
+    std::string jsonDataFilePath(int dataId) const {
         return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_data.json";
     }
     std::string infoFilePath(int dataId) const {
         return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_info.json";
     }
+
+private:
+    DataCache() = default;
+
     std::string catalogPath() const {
         return m_persistentDir + "/dataset_catalog.json";
     }
@@ -256,16 +276,41 @@ private:
 
     void loadCatalog() {
         std::string content = readFile(catalogPath());
-        if (content.empty()) return;
-        auto root = J::parse(content);
-        if (!root.isObject()) return;
-        if (root.has("nextId")) m_nextDataSetId = static_cast<int>(root.get("nextId").asDouble());
-        if (root.has("datasets") && root.get("datasets").isArray()) {
-            auto arr = root.get("datasets");
-            for (size_t i = 0; i < arr.size(); ++i) {
-                auto info = DataSetInfo::fromJson(arr.at(i));
-                m_index[info.id] = info;
+        bool fromCatalog = false;
+        if (!content.empty()) {
+            auto root = J::parse(content);
+            if (root.isObject()) {
+                if (root.has("nextId")) m_nextDataSetId = static_cast<int>(root.get("nextId").asDouble());
+                if (root.has("datasets") && root.get("datasets").isArray()) {
+                    auto arr = root.get("datasets");
+                    for (size_t i = 0; i < arr.size(); ++i) {
+                        auto info = DataSetInfo::fromJson(arr.at(i));
+                        m_index[info.id] = info;
+                    }
+                    fromCatalog = true;
+                }
             }
+        }
+        // 扫描独立 info 文件（兼容旧 DataServiceCache 格式）
+        if (!fromCatalog) {
+            scanIndividualInfoFiles();
+        }
+    }
+
+    // ── 扫描 dataset_*_info.json 文件，导入到统一 catalog ──
+    void scanIndividualInfoFiles() {
+        // 尝试加载 dataset_1_info.json 到 dataset_1000_info.json
+        // 老 DataServiceCache 每个数据集存为独立 info 文件
+        for (int id = 1; id <= 1000; ++id) {
+            if (m_index.find(id) != m_index.end()) continue; // 已在 catalog 中
+            std::string content = readFile(infoFilePath(id));
+            if (content.empty()) continue;
+            auto infoJson = J::parse(content);
+            if (!infoJson.isObject()) continue;
+            auto info = DataSetInfo::fromJson(infoJson);
+            info.id = id;
+            m_index[id] = info;
+            if (id >= m_nextDataSetId) m_nextDataSetId = id + 1;
         }
     }
 
@@ -282,7 +327,22 @@ private:
 
     static void writeFile(const std::string& path, const std::string& content) {
         FILE* f = fopen(path.c_str(), "wb");
-        if (f) { fwrite(content.data(), 1, content.size(), f); fclose(f); }
+        if (!f) {
+            fprintf(stderr, "[DataCache] writeFile: fopen failed for %s\n", path.c_str());
+            fflush(stderr);
+            return;
+        }
+        size_t written = fwrite(content.data(), 1, content.size(), f);
+        if (written != content.size()) {
+            fprintf(stderr, "[DataCache] writeFile: fwrite partial write (%zu / %zu bytes) for %s\n",
+                    written, content.size(), path.c_str());
+            fflush(stderr);
+            fclose(f);
+            // 删除部分写入的损坏文件
+            std::remove(path.c_str());
+            return;
+        }
+        fclose(f);
     }
 
     static std::string readFile(const std::string& path) {
@@ -293,8 +353,14 @@ private:
         fseek(f, 0, SEEK_SET);
         if (sz <= 0) { fclose(f); return {}; }
         std::string content(static_cast<size_t>(sz), '\0');
-        fread(&content[0], 1, static_cast<size_t>(sz), f);
+        size_t nread = fread(&content[0], 1, static_cast<size_t>(sz), f);
         fclose(f);
+        if (nread != static_cast<size_t>(sz)) {
+            fprintf(stderr, "[DataCache] readFile: fread partial read (%zu / %ld bytes) for %s\n",
+                    nread, sz, path.c_str());
+            fflush(stderr);
+            return {};
+        }
         return content;
     }
 
@@ -307,8 +373,7 @@ private:
     bool m_initialized{false};
     std::string m_persistentDir;
     int m_nextDataSetId{1};
-    std::map<int, DataSetInfo> m_index;
-    std::map<std::string, std::string> m_kvStore;
+    ankerl::unordered_dense::map<int, DataSetInfo> m_index;
 };
 
 } // namespace cleaning

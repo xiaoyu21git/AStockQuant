@@ -7,7 +7,7 @@
 #include <iostream>
 
 #include "DataFetchController.h"
-#include "DataServiceCache.h"
+#include "DataCacheAdapter.h"
 #include "foundation.h"
 
 namespace {
@@ -39,12 +39,12 @@ QString detectRepoRoot()
     return QDir::currentPath();
 }
 
-int maxDataSetId(const QVector<DataServiceCache::DataSetInfo>& infos)
+int maxDataSetId(const QVector<QVariantMap>& infos)
 {
     int maxId = 0;
     for (const auto& info : infos) {
-        if (info.id > maxId) {
-            maxId = info.id;
+        if (info.value("id").toInt() > maxId) {
+            maxId = info.value("id").toInt();
         }
     }
     return maxId;
@@ -73,14 +73,14 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    DataServiceCache& cache = DataServiceCache::getInstance();
-    if (!cache.initializeCache()) {
+    DataCacheAdapter& cache = DataCacheAdapter::instance();
+    if (!cache.isInitialized()) {
         std::cerr << "cache initialize failed\n";
         foundation::Foundation::instance().shutdown();
         return 1;
     }
 
-    const QVector<DataServiceCache::DataSetInfo> infosBefore = cache.getAllDataSetInfos();
+    const QVector<QVariantMap> infosBefore = cache.getAllDataSetInfos();
     const int maxIdBefore = maxDataSetId(infosBefore);
     const QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     const QString dataSetRoot = QDir(baseDir).filePath(QStringLiteral("datasets"));
@@ -130,7 +130,7 @@ int main(int argc, char** argv)
     QTimer::singleShot(5000, &loop, &QEventLoop::quit);
     loop.exec();
 
-    const QVector<DataServiceCache::DataSetInfo> infosAfter = cache.getAllDataSetInfos();
+    const QVector<QVariantMap> infosAfter = cache.getAllDataSetInfos();
     const int maxIdAfter = maxDataSetId(infosAfter);
 
     std::cout << "completed=" << (completed ? "true" : "false")
@@ -143,11 +143,11 @@ int main(int argc, char** argv)
         return 2;
     }
 
-    const DataServiceCache::DataSetInfo latestInfo = cache.getDataSetInfo(maxIdAfter);
-    std::cout << "new_dataset_id=" << latestInfo.id
-              << " sourceType=" << latestInfo.sourceType.toStdString()
-              << " rowCount=" << latestInfo.rowCount
-              << " displayName=" << latestInfo.displayName.toStdString() << "\n";
+    const QVariantMap latestInfo = cache.getDataSetInfo(maxIdAfter);
+    std::cout << "new_dataset_id=" << latestInfo.value("id").toInt()
+              << " sourceType=" << latestInfo.value("sourceType").toString().toStdString()
+              << " rowCount=" << latestInfo.value("rowCount").toInt()
+              << " displayName=" << latestInfo.value("displayName").toString().toStdString() << "\n";
 
     foundation::Foundation::instance().shutdown();
     return 0;

@@ -319,6 +319,7 @@ target_link_libraries(factor
         domain_trading
         astock_ta_lib
         astock_xxhash
+        astock_unordered_dense
 )
 
 if(TARGET Arrow::arrow_shared)

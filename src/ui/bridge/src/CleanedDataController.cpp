@@ -1,5 +1,6 @@
 #include "CleanedDataController.h"
-#include "DataServiceCache.h"
+#include "DataCacheAdapter.h"
+#include "AppStoragePaths.h"
 #include <QDebug>
 #include <QMetaObject>
 #include <QPointer>
@@ -112,32 +113,33 @@ QVariantMap buildFieldDiagnosticsImpl(const QVariantList& data,
     return diagnostics;
 }
 
-bool isCleanedDatasetInfo(const ::DataServiceCache::DataSetInfo& info)
+bool isCleanedDatasetInfo(const QVariantMap& info)
 {
-    const QStringList tags = info.tags;
+    const QStringList tags = info.value("tags").toStringList();
     if (tags.contains("cleaned") || tags.contains("清洗后")
             || tags.contains("data_cleaned") || tags.contains("cleaning_result")) {
         return true;
     }
 
-    if (info.description.contains(QStringLiteral("清洗"), Qt::CaseInsensitive)) {
+    if (info.value("description").toString().contains(QStringLiteral("清洗"), Qt::CaseInsensitive)) {
         return true;
     }
 
-    return info.sourceType.contains(QStringLiteral("cleaning"), Qt::CaseInsensitive);
+    return info.value("sourceType").toString().contains(QStringLiteral("cleaning"), Qt::CaseInsensitive);
 }
 
-bool isBacktestSelectableDatasetInfo(const ::DataServiceCache::DataSetInfo& info)
+bool isBacktestSelectableDatasetInfo(const QVariantMap& info)
 {
-    if (info.id <= 0) {
+    if (info.value("id", -1).toInt() <= 0) {
         return false;
     }
 
-    if (info.isBacktestReady) {
+    if (info.value("isBacktestReady").toBool()) {
         return true;
     }
 
-    return !info.availableFields.isEmpty() && !info.stockCodes.isEmpty();
+    return !info.value("availableFields").toStringList().isEmpty()
+        && !info.value("stockCodes").toStringList().isEmpty();
 }
 
 }
@@ -172,14 +174,15 @@ bool CleanedDataController::initialize()
     try {
         qDebug() << "CleanedDataController: Initializing...";
         
-        // 获取缓存实例
-        m_cache = &::DataServiceCache::getInstance();
-        
-        // 检查缓存是否已初始化
-        if (!m_cache->isCacheEnabled()) {
-            qWarning() << "CleanedDataController: Cache is not enabled";
+        // 获取缓存实例，未初始化则自动初始化
+        m_cache = &DataCacheAdapter::instance();
+        if (!m_cache->isInitialized()) {
+            m_cache->initialize(::bridge::storage::persistentDatasetRootDir());
+        }
+        if (!m_cache->isInitialized()) {
+            qWarning() << "CleanedDataController: Cache failed to initialize";
             updateLoadingState(false);
-            emit errorOccurred("缓存系统未启用");
+            emit errorOccurred("缓存系统初始化失败");
             emit initializationCompleted(false);
             return false;
         }
@@ -188,12 +191,10 @@ bool CleanedDataController::initialize()
 
         QObject::connect(
             m_cache,
-            &::DataServiceCache::dataSetStored,
+            &DataCacheAdapter::dataSetStored,
             this,
-            [this](int, const ::DataServiceCache::DataSetInfo&) {
-                if (!m_initialized) {
-                    return;
-                }
+            [this](int, QVariantMap) {
+                if (!m_initialized) return;
                 refreshDatasets();
             }
         );
@@ -233,34 +234,36 @@ void CleanedDataController::refreshDatasets()
         qDebug() << "CleanedDataController: Refreshing datasets...";
         
         // 从缓存获取所有数据集信息
-        QVector<::DataServiceCache::DataSetInfo> allInfos = m_cache->getAllDataSetInfos();
+        QVector<QVariantMap> allInfos = m_cache->getAllDataSetInfos();
         QVariantList datasets;
-        
+
         qDebug() << "CleanedDataController: Got" << allInfos.size() << "datasets from cache";
-        
-        for (const ::DataServiceCache::DataSetInfo& info : allInfos) {
-            if (!isCleanedDatasetInfo(info)) {
-                continue;
+
+        for (const QVariantMap& info : allInfos) {
+            if (isCleanedDatasetInfo(info)) {
+                continue;  // 跳过已清洗的，只显示待清洗的原始数据
             }
 
-            QStringList tags = info.tags;
+            QStringList tags = info.value("tags").toStringList();
+            QStringList stockCodes = info.value("stockCodes").toStringList();
             QVariantMap dataset;
-            dataset["id"] = info.id;
-            dataset["name"] = info.displayName;
-            dataset["displayName"] = info.displayName;
-            dataset["description"] = info.description;
-            dataset["symbol"] = info.stockCodes.isEmpty() ? "" : info.stockCodes.first();
-            dataset["stockCount"] = info.stockCodes.size();
-            dataset["stockCodes"] = info.stockCodes;
-            dataset["startDate"] = info.startDate.toString("yyyy-MM-dd");
-            dataset["endDate"] = info.endDate.toString("yyyy-MM-dd");
-            dataset["recordCount"] = info.rowCount;
-            dataset["createdTime"] = info.createdTime.toString(Qt::ISODate);
+            dataset["id"] = info.value("id");
+            dataset["name"] = info.value("displayName");
+            dataset["displayName"] = info.value("displayName");
+            dataset["description"] = info.value("description");
+            dataset["symbol"] = stockCodes.isEmpty() ? "" : stockCodes.first();
+            dataset["stockCount"] = stockCodes.size();
+            dataset["stockCodes"] = stockCodes;
+            dataset["startDate"] = info.value("startDate").toString();
+            dataset["endDate"] = info.value("endDate").toString();
+            dataset["recordCount"] = info.value("rowCount");
+            qint64 created = info.value("createdAt", 0).toLongLong();
+            dataset["createdTime"] = created > 0 ? QDateTime::fromSecsSinceEpoch(created).toString(Qt::ISODate) : "";
             dataset["tags"] = tags;
-            dataset["schemaVersion"] = info.schemaVersion;
-            dataset["isBacktestReady"] = info.isBacktestReady;
-            dataset["availableFields"] = info.availableFields;
-            dataset["sourceType"] = info.sourceType;
+            dataset["schemaVersion"] = info.value("schemaVersion");
+            dataset["isBacktestReady"] = info.value("isBacktestReady");
+            dataset["availableFields"] = info.value("availableFields");
+            dataset["sourceType"] = info.value("sourceType");
             
             QString cleaningRule = "unknown";
             for (const QString& tag : tags) {
@@ -379,7 +382,7 @@ void CleanedDataController::loadDatasetById(int datasetId)
 
     try {
         QPointer<CleanedDataController> safeThis(this);
-        ::DataServiceCache* cache = m_cache;
+        DataCacheAdapter* cache = m_cache;
         std::thread([safeThis, cache, requestedDatasetId]() {
             if (!safeThis || !cache) {
                 return;
@@ -401,23 +404,14 @@ void CleanedDataController::loadDatasetById(int datasetId)
                 return;
             }
 
-            const auto datasetInfoStruct = cache->getDataSetInfo(requestedDatasetId);
-            QVariantMap selectedDatasetInfo;
-            selectedDatasetInfo["id"] = datasetInfoStruct.id;
-            selectedDatasetInfo["displayName"] = datasetInfoStruct.displayName;
-            selectedDatasetInfo["name"] = datasetInfoStruct.displayName;
-            selectedDatasetInfo["description"] = datasetInfoStruct.description;
-            selectedDatasetInfo["symbol"] = datasetInfoStruct.stockCodes.isEmpty() ? QString() : datasetInfoStruct.stockCodes.first();
-            selectedDatasetInfo["stockCount"] = datasetInfoStruct.stockCodes.size();
-            selectedDatasetInfo["stockCodes"] = datasetInfoStruct.stockCodes;
-            selectedDatasetInfo["startDate"] = datasetInfoStruct.startDate.isValid() ? datasetInfoStruct.startDate.toString("yyyy-MM-dd") : QString();
-            selectedDatasetInfo["endDate"] = datasetInfoStruct.endDate.isValid() ? datasetInfoStruct.endDate.toString("yyyy-MM-dd") : QString();
-            selectedDatasetInfo["recordCount"] = datasetInfoStruct.rowCount;
-            selectedDatasetInfo["createdTime"] = datasetInfoStruct.createdTime.toString(Qt::ISODate);
-            selectedDatasetInfo["tags"] = datasetInfoStruct.tags;
-            selectedDatasetInfo["schemaVersion"] = datasetInfoStruct.schemaVersion;
-            selectedDatasetInfo["isBacktestReady"] = datasetInfoStruct.isBacktestReady;
-            selectedDatasetInfo["availableFields"] = datasetInfoStruct.availableFields;
+            QVariantMap selectedDatasetInfo = cache->getDataSetInfo(requestedDatasetId);
+            selectedDatasetInfo["name"] = selectedDatasetInfo.value("displayName");
+            QStringList sc = selectedDatasetInfo.value("stockCodes").toStringList();
+            selectedDatasetInfo["symbol"] = sc.isEmpty() ? QString() : sc.first();
+            selectedDatasetInfo["stockCount"] = sc.size();
+            selectedDatasetInfo["recordCount"] = selectedDatasetInfo.value("rowCount");
+            qint64 created = selectedDatasetInfo.value("createdAt", 0).toLongLong();
+            selectedDatasetInfo["createdTime"] = created > 0 ? QDateTime::fromSecsSinceEpoch(created).toString(Qt::ISODate) : "";
 
             int tradeDateCount = 0;
             const QVariantMap fieldDiagnostics = buildFieldDiagnosticsImpl(data, selectedDatasetInfo, &tradeDateCount);

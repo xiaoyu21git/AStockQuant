@@ -15,7 +15,7 @@
 #include <string>
 #include <unordered_set>
 
-#include "DataServiceCache.h"
+#include "DataCacheAdapter.h"
 #include "factor_check/FactorDetectionCoreService.h"
 #include "factor_check/FactorSupportScopeCacheCore.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
@@ -86,7 +86,7 @@ private:
         bool useCacheMode{false};
         bool hasValidDataSet{false};
         bool hasUsableDataSetRows{false};
-        DataServiceCache::DataSetInfo dataSetInfo;
+        QVariantMap dataSetInfo;
     };
 
     mutable QHash<QString, std::shared_ptr<factor::BaseFactor>> m_factorInstanceCache;
@@ -109,7 +109,7 @@ private:
     QVariantMap buildSupportInfo(const factor::bridge::check::SupportInfo& typedInfo) const;
     int uniqueTradeDateCount(const QVariantList& rows) const;
     QSet<QString> collectAvailableFields(const QVariantMap& cacheSnapshot,
-                                         const DataServiceCache::DataSetInfo& dataSetInfo,
+                                         const QVariantMap& dataSetInfo,
                                          const QVariantList& rows) const;
     QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot) const;
     bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,

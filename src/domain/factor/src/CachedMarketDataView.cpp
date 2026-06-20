@@ -1,11 +1,12 @@
 #include "factor_compute/CachedMarketDataView.h"
 #include "factor_compute/SubMarketDataView.h"
 #include "foundation/json/json_facade.h"
+#include "database/MarketDataRepository.h"
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <unordered_set>
+#include <ankerl/unordered_dense.h>
 
 namespace factor::compute {
 
@@ -25,7 +26,7 @@ public:
     RowMatrixXf m_closeMat;
     RowMatrixXf m_volumeMat;
 
-    std::unordered_map<std::string, RowMatrixXf> m_fieldMats;
+    ankerl::unordered_dense::map<std::string, RowMatrixXf> m_fieldMats;
 
     std::vector<DateKey> m_dates;
     std::vector<InstrumentId> m_instruments;
@@ -37,7 +38,8 @@ public:
         for (int d = 0; d < col.dateCount; ++d) {
             for (int i = 0; i < col.instrumentCount; ++i) {
                 int idx = d * col.instrumentCount + i;
-                mat(d, i) = (idx < static_cast<int>(col.values.size())) ? col.values[idx] : signal_value_t{0};
+                // 缺失值用 NaN 填充，避免零值被当作合法价格参与因子计算
+                mat(d, i) = (idx < static_cast<int>(col.values.size())) ? col.values[idx] : std::numeric_limits<signal_value_t>::quiet_NaN();
             }
         }
     }
@@ -156,7 +158,7 @@ CachedMarketDataView::slice(DateRange dateRange) const
 std::unique_ptr<IMarketDataView>
 CachedMarketDataView::slice(const std::vector<InstrumentId>& instrumentIds) const
 {
-    std::unordered_set<uint32_t> idSet;
+    ankerl::unordered_dense::set<uint32_t> idSet;
     for (const auto& id : instrumentIds) {
         idSet.insert(id.value);
     }
@@ -184,12 +186,12 @@ CachedMarketDataView::fromJson(const foundation::json::JsonFacade& root,
     }
 
     auto view = std::make_unique<CachedMarketDataView>();
-    std::unordered_map<std::string, InstrumentId> symToId;
+    ankerl::unordered_dense::map<std::string, InstrumentId> symToId;
     std::vector<InstrumentId> instruments;
     uint32_t nextId = 0;
 
-    std::unordered_set<std::string> symbolSet;
-    std::unordered_map<std::string, int> dateIndex;
+    ankerl::unordered_dense::set<std::string> symbolSet;
+    ankerl::unordered_dense::map<std::string, int> dateIndex;
     std::vector<std::string> sortedDates;
     const size_t rowCount = root.size();
 
@@ -220,16 +222,20 @@ CachedMarketDataView::fromJson(const foundation::json::JsonFacade& root,
         return nullptr;
     }
 
-    auto buildColumn = [&](float nanVal = 0.0f) -> CachedMarketDataView::ColumnData {
+    // ── 构建日期列数据 ──
+    auto makeColumnData = [&]() -> CachedMarketDataView::ColumnData {
         CachedMarketDataView::ColumnData col;
         col.dateCount = numDates;
         col.instrumentCount = numInsts;
-        col.values.assign(static_cast<size_t>(numDates) * numInsts, nanVal);
+        col.values.assign(static_cast<size_t>(numDates) * numInsts,
+                          std::numeric_limits<float>::quiet_NaN());
         for (const auto& d : sortedDates) {
             int dateInt = 0;
             try {
                 if (d.size() == 10 && d[4] == '-' && d[7] == '-') {
-                    dateInt = std::stoi(d) * 10000 + std::stoi(d.substr(5, 2)) * 100 + std::stoi(d.substr(8, 2));
+                    dateInt = std::stoi(d.substr(0,4)) * 10000
+                            + std::stoi(d.substr(5,2)) * 100
+                            + std::stoi(d.substr(8,2));
                 } else {
                     dateInt = std::stoi(d);
                 }
@@ -242,66 +248,68 @@ CachedMarketDataView::fromJson(const foundation::json::JsonFacade& root,
         return col;
     };
 
-    std::unordered_map<std::string, int> stringToIntMap;
+    // ── 构建所有列的 ColumnData ──
+    const size_t totalFields = 5 + extraFields.size();
+    std::vector<CachedMarketDataView::ColumnData> allCols(totalFields);
+    std::vector<std::string> allFieldNames(totalFields);
+    allFieldNames[0] = "open";   allFieldNames[1] = "high";
+    allFieldNames[2] = "low";    allFieldNames[3] = "close";
+    allFieldNames[4] = "volume";
+    for (size_t ei = 0; ei < extraFields.size(); ++ei)
+        allFieldNames[5 + ei] = extraFields[ei];
+    for (auto& col : allCols) col = makeColumnData();
+
+    // ── 单遍遍历：一次填充所有字段 ──
+    ankerl::unordered_dense::map<std::string, int> stringToIntMap;
     int nextStringId = 1;
 
-    auto fillColumn = [&](CachedMarketDataView::ColumnData& col,
-                          const std::string& field) {
-        for (size_t i = 0; i < rowCount; ++i) {
-            const auto row = root.at(i);
-            if (!row.isObject()) continue;
-            if (!row.has(field)) continue;
-            const auto fieldValue = row.get(field);
+    for (size_t i = 0; i < rowCount; ++i) {
+        const auto row = root.at(i);
+        if (!row.isObject()) continue;
 
-            double val = 0.0;
+        // 提取 symbol + date
+        std::string sym, date;
+        if (row.has("symbol"))     sym  = row.get("symbol").asString();
+        if (row.has("trade_date")) date = row.get("trade_date").asString();
+        if (sym.empty() || date.empty()) continue;
+
+        auto sit = symToId.find(sym);
+        auto dit = dateIndex.find(date);
+        if (sit == symToId.end() || dit == dateIndex.end()) continue;
+        int sIdx = static_cast<int>(sit->second.value);
+        int dIdx = dit->second;
+        size_t flatIdx = static_cast<size_t>(dIdx) * numInsts + sIdx;
+
+        // 对每个字段尝试提取值
+        for (size_t fi = 0; fi < totalFields; ++fi) {
+            const std::string& field = allFieldNames[fi];
+            if (!row.has(field)) continue;
+
+            const auto fieldValue = row.get(field);
+            float val;
             if (fieldValue.isNumber()) {
-                val = fieldValue.asDouble();
+                val = static_cast<float>(fieldValue.asDouble());
             } else if (fieldValue.isString()) {
                 const std::string strVal = fieldValue.asString();
                 auto it = stringToIntMap.find(strVal);
                 if (it == stringToIntMap.end()) {
                     it = stringToIntMap.emplace(strVal, nextStringId++).first;
                 }
-                val = static_cast<double>(it->second);
+                val = static_cast<float>(it->second);
             } else {
                 continue;
             }
-
-            std::string sym, date;
-            if (row.has("symbol"))  sym  = row.get("symbol").asString();
-            if (row.has("trade_date")) date = row.get("trade_date").asString();
-            auto sit = symToId.find(sym);
-            auto dit = dateIndex.find(date);
-            if (sit == symToId.end() || dit == dateIndex.end()) continue;
-
-            int sIdx = static_cast<int>(sit->second.value);
-            int dIdx = dit->second;
-            col.values[static_cast<size_t>(dIdx) * numInsts + sIdx]
-                = static_cast<float>(val);
+            allCols[fi].values[flatIdx] = val;
         }
-    };
-
-    auto colOpen  = buildColumn();
-    auto colHigh  = buildColumn();
-    auto colLow   = buildColumn();
-    auto colClose = buildColumn();
-    auto colVol   = buildColumn();
-
-    fillColumn(colOpen,  "open");
-    fillColumn(colHigh,  "high");
-    fillColumn(colLow,   "low");
-    fillColumn(colClose, "close");
-    fillColumn(colVol,   "volume");
-
-    view->loadFromColumnData(
-        std::move(colOpen), std::move(colHigh), std::move(colLow),
-        std::move(colClose), std::move(colVol));
-
-    for (const auto& field : extraFields) {
-        auto col = buildColumn(std::numeric_limits<float>::quiet_NaN());
-        fillColumn(col, field);
-        view->loadAdditionalField(field, std::move(col));
     }
+
+    // ── 加载到 view ──
+    view->loadFromColumnData(
+        std::move(allCols[0]), std::move(allCols[1]), std::move(allCols[2]),
+        std::move(allCols[3]), std::move(allCols[4]));
+
+    for (size_t ei = 0; ei < extraFields.size(); ++ei)
+        view->loadAdditionalField(extraFields[ei], std::move(allCols[5 + ei]));
 
     // 保存真实股票代码映射 (InstrumentId → 代码字符串)
     view->impl_->m_symbolStrings.resize(instruments.size());
@@ -312,22 +320,93 @@ CachedMarketDataView::fromJson(const foundation::json::JsonFacade& root,
     return view;
 }
 
-static void writeBinaryColumn(FILE* f, const CachedMarketDataView::ColumnData& col)
+// ── fromDailyBarRows：MySQL 查询结果直接构建 CachedMarketDataView（零 JSON） ──
+std::unique_ptr<CachedMarketDataView>
+CachedMarketDataView::fromDailyBarRows(
+    const std::vector<astock::infrastructure::database::DailyBarRow>& rows)
+{
+    if (rows.empty()) return nullptr;
+
+    // 单遍收集唯一 symbol/date（数据已按 ORDER BY symbol, trade_date 排序）
+    ankerl::unordered_dense::map<std::string, InstrumentId> symToId;
+    std::vector<InstrumentId> instruments;
+    uint32_t nextId = 0;
+    ankerl::unordered_dense::map<std::string, int> dateIndex;
+    std::vector<DateKey> sortedDateKeys;
+    const size_t N = rows.size();
+
+    for (const auto& row : rows) {
+        if (symToId.find(row.symbol) == symToId.end()) {
+            InstrumentId iid{nextId};
+            instruments.push_back(iid);
+            symToId[row.symbol] = iid;
+            ++nextId;
+        }
+        if (dateIndex.find(row.tradeDate) == dateIndex.end()) {
+            int y=0,m=0,d=0;
+            sscanf(row.tradeDate.c_str(), "%d-%d-%d", &y, &m, &d);
+            dateIndex[row.tradeDate] = static_cast<int>(sortedDateKeys.size());
+            sortedDateKeys.push_back(DateKey{y*10000 + m*100 + d});
+        }
+    }
+
+    int numInsts = static_cast<int>(instruments.size());
+    int numDates = static_cast<int>(sortedDateKeys.size());
+    if (numDates <= 0 || numInsts <= 0) return nullptr;
+
+    // 分配列数据
+    auto makeCol = [&]() -> ColumnData {
+        ColumnData c;
+        c.dateCount = numDates;
+        c.instrumentCount = numInsts;
+        c.values.assign(static_cast<size_t>(numDates) * numInsts, std::numeric_limits<float>::quiet_NaN());
+        c.dates = sortedDateKeys;
+        c.instruments = instruments;
+        return c;
+    };
+    ColumnData colOpen = makeCol(), colHigh = makeCol(), colLow = makeCol();
+    ColumnData colClose = makeCol(), colVol = makeCol();
+
+    // 第二遍填充值
+    for (const auto& row : rows) {
+        auto si = symToId.find(row.symbol);
+        auto di = dateIndex.find(row.tradeDate);
+        if (si == symToId.end() || di == dateIndex.end()) continue;
+        size_t idx = static_cast<size_t>(di->second) * numInsts + si->second.value;
+        colOpen.values[idx]  = static_cast<float>(row.open);
+        colHigh.values[idx]  = static_cast<float>(row.high);
+        colLow.values[idx]   = static_cast<float>(row.low);
+        colClose.values[idx] = static_cast<float>(row.close);
+        colVol.values[idx]   = static_cast<float>(row.volume);
+    }
+
+    auto view = std::make_unique<CachedMarketDataView>();
+    view->loadFromColumnData(
+        std::move(colOpen), std::move(colHigh), std::move(colLow),
+        std::move(colClose), std::move(colVol));
+    view->impl_->m_symbolStrings.resize(instruments.size());
+    for (const auto& [sym, id] : symToId)
+        view->impl_->m_symbolStrings[id.value] = sym;
+    return view;
+}
+
+static bool writeBinaryColumn(FILE* f, const CachedMarketDataView::ColumnData& col)
 {
     int32_t dc = col.dateCount;
     int32_t ic = col.instrumentCount;
-    std::fwrite(&dc, sizeof(int32_t), 1, f);
-    std::fwrite(&ic, sizeof(int32_t), 1, f);
+    if (std::fwrite(&dc, sizeof(int32_t), 1, f) != 1) return false;
+    if (std::fwrite(&ic, sizeof(int32_t), 1, f) != 1) return false;
     for (int i = 0; i < dc; ++i) {
         int32_t dv = col.dates[static_cast<size_t>(i)].value;
-        std::fwrite(&dv, sizeof(int32_t), 1, f);
+        if (std::fwrite(&dv, sizeof(int32_t), 1, f) != 1) return false;
     }
     for (int i = 0; i < ic; ++i) {
         uint32_t iv = col.instruments[static_cast<size_t>(i)].value;
-        std::fwrite(&iv, sizeof(uint32_t), 1, f);
+        if (std::fwrite(&iv, sizeof(uint32_t), 1, f) != 1) return false;
     }
     size_t total = static_cast<size_t>(dc) * static_cast<size_t>(ic);
-    std::fwrite(col.values.data(), sizeof(float), total, f);
+    if (std::fwrite(col.values.data(), sizeof(float), total, f) != total) return false;
+    return true;
 }
 
 static bool readBinaryColumn(FILE* f, CachedMarketDataView::ColumnData& col)
@@ -373,50 +452,59 @@ bool CachedMarketDataView::saveToBinary(const std::string& filePath) const
     uint32_t version = 2;  // v2: +symbol strings
     int32_t dc = static_cast<int32_t>(datesVec.size());
     int32_t ic = static_cast<int32_t>(instVec.size());
-    std::fwrite(&magic, sizeof(uint32_t), 1, f);
-    std::fwrite(&version, sizeof(uint32_t), 1, f);
-    std::fwrite(&dc, sizeof(int32_t), 1, f);
-    std::fwrite(&ic, sizeof(int32_t), 1, f);
+
+    // Lambda: 写失败时关闭文件并报错
+    auto fail = [&](const char* msg) -> bool {
+        fprintf(stderr, "[CMDV] saveToBinary: %s (%s)\n", msg, filePath.c_str());
+        fflush(stderr);
+        std::fclose(f);
+        std::remove(filePath.c_str());
+        return false;
+    };
+
+    if (std::fwrite(&magic, sizeof(uint32_t), 1, f) != 1) return fail("write magic failed");
+    if (std::fwrite(&version, sizeof(uint32_t), 1, f) != 1) return fail("write version failed");
+    if (std::fwrite(&dc, sizeof(int32_t), 1, f) != 1) return fail("write dateCount failed");
+    if (std::fwrite(&ic, sizeof(int32_t), 1, f) != 1) return fail("write instCount failed");
 
     // OHLCV columns (5)
-    writeBinaryColumn(f, impl_->m_open[0]);
-    writeBinaryColumn(f, impl_->m_high[0]);
-    writeBinaryColumn(f, impl_->m_low[0]);
-    writeBinaryColumn(f, impl_->m_close[0]);
-    writeBinaryColumn(f, impl_->m_volume[0]);
+    if (!writeBinaryColumn(f, impl_->m_open[0])) return fail("write open column failed");
+    if (!writeBinaryColumn(f, impl_->m_high[0])) return fail("write high column failed");
+    if (!writeBinaryColumn(f, impl_->m_low[0])) return fail("write low column failed");
+    if (!writeBinaryColumn(f, impl_->m_close[0])) return fail("write close column failed");
+    if (!writeBinaryColumn(f, impl_->m_volume[0])) return fail("write volume column failed");
 
     // Extra fields
     int32_t extraCount = static_cast<int32_t>(impl_->m_fieldMats.size());
-    std::fwrite(&extraCount, sizeof(int32_t), 1, f);
+    if (std::fwrite(&extraCount, sizeof(int32_t), 1, f) != 1) return fail("write extraCount failed");
     for (const auto& [name, mat] : impl_->m_fieldMats) {
         uint32_t nameLen = static_cast<uint32_t>(name.size());
-        std::fwrite(&nameLen, sizeof(uint32_t), 1, f);
-        std::fwrite(name.data(), 1, nameLen, f);
+        if (std::fwrite(&nameLen, sizeof(uint32_t), 1, f) != 1) return fail("write extra nameLen failed");
+        if (std::fwrite(name.data(), 1, nameLen, f) != nameLen) return fail("write extra name failed");
         int32_t edc = static_cast<int32_t>(mat.rows());
         int32_t eic = static_cast<int32_t>(mat.cols());
-        std::fwrite(&edc, sizeof(int32_t), 1, f);
-        std::fwrite(&eic, sizeof(int32_t), 1, f);
-        // Write dates and instruments from the base columns (same for all fields)
+        if (std::fwrite(&edc, sizeof(int32_t), 1, f) != 1) return fail("write extra dc failed");
+        if (std::fwrite(&eic, sizeof(int32_t), 1, f) != 1) return fail("write extra ic failed");
         for (const auto& d : datesVec) {
             int32_t dv = d.value;
-            std::fwrite(&dv, sizeof(int32_t), 1, f);
+            if (std::fwrite(&dv, sizeof(int32_t), 1, f) != 1) return fail("write extra dates failed");
         }
         for (const auto& inst : instVec) {
             uint32_t iv = inst.value;
-            std::fwrite(&iv, sizeof(uint32_t), 1, f);
+            if (std::fwrite(&iv, sizeof(uint32_t), 1, f) != 1) return fail("write extra insts failed");
         }
         for (int r = 0; r < edc; ++r)
             for (int c = 0; c < eic; ++c)
-                std::fwrite(&mat(r,c), sizeof(float), 1, f);
+                if (std::fwrite(&mat(r,c), sizeof(float), 1, f) != 1) return fail("write extra values failed");
     }
 
     // Symbol strings (v2)
     int32_t symCount = static_cast<int32_t>(impl_->m_symbolStrings.size());
-    std::fwrite(&symCount, sizeof(int32_t), 1, f);
+    if (std::fwrite(&symCount, sizeof(int32_t), 1, f) != 1) return fail("write symCount failed");
     for (const auto& s : impl_->m_symbolStrings) {
         uint32_t slen = static_cast<uint32_t>(s.size());
-        std::fwrite(&slen, sizeof(uint32_t), 1, f);
-        std::fwrite(s.data(), 1, slen, f);
+        if (std::fwrite(&slen, sizeof(uint32_t), 1, f) != 1) return fail("write slen failed");
+        if (std::fwrite(s.data(), 1, slen, f) != slen) return fail("write symbol string failed");
     }
 
     std::fclose(f);

@@ -1682,11 +1682,6 @@ public:
             ? (std::string("GM runtime error: ") + std::to_string(error_code))
             : string_from_cstr(error_msg);
         owner_->set_error_locked(runtime_error);
-        qWarning() << "GmStrategySession: runtime callback error"
-                   << "sessionId=" << QString::fromStdString(owner_->session_id_)
-                   << "accountId=" << QString::fromStdString(owner_->config_.account_id)
-                   << "code=" << error_code
-                   << "message=" << QString::fromStdString(runtime_error);
         if (!owner_->event_bus_ || !owner_->event_bus_->is_running()) {
             return;
         }
@@ -2448,10 +2443,6 @@ void GmStrategySession::mark_runtime_stopped_locked(const std::string& error_mes
     if (!error_message.empty()) {
         last_error_ = error_message;
         state_ = TradingSessionState::Error;
-        qWarning() << "GmStrategySession: runtime stopped with error"
-                   << "sessionId=" << QString::fromStdString(session_id_)
-                   << "accountId=" << QString::fromStdString(config_.account_id)
-                   << "message=" << QString::fromStdString(error_message);
     } else {
         state_ = TradingSessionState::Stopped;
     }
