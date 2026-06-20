@@ -180,6 +180,15 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         std::vector<std::string> symVec;
         for (const auto& s : allSymbols) symVec.push_back(s.toStdString());
 
+        // 动态计算总工作量：每种类型的 GROUP BY (1单位) + 每月 (1单位)
+        int doneUnits = dataTypes.size(); // GROUP BY 阶段已完成
+        int totalUnits = doneUnits;
+        for (const QString& dt : dataTypes) {
+            if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
+                for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) totalUnits++;
+            }
+        }
+
         for (const QString& dt : dataTypes) {
             if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
                 for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) {
@@ -202,6 +211,14 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                         j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
                         allRows.push_back(std::move(j));
                     }
+                    doneUnits++;
+                    int du = doneUnits, tu = totalUnits;
+                    QMetaObject::invokeMethod(self.get(), [self, du, tu, allRows]() {
+                        if (!self) return;
+                        int pct = (du * 100) / qMax(1, tu);
+                        self->updateStatus(QString("下载数据 %1/%2 (%3 行)").arg(du).arg(tu).arg(allRows.size()), pct);
+                        emit self->dataFetchProgress(pct, QString("下载数据 %1/%2").arg(du).arg(tu));
+                    }, Qt::QueuedConnection);
                 }
             }
         }
