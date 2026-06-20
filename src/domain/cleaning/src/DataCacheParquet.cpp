@@ -248,6 +248,18 @@ DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId)
     return session;
 }
 
+DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId,
+    const std::vector<std::string>& fieldNames,
+    const std::unordered_set<std::string>& numericFields)
+{
+    auto session = new ArrowWriteSession();
+    session->dataId = dataId;
+    session->fieldNames = fieldNames;
+    session->numericFields = numericFields;
+    session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
+    return session;
+}
+
 void DataCache::appendArrowBatch(ArrowWriteToken token, const std::vector<J>& rows)
 {
     if (!token || rows.empty()) return;

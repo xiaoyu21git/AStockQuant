@@ -220,8 +220,12 @@ public:
     /// @brief 从 Arrow 文件加载数据集数据
     std::vector<J> loadDataSetFile(int dataId);
 
-    /// @brief 批量写入：开始新 Arrow 文件（返回 writer token，null 表示失败）
+    /// @brief 批量写入：开始新 Arrow 文件（自动从数据扫描字段类型）
     ArrowWriteToken beginArrowWrite(int dataId);
+    /// @brief 批量写入：指定字段列表和类型，避免硬编码扫描
+    ArrowWriteToken beginArrowWrite(int dataId,
+        const std::vector<std::string>& fieldNames,
+        const std::unordered_set<std::string>& numericFields);
 
     /// @brief 批量写入：追加一批行（token 由 beginArrowWrite 返回）
     void appendArrowBatch(ArrowWriteToken token, const std::vector<J>& rows);

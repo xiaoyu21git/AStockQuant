@@ -95,6 +95,13 @@ cleaning::DataCache::ArrowWriteToken DataCacheAdapter::beginArrowWrite(int dataI
     return m_cache->beginArrowWrite(dataId);
 }
 
+cleaning::DataCache::ArrowWriteToken DataCacheAdapter::beginArrowWrite(int dataId,
+    const std::vector<std::string>& fieldNames,
+    const std::unordered_set<std::string>& numericFields) {
+    ensureInitialized();
+    return m_cache->beginArrowWrite(dataId, fieldNames, numericFields);
+}
+
 void DataCacheAdapter::appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
                                          const std::vector<foundation::json::JsonFacade>& rows) {
     m_cache->appendArrowBatch(token, rows);

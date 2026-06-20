@@ -29,6 +29,9 @@ public:
                               const QVariantMap& infoMap,
                               std::function<void(int,int)> progressCallback = {});
     cleaning::DataCache::ArrowWriteToken beginArrowWrite(int dataId);
+    cleaning::DataCache::ArrowWriteToken beginArrowWrite(int dataId,
+        const std::vector<std::string>& fieldNames,
+        const std::unordered_set<std::string>& numericFields);
     void appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
                            const std::vector<foundation::json::JsonFacade>& rows);
     void finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount);

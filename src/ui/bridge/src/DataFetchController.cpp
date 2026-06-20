@@ -249,8 +249,28 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         auto rowToJson = [&allFields](const astock::database::SqlQueryResultRow& r) { auto j = foundation::json::JsonFacade::createObject(); for (const auto& col : allFields) { auto it = r.getValues().find(col); if (it == r.getValues().end() || it->second.empty()) { j.set(col, foundation::json::JsonFacade::createDouble(NAN)); continue; } char* end = nullptr; double d = strtod(it->second.c_str(), &end); if (end && (size_t)(end - it->second.c_str()) == it->second.size()) j.set(col, foundation::json::JsonFacade::createDouble(d)); else j.set(col, foundation::json::JsonFacade::createString(it->second)); } return j; };
         // 写单个 Arrow 文件
         QVariantMap infoMap; infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate); infoMap["sourceType"] = dataSource; infoMap["stockCodes"] = allSymbols; infoMap["startDate"] = startDate; infoMap["endDate"] = endDate;
+        // 从首行数据自动判定数值/字符串类型，避免硬编码字段列表
+        std::unordered_set<std::string> numericFields;
+        auto testNumeric = [&](const std::string& v) { if(v.empty())return false; char* e=nullptr; strtod(v.c_str(),&e); return e && (size_t)(e-v.c_str())==v.size(); };
+        if (!allFields.empty()) {
+            auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (dbr && dbr->isOpen()) {
+                for (const QString& dt : dataTypes) {
+                    QString table = tableForType(dt); if(table.isEmpty()) continue;
+                    QString jc = symTableJoinClause(dt);
+                    std::string fc = jc.isEmpty() ? ("FROM "+table.toStdString()) : ("FROM "+table.toStdString()+" fi"+jc.toStdString());
+                    std::string sc = jc.isEmpty() ? "*" : "si.symbol, fi.*";
+                    std::string pf = jc.isEmpty() ? "" : "fi.";
+                    std::string sql = "SELECT "+sc+" "+fc+" WHERE "+pf+dateColForType(dt).toStdString()+" BETWEEN '"+startDate.toStdString()+"' AND '"+endDate.toStdString()+"' LIMIT 1";
+                    auto rr = dbr->executeQuery(sql,{});
+                    for (const auto& row : rr.getRows())
+                        for (const auto& [col,val] : row.getValues())
+                            if (testNumeric(val)) numericFields.insert(col);
+                }
+            }
+        }
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
-        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
+        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId, allFields, numericFields) : nullptr;
         int totalRows = 0;
         static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
         for (int mi = 0; mi < totalMonths; mi++) {
