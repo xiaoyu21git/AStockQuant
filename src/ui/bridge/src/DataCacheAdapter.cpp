@@ -101,8 +101,8 @@ void DataCacheAdapter::appendArrowBatch(cleaning::DataCache::ArrowWriteToken tok
 }
 
 void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount) {
-    m_cache->finishArrowWrite(token);
     int dataId = token ? token->dataId : -1;
+    m_cache->finishArrowWrite(token);
     if (dataId > 0) {
         m_cache->updateDataSetRowCount(dataId, rowCount);
         auto updated = m_cache->getDataSetInfo(dataId);

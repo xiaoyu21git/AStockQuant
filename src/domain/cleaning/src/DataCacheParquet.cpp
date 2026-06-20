@@ -264,7 +264,7 @@ void DataCache::finishArrowWrite(ArrowWriteToken token)
     if (s->writer) s->writer->Close();
     s->stream.reset();
     fprintf(stderr, "[DataCache] saved Arrow IPC %s: %lld rows x %zu cols\n",
-            dataFilePath(0).c_str(), s->totalRows, s->fieldNames.size());
+            dataFilePath(s->dataId).c_str(), s->totalRows, s->fieldNames.size());
     fflush(stderr);
     delete s;
 }
