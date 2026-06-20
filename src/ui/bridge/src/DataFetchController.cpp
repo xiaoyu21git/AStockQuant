@@ -218,20 +218,17 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int totalRows = 0;
         for (const QString& dt : dataTypes) {
             QString table = tableForType(dt);
-            if (table.isEmpty()) { fprintf(stderr, "[DFC] skip %s\n", dt.toStdString().c_str()); fflush(stderr); continue; }
-            auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-            if (!db2 || !db2->isOpen()) break;
+            if (table.isEmpty()) continue;
             std::string sql = "SELECT * FROM " + table.toStdString()
                 + " WHERE " + dateColForType(dt).toStdString()
                 + " BETWEEN '" + startDate.toStdString() + "' AND '" + endDate.toStdString() + "'";
             if (allSymbols.size() > 0 && allSymbols.size() <= 1000 && symColForType(dt) == "symbol") {
                 sql += " AND symbol IN (";
-                for (size_t si = 0; si < allSymbols.size(); ++si) {
-                    if (si > 0) sql += ",";
-                    sql += "'" + allSymbols[si].toStdString() + "'";
-                }
+                for (size_t si = 0; si < allSymbols.size(); ++si) { if (si>0) sql+=","; sql += "'" + allSymbols[si].toStdString() + "'"; }
                 sql += ")";
             }
+            auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (!db2 || !db2->isOpen()) break;
             auto result = db2->executeQuery(sql, {});
             std::vector<foundation::json::JsonFacade> batch;
             for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
@@ -239,7 +236,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             doneUnits++;
             int du = doneUnits, tu = totalUnits, tr = totalRows;
             QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
-            fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), batch.size());
+            fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), static_cast<int>(batch.size()));
             fflush(stderr);
         }
 
