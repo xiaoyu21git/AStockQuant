@@ -85,6 +85,9 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
+
+    emit dataSetStored(dataId, cppInfoToMap(info));
+    return dataId;
 }
 
 cleaning::DataCache::ArrowWriteToken DataCacheAdapter::beginArrowWrite(int dataId) {
