@@ -123,7 +123,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     updateStatus("分析数据范围...", 0);
 
     QPointer<DataFetchController> self(this);
-    FOUNDATION_THREADS.post([self, dataSource, startDate, endDate, dataTypes]() {
+    std::thread([self, dataSource, startDate, endDate, dataTypes]() {
         if (!self) return;
 
         auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
@@ -170,9 +170,17 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
 
+        QMetaObject::invokeMethod(self.get(), [self, symbolList, total]() {
+            if (!self) return;
+            self->m_fetchedData = symbolList;
+            self->m_isFetching = false; emit self->isFetchingChanged(); emit self->fetchedDataChanged();
+            if (total > 0 && self->m_previewModel) {
+                QVector<QVariantMap> pv; for (const auto& item : symbolList) pv.append(item.toMap());
+                self->m_previewModel->updateData(pv);
+            }
+            self->m_pendingDoneTotal = total;
+            self->updateStatus(QString("共 %1 只标的").arg(total), 20);
         }, Qt::QueuedConnection);
-
-        int totalDownloaded = 0;
 
         // 按月分片下载，每月更新进度
         auto y1 = startDate.mid(0,4).toInt(), m1 = startDate.mid(5,2).toInt(), d1 = startDate.mid(8,2).toInt();
@@ -186,12 +194,8 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         std::vector<std::string> allFields;
         std::unordered_set<std::string> fieldSet;
         for (const QString& dt : dataTypes) {
-            QString table = tableForType(dt); if (table.isEmpty()) continue;
-            QString jc = symTableJoinClause(dt);
-            std::string fc = jc.isEmpty() ? ("FROM "+table.toStdString()) : ("FROM "+table.toStdString()+" fi"+jc.toStdString());
-            std::string sc = jc.isEmpty() ? "*" : "si.symbol, fi.*";
-            std::string pf = jc.isEmpty() ? "" : "fi.";
-            std::string sql = "SELECT "+sc+" "+fc+" WHERE "+pf+dateColForType(dt).toStdString()+" BETWEEN '"+startDate.toStdString()+"' AND '"+endDate.toStdString()+"' LIMIT 1";
+            DataTypeSource src = sourceForType(dt); if(src.tableName.isEmpty()) continue;
+            std::string sql = src.buildSql(startDate.toStdString(), endDate.toStdString()) + " LIMIT 1";
             auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
             if (!dbr||!dbr->isOpen()) continue;
             auto rr = dbr->executeQuery(sql,{});
@@ -251,7 +255,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             self->refreshDataSetInfos();
             emit self->dataSetReadyForCleaning(did);
         }, Qt::QueuedConnection);
-    });
+    }).detach();
 }
 
 void DataFetchController::fetchDataByType(const QString& dataSource,
