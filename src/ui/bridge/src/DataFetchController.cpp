@@ -192,7 +192,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         infoMap["startDate"] = startDate;
         infoMap["endDate"] = endDate;
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
-        void* token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
+        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
 
         int totalRows = 0;
         for (const QString& dt : dataTypes) {
@@ -233,7 +233,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             }
         }
 
-        DataCacheAdapter::instance().finishArrowWrite(token, infoMap, dataId);
+        DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
         int did = dataId, tr = totalRows;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
             if (!self || did <= 0) return;

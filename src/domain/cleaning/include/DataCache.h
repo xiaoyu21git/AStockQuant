@@ -208,6 +208,10 @@ public:
 
     // ── 数据文件持久化（Parquet 列式存储） ──
 
+    // 批次写入会话（由 beginArrowWrite 创建）
+    struct WriteSession { int dataId = -1; int64_t totalRows = 0; };
+    typedef WriteSession* ArrowWriteToken;
+
 #ifdef ASTOCK_HAS_PARQUET
 
     /// @brief 保存数据集数据到 Arrow 文件（一次性）
@@ -217,13 +221,13 @@ public:
     std::vector<J> loadDataSetFile(int dataId);
 
     /// @brief 批量写入：开始新 Arrow 文件（返回 writer token，null 表示失败）
-    void* beginArrowWrite(int dataId);
+    ArrowWriteToken beginArrowWrite(int dataId);
 
     /// @brief 批量写入：追加一批行（token 由 beginArrowWrite 返回）
-    void appendArrowBatch(void* token, const std::vector<J>& rows);
+    void appendArrowBatch(ArrowWriteToken token, const std::vector<J>& rows);
 
     /// @brief 批量写入：完成并关闭文件
-    void finishArrowWrite(void* token);
+    void finishArrowWrite(ArrowWriteToken token);
 
 #endif // ASTOCK_HAS_PARQUET
 

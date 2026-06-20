@@ -97,18 +97,19 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     return dataId;
 }
 
-void* DataCacheAdapter::beginArrowWrite(int dataId) {
+cleaning::DataCache::ArrowWriteToken DataCacheAdapter::beginArrowWrite(int dataId) {
     ensureInitialized();
     return m_cache->beginArrowWrite(dataId);
 }
 
-void DataCacheAdapter::appendArrowBatch(void* token, const std::vector<foundation::json::JsonFacade>& rows) {
+void DataCacheAdapter::appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
+                                         const std::vector<foundation::json::JsonFacade>& rows) {
     m_cache->appendArrowBatch(token, rows);
 }
 
-void DataCacheAdapter::finishArrowWrite(void* token, const QVariantMap& infoMap, int rowCount) {
+void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount) {
     m_cache->finishArrowWrite(token);
-    int dataId = infoMap.value("id", -1).toInt();
+    int dataId = token ? token->dataId : -1;
     if (dataId > 0) {
         m_cache->updateDataSetRowCount(dataId, rowCount);
         auto updated = m_cache->getDataSetInfo(dataId);

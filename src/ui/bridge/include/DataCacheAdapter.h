@@ -28,9 +28,10 @@ public:
     int storeDataSetFromRows(const std::vector<foundation::json::JsonFacade>& rows,
                               const QVariantMap& infoMap,
                               std::function<void(int,int)> progressCallback = {});
-    void* beginArrowWrite(int dataId);
-    void appendArrowBatch(void* token, const std::vector<foundation::json::JsonFacade>& rows);
-    void finishArrowWrite(void* token, const QVariantMap& infoMap, int rowCount);
+    cleaning::DataCache::ArrowWriteToken beginArrowWrite(int dataId);
+    void appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
+                           const std::vector<foundation::json::JsonFacade>& rows);
+    void finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount);
     QVariantList getDataSetById(int dataId);
     QVariantMap getDataSetInfo(int dataId) const;
     QVector<QVariantMap> getAllDataSetInfos() const;

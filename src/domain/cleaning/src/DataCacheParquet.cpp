@@ -218,26 +218,26 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
 
 // ── 批量写入 ──
 
-struct WriteSession {
+struct ArrowWriteSession : public DataCache::WriteSession {
     std::shared_ptr<arrow::Schema> schema;
     std::shared_ptr<arrow::ipc::RecordBatchWriter> writer;
     std::shared_ptr<arrow::io::FileOutputStream> stream;
     std::vector<std::string> fieldNames;
     std::unordered_set<std::string> numericFields;
-    int64_t totalRows = 0;
 };
 
-void* DataCache::beginArrowWrite(int dataId)
+DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId)
 {
-    auto session = new WriteSession();
+    auto session = new ArrowWriteSession();
+    session->dataId = dataId;
     session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
     return session;
 }
 
-void DataCache::appendArrowBatch(void* token, const std::vector<J>& rows)
+void DataCache::appendArrowBatch(ArrowWriteToken token, const std::vector<J>& rows)
 {
     if (!token || rows.empty()) return;
-    auto* s = static_cast<WriteSession*>(token);
+    auto* s = static_cast<ArrowWriteSession*>(token);
 
     // 首次写入：探测字段 schema
     if (!s->writer) {
@@ -257,10 +257,10 @@ void DataCache::appendArrowBatch(void* token, const std::vector<J>& rows)
     s->totalRows += table->num_rows();
 }
 
-void DataCache::finishArrowWrite(void* token)
+void DataCache::finishArrowWrite(ArrowWriteToken token)
 {
     if (!token) return;
-    auto* s = static_cast<WriteSession*>(token);
+    auto* s = static_cast<ArrowWriteSession*>(token);
     if (s->writer) s->writer->Close();
     s->stream.reset();
     fprintf(stderr, "[DataCache] saved Arrow IPC %s: %lld rows x %zu cols\n",
