@@ -169,8 +169,6 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
 
             // 1. 从 Arrow 加载数据
             auto rows = cleaning::DataCache::instance().loadDataSetFile(dataSetId);
-            fprintf(stderr, "[CleaningSvc] loaded: %zu rows\n", rows.size());
-            fflush(stderr);
             inputRows = static_cast<int>(rows.size());
             if (rows.empty()) {
                 QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
@@ -180,23 +178,13 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             }
 
             // 2. 构建清洗引擎
-            fprintf(stderr, "[CleaningSvc] building engine, rules=%d\n", effectiveRules.size());
-            fflush(stderr);
             cleaning::CleaningEngine engine;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
-                std::string ruleKey = it.key().toStdString();
-                engine.addRule(createCppRule(ruleKey, ""));
+                engine.addRule(createCppRule(it.key().toStdString(), ""));
             }
 
-            fprintf(stderr, "[CleaningSvc] engine built, rules added\n");
-            fflush(stderr);
-
             // 3. 清洗
-            fprintf(stderr, "[CleaningSvc] engine.clean START: inputRows=%d\n", inputRows);
-            fflush(stderr);
             auto cleaned = engine.clean(std::move(rows));
-            fprintf(stderr, "[CleaningSvc] engine.clean DONE: outputRows=%zu\n", cleaned.size());
-            fflush(stderr);
             outputRows = static_cast<int>(cleaned.size());
 
             QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
@@ -213,11 +201,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             infoMap["startDate"] = info.value("startDate");
             infoMap["endDate"] = info.value("endDate");
 
-            fprintf(stderr, "[CleaningSvc] storeDataSetFromRows: outputRows=%d\n", outputRows);
-            fflush(stderr);
             resultId = DataCacheAdapter::instance().storeDataSetFromRows(cleaned, infoMap);
-            fprintf(stderr, "[CleaningSvc] storeDataSetFromRows returned: resultId=%d\n", resultId);
-            fflush(stderr);
             message = QString("清洗完成: %1 → %2 条").arg(inputRows).arg(outputRows);
 
         } catch (const std::exception& e) {
