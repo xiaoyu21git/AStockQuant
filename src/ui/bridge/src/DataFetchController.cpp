@@ -33,13 +33,28 @@ void updateBoolProperty(bool& target, bool value, const std::function<void()>& n
 static constexpr int kPageSize = 100;
 
 QString tableForType(const QString& dt) {
-    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") return "daily_bar";
+    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly" || dt == "minute_data") return "daily_bar";
     if (dt == "financial") return "financial_statement";
+    if (dt == "news") return "news_data";
+    if (dt == "realtime") return "realtime_quote";
+    if (dt == "historical") return "historical_data";
+    if (dt == "index_constituents") return "index_constituents";
+    if (dt == "index_list") return "index_info";
+    if (dt == "policy") return "policy_data";
+    if (dt == "alternative") return "alternative_data";
+    if (dt == "derivatives") return "derivatives_data";
     return QString();
 }
 QString dateColForType(const QString& dt) {
-    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") return "trade_date";
-    if (dt == "financial") return "report_date";
+    if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly" || dt == "minute_data") return "trade_date";
+    if (dt == "financial" || dt == "news") return "report_date";
+    if (dt == "realtime") return "update_time";
+    if (dt == "historical") return "trade_date";
+    if (dt == "index_constituents") return "snapshot_date";
+    if (dt == "index_list") return "listing_date";
+    if (dt == "policy") return "announce_date";
+    if (dt == "alternative") return "data_date";
+    if (dt == "derivatives") return "trade_date";
     return "trade_date";
 }
 
@@ -162,8 +177,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int totalMonths = monthsBetween(sy, sm, ey, em);
 
         int doneUnits = dataTypes.size();
-        int totalUnits = doneUnits + totalMonths * (dataTypes.contains("kline_daily") || dataTypes.contains("kline_weekly") || dataTypes.contains("kline_monthly") ? 1 : 0)
-                        + totalMonths * (dataTypes.contains("financial") ? 1 : 0);
+        int totalUnits = doneUnits + totalMonths * static_cast<int>(dataTypes.size());
 
         QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
             if (!self) return;
@@ -208,63 +222,51 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             return j;
         };
 
+        auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
+            auto j = foundation::json::JsonFacade::createObject();
+            for (const auto& [col, val] : r.getValues()) {
+                try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { j.set(col, foundation::json::JsonFacade::createDouble(d)); continue; } } catch(...) {}
+                j.set(col, foundation::json::JsonFacade::createString(val));
+            }
+            return j;
+        };
+
         int totalRows = 0;
         for (const QString& dt : dataTypes) {
-            bool isKline = (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly");
-            bool isFinancial = (dt == "financial");
+            QString table = tableForType(dt);
+            if (table.isEmpty()) continue;
 
-            if (isKline) {
-                for (int mi = 0; mi < totalMonths; mi++) {
-                    int cm = sm + mi;
-                    int cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
-                    int cs = (cy == sy && cm == sm) ? sd : 1;
-                    int ce = (cy == ey && cm == em) ? ed : 28; // approximate, repo handles actual month end
-                    auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
-                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-                    if (!db2 || !db2->isOpen()) break;
-                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-                    auto bars = repo.queryDailyBarBatch(symVec, ms, me);
-                    std::vector<foundation::json::JsonFacade> batch;
-                    for (const auto& bar : bars) {
-                        auto j = foundation::json::JsonFacade::createObject();
-                        j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
-                        j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
-                        j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
-                        j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
-                        j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
-                        j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
-                        j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
-                        j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
-                        batch.push_back(std::move(j));
+            for (int mi = 0; mi < totalMonths; mi++) {
+                int cm = sm + mi, cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
+                int cs = (cy == sy && cm == sm) ? sd : 1;
+                int ce = (cy == ey && cm == em) ? ed : 28;
+                auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
+                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+                if (!db2 || !db2->isOpen()) break;
+                std::string inClause;
+                if (!symVec.empty()) {
+                    inClause = " AND symbol IN (";
+                    for (size_t si = 0; si < symVec.size(); ++si) {
+                        if (si > 0) inClause += ",";
+                        inClause += "'" + symVec[si] + "'";
                     }
-                    if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
-                    doneUnits++;
-                    int du = doneUnits, tu = totalUnits, tr = totalRows;
-                    QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
+                    inClause += ")";
                 }
-            } else if (isFinancial) {
-                for (int mi = 0; mi < totalMonths; mi++) {
-                    int cm = sm + mi;
-                    int cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
-                    int cs = (cy == sy && cm == sm) ? sd : 1;
-                    int ce = (cy == ey && cm == em) ? ed : 28;
-                    auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
-                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-                    if (!db2 || !db2->isOpen()) break;
-                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-                    auto financialRows = repo.queryAllMarketFinancialData(ms, me);
-                    std::vector<foundation::json::JsonFacade> batch;
-                    for (const auto& row : financialRows) {
-                        batch.push_back(rowToJson(row));
-                    }
-                    if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
-                    doneUnits++;
-                    int du = doneUnits, tu = totalUnits, tr = totalRows;
-                    QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
-                }
+                std::string sql = "SELECT * FROM " + table.toStdString()
+                    + " WHERE " + dateColForType(dt).toStdString() + " BETWEEN '" + ms + "' AND '" + me + "'" + inClause;
+                auto result = db2->executeQuery(sql, {});
+                std::vector<foundation::json::JsonFacade> batch;
+                for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
+                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
+                doneUnits++;
+                int du = doneUnits, tu = totalUnits, tr = totalRows;
+                QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() {
+                    if (!self) return; int pct = (du * 100) / qMax(1, tu);
+                    self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct);
+                    emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu));
+                }, Qt::QueuedConnection);
             }
         }
-
         DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
         int did = dataId, tr = totalRows;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
