@@ -179,13 +179,18 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
 
             // 2. 构建清洗引擎
             cleaning::CleaningEngine engine;
+            int ruleCount = 0;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
-                engine.addRule(createCppRule(it.key().toStdString(), ""));
+                if (createCppRule(it.key().toStdString(), "")) { engine.addRule(createCppRule(it.key().toStdString(), "")); ++ruleCount; }
             }
+            fprintf(stderr, "[CleaningSvc] rules=%d rows=%d\n", ruleCount, inputRows);
+            fflush(stderr);
 
             // 3. 清洗
             auto cleaned = engine.clean(std::move(rows));
             outputRows = static_cast<int>(cleaned.size());
+            fprintf(stderr, "[CleaningSvc] done: %d -> %d rows removed=%d\n", inputRows, outputRows, inputRows - outputRows);
+            fflush(stderr);
 
             QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
                 emit self->cleaningProgress(QString::number(dataSetId), 95, QStringLiteral("写入结果..."));
