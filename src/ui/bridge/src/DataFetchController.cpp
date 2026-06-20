@@ -245,11 +245,13 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
                 for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
-                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
+                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); int n = static_cast<int>(batch.size()); totalRows += n; dtRows += n; }
                 doneUnits++;
                 int du = doneUnits, tu = totalUnits, tr = totalRows;
                 QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
             }
+            fprintf(stderr, "[DFC] %s: %d rows\n", dt.toStdString().c_str(), dtRows);
+            fflush(stderr);
         }
 
         DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
