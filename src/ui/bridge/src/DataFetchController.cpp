@@ -224,10 +224,11 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             QString table = tableForType(dt);
             if (table.isEmpty()) { fprintf(stderr, "[DFC] skip type %s (no table)\n", dt.toStdString().c_str()); fflush(stderr); continue; }
             int dtRows = 0;
+            auto lastDay = [](int y, int m) { static const int d[]={0,31,28,31,30,31,30,31,31,30,31,30,31}; return m==2 && y%4==0 && (y%100!=0||y%400==0) ? 29 : d[m]; };
             for (int mi = 0; mi < totalMonths; mi++) {
                 int cm = sm + mi, cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
                 int cs = (cy == sy && cm == sm) ? sd : 1;
-                int ce = (cy == ey && cm == em) ? ed : 28;
+                int ce = (cy == ey && cm == em) ? ed : lastDay(cy, cm);
                 auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
                 auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
                 if (!db2 || !db2->isOpen()) break;
