@@ -246,7 +246,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             auto rr = dbr->executeQuery(sql,{});
             for (const auto& row : rr.getRows()) for (const auto& [col,_] : row.getValues()) if (fieldSet.insert(col).second) allFields.push_back(col);
         }
-        auto rowToJson = [&allFields](const astock::database::SqlQueryResultRow& r) { auto j = foundation::json::JsonFacade::createObject(); for (const auto& [col, val] : r.getValues()) { if (val.empty()) continue; char* end = nullptr; double d = strtod(val.c_str(), &end); if (end && (size_t)(end - val.c_str()) == val.size()) j.set(col, foundation::json::JsonFacade::createDouble(d)); else j.set(col, foundation::json::JsonFacade::createString(val)); } return j; };
+        auto rowToJson = [&allFields](const astock::database::SqlQueryResultRow& r) { auto j = foundation::json::JsonFacade::createObject(); for (const auto& col : allFields) { auto it = r.getValues().find(col); if (it == r.getValues().end() || it->second.empty()) { j.set(col, foundation::json::JsonFacade::createDouble(NAN)); continue; } char* end = nullptr; double d = strtod(it->second.c_str(), &end); if (end && (size_t)(end - it->second.c_str()) == it->second.size()) j.set(col, foundation::json::JsonFacade::createDouble(d)); else j.set(col, foundation::json::JsonFacade::createString(it->second)); } return j; };
         // 写单个 Arrow 文件
         QVariantMap infoMap; infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate); infoMap["sourceType"] = dataSource; infoMap["stockCodes"] = allSymbols; infoMap["startDate"] = startDate; infoMap["endDate"] = endDate;
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
