@@ -152,15 +152,18 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& s : allSymbols) symbolList.append(merged[s]);
         int total = symbolList.size();
 
-        auto sD = QDate::fromString(startDate, "yyyy-MM-dd");
-        auto eD = QDate::fromString(endDate, "yyyy-MM-dd");
+        // 纯 C++ 日期计算
+        auto parseDate = [](const QString& s) { int y,m,d; sscanf(s.toStdString().c_str(), "%d-%d-%d", &y, &m, &d); return std::make_tuple(y,m,d); };
+        auto dateStr = [](int y, int m, int d) { char buf[16]; snprintf(buf, 16, "%04d-%02d-%02d", y, m, d); return std::string(buf); };
+        auto monthsBetween = [](int y1, int m1, int y2, int m2) { return (y2 - y1) * 12 + (m2 - m1) + 1; };
+
+        auto [sy, sm, sd] = parseDate(startDate);
+        auto [ey, em, ed] = parseDate(endDate);
+        int totalMonths = monthsBetween(sy, sm, ey, em);
+
         int doneUnits = dataTypes.size();
-        int totalUnits = doneUnits;
-        for (const QString& dt : dataTypes) {
-            if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
-                for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) totalUnits++;
-            }
-        }
+        int totalUnits = doneUnits + totalMonths * (dataTypes.contains("kline_daily") || dataTypes.contains("kline_weekly") || dataTypes.contains("kline_monthly") ? 1 : 0)
+                        + totalMonths * (dataTypes.contains("financial") ? 1 : 0);
 
         QMetaObject::invokeMethod(self.get(), [self, symbolList, total, doneUnits, totalUnits]() {
             if (!self) return;
@@ -194,16 +197,33 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
         auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId) : nullptr;
 
+        // 辅助函数: SqlQueryResultRow → JsonFacade
+        auto rowToJson = [](const astock::database::SqlQueryResultRow& r) {
+            auto j = foundation::json::JsonFacade::createObject();
+            for (const auto& [col, val] : r.getValues()) {
+                // 尝试解析为 double，失败则当字符串
+                try { size_t pos; double d = std::stod(val, &pos); if (pos == val.size()) { j.set(col, foundation::json::JsonFacade::createDouble(d)); continue; } } catch(...) {}
+                j.set(col, foundation::json::JsonFacade::createString(val));
+            }
+            return j;
+        };
+
         int totalRows = 0;
         for (const QString& dt : dataTypes) {
-            if (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly") {
-                for (QDate m = QDate(sD.year(), sD.month(), 1); m <= eD; m = m.addMonths(1)) {
-                    QDate ms = qMax(sD, m), me = qMin(eD, QDate(m.year(), m.month(), m.daysInMonth()));
-                    if (ms > me) continue;
+            bool isKline = (dt == "kline_daily" || dt == "kline_weekly" || dt == "kline_monthly");
+            bool isFinancial = (dt == "financial");
+
+            if (isKline) {
+                for (int mi = 0; mi < totalMonths; mi++) {
+                    int cm = sm + mi;
+                    int cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
+                    int cs = (cy == sy && cm == sm) ? sd : 1;
+                    int ce = (cy == ey && cm == em) ? ed : 28; // approximate, repo handles actual month end
+                    auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
                     auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
                     if (!db2 || !db2->isOpen()) break;
                     astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-                    auto bars = repo.queryDailyBarBatch(symVec, ms.toString("yyyy-MM-dd").toStdString(), me.toString("yyyy-MM-dd").toStdString());
+                    auto bars = repo.queryDailyBarBatch(symVec, ms, me);
                     std::vector<foundation::json::JsonFacade> batch;
                     for (const auto& bar : bars) {
                         auto j = foundation::json::JsonFacade::createObject();
@@ -217,18 +237,30 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                         j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
                         batch.push_back(std::move(j));
                     }
-                    if (!batch.empty()) {
-                        DataCacheAdapter::instance().appendArrowBatch(token, batch);
-                        totalRows += static_cast<int>(batch.size());
-                    }
+                    if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
                     doneUnits++;
                     int du = doneUnits, tu = totalUnits, tr = totalRows;
-                    QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() {
-                        if (!self) return;
-                        int pct = (du * 100) / qMax(1, tu);
-                        self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct);
-                        emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu));
-                    }, Qt::QueuedConnection);
+                    QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
+                }
+            } else if (isFinancial) {
+                for (int mi = 0; mi < totalMonths; mi++) {
+                    int cm = sm + mi;
+                    int cy = sy + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
+                    int cs = (cy == sy && cm == sm) ? sd : 1;
+                    int ce = (cy == ey && cm == em) ? ed : 28;
+                    auto ms = dateStr(cy, cm, cs), me = dateStr(cy, cm, ce);
+                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+                    if (!db2 || !db2->isOpen()) break;
+                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+                    auto financialRows = repo.queryAllMarketFinancialData(ms, me);
+                    std::vector<foundation::json::JsonFacade> batch;
+                    for (const auto& row : financialRows) {
+                        batch.push_back(rowToJson(row));
+                    }
+                    if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += static_cast<int>(batch.size()); }
+                    doneUnits++;
+                    int du = doneUnits, tu = totalUnits, tr = totalRows;
+                    QMetaObject::invokeMethod(self.get(), [self, du, tu, tr]() { if (!self) return; int pct = (du * 100) / qMax(1, tu); self->updateStatus(QString("下载 %1/%2 (%3 行)").arg(du).arg(tu).arg(tr), pct); emit self->dataFetchProgress(pct, QString("下载 %1/%2").arg(du).arg(tu)); }, Qt::QueuedConnection);
                 }
             }
         }
