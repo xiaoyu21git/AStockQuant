@@ -63,6 +63,7 @@ DataFetchController::DataFetchController(QObject* parent)
             this, [this](const QString&, int p, const QString& m) {
         m_progress = p; m_statusMessage = m;
         emit progressChanged(); emit statusMessageChanged();
+        emit dataCleaningProgress(p, m);
     });
     connect(m_cleaningSvc, &DataCleaningServiceRefactored::cleaningError,
             this, [this](const QString&, const QString& e) {
