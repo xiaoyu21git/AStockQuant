@@ -91,7 +91,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     updateStatus("分析数据范围...", 0);
 
     QPointer<DataFetchController> self(this);
-    std::thread([self, dataSource, startDate, endDate, dataTypes]() {
+    FOUNDATION_THREADS.post([self, dataSource, startDate, endDate, dataTypes]() {
         if (!self) return;
 
         auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
@@ -223,7 +223,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             self->refreshDataSetInfos();
             emit self->dataSetReadyForCleaning(did);
         }, Qt::QueuedConnection);
-    }).detach();
+    });
 }
 
 void DataFetchController::fetchDataByType(const QString& dataSource,
