@@ -38,15 +38,15 @@ void scanFields(const std::vector<J>& rows,
         MF::CIRCULATING_MARKET_CAP, MF::PRE_ADJ_FACTOR, MF::POST_ADJ_FACTOR,
         // K线字符串
         "asset_class", "status", CF::DATA_SOURCE, "trade_status",
-        "disclosure_date", "report_type",
+        F_F::DISCLOSURE_DATE, F_F::REPORT_TYPE,
         // 财务
-        "report_date", "symbol_id", "indicator_id",
-        "eps", "bps", "roa", "roe", "profit_margin", "gross_margin", "operating_margin",
-        "debt_to_equity", "current_ratio", "quick_ratio",
-        "operating_cash_flow", "investing_cash_flow", "financing_cash_flow",
-        "total_revenue", "net_profit", "total_assets", "total_liabilities", "equity",
-        "dividend_yield", "payout_ratio", "dividend_stability",
-        "effective_disclosure_date"
+        F_F::REPORT_DATE, F_F::SYMBOL_ID, F_F::INDICATOR_ID,
+        F_F::EPS, F_F::BPS, F_F::ROA, F_F::ROE, F_F::PROFIT_MARGIN, F_F::GROSS_MARGIN, F_F::OPERATING_MARGIN,
+        F_F::DEBT_TO_EQUITY, F_F::CURRENT_RATIO, F_F::QUICK_RATIO,
+        F_F::OPERATING_CASH_FLOW, F_F::INVESTING_CASH_FLOW, F_F::FINANCING_CASH_FLOW,
+        F_F::TOTAL_REVENUE, F_F::NET_PROFIT, F_F::TOTAL_ASSETS, F_F::TOTAL_LIABILITIES, F_F::EQUITY,
+        F_F::DIVIDEND_YIELD, F_F::PAYOUT_RATIO, F_F::DIVIDEND_STABILITY,
+        F_F::EFFECTIVE_DISCLOSURE_DATE
     };
     std::vector<const char*> knownFields(knownFieldsData, knownFieldsData + sizeof(knownFieldsData)/sizeof(knownFieldsData[0]));
     for (const auto& row : rows) {

@@ -64,6 +64,37 @@ struct MF {  // MarketFields
     static FieldSet all() { return {OPEN, HIGH, LOW, CLOSE, PRE_CLOSE, VOLUME, TURNOVER, CHANGE_AMT, CHANGE_PCT, AMPLITUDE, TURNOVER_RATE, PRE_ADJ_FACTOR, POST_ADJ_FACTOR, MARKET_CAP, CIRCULATING_MARKET_CAP, PE_RATIO, PB_RATIO, INDUSTRY_CODE}; }
 };
 
+// ── 财务字段 ──
+struct F_F {  // FinancialFields
+    static constexpr FieldKey REPORT_DATE{"report_date"};
+    static constexpr FieldKey REPORT_TYPE{"report_type"};
+    static constexpr FieldKey DISCLOSURE_DATE{"disclosure_date"};
+    static constexpr FieldKey EFFECTIVE_DISCLOSURE_DATE{"effective_disclosure_date"};
+    static constexpr FieldKey SYMBOL_ID{"symbol_id"};
+    static constexpr FieldKey INDICATOR_ID{"indicator_id"};
+    static constexpr FieldKey EPS{"eps"};
+    static constexpr FieldKey BPS{"bps"};
+    static constexpr FieldKey ROA{"roa"};
+    static constexpr FieldKey ROE{"roe"};
+    static constexpr FieldKey PROFIT_MARGIN{"profit_margin"};
+    static constexpr FieldKey GROSS_MARGIN{"gross_margin"};
+    static constexpr FieldKey OPERATING_MARGIN{"operating_margin"};
+    static constexpr FieldKey DEBT_TO_EQUITY{"debt_to_equity"};
+    static constexpr FieldKey CURRENT_RATIO{"current_ratio"};
+    static constexpr FieldKey QUICK_RATIO{"quick_ratio"};
+    static constexpr FieldKey OPERATING_CASH_FLOW{"operating_cash_flow"};
+    static constexpr FieldKey INVESTING_CASH_FLOW{"investing_cash_flow"};
+    static constexpr FieldKey FINANCING_CASH_FLOW{"financing_cash_flow"};
+    static constexpr FieldKey TOTAL_REVENUE{"total_revenue"};
+    static constexpr FieldKey NET_PROFIT{"net_profit"};
+    static constexpr FieldKey TOTAL_ASSETS{"total_assets"};
+    static constexpr FieldKey TOTAL_LIABILITIES{"total_liabilities"};
+    static constexpr FieldKey EQUITY{"equity"};
+    static constexpr FieldKey DIVIDEND_YIELD{"dividend_yield"};
+    static constexpr FieldKey PAYOUT_RATIO{"payout_ratio"};
+    static constexpr FieldKey DIVIDEND_STABILITY{"dividend_stability"};
+};
+
 // ── 财务字段 (与 FinancialFieldKeys 对齐) ──
 struct FF {
     static constexpr FieldKey REPORT_DATE{"report_date"};
