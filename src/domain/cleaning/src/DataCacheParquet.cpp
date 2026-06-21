@@ -95,7 +95,9 @@ std::shared_ptr<arrow::Table> buildArrowTable(
             for (const auto& row : rows) {
                 if (row.isObject() && row.has(fname.c_str())) {
                     auto v = row.get(fname.c_str());
-                    builder.Append(v.asString());
+                    if (v.isString()) builder.Append(v.asString());
+                    else if (v.isNumber()) { char buf[64]; snprintf(buf,64,"%.10g",v.asDouble()); builder.Append(std::string(buf)); }
+                    else builder.AppendNull();
                 } else {
                     builder.AppendNull();
                 }
