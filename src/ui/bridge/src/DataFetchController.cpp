@@ -201,17 +201,26 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             for (const QString& dt : dataTypes) {
                 auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
                 std::vector<foundation::json::JsonFacade> batch;
-                if (dt == "financial") {
-                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
-                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
+                astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+                if (src->typeName() == "financial") {
                     auto rows = repo.queryAllMarketFinancialData(ms, me);
                     for (const auto& row : rows) batch.push_back(rowToJson(row));
                 } else {
                     std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
-                    std::string sql = src->buildDataQuery(ms, me, sv);
-                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
-                    auto result = db2->executeQuery(sql, {});
-                    for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
+                    auto bars = repo.queryDailyBarBatch(sv, ms, me);
+                    for (const auto& bar : bars) {
+                        auto j = foundation::json::JsonFacade::createObject();
+                        j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
+                        j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
+                        j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
+                        j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
+                        j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
+                        j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
+                        j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
+                        j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
+                        batch.push_back(std::move(j));
+                    }
                 }
                 if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += (int)batch.size(); }
             }
