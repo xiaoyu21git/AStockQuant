@@ -200,12 +200,19 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
             for (const QString& dt : dataTypes) {
                 auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-                std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
-                std::string sql = src->buildDataQuery(ms, me, sv);
-                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
-                auto result = db2->executeQuery(sql, {});
                 std::vector<foundation::json::JsonFacade> batch;
-                for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
+                if (dt == "financial") {
+                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
+                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+                    auto rows = repo.queryAllMarketFinancialData(ms, me);
+                    for (const auto& row : rows) batch.push_back(rowToJson(row));
+                } else {
+                    std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
+                    std::string sql = src->buildDataQuery(ms, me, sv);
+                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
+                    auto result = db2->executeQuery(sql, {});
+                    for (const auto& row : result.getRows()) batch.push_back(rowToJson(row));
+                }
                 if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += (int)batch.size(); }
             }
             doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalRows;
