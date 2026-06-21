@@ -7,6 +7,7 @@
 #include <arrow/ipc/api.h>
 
 #include <cstdio>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -122,29 +123,39 @@ std::vector<J> tableToRows(const std::shared_ptr<arrow::Table>& table)
     const int64_t n = table->num_rows();
     rows.reserve(static_cast<size_t>(n));
     const auto& schema = table->schema();
+    const int nCols = table->num_columns();
+
+    // 预计算每列的 chunk 边界
+    struct ColInfo { std::vector<int64_t> offsets; std::vector<std::shared_ptr<arrow::Array>> chunks; };
+    std::vector<ColInfo> colInfos(nCols);
+    for (int c = 0; c < nCols; ++c) {
+        auto chunked = table->column(c);
+        int64_t off = 0;
+        for (int k = 0; k < chunked->num_chunks(); ++k) {
+            auto arr = chunked->chunk(k);
+            colInfos[c].offsets.push_back(off);
+            colInfos[c].chunks.push_back(arr);
+            off += arr->length();
+        }
+    }
 
     for (int64_t i = 0; i < n; ++i) {
         auto obj = J::createObject();
-        for (int c = 0; c < table->num_columns(); ++c) {
+        for (int c = 0; c < nCols; ++c) {
             const auto& fname = schema->field(c)->name();
-            auto chunked = table->column(c);
-            // 定位行 i 所在的 chunk
-            int chunkIdx = 0;
-            int64_t offset = i;
-            while (chunkIdx < chunked->num_chunks() && offset >= chunked->chunk(chunkIdx)->length()) {
-                offset -= chunked->chunk(chunkIdx)->length();
-                chunkIdx++;
-            }
-            if (chunkIdx >= chunked->num_chunks()) continue;
-            auto arrResult = chunked->chunk(chunkIdx);
-            if (!arrResult || arrResult->IsNull(offset)) continue;
+            const auto& info = colInfos[c];
+            auto it = std::upper_bound(info.offsets.begin(), info.offsets.end(), i) - 1;
+            int k = static_cast<int>(it - info.offsets.begin());
+            int64_t off = i - info.offsets[k];
+            auto arr = info.chunks[k];
+            if (arr->IsNull(off)) continue;
 
-            if (arrResult->type_id() == arrow::Type::DOUBLE) {
-                auto dArr = std::static_pointer_cast<arrow::DoubleArray>(arrResult);
-                obj.set(fname, J::createDouble(dArr->Value(offset)));
-            } else if (arrResult->type_id() == arrow::Type::STRING) {
-                auto sArr = std::static_pointer_cast<arrow::StringArray>(arrResult);
-                obj.set(fname, J::createString(sArr->GetString(offset)));
+            if (arr->type_id() == arrow::Type::DOUBLE) {
+                auto dArr = std::static_pointer_cast<arrow::DoubleArray>(arr);
+                obj.set(fname, J::createDouble(dArr->Value(off)));
+            } else if (arr->type_id() == arrow::Type::STRING) {
+                auto sArr = std::static_pointer_cast<arrow::StringArray>(arr);
+                obj.set(fname, J::createString(sArr->GetString(off)));
             }
         }
         rows.push_back(std::move(obj));
