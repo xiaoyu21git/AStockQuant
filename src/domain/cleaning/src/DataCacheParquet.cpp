@@ -277,9 +277,9 @@ void DataCache::appendArrowBatch(ArrowWriteToken token, const std::vector<J>& ro
     if (!token || rows.empty()) return;
     auto* s = static_cast<ArrowWriteSession*>(token);
 
-    // 首次写入：探测字段 schema
+    // 首次写入：若 schema 未预设则扫描字段
     if (!s->writer) {
-        scanFields(rows, s->fieldNames, s->numericFields);
+        if (s->fieldNames.empty()) scanFields(rows, s->fieldNames, s->numericFields);
         auto table = buildArrowTable(rows, s->fieldNames, s->numericFields);
         s->schema = table->schema();
         s->writer = arrow::ipc::MakeFileWriter(s->stream, s->schema).ValueOrDie();
