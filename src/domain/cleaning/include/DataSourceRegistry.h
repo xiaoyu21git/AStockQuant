@@ -93,19 +93,17 @@ public:
     }
 
     FieldSchema detectSchema(void* /*db*/, const std::string&, const std::string&) const override {
+        // 与 MarketDataRepository::queryAllMarketFinancialData 的 SELECT 列对齐
         FieldSchema s;
-        s.names = {"symbol","report_date",
-            "eps","bps","roa","roe","profit_margin","gross_margin","operating_margin",
-            "debt_to_equity","current_ratio","quick_ratio",
-            "operating_cash_flow","investing_cash_flow","financing_cash_flow",
+        s.names = {"symbol","report_date","disclosure_date",
+            "eps","bps","roe","roa",
             "total_revenue","net_profit","total_assets","total_liabilities","equity",
-            "dividend_yield","payout_ratio","dividend_stability",
-            "effective_disclosure_date"};
-        s.numeric = {"eps","bps","roa","roe","profit_margin","gross_margin","operating_margin",
-            "debt_to_equity","current_ratio","quick_ratio",
             "operating_cash_flow","investing_cash_flow","financing_cash_flow",
+            "dividend_yield"};
+        s.numeric = {"eps","bps","roe","roa",
             "total_revenue","net_profit","total_assets","total_liabilities","equity",
-            "dividend_yield","payout_ratio","dividend_stability"};
+            "operating_cash_flow","investing_cash_flow","financing_cash_flow",
+            "dividend_yield"};
         return s;
     }
 };

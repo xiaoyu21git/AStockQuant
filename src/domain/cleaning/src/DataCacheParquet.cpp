@@ -128,15 +128,23 @@ std::vector<J> tableToRows(const std::shared_ptr<arrow::Table>& table)
         for (int c = 0; c < table->num_columns(); ++c) {
             const auto& fname = schema->field(c)->name();
             auto chunked = table->column(c);
-            auto arrResult = chunked->chunk(0);
-            if (!arrResult) continue;
+            // 定位行 i 所在的 chunk
+            int chunkIdx = 0;
+            int64_t offset = i;
+            while (chunkIdx < chunked->num_chunks() && offset >= chunked->chunk(chunkIdx)->length()) {
+                offset -= chunked->chunk(chunkIdx)->length();
+                chunkIdx++;
+            }
+            if (chunkIdx >= chunked->num_chunks()) continue;
+            auto arrResult = chunked->chunk(chunkIdx);
+            if (!arrResult || arrResult->IsNull(offset)) continue;
 
             if (arrResult->type_id() == arrow::Type::DOUBLE) {
                 auto dArr = std::static_pointer_cast<arrow::DoubleArray>(arrResult);
-                if (!dArr->IsNull(i)) obj.set(fname, J::createDouble(dArr->Value(i)));
+                obj.set(fname, J::createDouble(dArr->Value(offset)));
             } else if (arrResult->type_id() == arrow::Type::STRING) {
                 auto sArr = std::static_pointer_cast<arrow::StringArray>(arrResult);
-                if (!sArr->IsNull(i)) obj.set(fname, J::createString(sArr->GetString(i)));
+                obj.set(fname, J::createString(sArr->GetString(offset)));
             }
         }
         rows.push_back(std::move(obj));
