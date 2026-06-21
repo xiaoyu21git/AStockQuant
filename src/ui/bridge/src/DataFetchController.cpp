@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <memory>
+#include <future>
 
 namespace {
 
@@ -198,30 +199,41 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             int ce = (cy == y2 && cm == m2) ? d2 : dtab[cm] + (cm==2 && cy%4==0 && (cy%100!=0||cy%400==0) ? 1 : 0);
             char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
+
+            // 并行查询当月所有数据类型
+            std::vector<std::future<std::vector<foundation::json::JsonFacade>>> futures;
             for (const QString& dt : dataTypes) {
-                auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-                std::vector<foundation::json::JsonFacade> batch;
-                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
-                astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-                if (src->typeName() == "financial") {
-                    auto rows = repo.queryAllMarketFinancialData(ms, me);
-                    for (const auto& row : rows) batch.push_back(rowToJson(row));
-                } else {
-                    std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
-                    auto bars = repo.queryDailyBarBatch(sv, ms, me);
-                    for (const auto& bar : bars) {
-                        auto j = foundation::json::JsonFacade::createObject();
-                        j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
-                        j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
-                        j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
-                        j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
-                        j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
-                        j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
-                        j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
-                        j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
-                        batch.push_back(std::move(j));
+                futures.push_back(std::async(std::launch::async, [&, dt, ms, me]() {
+                    std::vector<foundation::json::JsonFacade> batch;
+                    auto* src = cleaning::sourceByName(dt.toStdString());
+                    if (!src) return batch;
+                    auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+                    if (!db2 || !db2->isOpen()) return batch;
+                    astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
+                    if (src->typeName() == "financial") {
+                        auto rows = repo.queryAllMarketFinancialData(ms, me);
+                        for (const auto& row : rows) batch.push_back(rowToJson(row));
+                    } else {
+                        std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
+                        auto bars = repo.queryDailyBarBatch(sv, ms, me);
+                        for (const auto& bar : bars) {
+                            auto j = foundation::json::JsonFacade::createObject();
+                            j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
+                            j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
+                            j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
+                            j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
+                            j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
+                            j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
+                            j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
+                            j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
+                            batch.push_back(std::move(j));
+                        }
                     }
-                }
+                    return batch;
+                }));
+            }
+            for (auto& f : futures) {
+                auto batch = f.get();
                 if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += (int)batch.size(); }
             }
             doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalRows;
