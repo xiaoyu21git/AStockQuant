@@ -18,7 +18,6 @@
 
 #include <functional>
 #include <memory>
-#include <thread>
 
 namespace {
 
