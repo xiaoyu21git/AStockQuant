@@ -14,6 +14,7 @@
 #include <vector>
 
 using J = foundation::json::JsonFacade;
+using namespace cleaning;
 
 namespace {
 
@@ -27,22 +28,25 @@ void scanFields(const std::vector<J>& rows,
     static const int KNOWN_COUNT_KLINE = 30;
     static const int KNOWN_COUNT_FINANCIAL = 22;
     static const char* knownFieldsData[] = {
-        // K线字段
-        "symbol","name","code","stock_code","industry","industry_code",
-        "trade_date","open","high","low","close","pre_close",
-        "volume","turnover","change_pct","change_amt","amplitude",
-        "turnover_rate","pe_ratio","pb_ratio","market_cap",
-        "circulating_market_cap","pre_adj_factor","post_adj_factor",
-        "asset_class","status","data_source","trade_status",
-        "disclosure_date","report_type",
-        // 财务字段
-        "symbol_id","report_date",
-        "eps","bps","roa","roe","profit_margin","gross_margin","operating_margin",
-        "debt_to_equity","current_ratio","quick_ratio",
-        "operating_cash_flow","investing_cash_flow","financing_cash_flow",
-        "total_revenue","net_profit","total_assets","total_liabilities","equity",
-        "dividend_yield","payout_ratio","dividend_stability",
-        "effective_disclosure_date","indicator_id"
+        // 通用
+        CF::SYMBOL, "name", "code", "stock_code", CF::TRADE_DATE,
+        "industry", MF::INDUSTRY_CODE,
+        // K线数值
+        MF::OPEN, MF::HIGH, MF::LOW, MF::CLOSE, MF::PRE_CLOSE,
+        MF::VOLUME, MF::TURNOVER, MF::CHANGE_PCT, MF::CHANGE_AMT, MF::AMPLITUDE,
+        MF::TURNOVER_RATE, MF::PE_RATIO, MF::PB_RATIO, MF::MARKET_CAP,
+        MF::CIRCULATING_MARKET_CAP, MF::PRE_ADJ_FACTOR, MF::POST_ADJ_FACTOR,
+        // K线字符串
+        "asset_class", "status", CF::DATA_SOURCE, "trade_status",
+        "disclosure_date", "report_type",
+        // 财务
+        "report_date", "symbol_id", "indicator_id",
+        "eps", "bps", "roa", "roe", "profit_margin", "gross_margin", "operating_margin",
+        "debt_to_equity", "current_ratio", "quick_ratio",
+        "operating_cash_flow", "investing_cash_flow", "financing_cash_flow",
+        "total_revenue", "net_profit", "total_assets", "total_liabilities", "equity",
+        "dividend_yield", "payout_ratio", "dividend_stability",
+        "effective_disclosure_date"
     };
     std::vector<const char*> knownFields(knownFieldsData, knownFieldsData + sizeof(knownFieldsData)/sizeof(knownFieldsData[0]));
     for (const auto& row : rows) {
@@ -57,7 +61,7 @@ void scanFields(const std::vector<J>& rows,
             }
         }
     }
-    fieldNames = {"symbol", "trade_date"};
+    fieldNames = {CF::SYMBOL.c_str(), CF::TRADE_DATE.c_str()};
     for (const auto& [f, _] : fieldNumeric) {
         if (f != "symbol" && f != "trade_date") fieldNames.push_back(f);
     }
