@@ -129,6 +129,7 @@ private:
     double maxTargetWeight_{0.0};
     bool autoExecutionEnabled_{false};
     const void* m_historicalView{nullptr};
+    int m_currentEvaluationRow{-1};  // -1 = 实盘/未设置, 使用最后一行
 
 public:
     RuntimeStrategyContext() = default;
@@ -153,6 +154,10 @@ public:
     // ── 非因子策略：OHLCV 历史数据视图 (回测传入, 实盘为 nullptr) ──
     void setHistoricalView(const void* view) { m_historicalView = view; }
     [[nodiscard]] const void* historicalViewPtr() const noexcept { return m_historicalView; }
+
+    // ── 回测：当前评估行号 (从 0 开始), 实盘为 -1 表示使用最后一行 ──
+    void setCurrentEvaluationRow(int row) { m_currentEvaluationRow = row; }
+    [[nodiscard]] int currentEvaluationRow() const noexcept { return m_currentEvaluationRow; }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
     {

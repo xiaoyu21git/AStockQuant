@@ -52,14 +52,14 @@ Item {
             // 绩效指标卡片
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 200; radius: 8; color: "#1E293B"
                 GridLayout { anchors.fill: parent; anchors.margins: 10; columns: 5; columnSpacing: 8; rowSpacing: 6
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"总收益";   value:fp(perf.totalReturn);          accent:"#EF4444" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"年化收益"; value:fp(perf.annualizedReturn);     accent:"#EF4444" }
+                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"总收益";   value:fp(perf.totalReturn);          accent:(perf.totalReturn||0)>=0?"#EF4444":"#10B981" }
+                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"年化收益"; value:fp(perf.annualizedReturn);     accent:(perf.annualizedReturn||0)>=0?"#EF4444":"#10B981" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"最大回撤"; value:fp(perf.maxDrawdown);          accent:"#F59E0B" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"夏普比率"; value:fn(perf.sharpeRatio,3);        accent:"#38BDF8" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Sortino";  value:fn(perf.sortinoRatio,3);       accent:"#38BDF8" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Calmar";   value:fn(perf.calmarRatio,3);        accent:"#38BDF8" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"胜率";     value:fp(perf.winRate);              accent:"#22C55E" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"利润因子"; value:fn(perf.profitFactor,2);       accent:"#22C55E" }
+                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"胜率";     value:fp(perf.winRate);              accent:"#EF4444" }
+                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"利润因子"; value:fn(perf.profitFactor,2);       accent:"#EF4444" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Alpha";    value:fn(perf.alpha,3);             accent:"#F1F5F9" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Beta";     value:fn(perf.beta,2);              accent:"#F1F5F9" }
                     Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"信息比率"; value:fn(perf.informationRatio,3);   accent:"#F1F5F9" }
@@ -74,17 +74,17 @@ Item {
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 90; radius: 8; color: "#1E293B"
                 RowLayout { anchors.fill: parent; anchors.margins: 10; spacing: 14
                     Column { Layout.fillWidth: true; spacing: 2
-                        Text{text:"总盈利: "+fn(trades.totalProfit,0);font.pixelSize:12;color:"#22C55E";font.weight:Font.Bold}
-                        Text{text:"总亏损: "+fn(trades.totalLoss,0);font.pixelSize:12;color:"#EF4444";font.weight:Font.Bold}
+                        Text{text:"总盈利: "+fn(trades.totalProfit,0);font.pixelSize:12;color:"#EF4444";font.weight:Font.Bold}
+                        Text{text:"总亏损: "+fn(trades.totalLoss,0);font.pixelSize:12;color:"#10B981";font.weight:Font.Bold}
                         Text{text:"净值: "+(trades.totalProfit&&trades.totalLoss?fn(trades.totalProfit/Math.abs(trades.totalLoss),2):"--");font.pixelSize:10;color:"#64748B"} }
                     Column { Layout.fillWidth: true; spacing: 2
-                        Text{text:"最大盈利: "+fn(trades.largestWin,0);font.pixelSize:12;color:"#22C55E"}
-                        Text{text:"最大亏损: "+fn(trades.largestLoss,0);font.pixelSize:12;color:"#EF4444"}
+                        Text{text:"最大盈利: "+fn(trades.largestWin,0);font.pixelSize:12;color:"#EF4444"}
+                        Text{text:"最大亏损: "+fn(trades.largestLoss,0);font.pixelSize:12;color:"#10B981"}
                         Text{text:"平均持期: "+fn(trades.averageHoldingPeriodDays,0)+"天";font.pixelSize:10;color:"#64748B"} }
                     Column { Layout.fillWidth: true; spacing: 2
                         Text{text:"总交易: "+fn(trades.totalTrades,0);font.pixelSize:12;color:"#F1F5F9"}
                         Text{text:"胜: "+fn(trades.winningTrades,0)+" | 负: "+fn(trades.losingTrades,0);font.pixelSize:10;color:"#94A3B8"}
-                        Text{text:"胜率: "+fp(perf.winRate);font.pixelSize:10;color:"#22C55E"} }
+                        Text{text:"胜率: "+fp(perf.winRate);font.pixelSize:10;color:"#EF4444"} }
                 }
             }
 

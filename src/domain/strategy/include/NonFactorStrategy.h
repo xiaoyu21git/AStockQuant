@@ -53,9 +53,15 @@ public:
         if (rows < 50 || cols == 0) return;
 
         int rowStride = closeMat.rowStride;
-        int lastRow = rows - 1;
-        int lookback = std::min(50, rows);
+        // 回测时用 context 中的当前行号，实盘（-1）回退到最后一行
+        int evalRow = context.currentEvaluationRow();
+        int lastRow = (evalRow >= 0) ? evalRow : (rows - 1);
+        int lookback = std::min(50, lastRow + 1);
+        const int kMaxDailySignals = std::max(1, m_commonCfg.maxPositions);
 
+        // 收集所有信号，按评分排序后限流
+        std::vector<StrategySignal> allSignals;
+        allSignals.reserve(cols);
         for (int c = 0; c < cols; ++c) {
             std::vector<double> closePrices(lookback);
             for (int i = 0; i < lookback; ++i)
@@ -65,12 +71,31 @@ public:
             SignalResult sig = evaluateSymbol(closePrices, instruments[c].value,
                                                context, m_commonCfg);
             if (sig.valid) {
-                outputSignals.emplace_back(
+                allSignals.emplace_back(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},
                     sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
                     sig.score, sig.weight);
             }
+        }
+
+        // 卖单优先（平仓降低风险），买单按评分排序取 Top-N
+        std::sort(allSignals.begin(), allSignals.end(),
+            [](const StrategySignal& a, const StrategySignal& b) {
+                // 卖单排前面
+                if (a.side() == RuntimeOrderSide::Sell && b.side() == RuntimeOrderSide::Buy) return true;
+                if (a.side() == RuntimeOrderSide::Buy && b.side() == RuntimeOrderSide::Sell) return false;
+                // 同为买/卖，按评分降序
+                return a.score() > b.score();
+            });
+
+        int buyCount = 0;
+        for (auto& s : allSignals) {
+            if (s.side() == RuntimeOrderSide::Buy) {
+                if (buyCount >= kMaxDailySignals) continue;
+                ++buyCount;
+            }
+            outputSignals.push_back(std::move(s));
         }
     }
 
@@ -110,24 +135,23 @@ protected:
         sig.instrumentId = instrumentId;
         sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
-        bool golden  = checkMACross(closePrices, cfg.fastPeriod, cfg.slowPeriod, true);
-        bool dead    = checkMACross(closePrices, cfg.fastPeriod, cfg.slowPeriod, false);
-        if (golden)  { sig.valid = true; sig.isBuy = true;  sig.score = 0.75; }
-        if (dead)    { sig.valid = true; sig.isBuy = false; sig.score = 0.65; }
-        return sig;
-    }
+        int N = static_cast<int>(closePrices.size());
+        if (N < cfg.slowPeriod + 1) return sig;
 
-private:
-    static bool checkMACross(const std::vector<double>& prices,
-                              int fast, int slow, bool up) {
-        int N = static_cast<int>(prices.size());
-        if (N < slow + 1) return false;
         std::vector<double> fma(N,0), sma(N,0);
-        int b = 0, n = 0;
-        if (TA_SMA(0,N-1,prices.data(),fast,&b,&n,fma.data())!=TA_SUCCESS||n<2) return false;
-        if (TA_SMA(0,N-1,prices.data(),slow,&b,&n,sma.data())!=TA_SUCCESS||n<2) return false;
-        int p = n-2, c = n-1;
-        return up ? (fma[p]<=sma[p]&&fma[c]>sma[c]) : (fma[p]>=sma[p]&&fma[c]<sma[c]);
+        int b=0, n=0;
+        if (TA_SMA(0,N-1,closePrices.data(),cfg.fastPeriod,&b,&n,fma.data())!=TA_SUCCESS||n<2) return sig;
+        if (TA_SMA(0,N-1,closePrices.data(),cfg.slowPeriod,&b,&n,sma.data())!=TA_SUCCESS||n<2) return sig;
+
+        int p=n-2, c=n-1;
+        bool golden = (fma[p] <= sma[p] && fma[c] > sma[c]);
+        bool dead   = (fma[p] >= sma[p] && fma[c] < sma[c]);
+
+        // 以快慢线价差作为信号强度，使排序限流时有区分度
+        double strength = sma[c] > 0.0 ? (fma[c] - sma[c]) / sma[c] : 0.0;
+        if (golden)  { sig.valid = true; sig.isBuy = true;  sig.score = 0.5 + std::min(0.45, std::abs(strength) * 10.0); }
+        if (dead)    { sig.valid = true; sig.isBuy = false; sig.score = 0.3 + std::min(0.35, std::abs(strength) * 10.0); }
+        return sig;
     }
 };
 

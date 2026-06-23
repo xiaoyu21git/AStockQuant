@@ -990,6 +990,7 @@ Rectangle {
         showPerformance = false
         showBacktestWorkbench = true
         backtestWorkbenchMode = "analysis"
+        backtestWorkbenchLoadedOnce = true
         if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
             performanceLoader.item.refreshPerformance()
         }

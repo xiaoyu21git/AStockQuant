@@ -47,13 +47,15 @@ struct RiskSpec final {
     strategy::Ratio maxSinglePositionRatio;
     strategy::Ratio maxDrawdownLimit;
     strategy::Ratio stopLossRate;
+    strategy::Ratio takeProfitRate;
 
     [[nodiscard]] bool isValid() const
     {
         return maxPositionRatio.isValid()
             && maxSinglePositionRatio.isValid()
             && maxDrawdownLimit.isValid()
-            && stopLossRate.isValid();
+            && stopLossRate.isValid()
+            && takeProfitRate.isValid();
     }
 };
 

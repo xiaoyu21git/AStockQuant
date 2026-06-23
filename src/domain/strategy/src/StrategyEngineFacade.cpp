@@ -151,6 +151,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     fprintf(stderr, "[fromDb] engine built: %p\n", static_cast<void*>(engine.get())); fflush(stderr);
     if (!engine) return nullptr;
 
+    engine->m_hasFactorStrategies_ = isFactorType;
+
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
@@ -668,6 +670,13 @@ StrategyBacktestResult StrategyEngine::backtest(
         strategyService_->start();
     }
 
+    // 非因子策略需要 historicalView 用于 TA-Lib 技术指标计算；
+    // 因子策略通过 RuntimeFactorSvc(m_dataSvc) → FactorEngine 获取因子值，不需要 historicalView。
+    // 开关依据：fromDb() 根据策略配置的 behaviorKind 设置 m_hasFactorStrategies_
+    if (!m_hasFactorStrategies_ && view) {
+        strategyService_->setContextHistoricalView(view);
+    }
+
     const int totalDays = static_cast<int>(view->dates().size());
     const int colCount = static_cast<int>(view->instruments().size());
 
@@ -716,6 +725,8 @@ StrategyBacktestResult StrategyEngine::backtest(
     // 数据准备完成 → 0%
     if (onProgress) onProgress(0.0);
 
+    double peakEquity = req.costSpec.initialCapital.value;  // 峰值净值，用于风控回撤计算
+
     // 3. 逐日驱动
     // 第一步会触发惰性因子计算（FactorEngine::compute），我们不知道它占总时间的比例
     // 但它是真实工作，后续逐日循环也是真实工作
@@ -738,6 +749,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                     r, totalDays, posEngine.account().totalAsset(),
                     posEngine.positions().size());
             fflush(stderr);
+        }
+
+        // 设置当前回测行号，使 NonFactorStrategy 只用截至当天的数据评估
+        if (!m_hasFactorStrategies_ && strategyService_) {
+            strategyService_->setContextEvaluationRow(r);
         }
 
         std::vector<MarketDataPoint> mdpBatch;
@@ -782,12 +798,43 @@ StrategyBacktestResult StrategyEngine::backtest(
                 riskInput.setQuantity(static_cast<std::int64_t>(order.quantity()));
                 riskInput.setStrategyBound(true);
                 riskInput.setStrategyActive(true);
-                riskInput.setSignalStrength(0.5);         // 回测默认信号强度
-                riskInput.setPositionSnapshotReady(true);  // 回测持仓快照可用
+                riskInput.setSignalStrength(0.5);
+                riskInput.setPositionSnapshotReady(true);
                 const auto& accSnap = posEngine.account();
                 riskInput.setCurrentTotalAsset(accSnap.totalAsset());
                 riskInput.setCurrentMarketValue(accSnap.marketValue());
                 riskInput.setTradingSessionOpen(true);
+
+                // ── 注入风控阈值 ──
+                riskInput.setStopLossPercent(req.riskSpec.stopLossRate.value * 100.0);
+                riskInput.setTakeProfitPercent(req.riskSpec.takeProfitRate.value * 100.0);
+                riskInput.setMaxTotalExposurePercent(
+                    domain::strategy::RiskConfig::defaults().maxTotalExposurePercent);
+                riskInput.setMaxDrawdownLimitPercent(
+                    domain::strategy::RiskConfig::defaults().maxDrawdownLimitPercent);
+                riskInput.setMaxPositionPercent(req.riskSpec.maxSinglePositionRatio.value * 100.0);
+
+                // ── 当前持仓浮动盈亏及市值 ──
+                {
+                    const auto& posMap = posEngine.positions();
+                    auto pit = posMap.find(symbol);
+                    if (pit != posMap.end()) {
+                        riskInput.setSymbolMarketValue(
+                            closePrice * static_cast<double>(pit->second.quantity()));
+                    }
+                }
+                if (riskInput.isBuyOrder()) {
+                    auto bpIt = buyPriceMap.find(symbol);
+                    if (bpIt != buyPriceMap.end() && bpIt->second > 0.0) {
+                        riskInput.setSymbolPositionReturnPercent(
+                            (closePrice / bpIt->second - 1.0) * 100.0);
+                    }
+                    // 当前回撤
+                    if (peakEquity > 0.0 && accSnap.totalAsset() < peakEquity) {
+                        riskInput.setCurrentDrawdownPercent(
+                            (accSnap.totalAsset() / peakEquity - 1.0) * 100.0);
+                    }
+                }
                 // 卖出单：填充可卖数量
                 if (!riskInput.isBuyOrder()) {
                     const auto& posMap = posEngine.positions();
@@ -800,6 +847,24 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (!riskResult.approved()) {
                     ++riskRejectedCount;
                     continue;
+                }
+
+                // ── 持仓数量上限（回测页 maxPositionCount）──
+                if (order.side() == RuntimeOrderSide::Buy) {
+                    const auto& posMap = posEngine.positions();
+                    bool isNewPosition = (posMap.find(symbol) == posMap.end()
+                                          || posMap.at(symbol).quantity() == 0);
+                    if (isNewPosition) {
+                        int activePositions = 0;
+                        for (const auto& [_, p] : posMap) {
+                            if (p.quantity() > 0) ++activePositions;
+                        }
+                        int maxPos = std::max(1, req.factorOverlaySpec.targetPositionCount);
+                        if (activePositions >= maxPos) {
+                            ++riskRejectedCount;
+                            continue;
+                        }
+                    }
                 }
 
                 // ── 成交模拟 (BacktestFillSimulator — 公共类) ──
@@ -852,6 +917,58 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
+        // ── 持仓止损/止盈检查 ──
+        {
+            const double stopLossPct = req.riskSpec.stopLossRate.value;
+            const double takeProfitPct = req.riskSpec.takeProfitRate.value;
+            auto& posMap = posEngine.positions();
+            std::vector<std::string> positionsToClose;
+            for (const auto& [sym, pos] : posMap) {
+                if (pos.quantity() <= 0) continue;
+                // 查找当日价格
+                double px = 0.0;
+                for (const auto& mdp : mdpBatch) {
+                    auto symIt = idToSymbol.find(mdp.instrumentId().value);
+                    if (symIt != idToSymbol.end() && symIt->second == sym) {
+                        px = mdp.lastPrice(); break;
+                    }
+                }
+                if (px <= 0.0) continue;
+                auto bpIt = buyPriceMap.find(sym);
+                if (bpIt == buyPriceMap.end() || bpIt->second <= 0.0) continue;
+                double pnlPct = (px / bpIt->second - 1.0);
+                if (pnlPct <= -stopLossPct || pnlPct >= takeProfitPct) {
+                    positionsToClose.push_back(sym);
+                }
+            }
+            for (const auto& sym : positionsToClose) {
+                auto it = posMap.find(sym);
+                if (it == posMap.end()) continue;
+                const std::int64_t qty = it->second.quantity();
+                if (qty <= 0) continue;
+                double px = 0.0;
+                for (const auto& mdp : mdpBatch) {
+                    auto symIt = idToSymbol.find(mdp.instrumentId().value);
+                    if (symIt != idToSymbol.end() && symIt->second == sym) {
+                        px = mdp.lastPrice(); break;
+                    }
+                }
+                if (px <= 0.0) continue;
+                auto fr = fillSim.simulateSell(px, qty);
+                cash += fr.income;
+                ++totalFills;
+                double bp = buyPriceMap[sym];
+                double pnl = (fr.income / qty - bp) * qty;
+                if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
+                else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
+                symbolPnl[sym] += pnl;
+                buyPriceMap.erase(sym);
+                domain::trading::Position empty;
+                empty.setSymbol(sym); empty.setQuantity(0);
+                posEngine.applyPositionEvent(sym, empty);
+            }
+        }
+
         // 更新账户
         double marketValue = 0.0;
         for (const auto& [sym, pos] : posEngine.positions()) {
@@ -872,6 +989,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         newAcc.setTotalAsset(equity);
         posEngine.applyAccountEvent(newAcc);
         equityCurve.push_back(equity);
+        if (equity > peakEquity) peakEquity = equity;
 
         if (onProgress && totalDays > 0) {
             double loopFrac = static_cast<double>(r + 1) / static_cast<double>(totalDays);
@@ -908,7 +1026,15 @@ StrategyBacktestResult StrategyEngine::backtest(
                 dailyReturns.push_back(equityCurve[i] / equityCurve[i - 1] - 1.0);
         }
 
-        result.metrics.maxDrawdown   = ::factor::FactorBacktestMetricsCalculator::calculateMaxDrawdown(dailyReturns);
+        // 从真实净值曲线计算最大回撤（直接用 equity，不通过日收益率复利，避免净值大幅波动时失真）
+        {
+            double pk = equityCurve[0];
+            for (double e : equityCurve) {
+                if (e > pk) pk = e;
+                double dd = pk > 0.0 ? (pk - e) / pk : 0.0;
+                if (dd > result.metrics.maxDrawdown) result.metrics.maxDrawdown = dd;
+            }
+        }
         result.metrics.winRate       = ::factor::FactorBacktestMetricsCalculator::calculateWinRate(dailyReturns);
         result.metrics.profitFactor  = ::factor::FactorBacktestMetricsCalculator::calculateProfitFactor(dailyReturns);
         double sum = 0.0;

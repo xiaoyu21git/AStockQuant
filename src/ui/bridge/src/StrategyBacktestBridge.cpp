@@ -67,6 +67,7 @@ BacktestRequest buildBacktestRequest(const QString& strategyId, const QVariantMa
     req.riskSpec.maxSinglePositionRatio = Ratio{params.value("singlePositionWeight", 0.20).toDouble()};
     req.riskSpec.maxDrawdownLimit = Ratio{0.30};
     req.riskSpec.stopLossRate = Ratio{params.value("stopLossPercent", 0.10).toDouble()};
+    req.riskSpec.takeProfitRate = Ratio{params.value("takeProfitPercent", 0.30).toDouble()};
 
     req.executionSpec.executionKind = StrategyExecutionKind::Standard;
     req.executionSpec.positionSizingMethod = PositionSizingMethod::FixedFraction;

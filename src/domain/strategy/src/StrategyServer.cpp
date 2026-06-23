@@ -230,6 +230,13 @@ StrategyServiceFlowResult StrategyService::onMarketDataPoint(
         return updateResult;
     }
 
+    // 日内去重：同一交易日首笔 tick 触发完整评估，后续 tick 仅更新因子快照
+    const int today = marketDataPoint.tradingDay();
+    if (today == m_lastEvaluatedDay_) {
+        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
+    }
+    m_lastEvaluatedDay_ = today;
+
     publishDiagnostics(DiagnosticsEvent(
         DiagnosticsEventCode::MarketDataAccepted,
         StrategyServiceFlowCode::Ok,
@@ -252,9 +259,6 @@ StrategyServiceFlowResult StrategyService::onMarketDataBatch(
     if (batch.empty()) {
         resetStats();
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-    }
-    if (batch.size() > plan_.maxMarketDataPerBatch()) {
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::CapacityExceeded);
     }
 
     // 过滤无效 MarketDataPoint（如 InstrumentId=0），避免因个别无效条目拒绝整批
@@ -348,9 +352,6 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesBatch()
                 static_cast<double>(signalBuffer_.size()),
                 static_cast<double>(entry.strategy->ruleSetId())));
             return evaluateBatchResult;
-        }
-        if (ruleResultBuffer_.size() > plan_.maxRuleResultPerBatch()) {
-            return StrategyServiceFlowResult(StrategyServiceFlowCode::CapacityExceeded);
         }
 
         for (const RuleEvaluationResult& result : ruleResultBuffer_) {
@@ -456,9 +457,6 @@ StrategyServiceFlowResult StrategyService::evaluateEntrySignals(
         InstrumentId(),
         static_cast<double>(signalBuffer_.size()),
         static_cast<double>(entry.context.snapshotVersion())));
-    if (signalBuffer_.size() > plan_.maxSignalPerBatch()) {
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::CapacityExceeded);
-    }
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 
@@ -539,11 +537,8 @@ StrategyServiceFlowResult StrategyService::flushPendingOrders()
     if (pendingOrderBuffer_.empty()) {
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
-    // 未配置下单出口：回测/仿真模式下由上层通过 copyPendingOrders 读取订单；
-    // 实盘场景下必须配置 orderSink_，否则订单将被丢弃。
+    // 未配置下单出口：回测/仿真/监听器模式下由上层通过 copyPendingOrders 读取订单
     if (!orderSink_) {
-        INTERNAL_WARN_STREAM << "[StrategyService] flushPendingOrders: orderSink_ is null, "
-                             << pendingOrderBuffer_.size() << " orders will not be submitted";
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
@@ -587,6 +582,13 @@ void StrategyService::setContextHistoricalView(const void* view)
 {
     for (auto& entry : strategyEntries_) {
         entry.context.setHistoricalView(view);
+    }
+}
+
+void StrategyService::setContextEvaluationRow(int row)
+{
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCurrentEvaluationRow(row);
     }
 }
 
