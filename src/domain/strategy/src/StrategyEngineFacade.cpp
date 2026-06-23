@@ -714,7 +714,6 @@ StrategyBacktestResult StrategyEngine::backtest(
     domain::backtest::BacktestFillSimulator fillSim(fillParams);
 
     double cash = req.costSpec.initialCapital.value;
-    int riskRejectedCount = 0;
     int totalFills = 0, winningFills = 0, losingFills = 0;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
@@ -845,7 +844,8 @@ StrategyBacktestResult StrategyEngine::backtest(
 
                 auto riskResult = domain::strategy::RiskEvaluator::evaluateOrder(riskInput);
                 if (!riskResult.approved()) {
-                    ++riskRejectedCount;
+                    ++result.riskRejectedCount;
+                    ++result.riskRejectionStats[static_cast<int>(riskResult.code())];
                     continue;
                 }
 
@@ -861,7 +861,9 @@ StrategyBacktestResult StrategyEngine::backtest(
                         }
                         int maxPos = std::max(1, req.factorOverlaySpec.targetPositionCount);
                         if (activePositions >= maxPos) {
-                            ++riskRejectedCount;
+                            ++result.riskRejectedCount;
+                            ++result.riskRejectionStats[static_cast<int>(
+                                domain::strategy::RiskRejectCode::PositionConcentrationExceeded)];
                             continue;
                         }
                     }
@@ -999,7 +1001,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     }
 
     fprintf(stderr, "[backtest] loop done: days=%d finalEquity=%.2f fills=%d riskRejected=%d\n",
-            totalDays, posEngine.account().totalAsset(), totalFills, riskRejectedCount);
+            totalDays, posEngine.account().totalAsset(), totalFills, result.riskRejectedCount);
     // 逐标的盈亏 top5
     std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
     std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });
@@ -1114,8 +1116,8 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    if (riskRejectedCount > 0) {
-        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
+    if (result.riskRejectedCount > 0) {
+        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << result.riskRejectedCount;
     }
     if (onProgress) onProgress(100.0);
     fprintf(stderr, "[backtest] success, returning result\n"); fflush(stderr);

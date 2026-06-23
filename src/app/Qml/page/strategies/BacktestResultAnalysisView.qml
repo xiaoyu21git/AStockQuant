@@ -18,6 +18,21 @@ Item {
     property var trades: (backtestResult && backtestResult.trades) ? backtestResult.trades : ({})
     property var ts: (backtestResult && backtestResult.timeSeries) ? backtestResult.timeSeries : ({})
     property var params: (backtestResult && backtestResult.parameters) ? backtestResult.parameters : ({})
+    property var risk: (backtestResult && backtestResult.risk) ? backtestResult.risk : ({})
+
+    function rejectionLabel(code) {
+        switch(Number(code)) {
+            case 1: return "缺少必填字段"; case 2: return "策略未绑定"; case 3: return "策略未激活"
+            case 4: return "价格无效"; case 5: return "信号太弱"; case 6: return "持仓快照未就绪"
+            case 7: return "非交易时段"; case 8: return "无可卖持仓"; case 9: return "卖出超量"
+            case 10: return "订单金额超限"; case 11: return "滑点超限"; case 12: return "日成交额超限"
+            case 13: return "止损触发"; case 14: return "止盈触发"
+            case 15: return "一级熔断"; case 16: return "二级熔断"; case 17: return "三级熔断"
+            case 18: return "最大回撤超限"; case 19: return "集中度超限"; case 20: return "总敞口超限"
+            case 21: return "交易暂停"; case 22: return "缺委托数量"
+            default: return "未知("+code+")"
+        }
+    }
 
     onBacktestResultChanged: {
         if (!backtestResult || !backtestResult.timeSeries) return
@@ -94,6 +109,28 @@ Item {
                         Text{text:"总交易: "+fn(trades.totalTrades,0);font.pixelSize:12;color:"#F1F5F9"}
                         Text{text:"胜: "+fn(trades.winningTrades,0)+" | 负: "+fn(trades.losingTrades,0);font.pixelSize:10;color:"#94A3B8"}
                         Text{text:"胜率: "+fp(perf.winRate);font.pixelSize:10;color:"#EF4444"} }
+                }
+            }
+
+            // 订单拒绝原因
+            Rectangle { Layout.fillWidth: true; visible: (risk.totalRejected||0)>0; radius: 8; color: "#1E293B"
+                implicitHeight: rejectCol.implicitHeight + 16
+                ColumnLayout { id: rejectCol; anchors.fill: parent; anchors.margins: 10; spacing: 4
+                    Text{text:"订单拒绝统计 (共 "+(risk.totalRejected||0)+" 笔)";font.pixelSize:11;color:"#94A3B8";font.weight:Font.Bold}
+                    GridLayout { columns: 4; columnSpacing: 12; rowSpacing: 2; Layout.fillWidth: true
+                        Repeater {
+                            model: {
+                                var list=[]; var d=risk.rejectionDetails||{}
+                                for(var k in d){if(d.hasOwnProperty(k))list.push({code:k,count:d[k]})}
+                                list.sort(function(a,b){return b.count-a.count})
+                                return list
+                            }
+                            delegate: RowLayout { spacing: 4
+                                Text{text:rejectionLabel(modelData.code);font.pixelSize:10;color:"#94A3B8";Layout.preferredWidth:80}
+                                Text{text:modelData.count;font.pixelSize:10;color:"#F59E0B";font.weight:Font.Bold}
+                            }
+                        }
+                    }
                 }
             }
 

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 namespace domain::strategy {
@@ -578,6 +579,8 @@ struct StrategyBacktestResult final {
     TradeStatistics tradeStats;
     bool success{false};
     std::string errorMessage;
+    int riskRejectedCount{0};
+    std::unordered_map<int, int> riskRejectionStats;  // RiskRejectCode → count
 };
 
 } // namespace domain::strategy

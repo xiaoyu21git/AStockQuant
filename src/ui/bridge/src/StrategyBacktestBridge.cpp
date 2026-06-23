@@ -308,10 +308,16 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             qParams["dataFrequency"]   = params.value("dataFrequency");
             qResult["parameters"] = qParams;
 
-            // 风险指标（引擎暂未计算，预留 0 值）
+            // 风险指标 + 拒绝统计
             QVariantMap riskMap;
             riskMap["var95"] = 0.0; riskMap["cvar95"] = 0.0;
             riskMap["downsideDeviation"] = 0.0; riskMap["maxConsecutiveLosses"] = 0;
+            riskMap["totalRejected"] = result.riskRejectedCount;
+            QVariantMap rejectionMap;
+            for (const auto& [code, count] : result.riskRejectionStats) {
+                rejectionMap[QString::number(code)] = count;
+            }
+            riskMap["rejectionDetails"] = rejectionMap;
             qResult["risk"] = riskMap;
 
             // 持久化到 DB
