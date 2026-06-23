@@ -215,7 +215,8 @@ StrategyServiceFlowResult RuntimeFactorSvc::updateBatch(
     std::int32_t latestDay{0};
     std::vector<std::uint32_t> syms;
     for (const auto& p : batch) {
-        if (!p.isValid()) continue;
+        // 只需 instrumentId 有效 + 有交易日，不要求价格>0（因子查询不需要价格）
+        if (!p.instrumentId().isValid() || p.tradingDay() < 0) continue;
         latestDay = p.tradingDay();
         syms.push_back(p.instrumentId().value);
     }

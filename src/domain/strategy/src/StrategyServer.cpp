@@ -272,10 +272,17 @@ StrategyServiceFlowResult StrategyService::onMarketDataBatch(
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
-    // 批量更新因子可保持数据访问连续，并减少重复调度开销。
-    const StrategyServiceFlowResult updateResult = factorService_.updateBatch(validBatch);
-    if (!updateResult.isOk()) {
-        return updateResult;
+    // 因子更新用全量标的（不受当日价格过滤限制），确保 copySnapshots 覆盖所有股票
+    {
+        std::vector<MarketDataPoint> allSymbolsBatch;
+        allSymbolsBatch.reserve(batch.size());
+        for (const auto& mdp : batch) {
+            // 只要求 instrumentId 有效，不要求价格>0
+            if (mdp.instrumentId().isValid()) {
+                allSymbolsBatch.push_back(mdp);
+            }
+        }
+        factorService_.updateBatch(allSymbolsBatch);
     }
 
     return evaluateAndCheckRulesBatch();
