@@ -21,11 +21,20 @@ Item {
 
     onBacktestResultChanged: {
         if (!backtestResult || !backtestResult.timeSeries) return
-        var pv=ts.portfolioValues||[]; var dd=ts.drawdowns||[]; var ret=ts.returns||[]
+        var tss = backtestResult.timeSeries
+        var pv=tss.portfolioValues||[]; var dd=tss.drawdowns||[]; var ret=tss.returns||[]
         equityS.clear(); drawdownS.clear(); returnS.clear()
-        var peak=1.0; for(var i=0;i<pv.length;i++){equityS.append(i,pv[i]);drawdownS.append(i,dd[i]||0);if(pv[i]>peak)peak=pv[i]}
+        var pMin=1e18,pMax=-1e18,dMin=0,dMax=-1e18,rMin=1e18,rMax=-1e18
+        for(var i=0;i<pv.length;i++){
+            equityS.append(i,pv[i]);drawdownS.append(i,dd[i]||0)
+            if(pv[i]>pMax)pMax=pv[i];if(pv[i]<pMin)pMin=pv[i]
+            if(dd[i]<dMin)dMin=dd[i];if(dd[i]>dMax)dMax=dd[i]
+        }
         var n=Math.max(1,pv.length-1); eqX.max=n; ddX.max=n; retX.max=Math.max(1,ret.length-1)
-        var cum=0; for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum)}
+        eqY.min=pMin*0.95;eqY.max=pMax*1.05;ddY.min=dMin*1.1;ddY.max=dMax>0?dMax*1.1:0
+        var cum=0; for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum);if(cum>rMax)rMax=cum;if(cum<rMin)rMin=cum}
+        retY.min=rMin*1.1;retY.max=rMax*1.1
+        console.log("分析页图形更新: "+pv.length+" 净值点, "+dd.length+" 回撤点, "+ret.length+" 收益点")
     }
 
     Flickable { anchors.fill: parent; contentWidth: parent.width; contentHeight: content.implicitHeight+20; clip: true
