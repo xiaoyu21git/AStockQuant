@@ -1,7 +1,22 @@
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "factor_compute/CachedMarketDataView.h"
+#include "factor_compute/ArrowMarketDataView.h"
 
 namespace factor::compute {
+
+namespace {
+    // 尝试从各种 MarketDataView 子类获取真实股票代码，失败返回空 vector
+    std::vector<std::string> tryGetSymbolStrings(const IMarketDataView& view)
+    {
+        if (auto* cv = dynamic_cast<const CachedMarketDataView*>(&view)) {
+            if (!cv->symbolStrings().empty()) return cv->symbolStrings();
+        }
+        if (auto* av = dynamic_cast<const ArrowMarketDataView*>(&view)) {
+            if (!av->symbolStrings().empty()) return av->symbolStrings();
+        }
+        return {};
+    }
+}
 
 CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     const factor::compute::IMarketDataView& marketDataView)
@@ -18,12 +33,11 @@ CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     }
 
     symbols_.reserve(viewInstruments.size());
-    // 优先使用 CachedMarketDataView::symbolStrings() 获取真实股票代码
-    auto* cachedView = dynamic_cast<const CachedMarketDataView*>(&marketDataView);
-    if (cachedView && !cachedView->symbolStrings().empty()) {
-        for (size_t i = 0; i < viewInstruments.size() && i < cachedView->symbolStrings().size(); ++i) {
-            symbols_.push_back(cachedView->symbolStrings()[i]);
-            symbolToIndex_[cachedView->symbolStrings()[i]] = static_cast<int32_t>(i);
+    auto realSymbols = tryGetSymbolStrings(marketDataView);
+    if (!realSymbols.empty()) {
+        for (size_t i = 0; i < viewInstruments.size() && i < realSymbols.size(); ++i) {
+            symbols_.push_back(realSymbols[i]);
+            symbolToIndex_[realSymbols[i]] = static_cast<int32_t>(i);
         }
     } else {
         for (size_t i = 0; i < viewInstruments.size(); ++i) {
