@@ -480,11 +480,10 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
         auto& pool = astock::database::NativeMySQLConnectionPool::instance();
-        if (pool.isInitialized()) {
-            auto db = pool.getConnection();
-            if (db && db->isOpen()) {
-                auto result = db->executeQuery(
-                    "SELECT symbol, name FROM symbol_info WHERE asset_class='STOCK' AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol");
+        auto db = pool.getConnection();
+        if (db && db->isOpen()) {
+            auto result = db->executeQuery(
+                "SELECT symbol, name FROM ref.symbol_info WHERE asset_class='STOCK' AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol");
                 int rows = static_cast<int>(result.rowCount());
                 std::cerr << "[JMC] DB query returned " << rows << " symbols\n" << std::flush;
                 for (int i = 0; i < rows; ++i) {
@@ -504,8 +503,6 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
             } else {
                 std::cerr << "[JMC] DB connection failed\n" << std::flush;
             }
-        } else {
-            std::cerr << "[JMC] DB pool not initialized\n" << std::flush;
         }
     }
 
