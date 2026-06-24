@@ -7,17 +7,40 @@
 """
 from __future__ import annotations
 import argparse, datetime as dt, os, sys, time, traceback
-import psycopg2, pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import import_from_baostock as baostock
 from db_config import pg_connect
+import psycopg2, pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BATCH = 50
 SLEEP = 0.2
 
 def conn(): return pg_connect()
+
+# symbol → symbol_id 映射缓存
+_sym_cache = {}
+def sym_id(symbol):
+    if symbol not in _sym_cache:
+        c = conn()
+        with c.cursor() as cur:
+            cur.execute("SELECT id FROM ref.symbol_info WHERE symbol=%s", (symbol,))
+            row = cur.fetchone()
+            _sym_cache[symbol] = row[0] if row else None
+        c.close()
+    return _sym_cache[symbol]
+
+# 批量 symbol → symbol_id（用于 IN 子句）
+def sym_list(symbols):
+    if not symbols: return {}
+    c = conn()
+    try:
+        with c.cursor() as cur:
+            cur.execute("SELECT symbol, id FROM ref.symbol_info WHERE symbol = ANY(%s)", (list(symbols),))
+            return {row[0]: row[1] for row in cur.fetchall()}
+    finally:
+        c.close()
 
 # ══════════════════════════════════════════════════
 # Phase 1: 多线程补齐非 Baostock 字段
@@ -49,7 +72,7 @@ def backfill_market_cap_akshare(symbols: list[str]):
                 try:
                     c = conn()
                     with c.cursor() as cur:
-                        cur.execute("UPDATE daily_bar SET market_cap=%s, circulating_market_cap=%s WHERE symbol=%s AND trade_date=(SELECT MAX(trade_date) FROM daily_bar WHERE symbol=%s)",
+                        cur.execute("UPDATE mkt.daily_bar SET market_cap=%s, circulating_market_cap=%s WHERE symbol_id=(SELECT id FROM ref.symbol_info WHERE symbol=%s) AND trade_date=(SELECT MAX(trade_date) FROM mkt.daily_bar WHERE symbol_id=(SELECT id FROM ref.symbol_info WHERE symbol=%s)",
                                   (r['market_cap'], r['circulating_market_cap'], r['symbol'], r['symbol']))
                     c.commit(); c.close()
                     results['ok'] += 1
@@ -84,7 +107,7 @@ def backfill_adjust_factors_juejin(symbols: list[str]):
                     c = conn()
                     with c.cursor() as cur:
                         for _, row in r.iterrows():
-                            cur.execute("UPDATE daily_bar SET pre_adjust_factor=%s, post_adjust_factor=%s WHERE symbol=%s AND trade_date=%s",
+                            cur.execute("UPDATE mkt.daily_bar SET pre_adjust_factor=%s, post_adjust_factor=%s WHERE symbol_id=(SELECT id FROM ref.symbol_info WHERE symbol=%s) AND trade_date=%s",
                                       (float(row['pre_adjust_factor']), float(row['post_adjust_factor']), row['symbol'], str(row['bob'])[:10]))
                     c.commit(); c.close()
                     results['ok'] += 1
@@ -98,9 +121,9 @@ def backfill_adjust_factors_juejin(symbols: list[str]):
 def phase2_local_backfill(c):
     print("[Phase2] local SQL backfill...", flush=True)
     updates = [
-        ("change_amt", "UPDATE daily_bar SET change_amt=ROUND(close-pre_close,4), updated_at=CURRENT_TIMESTAMP WHERE change_amt IS NULL AND close>0 AND pre_close>0"),
-        ("amplitude", "UPDATE daily_bar SET amplitude=ROUND((high-low)/pre_close*100,4), updated_at=CURRENT_TIMESTAMP WHERE amplitude IS NULL AND high>0 AND low>0 AND pre_close>0"),
-        ("turnover_rate", "UPDATE daily_bar SET turnover_rate=ROUND(turnover/circulating_market_cap*100,4), updated_at=CURRENT_TIMESTAMP WHERE turnover_rate IS NULL AND turnover>0 AND circulating_market_cap>0"),
+        ("change_amt", "UPDATE mkt.daily_bar SET change_amt=ROUND(close-pre_close,4), updated_at=CURRENT_TIMESTAMP WHERE change_amt IS NULL AND close>0 AND pre_close>0"),
+        ("amplitude", "UPDATE mkt.daily_bar SET amplitude=ROUND((high-low)/pre_close*100,4), updated_at=CURRENT_TIMESTAMP WHERE amplitude IS NULL AND high>0 AND low>0 AND pre_close>0"),
+        ("turnover_rate", "UPDATE mkt.daily_bar SET turnover_rate=ROUND(turnover/circulating_market_cap*100,4), updated_at=CURRENT_TIMESTAMP WHERE turnover_rate IS NULL AND turnover>0 AND circulating_market_cap>0"),
     ]
     for name, sql in updates:
         with c.cursor() as cur:
@@ -116,7 +139,7 @@ def phase2_local_backfill(c):
 def phase3_baostock_update(c, target_date: str):
     print("[Phase3] Baostock single-threaded update...", flush=True)
     with c.cursor() as cur:
-        cur.execute("SELECT symbol FROM symbol_info WHERE status NOT IN ('DELISTED','退市') AND symbol LIKE '%.%' ORDER BY symbol")
+        cur.execute("SELECT symbol FROM ref.symbol_info WHERE status NOT IN ('DELISTED','退市') AND symbol LIKE '%.%' ORDER BY symbol")
         symbols = [r[0] for r in cur.fetchall()]
     print(f"  {len(symbols)} symbols", flush=True)
 
@@ -126,7 +149,7 @@ def phase3_baostock_update(c, target_date: str):
         batch = symbols[i:i+500]
         ph = ','.join(['%s']*len(batch))
         with c.cursor() as cur:
-            cur.execute(f"SELECT symbol, MAX(trade_date) FROM daily_bar WHERE symbol IN ({ph}) GROUP BY symbol", batch)
+            cur.execute(f"SELECT symbol, MAX(trade_date) FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE si.symbol IN ({ph}) GROUP BY si.symbol", batch)
             for row in cur.fetchall(): latest[row[0]] = str(row[1]) if row[1] else None
     need = [s for s in symbols if latest.get(s) is None or str(latest[s]) < target_date]
     print(f"  {len(need)} need update", flush=True)
@@ -166,24 +189,33 @@ def phase3_baostock_update(c, target_date: str):
 def upsert_baostock(c, df: pd.DataFrame) -> int:
     """只更新 Baostock 能提供的字段"""
     if df.empty: return 0
-    sql = """INSERT INTO daily_bar (symbol,trade_date,open,high,low,close,pre_close,volume,turnover,change_pct,
+    # 先批量查 symbol → symbol_id 映射
+    symbols = df['symbol'].unique().tolist()
+    id_map = sym_list(symbols)
+
+    sql = """INSERT INTO mkt.daily_bar (symbol_id,trade_date,open,high,low,close,pre_close,volume,turnover,change_pct,
         turnover_rate,pe_ratio,pb_ratio,data_source)
-        VALUES (%(symbol)s,%(trade_date)s,%(open)s,%(high)s,%(low)s,%(close)s,%(pre_close)s,
-        %(volume)s,%(turnover)s,%(change_pct)s,%(turnover_rate)s,%(pe_ratio)s,%(pb_ratio)s,%(data_source)s)
-        ON CONFLICT (symbol, trade_date) DO UPDATE SET
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
         open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
         pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,
         change_pct=EXCLUDED.change_pct,turnover_rate=EXCLUDED.turnover_rate,
         pe_ratio=EXCLUDED.pe_ratio,pb_ratio=EXCLUDED.pb_ratio,
         data_source=EXCLUDED.data_source,updated_at=CURRENT_TIMESTAMP"""
-    wanted = ['symbol','trade_date','open','high','low','close','pre_close','volume','turnover','change_pct',
-              'turnover_rate','pe_ratio','pb_ratio','data_source']
-    rows = [{k: row.get(k) for k in wanted} for _, row in df.iterrows()]
     w = 0
     with c.cursor() as cur:
-        for row in rows:
+        for _, row in df.iterrows():
+            sid = id_map.get(row.get('symbol'))
+            if not sid: continue
             try:
-                cur.execute(sql, row); w += 1
+                cur.execute(sql, (
+                    sid,
+                    row.get('trade_date'), row.get('open'), row.get('high'), row.get('low'),
+                    row.get('close'), row.get('pre_close'), row.get('volume'), row.get('turnover'),
+                    row.get('change_pct'), row.get('turnover_rate'), row.get('pe_ratio'),
+                    row.get('pb_ratio'), row.get('data_source')
+                ))
+                w += 1
             except: pass
     c.commit()
     return w

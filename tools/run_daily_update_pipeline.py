@@ -9,6 +9,7 @@ import argparse
 import bisect
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,7 @@ from tools.history_start_policy import clamp_history_start_date
 from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calendar, parse_time_text, resolve_latest_closed_trade_date
 
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db_config import PG_CONFIG
 
 MYSQL_CONFIG = PG_CONFIG  # 兼容旧变量名
@@ -241,10 +243,10 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
                        MIN(d.trade_date) AS earliest_trade_date,
                        MAX(d.trade_date) AS latest_trade_date,
                        COUNT(DISTINCT d.trade_date) AS trade_date_count
-                FROM symbol_info s
-                LEFT JOIN daily_bar d ON d.symbol = s.symbol
+                FROM ref.symbol_info s
+                LEFT JOIN mkt.daily_bar d ON d.symbol_id = s.id
                 WHERE s.asset_class = 'STOCK' AND s.status = 'ACTIVE'
-                GROUP BY s.symbol
+                GROUP BY s.symbol, s.list_date
                 ORDER BY s.symbol
                 """,
             )

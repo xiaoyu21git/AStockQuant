@@ -77,6 +77,8 @@ def _calendar_juejin() -> list[dt.date]:
     return sorted(set(dates))
 
 def _calendar_mysql() -> list[dt.date]:
+    import os, sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from db_config import pg_connect
     conn = pg_connect()
     try:
