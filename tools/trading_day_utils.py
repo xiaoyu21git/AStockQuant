@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import datetime as dt
-import time
+import os, sys, time
 from functools import lru_cache
 from typing import Callable, Optional
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from data_source_config import get_trade_calendar as _get_calendar, clear_calendar_cache
 
 
