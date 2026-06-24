@@ -4,15 +4,16 @@ import argparse
 import bisect
 import datetime as dt
 import sys
+from db_config import pg_connect
 from collections import defaultdict
 from typing import DefaultDict, Dict, List, Optional, Sequence, Tuple
 
-import pymysql
+import psycopg2
 
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "port": 3306,
+    "
     "user": "root",
     "password": "123456a",
     "database": "astock_quant",
@@ -34,7 +35,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_connection():
-    return pymysql.connect(**MYSQL_CONFIG)
+    return pg_connect()
 
 
 def load_target_symbols(cursor, start_date: str, end_date: str) -> List[str]:

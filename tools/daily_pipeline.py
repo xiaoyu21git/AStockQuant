@@ -7,17 +7,17 @@
 """
 from __future__ import annotations
 import argparse, datetime as dt, os, sys, time, traceback
-import pymysql, pandas as pd
+import psycopg2, pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import import_from_baostock as baostock
+from db_config import pg_connect
 
-DB = {"host":"127.0.0.1","port":3306,"user":"root","password":"123456a","database":"astock_quant","charset":"utf8mb4"}
 BATCH = 50
 SLEEP = 0.2
 
-def conn(): return pymysql.connect(**DB)
+def conn(): return pg_connect()
 
 # ══════════════════════════════════════════════════
 # Phase 1: 多线程补齐非 Baostock 字段
@@ -170,12 +170,12 @@ def upsert_baostock(c, df: pd.DataFrame) -> int:
         turnover_rate,pe_ratio,pb_ratio,data_source)
         VALUES (%(symbol)s,%(trade_date)s,%(open)s,%(high)s,%(low)s,%(close)s,%(pre_close)s,
         %(volume)s,%(turnover)s,%(change_pct)s,%(turnover_rate)s,%(pe_ratio)s,%(pb_ratio)s,%(data_source)s)
-        ON DUPLICATE KEY UPDATE
-        open=VALUES(open),high=VALUES(high),low=VALUES(low),close=VALUES(close),
-        pre_close=VALUES(pre_close),volume=VALUES(volume),turnover=VALUES(turnover),
-        change_pct=VALUES(change_pct),turnover_rate=VALUES(turnover_rate),
-        pe_ratio=VALUES(pe_ratio),pb_ratio=VALUES(pb_ratio),
-        data_source=VALUES(data_source),updated_at=CURRENT_TIMESTAMP"""
+        ON CONFLICT (symbol, trade_date) DO UPDATE SET
+        open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
+        pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,
+        change_pct=EXCLUDED.change_pct,turnover_rate=EXCLUDED.turnover_rate,
+        pe_ratio=EXCLUDED.pe_ratio,pb_ratio=EXCLUDED.pb_ratio,
+        data_source=EXCLUDED.data_source,updated_at=CURRENT_TIMESTAMP"""
     wanted = ['symbol','trade_date','open','high','low','close','pre_close','volume','turnover','change_pct',
               'turnover_rate','pe_ratio','pb_ratio','data_source']
     rows = [{k: row.get(k) for k in wanted} for _, row in df.iterrows()]

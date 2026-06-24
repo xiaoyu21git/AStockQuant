@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import argparse
 import sys
+from db_config import pg_connect
 from pathlib import Path
 from typing import Optional, Tuple
 
-import pymysql
+import psycopg2
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -17,7 +18,7 @@ from tools.history_start_policy import resolve_history_date_bounds
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "port": 3306,
+    "
     "user": "root",
     "password": "123456a",
     "database": "astock_quant",
@@ -36,7 +37,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def get_connection():
-    return pymysql.connect(**MYSQL_CONFIG)
+    return pg_connect()
 
 
 def resolve_date_range(cursor, start_date: Optional[str], end_date: Optional[str]) -> Tuple[str, str]:

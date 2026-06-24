@@ -8,9 +8,10 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+from db_config import pg_connect
 from pathlib import Path
 
-import pymysql
+import psycopg2
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -27,7 +28,7 @@ from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, parse_time_text, 
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "port": 3306,
+    "
     "user": "root",
     "password": "123456a",
     "database": "astock_quant",
@@ -67,7 +68,7 @@ def resolve_target_date(args: argparse.Namespace) -> dt.date:
 
 
 def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
-    conn = pymysql.connect(**MYSQL_CONFIG)
+    conn = pg_connect()
     try:
         with conn.cursor() as cursor:
             cursor.execute("SELECT MAX(trade_date) FROM daily_bar")

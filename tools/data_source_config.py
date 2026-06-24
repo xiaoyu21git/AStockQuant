@@ -77,12 +77,11 @@ def _calendar_juejin() -> list[dt.date]:
     return sorted(set(dates))
 
 def _calendar_mysql() -> list[dt.date]:
-    import pymysql
-    conn = pymysql.connect(host='127.0.0.1', port=3306, user='root', password='123456a',
-                           database='astock_quant', charset='utf8mb4')
+    from db_config import pg_connect
+    conn = pg_connect()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT trade_date FROM daily_bar ORDER BY trade_date")
+            cur.execute("SELECT DISTINCT trade_date FROM mkt.daily_bar ORDER BY trade_date")
             return [row[0] for row in cur.fetchall() if isinstance(row[0], dt.date)]
     finally:
         conn.close()
@@ -91,7 +90,8 @@ _CALENDAR_SOURCES = {
     'akshare': _calendar_akshare,
     'baostock': _calendar_baostock,
     'juejin': _calendar_juejin,
-    'mysql': _calendar_mysql,
+    'mysql': _calendar_mysql,  # 已改用 PG，保持兼容
+    'pg': _calendar_mysql,
 }
 
 @lru_cache(maxsize=1)

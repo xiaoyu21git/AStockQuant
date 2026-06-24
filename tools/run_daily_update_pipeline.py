@@ -13,7 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pymysql
+import psycopg2
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,14 +25,9 @@ from tools.history_start_policy import clamp_history_start_date
 from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calendar, parse_time_text, resolve_latest_closed_trade_date
 
 
-MYSQL_CONFIG = {
-    "host": "127.0.0.1",
-    "port": 3306,
-    "user": "root",
-    "password": "123456a",
-    "database": "astock_quant",
-    "charset": "utf8mb4",
-}
+from db_config import PG_CONFIG
+
+MYSQL_CONFIG = PG_CONFIG  # 兼容旧变量名
 
 DEFAULT_AUTO_CLOSE_TIME = "15:40"
 
@@ -236,7 +231,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
         right = bisect.bisect_right(trade_calendar, end_date)
         return trade_calendar[left:right]
 
-    conn = pymysql.connect(**MYSQL_CONFIG)
+    conn = psycopg2.connect(**MYSQL_CONFIG)
     try:
         with conn.cursor() as cursor:
             cursor.execute(

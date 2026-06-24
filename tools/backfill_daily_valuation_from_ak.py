@@ -4,13 +4,14 @@ import argparse
 import datetime as dt
 import os
 import sys
+from db_config import pg_connect
 import time
 from pathlib import Path
 from typing import Iterable, List, Optional, Tuple
 
 import akshare as ak
 import pandas as pd
-import pymysql
+import psycopg2
 
 
 AK_BACKFILL_SOURCE = "AK_VALUE_EM"
@@ -18,7 +19,7 @@ AK_BACKFILL_SOURCE = "AK_VALUE_EM"
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "port": 3306,
+    "
     "user": "root",
     "password": "123456a",
     "database": "astock_quant",
@@ -102,7 +103,7 @@ def to_plain_code(symbol: str) -> Optional[str]:
 
 
 def get_connection():
-    return pymysql.connect(**MYSQL_CONFIG)
+    return pg_connect()
 
 
 def load_target_symbols(
