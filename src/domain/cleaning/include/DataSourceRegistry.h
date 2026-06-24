@@ -194,7 +194,7 @@ public:
 class FinancialDataSource : public IDataSource {
 public:
     std::string typeName() const override { return "financial"; }
-    std::string tableName() const override { return "financial_indicator"; }
+    std::string tableName() const override { return "financial_indicator_daily"; }
     std::string dateColumn() const override { return "report_date"; }
 
     std::string buildGroupQuery(const std::string& start,

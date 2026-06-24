@@ -90,6 +90,7 @@ endif()
 target_include_directories(bridge
     PUBLIC
         include
+        ${CMAKE_SOURCE_DIR}/src/infrastructure/include
     PRIVATE
         src
         ${CMAKE_SOURCE_DIR}/src/domain/cleaning/include

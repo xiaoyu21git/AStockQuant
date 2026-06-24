@@ -198,6 +198,24 @@ std::vector<DailyBarRow> MarketDataRepository::queryDailyBarWithFields(
     return rows;
 }
 
+// ═══ queryAllMarketDailyBarWithFields ═══
+
+std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::queryAllMarketDailyBarWithFields(
+    const std::string& startDate,
+    const std::string& endDate,
+    const std::vector<std::string>& extraFields)
+{
+    std::ostringstream sql;
+    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
+        << buildExtraColumnsSql(extraFields)
+        << " FROM daily_bar"
+        << " WHERE trade_date >= " << safeStr(startDate)
+        << " AND trade_date <= " << safeStr(endDate)
+        << " ORDER BY symbol, trade_date ASC";
+
+    return db_->executeQuery(sql.str()).getRows();
+}
+
 // ═══ queryAllMarketDailyBar ═══
 
 std::vector<DailyBarRow> MarketDataRepository::queryAllMarketDailyBar(

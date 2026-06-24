@@ -6,10 +6,10 @@
 #include "HistoricalView.h"
 #include "foundation/json/json_facade.h"
 #include "factor_compute/CachedMarketDataView.h"
+#include "foundation/log/logging.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -193,22 +193,10 @@ std::unordered_map<std::string, double> FactorEngine::computeOneDay(
             ++infCount;
         }
     }
-    // 输出前 3 个日期的详细统计（计数器在 compute() 入口重置）
-    if (++s_computeOneDayCounter <= 3) {
-        fprintf(stderr, "[FE] computeOneDay #%d: date=%s symbols=%zu total=%zu finite=%d nan=%d inf=%d firstFinite=%.6f\n",
-                s_computeOneDayCounter, dateStr.c_str(), symbols.size(), cr.values.size(),
-                finiteCount, nanCount, infCount, firstFinite);
-        if (nanCount > 0 || infCount > 0) {
-            int printed = 0;
-            for (const auto& [sym, val] : cr.values) {
-                if (!std::isfinite(val) && printed < 3) {
-                    fprintf(stderr, "[FE]   bad sample: sym=%s val=%.6f\n", sym.c_str(), val);
-                    fflush(stderr);
-                    ++printed;
-                }
-            }
-        }
-        fflush(stderr);
+    if (cr.values.empty()) {
+        std::string firstSym = symbols.empty() ? "(none)" : symbols[0];
+        INTERNAL_WARN_STREAM << "[FE] 因子计算空: date=" << dateStr << " sym=" << firstSym
+                             << " nan=" << nanCount;
     }
     return result;
 }
@@ -220,17 +208,16 @@ std::unordered_map<std::string, double> FactorEngine::computeSingleDate(
     const IMarketDataView* view)
 {
     if (!m_instanceManager) {
-        fprintf(stderr, "[FactorEngine] computeSingleDate: m_instanceManager is null\n"); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: m_instanceManager is null";
         return {};
     }
     if (!view) {
-        fprintf(stderr, "[FactorEngine] computeSingleDate: view is null\n"); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: view is null";
         return {};
     }
     auto factor = m_instanceManager->createInstance(factorName);
     if (!factor) {
-        fprintf(stderr, "[FactorEngine] computeSingleDate: factor not found: %s\n", factorName.c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: factor not found: " << factorName;
         return {};
     }
     return computeOneDay(*factor, date, symbols, *view);

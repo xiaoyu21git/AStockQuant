@@ -382,6 +382,10 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
     ruleResultBuffer_.clear();
     pendingOrderBuffer_.clear();
 
+    static int s_evalRound = 0;
+    static int s_totalSignals = 0;
+    static int s_totalOrders = 0;
+
     if (!ruleEvaluationService_.isReady()) {
         publishDiagnostics(DiagnosticsEvent(
             DiagnosticsEventCode::RuleRejected,
@@ -436,6 +440,15 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
     stats_.setGeneratedSignalCount(generatedSignalCount);
     stats_.setPassedRuleCount(passedCount);
     stats_.setRejectedRuleCount(rejectedCount);
+
+    s_evalRound++;
+    s_totalSignals += generatedSignalCount;
+    s_totalOrders += pendingOrderBuffer_.size();
+    if (s_evalRound % 50 == 0 || generatedSignalCount > 0)
+        INTERNAL_INFO_STREAM << "[评估] 第" << s_evalRound << "轮: 信号="
+                             << generatedSignalCount << " 订单=" << pendingOrderBuffer_.size()
+                             << " 累计信号=" << s_totalSignals << " 累计订单=" << s_totalOrders;
+
     return flushPendingOrders();
 }
 

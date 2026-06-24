@@ -8,7 +8,7 @@
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "DataCacheAdapter.h"
-#include "QtSqlDatabaseAdapter.h"
+
 #include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <QDate>
@@ -152,7 +152,7 @@ QVariantMap fromJsonStringToVariantMap(const std::string& json)
 } // namespace
 
 FactorDetectionService::RuntimeContext FactorDetectionService::resolveRuntimeContext(
-    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const std::shared_ptr<astock::database::ISqlDatabase>& database,
     const std::shared_ptr<factor::DataAvailabilityChecker>& dataChecker,
     const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
     bool skipInstanceRefreshForTests) const
@@ -172,18 +172,16 @@ FactorDetectionService::RuntimeContext FactorDetectionService::resolveRuntimeCon
         return context;
     }
 
-    context.database = dbManager.getDatabase();
+    context.database = dbManager.getNativeConnection();
     if (!context.database) {
         context.errorMessage = QStringLiteral("因子检查运行时初始化失败：数据库实例不可用");
         return context;
     }
 
     if (!context.dataChecker) {
-        context.dataChecker = std::make_shared<factor::DataAvailabilityChecker>(
-            std::make_shared<astock::database::QtSqlDatabaseAdapter>(context.database));
+        context.dataChecker = std::make_shared<factor::DataAvailabilityChecker>(context.database);
     }
-    context.instanceManager = std::make_shared<factor::FactorInstanceManager>(
-        std::make_shared<astock::database::QtSqlDatabaseAdapter>(context.database), context.dataChecker);
+    context.instanceManager = std::make_shared<factor::FactorInstanceManager>(context.database, context.dataChecker);
     return context;
 }
 

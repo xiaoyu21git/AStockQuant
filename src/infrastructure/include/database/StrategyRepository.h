@@ -1,7 +1,7 @@
 #ifndef ASTOCK_INFRASTRUCTURE_DATABASE_STRATEGYREPOSITORY_H
 #define ASTOCK_INFRASTRUCTURE_DATABASE_STRATEGYREPOSITORY_H
 
-#include "database/ConnectionPool.h"
+#include "database/NativeMySQLConnectionPool.h"
 #include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
 #include "../../../domain/types/ResolvedStrategyBehavior.h"
 #include "../../../domain/strategies/include/StrategyDefinitionTypes.h"
@@ -9,7 +9,7 @@
 #include <QString>
 #include <QVariantMap>
 #include <QMutex>
-#include <QSqlDatabase>
+
 #include <vector>
 #include <memory>
 #include <optional>
@@ -126,50 +126,30 @@ private:
      */
     class ScopedConnection {
     public:
-        ScopedConnection() 
-            : m_db(ConnectionPool::instance().getConnection())
-            , m_released(false) 
+        ScopedConnection()
+            : m_db(NativeMySQLConnectionPool::instance().getConnection())
         {
         }
-        
-        ~ScopedConnection() {
-            release();
-        }
-        
-        /**
-         * @brief 获取数据库连接引用
-         */
-        QSqlDatabase& get() { return m_db; }
-        
-        /**
-         * @brief 检查连接是否有效
-         */
-        bool isValid() const { return m_db.isValid() && m_db.isOpen(); }
-        
-        /**
-         * @brief 手动释放连接（可选，析构时会自动释放）
-         */
-        void release() {
-            if (!m_released && m_db.isValid()) {
-                ConnectionPool::instance().releaseConnection(m_db);
-                m_released = true;
-            }
-        }
-        
-        // 禁止拷贝和移动
+        ~ScopedConnection() = default;
+        std::shared_ptr<ISqlDatabase>& db() { return m_db; }
+        bool isValid() const { return m_db && m_db->isOpen(); }
+        void release() { m_db.reset(); }
+        SqlQueryResult exec(const std::string& sql, const std::vector<SqlParam>& p={}) { return m_db?m_db->executeQuery(sql,p):SqlQueryResult{}; }
+        int execUpdate(const std::string& sql, const std::vector<SqlParam>& p={}) { return m_db?m_db->executeUpdate(sql,p):0; }
+        bool beginTx() { return m_db?m_db->beginTransaction():false; }
+        bool commitTx() { return m_db?m_db->commitTransaction():false; }
+
         ScopedConnection(const ScopedConnection&) = delete;
         ScopedConnection& operator=(const ScopedConnection&) = delete;
         ScopedConnection(ScopedConnection&&) = delete;
         ScopedConnection& operator=(ScopedConnection&&) = delete;
-        
     private:
-        QSqlDatabase m_db;
-        bool m_released;
+        std::shared_ptr<ISqlDatabase> m_db;
     };
     
     // 辅助方法
-    PersistedStrategyData rowToStrategyData(const QSqlQuery& query);
-    QVariantMap loadStrategyParameters(const QString& strategyId, QSqlDatabase& db);
+    PersistedStrategyData rowToStrategyData(const SqlQueryResultRow& row);
+    QVariantMap loadStrategyParameters(const QString& strategyId, std::shared_ptr<ISqlDatabase>& db);
     
     /**
      * @brief 内部保存方法，使用传入的连接
@@ -177,7 +157,7 @@ private:
      * 被 save() 和 update() 复用，确保事务中使用同一连接
      * @return 保存成功的策略ID，失败返回空字符串
      */
-    QString saveStrategyInternal(const PersistedStrategyData& strategy, QSqlDatabase& db, bool isUpdate = false);
+    QString saveStrategyInternal(const PersistedStrategyData& strategy, std::shared_ptr<ISqlDatabase>& db, bool isUpdate = false);
     
     /**
      * @brief 生成策略代码（如果未提供）

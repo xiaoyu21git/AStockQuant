@@ -435,7 +435,8 @@ void StrategyEngine::startLiveLoop()
     }
     m_loopRunning.store(true, std::memory_order_release);
 
-    // 提交 drainQueue 到专属线程（线程池只有 1 个 worker，独占该线程）
+    INTERNAL_INFO_STREAM << "[启动] 实盘循环开始";
+
     m_dedicatedExecutor->post([this]() {
         drainQueue();
     });

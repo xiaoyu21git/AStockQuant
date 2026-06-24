@@ -135,16 +135,6 @@ def parse_args() -> argparse.Namespace:
         help="估值回填每只股票之间的休眠秒数，默认 0.15",
     )
     parser.add_argument(
-        "--juejin",
-        action="store_true",
-        help="日线更新使用掘金多线程 (替代默认 Baostock 全市场)",
-    )
-    parser.add_argument(
-        "--baostock",
-        action="store_true",
-        help="(已废弃，Baostock 现为默认) 日线更新使用 Baostock 单线程",
-    )
-    parser.add_argument(
         "--baostock-only",
         action="store_true",
         help="仅运行 Baostock 单线程全量更新 (跳过所有回填步骤)",
@@ -324,22 +314,6 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
     return min(start_dates), target_date
 
 
-def build_update_command(args: argparse.Namespace) -> list[str]:
-    command = [sys.executable, "tools/update_daily_data.py"]
-    if args.target_date:
-        command.extend(["--target-date", args.target_date])
-    if args.close_time:
-        command.extend(["--close-time", args.close_time])
-    if args.wait_until_close:
-        command.append("--wait-until-close")
-    return command
-
-
-def build_mode_update_command(args: argparse.Namespace, mode: str) -> list[str]:
-    command = build_update_command(args)
-    command.extend(["--mode", mode])
-    return command
-
 def build_baostock_update_command(args: argparse.Namespace) -> list[str]:
     """单线程 Baostock 全量日线更新"""
     command = [sys.executable, "tools/daily_pipeline.py", "--phase3-only"]
@@ -492,9 +466,7 @@ def main() -> int:
             return step_results[-1]["exit_code"]
         return 0
 
-    # 默认用 Baostock 全市场更新；--juejin 切回掘金多线程
-    update_cmd_builder = build_baostock_update_command if not args.juejin else (
-        lambda a: build_mode_update_command(a, "latest"))
+    update_cmd_builder = build_baostock_update_command
 
     def finalize(exit_code: int) -> int:
         optional_failures = [item for item in step_results if item["status"] == "failed_optional"]
@@ -591,7 +563,7 @@ def main() -> int:
     if args.include_history_gaps and history_start_date <= history_end_date:
         if not execute_step(
             "daily history gap supplement",
-            build_mode_update_command(args, "history"),
+            build_baostock_update_command(args),
             required=False,
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,

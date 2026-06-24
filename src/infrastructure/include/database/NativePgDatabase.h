@@ -1,22 +1,17 @@
 #pragma once
 
-#include "DatabaseConfig.h"
 #include "ISqlDatabase.h"
+#include "DatabaseConfig.h"
 
 #include <memory>
 
 namespace astock {
 namespace database {
 
-class NativeMySQLDatabase final : public ISqlDatabase {
+class NativePgDatabase final : public ISqlDatabase {
 public:
-    explicit NativeMySQLDatabase(const DatabaseConfig& config);
-    ~NativeMySQLDatabase() override;
-
-    NativeMySQLDatabase(const NativeMySQLDatabase&) = delete;
-    NativeMySQLDatabase& operator=(const NativeMySQLDatabase&) = delete;
-    NativeMySQLDatabase(NativeMySQLDatabase&& other) noexcept;
-    NativeMySQLDatabase& operator=(NativeMySQLDatabase&& other) noexcept;
+    explicit NativePgDatabase(const DatabaseConfig& config);
+    ~NativePgDatabase() override;
 
     bool open() override;
     void close() override;
@@ -26,7 +21,6 @@ public:
                                                const std::vector<SqlParam>& params = {}) override;
     int executeUpdate(const std::string& sql,
                       const std::vector<SqlParam>& params = {}) override;
-
     int executeBatchUpdate(const std::string& sql,
                            const std::vector<std::vector<SqlParam>>& batchParams) override;
 

@@ -512,6 +512,8 @@ void AppBootstrap::reconcileOptionalConnectors()
             std::cerr << "[AppBootstrap] JMC start FAILED: " << m_jujinMarketConnector->lastError() << "\n";
         } else {
             std::cerr << "[AppBootstrap] JMC started OK\n";
+            // 交易网关挂到共享 JujinApi（JMC 已初始化共享 API）
+            app::system::TradingSystem::instance().initializeWithBroker("jujin", "live");
         }
         return;
     }

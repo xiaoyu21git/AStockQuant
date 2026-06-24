@@ -54,17 +54,12 @@ endif()
 
 # 基础设施静态库源码
 add_library(infrastructure STATIC
-    src/database/ConnectionPool.cpp
+    src/database/NativePgDatabase.cpp
     src/database/NativeMySQLConnectionPool.cpp
-    src/database/NativeMySQLDatabase.cpp
-    src/database/QtMySQLDatabase.cpp
+    src/database/StrategyRepository.cpp
     src/database/MarketDataRepository.cpp
     src/database/MarketDataService.cpp
     src/database/SymbolMapper.cpp
-    # src/database/MarketDataLoader.cpp -- removed (database builder deleted)
-    src/database/QueryBuilder.cpp
-    src/database/FactorRepository.cpp
-    src/database/StrategyRepository.cpp
     src/database/BacktestResultRepository.cpp
 )
 
@@ -76,7 +71,7 @@ set_target_properties(infrastructure PROPERTIES
 target_include_directories(infrastructure
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${MYSQL_INCLUDE_DIR}
+        ${PostgreSQL_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}/src/domain/factor/include
         ${CMAKE_SOURCE_DIR}/src/domain/market/include
         ${CMAKE_SOURCE_DIR}/src/domain/cleaning/include
@@ -87,6 +82,7 @@ target_include_directories(infrastructure
 target_link_libraries(infrastructure
     PUBLIC
         foundation
+        ${PostgreSQL_LIBRARY_RELEASE}
     PRIVATE
         Qt6::Core
         Qt6::Sql

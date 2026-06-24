@@ -24,7 +24,7 @@ class BaseFactor;
 class FactorInstanceManager;
 class DataAvailabilityChecker;
 }
-namespace astock { namespace database { class QtMySQLDatabase; } }
+namespace astock { namespace database { class ISqlDatabase; } }
 
 class FactorService : public QObject {
     Q_OBJECT
@@ -101,7 +101,7 @@ private:
 
     // 底层服务引用
     std::unique_ptr<FactorDetectionService> m_detectionService;
-    std::shared_ptr<astock::database::QtMySQLDatabase> m_database;
+    std::shared_ptr<astock::database::ISqlDatabase> m_database;
     std::shared_ptr<factor::DataAvailabilityChecker> m_dataChecker;
     std::shared_ptr<factor::FactorInstanceManager> m_instanceManager;
 

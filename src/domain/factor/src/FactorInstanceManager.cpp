@@ -435,7 +435,7 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
     try {
         auto result = db_->executeQuery(
             "SELECT fi.instance_id, fi.instance_name, fi.description, "
-            "CAST(fi.full_config AS CHAR) AS full_config, fi.status, fi.factor_id, f.major_category "
+            "fi.full_config::text AS full_config, fi.status, fi.factor_id, f.major_category "
             "FROM factor_instance fi "
             "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
             "WHERE fi.instance_id = ?",
@@ -530,7 +530,7 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
     try {
         auto result = db_->executeQuery(
             "SELECT fi.instance_id, fi.instance_name, fi.description, "
-            "CAST(fi.full_config AS CHAR) AS full_config, fi.status, fi.factor_id, f.major_category "
+            "fi.full_config::text AS full_config, fi.status, fi.factor_id, f.major_category "
             "FROM factor_instance fi "
             "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
             "WHERE fi.status = 'ACTIVE' "

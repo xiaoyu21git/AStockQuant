@@ -151,13 +151,14 @@ domain::strategy::RiskInput TradingSystem::buildRiskInput(
 
     // ── 策略上下文 ──
     const bool hasStrategy = !order.strategyId().empty();
-    if (hasStrategy) {
+    const bool isAutoSignal = order.signalStrength() > 0.0 && hasStrategy;
+    if (isAutoSignal) {
         auto* engine = domain::strategy::StrategyManager::instance().get(order.strategyId());
         input.setStrategyBound(engine != nullptr);
         input.setStrategyActive(engine != nullptr);
-        input.setAutoStrategySignal(false); // 手动提交的订单不是自动信号
+        input.setAutoStrategySignal(true);
     } else {
-        // 无策略 ID 的订单（手动交易），跳过策略绑定检查
+        // 手动提交的订单，跳过策略绑定检查
         input.setStrategyBound(true);
         input.setStrategyActive(true);
         input.setAutoStrategySignal(false);

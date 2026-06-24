@@ -35,7 +35,7 @@ class FactorDetectionService final
 {
 public:
     struct RuntimeContext {
-        std::shared_ptr<astock::database::QtMySQLDatabase> database;
+        std::shared_ptr<astock::database::ISqlDatabase> database;
         std::shared_ptr<factor::DataAvailabilityChecker> dataChecker;
         std::shared_ptr<factor::FactorInstanceManager> instanceManager;
         QString errorMessage;
@@ -64,7 +64,7 @@ public:
     };
 
     RuntimeContext resolveRuntimeContext(
-        const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+        const std::shared_ptr<astock::database::ISqlDatabase>& database,
         const std::shared_ptr<factor::DataAvailabilityChecker>& dataChecker,
         const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
         bool skipInstanceRefreshForTests) const;

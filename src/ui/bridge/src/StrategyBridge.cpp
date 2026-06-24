@@ -3,9 +3,10 @@
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"
 
-#include "database/StrategyRepository.h"
 #include "database/MarketDataRepository.h"
 #include "database/NativeMySQLConnectionPool.h"
+#include "database/ISqlDatabase.h"
+#include "database/StrategyRepository.h"
 #include "FactorService.h"
 
 #include "../../app/system/TradingSystem.h"
@@ -602,6 +603,7 @@ bool StrategyBridge::start(const QString& strategyId)
             1, 4, std::chrono::seconds(120), "StrategyBridgeStartup");
     }
     m_startupPool->post([this, repositoryId]() {
+        domain::strategy::RuntimeFactorSvc* rawFactorSvc = nullptr;
         try {
         auto& mgr = domain::strategy::StrategyManager::instance();
         if (!mgr.get(repositoryId.toStdString())) {
@@ -612,17 +614,18 @@ bool StrategyBridge::start(const QString& strategyId)
                 if (instanceMgr) {
                     auto symbolResolver = [](std::uint32_t id) -> std::string {
                         char buf[16];
-                        const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
-                        std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
+                        std::snprintf(buf, sizeof(buf), "%06u", id);
                         return buf;
                     };
                     auto factorNameResolver = [](std::uint64_t fid) -> std::string {
                         return std::to_string(fid);
                     };
-                    factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
+                    auto rfs = std::make_unique<domain::strategy::RuntimeFactorSvc>(
                         *instanceMgr,
                         std::move(symbolResolver),
                         std::move(factorNameResolver));
+                    rawFactorSvc = rfs.get();
+                    factorSvc = std::move(rfs);
                 }
             }
             mgr.createEngine(repositoryId.toStdString(), std::move(factorSvc));
@@ -645,47 +648,76 @@ bool StrategyBridge::start(const QString& strategyId)
             return;
         }
 
-        // 加载历史 MarketView（因子策略必需，非因子策略无害）
+        // ── 按因子需求查 DB，构建完整 MarketView ──
         {
             auto& pool = astock::database::NativeMySQLConnectionPool::instance();
             if (pool.isInitialized()) {
                 auto db = pool.getConnection();
                 if (db && db->isOpen()) {
-                    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
-                    // 获取当前日期 YYYY-MM-DD
                     auto now = std::chrono::system_clock::now();
                     auto tt = std::chrono::system_clock::to_time_t(now);
                     char endBuf[16];
                     std::strftime(endBuf, sizeof(endBuf), "%Y-%m-%d", std::localtime(&tt));
-                    constexpr int kLookbackDays = 90;  // 约 60 个交易日，因子计算够用
+                    int lookbackDays = rawFactorSvc ? rawFactorSvc->getMaxLookbackDays() : 90;
                     char startBuf[16];
                     {
-                        auto tp = std::chrono::system_clock::now() - std::chrono::hours(24 * kLookbackDays);
+                        auto tp = std::chrono::system_clock::now() - std::chrono::hours(24 * lookbackDays);
                         auto t = std::chrono::system_clock::to_time_t(tp);
                         std::strftime(startBuf, sizeof(startBuf), "%Y-%m-%d", std::localtime(&t));
                     }
-                    INTERNAL_INFO_STREAM << "[Live] loading market data: " << startBuf << " ~ " << endBuf;
-                    auto rows = repo->queryAllMarketDailyBar(startBuf, endBuf);
-                    if (!rows.empty()) {
-                        // 转 QVariantList → JSON → CachedMarketDataView
-                        QVariantList data;
-                        for (auto& r : rows) {
-                            QVariantMap row;
-                            row["symbol"] = QString::fromStdString(r.symbol);
-                            row["trade_date"] = QString::fromStdString(r.tradeDate);
-                            row["open"] = r.open;
-                            row["high"] = r.high;
-                            row["low"] = r.low;
-                            row["close"] = r.close;
-                            row["volume"] = r.volume;
-                            data.append(row);
+
+                    // 领域层：获取因子需求字段
+                    std::vector<std::string> extraFields;
+                    if (rawFactorSvc) extraFields = rawFactorSvc->getRequiredFields();
+
+                    INTERNAL_INFO_STREAM << "[Live] loading market data: " << startBuf << " ~ " << endBuf
+                                         << " extraFields=" << extraFields.size();
+
+                    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+                    if (extraFields.empty()) {
+                        // 无因子需求：基础 OHLCV
+                        auto rows = repo->queryAllMarketDailyBar(startBuf, endBuf);
+                        if (!rows.empty()) {
+                            QVariantList data;
+                            for (auto& r : rows) {
+                                QVariantMap row;
+                                row["symbol"] = QString::fromStdString(r.symbol);
+                                row["trade_date"] = QString::fromStdString(r.tradeDate);
+                                row["open"] = r.open;
+                                row["high"] = r.high;
+                                row["low"] = r.low;
+                                row["close"] = r.close;
+                                row["volume"] = r.volume;
+                                data.append(row);
+                            }
+                            QJsonDocument doc(QJsonArray::fromVariantList(data));
+                            auto root = foundation::json::JsonFacade::parse(
+                                doc.toJson(QJsonDocument::Compact).toStdString());
+                            m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
                         }
-                        QJsonDocument doc(QJsonArray::fromVariantList(data));
-                        auto root = foundation::json::JsonFacade::parse(doc.toJson(QJsonDocument::Compact).toStdString());
-                        m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
-                        engine->setLiveMarketView(m_liveMarketView.get());
-                        INTERNAL_INFO_STREAM << "[Live] history loaded: " << rows.size() << " rows, "
-                                         << m_liveMarketView->instruments().size() << " 标的";
+                    } else {
+                        // 有因子需求：带额外字段查询 + 零 JSON 构建
+                        auto rawRows = repo->queryAllMarketDailyBarWithFields(startBuf, endBuf, extraFields);
+                        if (!rawRows.empty()) {
+                            rawFactorSvc->buildLiveView(rawRows, extraFields);
+                        }
+                    }
+
+                    {
+                        size_t dates = 0, instrs = 0;
+                        const auto* v = rawFactorSvc ? rawFactorSvc->liveView() : m_liveMarketView.get();
+                        if (v) { dates = v->dates().size(); instrs = v->instruments().size(); }
+                        INTERNAL_INFO_STREAM << "[启动] 历史数据就绪: " << dates << "天 " << instrs
+                                             << "标的 fields=" << (extraFields.empty() ? 5 : 5 + extraFields.size());
+                        if (!extraFields.empty()) {
+                            std::string fs;
+                            for (size_t i = 0; i < std::min(extraFields.size(), size_t(5)); ++i) {
+                                if (i) fs += ",";
+                                fs += extraFields[i];
+                            }
+                            if (extraFields.size() > 5) fs += "...";
+                            INTERNAL_INFO_STREAM << "[启动] 额外字段: " << fs;
+                        }
                     }
                 }
             }

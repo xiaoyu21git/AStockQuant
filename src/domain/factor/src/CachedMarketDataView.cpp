@@ -390,6 +390,86 @@ CachedMarketDataView::fromDailyBarRows(
     return view;
 }
 
+// ── fromSqlRows：带额外字段的原始行直接构建 ──
+std::unique_ptr<CachedMarketDataView>
+CachedMarketDataView::fromSqlRows(
+    const std::vector<astock::database::SqlQueryResultRow>& rows,
+    const std::vector<std::string>& extraFields)
+{
+    if (rows.empty()) return nullptr;
+
+    ankerl::unordered_dense::map<std::string, InstrumentId> symToId;
+    std::vector<InstrumentId> instruments;
+    uint32_t nextId = 0;
+    ankerl::unordered_dense::map<std::string, int> dateIndex;
+    std::vector<DateKey> sortedDateKeys;
+
+    for (const auto& row : rows) {
+        std::string sym = row.getString("symbol");
+        std::string date = row.getString("trade_date");
+        if (sym.empty() || date.empty()) continue;
+        if (symToId.find(sym) == symToId.end()) {
+            symToId[sym] = InstrumentId{nextId};
+            instruments.push_back(InstrumentId{nextId});
+            ++nextId;
+        }
+        if (dateIndex.find(date) == dateIndex.end()) {
+            int y=0,m=0,d=0;
+            sscanf(date.c_str(), "%d-%d-%d", &y, &m, &d);
+            dateIndex[date] = static_cast<int>(sortedDateKeys.size());
+            sortedDateKeys.push_back(DateKey{y*10000 + m*100 + d});
+        }
+    }
+
+    int numInsts = static_cast<int>(instruments.size());
+    int numDates = static_cast<int>(sortedDateKeys.size());
+    if (numDates <= 0 || numInsts <= 0) return nullptr;
+
+    auto makeCol = [&]() -> ColumnData {
+        ColumnData c;
+        c.dateCount = numDates;
+        c.instrumentCount = numInsts;
+        c.values.assign(static_cast<size_t>(numDates) * numInsts, std::numeric_limits<float>::quiet_NaN());
+        c.dates = sortedDateKeys;
+        c.instruments = instruments;
+        return c;
+    };
+
+    ColumnData colOpen = makeCol(), colHigh = makeCol(), colLow = makeCol();
+    ColumnData colClose = makeCol(), colVol = makeCol();
+
+    // 额外字段列
+    std::vector<ColumnData> extraCols(extraFields.size());
+    for (auto& c : extraCols) c = makeCol();
+
+    for (const auto& row : rows) {
+        std::string sym = row.getString("symbol");
+        std::string date = row.getString("trade_date");
+        auto si = symToId.find(sym);
+        auto di = dateIndex.find(date);
+        if (si == symToId.end() || di == dateIndex.end()) continue;
+        size_t idx = static_cast<size_t>(di->second) * numInsts + si->second.value;
+        colOpen.values[idx]  = static_cast<float>(row.getDouble("open"));
+        colHigh.values[idx]  = static_cast<float>(row.getDouble("high"));
+        colLow.values[idx]   = static_cast<float>(row.getDouble("low"));
+        colClose.values[idx] = static_cast<float>(row.getDouble("close"));
+        colVol.values[idx]   = static_cast<float>(row.getDouble("volume"));
+        for (size_t ei = 0; ei < extraFields.size(); ++ei)
+            extraCols[ei].values[idx] = static_cast<float>(row.getDouble(extraFields[ei]));
+    }
+
+    auto view = std::make_unique<CachedMarketDataView>();
+    view->loadFromColumnData(
+        std::move(colOpen), std::move(colHigh), std::move(colLow),
+        std::move(colClose), std::move(colVol));
+    for (size_t ei = 0; ei < extraFields.size(); ++ei)
+        view->loadAdditionalField(extraFields[ei], std::move(extraCols[ei]));
+    view->impl_->m_symbolStrings.resize(instruments.size());
+    for (const auto& [sym, id] : symToId)
+        view->impl_->m_symbolStrings[id.value] = sym;
+    return view;
+}
+
 static bool writeBinaryColumn(FILE* f, const CachedMarketDataView::ColumnData& col)
 {
     int32_t dc = col.dateCount;

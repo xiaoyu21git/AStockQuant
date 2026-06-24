@@ -20,7 +20,6 @@ constexpr const char* kRequiredKey = "required";
 constexpr const char* kSourceTableKey = "sourceTable";
 constexpr const char* kDailyBarTable = "daily_bar";
 constexpr const char* kCleanedDailyBarTable = "cleaned_daily_bar";
-constexpr const char* kFinancialIndicatorTable = "financial_indicator";
 constexpr const char* kFinancialIndicatorDailyTable = "financial_indicator_daily";
 constexpr const char* kSymbolInfoTable = "symbol_info";
 constexpr const char* kNewsSentimentTable = "news_sentiment";
@@ -124,8 +123,7 @@ std::string resolveDateColumn(const std::string& table)
         || table == checker_contract::kAlternativeDataTable
         || table == checker_contract::kDerivativesDataTable)
         return checker_contract::kTradeDateColumn;
-    if (table == checker_contract::kFinancialIndicatorTable
-        || table == checker_contract::kFinancialIndicatorDailyTable)
+    if (table == checker_contract::kFinancialIndicatorDailyTable)
         return checker_contract::kTradeDateColumn;
     return {};
 }
@@ -133,7 +131,7 @@ std::string resolveDateColumn(const std::string& table)
 std::string buildDatePredicate(const std::string& table, const std::string& column)
 {
     if (column.empty()) return {};
-    if (table == checker_contract::kFinancialIndicatorTable
+    if (table == checker_contract::kFinancialIndicatorDailyTable
         || table == checker_contract::kFinancialIndicatorDailyTable)
         return column + " <= ?";
     if (table == checker_contract::kPolicyDataTable)
@@ -150,8 +148,7 @@ std::string buildDatePredicate(const std::string& table, const std::string& colu
 
 std::string symbolColumnForTable(const std::string& table)
 {
-    return (table == checker_contract::kFinancialIndicatorTable
-            || table == checker_contract::kFinancialIndicatorDailyTable)
+    return (table == checker_contract::kFinancialIndicatorDailyTable)
         ? checker_contract::kSymbolIdColumn
         : checker_contract::kSymbolColumn;
 }
@@ -481,7 +478,7 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
         if (!db_) return createErrorStatus("database connection not initialized");
 
         auto queryResult = db_->executeQuery(
-            "SELECT CAST(full_config AS CHAR) AS full_config FROM factor_instance WHERE instance_id = ?",
+            "SELECT full_config::text AS full_config FROM factor_instance WHERE instance_id = ?",
             { astock::database::SqlParam{std::string(instanceId)} }
         );
 

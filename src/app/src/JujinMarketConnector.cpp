@@ -21,6 +21,7 @@
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/log/logging.hpp"
 #include <ctime>
 #include "foundation/config/ConfigManager.hpp"
 
@@ -339,16 +340,14 @@ bool JujinMarketConnector::start()
             auto vol   = event.get<double>("volume");
             auto date  = event.get<std::int64_t>("tradingDay");
             if (sym.has_value() && price.has_value()) {
-                // 心跳：每 15 秒打印一次统计摘要
                 static int totalTicks = 0;
                 static auto lastReport = std::chrono::steady_clock::now();
                 totalTicks++;
                 auto now = std::chrono::steady_clock::now();
                 auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
-                if (elapsed >= 15) {
-                    std::cerr << "[JMC] heartbeat: " << totalTicks << " ticks in "
-                              << elapsed << "s (~" << (totalTicks / (elapsed > 0 ? elapsed : 1))
-                              << " tick/s)\n" << std::flush;
+                if (elapsed >= 60) {
+                    INTERNAL_INFO_STREAM << "[行情] tick: " << totalTicks << "/" << elapsed
+                                         << "s ≈ " << (totalTicks / (elapsed > 0 ? elapsed : 1)) << "/s";
                     totalTicks = 0;
                     lastReport = now;
                 }

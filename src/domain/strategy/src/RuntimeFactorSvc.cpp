@@ -2,8 +2,9 @@
 #include "../../factor/include/FactorInstanceManager.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
+#include "../../infrastructure/include/database/ISqlDatabase.h"
+#include "foundation/log/logging.hpp"
 
-#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -35,14 +36,20 @@ void RuntimeFactorSvc::setMarketView(const factor::compute::IMarketDataView*) {
 
 void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView* view) {
     m_liveMarketView = view;
-    // 与 setDataService 相同：从 CachedMarketDataView 重建符号解析
+    // 重建符号解析：tick 侧 InstrumentId 用股票代码段(000001→1, 600000→600000)
+    // 解析后直接映射到 view 中的股票代码字符串，不再走顺序 ID
     auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(view);
     if (cachedView && !cachedView->symbolStrings().empty()) {
         const auto& symbols = cachedView->symbolStrings();
-        const auto& instruments = view->instruments();
         auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
-        for (size_t i = 0; i < instruments.size() && i < symbols.size(); ++i)
-            (*idToSym)[instruments[i].value] = symbols[i];
+        for (size_t i = 0; i < symbols.size(); ++i) {
+            const std::string& sym = symbols[i];
+            if (sym.empty()) continue;
+            std::uint32_t codeId = 0;
+            try { codeId = static_cast<std::uint32_t>(std::stoul(sym)); }
+            catch (...) { continue; }
+            (*idToSym)[codeId] = sym;
+        }
         m_symbolResolver = [idToSym](std::uint32_t id) -> std::string {
             auto it = idToSym->find(id);
             return it != idToSym->end() ? it->second : std::string();
@@ -68,16 +75,20 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
             auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(batch.marketView);
             if (cachedView && !cachedView->symbolStrings().empty()) {
                 const auto& symbols = cachedView->symbolStrings();
-                const auto& instruments = batch.marketView->instruments();
                 auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
-                for (size_t i = 0; i < instruments.size() && i < symbols.size(); ++i) {
-                    (*idToSym)[instruments[i].value] = symbols[i];
+                for (size_t i = 0; i < symbols.size(); ++i) {
+                    const std::string& sym = symbols[i];
+                    if (sym.empty()) continue;
+                    std::uint32_t codeId = 0;
+                    try { codeId = static_cast<std::uint32_t>(std::stoul(sym)); }
+                    catch (...) { continue; }
+                    (*idToSym)[codeId] = sym;
                 }
                 m_symbolResolver = [idToSym](std::uint32_t id) -> std::string {
                     auto it = idToSym->find(id);
                     return it != idToSym->end() ? it->second : std::string();
                 };
-                fprintf(stderr, "[RFS] setDataService: rebuilt symbol resolver from CachedMarketDataView (%zu symbols)\n", symbols.size());
+                fprintf(stderr, "[RFS] setDataService: rebuilt symbol resolver (%zu symbols)\n", symbols.size());
                 fflush(stderr);
             }
         }
@@ -87,9 +98,52 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
 void RuntimeFactorSvc::setFactorIds(const std::vector<std::string>& factorIds) {
     const std::lock_guard<std::mutex> lock(m_stateMutex);
     m_factorIds = factorIds;
-    fprintf(stderr, "[RFS] setFactorIds: count=%zu first=%s\n",
-            factorIds.size(), factorIds.empty() ? "(none)" : factorIds[0].c_str());
-    fflush(stderr);
+}
+
+std::vector<std::string> RuntimeFactorSvc::getRequiredFields() const {
+    std::vector<std::string> fields;
+    for (const auto& fid : m_factorIds) {
+        if (fid.empty()) continue;
+        try {
+            auto factor = m_instanceManager.createInstance(fid);
+            if (factor) {
+                auto reqs = factor->getDataRequirements();
+                for (auto& f : reqs.requiredFields)
+                    fields.push_back(f);
+                for (auto& f : reqs.optionalFields)
+                    fields.push_back(f);
+            }
+        } catch (...) {}
+    }
+    std::sort(fields.begin(), fields.end());
+    fields.erase(std::unique(fields.begin(), fields.end()), fields.end());
+    return fields;
+}
+
+int RuntimeFactorSvc::getMaxLookbackDays() const {
+    int maxDays = 0;
+    for (const auto& fid : m_factorIds) {
+        if (fid.empty()) continue;
+        try {
+            auto factor = m_instanceManager.createInstance(fid);
+            if (factor) {
+                int minPts = factor->getBoundaryRules().minDataPoints;
+                if (minPts > maxDays) maxDays = minPts;
+            }
+        } catch (...) {}
+    }
+    // 交易日 → 日历日：×1.5 覆盖周末节假日，最少 30 天
+    int calendarDays = std::max(30, static_cast<int>(maxDays * 1.5));
+    return calendarDays;
+}
+
+void RuntimeFactorSvc::buildLiveView(
+    const std::vector<astock::database::SqlQueryResultRow>& rows,
+    const std::vector<std::string>& extraFields)
+{
+    auto view = factor::compute::CachedMarketDataView::fromSqlRows(rows, extraFields);
+    if (view) setLiveMarketView(view.get());
+    m_ownedLiveView = std::move(view);
 }
 
 // ── IFactorSvc: 统一的因子值计算入口 ──
@@ -103,8 +157,12 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
 
     std::vector<std::string> symbolStrList;
     for (std::uint32_t id : symbolIds) {
-        const std::string sym = m_symbolResolver(id);
-        if (!sym.empty()) symbolStrList.push_back(sym);
+        std::string sym = m_symbolResolver(id);
+        if (sym.empty()) continue;
+        // 去掉 .SH / .SZ 后缀，对齐 view 的 symbolStrings
+        auto dot = sym.find('.');
+        if (dot != std::string::npos) sym.resize(dot);
+        symbolStrList.push_back(std::move(sym));
     }
     if (symbolStrList.empty()) return result;
 
@@ -157,27 +215,30 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         return result;
     }
 
-    // ── 实盘: 统一走 FactorEngine::computeSingleDate（HistoricalView 由 m_liveMarketView 提供）──
+    // ── 实盘: 用 view 中最新日期（昨天）而不是 tick 日期（今天）做因子计算 ──
     if (m_liveMarketView) {
-        fprintf(stderr, "[RFS] getValues LIVE: instance=%s date=%s symbols=%zu view=%p\n",
-                instanceId.c_str(), dateBuf, symbolStrList.size(),
-                static_cast<const void*>(m_liveMarketView));
-        fflush(stderr);
+        const auto& dates = m_liveMarketView->dates();
+        if (!dates.empty()) {
+            int lastDate = dates.back().value;
+            int ly = lastDate / 10000, lm = (lastDate / 100) % 100, ld = lastDate % 100;
+            std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", ly, lm, ld);
+        }
         auto factorValues = m_engine->computeSingleDate(instanceId, dateBuf, symbolStrList, m_liveMarketView);
         for (const auto& [sym, val] : factorValues) {
             for (uint32_t id : symbolIds)
                 if (m_symbolResolver(id) == sym) { result[id] = val; break; }
         }
-        fprintf(stderr, "[RFS] getValues LIVE result: %zu values\n", result.size());
-        fflush(stderr);
+        if (result.empty())
+            INTERNAL_WARN_STREAM << "[RFS] 因子值空: id=" << instanceId << " date=" << dateBuf
+                                 << " sym=" << (symbolStrList.empty() ? "?" : symbolStrList[0])
+                                 << " viewLastDate=" << (m_liveMarketView->dates().empty() ? "none"
+                                     : std::to_string(m_liveMarketView->dates().back().value));
         return result;
     }
 
-    // ── 回退: 无 MarketView 时无法计算。实盘启动前必须调用 setLiveMarketView()，回测须注入 setDataService() ──
-    fprintf(stderr, "[RFS] getValues NO-SOURCE: instance=%s m_dataSvc=%p m_liveMarketView=%p — 因子值全部返回空!\n",
-            instanceId.c_str(), static_cast<void*>(m_dataSvc),
-            static_cast<const void*>(m_liveMarketView));
-    fflush(stderr);
+    INTERNAL_WARN_STREAM << "[RFS] 无数据源: id=" << instanceId
+                         << " dataSvc=" << static_cast<void*>(m_dataSvc)
+                         << " liveView=" << static_cast<const void*>(m_liveMarketView);
     return result;
 }
 
@@ -226,15 +287,7 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         syms = m_latestSymbols;
         instanceIds = m_factorIds;
     }
-    fprintf(stderr, "[RFS] copySnapshots: day=%d syms=%zu factorIds=%zu m_dataSvc=%p m_liveMarketView=%p\n",
-            tradeDay, syms.size(), instanceIds.size(),
-            static_cast<void*>(m_dataSvc),
-            static_cast<const void*>(m_liveMarketView));
-    fflush(stderr);
     if (tradeDay == 0 || syms.empty() || instanceIds.empty()) {
-        fprintf(stderr, "[RFS] copySnapshots SKIP: no data (day=%d syms=%zu ids=%zu)\n",
-                tradeDay, syms.size(), instanceIds.size());
-        fflush(stderr);
         return;
     }
 
@@ -245,8 +298,12 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
             output.push_back(RuntimeFactorSnapshot{ sym, iid, score, 1 });
         }
     }
-    fprintf(stderr, "[RFS] copySnapshots DONE: %zu snapshots\n", output.size());
-    fflush(stderr);
+    if (output.empty()) {
+        static int emptySnapCount = 0;
+        if (++emptySnapCount % 50 == 0)
+            INTERNAL_WARN_STREAM << "[RFS] 快照连续空: count=" << emptySnapCount
+                                 << " day=" << tradeDay << " ids=" << instanceIds.size();
+    }
 }
 
 } // namespace domain::strategy

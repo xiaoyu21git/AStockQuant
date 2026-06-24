@@ -12,10 +12,12 @@
 #include <unordered_map>
 #include <vector>
 
+namespace astock { namespace database { class SqlQueryResultRow; } }
 namespace factor {
 class FactorInstanceManager;
 namespace compute {
 class IMarketDataView;
+class CachedMarketDataView;
 class BacktestDataService;
 class FactorEngine;
 }
@@ -50,6 +52,22 @@ public:
     /// @brief 设置关注的因子实例 ID 列表（copySnapshots 迭代用）
     void setFactorIds(const std::vector<std::string>& factorIds);
 
+    /// @brief 从因子需求收集所需的数据字段
+    [[nodiscard]] std::vector<std::string> getRequiredFields() const;
+
+    /// @brief 从因子需求计算最大回溯窗口（交易日数，用于确定查多少天历史数据）
+    [[nodiscard]] int getMaxLookbackDays() const;
+
+    /// @brief 用 DB 查询结果构建实盘 MarketView（零 JSON）
+    void buildLiveView(
+        const std::vector<astock::database::SqlQueryResultRow>& rows,
+        const std::vector<std::string>& extraFields);
+
+    /// @brief 获取当前实盘视图（供桥接层读取元数据）
+    [[nodiscard]] const factor::compute::IMarketDataView* liveView() const {
+        return m_liveMarketView;
+    }
+
     // ── IFactorSvc ──
     [[nodiscard]] std::unordered_map<std::uint32_t, double> getValues(
         const std::string& instanceId,
@@ -70,6 +88,7 @@ private:
 
     factor::compute::BacktestDataService* m_dataSvc = nullptr;
     const factor::compute::IMarketDataView* m_liveMarketView = nullptr;
+    std::unique_ptr<factor::compute::CachedMarketDataView> m_ownedLiveView;
     std::unique_ptr<factor::compute::FactorEngine> m_engine;
 
     // ── 回测缓存 ──

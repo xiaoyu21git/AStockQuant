@@ -76,10 +76,22 @@ def _calendar_juejin() -> list[dt.date]:
             except: pass
     return sorted(set(dates))
 
+def _calendar_mysql() -> list[dt.date]:
+    import pymysql
+    conn = pymysql.connect(host='127.0.0.1', port=3306, user='root', password='123456a',
+                           database='astock_quant', charset='utf8mb4')
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT DISTINCT trade_date FROM daily_bar ORDER BY trade_date")
+            return [row[0] for row in cur.fetchall() if isinstance(row[0], dt.date)]
+    finally:
+        conn.close()
+
 _CALENDAR_SOURCES = {
     'akshare': _calendar_akshare,
     'baostock': _calendar_baostock,
     'juejin': _calendar_juejin,
+    'mysql': _calendar_mysql,
 }
 
 @lru_cache(maxsize=1)
@@ -90,7 +102,7 @@ def _get_cached_calendar(source: str) -> list[dt.date]:
 def get_trade_calendar(force_source: Optional[str] = None) -> list[dt.date]:
     """获取交易日历，默认使用配置的源"""
     cfg = _load_config()
-    source = force_source or cfg.get('calendar_source', 'baostock')
+    source = force_source or cfg.get('calendar_source', 'mysql')
     return _get_cached_calendar(source)
 
 def clear_calendar_cache():

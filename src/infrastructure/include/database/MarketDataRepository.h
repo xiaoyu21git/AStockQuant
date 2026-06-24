@@ -83,6 +83,12 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
+    /// 全市场日K线（带额外字段，返回原始行以便访问自定义列）
+    std::vector<astock::database::SqlQueryResultRow> queryAllMarketDailyBarWithFields(
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& extraFields);
+
     /// 全市场周K线（按日期范围）
     std::vector<DailyBarRow> queryAllMarketWeeklyBar(
         const std::string& startDate,
