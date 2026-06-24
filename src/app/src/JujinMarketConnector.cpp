@@ -503,7 +503,6 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
             } else {
                 std::cerr << "[JMC] DB connection failed\n" << std::flush;
             }
-        }
     }
 
     while (true) {
