@@ -23,7 +23,6 @@
     MarketDataBridge.cpp
     GmMarketSource.cpp
     TradingBridges.cpp
-    DataCleaningPersistence.cpp
     StrategyListModel.cpp
     TradingConnectionConfigService.cpp
     TradingRuntimeStatusService.cpp

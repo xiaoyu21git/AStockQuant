@@ -23,7 +23,10 @@ bool PersistedStrategyData::isValid() const { return !strategyId.empty(); }
 QVariantMap PersistedStrategyData::toVariantMap() const {
     QVariantMap m;
     m["strategyId"] = fromS(strategyId);
+    m["strategyName"] = fromS(metadata.name);
     m["strategyCode"] = fromS(strategyCode);
+    m["behaviorKind"] = static_cast<int>(metadata.behaviorKind);
+    m["description"] = fromS(metadata.description);
     m["version"] = fromS(version);
     m["author"] = fromS(author);
     m["language"] = static_cast<int>(language);
@@ -57,7 +60,12 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
     d.author = row.getString("author");
     d.language = static_cast<StrategyLanguageCode>(row.getInt("language"));
     d.status = strategy_view::StrategyLifecycleStatus::Active;
-    d.metadata = domain::strategies::StrategyMetadata{};
+    auto metaJson = fromJson(row.getString("metadata_json"));
+    d.metadata.name = metaJson.value("name").toString().toStdString();
+    d.metadata.description = metaJson.value("description").toString().toStdString();
+    d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
+        metaJson.value("behaviorKind").toInt());
+    d.metadata.enabled = metaJson.value("enabled").toBool();
     d.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{};
     d.parameters = fromJson(row.getString("parameters"));
     d.performanceMetrics = fromJson(row.getString("performance_metrics"));
@@ -84,6 +92,13 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
         d.status = strategy_view::StrategyLifecycleStatus::Active;
         d.createdAt = QDateTime::fromString(fromS(row.getString("created_at")), Qt::ISODate);
         d.updatedAt = QDateTime::fromString(fromS(row.getString("updated_at")), Qt::ISODate);
+        // 解析 metadata_json
+        auto metaJson = fromJson(row.getString("metadata_json"));
+        d.metadata.name = metaJson.value("name").toString().toStdString();
+        d.metadata.description = metaJson.value("description").toString().toStdString();
+        d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
+            metaJson.value("behaviorKind").toInt());
+        d.metadata.enabled = metaJson.value("enabled").toBool();
         v.push_back(d);
     }
     return v;

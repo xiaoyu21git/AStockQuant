@@ -1,6 +1,5 @@
-# MySQL 依赖配置
-include_directories("C:/Program Files/MySQL/MySQL Server 8.0/include")
-find_library(MYSQL_LIB libmysql PATHS "C:/Program Files/MySQL/MySQL Server 8.0/lib" REQUIRED)
+# PostgreSQL via infrastructure
+find_package(PostgreSQL REQUIRED)
 
 # CMakeLists.txt
 cmake_minimum_required(VERSION 3.15)
@@ -43,7 +42,6 @@ add_library(astock_market STATIC
 target_link_libraries(astock_market
     PUBLIC
         foundation
-        ${MYSQL_LIB}
     PRIVATE
         OpenSSL::SSL
         OpenSSL::Crypto
@@ -55,7 +53,6 @@ target_include_directories(astock_market
         ${CMAKE_SOURCE_DIR}/src/domain/market/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-        ${MARKET_MYSQL_INCLUDE_DIR}
 )
 
 

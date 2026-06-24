@@ -71,7 +71,7 @@ set_target_properties(infrastructure PROPERTIES
 target_include_directories(infrastructure
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${PostgreSQL_INCLUDE_DIRS}
+        ${PostgreSQL_INCLUDE_DIR}
         ${CMAKE_SOURCE_DIR}/src/domain/factor/include
         ${CMAKE_SOURCE_DIR}/src/domain/market/include
         ${CMAKE_SOURCE_DIR}/src/domain/cleaning/include
