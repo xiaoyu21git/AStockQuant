@@ -14,7 +14,6 @@
 #include <queue>
 #include <chrono>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 namespace foundation {
@@ -271,7 +270,6 @@ public:
     virtual void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const = 0;
 
     virtual void setContextHistoricalView(const void* view) = 0;
-    virtual void setContextEvaluationRow(int row) = 0;
 };
 
 class LocalRuleEvaluationService final : public IRuleEvaluationService,
@@ -409,9 +407,6 @@ private:
     void reserveWorkingBuffers();
     void resetStats();
 
-    /// @brief 为所有已注册策略设置当前回测评估行号 (非因子策略需要知道"当前是第几行")
-    void setContextEvaluationRow(int row) override;
-
     /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
     void setContextHistoricalView(const void* view);
 
@@ -425,8 +420,6 @@ private:
     StrategyServiceExecutionPlan plan_;
     StrategyExecutionStats stats_;
     std::vector<StrategyRuntimeEntry> strategyEntries_;
-    // 日内去重：每标的首笔 tick 触发评估，后续仅更新因子快照
-    std::unordered_map<InstrumentId, int, InstrumentId::Hash> m_evaluatedDays_;
     std::vector<RuntimeFactorSnapshot> factorSnapshotBuffer_;
     std::vector<StrategySignal> signalBuffer_;
     std::vector<RuleEvaluationResult> ruleResultBuffer_;
@@ -530,9 +523,6 @@ public:
     /// @param view 包含足够回溯窗口的行情数据视图 (不为 Engine 所有，调用方保证生命周期)
     void setLiveMarketView(const void* view);
 
-    /// @brief 查询是否为因子策略（MultiFactor / MachineLearning）
-    [[nodiscard]] bool hasFactorStrategies() const noexcept { return m_hasFactorStrategies_; }
-
     /// @brief 丢弃的 tick 计数（队列满时触发）
     [[nodiscard]] std::int64_t droppedTicks() const noexcept {
         return m_droppedTicks.load(std::memory_order_acquire);
@@ -569,7 +559,6 @@ private:
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
-    bool m_hasFactorStrategies_{false};
 };
 
 class StrategyEngine::Builder final {

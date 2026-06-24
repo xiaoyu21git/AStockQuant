@@ -2,7 +2,6 @@
 #include "../../factor/include/FactorInstanceManager.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
-#include "../../factor/include/factor_compute/ArrowMarketDataView.h"
 
 #include <cstdio>
 #include <string>
@@ -36,9 +35,11 @@ void RuntimeFactorSvc::setMarketView(const factor::compute::IMarketDataView*) {
 
 void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView* view) {
     m_liveMarketView = view;
-
-    // 重建符号解析器：优先 CachedMarketDataView，其次 ArrowMarketDataView
-    auto buildResolver = [this](const auto& symbols, const auto& instruments) {
+    // 与 setDataService 相同：从 CachedMarketDataView 重建符号解析
+    auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(view);
+    if (cachedView && !cachedView->symbolStrings().empty()) {
+        const auto& symbols = cachedView->symbolStrings();
+        const auto& instruments = view->instruments();
         auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
         for (size_t i = 0; i < instruments.size() && i < symbols.size(); ++i)
             (*idToSym)[instruments[i].value] = symbols[i];
@@ -47,20 +48,10 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
             return it != idToSym->end() ? it->second : std::string();
         };
         fprintf(stderr, "[RFS] setLiveMarketView: rebuilt symbol resolver (%zu symbols)\n", symbols.size());
-        fflush(stderr);
-    };
-
-    if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(view)) {
-        if (!cv->symbolStrings().empty())
-            buildResolver(cv->symbolStrings(), view->instruments());
-    } else if (auto* av = dynamic_cast<const factor::compute::ArrowMarketDataView*>(view)) {
-        if (!av->symbolStrings().empty())
-            buildResolver(av->symbolStrings(), view->instruments());
     } else {
-        fprintf(stderr, "[RFS] setLiveMarketView: view=%p (no symbol strings available)\n",
-                static_cast<const void*>(view));
-        fflush(stderr);
+        fprintf(stderr, "[RFS] setLiveMarketView: view=%p (no symbol strings available)\n", static_cast<const void*>(view));
     }
+    fflush(stderr);
 }
 
 void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc) {
@@ -73,15 +64,11 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
     if (svc) {
         auto batch = svc->loadBatch(0);
         if (batch.marketView && !batch.marketView->instruments().empty()) {
-            const auto& instruments = batch.marketView->instruments();
-            std::vector<std::string> symbols;
-            // 尝试从 CachedMarketDataView 或 ArrowMarketDataView 获取真实股票代码
-            if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(batch.marketView)) {
-                symbols = cv->symbolStrings();
-            } else if (auto* av = dynamic_cast<const factor::compute::ArrowMarketDataView*>(batch.marketView)) {
-                symbols = av->symbolStrings();
-            }
-            if (!symbols.empty()) {
+            // 尝试从 CachedMarketDataView 获取真实股票代码
+            auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(batch.marketView);
+            if (cachedView && !cachedView->symbolStrings().empty()) {
+                const auto& symbols = cachedView->symbolStrings();
+                const auto& instruments = batch.marketView->instruments();
                 auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
                 for (size_t i = 0; i < instruments.size() && i < symbols.size(); ++i) {
                     (*idToSym)[instruments[i].value] = symbols[i];
@@ -90,7 +77,7 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
                     auto it = idToSym->find(id);
                     return it != idToSym->end() ? it->second : std::string();
                 };
-                fprintf(stderr, "[RFS] setDataService: rebuilt symbol resolver (%zu symbols)\n", symbols.size());
+                fprintf(stderr, "[RFS] setDataService: rebuilt symbol resolver from CachedMarketDataView (%zu symbols)\n", symbols.size());
                 fflush(stderr);
             }
         }
@@ -215,8 +202,7 @@ StrategyServiceFlowResult RuntimeFactorSvc::updateBatch(
     std::int32_t latestDay{0};
     std::vector<std::uint32_t> syms;
     for (const auto& p : batch) {
-        // 只需 instrumentId 有效 + 有交易日，不要求价格>0（因子查询不需要价格）
-        if (!p.instrumentId().isValid() || p.tradingDay() < 0) continue;
+        if (!p.isValid()) continue;
         latestDay = p.tradingDay();
         syms.push_back(p.instrumentId().value);
     }

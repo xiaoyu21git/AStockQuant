@@ -234,7 +234,7 @@ bool JujinMarketConnector::start()
     auto configObj = cfg::loadConfigObject();
     m_maxMarketSubscriptions = static_cast<size_t>(
         (std::max)(1, cfg::readInt(configObj, "maxMarketSubscriptions",
-                                   "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS", 50)));
+                                   "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS", 500)));
     m_marketSubscriptionBatchSize = static_cast<size_t>(
         (std::max)(1, cfg::readInt(configObj, "marketSubscriptionBatchSize",
                                    "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE", 4)));

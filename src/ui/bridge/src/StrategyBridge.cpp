@@ -12,8 +12,6 @@
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/factor/include/factor_compute/CachedMarketDataView.h"
-#include "../../domain/factor/include/factor_compute/ArrowMarketDataView.h"
-#include "../../domain/cleaning/include/DataCache.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
 #include "foundation/json/json_facade.h"
 #include "../../domain/strategy/include/StrategyManager.h"
@@ -667,28 +665,27 @@ bool StrategyBridge::start(const QString& strategyId)
                         std::strftime(startBuf, sizeof(startBuf), "%Y-%m-%d", std::localtime(&t));
                     }
                     INTERNAL_INFO_STREAM << "[Live] loading market data: " << startBuf << " ~ " << endBuf;
-                    // 使用 ArrowMarketDataView 直接读取缓存文件，零拷贝
-                    {
-                        auto& cache = cleaning::DataCache::instance();
-                        auto datasets = cache.listDataSets();
-                        int datasetId = -1;
-                        for (const auto& ds : datasets) {
-                            if (ds.sourceType == "all_market") {
-                                datasetId = ds.id;
-                                break;
-                            }
+                    auto rows = repo->queryAllMarketDailyBar(startBuf, endBuf);
+                    if (!rows.empty()) {
+                        // 转 QVariantList → JSON → CachedMarketDataView
+                        QVariantList data;
+                        for (auto& r : rows) {
+                            QVariantMap row;
+                            row["symbol"] = QString::fromStdString(r.symbol);
+                            row["trade_date"] = QString::fromStdString(r.tradeDate);
+                            row["open"] = r.open;
+                            row["high"] = r.high;
+                            row["low"] = r.low;
+                            row["close"] = r.close;
+                            row["volume"] = r.volume;
+                            data.append(row);
                         }
-                        if (datasetId > 0) {
-                            std::string arrowPath = cache.dataFilePath(datasetId);
-                            m_liveMarketView = std::make_unique<factor::compute::ArrowMarketDataView>(arrowPath);
-                            engine->setLiveMarketView(m_liveMarketView.get());
-                            INTERNAL_INFO_STREAM << "[Live] history loaded: "
-                                             << m_liveMarketView->dates().size() << " dates, "
-                                             << m_liveMarketView->instruments().size() << " 标的"
-                                             << " (Arrow zero-copy)";
-                        } else {
-                            INTERNAL_ERROR_STREAM << "[Live] no all_market cache dataset found";
-                        }
+                        QJsonDocument doc(QJsonArray::fromVariantList(data));
+                        auto root = foundation::json::JsonFacade::parse(doc.toJson(QJsonDocument::Compact).toStdString());
+                        m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
+                        engine->setLiveMarketView(m_liveMarketView.get());
+                        INTERNAL_INFO_STREAM << "[Live] history loaded: " << rows.size() << " rows, "
+                                         << m_liveMarketView->instruments().size() << " 标的";
                     }
                 }
             }

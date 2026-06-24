@@ -151,8 +151,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     fprintf(stderr, "[fromDb] engine built: %p\n", static_cast<void*>(engine.get())); fflush(stderr);
     if (!engine) return nullptr;
 
-    engine->m_hasFactorStrategies_ = isFactorType;
-
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
@@ -284,10 +282,6 @@ void StrategyEngine::setLiveMarketView(const void* view)
 {
     if (auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get())) {
         rfs->setLiveMarketView(static_cast<const factor::compute::IMarketDataView*>(view));
-    }
-    // 非因子策略：评估时从 context.historicalViewPtr() 取 OHLCV 数据计算 TA-Lib 指标
-    if (strategyService_) {
-        strategyService_->setContextHistoricalView(view);
     }
 }
 
@@ -472,10 +466,6 @@ void StrategyEngine::setOrderListener(IOrderListener* listener)
 
 void StrategyEngine::drainQueue()
 {
-    std::size_t processed = 0;
-    std::size_t signalsGenerated = 0;
-    auto lastReport = std::chrono::steady_clock::now();
-
     while (m_loopRunning.load(std::memory_order_acquire)) {
         MarketDataPoint mdp;
         {
@@ -492,37 +482,12 @@ void StrategyEngine::drainQueue()
 
         try {
             auto orders = step(mdp);
-            if (orders.has_value() && !orders->empty()) {
-                signalsGenerated += orders->size();
-                if (m_orderListener) {
-                    m_orderListener->onOrders(*orders);
-                }
+            if (orders.has_value() && m_orderListener) {
+                m_orderListener->onOrders(*orders);
             }
         } catch (const std::exception& e) {
             INTERNAL_WARN_STREAM << "[StrategyEngine] tick processing failed: "
                                  << e.what() << " — skipping";
-        }
-
-        processed++;
-
-        // 心跳：每处理 200 条或 15 秒打印一次策略运行摘要
-        auto now = std::chrono::steady_clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
-        if (processed % 200 == 0 || elapsed >= 15) {
-            std::size_t qDepth = 0;
-            {
-                std::lock_guard<std::mutex> lock(m_queueMutex);
-                qDepth = m_mdpQueue.size();
-            }
-            auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
-            fprintf(stderr,
-                    "[Engine] processed=%zu queue=%zu signals=%zu dropped=%zu "
-                    "(%llds)\n",
-                    processed, qDepth, signalsGenerated,
-                    static_cast<size_t>(dropped),
-                    static_cast<long long>(elapsed));
-            fflush(stderr);
-            lastReport = now;
         }
 
         // 心跳 — 记录最后处理时间
@@ -703,41 +668,12 @@ StrategyBacktestResult StrategyEngine::backtest(
         strategyService_->start();
     }
 
-    // 非因子策略需要 historicalView 用于 TA-Lib 技术指标计算；
-    // 因子策略通过 RuntimeFactorSvc(m_dataSvc) → FactorEngine 获取因子值，不需要 historicalView。
-    // 开关依据：fromDb() 根据策略配置的 behaviorKind 设置 m_hasFactorStrategies_
-    if (!m_hasFactorStrategies_ && view) {
-        strategyService_->setContextHistoricalView(view);
-    }
-
     const int totalDays = static_cast<int>(view->dates().size());
     const int colCount = static_cast<int>(view->instruments().size());
 
     if (totalDays == 0 || colCount == 0) {
         result.errorMessage = "Empty market data";
         return result;
-    }
-
-    // ── 诊断：抽样检查各时间点的价格覆盖率 ──
-    {
-        auto closeMat = view->close();
-        const auto& dts = view->dates();
-        int samplePcts[] = {0, 25, 50, 75, 90, 95, 99};
-        fprintf(stderr, "[backtest] 价格覆盖率诊断 (共 %d 天 x %d 只股票):\n",
-                totalDays, colCount);
-        for (int pct : samplePcts) {
-            int di = static_cast<int>(std::min(static_cast<size_t>(totalDays - 1),
-                static_cast<size_t>(totalDays) * pct / 100));
-            int validCount = 0;
-            size_t rowOff = static_cast<size_t>(di) * static_cast<size_t>(colCount);
-            for (int c = 0; c < colCount; ++c) {
-                double px = static_cast<double>(closeMat.data[rowOff + c]);
-                if (px > 0.0 && std::isfinite(px)) ++validCount;
-            }
-            fprintf(stderr, "  进度[%3d%%] 日期 %d: %d/%d 只有效价格\n",
-                    pct, dts[di].value, validCount, colCount);
-        }
-        fflush(stderr);
     }
 
     // 2. 构建 symbol 映射 + 账户初始化
@@ -769,6 +705,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     domain::backtest::BacktestFillSimulator fillSim(fillParams);
 
     double cash = req.costSpec.initialCapital.value;
+    int riskRejectedCount = 0;
     int totalFills = 0, winningFills = 0, losingFills = 0;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
@@ -778,8 +715,6 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     // 数据准备完成 → 0%
     if (onProgress) onProgress(0.0);
-
-    double peakEquity = req.costSpec.initialCapital.value;  // 峰值净值，用于风控回撤计算
 
     // 3. 逐日驱动
     // 第一步会触发惰性因子计算（FactorEngine::compute），我们不知道它占总时间的比例
@@ -803,11 +738,6 @@ StrategyBacktestResult StrategyEngine::backtest(
                     r, totalDays, posEngine.account().totalAsset(),
                     posEngine.positions().size());
             fflush(stderr);
-        }
-
-        // 设置当前回测行号，使 NonFactorStrategy 只用截至当天的数据评估
-        if (!m_hasFactorStrategies_ && strategyService_) {
-            strategyService_->setContextEvaluationRow(r);
         }
 
         std::vector<MarketDataPoint> mdpBatch;
@@ -852,43 +782,12 @@ StrategyBacktestResult StrategyEngine::backtest(
                 riskInput.setQuantity(static_cast<std::int64_t>(order.quantity()));
                 riskInput.setStrategyBound(true);
                 riskInput.setStrategyActive(true);
-                riskInput.setSignalStrength(0.5);
-                riskInput.setPositionSnapshotReady(true);
+                riskInput.setSignalStrength(0.5);         // 回测默认信号强度
+                riskInput.setPositionSnapshotReady(true);  // 回测持仓快照可用
                 const auto& accSnap = posEngine.account();
                 riskInput.setCurrentTotalAsset(accSnap.totalAsset());
                 riskInput.setCurrentMarketValue(accSnap.marketValue());
                 riskInput.setTradingSessionOpen(true);
-
-                // ── 注入风控阈值 ──
-                riskInput.setStopLossPercent(req.riskSpec.stopLossRate.value * 100.0);
-                riskInput.setTakeProfitPercent(req.riskSpec.takeProfitRate.value * 100.0);
-                riskInput.setMaxTotalExposurePercent(
-                    domain::strategy::RiskConfig::defaults().maxTotalExposurePercent);
-                riskInput.setMaxDrawdownLimitPercent(
-                    domain::strategy::RiskConfig::defaults().maxDrawdownLimitPercent);
-                riskInput.setMaxPositionPercent(req.riskSpec.maxSinglePositionRatio.value * 100.0);
-
-                // ── 当前持仓浮动盈亏及市值 ──
-                {
-                    const auto& posMap = posEngine.positions();
-                    auto pit = posMap.find(symbol);
-                    if (pit != posMap.end()) {
-                        riskInput.setSymbolMarketValue(
-                            closePrice * static_cast<double>(pit->second.quantity()));
-                    }
-                }
-                if (riskInput.isBuyOrder()) {
-                    auto bpIt = buyPriceMap.find(symbol);
-                    if (bpIt != buyPriceMap.end() && bpIt->second > 0.0) {
-                        riskInput.setSymbolPositionReturnPercent(
-                            (closePrice / bpIt->second - 1.0) * 100.0);
-                    }
-                    // 当前回撤
-                    if (peakEquity > 0.0 && accSnap.totalAsset() < peakEquity) {
-                        riskInput.setCurrentDrawdownPercent(
-                            (accSnap.totalAsset() / peakEquity - 1.0) * 100.0);
-                    }
-                }
                 // 卖出单：填充可卖数量
                 if (!riskInput.isBuyOrder()) {
                     const auto& posMap = posEngine.positions();
@@ -899,29 +798,8 @@ StrategyBacktestResult StrategyEngine::backtest(
 
                 auto riskResult = domain::strategy::RiskEvaluator::evaluateOrder(riskInput);
                 if (!riskResult.approved()) {
-                    ++result.riskRejectedCount;
-                    ++result.riskRejectionStats[static_cast<int>(riskResult.code())];
+                    ++riskRejectedCount;
                     continue;
-                }
-
-                // ── 持仓数量上限（回测页 maxPositionCount）──
-                if (order.side() == RuntimeOrderSide::Buy) {
-                    const auto& posMap = posEngine.positions();
-                    bool isNewPosition = (posMap.find(symbol) == posMap.end()
-                                          || posMap.at(symbol).quantity() == 0);
-                    if (isNewPosition) {
-                        int activePositions = 0;
-                        for (const auto& [_, p] : posMap) {
-                            if (p.quantity() > 0) ++activePositions;
-                        }
-                        int maxPos = std::max(1, req.factorOverlaySpec.targetPositionCount);
-                        if (activePositions >= maxPos) {
-                            ++result.riskRejectedCount;
-                            ++result.riskRejectionStats[static_cast<int>(
-                                domain::strategy::RiskRejectCode::PositionConcentrationExceeded)];
-                            continue;
-                        }
-                    }
                 }
 
                 // ── 成交模拟 (BacktestFillSimulator — 公共类) ──
@@ -974,58 +852,6 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
-        // ── 持仓止损/止盈检查 ──
-        {
-            const double stopLossPct = req.riskSpec.stopLossRate.value;
-            const double takeProfitPct = req.riskSpec.takeProfitRate.value;
-            auto& posMap = posEngine.positions();
-            std::vector<std::string> positionsToClose;
-            for (const auto& [sym, pos] : posMap) {
-                if (pos.quantity() <= 0) continue;
-                // 查找当日价格
-                double px = 0.0;
-                for (const auto& mdp : mdpBatch) {
-                    auto symIt = idToSymbol.find(mdp.instrumentId().value);
-                    if (symIt != idToSymbol.end() && symIt->second == sym) {
-                        px = mdp.lastPrice(); break;
-                    }
-                }
-                if (px <= 0.0) continue;
-                auto bpIt = buyPriceMap.find(sym);
-                if (bpIt == buyPriceMap.end() || bpIt->second <= 0.0) continue;
-                double pnlPct = (px / bpIt->second - 1.0);
-                if (pnlPct <= -stopLossPct || pnlPct >= takeProfitPct) {
-                    positionsToClose.push_back(sym);
-                }
-            }
-            for (const auto& sym : positionsToClose) {
-                auto it = posMap.find(sym);
-                if (it == posMap.end()) continue;
-                const std::int64_t qty = it->second.quantity();
-                if (qty <= 0) continue;
-                double px = 0.0;
-                for (const auto& mdp : mdpBatch) {
-                    auto symIt = idToSymbol.find(mdp.instrumentId().value);
-                    if (symIt != idToSymbol.end() && symIt->second == sym) {
-                        px = mdp.lastPrice(); break;
-                    }
-                }
-                if (px <= 0.0) continue;
-                auto fr = fillSim.simulateSell(px, qty);
-                cash += fr.income;
-                ++totalFills;
-                double bp = buyPriceMap[sym];
-                double pnl = (fr.income / qty - bp) * qty;
-                if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
-                else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
-                symbolPnl[sym] += pnl;
-                buyPriceMap.erase(sym);
-                domain::trading::Position empty;
-                empty.setSymbol(sym); empty.setQuantity(0);
-                posEngine.applyPositionEvent(sym, empty);
-            }
-        }
-
         // 更新账户
         double marketValue = 0.0;
         for (const auto& [sym, pos] : posEngine.positions()) {
@@ -1046,7 +872,6 @@ StrategyBacktestResult StrategyEngine::backtest(
         newAcc.setTotalAsset(equity);
         posEngine.applyAccountEvent(newAcc);
         equityCurve.push_back(equity);
-        if (equity > peakEquity) peakEquity = equity;
 
         if (onProgress && totalDays > 0) {
             double loopFrac = static_cast<double>(r + 1) / static_cast<double>(totalDays);
@@ -1056,7 +881,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     }
 
     fprintf(stderr, "[backtest] loop done: days=%d finalEquity=%.2f fills=%d riskRejected=%d\n",
-            totalDays, posEngine.account().totalAsset(), totalFills, result.riskRejectedCount);
+            totalDays, posEngine.account().totalAsset(), totalFills, riskRejectedCount);
     // 逐标的盈亏 top5
     std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
     std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });
@@ -1083,15 +908,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 dailyReturns.push_back(equityCurve[i] / equityCurve[i - 1] - 1.0);
         }
 
-        // 从真实净值曲线计算最大回撤（直接用 equity，不通过日收益率复利，避免净值大幅波动时失真）
-        {
-            double pk = equityCurve[0];
-            for (double e : equityCurve) {
-                if (e > pk) pk = e;
-                double dd = pk > 0.0 ? (pk - e) / pk : 0.0;
-                if (dd > result.metrics.maxDrawdown) result.metrics.maxDrawdown = dd;
-            }
-        }
+        result.metrics.maxDrawdown   = ::factor::FactorBacktestMetricsCalculator::calculateMaxDrawdown(dailyReturns);
         result.metrics.winRate       = ::factor::FactorBacktestMetricsCalculator::calculateWinRate(dailyReturns);
         result.metrics.profitFactor  = ::factor::FactorBacktestMetricsCalculator::calculateProfitFactor(dailyReturns);
         double sum = 0.0;
@@ -1171,8 +988,8 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    if (result.riskRejectedCount > 0) {
-        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << result.riskRejectedCount;
+    if (riskRejectedCount > 0) {
+        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
     }
     if (onProgress) onProgress(100.0);
     fprintf(stderr, "[backtest] success, returning result\n"); fflush(stderr);
