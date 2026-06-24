@@ -56,14 +56,15 @@ Item {
         if (factorService && typeof factorService.initialize === "function") {
             factorService.initialize()
         }
-        factorViewModel = factorService ? factorService.getViewModel() : null
+        // 仅在 ViewModel 为空时填充，避免重复 DB 查询阻塞 UI
+        if (!factorViewModel || (typeof factorViewModel.rowCount === "function" && factorViewModel.rowCount() === 0)) {
+            factorViewModel = factorService ? factorService.getViewModel() : null
+        }
     }
 
     function warmupPage() {
         ensureFactorServiceReady()
-        if (factorService && typeof factorService.getAllFactors === "function") {
-            factorService.getAllFactors()
-        }
+        // getAllFactors() 已由 getViewModel() → ensureViewModelPopulated() 内部调用，此处不再重复
     }
 
     function resolveBaseStatusMessage() {
@@ -81,8 +82,8 @@ Item {
     // 因子服务（单例模式）- 直接使用，不需要实例化
     readonly property var factorService: Bridge.FactorService
     
-    // 因子视图模型 - 直接从FactorService获取
-    property var factorViewModel: factorService ? factorService.getViewModel() : null
+    // 因子视图模型 - 由 ensureFactorServiceReady() 显式初始化，避免绑定求值时提前触发 DB 查询
+    property var factorViewModel: null
 
     // ============ 因子参数配置加载 ============
     Component.onCompleted: {

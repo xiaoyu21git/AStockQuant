@@ -96,6 +96,7 @@ Rectangle {
     border.color: selected ? resolvedCategoryColor : baseConstants.borderColor
     border.width: selected ? 2 : 1
     
+    // 离屏渲染 FBO 常驻避免 hover 切换时反复创建/销毁导致渲染抖动
     layer.enabled: true
     layer.effect: DropShadow {
         horizontalOffset: 0

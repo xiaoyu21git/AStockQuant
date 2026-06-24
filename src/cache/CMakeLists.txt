@@ -70,9 +70,7 @@ set(CACHE_HEADERS
 add_library(cache_module STATIC)
 target_sources(cache_module PRIVATE ${CACHE_SOURCES} ${CACHE_HEADERS})
 
-if(MSVC)
-    target_compile_options(cache_module PRIVATE /utf-8)
-endif()
+# /utf-8 已在根 CMakeLists.txt 全局设置
 
 # 链接依赖库（使用Foundation JSON，不需要外部JSON库）
 target_link_libraries(cache_module

@@ -13,9 +13,13 @@
 #include <vector>
 #include <ankerl/unordered_dense.h>
 
+#ifdef ASTOCK_HAS_PARQUET
+namespace arrow { class Table; }
+#endif
+
 namespace cleaning {
 
-using J = foundation::json::JsonFacade;
+using JCache = foundation::json::JsonFacade;
 
 // ── 数据集元数据（纯 C++ 版本） ──
 struct DataSetInfo {
@@ -33,33 +37,33 @@ struct DataSetInfo {
     std::vector<std::string> tags;
     bool isBacktestReady{false};
 
-    J toJson() const {
-        auto obj = J::createObject();
-        obj.set("id", J::createDouble(static_cast<double>(id)));
-        obj.set("displayName", J::createString(displayName));
-        obj.set("description", J::createString(description));
-        obj.set("sourceType", J::createString(sourceType));
-        obj.set("createdAt", J::createDouble(static_cast<double>(createdAt)));
-        obj.set("rowCount", J::createDouble(static_cast<double>(rowCount)));
-        obj.set("schemaVersion", J::createDouble(static_cast<double>(schemaVersion)));
-        auto fieldsArr = J::createArray();
-        for (const auto& f : availableFields) fieldsArr.push_back(J::createString(f));
+    JCache toJson() const {
+        auto obj = JCache::createObject();
+        obj.set("id", JCache::createDouble(static_cast<double>(id)));
+        obj.set("displayName", JCache::createString(displayName));
+        obj.set("description", JCache::createString(description));
+        obj.set("sourceType", JCache::createString(sourceType));
+        obj.set("createdAt", JCache::createDouble(static_cast<double>(createdAt)));
+        obj.set("rowCount", JCache::createDouble(static_cast<double>(rowCount)));
+        obj.set("schemaVersion", JCache::createDouble(static_cast<double>(schemaVersion)));
+        auto fieldsArr = JCache::createArray();
+        for (const auto& f : availableFields) fieldsArr.push_back(JCache::createString(f));
         obj.set("availableFields", std::move(fieldsArr));
-        auto scArr = J::createArray();
-        for (const auto& s : stockCodes) scArr.push_back(J::createString(s));
+        auto scArr = JCache::createArray();
+        for (const auto& s : stockCodes) scArr.push_back(JCache::createString(s));
         obj.set("stockCodes", std::move(scArr));
-        obj.set("startDate", J::createString(startDate));
-        obj.set("endDate", J::createString(endDate));
+        obj.set("startDate", JCache::createString(startDate));
+        obj.set("endDate", JCache::createString(endDate));
         if (!tags.empty()) {
-            auto tArr = J::createArray();
-            for (const auto& t : tags) tArr.push_back(J::createString(t));
+            auto tArr = JCache::createArray();
+            for (const auto& t : tags) tArr.push_back(JCache::createString(t));
             obj.set("tags", std::move(tArr));
         }
-        obj.set("isBacktestReady", J::createBool(isBacktestReady));
+        obj.set("isBacktestReady", JCache::createBool(isBacktestReady));
         return obj;
     }
 
-    static DataSetInfo fromJson(const J& obj) {
+    static DataSetInfo fromJson(const JCache& obj) {
         DataSetInfo info;
         if (obj.has("id")) info.id = static_cast<int>(obj.get("id").asDouble());
         if (obj.has("displayName")) info.displayName = obj.get("displayName").asString();
@@ -121,7 +125,7 @@ public:
     bool isInitialized() const { return m_initialized; }
 
     // ── 存储数据集 ──
-    int storeDataSet(const std::vector<J>& data, const DataSetInfo& info,
+    int storeDataSet(const std::vector<JCache>& data, const DataSetInfo& info,
                      ProgressCallback onProgress = {}) {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_initialized) return -1;
@@ -198,6 +202,16 @@ public:
         return true;
     }
 
+    /// @brief 按 sourceType 批量删除数据集
+    int removeDataSetsBySourceType(const std::string& sourceType) {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        int removed = 0; std::vector<int> ids;
+        for (const auto& [id, info] : m_index) if (info.sourceType == sourceType) ids.push_back(id);
+        for (int id : ids) { std::remove(infoFilePath(id).c_str()); std::remove(dataFilePath(id).c_str()); std::remove(jsonDataFilePath(id).c_str()); m_index.erase(id); ++removed; }
+        if (removed > 0) saveCatalog();
+        return removed;
+    }
+
     // ── 列出所有数据集 ──
     std::vector<DataSetInfo> listDataSets() const {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -215,14 +229,20 @@ public:
 #ifdef ASTOCK_HAS_PARQUET
 
     /// @brief 保存数据集数据到 Arrow 文件（自动扫描字段）
-    void saveDataSetFile(int dataId, const std::vector<J>& rows);
+    void saveDataSetFile(int dataId, const std::vector<JCache>& rows);
     /// @brief 保存数据集数据到 Arrow 文件（显式字段，不扫描）
-    void saveDataSetFile(int dataId, const std::vector<J>& rows,
+    void saveDataSetFile(int dataId, const std::vector<JCache>& rows,
         const std::vector<std::string>& fieldNames,
         const std::unordered_set<std::string>& numericFields);
 
     /// @brief 从 Arrow 文件加载数据集数据
-    std::vector<J> loadDataSetFile(int dataId);
+    std::vector<JCache> loadDataSetFile(int dataId);
+
+    /// @brief 从 Arrow 文件加载为 Arrow Table
+    std::shared_ptr<arrow::Table> loadDataSetTable(int dataId);
+
+    /// @brief 仅读取 Arrow 文件 schema 字段名（零数据行加载，O(1) 内存）
+    std::vector<std::string> loadDataSetSchemaFields(int dataId);
 
     /// @brief 批量写入：开始新 Arrow 文件（自动从数据扫描字段类型）
     ArrowWriteToken beginArrowWrite(int dataId);
@@ -232,7 +252,10 @@ public:
         const std::unordered_set<std::string>& numericFields);
 
     /// @brief 批量写入：追加一批行（token 由 beginArrowWrite 返回）
-    void appendArrowBatch(ArrowWriteToken token, const std::vector<J>& rows);
+    void appendArrowBatch(ArrowWriteToken token, const std::vector<JCache>& rows);
+
+    /// @brief 批量写入：直接追加 Arrow Table（跳过 JsonFacade）
+    void appendArrowTable(ArrowWriteToken token, const std::shared_ptr<arrow::Table>& table);
 
     /// @brief 批量写入：完成并关闭文件
     void finishArrowWrite(ArrowWriteToken token);
@@ -240,19 +263,19 @@ public:
 #endif // ASTOCK_HAS_PARQUET
 
     /// @brief 保存数据集数据到 JSON 文件（无 Parquet 时的回退）
-    void saveDataSetFileJson(int dataId, const std::vector<J>& rows) {
-        auto arr = J::createArray();
+    void saveDataSetFileJson(int dataId, const std::vector<JCache>& rows) {
+        auto arr = JCache::createArray();
         for (const auto& row : rows) arr.push_back(row);
         writeFile(jsonDataFilePath(dataId), arr.toString());
     }
 
     /// @brief 从 JSON 文件加载数据集数据（无 Parquet 时的回退）
-    std::vector<J> loadDataSetFileJson(int dataId) {
+    std::vector<JCache> loadDataSetFileJson(int dataId) {
         std::string content = readFile(jsonDataFilePath(dataId));
         if (content.empty()) return {};
-        auto root = J::parse(content);
+        auto root = JCache::parse(content);
         if (!root.isArray()) return {};
-        std::vector<J> rows;
+        std::vector<JCache> rows;
         rows.reserve(root.size());
         for (size_t i = 0; i < root.size(); ++i) rows.push_back(root.at(i));
         return rows;
@@ -294,9 +317,9 @@ private:
     }
 
     void saveCatalog() {
-        auto obj = J::createObject();
-        obj.set("nextId", J::createDouble(static_cast<double>(m_nextDataSetId)));
-        auto arr = J::createArray();
+        auto obj = JCache::createObject();
+        obj.set("nextId", JCache::createDouble(static_cast<double>(m_nextDataSetId)));
+        auto arr = JCache::createArray();
         for (const auto& [id, info] : m_index) arr.push_back(info.toJson());
         obj.set("datasets", std::move(arr));
         writeFile(catalogPath(), obj.toString());
@@ -306,19 +329,32 @@ private:
         std::string content = readFile(catalogPath());
         bool fromCatalog = false;
         if (!content.empty()) {
-            auto root = J::parse(content);
+            auto root = JCache::parse(content);
             if (root.isObject()) {
                 if (root.has("nextId")) m_nextDataSetId = static_cast<int>(root.get("nextId").asDouble());
                 if (root.has("datasets") && root.get("datasets").isArray()) {
                     auto arr = root.get("datasets");
                     for (size_t i = 0; i < arr.size(); ++i) {
                         auto info = DataSetInfo::fromJson(arr.at(i));
+                        // 跳过数据文件已被删除的无效条目
+                        std::string apath = dataFilePath(info.id);
+                        FILE* ftest = fopen(apath.c_str(), "rb");
+                        if (!ftest) {
+                            fprintf(stderr, "[DataCache] skip stale dataset %d (no file)\n", info.id); fflush(stderr);
+                            std::remove(infoFilePath(info.id).c_str());
+                            std::remove(jsonDataFilePath(info.id).c_str());
+                            m_indexStale = true;
+                            continue;
+                        }
+                        fclose(ftest);
                         m_index[info.id] = info;
                     }
                     fromCatalog = true;
                 }
             }
         }
+        // 剔除脏文件后重写 catalog
+        if (m_indexStale) { saveCatalog(); m_indexStale = false; }
         // 扫描独立 info 文件（兼容旧 DataServiceCache 格式）
         if (!fromCatalog) {
             scanIndividualInfoFiles();
@@ -333,7 +369,7 @@ private:
             if (m_index.find(id) != m_index.end()) continue; // 已在 catalog 中
             std::string content = readFile(infoFilePath(id));
             if (content.empty()) continue;
-            auto infoJson = J::parse(content);
+            auto infoJson = JCache::parse(content);
             if (!infoJson.isObject()) continue;
             auto info = DataSetInfo::fromJson(infoJson);
             info.id = id;
@@ -402,6 +438,7 @@ private:
     std::string m_persistentDir;
     int m_nextDataSetId{1};
     ankerl::unordered_dense::map<int, DataSetInfo> m_index;
+    bool m_indexStale{false};
 };
 
 } // namespace cleaning

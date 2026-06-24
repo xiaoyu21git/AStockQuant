@@ -153,6 +153,7 @@
         <file>components/UserInfoPanel.qml</file>
         <file>main.qml</file>
         <file>page/DataAnalysis/Datamain.qml</file>
+        <file>page/DataAnalysis/CacheManagementPage.qml</file>
         <file>page/FactorWorkbench.qml</file>
         <file>page/Sidebar.qml</file>
         <file>page/dashboard/ChartArea.qml</file>
@@ -179,6 +180,8 @@
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
         <file>config/views/risk_backtest_params.json</file>
+        <file>config/views/factor_common.json</file>
+        <file>config/views/factor_common_params.json</file>
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorMetaLoader.js</file>
         <file>utils/I18n.js</file>

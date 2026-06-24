@@ -3,7 +3,8 @@
 #pragma once
 #include "ICleaningRule.h"
 #include "DataFieldKeys.h"
-#include "foundation/json/json_facade.h"
+#include "LightRow.h"
+#include "foundation/json/json_facade.h"  // JCfg::parse 用
 #include <algorithm>
 #include <cmath>
 #include <functional>
@@ -11,7 +12,8 @@
 
 namespace cleaning {
 
-using J = foundation::json::JsonFacade;
+using J = LightRow;
+using JCfg = foundation::json::JsonFacade;  // 仅构造用
 
 namespace detail {
 // 辅助函数
@@ -64,7 +66,7 @@ public:
     explicit DuplicateRemovalRule(const std::string& configJson = {}) {
         m_keyFields = {CF::SYMBOL.c_str(), CF::TRADE_DATE.c_str()}; // 默认
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("keyFields") && cfg.get("keyFields").isArray()) {
                 m_keyFields.clear();
                 auto arr = cfg.get("keyFields");
@@ -88,7 +90,7 @@ public:
         if (m_keyFields.empty()) return true;
         std::string key;
         for (const auto& f : m_keyFields) {
-            if (row.has(f)) key += f + "=" + row.get(f).asString() + ";";
+            if (row.has(f.c_str())) key += f + "=" + row.get(f.c_str()).asString() + ";";
         }
         if (m_seen.count(key)) return false;
         m_seen.insert(key);
@@ -121,9 +123,9 @@ public:
                 d.erase(0, d.find_first_not_of(" \t\r\n"));
                 d.erase(d.find_last_not_of(" \t\r\n") + 1);
                 if (d.empty() || d == "null" || d == "NULL") {
-                    row.set(FF::REPORT_DATE.c_str(), J::createNull());
+                    row.set(FF::REPORT_DATE.c_str(), LightRow::createNull());
                 } else if (d.size() >= 10) {
-                    row.set(FF::REPORT_DATE.c_str(), J::createString(d.substr(0, 10)));
+                    row.set(FF::REPORT_DATE.c_str(), LightRow::createString(d.substr(0, 10)));
                 }
             }
         }
@@ -135,9 +137,9 @@ public:
                 d.erase(0, d.find_first_not_of(" \t\r\n"));
                 d.erase(d.find_last_not_of(" \t\r\n") + 1);
                 if (d.empty() || d == "null" || d == "NULL") {
-                    row.set(FF::DISCLOSURE_DATE.c_str(), J::createNull());
+                    row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createNull());
                 } else if (d.size() >= 10) {
-                    row.set(FF::DISCLOSURE_DATE.c_str(), J::createString(d.substr(0, 10)));
+                    row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createString(d.substr(0, 10)));
                 }
             }
         }
@@ -194,7 +196,7 @@ public:
         auto cr = parseFinite(row, FF::CURRENT_RATIO);
         auto qr = parseFinite(row, FF::QUICK_RATIO);
         if (cr && qr && *qr > *cr) {
-            row.set(FF::QUICK_RATIO.c_str(), J::createNull());
+            row.set(FF::QUICK_RATIO.c_str(), LightRow::createNull());
         }
 
         return true;
@@ -220,7 +222,7 @@ private:
         if (v.isNumber()) {
             double d = v.asDouble();
             if (!std::isfinite(d)) {
-                row.set(f.c_str(), J::createNull());
+                row.set(f.c_str(), LightRow::createNull());
             }
         }
     }
@@ -233,7 +235,7 @@ private:
         if (v.isNumber()) {
             double d = v.asDouble();
             if (!std::isfinite(d) || d <= 0.0) {
-                row.set(f.c_str(), J::createNull());
+                row.set(f.c_str(), LightRow::createNull());
             }
         }
     }
@@ -246,7 +248,7 @@ private:
         if (v.isNumber()) {
             double d = v.asDouble();
             if (!std::isfinite(d) || d < 0.0) {
-                row.set(f.c_str(), J::createNull());
+                row.set(f.c_str(), LightRow::createNull());
             }
         }
     }
@@ -262,7 +264,7 @@ public:
         m_dropAfterMax = true;
         m_fillFields = {MF::OPEN.c_str(), MF::HIGH.c_str(), MF::LOW.c_str(), MF::CLOSE.c_str()};
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("maxForwardFillDays")) m_maxForwardDays = cfg.get("maxForwardFillDays").asInt();
             if (cfg.has("dropAfterMaxDays")) m_dropAfterMax = cfg.get("dropAfterMaxDays").asBool();
             if (cfg.has("fillFields") && cfg.get("fillFields").isArray()) {
@@ -307,12 +309,12 @@ public:
                 if (m_dropAfterMax && count > m_maxForwardDays) return false;
                 // 用上次有效值填充
                 const auto& lastVals = it->second;
-                row.set(TF::IS_SUSPENDED.c_str(), J::createBool(true));
-                row.set(TF::FORWARD_FILLED.c_str(), J::createBool(true));
+                row.set(TF::IS_SUSPENDED.c_str(), LightRow::createBool(true));
+                row.set(TF::FORWARD_FILLED.c_str(), LightRow::createBool(true));
                 for (const auto& f : m_fillFields) {
                     auto fi = lastVals.find(f);
                     if (fi != lastVals.end()) {
-                        row.set(f, J::createDouble(fi->second));
+                        row.set(f.c_str(), LightRow::createDouble(fi->second));
                     }
                 }
             }
@@ -321,8 +323,8 @@ public:
             // 更新最后有效值
             auto& vals = m_lastValid[sym];
             for (const auto& f : m_fillFields) {
-                if (row.has(f)) {
-                    auto v = row.get(f);
+                if (row.has(f.c_str())) {
+                    auto v = row.get(f.c_str());
                     if (v.isNumber()) vals[f] = v.asDouble();
                 }
             }
@@ -348,7 +350,7 @@ public:
         m_fields = {MF::OPEN.c_str(), MF::HIGH.c_str(), MF::LOW.c_str(), MF::CLOSE.c_str(),
                     MF::TURNOVER_RATE.c_str(), MF::MARKET_CAP.c_str(), MF::CIRCULATING_MARKET_CAP.c_str()};
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("maxLookbackDays")) m_maxLookback = cfg.get("maxLookbackDays").asInt();
             if (cfg.has("fields") && cfg.get("fields").isArray()) {
                 m_fields.clear();
@@ -378,7 +380,7 @@ public:
                 ++counter;
                 auto it = lastMap.find(f);
                 if (it != lastMap.end() && counter <= m_maxLookback) {
-                    row.set(f, J::createDouble(it->second));
+                    row.set(f.c_str(), LightRow::createDouble(it->second));
                     anyFilled = true;
                 }
             } else {
@@ -388,7 +390,7 @@ public:
             }
         }
         if (anyFilled) {
-            row.set(TF::MISSING_VALUE_FILLED.c_str(), J::createBool(true));
+            row.set(TF::MISSING_VALUE_FILLED.c_str(), LightRow::createBool(true));
         }
         return true;
     }
@@ -420,18 +422,18 @@ public:
             for (const auto* f : {&MF::OPEN, &MF::HIGH, &MF::LOW, &MF::CLOSE}) {
                 if (row.has(f->c_str())) {
                     double v = detail::safeDouble(row, *f, 0.0);
-                    if (v > 0.0) row.set(f->c_str(), J::createDouble(v * pref));
+                    if (v > 0.0) row.set(f->c_str(), LightRow::createDouble(v * pref));
                 }
             }
-            row.set(IF::ADJUSTED_PRICE_APPLIED.c_str(), J::createBool(true));
+            row.set(IF::ADJUSTED_PRICE_APPLIED.c_str(), LightRow::createBool(true));
         } else if (postf > 0.0 && postf != 1.0) {
             for (const auto* f : {&MF::OPEN, &MF::HIGH, &MF::LOW, &MF::CLOSE}) {
                 if (row.has(f->c_str())) {
                     double v = detail::safeDouble(row, *f, 0.0);
-                    if (v > 0.0) row.set(f->c_str(), J::createDouble(v * postf));
+                    if (v > 0.0) row.set(f->c_str(), LightRow::createDouble(v * postf));
                 }
             }
-            row.set(IF::ADJUSTED_PRICE_APPLIED.c_str(), J::createBool(true));
+            row.set(IF::ADJUSTED_PRICE_APPLIED.c_str(), LightRow::createBool(true));
         }
         return true;
     }
@@ -445,7 +447,7 @@ public:
     explicit PriceValidityRule(const std::string& configJson = {}) {
         m_minPrice = 0.01; m_maxPrice = 10000.0; m_enforceChain = true;
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("minPrice")) m_minPrice = cfg.get("minPrice").asDouble();
             if (cfg.has("maxPrice")) m_maxPrice = cfg.get("maxPrice").asDouble();
             if (cfg.has("enforceChain")) m_enforceChain = cfg.get("enforceChain").asBool();
@@ -497,7 +499,7 @@ public:
     explicit VolumeFilterRule(const std::string& configJson = {}) {
         m_minVolume = 0.0; m_maxVolume = 1e12; m_allowZeroWhenSuspended = true;
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("minVolume")) m_minVolume = cfg.get("minVolume").asDouble();
             if (cfg.has("maxVolume")) m_maxVolume = cfg.get("maxVolume").asDouble();
             if (cfg.has("allowZeroWhenSuspended")) m_allowZeroWhenSuspended = cfg.get("allowZeroWhenSuspended").asBool();
@@ -537,7 +539,7 @@ public:
     explicit LimitMoveTagRule(const std::string& configJson = {}) {
         m_upThreshold = 9.5; m_downThreshold = -9.5;
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("upThreshold")) m_upThreshold = cfg.get("upThreshold").asDouble();
             if (cfg.has("downThreshold")) m_downThreshold = cfg.get("downThreshold").asDouble();
         }
@@ -561,10 +563,10 @@ public:
         }
         bool limitUp = chg >= m_upThreshold;
         bool limitDown = chg <= m_downThreshold;
-        row.set(TF::LIMIT_UP.c_str(), J::createBool(limitUp));
-        row.set(TF::LIMIT_DOWN.c_str(), J::createBool(limitDown));
-        row.set(TF::CAN_BUY.c_str(), J::createBool(!limitUp));
-        row.set(TF::CAN_SELL.c_str(), J::createBool(!limitDown));
+        row.set(TF::LIMIT_UP.c_str(), LightRow::createBool(limitUp));
+        row.set(TF::LIMIT_DOWN.c_str(), LightRow::createBool(limitDown));
+        row.set(TF::CAN_BUY.c_str(), LightRow::createBool(!limitUp));
+        row.set(TF::CAN_SELL.c_str(), LightRow::createBool(!limitDown));
         return true;
     }
 private:
@@ -588,7 +590,7 @@ public:
         std::string invalidFields;
         auto check = [&](const FieldKey& f, bool cond) {
             if (row.has(f.c_str()) && cond) {
-                row.set(f.c_str(), J::createNull());
+                row.set(f.c_str(), LightRow::createNull());
                 if (!invalidFields.empty()) invalidFields += ",";
                 invalidFields += f.c_str();
             }
@@ -606,14 +608,14 @@ public:
         // circulating < total 异常
         double cmc = detail::safeDouble(row, MF::CIRCULATING_MARKET_CAP, -1.0);
         if (mc > 0 && cmc > mc) {
-            row.set(MF::CIRCULATING_MARKET_CAP.c_str(), J::createNull());
+            row.set(MF::CIRCULATING_MARKET_CAP.c_str(), LightRow::createNull());
             if (!invalidFields.empty()) invalidFields += ",";
             invalidFields += MF::CIRCULATING_MARKET_CAP.c_str();
         }
 
-        row.set(TF::VALUATION_SANITIZED.c_str(), J::createBool(true));
+        row.set(TF::VALUATION_SANITIZED.c_str(), LightRow::createBool(true));
         if (!invalidFields.empty()) {
-            row.set(IF::VALUATION_INVALID_FIELDS.c_str(), J::createString(invalidFields));
+            row.set(IF::VALUATION_INVALID_FIELDS.c_str(), LightRow::createString(invalidFields));
         }
         return true;
     }
@@ -641,9 +643,9 @@ public:
                 if (v.isNumber()) {
                     double d = v.asDouble();
                     if (std::isfinite(d) && d > 0.0) {
-                        row.set(f->c_str(), J::createDouble(d));
+                        row.set(f->c_str(), LightRow::createDouble(d));
                     } else {
-                        row.set(f->c_str(), J::createNull());
+                        row.set(f->c_str(), LightRow::createNull());
                     }
                 }
             }
@@ -653,9 +655,9 @@ public:
         if (row.has("effective_disclosure_date") && !row.has(FF::DISCLOSURE_DATE.c_str())) {
             auto v = row.get("effective_disclosure_date");
             if (v.isString() && !v.asString().empty()) {
-                row.set(FF::DISCLOSURE_DATE.c_str(), J::createString(v.asString().substr(0, 10)));
+                row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createString(v.asString().substr(0, 10)));
             }
-            row.set("effective_disclosure_date", J::createNull());
+            row.set("effective_disclosure_date", LightRow::createNull());
         }
 
         // 3. 格式化日期字段（去掉时间后缀）
@@ -666,7 +668,7 @@ public:
                     std::string s = v.asString();
                     auto sp = s.find(' ');
                     if (sp != std::string::npos) {
-                        row.set(f.c_str(), J::createString(s.substr(0, sp)));
+                        row.set(f.c_str(), LightRow::createString(s.substr(0, sp)));
                     }
                 }
             }
@@ -680,22 +682,22 @@ public:
             auto v = row.get("source");
             if (v.isString() && !v.asString().empty()) {
                 if (!row.has(CF::DATA_SOURCE.c_str()))
-                    row.set(CF::DATA_SOURCE.c_str(), J::createString(v.asString()));
+                    row.set(CF::DATA_SOURCE.c_str(), LightRow::createString(v.asString()));
             }
-            row.set("source", J::createNull());
+            row.set("source", LightRow::createNull());
         }
         if (row.has("dataType")) {
             auto v = row.get("dataType");
             if (v.isString() && !v.asString().empty()) {
                 if (!row.has(IF::DATA_TYPE.c_str()))
-                    row.set(IF::DATA_TYPE.c_str(), J::createString(v.asString()));
+                    row.set(IF::DATA_TYPE.c_str(), LightRow::createString(v.asString()));
             }
-            row.set("dataType", J::createNull());
+            row.set("dataType", LightRow::createNull());
         }
 
         // 5. 删除内部字段
         for (const char* f : {"id","created_at","updated_at","symbol_id","indicator_id"}) {
-            row.set(f, J::createNull());
+            row.setNull(f);
         }
 
         // 6. 补充元数据（可选回调，桥接层注入 DB 查询）
@@ -746,15 +748,15 @@ public:
                 } else {
                     effectiveDate = dd.substr(0, 10); // 无回调时直接使用披露日
                 }
-                row.set(CF::TRADE_DATE.c_str(), J::createString(effectiveDate));
-                row.set(TF::REPORT_DATE_ALIGNED.c_str(), J::createBool(true));
+                row.set(CF::TRADE_DATE.c_str(), LightRow::createString(effectiveDate));
+                row.set(TF::REPORT_DATE_ALIGNED.c_str(), LightRow::createBool(true));
                 return true;
             }
         }
 
         // 无披露日时使用报告日本身作为交易日
-        row.set(CF::TRADE_DATE.c_str(), J::createString(rd.substr(0, 10)));
-        row.set(TF::REPORT_DATE_ALIGNED.c_str(), J::createBool(true));
+        row.set(CF::TRADE_DATE.c_str(), LightRow::createString(rd.substr(0, 10)));
+        row.set(TF::REPORT_DATE_ALIGNED.c_str(), LightRow::createBool(true));
         return true;
     }
 
@@ -796,7 +798,7 @@ public:
             if (td > dd) return false;
         }
 
-        row.set(TF::SURVIVOR_BIAS_CHECKED.c_str(), J::createBool(true));
+        row.set(TF::SURVIVOR_BIAS_CHECKED.c_str(), LightRow::createBool(true));
         return true;
     }
 };
@@ -862,7 +864,7 @@ public:
     explicit NewStockFilterRule(const std::string& configJson, TradeDayCountFn fn = nullptr)
         : m_minTradeDays(60), m_countTradingDays(std::move(fn)) {
         if (!configJson.empty()) {
-            auto cfg = J::parse(configJson);
+            auto cfg = JCfg::parse(configJson);
             if (cfg.has("minTradeDays")) m_minTradeDays = cfg.get("minTradeDays").asInt();
         }
     }

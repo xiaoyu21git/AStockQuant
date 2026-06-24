@@ -14,7 +14,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
-#include "JujinApi.h"
+#include "../../engine/include/JujinApi.h"
 #include "JujinTypes.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "MarketSubscriptionStatusRegistry.h"
@@ -234,7 +234,7 @@ bool JujinMarketConnector::start()
     auto configObj = cfg::loadConfigObject();
     m_maxMarketSubscriptions = static_cast<size_t>(
         (std::max)(1, cfg::readInt(configObj, "maxMarketSubscriptions",
-                                   "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS", 32)));
+                                   "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS", 50)));
     m_marketSubscriptionBatchSize = static_cast<size_t>(
         (std::max)(1, cfg::readInt(configObj, "marketSubscriptionBatchSize",
                                    "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE", 4)));
@@ -338,14 +338,20 @@ bool JujinMarketConnector::start()
             auto price = event.get<double>("price");
             auto vol   = event.get<double>("volume");
             auto date  = event.get<std::int64_t>("tradingDay");
-            static int tickCount = 0;
-            if (++tickCount % 100 == 0)
-                std::cerr << "[JMC] tick #" << tickCount << " sym=" << sym.value_or("?")
-                          << " price=" << price.value_or(-1.0) << "\n";
             if (sym.has_value() && price.has_value()) {
-                static int jmcLog = 0;
-                if (++jmcLog <= 3)
-                    std::cerr << "[JMC] tick/bar: " << *sym << " price=" << *price << "\n" << std::flush;
+                // 心跳：每 15 秒打印一次统计摘要
+                static int totalTicks = 0;
+                static auto lastReport = std::chrono::steady_clock::now();
+                totalTicks++;
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
+                if (elapsed >= 15) {
+                    std::cerr << "[JMC] heartbeat: " << totalTicks << " ticks in "
+                              << elapsed << "s (~" << (totalTicks / (elapsed > 0 ? elapsed : 1))
+                              << " tick/s)\n" << std::flush;
+                    totalTicks = 0;
+                    lastReport = now;
+                }
                 app::system::TradingSystem::instance().pushMarketData(
                     *sym, *price, vol.value_or(0.0),
                     date.has_value() ? static_cast<std::int32_t>(*date) : 0);
@@ -361,9 +367,6 @@ bool JujinMarketConnector::start()
             auto vol   = event.get<double>("volume");
             auto date  = event.get<std::int64_t>("tradingDay");
             if (sym.has_value() && price.has_value()) {
-                static int jmcLog = 0;
-                if (++jmcLog <= 3)
-                    std::cerr << "[JMC] tick/bar: " << *sym << " price=" << *price << "\n" << std::flush;
                 app::system::TradingSystem::instance().pushMarketData(
                     *sym, *price, vol.value_or(0.0),
                     date.has_value() ? static_cast<std::int32_t>(*date) : 0);

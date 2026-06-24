@@ -35,5 +35,6 @@ target_link_libraries(domain_strategy_runtime
 )
 
 if (MSVC)
-    target_compile_options(domain_strategy_runtime PRIVATE /utf-8 /Zc:__cplusplus /permissive-)
+    # /utf-8 和 /Zc:__cplusplus 已在根 CMakeLists.txt 全局设置
+    target_compile_options(domain_strategy_runtime PRIVATE /permissive-)
 endif()

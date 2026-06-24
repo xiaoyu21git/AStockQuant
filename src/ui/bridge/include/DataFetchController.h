@@ -53,6 +53,7 @@ public:
     Q_INVOKABLE void onDropdownRefreshed(int count);
     Q_INVOKABLE void loadSymbolDetail(const QString& symbol, int page);
     Q_INVOKABLE void cleanDataFromDataSet(int dataSetId, const QVariantMap& rules);
+    Q_INVOKABLE bool removeDataSet(int dataSetId);
 
     QString dataSource() const { return m_dataSource; }
     void setDataSource(const QString& source);

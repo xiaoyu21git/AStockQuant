@@ -45,7 +45,12 @@ public:
                      domain::trading::TradeCallback onResult) override;
 
 private:
-    thirdparty::JujinApi* m_api = nullptr;  // 共享实例，不持有所有权
+    /// @brief 懒解析共享 JujinApi（JMC 可能尚未启动），const 安全
+    void tryResolveApi() const;
+
+    mutable thirdparty::JujinApi* m_api = nullptr;  // 共享实例，不持有所有权，懒解析
+    domain::trading::TradeCallback m_tradeCallback;
+    domain::trading::ErrorCallback m_errorCallback;
     mutable std::string m_lastError;
 };
 

@@ -159,13 +159,9 @@ Dialog {
             return factorDetailCache[normalizedId]
         }
 
+        // 不在属性绑定内修改 factorDetailCache，避免 QML 检测到绑定循环
         var detail = factorService.getFactorById(normalizedId) || ({})
-        var nextCache = ({})
-        for (var key in factorDetailCache) {
-            nextCache[key] = factorDetailCache[key]
-        }
-        nextCache[normalizedId] = detail
-        factorDetailCache = nextCache
+        factorDetailCache[normalizedId] = detail
         return detail
     }
 

@@ -1653,7 +1653,8 @@ Item {
             }
         }
 
-        var changeValue = Number(quote && quote.change !== undefined ? quote.change : 0)
+        var changeValue = Number(quote && quote.changePct !== undefined ? quote.changePct
+            : (quote && quote.changePercent !== undefined ? quote.changePercent : 0))
         var preCloseValue = Number(quote && quote.preClose !== undefined ? quote.preClose : (quote && quote.pre_close !== undefined ? quote.pre_close : 0))
         if ((!preCloseValue || isNaN(preCloseValue) || preCloseValue <= 0) && priceValue > 0) {
             preCloseValue = priceValue / (1 + changeValue / 100.0)

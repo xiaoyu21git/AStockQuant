@@ -114,18 +114,24 @@ void PositionAccountEngine::applyTradeFill(const TradeFillSummary& fill) {
 }
 
 void PositionAccountEngine::applyPositionEvent(const std::string& symbol, const Position& pos) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_positions[symbol] = pos;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_positions[symbol] = pos;
+    }
+    if (m_onDataChanged) m_onDataChanged();
 }
 
 void PositionAccountEngine::applyAccountEvent(const AccountSnapshot& acc) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (!acc.accountId().empty()) m_account.setAccountId(acc.accountId());
-    m_account.setAvailableCash(acc.availableCash());
-    m_account.setMarketValue(acc.marketValue());
-    m_account.setRealizedPnl(acc.realizedPnl());
-    m_account.setUnrealizedPnl(acc.unrealizedPnl());
-    m_account.setTotalAsset(acc.totalAsset());
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!acc.accountId().empty()) m_account.setAccountId(acc.accountId());
+        m_account.setAvailableCash(acc.availableCash());
+        m_account.setMarketValue(acc.marketValue());
+        m_account.setRealizedPnl(acc.realizedPnl());
+        m_account.setUnrealizedPnl(acc.unrealizedPnl());
+        m_account.setTotalAsset(acc.totalAsset());
+    }
+    if (m_onDataChanged) m_onDataChanged();
 }
 
 void PositionAccountEngine::applyBrokerSnapshot(

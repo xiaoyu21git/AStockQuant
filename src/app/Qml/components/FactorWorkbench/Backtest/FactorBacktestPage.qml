@@ -748,13 +748,6 @@ Item {
                 && Number(compositeMinimumCoverageRatio) <= 1
     }
 
-    function canStartBacktest() {
-        if (backtestEntryMode === 1) {
-            return canStartCompositeBacktest()
-        }
-        return canStartSingleOrBatchBacktest()
-    }
-
     function factorIdsForSupportCheck(includeAllFactors) {
         if (includeAllFactors === true) {
             return allFactorIdsForSupportCheck()
@@ -888,6 +881,7 @@ Item {
                 && supportMapCoversFactorIds(root.factorSupportMapCache, factorIds)) {
             console.log("因子支持校验命中当前缓存，跳过刷新")
             if (factorSelectorDialog) {
+                factorSelectorDialog.supportMapRequested = true
                 factorSelectorDialog.supportMapLoading = false
                 factorSelectorDialog.factorSupportMap = root.factorSupportMapCache
             }
@@ -2050,12 +2044,54 @@ Item {
     property string compositeDraftName: ""
     property bool compositeDraftDirty: false
     property var factorSupportMapCache: ({})
+
+    // 回测按钮禁用原因（空字符串 = 可用）
+    readonly property string backtestDisabledReason: {
+        if (isBacktesting) return "回测正在运行中"
+        if (!factorBacktestController) return "回测控制器未就绪"
+        if (!cacheDatasetOptions || cacheDatasetOptions.length <= 1) return "没有可用缓存集"
+        var datasetId = selectedCacheDatasetId > 0 ? selectedCacheDatasetId
+            : (factorBacktestController.selectedDatasetId || 0)
+        if (datasetId <= 0 && cleanedDataController) {
+            var info = cleanedDataController.selectedDatasetInfo
+            if (info) datasetId = info.id || 0
+        }
+        if (datasetId <= 0) return "未选择缓存集"
+        var supportMap = factorSupportMapCache
+        if (!supportMap || Object.keys(supportMap).length === 0) return "因子支持校验未完成，请打开因子选择器点击\"开始校验\""
+        if (!selectedFactorIds || selectedFactorIds.length === 0) return "未选择因子"
+        for (var si = 0; si < selectedFactorIds.length; si++) {
+            var factorId = String(selectedFactorIds[si])
+            var sInfo = supportMap[factorId]
+            if (!sInfo) return "因子 " + factorId + " 未经校验"
+            if (sInfo.supported === false) return "因子 " + factorId + " 不支持: " + (sInfo.reason || "未知原因")
+        }
+        return ""
+    }
+
+    // 回测按钮启用条件
+    readonly property bool backtestButtonEnabled: backtestDisabledReason === ""
     property bool _analysisReportSuppressed: false
     property string appliedSupportMapScopeFingerprint: ""
     property string pendingSupportMapScopeFingerprint: ""
     property var pendingSupportMapFactorIds: []
     property int pendingSupportMapRequestId: 0
     property double lastDatasetRefreshAtMs: 0
+
+    onBacktestDisabledReasonChanged: {
+        if (backtestDisabledReason !== "") {
+            console.warn("回测按钮禁用原因:", backtestDisabledReason)
+            console.warn("  cacheDatasetOptions.length:", cacheDatasetOptions ? cacheDatasetOptions.length : -1)
+            console.warn("  factorSupportMapCache keys:", factorSupportMapCache ? Object.keys(factorSupportMapCache).length : -1)
+            console.warn("  selectedFactorIds:", JSON.stringify(selectedFactorIds))
+            if (factorSupportMapCache && selectedFactorIds.length > 0) {
+                for (var si = 0; si < selectedFactorIds.length; si++) {
+                    var fid = String(selectedFactorIds[si])
+                    console.warn("  factor " + fid + " in map:", factorSupportMapCache[fid] !== undefined, "supported:", factorSupportMapCache[fid] ? factorSupportMapCache[fid].supported : "N/A")
+                }
+            }
+        }
+    }
     property bool supportMapRefreshAllFactorsRequested: false
     property string lastAutoBenchmarkSymbol: ""
 
@@ -2193,8 +2229,16 @@ Item {
             root.lastPreflightFailures = root.normalizePreflightFailures(factorBacktestController.lastPreflightFailures)
         }
         onFactorSupportMapReady: function(requestId, supportMap) {
-            console.log("因子支持校验返回:", requestId)
+            console.log("因子支持校验返回:", requestId, "因子数:", supportMap ? Object.keys(supportMap).length : 0)
             if (!factorBacktestController.handleFactorSupportMapReady(requestId, supportMap || ({}))) {
+                // 即使 handle 失败也要重置 pending 状态，防止后续校验被永久拦截
+                console.warn("因子支持校验 handle 失败，requestId:", requestId)
+                root.pendingSupportMapRequestId = 0
+                root.pendingSupportMapScopeFingerprint = ""
+                root.pendingSupportMapFactorIds = []
+                if (factorSelectorDialog) {
+                    factorSelectorDialog.supportMapLoading = false
+                }
                 return
             }
 
@@ -2207,6 +2251,7 @@ Item {
 
             root.factorSupportMapCache = factorBacktestController.factorSupportMapCache
             if (factorSelectorDialog) {
+                factorSelectorDialog.supportMapRequested = true
                 factorSelectorDialog.supportMapLoading = factorBacktestController.supportMapRequestInFlight
                 factorSelectorDialog.factorSupportMap = root.factorSupportMapCache
             }
@@ -2324,7 +2369,13 @@ Item {
     // 数据源属性
     property string selectedDataSourceMode: "cache"
     property int selectedCacheDatasetId: -1
-    property var cacheDatasetOptions: [{ text: "请选择缓存集", value: -1, raw: null }]
+    property var cacheDatasetOptions: {
+        var base = [{ text: "请选择缓存集", value: -1, raw: null, isBacktestReady: false }]
+        if (!factorBacktestController || !cleanedDataController) return base
+        var list = cleanedDataController.datasetList
+        if (!list || !Array.isArray(list) || list.length === 0) return base
+        return base.concat(factorBacktestController.buildBacktestDatasetOptions(list))
+    }
     property var riskConfigService: Bridge.RiskConfigService
 
     onSelectedDataSourceModeChanged: {
@@ -2402,10 +2453,7 @@ Item {
     }
 
     function rebuildCacheDatasetOptions() {
-        cacheDatasetOptions = factorBacktestController.buildBacktestDatasetOptions(
-            cleanedDataController && cleanedDataController.datasetList ? cleanedDataController.datasetList : []
-        )
-
+        // cacheDatasetOptions 现在是属性绑定，自动追踪 datasetList 变化
         syncSelectedDatasetIndex()
         console.log("回测页可回测缓存集选项已刷新，数量:", Math.max(0, cacheDatasetOptions.length - 1))
     }
@@ -3385,6 +3433,37 @@ Item {
                             }
                         }
 
+                        // 回测不可用原因提示
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 8
+                            radius: 6
+                            color: "#422a1a"
+                            border.width: 1
+                            border.color: "#b45309"
+                            visible: !isBacktesting && !backtestButtonEnabled && selectedFactorIds.length > 0
+                            height: visible ? implicitHeight : 0
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 8
+
+                                Text {
+                                    text: "⚠️"
+                                    font.pixelSize: 14
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.backtestDisabledReason
+                                    font.pixelSize: 12
+                                    color: "#fdba74"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
@@ -3399,7 +3478,7 @@ Item {
                                 Layout.minimumWidth: 132
                                 Layout.preferredHeight: 40
                                 radius: 8
-                                color: isBacktesting ? "#334155" : (canStartBacktest() ? "#3B82F6" : "#475569")
+                                color: isBacktesting ? "#334155" : (backtestButtonEnabled ? "#3B82F6" : "#475569")
 
                                 Row {
                                     anchors.centerIn: parent
@@ -3408,21 +3487,21 @@ Item {
                                     Text {
                                         text: isBacktesting ? "⏸️" : "▶️"
                                         font.pixelSize: 14
-                                        color: isBacktesting ? "#94A3B8" : (canStartBacktest() ? "white" : "#94A3B8")
+                                        color: isBacktesting ? "#94A3B8" : (backtestButtonEnabled ? "white" : "#94A3B8")
                                     }
 
                                     Text {
                                         text: isBacktesting ? "回测中..." : (backtestEntryMode === 1 ? "开始组合回测" : "开始回测")
                                         font.pixelSize: 14
                                         font.weight: Font.Medium
-                                        color: isBacktesting ? "#94A3B8" : (canStartBacktest() ? "white" : "#94A3B8")
+                                        color: isBacktesting ? "#94A3B8" : (backtestButtonEnabled ? "white" : "#94A3B8")
                                     }
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    enabled: canStartBacktest()
+                                    enabled: backtestButtonEnabled
                                     onClicked: startBacktest()
                                 }
                             }

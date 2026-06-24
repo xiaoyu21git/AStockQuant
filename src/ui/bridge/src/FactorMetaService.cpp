@@ -1112,10 +1112,7 @@ void FactorMetaService::initialize()
         return;
     }
     
-    if (!loadMetaData()) {
-        updateError("Failed to load factor metadata");
-        return;
-    }
+    loadMetaData(); // JSON 文件缺失不阻塞初始化，因子数据在数据库，静态目录提供 UI 兜底
     
     m_initialized = true;
     emit initializedChanged();
@@ -1134,17 +1131,14 @@ void FactorMetaService::reloadMetaData()
     m_factorCategories.clear();
     m_mergedParameters.clear();
     m_initialized = false;
-    
-    if (!loadMetaData()) {
-        updateError("Failed to reload factor metadata");
-        return;
-    }
-    
+
+    loadMetaData(); // JSON 缺失不阻塞，静态目录兜底
+
     m_initialized = true;
     emit initializedChanged();
     emit factorCategoriesChanged();
     emit parameterTypesChanged();
-    
+
     LOG_DEBUG("FactorMetaService metadata reloaded");
     emit metaDataLoaded(true, "因子元数据重新加载成功");
 }
@@ -1468,17 +1462,17 @@ QVariantMap FactorMetaService::parameterTypes() const
 // 私有方法实现
 bool FactorMetaService::loadMetaData()
 {
-    if (!loadCommonMetaData()) {
-        LOG_WARN("Failed to load common metadata");
-        return false;
+    const bool commonOk = loadCommonMetaData();
+    if (!commonOk) {
+        LOG_WARN("Failed to load common metadata JSON, using static catalog fallback");
     }
-    
-    if (!loadParameterMetaData()) {
-        LOG_WARN("Failed to load parameter metadata");
-        return false;
+
+    const bool paramsOk = loadParameterMetaData();
+    if (!paramsOk) {
+        LOG_WARN("Failed to load parameter metadata JSON, using static catalog fallback");
     }
-    
-    // 初始化因子分类缓存
+
+    // 初始化因子分类缓存 — JSON 优先
     if (m_commonMetaData.contains("categories")) {
         QVariantList categories = m_commonMetaData["categories"].toList();
         for (const QVariant& category : categories) {
@@ -1488,8 +1482,16 @@ bool FactorMetaService::loadMetaData()
             m_factorCategories[factorType] = categoryMap;
         }
     }
-    
-    return true;
+
+    // 静态目录兜底：JSON 缺失时从 C++ 静态数据填充分类信息
+    if (m_factorCategories.isEmpty()) {
+        const auto& uiCatalog = factorUiMetaCatalog();
+        for (auto it = uiCatalog.constBegin(); it != uiCatalog.constEnd(); ++it) {
+            m_factorCategories.insert(it.key(), it.value());
+        }
+    }
+
+    return true; // 因子数据在数据库，JSON 仅用于 UI 装饰，缺失不阻塞初始化
 }
 
 bool FactorMetaService::loadCommonMetaData()
@@ -1655,31 +1657,28 @@ bool FactorMetaService::validateStringParameter(const QVariant& value, const QVa
 
 QString FactorMetaService::getConfigFilePath(const QString& relativePath)
 {
-    // 首先尝试当前工作目录
-    QString currentDir = QDir::currentPath();
-    QString filePath = QDir::cleanPath(currentDir + "/" + relativePath);
-    
+    // 1) 应用程序目录优先（bin/Release/ 或 bin/Debug/）
+    const QString appDir = QCoreApplication::applicationDirPath();
+    QString filePath = QDir::cleanPath(appDir + "/" + relativePath);
     if (QFile::exists(filePath)) {
         return filePath;
     }
-    
-    // 尝试应用程序目录
-    QString appDir = QCoreApplication::applicationDirPath();
-    filePath = QDir::cleanPath(appDir + "/" + relativePath);
-    
+
+    // 2) 当前工作目录
+    const QString currentDir = QDir::currentPath();
+    filePath = QDir::cleanPath(currentDir + "/" + relativePath);
     if (QFile::exists(filePath)) {
         return filePath;
     }
-    
-    // 尝试项目根目录
-    QString projectRoot = QDir::cleanPath(currentDir + "/../../..");
+
+    // 3) 项目根目录回退：bin/{Release,Debug} → 往上 2 层
+    const QString projectRoot = QDir::cleanPath(appDir + "/../..");
     filePath = QDir::cleanPath(projectRoot + "/" + relativePath);
-    
     if (QFile::exists(filePath)) {
         return filePath;
     }
-    
-    // 返回原始路径
+
+    // 返回原始路径（Qt 资源系统兜底）
     return relativePath;
 }
 

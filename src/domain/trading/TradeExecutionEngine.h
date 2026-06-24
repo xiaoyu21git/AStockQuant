@@ -115,6 +115,29 @@ public:
     [[nodiscard]] int manualCheckpointBatchIndex() const noexcept { return m_manualCheckpointBatchIndex; }
     void setManualCheckpointBatchIndex(int v) noexcept { m_manualCheckpointBatchIndex = v; }
 
+    // ── 订单生命周期状态 ──
+    [[nodiscard]] const std::string& brokerOrderId() const noexcept { return m_brokerOrderId; }
+    void setBrokerOrderId(std::string v) { m_brokerOrderId = std::move(v); }
+
+    [[nodiscard]] OrderStatusValue status() const noexcept { return m_status; }
+    void setStatus(OrderStatusValue v) noexcept { m_status = v; }
+
+    [[nodiscard]] double filledPrice() const noexcept { return m_filledPrice; }
+    void setFilledPrice(double v) noexcept { m_filledPrice = v; }
+
+    [[nodiscard]] std::int64_t filledQuantity() const noexcept { return m_filledQuantity; }
+    void setFilledQuantity(std::int64_t v) noexcept { m_filledQuantity = v; }
+
+    [[nodiscard]] const std::string& statusMessage() const noexcept { return m_statusMessage; }
+    void setStatusMessage(std::string v) { m_statusMessage = std::move(v); }
+
+    [[nodiscard]] bool isClosed() const noexcept {
+        return m_status == OrderStatusValue::Filled
+            || m_status == OrderStatusValue::Cancelled
+            || m_status == OrderStatusValue::Rejected
+            || m_status == OrderStatusValue::Expired;
+    }
+
 private:
     std::string m_strategyId;
     std::string m_symbol;
@@ -126,6 +149,12 @@ private:
     double m_cashAmount{0.0};
     ActionKind m_actionKind{ActionKind::Normal};
     bool m_isBoardLotMode{true};
+
+    std::string m_brokerOrderId;
+    OrderStatusValue m_status{OrderStatusValue::Pending};
+    double m_filledPrice{0.0};
+    std::int64_t m_filledQuantity{0};
+    std::string m_statusMessage;
 
     std::string m_batchId;
     int m_batchIndex{0};
@@ -230,9 +259,12 @@ public:
     [[nodiscard]] static ValidationResult validateOrder(const TradeOrder& order);
 
     // ── Callbacks (for bridge layer to connect to EventBus) ──
+    using OrderAcceptedCallback = std::function<void(const TradeOrder&)>;
     using OrderUpdateCallback = std::function<void(const TradeOrder&)>;
     using TradeFillCallback = std::function<void(const TradeFill&)>;
 
+    /// @brief 订单通过验证/调度/风控后同步回调（bridge 层由此写入 recentOrders）
+    void setOnOrderAccepted(OrderAcceptedCallback cb) noexcept;
     void setOnOrderUpdate(OrderUpdateCallback cb) noexcept;
     void setOnTradeFill(TradeFillCallback cb) noexcept;
 

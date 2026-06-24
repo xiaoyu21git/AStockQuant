@@ -882,6 +882,24 @@ Item {
                             spacing: 10
 
                             Button {
+                                text: "🗑 删除"
+                                enabled: cacheSelectionComboBox.currentIndex >= 0
+                                onClicked: {
+                                    var entry = cacheDisplayModel.get(cacheSelectionComboBox.currentIndex)
+                                    if (entry && entry.id > 0) {
+                                        if (dataFetchController.removeDataSet(entry.id)) {
+                                            handlePanelStatusRequested("已删除缓存 #" + entry.id, "success")
+                                        } else {
+                                            handlePanelStatusRequested("删除失败", "error")
+                                        }
+                                    }
+                                }
+                                background: Rectangle { color: parent.enabled ? "#991b1b" : "#374151"; radius: 4 }
+                                contentItem: Text { text: parent.text; color: parent.enabled ? "white" : "#666"; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                padding: 8
+                            }
+
+                            Button {
                                 text: "执行清洗"
                                 width: (parent.width - 20) / 2
                                 height: 32

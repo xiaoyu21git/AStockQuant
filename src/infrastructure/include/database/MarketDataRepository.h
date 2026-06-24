@@ -93,10 +93,25 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
-    /// 全市场财务数据（按日期范围）
+    /// 全市场财务数据（按日期范围，显式 25 列）
     std::vector<astock::database::SqlQueryResultRow> queryAllMarketFinancialData(
         const std::string& startDate,
         const std::string& endDate);
+
+    /// 日K线 JOIN symbol_info（返回 26 列：20 K线 + 6 元数据）
+    std::vector<astock::database::SqlQueryResultRow> queryDailyBarJoined(
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 日K线 JOIN symbol_info（指定标的列表）
+    std::vector<astock::database::SqlQueryResultRow> queryDailyBarJoined(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 指数成分股映射（symbol → 逗号分隔的 index_code）
+    std::map<std::string, std::string> queryIndexCodeMap(
+        const std::string& anchorDate);
 
     /// 指数列表查询
     std::vector<std::string> queryIndexList();

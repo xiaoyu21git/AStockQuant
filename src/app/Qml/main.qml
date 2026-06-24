@@ -373,6 +373,15 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                     }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        CacheManagementPage {
+                            id: cacheManagementPage
+                            anchors.fill: parent
+                        }
+                    }
                 }
             }
             }
@@ -612,7 +621,7 @@ ApplicationWindow {
         // 二级菜单映射到对应的页面
         var secondaryMenuToIndex = {
             "data_dashboard": 0,              // 数据看板 -> 数据管理 (索引0)
-            "cache_management": 12,           // 缓存管理 -> 独立缓存管理页 (索引12)
+            "cache_management": 12,           // 缓存管理 -> 独立缓存管理页
             "rule_management": 0,             // 规则管理 -> 数据管理 (索引0)
             "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
             "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)

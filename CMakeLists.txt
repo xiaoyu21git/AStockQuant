@@ -11,6 +11,9 @@ if(MSVC)
     add_compile_options(
         "$<$<COMPILE_LANGUAGE:C>:/FS>"
         "$<$<COMPILE_LANGUAGE:CXX>:/FS>"
+        "$<$<COMPILE_LANGUAGE:C>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>"
     )
 endif()
 

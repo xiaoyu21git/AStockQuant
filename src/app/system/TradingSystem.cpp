@@ -1,6 +1,10 @@
 #include "TradingSystem.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/MarketDataAdapter.h"
+#include "../adapters/JujinBrokerGateway.h"
+
+#include "../../engine/include/JujinApi.h"
+#include "../../engine/include/GlobalEventBusRegistry.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,12 +29,9 @@ void TradingSystem::initialize() {
     m_tradeEngine = std::make_unique<domain::trading::TradeExecutionEngine>();
     m_positionEngine = std::make_unique<domain::trading::PositionAccountEngine>();
 
-    // 必须通过 setBrokerGateway 预先注入网关，不走回退
-    if (!m_brokerGateway) {
-        std::cerr << "[TradingSystem] FATAL: no broker gateway set, call setBrokerGateway first\n";
-        return;
+    if (m_brokerGateway) {
+        m_tradeEngine->setGateway(std::move(m_brokerGateway));
     }
-    m_tradeEngine->setGateway(std::move(m_brokerGateway));
 
     // 连接持仓变更回调：同步更新峰值资产
     m_positionEngine->setOnDataChanged([this]() {
@@ -45,14 +46,91 @@ void TradingSystem::initialize() {
     std::cout << "[TradingSystem] Initialized\n";
 }
 
+void TradingSystem::initializeWithBroker(const std::string& token, const std::string& accountId) {
+    if (m_initialized) return;
+
+    if (!token.empty()) {
+        auto gw = std::make_unique<app::adapters::JujinBrokerGateway>();
+        const std::string configJson = R"({"token":")" + token + R"(","accountId":")" + accountId + R"("})";
+        if (gw->connect(configJson)) {
+            const bool live = gw->isConnected();
+            setBrokerGateway(std::move(gw));
+            std::cout << "[TradingSystem] Broker gateway connected"
+                      << (live ? " (live)" : " (lazy, awaiting JMC)")
+                      << "\n";
+        } else {
+            std::cerr << "[TradingSystem] WARNING: Broker gateway connect failed\n";
+        }
+    } else {
+        std::cerr << "[TradingSystem] WARNING: No token configured, broker gateway not created\n";
+    }
+
+    initialize();
+
+    // ── 从 SDK 同步账户/持仓 ──
+    if (auto* api = engine::get_shared_jujin_api()) {
+        if (m_positionEngine) {
+            auto acc = api->query_account();
+            domain::trading::AccountSnapshot snap;
+            snap.setAccountId(accountId);
+            snap.setAvailableCash(acc.available);
+            snap.setTotalAsset(acc.total_asset);
+            snap.setMarketValue(acc.market_value);
+            m_positionEngine->applyAccountEvent(snap);
+            for (auto& p : api->query_positions()) {
+                domain::trading::Position pos;
+                pos.setSymbol(p.symbol);
+                pos.setLastPrice(p.price);
+                pos.setQuantity(p.quantity);
+                pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
+                                            : domain::trading::PositionSide::Short);
+                m_positionEngine->applyPositionEvent(p.symbol, pos);
+            }
+        }
+    }
+}
+
+void TradingSystem::refreshPositionsFromBroker() {
+    if (!m_positionEngine) return;
+    auto* api = engine::get_shared_jujin_api();
+    if (!api) return;
+
+    auto acc = api->query_account();
+    domain::trading::AccountSnapshot snap;
+    snap.setAvailableCash(acc.available);
+    snap.setTotalAsset(acc.total_asset);
+    snap.setMarketValue(acc.market_value);
+    m_positionEngine->applyAccountEvent(snap);
+
+    for (auto& p : api->query_positions()) {
+        domain::trading::Position pos;
+        pos.setSymbol(p.symbol);
+        pos.setLastPrice(p.price);
+        pos.setQuantity(p.quantity);
+        pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
+                                    : domain::trading::PositionSide::Short);
+        m_positionEngine->applyPositionEvent(p.symbol, pos);
+    }
+}
+
 void TradingSystem::setRiskConfig(const domain::strategy::RiskConfig& config) {
     m_riskConfig = config;
 }
 
 void TradingSystem::pushMarketData(const std::string& symbol, double price,
                                     double volume, std::int32_t tradingDay) {
+    {
+        std::lock_guard<std::mutex> lock(m_priceMutex);
+        m_latestPrices[symbol] = price;
+    }
     domain::strategy::MarketDataAdapter adapter;
     adapter.pushTick(symbol, price, volume, tradingDay);
+}
+
+double TradingSystem::latestPrice(const std::string& symbol) const {
+    std::lock_guard<std::mutex> lock(m_priceMutex);
+    auto it = m_latestPrices.find(symbol);
+    return it != m_latestPrices.end() ? it->second : 0.0;
 }
 
 // ── 构建完整的 RiskInput（从订单 + 当前状态 + 配置） ──
@@ -139,33 +217,7 @@ domain::trading::SubmitResult TradingSystem::submitOrder(const domain::trading::
     }
 
     domain::strategy::RiskInput riskInput = buildRiskInput(order);
-    auto result = m_tradeEngine->submitOrder(order, riskInput);
-
-    // 模拟成交场景：委托受理后直接更新持仓（实盘需券商回调）
-    if (result.succeeded() && m_positionEngine) {
-        const auto& posMap = m_positionEngine->positions();
-        auto it = posMap.find(order.symbol());
-        std::int64_t existingQty = (it != posMap.end()) ? it->second.quantity() : 0LL;
-
-        domain::trading::Position pos;
-        pos.setSymbol(order.symbol());
-        pos.setLastPrice(order.price());
-        pos.setSide(order.side() == domain::strategy::OrderDirection::Buy
-            ? domain::trading::PositionSide::Long : domain::trading::PositionSide::Short);
-        pos.setQuantity(order.side() == domain::strategy::OrderDirection::Buy
-            ? existingQty + order.quantity() : std::max(0LL, existingQty - order.quantity()));
-        m_positionEngine->applyPositionEvent(order.symbol(), pos);
-
-        double cashDelta = order.side() == domain::strategy::OrderDirection::Buy
-            ? -(order.price() * static_cast<double>(order.quantity()))
-            : order.price() * static_cast<double>(order.quantity());
-        auto acc = m_positionEngine->account();
-        acc.setAvailableCash(acc.availableCash() + cashDelta);
-        acc.setTotalAsset(acc.totalAsset() + cashDelta);
-        m_positionEngine->applyAccountEvent(acc);
-        notifyDataChanged();
-    }
-    return result;
+    return m_tradeEngine->submitOrder(order, riskInput);
 }
 
 const domain::trading::AccountSnapshot& TradingSystem::accountSnapshot() const {
@@ -182,6 +234,12 @@ const std::unordered_map<std::string, domain::trading::Position>& TradingSystem:
 
 domain::strategy::RiskResult TradingSystem::evaluateOrderRisk(const domain::strategy::RiskInput& input) {
     return domain::strategy::RiskEvaluator::evaluateOrder(input);
+}
+
+void TradingSystem::setOnOrderAccepted(OrderUpdateHandler handler) {
+    if (m_tradeEngine) {
+        m_tradeEngine->setOnOrderAccepted(std::move(handler));
+    }
 }
 
 void TradingSystem::setOnOrderUpdate(OrderUpdateHandler handler) {

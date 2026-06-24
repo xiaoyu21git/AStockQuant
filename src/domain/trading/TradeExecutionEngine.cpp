@@ -32,6 +32,7 @@ public:
     mutable std::mutex m_mutex;
 
     // Callbacks
+    TradeExecutionEngine::OrderAcceptedCallback m_orderAcceptedCallback;
     TradeExecutionEngine::OrderUpdateCallback m_orderUpdateCallback;
     TradeExecutionEngine::TradeFillCallback m_tradeFillCallback;
 
@@ -224,21 +225,65 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
         order.price(),
         order.quantity());
 
+    // ── 受理订单：标记 Submitted，同步通知上层 ──
+    {
+        TradeOrder accepted = order;
+        accepted.setStatus(OrderStatusValue::Submitted);
+        accepted.setStatusMessage("accepted");
+        m_impl->appendRecentOrder(accepted);
+        if (m_impl->m_orderAcceptedCallback) {
+            m_impl->m_orderAcceptedCallback(accepted);
+        }
+    }
+
+    // ── 异步网关提交：回调中读取真实状态 ──
     m_impl->m_gateway->submitOrder(request, [this, order](const OrderStatus& status) {
         TradeOrder updated = order;
+        updated.setBrokerOrderId(status.brokerOrderId().text());
+        updated.setStatus(status.statusValue());
+        updated.setFilledPrice(status.filledPrice());
+        updated.setFilledQuantity(status.filledQuantity());
+        if (status.statusValue() == OrderStatusValue::Rejected) {
+            updated.setStatusMessage(status.attribute("error", "gateway rejected"));
+        }
+
+        // 更新引擎内订单记录
+        {
+            std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+            for (auto& o : m_impl->m_recentOrders) {
+                if (o.symbol() == updated.symbol() && o.side() == updated.side()
+                    && o.price() == updated.price() && o.quantity() == updated.quantity()
+                    && o.status() == OrderStatusValue::Submitted) {
+                    o.setBrokerOrderId(updated.brokerOrderId());
+                    o.setStatus(updated.status());
+                    o.setFilledPrice(updated.filledPrice());
+                    o.setFilledQuantity(updated.filledQuantity());
+                    o.setStatusMessage(updated.statusMessage());
+                    break;
+                }
+            }
+        }
+
         if (m_impl->m_orderUpdateCallback) {
             m_impl->m_orderUpdateCallback(updated);
         }
     });
-
-    m_impl->appendRecentOrder(order);
 
     return SubmitResult::success(BrokerOrderId(""));
 }
 
 bool TradeExecutionEngine::cancelOrder(BrokerOrderId brokerOrderId) {
     if (!m_impl->m_gateway) return false;
-    m_impl->m_gateway->cancelOrder(brokerOrderId, [](const OrderStatus&) {});
+    m_impl->m_gateway->cancelOrder(brokerOrderId, [this, brokerOrderId](const OrderStatus& status) {
+        TradeOrder updated;
+        updated.setBrokerOrderId(status.brokerOrderId().text());
+        updated.setStatus(status.statusValue());
+        updated.setStatusMessage(status.attribute("error",
+            status.statusValue() == OrderStatusValue::Cancelled ? "cancelled" : "cancel failed"));
+        if (m_impl->m_orderUpdateCallback) {
+            m_impl->m_orderUpdateCallback(updated);
+        }
+    });
     return true;
 }
 
@@ -276,6 +321,19 @@ const std::vector<TradeOrder>& TradeExecutionEngine::recentOrders() const noexce
 // ============================================================================
 void TradeExecutionEngine::setGateway(std::unique_ptr<IBrokerGateway> gateway) {
     m_impl->m_gateway = std::move(gateway);
+    if (m_impl->m_gateway) {
+        // 注册成交回报：网关推送成交 → 更新仓位 → 通知上层
+        m_impl->m_gateway->setTradeCallback([this](const TradeFill& fill) {
+            // 更新 PositionAccountEngine
+            if (m_impl->m_tradeFillCallback) {
+                m_impl->m_tradeFillCallback(fill);
+            }
+        });
+        m_impl->m_gateway->setErrorCallback([this](const std::string& err) {
+            fprintf(stderr, "[TradeExecEngine] gateway error: %s\n", err.c_str());
+            fflush(stderr);
+        });
+    }
 }
 
 IBrokerGateway* TradeExecutionEngine::gateway() const noexcept {
@@ -285,6 +343,10 @@ IBrokerGateway* TradeExecutionEngine::gateway() const noexcept {
 // ============================================================================
 // Callbacks
 // ============================================================================
+void TradeExecutionEngine::setOnOrderAccepted(OrderAcceptedCallback cb) noexcept {
+    m_impl->m_orderAcceptedCallback = std::move(cb);
+}
+
 void TradeExecutionEngine::setOnOrderUpdate(OrderUpdateCallback cb) noexcept {
     m_impl->m_orderUpdateCallback = std::move(cb);
 }
@@ -338,9 +400,8 @@ bool TradeExecutionEngine::Impl::updateExecutionPauseLocked(const TradeOrder& or
     return false;
 }
 
-bool TradeExecutionEngine::Impl::isOrderClosed(const TradeOrder&) const noexcept {
-    // Simplified — bridge layer will update status via callback
-    return false;
+bool TradeExecutionEngine::Impl::isOrderClosed(const TradeOrder& order) const noexcept {
+    return order.isClosed();
 }
 
 } // namespace domain::trading

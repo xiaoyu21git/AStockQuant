@@ -36,6 +36,28 @@ Rectangle {
     readonly property int compactDepthChipHeight: compactMode ? 20 : 26
     readonly property int compactDepthHeaderHeight: compactMode ? 24 : 30
     readonly property int compactDepthSideWidth: compactMode ? 24 : 34
+
+    readonly property bool isLimitBoard: !!(marketSnapshot && (marketSnapshot.limitUp || marketSnapshot.limitDown))
+    function statusBadgeText() {
+        if (marketSnapshot && marketSnapshot.limitUp) return "涨停"
+        if (marketSnapshot && marketSnapshot.limitDown) return "跌停"
+        return ""
+    }
+    function statusBadgeColor() {
+        if (marketSnapshot && marketSnapshot.limitUp) return "#cc0022"
+        if (marketSnapshot && marketSnapshot.limitDown) return "#008822"
+        return "transparent"
+    }
+    function sealedInfo() {
+        if (!isLimitBoard) return ""
+        var vol = Number(marketSnapshot.sealedVolume || 0)
+        var amt = Number(marketSnapshot.sealedAmount || 0)
+        if (vol <= 0) return "封单: --"
+        var volStr = vol >= 1e8 ? (vol/1e8).toFixed(2)+"亿" : (vol/1e4).toFixed(0)+"万"
+        var amtStr = amt >= 1e8 ? (amt/1e8).toFixed(2)+"亿" : (amt/1e4).toFixed(0)+"万"
+        var side = marketSnapshot.limitUp ? "买一封单" : "卖一封单"
+        return side + ": " + volStr + " 约" + amtStr
+    }
     readonly property int compactDepthPriceWidth: compactMode ? 40 : 60
     readonly property int compactDepthLotWidth: compactMode ? 28 : 44
     readonly property int compactDepthShareWidth: compactMode ? 38 : 56
@@ -230,7 +252,7 @@ Rectangle {
         return "等待桥接行情"
     }
 
-    readonly property color trendColor: !hasDisplayPrice ? "#94a3b8" : (trendUp() ? "#00cc88" : "#ff6a00")
+    readonly property color trendColor: !hasDisplayPrice ? "#94a3b8" : (trendUp() ? "#cc0022" : "#008822")
 
     Rectangle {
         anchors.fill: parent
@@ -291,6 +313,26 @@ Rectangle {
                     text: trendText()
                     color: root.trendColor
                     font.pixelSize: compactMode ? 10 : 13
+                }
+
+                Row {
+                    spacing: 4
+                    visible: root.isLimitBoard
+                    Rectangle {
+                        radius: 3; color: root.statusBadgeColor()
+                        width: badgeText.implicitWidth + 10; height: badgeText.implicitHeight + 4
+                        Text {
+                            id: badgeText
+                            anchors.centerIn: parent
+                            text: root.statusBadgeText()
+                            color: "white"; font.pixelSize: 9; font.weight: Font.Bold
+                        }
+                    }
+                    Text {
+                        text: root.sealedInfo()
+                        color: "#94a3b8"; font.pixelSize: compactMode ? 9 : 11
+                        visible: root.sealedInfo() !== ""
+                    }
                 }
             }
         }
@@ -598,6 +640,16 @@ Rectangle {
                         font.pixelSize: compactMetaFont
                         horizontalAlignment: Text.AlignHCenter
                     }
+                }
+
+                // 涨跌停遮罩
+                Rectangle {
+                    anchors.fill: parent
+                    radius: 22
+                    color: root.isLimitBoard ? (marketSnapshot.limitUp ? "#33cc0022" : "#33008822") : "transparent"
+                    visible: root.isLimitBoard
+                    border.color: root.isLimitBoard ? root.statusBadgeColor() : "transparent"
+                    border.width: 2
                 }
             }
 

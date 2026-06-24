@@ -240,8 +240,12 @@ void CleanedDataController::refreshDatasets()
         qDebug() << "CleanedDataController: Got" << allInfos.size() << "datasets from cache";
 
         for (const QVariantMap& info : allInfos) {
-            if (isCleanedDatasetInfo(info)) {
-                continue;  // 跳过已清洗的，只显示待清洗的原始数据
+            // 因子回测页只显示已清洗的缓存
+            if (!isCleanedDatasetInfo(info)) {
+                continue;
+            }
+            if (info.value("id", -1).toInt() <= 0) {
+                continue;
             }
 
             QStringList tags = info.value("tags").toStringList();
@@ -388,23 +392,16 @@ void CleanedDataController::loadDatasetById(int datasetId)
                 return;
             }
 
-            QVariantList data = cache->getDataSetById(requestedDatasetId);
-            if (data.isEmpty()) {
-                QMetaObject::invokeMethod(
-                    safeThis.data(),
-                    [safeThis, requestedDatasetId]() {
-                        if (!safeThis || safeThis->m_currentDatasetId != requestedDatasetId) {
-                            return;
-                        }
-                        qWarning() << "CleanedDataController: Dataset" << requestedDatasetId << "not found or empty";
-                        emit safeThis->errorOccurred(QString("数据集%1未找到或为空").arg(requestedDatasetId));
-                        safeThis->updateLoadingState(false);
-                    },
-                    Qt::QueuedConnection);
+            QVariantMap selectedDatasetInfo = cache->getDataSetInfo(requestedDatasetId);
+            if (selectedDatasetInfo.isEmpty()) {
+                QMetaObject::invokeMethod(safeThis.data(), [safeThis, requestedDatasetId]() {
+                    if (!safeThis || safeThis->m_currentDatasetId != requestedDatasetId) return;
+                    emit safeThis->errorOccurred(QString("数据集%1未找到或为空").arg(requestedDatasetId));
+                    safeThis->updateLoadingState(false);
+                }, Qt::QueuedConnection);
                 return;
             }
 
-            QVariantMap selectedDatasetInfo = cache->getDataSetInfo(requestedDatasetId);
             selectedDatasetInfo["name"] = selectedDatasetInfo.value("displayName");
             QStringList sc = selectedDatasetInfo.value("stockCodes").toStringList();
             selectedDatasetInfo["symbol"] = sc.isEmpty() ? QString() : sc.first();
@@ -413,24 +410,16 @@ void CleanedDataController::loadDatasetById(int datasetId)
             qint64 created = selectedDatasetInfo.value("createdAt", 0).toLongLong();
             selectedDatasetInfo["createdTime"] = created > 0 ? QDateTime::fromSecsSinceEpoch(created).toString(Qt::ISODate) : "";
 
-            int tradeDateCount = 0;
-            const QVariantMap fieldDiagnostics = buildFieldDiagnosticsImpl(data, selectedDatasetInfo, &tradeDateCount);
-            selectedDatasetInfo["fieldDiagnostics"] = fieldDiagnostics;
-            selectedDatasetInfo["tradeDateCount"] = tradeDateCount;
-
             QMetaObject::invokeMethod(
                 safeThis.data(),
                 [safeThis,
                  requestedDatasetId,
-                 data = std::move(data),
-                 selectedDatasetInfo = std::move(selectedDatasetInfo),
-                 fieldDiagnostics]() mutable {
+                 selectedDatasetInfo = std::move(selectedDatasetInfo)]() mutable {
                     if (!safeThis || safeThis->m_currentDatasetId != requestedDatasetId) {
                         return;
                     }
 
                     safeThis->m_selectedDatasetInfo = selectedDatasetInfo;
-                    safeThis->m_selectedDatasetFieldDiagnostics = fieldDiagnostics;
                     safeThis->m_currentDatasetId = requestedDatasetId;
 
                     if (safeThis->m_selectedDatasetInfo.contains("symbol")) {
@@ -443,14 +432,7 @@ void CleanedDataController::loadDatasetById(int datasetId)
                         safeThis->setCurrentEndDate(safeThis->m_selectedDatasetInfo["endDate"].toString());
                     }
 
-                    safeThis->m_selectedDatasetInfo["fieldDiagnostics"] = safeThis->m_selectedDatasetFieldDiagnostics;
-                    emit safeThis->selectedDatasetDiagnosticsChanged();
                     emit safeThis->selectedDatasetChanged();
-
-                    qDebug() << "CleanedDataController: Loaded dataset" << requestedDatasetId
-                             << "with" << data.size() << "records";
-
-                    safeThis->emitDataLoaded(data);
                     safeThis->updateLoadingState(false);
                 },
                 Qt::QueuedConnection);

@@ -1,11 +1,13 @@
-// DataCleaningServiceRefactored.cpp — 纯 C++ 清洗服务实现
-// 使用 foundation::ThreadPoolExecutor + 纯 C++ CleaningEngine
-// 纯 C++ 引擎与 Qt 桥接层
+// DataCleaningServiceRefactored.cpp
+#include <arrow/api.h>
+#include <arrow/io/api.h>
+#include <arrow/ipc/api.h>
 #include "DataCleaningServiceRefactored.h"
 #include "CleaningEngine.h"
 #include "DataCacheAdapter.h"
 #include "rules/CoreCleaningRules.h"
 #include "AppStoragePaths.h"
+#include "LightRow.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
 
@@ -19,7 +21,7 @@
 #include <cstdio>
 #include <stdexcept>
 
-using J = foundation::json::JsonFacade;
+using J = cleaning::LightRow;
 
 
 // 根据规则 key 名字符串创建对应的纯 C++ 规则实例
@@ -167,47 +169,128 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                 emit self->cleaningProgress(QString::number(dataSetId), 5, QStringLiteral("加载数据..."));
             }, Qt::QueuedConnection);
 
-            // 1. 从 Arrow 加载数据
-            auto rows = cleaning::DataCache::instance().loadDataSetFile(dataSetId);
-            inputRows = static_cast<int>(rows.size());
-            if (rows.empty()) {
-                QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
-                    emit self->dataSetCleaned(dataSetId, -1, QStringLiteral("数据集为空"), 0, 0);
-                }, Qt::QueuedConnection);
-                return;
-            }
+            // 1. 打开 Arrow 文件
+            std::string path = cleaning::DataCache::instance().dataFilePath(dataSetId);
+            auto inR = arrow::io::ReadableFile::Open(path);
+            if (!inR.ok()) { emit self->dataSetCleaned(dataSetId, -1, "无法打开数据文件", 0, 0); return; }
+            auto rdR = arrow::ipc::RecordBatchFileReader::Open(inR.ValueOrDie());
+            if (!rdR.ok()) { emit self->dataSetCleaned(dataSetId, -1, "无法读取数据文件", 0, 0); return; }
+            auto reader = rdR.ValueOrDie();
+            int numBatches = reader->num_record_batches();
+            if (numBatches == 0) { emit self->dataSetCleaned(dataSetId, -1, "数据集为空", 0, 0); return; }
 
-            // 2. 构建清洗引擎
+            // 2. 初始化 Schema + 提取字段信息
+            auto schema = reader->schema();
+            std::vector<std::string> fieldNames;
+            std::unordered_set<std::string> numericFields;
+            for (int fi = 0; fi < schema->num_fields(); ++fi) {
+                auto f = schema->field(fi);
+                fieldNames.push_back(f->name());
+                if (f->type()->id() == arrow::Type::DOUBLE || f->type()->id() == arrow::Type::FLOAT)
+                    numericFields.insert(f->name());
+            }
+            cleaning::LightSchema::instance().init(fieldNames);
+
+            // 3. 构建引擎 + 创建输出
             cleaning::CleaningEngine engine;
             int ruleCount = 0;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
-                if (createCppRule(it.key().toStdString(), "")) { engine.addRule(createCppRule(it.key().toStdString(), "")); ++ruleCount; }
+                auto r = createCppRule(it.key().toStdString(), "");
+                if (r) { engine.addRule(std::move(r)); ++ruleCount; }
             }
-            fprintf(stderr, "[CleaningSvc] rules=%d rows=%d\n", ruleCount, inputRows);
-            fflush(stderr);
-
-            // 3. 清洗
-            auto cleaned = engine.clean(std::move(rows));
-            outputRows = static_cast<int>(cleaned.size());
-            fprintf(stderr, "[CleaningSvc] done: %d -> %d rows removed=%d\n", inputRows, outputRows, inputRows - outputRows);
-            fflush(stderr);
-
-            QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
-                emit self->cleaningProgress(QString::number(dataSetId), 95, QStringLiteral("写入结果..."));
-            }, Qt::QueuedConnection);
-
-            // 4. 写入新 DataSet
             auto info = DataCacheAdapter::instance().getDataSetInfo(dataSetId);
             QVariantMap infoMap;
-            infoMap["displayName"] = QString("cleaned_%1").arg(info.value("displayName").toString());
+            infoMap["displayName"] = QString("cleaning:%1:%2:%3")
+                .arg(info.value("sourceType").toString(), info.value("startDate").toString(), info.value("endDate").toString());
             infoMap["sourceType"] = "cleaning";
-            infoMap["rowCount"] = outputRows;
             infoMap["stockCodes"] = info.value("stockCodes");
             infoMap["startDate"] = info.value("startDate");
             infoMap["endDate"] = info.value("endDate");
+            infoMap["isBacktestReady"] = true;
+            QStringList fields;
+            for (const auto& f : fieldNames) fields.append(QString::fromStdString(f));
+            infoMap["availableFields"] = fields;
+            resultId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
+            auto token = DataCacheAdapter::instance().beginArrowWrite(resultId, fieldNames, numericFields);
 
-            resultId = DataCacheAdapter::instance().storeDataSetFromRows(cleaned, infoMap);
+            QMetaObject::invokeMethod(self.get(), [self, dataSetId]() {
+                emit self->cleaningProgress(QString::number(dataSetId), 10, QStringLiteral("清洗中..."));
+            }, Qt::QueuedConnection);
+
+            // 4. 预分配行池 + 逐批清洗直写
+            const int poolSize = 5000;
+            std::vector<cleaning::LightRow> pool(poolSize);
+            bool engineFirst = true;
+            fprintf(stderr, "[CleaningSvc] rules=%d batches=%d\n", ruleCount, numBatches); fflush(stderr);
+
+            for (int bi = 0; bi < numBatches; ++bi) {
+                auto batch = reader->ReadRecordBatch(bi).ValueOrDie();
+                int64_t n = batch->num_rows();
+                if (n == 0) continue;
+                if (n > poolSize) pool.resize(static_cast<size_t>(n));
+                inputRows += static_cast<int>(n);
+
+                // 填池：从 Arrow 列直接读取
+                int nCols = batch->num_columns();
+                for (int64_t ri = 0; ri < n; ++ri) {
+                    auto& row = pool[static_cast<size_t>(ri)];
+                    if (!row.isObject()) row = J::createObject();
+                    for (int c = 0; c < nCols; ++c) {
+                        auto arr = batch->column(c);
+                        const char* fn = schema->field(c)->name().c_str();
+                        if (arr->IsNull(ri)) { row.setNull(fn); continue; }
+                        if (numericFields.count(fn)) {
+                            row.setDouble(fn, std::static_pointer_cast<arrow::DoubleArray>(arr)->Value(ri));
+                        } else {
+                            row.setString(fn, std::static_pointer_cast<arrow::StringArray>(arr)->GetString(ri));
+                        }
+                    }
+                }
+
+                // Arrow Builders
+                std::vector<std::unique_ptr<arrow::ArrayBuilder>> builders;
+                std::vector<std::shared_ptr<arrow::Field>> sf;
+                for (const auto& fn : fieldNames) {
+                    if (numericFields.count(fn)) { builders.push_back(std::make_unique<arrow::DoubleBuilder>()); sf.push_back(arrow::field(fn, arrow::float64())); }
+                    else { builders.push_back(std::make_unique<arrow::StringBuilder>()); sf.push_back(arrow::field(fn, arrow::utf8())); }
+                }
+
+                engine.cleanSortedBatch(pool, engineFirst, bi == numBatches - 1, [&](J& row) {
+                    for (size_t ci = 0; ci < fieldNames.size(); ++ci) {
+                        const char* cn = fieldNames[ci].c_str();
+                        if (!row.has(cn)) {
+                            if (numericFields.count(cn)) static_cast<arrow::DoubleBuilder*>(builders[ci].get())->AppendNull();
+                            else static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
+                            continue;
+                        }
+                        auto v = row.get(cn);
+                        if (numericFields.count(cn)) {
+                            if (v.isNumber()) static_cast<arrow::DoubleBuilder*>(builders[ci].get())->Append(v.asDouble());
+                            else static_cast<arrow::DoubleBuilder*>(builders[ci].get())->AppendNull();
+                        } else {
+                            if (v.isString()) static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(v.asString());
+                            else static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
+                        }
+                    }
+                });
+                engineFirst = false;
+
+                int keptThisBatch = engine.lastStats().keptRecords - outputRows;
+                outputRows = engine.lastStats().keptRecords;
+                if (keptThisBatch > 0) {
+                    std::vector<std::shared_ptr<arrow::ChunkedArray>> ca;
+                    for (auto& b : builders) { std::shared_ptr<arrow::Array> a; b->Finish(&a); ca.push_back(std::make_shared<arrow::ChunkedArray>(a)); }
+                    DataCacheAdapter::instance().appendArrowTable(token, arrow::Table::Make(arrow::schema(sf), ca, static_cast<int64_t>(keptThisBatch)));
+                }
+                int pct = 10 + (bi + 1) * 85 / numBatches;
+                QMetaObject::invokeMethod(self.get(), [self, dataSetId, pct, bi, numBatches]() {
+                    if (!self) return;
+                    emit self->cleaningProgress(QString::number(dataSetId), pct, QStringLiteral("清洗中 %1/%2 批").arg(bi + 1).arg(numBatches));
+                }, Qt::QueuedConnection);
+            }
+            DataCacheAdapter::instance().finishArrowWrite(token, outputRows);
             message = QString("清洗完成: %1 → %2 条").arg(inputRows).arg(outputRows);
+            fprintf(stderr, "[CleaningSvc] done: %d -> %d rows removed=%d\n", inputRows, outputRows, inputRows - outputRows); fflush(stderr);
 
         } catch (const std::exception& e) {
             message = QString("清洗异常: %1").arg(e.what());

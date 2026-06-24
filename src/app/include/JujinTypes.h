@@ -37,7 +37,7 @@ struct GmConnectorConfig {
     bool simtradeOnly{false};
     bool readOnly{false};
     bool enabled{false};
-    std::uint32_t maxMarketSubscriptions{32};
+    std::uint32_t maxMarketSubscriptions{50};
     std::uint32_t marketSubscriptionBatchSize{4};
     std::vector<std::string> clientProcessNames;
 };

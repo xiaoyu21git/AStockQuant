@@ -24,6 +24,10 @@ public:
     // ── 初始化 ──
     void initialize();
     void setBrokerGateway(std::unique_ptr<domain::trading::IBrokerGatewayEx> gw);
+
+    /// @brief 带券商网关的完整初始化（由桥接层传入 token/accountId）
+    void initializeWithBroker(const std::string& token, const std::string& accountId);
+
     bool initialized() const noexcept { return m_initialized; }
 
     // ── 交易引擎 ──
@@ -35,6 +39,9 @@ public:
     const domain::trading::AccountSnapshot& accountSnapshot() const;
     const std::unordered_map<std::string, domain::trading::Position>& positions() const;
 
+    /// @brief 从 SDK 刷新持仓和账户快照（供桥接层定时调用）
+    void refreshPositionsFromBroker();
+
     // ── 风控配置 ──
     const domain::strategy::RiskConfig& riskConfig() const noexcept { return m_riskConfig; }
     void setRiskConfig(const domain::strategy::RiskConfig& config);
@@ -44,12 +51,16 @@ public:
     void pushMarketData(const std::string& symbol, double price,
                         double volume, std::int32_t tradingDay);
 
+    /// @brief 获取标的最新行情价（供策略下单时参考定价）
+    double latestPrice(const std::string& symbol) const;
+
     // ── 风控审批 ──
     domain::strategy::RiskResult evaluateOrderRisk(const domain::strategy::RiskInput& input);
 
     // ── 引擎回调（桥接层注册，用于转发成交/状态到 QML） ──
     using OrderUpdateHandler = std::function<void(const domain::trading::TradeOrder&)>;
     using TradeFillHandler = std::function<void(const domain::trading::TradeFill&)>;
+    void setOnOrderAccepted(OrderUpdateHandler handler);
     void setOnOrderUpdate(OrderUpdateHandler handler);
     void setOnTradeFill(TradeFillHandler handler);
 
@@ -77,6 +88,8 @@ private:
     domain::strategy::RiskConfig m_riskConfig{domain::strategy::RiskConfig::defaults()};
     mutable double m_peakTotalAsset{0.0};
     mutable std::mutex m_mutex;
+    mutable std::mutex m_priceMutex;
+    std::unordered_map<std::string, double> m_latestPrices;
     DataChangedCallback m_onDataChanged;
 };
 

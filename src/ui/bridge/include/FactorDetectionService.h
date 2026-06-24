@@ -107,10 +107,6 @@ private:
     QStringList normalizedRequiredFields(factor::FactorType runtimeType,
                                          const factor::DataRequirements& requirements) const;
     QVariantMap buildSupportInfo(const factor::bridge::check::SupportInfo& typedInfo) const;
-    int uniqueTradeDateCount(const QVariantList& rows) const;
-    QSet<QString> collectAvailableFields(const QVariantMap& cacheSnapshot,
-                                         const QVariantMap& dataSetInfo,
-                                         const QVariantList& rows) const;
     QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot) const;
     bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,
                               const QString& field) const;

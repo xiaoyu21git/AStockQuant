@@ -285,6 +285,10 @@ void StrategyEngine::setLiveMarketView(const void* view)
     if (auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get())) {
         rfs->setLiveMarketView(static_cast<const factor::compute::IMarketDataView*>(view));
     }
+    // 非因子策略：评估时从 context.historicalViewPtr() 取 OHLCV 数据计算 TA-Lib 指标
+    if (strategyService_) {
+        strategyService_->setContextHistoricalView(view);
+    }
 }
 
 StrategyEngine::StrategyEngine(std::unique_ptr<IRuntimeFactorService> factorService,
@@ -468,6 +472,10 @@ void StrategyEngine::setOrderListener(IOrderListener* listener)
 
 void StrategyEngine::drainQueue()
 {
+    std::size_t processed = 0;
+    std::size_t signalsGenerated = 0;
+    auto lastReport = std::chrono::steady_clock::now();
+
     while (m_loopRunning.load(std::memory_order_acquire)) {
         MarketDataPoint mdp;
         {
@@ -484,12 +492,37 @@ void StrategyEngine::drainQueue()
 
         try {
             auto orders = step(mdp);
-            if (orders.has_value() && m_orderListener) {
-                m_orderListener->onOrders(*orders);
+            if (orders.has_value() && !orders->empty()) {
+                signalsGenerated += orders->size();
+                if (m_orderListener) {
+                    m_orderListener->onOrders(*orders);
+                }
             }
         } catch (const std::exception& e) {
             INTERNAL_WARN_STREAM << "[StrategyEngine] tick processing failed: "
                                  << e.what() << " — skipping";
+        }
+
+        processed++;
+
+        // 心跳：每处理 200 条或 15 秒打印一次策略运行摘要
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
+        if (processed % 200 == 0 || elapsed >= 15) {
+            std::size_t qDepth = 0;
+            {
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                qDepth = m_mdpQueue.size();
+            }
+            auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
+            fprintf(stderr,
+                    "[Engine] processed=%zu queue=%zu signals=%zu dropped=%zu "
+                    "(%llds)\n",
+                    processed, qDepth, signalsGenerated,
+                    static_cast<size_t>(dropped),
+                    static_cast<long long>(elapsed));
+            fflush(stderr);
+            lastReport = now;
         }
 
         // 心跳 — 记录最后处理时间
@@ -683,6 +716,28 @@ StrategyBacktestResult StrategyEngine::backtest(
     if (totalDays == 0 || colCount == 0) {
         result.errorMessage = "Empty market data";
         return result;
+    }
+
+    // ── 诊断：抽样检查各时间点的价格覆盖率 ──
+    {
+        auto closeMat = view->close();
+        const auto& dts = view->dates();
+        int samplePcts[] = {0, 25, 50, 75, 90, 95, 99};
+        fprintf(stderr, "[backtest] 价格覆盖率诊断 (共 %d 天 x %d 只股票):\n",
+                totalDays, colCount);
+        for (int pct : samplePcts) {
+            int di = static_cast<int>(std::min(static_cast<size_t>(totalDays - 1),
+                static_cast<size_t>(totalDays) * pct / 100));
+            int validCount = 0;
+            size_t rowOff = static_cast<size_t>(di) * static_cast<size_t>(colCount);
+            for (int c = 0; c < colCount; ++c) {
+                double px = static_cast<double>(closeMat.data[rowOff + c]);
+                if (px > 0.0 && std::isfinite(px)) ++validCount;
+            }
+            fprintf(stderr, "  进度[%3d%%] 日期 %d: %d/%d 只有效价格\n",
+                    pct, dts[di].value, validCount, colCount);
+        }
+        fflush(stderr);
     }
 
     // 2. 构建 symbol 映射 + 账户初始化

@@ -1,7 +1,9 @@
 // DataCacheAdapter.cpp — 纯 C++ DataCache 的轻量适配器
 #include "DataCacheAdapter.h"
 #include "AppStoragePaths.h"
+#include "DataSourceRegistry.h"
 #include "foundation/json/json_facade.h"
+#include <arrow/api.h>
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -21,7 +23,8 @@ DataCacheAdapter::DataCacheAdapter()
 
 void DataCacheAdapter::ensureInitialized() {
     if (!m_cache->isInitialized()) {
-        m_cache->initialize("persistent");
+        std::string dir = bridge::storage::persistentDatasetRootDir().toStdString();
+        m_cache->initialize(dir);
     }
 }
 
@@ -75,18 +78,30 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     int dataId = m_cache->storeDataSet({}, info, progressCallback);
     if (dataId <= 0) return -1;
 
-    // 直写 Arrow，自动检测字段类型
+    // 自动检测字段（输入行已含完整 Schema，无需硬编码）
     std::vector<std::string> fieldNames;
     std::unordered_set<std::string> numericFields;
-    if (!rows.empty() && rows[0].isObject()) {
-        // 遍历首行所有字段，用 strtod 判断数值类型
+    if (!rows.empty()) {
+        // 从 cleaning 完整字段集获取数值类型标记
+        auto klineSchema = cleaning::KlineDataSource().detectSchema(nullptr, {}, {});
+        auto finSchema   = cleaning::FinancialDataSource().detectSchema(nullptr, {}, {});
+        std::unordered_set<std::string> knownNumeric;
+        for (auto& f : klineSchema.numeric) knownNumeric.insert(f);
+        for (auto& f : finSchema.numeric)   knownNumeric.insert(f);
+        // 按首行字段顺序排列（symbol, trade_date 优先）
+        const char* head[] = {"symbol","trade_date","report_date"};
+        for (auto* h : head) { if (rows[0].has(h)) fieldNames.push_back(h); }
         for (const auto& row : rows) {
             if (!row.isObject()) continue;
-            for (const char* known : {"symbol","code","stock_code","name","trade_date","report_date","disclosure_date","report_type","industry_code","industry","status","data_source","asset_class","trade_status"})
-                if (row.has(known) && std::find(fieldNames.begin(),fieldNames.end(),known)==fieldNames.end()) fieldNames.push_back(known);
-            for (const char* num : {"open","high","low","close","pre_close","volume","turnover","change_pct","change_amt","amplitude","turnover_rate","pe_ratio","pb_ratio","market_cap","circulating_market_cap","pre_adj_factor","post_adj_factor","symbol_id","indicator_id","eps","bps","roa","roe","profit_margin","gross_margin","operating_margin","debt_to_equity","current_ratio","quick_ratio","operating_cash_flow","investing_cash_flow","financing_cash_flow","total_revenue","net_profit","total_assets","total_liabilities","equity","dividend_yield","payout_ratio","dividend_stability","effective_disclosure_date","created_at","updated_at"})
-                if (row.has(num)) { if(std::find(fieldNames.begin(),fieldNames.end(),num)==fieldNames.end()) fieldNames.push_back(num); numericFields.insert(num); }
+            for (const auto& key : row.keys()) {
+                if (std::find(fieldNames.begin(), fieldNames.end(), key) == fieldNames.end())
+                    fieldNames.push_back(key);
+            }
             break;
+        }
+        for (auto& f : fieldNames) {
+            if (knownNumeric.count(f)) numericFields.insert(f);
+            else { double d = 0; try { d = std::stod(rows[0].get(f).asString()); } catch(...) {} if (d != 0 || rows[0].get(f).isNumber()) numericFields.insert(f); }
         }
     }
     m_cache->saveDataSetFile(dataId, rows, fieldNames, numericFields);
@@ -95,9 +110,6 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     fprintf(stderr, "[DataCacheAdapter] stored dataset %d (from rows): %s (%zu rows)\n",
             dataId, info.displayName.c_str(), rows.size());
     fflush(stderr);
-
-    emit dataSetStored(dataId, cppInfoToMap(info));
-    return dataId;
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
@@ -118,6 +130,11 @@ cleaning::DataCache::ArrowWriteToken DataCacheAdapter::beginArrowWrite(int dataI
 void DataCacheAdapter::appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
                                          const std::vector<foundation::json::JsonFacade>& rows) {
     m_cache->appendArrowBatch(token, rows);
+}
+
+void DataCacheAdapter::appendArrowTable(cleaning::DataCache::ArrowWriteToken token,
+                                         const std::shared_ptr<arrow::Table>& table) {
+    m_cache->appendArrowTable(token, table);
 }
 
 void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount) {
@@ -153,7 +170,15 @@ QVariantMap DataCacheAdapter::getDataSetInfo(int dataId) const {
     return cppInfoToMap(m_cache->getDataSetInfo(dataId));
 }
 
+QStringList DataCacheAdapter::getDataSetSchemaFields(int dataId) const {
+    QStringList fields;
+    for (const auto& f : m_cache->loadDataSetSchemaFields(dataId))
+        fields.append(QString::fromStdString(f));
+    return fields;
+}
+
 QVector<QVariantMap> DataCacheAdapter::getAllDataSetInfos() const {
+    const_cast<DataCacheAdapter*>(this)->ensureInitialized();
     QVector<QVariantMap> result;
     for (const auto& info : m_cache->listDataSets())
         result.append(cppInfoToMap(info));
@@ -164,6 +189,13 @@ bool DataCacheAdapter::removeDataSet(int dataId) {
     bool ok = m_cache->removeDataSet(dataId);
     if (ok) emit dataSetRemoved(dataId);
     return ok;
+}
+
+int DataCacheAdapter::removeDataSetsBySourceType(const std::string& sourceType) {
+    int n = m_cache->removeDataSetsBySourceType(sourceType);
+    fprintf(stderr, "[DataCacheAdapter] removed %d datasets with sourceType=%s\n", n, sourceType.c_str());
+    fflush(stderr);
+    return n;
 }
 
 bool DataCacheAdapter::initialize(const QString& persistentDir) {

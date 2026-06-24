@@ -229,10 +229,19 @@ void FactorService::ensureViewModelPopulated()
         return;
     }
 
+    // 防重入：beginResetModel() 期间若 GridView 回调触发了再次 getViewModel()，
+    // m_viewModelPopulating 为 true 时直接跳过，避免 beginResetModel/endResetModel 嵌套崩溃
+    bool expected = false;
+    if (!m_viewModelPopulating.compare_exchange_strong(expected, true)) {
+        qDebug() << "[FactorService] ViewModel 填充进行中，跳过重入";
+        return;
+    }
+
     try {
         QVariantList factors = getAllFactors();
         if (factors.isEmpty()) {
             qDebug() << "[FactorService] 因子列表为空，不更新ViewModel";
+            m_viewModelPopulating.store(false);
             return;
         }
         m_viewModel->updateData(factors);
@@ -242,6 +251,8 @@ void FactorService::ensureViewModelPopulated()
     } catch (...) {
         qWarning() << "[FactorService] 填充ViewModel未知异常";
     }
+
+    m_viewModelPopulating.store(false);
 }
 
 // ============ 属性访问器 ============
@@ -630,6 +641,43 @@ void FactorService::beginMutation()
 factor::FactorInstanceManager* FactorService::instanceManager() const
 {
     return m_instanceManager.get();
+}
+
+QVariantMap FactorService::buildFactorSupportMap(
+    const QStringList& factorIds,
+    const QString& startDate, const QString& endDate,
+    const QVariantMap& cacheSnapshot,
+    const QString& dataSourceMode,
+    int selectedDatasetId)
+{
+    if (!m_detectionService || !m_instanceManager) {
+        // 回退：全部标记为支持
+        QVariantMap map;
+        for (const QString& id : factorIds) {
+            QVariantMap info;
+            info["supported"] = true;
+            info["reason"] = QStringLiteral("因子服务未就绪，跳过检测");
+            info["category"] = QStringLiteral("unknown");
+            map[id] = info;
+        }
+        return map;
+    }
+
+    FactorDetectionService::Request request;
+    request.factorIds = factorIds;
+    request.startDate = startDate;
+    request.endDate = endDate;
+    request.cacheSnapshot = cacheSnapshot;
+    request.dataSourceMode = dataSourceMode;
+    request.selectedDatasetId = selectedDatasetId;
+
+    auto runtimeContext = m_detectionService->resolveRuntimeContext(
+        m_database, m_dataChecker, m_instanceManager, false);
+
+    FactorDetectionService::Overrides overrides; // 无测试覆写
+
+    auto result = m_detectionService->buildSupportMap(request, runtimeContext, overrides);
+    return result.supportMap;
 }
 
 void FactorService::endMutation(bool success, const QString& message)

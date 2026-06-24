@@ -14,6 +14,7 @@
 #include <queue>
 #include <chrono>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 namespace foundation {
@@ -424,7 +425,8 @@ private:
     StrategyServiceExecutionPlan plan_;
     StrategyExecutionStats stats_;
     std::vector<StrategyRuntimeEntry> strategyEntries_;
-    int m_lastEvaluatedDay_{0};  // 日内去重：同一交易日只评估一次
+    // 日内去重：每标的首笔 tick 触发评估，后续仅更新因子快照
+    std::unordered_map<InstrumentId, int, InstrumentId::Hash> m_evaluatedDays_;
     std::vector<RuntimeFactorSnapshot> factorSnapshotBuffer_;
     std::vector<StrategySignal> signalBuffer_;
     std::vector<RuleEvaluationResult> ruleResultBuffer_;

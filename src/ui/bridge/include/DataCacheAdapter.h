@@ -12,6 +12,8 @@
 
 #include "DataCache.h"
 
+namespace arrow { class Table; }
+
 class DataCacheAdapter : public QObject {
     Q_OBJECT
     Q_DISABLE_COPY(DataCacheAdapter)
@@ -34,11 +36,16 @@ public:
         const std::unordered_set<std::string>& numericFields);
     void appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
                            const std::vector<foundation::json::JsonFacade>& rows);
+    void appendArrowTable(cleaning::DataCache::ArrowWriteToken token,
+                           const std::shared_ptr<arrow::Table>& table);
     void finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount);
     QVariantList getDataSetById(int dataId);
     QVariantMap getDataSetInfo(int dataId) const;
+    /// @brief 仅读取 Arrow schema 字段名列表（零数据行加载）
+    QStringList getDataSetSchemaFields(int dataId) const;
     QVector<QVariantMap> getAllDataSetInfos() const;
     bool removeDataSet(int dataId);
+    int removeDataSetsBySourceType(const std::string& sourceType);
 
 signals:
     void dataSetStored(int dataId, QVariantMap info);

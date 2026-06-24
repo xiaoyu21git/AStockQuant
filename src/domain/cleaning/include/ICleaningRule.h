@@ -1,12 +1,12 @@
 // ICleaningRule.h — 纯 C++ 数据清洗规则接口（零 Qt 依赖）
-// 所有规则通过此接口实现，使用 foundation::json::JsonFacade 作为行数据
+// 所有规则通过此接口实现，使用 LightRow 作为行数据
 #pragma once
 #include <string>
 #include <vector>
 #include <memory>
 #include <cstdint>
 
-namespace foundation::json { class JsonFacade; }
+#include "LightRow.h"
 
 namespace cleaning {
 
@@ -65,17 +65,17 @@ public:
     virtual uint8_t executionOrder() const = 0;
 
     /// @brief 预处理：对全部数据执行一次（可用于批量上下文构建）
-    virtual void cleanCrossSectional(std::vector<foundation::json::JsonFacade>& rows) {}
+    virtual void cleanCrossSectional(std::vector<LightRow>& rows) {}
 
     /// @brief 判断规则是否适用于此数据行（默认总是适用，可重写以按行类型跳过）
     /// @return true 适用，false 跳过此规则对此行的检查
-    virtual bool appliesTo(const foundation::json::JsonFacade& row) const { return true; }
+    virtual bool appliesTo(const LightRow& row) const { return true; }
 
     /// @brief 逐行过滤：返回 true 保留，false 移除
-    virtual bool clean(foundation::json::JsonFacade& row) = 0;
+    virtual bool clean(LightRow& row) = 0;
 
     /// @brief 后处理：对过滤后的数据执行一次
-    virtual void postCrossSectional(std::vector<foundation::json::JsonFacade>& rows) {}
+    virtual void postCrossSectional(std::vector<LightRow>& rows) {}
 
     /// @brief 验证规则配置是否有效（返回空字符串表示通过，否则返回错误消息）
     virtual std::string validateConfig() const { return ""; }

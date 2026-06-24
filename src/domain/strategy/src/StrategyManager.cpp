@@ -94,9 +94,6 @@ std::vector<OrderRequest> StrategyManager::stepAll(const MarketDataPoint& mdp) {
 void StrategyManager::pushMarketData(const MarketDataPoint& mdp)
 {
     const std::lock_guard<std::mutex> lock(m_mutex);
-    fprintf(stderr, "[SM] pushMarketData: engines=%zu valid=%d day=%d\n",
-            m_engines.size(), mdp.isValid() ? 1 : 0, mdp.tradingDay());
-    fflush(stderr);
     for (auto& [id, engine] : m_engines) {
         if (engine) {
             engine->enqueueMarketData(mdp);

@@ -6,6 +6,7 @@
 #include "foundation/json/json_facade.h"
 #include "DataSourceRegistry.h"
 #include "database/MarketDataRepository.h"
+#include <arrow/api.h>
 #include "database/NativeMySQLConnectionPool.h"
 
 #include "foundation.h"
@@ -153,44 +154,87 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         auto y1 = startDate.mid(0,4).toInt(), m1 = startDate.mid(5,2).toInt(), d1 = startDate.mid(8,2).toInt();
         auto y2 = endDate.mid(0,4).toInt(),   m2 = endDate.mid(5,2).toInt(),   d2 = endDate.mid(8,2).toInt();
         int totalMonths = (y2 - y1) * 12 + (m2 - m1) + 1;
-        int monthCount = totalMonths * static_cast<int>(dataTypes.size());
+        int monthCount = totalMonths;
         int doneMonths = 0;
         QMetaObject::invokeMethod(self.get(), [self, monthCount]() { if (self) self->updateStatus(QString("开始下载 %1 个批次...").arg(monthCount), 30); }, Qt::BlockingQueuedConnection);
 
-        // 第一步：扫描所有类型的列名，合并成统一集合
-        std::vector<std::string> allFields;
-        std::unordered_set<std::string> fieldSet;
-        for (const QString& dt : dataTypes) {
-            auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-            std::vector<std::string> sv; for(const auto& s : allSymbols) sv.push_back(s.toStdString());
-            std::string sql = src->buildDataQuery(startDate.toStdString(), endDate.toStdString(), sv) + " LIMIT 1";
-            auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-            if (!dbr||!dbr->isOpen()) continue;
-            auto rr = dbr->executeQuery(sql,{});
-            for (const auto& row : rr.getRows()) for (const auto& [col,_] : row.getValues()) if (fieldSet.insert(col).second) allFields.push_back(col);
-        }
-        auto rowToJson = [&allFields](const astock::database::SqlQueryResultRow& r) { auto j = foundation::json::JsonFacade::createObject(); for (const auto& col : allFields) { auto it = r.getValues().find(col); if (it == r.getValues().end() || it->second.empty()) { j.set(col, foundation::json::JsonFacade::createDouble(NAN)); continue; } char* end = nullptr; double d = strtod(it->second.c_str(), &end); if (end && (size_t)(end - it->second.c_str()) == it->second.size()) j.set(col, foundation::json::JsonFacade::createDouble(d)); else j.set(col, foundation::json::JsonFacade::createString(it->second)); } return j; };
-        // 写单个 Arrow 文件
-        QVariantMap infoMap; infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate); infoMap["sourceType"] = dataSource; infoMap["stockCodes"] = allSymbols; infoMap["startDate"] = startDate; infoMap["endDate"] = endDate;
-        // 从首行数据自动判定数值/字符串类型，避免硬编码字段列表
-        std::unordered_set<std::string> numericFields;
-        auto testNumeric = [&](const std::string& v) { if(v.empty())return false; char* e=nullptr; strtod(v.c_str(),&e); return e && (size_t)(e-v.c_str())==v.size(); };
-        if (!allFields.empty()) {
-            auto dbr = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-            if (dbr && dbr->isOpen()) {
-                for (const QString& dt : dataTypes) {
-                    auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-                    std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
-                    std::string sql = src->buildDataQuery(startDate.toStdString(),endDate.toStdString(),sv) + " LIMIT 1";
-                    auto rr = dbr->executeQuery(sql,{});
-                    for (const auto& row : rr.getRows())
-                        for (const auto& [col,val] : row.getValues()) {}
+        // ── 构建统一 Schema（DataSourceRegistry 唯一定义点）──
+        std::vector<std::string> typeNames;
+        for (const QString& dt : dataTypes) typeNames.push_back(dt.toStdString());
+        auto mergedSchema = cleaning::fullSchemaForTypes(typeNames);
+        const auto& allFields = mergedSchema.names;
+        const auto& numericFields = mergedSchema.numeric;
+        if (allFields.empty()) { /* error handling */ return; }
+
+        // 财务字段名集合（用于后续合并判断）
+        const auto& finCols = cleaning::financial_columns::names();
+        std::unordered_set<std::string> finColSet(finCols.begin(), finCols.end());
+
+        // 预构建全量 symbol 列表 + 分片大小
+        std::vector<std::string> allSymbolsVec;
+        for (const auto& s : allSymbols) allSymbolsVec.push_back(s.toStdString());
+        static const int symbolChunkSize = 200;
+
+        // ── 第一步：全量加载财务数据到内存（~11万行，<200MB）──
+        //   symbol → [(report_date, {col: val})], report_date 升序
+        std::map<std::string, std::vector<std::pair<std::string, std::unordered_map<std::string, std::string>>>> finCache;
+        {
+            auto dbFin = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (dbFin && dbFin->isOpen()) {
+                astock::infrastructure::database::MarketDataRepository finRepo(std::move(dbFin));
+                std::string sd = startDate.toStdString(), ed = endDate.toStdString();
+                // 分批查询避免单次结果集过大
+                for (size_t fs = 0; fs < allSymbolsVec.size(); fs += symbolChunkSize) {
+                    size_t fe = (std::min)(fs + symbolChunkSize, allSymbolsVec.size());
+                    std::vector<std::string> fchunk(allSymbolsVec.begin() + fs, allSymbolsVec.begin() + fe);
+                    auto frows = finRepo.queryFinancialData(fchunk, sd, ed);
+                    for (const auto& row : frows) {
+                        const auto& vals = row.getValues();
+                        auto symIt = vals.find("symbol");
+                        auto discIt = vals.find("disclosure_date");
+                        if (symIt == vals.end() || discIt == vals.end()
+                            || discIt->second.empty()) continue;
+                        std::unordered_map<std::string, std::string> fv;
+                        for (const auto& [col, val] : vals) {
+                            if (!val.empty() && finColSet.count(col)) fv[col] = val;
+                        }
+                        // 按披露日排序，对齐时 disclosure_date ≤ trade_date
+                        finCache[symIt->second].emplace_back(discIt->second, std::move(fv));
+                    }
                 }
             }
+            // 每标的 disclosure_date 升序
+            for (auto& [sym, vec] : finCache)
+                std::sort(vec.begin(), vec.end(),
+                    [](auto& a, auto& b) { return a.first < b.first; });
         }
+        QMetaObject::invokeMethod(self.get(), [self]() {
+            if (self) self->updateStatus("财务数据已加载，开始下载K线...", 30);
+        }, Qt::BlockingQueuedConnection);
+
+        // index_code 映射（直接 Arrow 构建时用）
+        std::map<std::string, std::string> indexMap;
+        {
+            auto idxDb = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (idxDb && idxDb->isOpen()) {
+                astock::infrastructure::database::MarketDataRepository idxRepo(std::move(idxDb));
+                indexMap = idxRepo.queryIndexCodeMap(endDate.toStdString());
+            }
+        }
+
+        // 创建数据集 + 预设 Schema
+        QVariantMap infoMap;
+        infoMap["displayName"] = QString("%1:%2:%3:%4").arg(dataSource, dataTypes.join(","), startDate, endDate);
+        infoMap["sourceType"] = dataSource;
+        infoMap["stockCodes"] = allSymbols;
+        infoMap["startDate"] = startDate;
+        infoMap["endDate"] = endDate;
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
         auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId, allFields, numericFields) : nullptr;
+        if (!token) { /* error handling */ return; }
         int totalRows = 0;
+
+        // ── 第二步：按月分片下载 K线，每行即时合并财务数据 ──
         static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
         for (int mi = 0; mi < totalMonths; mi++) {
             int cm = m1 + mi, cy = y1 + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
@@ -199,38 +243,135 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
             snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
 
-            // 按月内各类型顺序查询（线程池内查 MySQL 本身非阻塞，两类型串行也很快）
-            for (const QString& dt : dataTypes) {
-                auto* src = cleaning::sourceByName(dt.toStdString()); if (!src) continue;
-                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection(); if (!db2||!db2->isOpen()) goto dl_end;
+            for (size_t start = 0; start < allSymbolsVec.size(); start += symbolChunkSize) {
+                size_t end = (std::min)(start + symbolChunkSize, allSymbolsVec.size());
+                std::vector<std::string> chunk(allSymbolsVec.begin() + start, allSymbolsVec.begin() + end);
+
+                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+                if (!db2 || !db2->isOpen()) goto dl_end;
                 astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-                std::vector<foundation::json::JsonFacade> batch;
-                if (src->typeName() == "financial") {
-                    auto rows = repo.queryAllMarketFinancialData(ms, me);
-                    for (const auto& row : rows) batch.push_back(rowToJson(row));
-                } else {
-                    std::vector<std::string> sv; for(const auto& s:allSymbols) sv.push_back(s.toStdString());
-                    auto bars = repo.queryDailyBarBatch(sv, ms, me);
-                    for (const auto& bar : bars) {
-                        auto j = foundation::json::JsonFacade::createObject();
-                        j.set("symbol", foundation::json::JsonFacade::createString(bar.symbol));
-                        j.set("trade_date", foundation::json::JsonFacade::createString(bar.tradeDate));
-                        j.set("open", foundation::json::JsonFacade::createDouble(bar.open));
-                        j.set("high", foundation::json::JsonFacade::createDouble(bar.high));
-                        j.set("low", foundation::json::JsonFacade::createDouble(bar.low));
-                        j.set("close", foundation::json::JsonFacade::createDouble(bar.close));
-                        j.set("volume", foundation::json::JsonFacade::createDouble(bar.volume));
-                        j.set("turnover", foundation::json::JsonFacade::createDouble(bar.turnover));
-                        batch.push_back(std::move(j));
+                auto rows = repo.queryDailyBarJoined(chunk, ms, me);
+                if (rows.empty()) continue;
+                int64_t nRows = static_cast<int64_t>(rows.size());
+
+                // ── 直接构建 Arrow Table（零 JsonFacade，零碎片）──
+                std::vector<std::shared_ptr<arrow::ArrayBuilder>> builders;
+                std::vector<std::shared_ptr<arrow::Field>> schemaFields;
+                builders.reserve(allFields.size());
+                schemaFields.reserve(allFields.size());
+                for (const auto& fname : allFields) {
+                    if (numericFields.count(fname)) {
+                        builders.push_back(std::make_shared<arrow::DoubleBuilder>());
+                        schemaFields.push_back(arrow::field(fname, arrow::float64()));
+                    } else {
+                        builders.push_back(std::make_shared<arrow::StringBuilder>());
+                        schemaFields.push_back(arrow::field(fname, arrow::utf8()));
                     }
                 }
-                if (!batch.empty()) { DataCacheAdapter::instance().appendArrowBatch(token, batch); totalRows += (int)batch.size(); }
+
+                for (int64_t ri = 0; ri < nRows; ++ri) {
+                    const auto& vals = rows[ri].getValues();
+                    std::string sym, td;
+                    auto si = vals.find("symbol");
+                    auto ti = vals.find("trade_date");
+                    if (si != vals.end()) sym = si->second;
+                    if (ti != vals.end()) td = ti->second;
+
+                    const std::unordered_map<std::string, std::string>* fv = nullptr;
+                    if (!sym.empty() && !td.empty()) {
+                        auto fit = finCache.find(sym);
+                        if (fit != finCache.end() && !fit->second.empty()) {
+                            auto it = std::upper_bound(fit->second.begin(), fit->second.end(), td,
+                                [](const std::string& d, const auto& rp) { return d < rp.first; });
+                            if (it != fit->second.begin()) fv = &(it - 1)->second;
+                        }
+                    }
+
+                    for (size_t ci = 0; ci < allFields.size(); ++ci) {
+                        const auto& cn = allFields[ci];
+                        bool isNum = numericFields.count(cn) > 0;
+
+                        // 优先级: SQL行 > 财务缓存 > null
+                        auto vit = vals.find(cn);
+                        if (vit != vals.end() && !vit->second.empty()) {
+                            if (isNum) {
+                                char* e = nullptr;
+                                double d = strtod(vit->second.c_str(), &e);
+                                if (e && static_cast<size_t>(e - vit->second.c_str()) == vit->second.size())
+                                    static_cast<arrow::DoubleBuilder*>(builders[ci].get())->Append(d);
+                                else
+                                    static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(vit->second);
+                            } else {
+                                static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(vit->second);
+                            }
+                        } else if (fv) {
+                            auto fit = fv->find(cn);
+                            if (fit != fv->end() && !fit->second.empty()) {
+                                if (isNum) {
+                                    char* e = nullptr;
+                                    double d = strtod(fit->second.c_str(), &e);
+                                    if (e && static_cast<size_t>(e - fit->second.c_str()) == fit->second.size())
+                                        static_cast<arrow::DoubleBuilder*>(builders[ci].get())->Append(d);
+                                    else
+                                        static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(fit->second);
+                                } else {
+                                    static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(fit->second);
+                                }
+                            } else {
+                                if (isNum) static_cast<arrow::DoubleBuilder*>(builders[ci].get())->AppendNull();
+                                else       static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
+                            }
+                        } else if (cn == "index_code" && !sym.empty()) {
+                            // 从 indexMap 注入指数成分
+                            auto im = indexMap.find(sym);
+                            if (im != indexMap.end())
+                                static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(im->second);
+                            else
+                                static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
+                        } else {
+                            if (isNum) static_cast<arrow::DoubleBuilder*>(builders[ci].get())->AppendNull();
+                            else       static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
+                        }
+                    }
+                }
+                rows.clear(); rows.shrink_to_fit();
+
+                std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
+                columns.reserve(builders.size());
+                for (auto& b : builders) {
+                    std::shared_ptr<arrow::Array> arr;
+                    b->Finish(&arr);
+                    columns.push_back(std::make_shared<arrow::ChunkedArray>(arr));
+                }
+                auto table = arrow::Table::Make(arrow::schema(schemaFields), columns, nRows);
+
+                DataCacheAdapter::instance().appendArrowTable(token, table);
+                totalRows += static_cast<int>(nRows);
+            }
+            // 本月 K线已写完，清除不会再被后续月份引用的旧财报
+            for (auto it = finCache.begin(); it != finCache.end(); ) {
+                auto& vec = it->second;
+                auto cut = std::lower_bound(vec.begin(), vec.end(), ms,
+                    [](const auto& rp, const std::string& c) { return rp.first < c; });
+                if (cut != vec.begin()) --cut;
+                if (cut != vec.begin()) { vec.erase(vec.begin(), cut); vec.shrink_to_fit(); }
+                if (vec.empty()) it = finCache.erase(it);
+                else ++it;
             }
             doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalRows;
-            QMetaObject::invokeMethod(self.get(), [self,dm,tm,tr](){ if(!self)return; int pct=30+(dm*68)/qMax(1,tm); self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr),pct); emit self->dataFetchProgress(pct,QString("下载 %1/%2 月").arg(dm).arg(tm)); }, Qt::BlockingQueuedConnection);
+            QMetaObject::invokeMethod(self.get(), [self,dm,tm,tr](){
+                if(!self)return;
+                int pct=30+(dm*68)/qMax(1,tm);
+                self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr),pct);
+                emit self->dataFetchProgress(pct,QString("下载 %1/%2 月").arg(dm).arg(tm));
+            }, Qt::BlockingQueuedConnection);
         }
         dl_end:
         DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
+        // 释放财务缓存和标的列表
+        finCache.clear();
+        allSymbolsVec.clear(); allSymbolsVec.shrink_to_fit();
+        indexMap.clear();
         int did = dataId, tr = totalRows;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
             if (!self || did <= 0) return;
@@ -270,25 +411,27 @@ void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
 
     QVariantList data;
 
-    // K线
-    std::string kSql = "SELECT symbol, trade_date, open, high, low, close, volume, turnover "
-                       "FROM daily_bar WHERE symbol=" + sym + " AND trade_date BETWEEN " + sd
-                       + " AND " + ed + " ORDER BY trade_date LIMIT " + limit + " OFFSET " + offset;
+    // K线（显式 20 列 + symbol_info 元数据，禁止 SELECT *）
+    std::string kSql = "SELECT " + cleaning::kline_columns::sqlSelect() + ","
+                       + cleaning::symbol_info_columns::sqlSelect()
+                       + " FROM daily_bar d JOIN symbol_info s ON d.symbol = s.symbol"
+                       + " WHERE d.symbol=" + sym + " AND d.trade_date BETWEEN " + sd
+                       + " AND " + ed + " ORDER BY d.trade_date LIMIT " + limit + " OFFSET " + offset;
     auto kResult = db->executeQuery(kSql, {});
     for (const auto& row : kResult.getRows()) {
         QVariantMap m;
-        m["symbol"] = QString::fromStdString(row.getString("symbol"));
-        m["trade_date"] = QString::fromStdString(row.getString("trade_date"));
-        m["open"] = row.getDouble("open"); m["high"] = row.getDouble("high");
-        m["low"] = row.getDouble("low"); m["close"] = row.getDouble("close");
-        m["volume"] = row.getDouble("volume"); m["turnover"] = row.getDouble("turnover");
+        for (const auto& f : cleaning::kline_columns::names())
+            m[QString::fromStdString(f)] = QString::fromStdString(row.getString(f));
+        for (const auto& f : cleaning::symbol_info_columns::names())
+            m[QString::fromStdString(f)] = QString::fromStdString(row.getString(f));
         m["dataType"] = "kline_daily";
         data.append(m);
     }
 
-    // 财务
-    std::string fSql = "SELECT si.symbol, fi.* FROM financial_indicator fi JOIN symbol_info si ON fi.symbol_id=si.symbol_id"
-                       " WHERE si.symbol=" + sym + " AND fi.report_date BETWEEN " + sd + " AND " + ed
+    // 财务（显式 25 列，禁止 fi.*）
+    std::string fSql = "SELECT " + cleaning::financial_columns::sqlSelect()
+                       + " FROM financial_indicator fi JOIN symbol_info si ON fi.symbol_id=si.symbol_id"
+                       + " WHERE si.symbol=" + sym + " AND fi.report_date BETWEEN " + sd + " AND " + ed
                        + " ORDER BY fi.report_date LIMIT " + limit + " OFFSET " + offset;
     auto fResult = db->executeQuery(fSql, {});
     for (const auto& row : fResult.getRows()) {
@@ -316,9 +459,14 @@ void DataFetchController::refreshDataSetInfos()
     auto infos = cache.getAllDataSetInfos();
     QVariantList result;
     for (const QVariantMap& info : infos) {
+        // 清洗下拉框只显示未清洗的缓存（sourceType 非 "cleaning"）
+        const QString st = info.value("sourceType").toString();
+        if (st == QStringLiteral("cleaning")) {
+            continue;
+        }
         QVariantMap map;
         map["id"] = info.value("id"); map["displayName"] = info.value("displayName");
-        map["sourceType"] = info.value("sourceType"); map["rowCount"] = info.value("rowCount");
+        map["sourceType"] = st; map["rowCount"] = info.value("rowCount");
         map["stockCodes"] = info.value("stockCodes");
         map["startDate"] = info.value("startDate"); map["endDate"] = info.value("endDate");
         map["tags"] = info.value("tags");
@@ -337,6 +485,13 @@ void DataFetchController::onDropdownRefreshed(int count)
     emit dataFetchProgress(100, m_pendingDoneMsg.isEmpty()
         ? QString("查询完成，共 %1 只标的").arg(m_pendingDoneTotal) : m_pendingDoneMsg);
     m_pendingDoneTotal = 0;
+}
+
+bool DataFetchController::removeDataSet(int dataSetId) {
+    if (dataSetId <= 0) return false;
+    bool ok = DataCacheAdapter::instance().removeDataSet(dataSetId);
+    if (ok) refreshDataSetInfos();
+    return ok;
 }
 
 void DataFetchController::logInitMessage() { fprintf(stderr, "[DataFetchController] ready\n"); fflush(stderr); }

@@ -257,6 +257,7 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
     }
 
     if (!cacheFilePath.isEmpty()) {
+        // 从已有持久化条目拷贝起点 — persistScopeEntries 是 scope 级别全量覆盖，不能只传增量
         factor::bridge::check::PersistedFactorEntryMap updatedScopeEntries = persistedScopeEntries;
         const std::string checkedAt = toStdString(QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
         for (const QString& factorIdValue : normalizedFactorIds) {
@@ -266,19 +267,9 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
                 continue;
             }
 
-            QString definitionFingerprint = definitionFingerprints.value(factorId);
+            const QString definitionFingerprint = definitionFingerprints.value(factorId);
             if (definitionFingerprint.isEmpty()) {
-                const QString resolvedInstanceId = resolveInstanceId(factorIdValue, overrides.resolveInstanceIdOverrideForTests);
-                if (!resolvedInstanceId.isEmpty()) {
-                    definitionFingerprint = buildDefinitionFingerprint(
-                        resolveInstanceInfo(
-                            resolvedInstanceId,
-                            overrides.instanceInfoOverrideForTests,
-                            runtimeContext.instanceManager));
-                }
-            }
-            if (definitionFingerprint.isEmpty()) {
-                continue;
+                continue; // 第一轮就解析失败的因子无法持久化，跳过
             }
 
             updatedScopeEntries[factorId.toStdString()] = factor::bridge::check::PersistedFactorEntry{
@@ -510,57 +501,6 @@ QVariantMap FactorDetectionService::buildSupportInfo(const factor::bridge::check
     return info;
 }
 
-int FactorDetectionService::uniqueTradeDateCount(const QVariantList& rows) const
-{
-    QSet<QDate> tradeDates;
-    for (const QVariant& rowValue : rows) {
-        const QVariantMap row = rowValue.toMap();
-        const QDate tradeDate = parseSupportDate(
-            row.value(factor::bridge::CommonFieldKeys::TRADE_DATE,
-                      row.value(factor::bridge::LegacyCleaningFieldKeys::DATE)));
-        if (tradeDate.isValid()) {
-            tradeDates.insert(tradeDate);
-        }
-    }
-    return tradeDates.size();
-}
-
-QSet<QString> FactorDetectionService::collectAvailableFields(
-    const QVariantMap& cacheSnapshot,
-    const QVariantMap& dataSetInfo,
-    const QVariantList& rows) const
-{
-    QSet<QString> fields;
-    const auto appendFields = [&fields](const QStringList& values) {
-        for (const QString& value : values) {
-            const QString normalized = value.trimmed();
-            if (!normalized.isEmpty()) {
-                fields.insert(normalized);
-            }
-        }
-    };
-
-    appendFields(cacheSnapshot.value(QStringLiteral("availableFields")).toStringList());
-    appendFields(dataSetInfo.value("availableFields").toStringList());
-
-    for (const QVariant& rowValue : rows) {
-        const QVariantMap row = rowValue.toMap();
-        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
-            const QString key = it.key().trimmed();
-            const QString canonicalKey = factor::bridge::runtimeContractFieldName(key);
-            if (key.isEmpty()
-                || key == factor::bridge::CommonFieldKeys::SYMBOL
-                || key == factor::bridge::CommonFieldKeys::TRADE_DATE
-                || key == factor::bridge::LegacyCleaningFieldKeys::DATE) {
-                continue;
-            }
-            fields.insert(canonicalKey.isEmpty() ? key : canonicalKey);
-        }
-    }
-
-    return fields;
-}
-
 QVariantMap FactorDetectionService::collectFieldDiagnostics(const QVariantMap& cacheSnapshot) const
 {
     QVariantMap normalizedDiagnostics;
@@ -747,7 +687,6 @@ QVariantMap FactorDetectionService::detectPendingFactors(
     const bool useCacheMode = sourceMode != QStringLiteral("database");
 
     QVariantMap dataSetInfo;
-    QVariantList dataSetRows;
     bool hasValidDataSet = false;
     QSet<QString> availableFields;
     QVariantMap fieldDiagnostics;
@@ -761,16 +700,30 @@ QVariantMap FactorDetectionService::detectPendingFactors(
             hasValidDataSet = dataSetInfo.value("id", -1).toInt() > 0;
 
             if (hasValidDataSet) {
-                dataSetRows = cache.getDataSetById(request.selectedDatasetId);
-                availableFields = collectAvailableFields(
-                    request.cacheSnapshot, dataSetInfo, dataSetRows);
+                // 1) 快照 + 元数据 availableFields
+                const auto appendSnapshotFields = [&availableFields](const QStringList& values) {
+                    for (const QString& value : values) {
+                        const QString normalized = value.trimmed();
+                        if (!normalized.isEmpty()) availableFields.insert(normalized);
+                    }
+                };
+                appendSnapshotFields(request.cacheSnapshot.value(QStringLiteral("availableFields")).toStringList());
+                appendSnapshotFields(dataSetInfo.value("availableFields").toStringList());
+
+                // 2) Arrow schema 字段补全（零数据行加载）— 兜底元数据可能遗漏的字段
+                const QStringList schemaFields = cache.getDataSetSchemaFields(request.selectedDatasetId);
+                appendSnapshotFields(schemaFields);
+
                 fieldDiagnostics = collectFieldDiagnostics(request.cacheSnapshot);
-                availableTradeDateCount = request.cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt() > 0
-                    ? request.cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt()
-                    : uniqueTradeDateCount(dataSetRows);
+                availableTradeDateCount = request.cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt();
+                if (availableTradeDateCount <= 0) {
+                    availableTradeDateCount = dataSetInfo.value("rowCount", 0).toInt() > 0 ? 1 : 0;
+                }
             }
         }
     }
+
+    const bool hasUsableDataSetRows = dataSetInfo.value("rowCount", 0).toInt() > 0;
 
     SharedContext sharedCtx{
         availableFields,
@@ -778,7 +731,7 @@ QVariantMap FactorDetectionService::detectPendingFactors(
         toUnusableFieldSet(fieldDiagnostics),
         fieldDiagnostics,
         availableTradeDateCount,
-        useCacheMode, hasValidDataSet, dataSetInfo.value("rowCount", 0).toInt() > 0 || !dataSetRows.isEmpty(), dataSetInfo
+        useCacheMode, hasValidDataSet, hasUsableDataSetRows, dataSetInfo
     };
 
     if (normalized.size() == 1) {
@@ -795,7 +748,8 @@ QVariantMap FactorDetectionService::detectPendingFactors(
     std::vector<std::future<QVariantMap>> futures;
     futures.reserve(normalized.size());
     for (const QString& factorIdValue : normalized) {
-        futures.push_back(executor.submit([this, factorIdValue, request, runtimeContext, overrides, sharedCtx]() {
+        // factorIdValue 按值捕获（循环变量），大对象以 const 引用捕获（生命周期覆盖所有 future）
+        futures.push_back(executor.submit([this, factorIdValue, &request, &runtimeContext, &overrides, &sharedCtx]() {
             return detectSingleFactor(factorIdValue, request, runtimeContext, overrides, sharedCtx);
         }));
     }

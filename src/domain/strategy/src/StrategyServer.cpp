@@ -3,11 +3,27 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <chrono>
 
 namespace domain::strategy {
 
 namespace {
 DefaultOrderBuilder kDefaultOrderBuilder;
+
+// 心跳打印：每 500 次因子更新或 20 秒触发
+void heartbeatReport(int factorUpdates, int evaluations, int signals,
+                     std::chrono::steady_clock::time_point& lastReport) {
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
+    if (factorUpdates % 500 == 0 || elapsed >= 20) {
+        fprintf(stderr,
+                "[Strategy] factorUpdates=%d evaluations=%d signals=%d (%llds)\n",
+                factorUpdates, evaluations, signals,
+                static_cast<long long>(elapsed));
+        fflush(stderr);
+        lastReport = now;
+    }
+}
 }
 
 StrategyService::StrategyService(IRuntimeFactorService& factorService,
@@ -207,6 +223,12 @@ StrategyServiceFlowResult StrategyService::clearStrategies()
 StrategyServiceFlowResult StrategyService::onMarketDataPoint(
     const MarketDataPoint& marketDataPoint)
 {
+    // ── 监控统计（函数级静态变量）──
+    static int s_factorUpdates = 0;
+    static int s_evaluations = 0;
+    static int s_signals = 0;
+    static auto s_lastReport = std::chrono::steady_clock::now();
+
     std::lock_guard<std::mutex> lock(mutex_);
     if (state_ != StrategyServiceState::Running) {
         return StrategyServiceFlowResult(StrategyServiceFlowCode::InvalidState);
@@ -219,23 +241,27 @@ StrategyServiceFlowResult StrategyService::onMarketDataPoint(
             marketDataPoint.instrumentId(),
             0.0,
             0.0));
-        // 实盘单 tick 路径：无效行情仅跳过当次评估，不中断策略运行
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
-    // 因子服务是运行时因子快照的唯一写入路径。
     const StrategyServiceFlowResult updateResult =
         factorService_.updateIncremental(marketDataPoint);
     if (!updateResult.isOk()) {
         return updateResult;
     }
+    s_factorUpdates++;
 
-    // 日内去重：同一交易日首笔 tick 触发完整评估，后续 tick 仅更新因子快照
+    // 日内去重：每标的首笔 tick 触发评估，后续 tick 仅更新因子快照
     const int today = marketDataPoint.tradingDay();
-    if (today == m_lastEvaluatedDay_) {
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
+    {
+        auto it = m_evaluatedDays_.find(marketDataPoint.instrumentId());
+        if (it != m_evaluatedDays_.end() && it->second == today) {
+            heartbeatReport(s_factorUpdates, s_evaluations, s_signals, s_lastReport);
+            return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
+        }
+        m_evaluatedDays_[marketDataPoint.instrumentId()] = today;
     }
-    m_lastEvaluatedDay_ = today;
+    s_evaluations++;
 
     publishDiagnostics(DiagnosticsEvent(
         DiagnosticsEventCode::MarketDataAccepted,
@@ -245,8 +271,11 @@ StrategyServiceFlowResult StrategyService::onMarketDataPoint(
         marketDataPoint.lastPrice(),
         marketDataPoint.volume()));
 
-    // 单笔低延迟路径：策略评估后对每条信号执行 check(signal)。
-    return evaluateAndCheckRulesLowLatency();
+    auto result = evaluateAndCheckRulesLowLatency();
+    // 累计本次评估产生的信号数
+    s_signals += static_cast<int>(stats_.generatedSignalCount());
+    heartbeatReport(s_factorUpdates, s_evaluations, s_signals, s_lastReport);
+    return result;
 }
 
 StrategyServiceFlowResult StrategyService::onMarketDataBatch(

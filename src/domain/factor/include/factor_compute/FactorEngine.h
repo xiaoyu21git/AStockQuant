@@ -101,6 +101,9 @@ public:
     /// @brief 检查 InstanceManager 是否已注入 (compute 的前置条件)
     [[nodiscard]] bool hasInstanceManager() const noexcept { return m_instanceManager != nullptr; }
 
+    /// @brief 获取 InstanceManager（供 Orchestrator 收集字段需求）
+    [[nodiscard]] factor::FactorInstanceManager* instanceManager() const noexcept { return m_instanceManager; }
+
     /// @brief 设置 DataSvc 引用 (compute() 中按需构建 MarketView 用)
     void setDataService(class BacktestDataService* dataSvc);
 

@@ -261,6 +261,61 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
     return tableToRows(table);
 }
 
+std::shared_ptr<arrow::Table> DataCache::loadDataSetTable(int dataId)
+{
+    std::string path = dataFilePath(dataId);
+
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) {
+        fprintf(stderr, "[DataCache] loadTable: cannot open %s\n", path.c_str());
+        fflush(stderr);
+        return nullptr;
+    }
+
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) return nullptr;
+
+    auto reader = readerResult.ValueOrDie();
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    for (int i = 0; i < reader->num_record_batches(); ++i) {
+        auto batchResult = reader->ReadRecordBatch(i);
+        if (!batchResult.ok()) continue;
+        batches.push_back(batchResult.ValueOrDie());
+    }
+    if (batches.empty()) return nullptr;
+
+    auto tableResult = arrow::Table::FromRecordBatches(batches);
+    if (!tableResult.ok()) return nullptr;
+
+    auto table = tableResult.ValueOrDie();
+    fprintf(stderr, "[DataCache] loaded Arrow Table %s: %lld rows x %d cols\n",
+            path.c_str(), table->num_rows(), table->num_columns());
+    fflush(stderr);
+    return table;
+}
+
+std::vector<std::string> DataCache::loadDataSetSchemaFields(int dataId)
+{
+    std::string path = dataFilePath(dataId);
+
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) return {};
+
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) return {};
+
+    auto reader = readerResult.ValueOrDie();
+    auto schema = reader->schema();
+    if (!schema) return {};
+
+    std::vector<std::string> fields;
+    fields.reserve(static_cast<size_t>(schema->num_fields()));
+    for (int i = 0; i < schema->num_fields(); ++i) {
+        fields.push_back(schema->field(i)->name());
+    }
+    return fields;
+}
+
 // ── 批量写入 ──
 
 struct ArrowWriteSession : public DataCache::WriteSession {
@@ -310,6 +365,20 @@ void DataCache::appendArrowBatch(ArrowWriteToken token, const std::vector<J>& ro
     // 后续批次：复用 schema
     auto table = buildArrowTable(rows, s->fieldNames, s->numericFields);
     if (!table->schema()->Equals(*s->schema)) return; // schema 不匹配，跳过
+    s->writer->WriteTable(*table);
+    s->totalRows += table->num_rows();
+}
+
+void DataCache::appendArrowTable(ArrowWriteToken token,
+                                  const std::shared_ptr<arrow::Table>& table)
+{
+    if (!token || !table) return;
+    auto* s = static_cast<ArrowWriteSession*>(token);
+    if (!s->writer) {
+        s->schema = table->schema();
+        s->writer = arrow::ipc::MakeFileWriter(s->stream, s->schema).ValueOrDie();
+    }
+    if (!table->schema()->Equals(*s->schema)) return;
     s->writer->WriteTable(*table);
     s->totalRows += table->num_rows();
 }

@@ -670,20 +670,135 @@ void FactorBacktestBridge::runFactorBacktestAsync(const QString& factorId, const
     startBacktestWithFactors(factorIds, QString(), startDate, endDate, config);
 }
 
-QVariantMap FactorBacktestBridge::buildFactorSupportMap(const QVariantList& factorIds, const QString&, const QString&, const QVariantMap&)
-{ QVariantMap map; for (const QVariant& id : factorIds) {
-      QVariantMap i; i["supported"] = true; i["reason"] = QStringLiteral("当前数据源支持");
-      i["category"] = QStringLiteral("supported"); map[id.toString()] = i;
-  } m_factorSupportMapCache = map; return map; }
+QVariantMap FactorBacktestBridge::buildFactorSupportMap(
+    const QVariantList& factorIds,
+    const QString& startDate,
+    const QString& endDate,
+    const QVariantMap& cacheSnapshot)
+{
+    auto buildFallbackMap = [&factorIds](const QString& reason) {
+        QVariantMap map;
+        for (const QVariant& id : factorIds) {
+            QVariantMap i;
+            i["supported"] = true;
+            i["reason"] = reason;
+            i["category"] = QStringLiteral("unknown");
+            map[id.toString()] = i;
+        }
+        return map;
+    };
 
-int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& f, const QString& s, const QString& e, const QVariantMap& c)
-{ m_supportMapRequestInFlight.store(true); emit supportMapRequestInFlightChanged();
-  QVariantMap map = buildFactorSupportMap(f, s, e, c);
-  m_supportMapRequestInFlight.store(false); emit supportMapRequestInFlightChanged();
-  emit factorSupportMapReady(1, map); return 1; }
+    auto* factorSvc = FactorService::instance();
+    if (factorSvc && factorSvc->isInitialized()) {
+        QStringList ids;
+        for (const QVariant& id : factorIds)
+            ids.append(id.toString());
+
+        try {
+            QVariantMap map = factorSvc->buildFactorSupportMap(
+                ids, startDate, endDate, cacheSnapshot,
+                m_dataSourceMode, m_selectedDatasetId);
+
+            m_factorSupportMapCache = map;
+            return map;
+        } catch (const std::exception& e) {
+            QVariantMap map = buildFallbackMap(
+                QStringLiteral("因子检测异常: ") + QString::fromStdString(e.what()));
+            m_factorSupportMapCache = map;
+            return map;
+        } catch (...) {
+            QVariantMap map = buildFallbackMap(QStringLiteral("因子检测未知异常，已跳过检测"));
+            m_factorSupportMapCache = map;
+            return map;
+        }
+    }
+
+    // FactorService 未就绪时的回退
+    QVariantMap map = buildFallbackMap(QStringLiteral("FactorService 未初始化，跳过检测"));
+    m_factorSupportMapCache = map;
+    return map;
+}
+
+int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& factorIds, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot)
+{
+    // 懒初始化线程池
+    if (!m_workerPool) {
+        m_workerPool = std::make_unique<foundation::thread::ThreadPoolExecutor>(
+            1, 1, std::chrono::milliseconds(60000), "FactorSupportCheck");
+    }
+
+    static std::atomic<int> s_nextRequestId{1};
+    int requestId = s_nextRequestId.fetch_add(1);
+
+    m_supportMapRequestInFlight.store(true);
+    emit supportMapRequestInFlightChanged();
+
+    // 捕获必要参数到 worker 线程
+    QStringList ids;
+    for (const QVariant& id : factorIds) ids.append(id.toString());
+    QString capturedMode = m_dataSourceMode;
+    int capturedDatasetId = m_selectedDatasetId;
+
+    fprintf(stderr, "[FactorSupportCheck] worker started, requestId=%d, factors=%d\n", requestId, (int)ids.size()); fflush(stderr);
+    m_workerPool->post([this, requestId, ids, startDate, endDate, cacheSnapshot, capturedMode, capturedDatasetId]() {
+        fprintf(stderr, "[FactorSupportCheck] worker running, requestId=%d\n", requestId); fflush(stderr);
+        QVariantMap map;
+        try {
+            auto* factorSvc = FactorService::instance();
+            fprintf(stderr, "[FactorSupportCheck] FactorService=%p, initialized=%d\n",
+                    (void*)factorSvc, factorSvc ? (int)factorSvc->isInitialized() : -1); fflush(stderr);
+            if (factorSvc && factorSvc->isInitialized()) {
+                map = factorSvc->buildFactorSupportMap(ids, startDate, endDate, cacheSnapshot,
+                                                        capturedMode, capturedDatasetId);
+            } else {
+                for (const QString& id : ids) {
+                    QVariantMap i;
+                    i["supported"] = true;
+                    i["reason"] = QStringLiteral("FactorService 未初始化");
+                    i["category"] = QStringLiteral("unknown");
+                    map[id] = i;
+                }
+            }
+        } catch (const std::exception& e) {
+            // 检测抛异常时也要返回兜底结果，避免按钮永灰
+            for (const QString& id : ids) {
+                QVariantMap i;
+                i["supported"] = true;
+                i["reason"] = QStringLiteral("因子检测异常: ") + QString::fromStdString(e.what());
+                i["category"] = QStringLiteral("unknown");
+                map[id] = i;
+            }
+        } catch (...) {
+            for (const QString& id : ids) {
+                QVariantMap i;
+                i["supported"] = true;
+                i["reason"] = QStringLiteral("因子检测未知异常，已跳过检测");
+                i["category"] = QStringLiteral("unknown");
+                map[id] = i;
+            }
+        }
+
+        fprintf(stderr, "[FactorSupportCheck] worker done, requestId=%d, mapSize=%d, emitting to main thread\n",
+                requestId, (int)map.size()); fflush(stderr);
+        QMetaObject::invokeMethod(this, [this, requestId, map]() {
+            fprintf(stderr, "[FactorSupportCheck] main thread callback, requestId=%d, mapSize=%d\n",
+                    requestId, (int)map.size()); fflush(stderr);
+            m_supportMapRequestInFlight.store(false);
+            emit supportMapRequestInFlightChanged();
+            emit factorSupportMapReady(requestId, map);
+        }, Qt::QueuedConnection);
+    });
+
+    return requestId;
+}
 
 bool FactorBacktestBridge::handleFactorSupportMapReady(int id, const QVariantMap& map)
-{ if (id != 1) return false; m_factorSupportMapCache = map; emit factorSupportMapCacheChanged(); return true; }
+{
+    if (id <= 0 || map.isEmpty()) return false;
+    m_factorSupportMapCache = map;
+    emit factorSupportMapCacheChanged();
+    return true;
+}
 
 QVariantList FactorBacktestBridge::normalizeFactorIds(const QVariantList& ids) const
 { QVariantList out; QSet<QString> seen;

@@ -62,10 +62,8 @@ namespace wang{
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
             auto* controller = new ui::bridge::CleanedDataController();
-            // 异步初始化，避免阻塞UI
-            QTimer::singleShot(0, [controller]() {
-                controller->initialize();
-            });
+            // 同步初始化：只读缓存元数据索引，不加载数据文件，不会阻塞 UI
+            controller->initialize();
             return controller;
          }
       );
@@ -76,6 +74,7 @@ namespace wang{
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
             auto* bridge = new bridge::MarketDataBridge();
+            bridge->initializeAsync();
             return bridge;
          }
       );

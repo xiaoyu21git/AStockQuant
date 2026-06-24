@@ -21,6 +21,7 @@
     factor_check/FactorSupportScopeCacheCore.cpp
     factor_check/FactorSupportScopeKeyCore.cpp
     MarketDataBridge.cpp
+    GmMarketSource.cpp
     TradingBridges.cpp
     DataCleaningPersistence.cpp
     StrategyListModel.cpp

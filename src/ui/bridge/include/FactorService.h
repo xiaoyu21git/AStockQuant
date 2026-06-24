@@ -66,6 +66,15 @@ public:
     /// @brief 获取底层 FactorInstanceManager（供回测引擎复用，避免重复创建）
     factor::FactorInstanceManager* instanceManager() const;
 
+    /// @brief 因子上架检测：检查当前缓存数据集对每个因子的支持情况
+    /// @return { factorId: { supported, reason, category, ... } }
+    Q_INVOKABLE QVariantMap buildFactorSupportMap(
+        const QStringList& factorIds,
+        const QString& startDate, const QString& endDate,
+        const QVariantMap& cacheSnapshot,
+        const QString& dataSourceMode,
+        int selectedDatasetId);
+
     // 属性访问器
     bool mutationInProgress() const;
     QVariantMap lastOperationReport() const;
@@ -102,6 +111,7 @@ private:
     // 状态
     std::atomic<bool> m_initialized{false};
     std::atomic<bool> m_mutationInProgress{false};
+    std::atomic<bool> m_viewModelPopulating{false};  // 防重入：beginResetModel 期间 GridView 可能触发级联
     QVariantMap m_lastOperationReport;
     mutable std::mutex m_mutex;
 };

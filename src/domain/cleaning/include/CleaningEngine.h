@@ -1,10 +1,10 @@
 // CleaningEngine.h — 纯 C++ 数据清洗引擎（零 Qt 依赖）
-// 使用 foundation::json::JsonFacade，与 bin 缓存一致
+// 使用 J，与 bin 缓存一致
 // 支持取消操作、进度回调、规则统计
 #pragma once
 #include "ICleaningRule.h"
 #include "DataFieldKeys.h"
-#include "foundation/json/json_facade.h"
+#include "LightRow.h"
 #include <algorithm>
 #include <atomic>
 #include <functional>
@@ -15,8 +15,6 @@
 #include <cstdio>
 
 namespace cleaning {
-
-using J = foundation::json::JsonFacade;
 
 class CleaningEngine {
 public:
@@ -42,7 +40,7 @@ public:
     bool isCancelled() const { return m_cancelled.load(std::memory_order_relaxed); }
 
     /// @brief 执行清洗
-    std::vector<foundation::json::JsonFacade> clean(std::vector<foundation::json::JsonFacade> data) {
+    std::vector<LightRow> clean(std::vector<LightRow> data) {
         // 重置取消标志
         m_cancelled.store(false, std::memory_order_relaxed);
 
@@ -75,7 +73,7 @@ public:
             if (keys[a].first != keys[b].first) return keys[a].first < keys[b].first;
             return keys[a].second < keys[b].second;
         });
-        std::vector<J> sorted; sorted.reserve(data.size());
+        std::vector<LightRow> sorted; sorted.reserve(data.size());
         for (size_t i : idx) sorted.push_back(std::move(data[i]));
         data = std::move(sorted);
         keys.clear(); idx.clear();
@@ -88,7 +86,7 @@ public:
         if (m_onProgress) m_onProgress(s.totalRecords / 10, s.totalRecords, "pre_clean");
 
         // 2. 逐行过滤
-        std::vector<foundation::json::JsonFacade> kept;
+        std::vector<LightRow> kept;
         kept.reserve(data.size());
         int processed = 0;
         for (auto& row : data) {
@@ -142,10 +140,43 @@ public:
         return kept;
     }
 
+    template<typename F>
+    void cleanSortedBatch(std::vector<LightRow>& batch, bool isFirst, bool isLast, F&& onKeep) {
+        int bs = static_cast<int>(batch.size());
+        if (isFirst) {
+            m_cancelled.store(false, std::memory_order_relaxed);
+            m_lastStats = CleaningStats{};
+            m_lastStats.totalRecords = 0;
+            m_lastStats.ruleStats.clear();
+            for (const auto& rule : m_rules) m_lastStats.ruleStats.push_back({rule->ruleName(), 0, 0});
+        }
+        for (auto& rule : m_rules) rule->cleanCrossSectional(batch);
+        m_lastStats.totalRecords += bs;
+        int processed = m_lastStats.keptRecords + m_lastStats.removedRecords;
+        for (auto& row : batch) {
+            if ((processed % 1000) == 0 && m_cancelled.load(std::memory_order_relaxed)) return;
+            bool keep = true; int ri = 0;
+            for (auto& rule : m_rules) {
+                if (!rule->appliesTo(row)) { ++ri; continue; }
+                if (!rule->clean(row)) { keep = false; ++m_lastStats.removedRecords;
+                    if (ri < (int)m_lastStats.ruleStats.size()) ++m_lastStats.ruleStats[ri].removed; break; }
+                else { if (ri < (int)m_lastStats.ruleStats.size()) ++m_lastStats.ruleStats[ri].passed; }
+                ++ri;
+            }
+            if (keep) { stripInternalFieldsSingle(row); onKeep(row); ++m_lastStats.keptRecords; }
+            ++processed;
+        }
+        if (isLast) { std::vector<LightRow> d; for (auto& rule : m_rules) rule->postCrossSectional(d);
+            fprintf(stderr, "[CleaningEngine] %d -> %d rows (%d removed)\n", m_lastStats.totalRecords, m_lastStats.keptRecords, m_lastStats.removedRecords); fflush(stderr); }
+    }
+
     const CleaningStats& lastStats() const { return m_lastStats; }
 
 private:
-    void stripInternalFields(std::vector<foundation::json::JsonFacade>& rows) {
+    static void stripInternalFieldsSingle(LightRow& row) { if (!row.isObject()) return;
+        static const char* ik[] = {"adjusted_price_applied","data_type","valuation_invalid_fields","cleaning_tags","adj_factor","amount","date","tradeDate","industry","turnover_amount"};
+        for (auto* k : ik) row.remove(k); }
+    void stripInternalFields(std::vector<LightRow>& rows) {
         for (auto& row : rows) {
             if (!row.isObject()) continue;
             // 使用 remove 彻底删除内部字段（而非 set null 保留占位）

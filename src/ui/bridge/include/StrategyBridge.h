@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace factor::compute { class CachedMarketDataView; }
+namespace factor::compute { class IMarketDataView; class CachedMarketDataView; }
 
 namespace domain::strategy {
 class StrategyEngine;
@@ -210,7 +210,7 @@ private:
     std::unique_ptr<domain::strategy::IOrderListener> m_orderListener;
 
     // 实盘行情视图
-    std::unique_ptr<factor::compute::CachedMarketDataView> m_liveMarketView;
+    std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
 
     // 异步启动线程池
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_startupPool;

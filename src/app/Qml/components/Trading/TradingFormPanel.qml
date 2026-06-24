@@ -1864,7 +1864,7 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
-                        color: "#ff6a00"
+                        color: "#cc0022"
 
                         Text {
                             anchors.centerIn: parent
@@ -1916,7 +1916,7 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#ff6a00"
+                            color: "#cc0022"
 
                             Text {
                                 anchors.centerIn: parent
