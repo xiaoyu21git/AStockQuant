@@ -233,6 +233,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
         right = bisect.bisect_right(trade_calendar, end_date)
         return trade_calendar[left:right]
 
+    print(f"  [resolve_backfill_range] mode={mode} fetching data...", flush=True)
     conn = psycopg2.connect(**MYSQL_CONFIG)
     try:
         with conn.cursor() as cursor:
@@ -290,8 +291,9 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
                 cursor.execute(
                     """
                     SELECT trade_date
-                    FROM daily_bar
-                    WHERE symbol = %s AND trade_date BETWEEN %s AND %s
+                    FROM mkt.daily_bar
+                    WHERE symbol_id = (SELECT id FROM ref.symbol_info WHERE symbol = %s)
+                      AND trade_date BETWEEN %s AND %s
                     ORDER BY trade_date
                     """,
                     (symbol_text, expected_start_date, target_date),
@@ -451,17 +453,18 @@ def main() -> int:
             return 0
 
     target_date = resolve_target_date(args)
-    latest_start_date, latest_end_date = resolve_backfill_range(target_date, "latest")
-    history_start_date, history_end_date = resolve_backfill_range(target_date, "history") if args.include_history_gaps else (target_date, target_date)
 
     step_results: list[dict] = []
 
-    # --baostock-only: 仅 Baostock 全量更新, 跳过所有其他步骤
+    # --baostock-only: 仅 Baostock 全量更新, 跳过 resolve_backfill_range
     if args.baostock_only:
         if not execute_step("baostock single-threaded update", build_baostock_update_command(args),
                            required=True, continue_on_failure=False, results=step_results):
             return step_results[-1]["exit_code"]
         return 0
+
+    latest_start_date, latest_end_date = resolve_backfill_range(target_date, "latest")
+    history_start_date, history_end_date = resolve_backfill_range(target_date, "history") if args.include_history_gaps else (target_date, target_date)
 
     update_cmd_builder = build_baostock_update_command
 
