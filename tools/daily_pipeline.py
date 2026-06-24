@@ -145,12 +145,10 @@ def phase3_baostock_update(c, target_date: str):
 
     # 检查最新日期
     latest = {}
-    for i in range(0, len(symbols), 500):
-        batch = symbols[i:i+500]
-        ph = ','.join(['%s']*len(batch))
-        with c.cursor() as cur:
-            cur.execute(f"SELECT symbol, MAX(trade_date) FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE si.symbol IN ({ph}) GROUP BY si.symbol", batch)
-            for row in cur.fetchall(): latest[row[0]] = str(row[1]) if row[1] else None
+    print(f"  Checking latest dates (one pass)...", flush=True)
+    with c.cursor() as cur:
+        cur.execute("SELECT si.symbol, MAX(d.trade_date) FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id GROUP BY si.symbol")
+        for row in cur.fetchall(): latest[row[0]] = str(row[1]) if row[1] else None
     need = [s for s in symbols if latest.get(s) is None or str(latest[s]) < target_date]
     print(f"  {len(need)} need update", flush=True)
     if not need:
