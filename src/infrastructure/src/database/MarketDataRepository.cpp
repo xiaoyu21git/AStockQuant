@@ -59,9 +59,9 @@ std::vector<DailyBarRow> MarketDataRepository::queryDailyBar(
     const std::vector<std::string>& /*extraFields*/)
 {
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM daily_bar"
-        << " WHERE symbol = " << safeStr(symbol)
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE si.symbol = " << safeStr(symbol)
         << " AND trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
         << " ORDER BY trade_date ASC";
@@ -85,12 +85,12 @@ std::vector<DailyBarRow> MarketDataRepository::queryDailyBarBatch(
     if (symbols.empty()) return {};
 
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM daily_bar"
-        << " WHERE symbol IN " << symbolList(symbols)
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
         << " AND trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
 
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
@@ -109,8 +109,8 @@ std::vector<FieldRow> MarketDataRepository::queryFieldCrossSection(
     const std::vector<std::string>& symbols)
 {
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, " << field << " AS field_value"
-        << " FROM daily_bar"
+    sql << "SELECT si.symbol, trade_date, " << field << " AS field_value"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
         << " WHERE trade_date = " << safeStr(date);
 
     if (!symbols.empty()) {
@@ -181,13 +181,13 @@ std::vector<DailyBarRow> MarketDataRepository::queryDailyBarWithFields(
 {
     if (symbols.empty()) return {};
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume"
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume"
         << buildExtraColumnsSql(extraFields)
-        << " FROM daily_bar"
-        << " WHERE symbol IN " << symbolList(symbols)
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
         << " AND trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
 
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
@@ -206,12 +206,12 @@ std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::queryAllM
     const std::vector<std::string>& extraFields)
 {
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
         << buildExtraColumnsSql(extraFields)
-        << " FROM daily_bar"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
         << " WHERE trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
 
     return db_->executeQuery(sql.str()).getRows();
 }
@@ -223,11 +223,11 @@ std::vector<DailyBarRow> MarketDataRepository::queryAllMarketDailyBar(
     const std::string& endDate)
 {
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM daily_bar"
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
         << " WHERE trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
 
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
@@ -245,11 +245,11 @@ std::vector<DailyBarRow> MarketDataRepository::queryAllMarketWeeklyBar(
     const std::string& endDate)
 {
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM weekly_bar"
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.weekly_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
         << " WHERE trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
 
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
@@ -267,11 +267,11 @@ std::vector<DailyBarRow> MarketDataRepository::queryAllMarketMonthlyBar(
     const std::string& endDate)
 {
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM monthly_bar"
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.monthly_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
         << " WHERE trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
 
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
@@ -291,7 +291,7 @@ std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::queryAllM
     std::ostringstream sql;
     sql << "SELECT " << cleaning::financial_columns::sqlSelect()
         << " FROM financial_indicator fi"
-        << " JOIN symbol_info si ON fi.symbol_id = si.symbol_id"
+        << " JOIN ref.symbol_info si ON fi.symbol_id = si.symbol_id"
         << " WHERE fi.report_date >= " << safeStr(startDate)
         << " AND fi.report_date <= " << safeStr(endDate)
         << " ORDER BY si.symbol, fi.report_date ASC";
@@ -315,8 +315,8 @@ MarketDataRepository::queryDailyBarJoined(
     std::ostringstream sql;
     sql << "SELECT " << cleaning::kline_columns::sqlSelect() << ","
         << cleaning::symbol_info_columns::sqlSelect()
-        << " FROM daily_bar d"
-        << " JOIN symbol_info s ON d.symbol = s.symbol"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id d"
+        << " JOIN ref.symbol_info s ON d.symbol_id = s.id"
         << " WHERE d.trade_date >= " << safeStr(startDate)
         << " AND d.trade_date <= " << safeStr(endDate)
         << " ORDER BY d.symbol, d.trade_date ASC";
@@ -340,8 +340,8 @@ MarketDataRepository::queryDailyBarJoined(
     std::ostringstream sql;
     sql << "SELECT " << cleaning::kline_columns::sqlSelect() << ","
         << cleaning::symbol_info_columns::sqlSelect()
-        << " FROM daily_bar d"
-        << " JOIN symbol_info s ON d.symbol = s.symbol"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id d"
+        << " JOIN ref.symbol_info s ON d.symbol_id = s.id"
         << " WHERE d.symbol IN " << symbolList(symbols)
         << " AND d.trade_date >= " << safeStr(startDate)
         << " AND d.trade_date <= " << safeStr(endDate)
@@ -403,7 +403,7 @@ std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::queryFina
     std::ostringstream sql;
     sql << "SELECT " << cleaning::financial_columns::sqlSelect()
         << " FROM financial_indicator fi"
-        << " JOIN symbol_info si ON fi.symbol_id = si.symbol_id"
+        << " JOIN ref.symbol_info si ON fi.symbol_id = si.symbol_id"
         << " WHERE si.symbol IN " << symbolList(symbols)
         << " AND fi.report_date >= " << safeStr(startDate)
         << " AND fi.report_date <= " << safeStr(endDate)
@@ -427,12 +427,12 @@ std::vector<DailyBarRow> MarketDataRepository::queryWeeklyBar(
 {
     if (symbols.empty()) return {};
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM weekly_bar"
-        << " WHERE symbol IN " << symbolList(symbols)
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.weekly_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
         << " AND trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
     rows.reserve(result.rowCount());
@@ -447,12 +447,12 @@ std::vector<DailyBarRow> MarketDataRepository::queryMonthlyBar(
 {
     if (symbols.empty()) return {};
     std::ostringstream sql;
-    sql << "SELECT symbol, trade_date, open, high, low, close, volume, turnover"
-        << " FROM monthly_bar"
-        << " WHERE symbol IN " << symbolList(symbols)
+    sql << "SELECT si.symbol, trade_date, open, high, low, close, volume, turnover"
+        << " FROM mkt.monthly_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
         << " AND trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
-        << " ORDER BY symbol, trade_date ASC";
+        << " ORDER BY si.symbol, trade_date ASC";
     auto result = db_->executeQuery(sql.str());
     std::vector<DailyBarRow> rows;
     rows.reserve(result.rowCount());
@@ -467,9 +467,9 @@ std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::querySymb
 {
     if (symbols.empty()) return {};
     std::ostringstream sql;
-    sql << "SELECT symbol, name, exchange, asset_class, list_date, delist_date, status"
-        << " FROM symbol_info"
-        << " WHERE symbol IN " << symbolList(symbols);
+    sql << "SELECT si.symbol, name, exchange, asset_class, list_date, delist_date, status"
+        << " FROM ref.symbol_info"
+        << " WHERE si.symbol IN " << symbolList(symbols);
     auto result = db_->executeQuery(sql.str());
     std::vector<astock::database::SqlQueryResultRow> rows;
     rows.reserve(result.rowCount());
