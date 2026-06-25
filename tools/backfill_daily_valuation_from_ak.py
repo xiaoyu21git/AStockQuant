@@ -19,11 +19,10 @@ AK_BACKFILL_SOURCE = "AK_VALUE_EM"
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "
-    "user": "root",
-    "password": "123456a",
+    "port": 5432,
+    "user": "astock",
+    "password": "astock123",
     "database": "astock_quant",
-    "charset": "utf8mb4",
     "autocommit": False,
 }
 
@@ -126,13 +125,13 @@ def load_target_symbols(
         """
 
     sql = f"""
-        SELECT DISTINCT db.symbol
+        SELECT si.symbol
         FROM daily_bar db
-        INNER JOIN symbol_info si ON si.symbol = db.symbol
+        JOIN ref.symbol_info si ON si.id = db.symbol_id
         WHERE db.trade_date BETWEEN %s AND %s
           AND si.asset_class = %s
           {missing_filter}
-        ORDER BY db.symbol
+        ORDER BY si.symbol
     """
     cursor.execute(sql, (start_date, end_date, asset_class))
     raw_symbols = [normalize_symbol(row[0]) for row in cursor.fetchall() if row and row[0]]
@@ -256,7 +255,7 @@ def apply_updates(cursor, updates: List[Tuple[object, ...]], only_missing: bool)
                         THEN %s
                     ELSE data_source
                 END
-            WHERE symbol = %s AND trade_date = %s
+            WHERE symbol_id = (SELECT id FROM ref.symbol_info WHERE symbol = %s) AND trade_date = %s
         """
     else:
         sql = """
@@ -271,7 +270,7 @@ def apply_updates(cursor, updates: List[Tuple[object, ...]], only_missing: bool)
                         THEN %s
                     ELSE data_source
                 END
-            WHERE symbol = %s AND trade_date = %s
+            WHERE symbol_id = (SELECT id FROM ref.symbol_info WHERE symbol = %s) AND trade_date = %s
         """
 
     cursor.executemany(sql, updates)

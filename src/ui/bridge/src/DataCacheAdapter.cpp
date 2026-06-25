@@ -61,9 +61,7 @@ int DataCacheAdapter::storeDataSet(const QVariantList& data, const QVariantMap& 
         fclose(fi);
     }
 
-    fprintf(stderr, "[DataCacheAdapter] stored dataset %d: %s (%d rows)\n",
-            dataId, fullInfo.displayName.c_str(), static_cast<int>(data.size()));
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] stored dataset " << dataId << ": " << fullInfo.displayName << " (" << static_cast<int>(data.size()) << " rows)";
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
@@ -107,9 +105,7 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     m_cache->saveDataSetFile(dataId, rows, fieldNames, numericFields);
     m_cache->updateDataSetRowCount(dataId, static_cast<int>(rows.size()));
 
-    fprintf(stderr, "[DataCacheAdapter] stored dataset %d (from rows): %s (%zu rows)\n",
-            dataId, info.displayName.c_str(), rows.size());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] stored dataset " << dataId << " (from rows): " << info.displayName << " (" << rows.size() << " rows)";
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
@@ -145,8 +141,7 @@ void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken tok
         auto updated = m_cache->getDataSetInfo(dataId);
         emit dataSetStored(dataId, cppInfoToMap(updated));
     }
-    fprintf(stderr, "[DataCacheAdapter] batch write finished: dataSetId=%d rows=%d\n", dataId, rowCount);
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] batch write finished: dataSetId=" << dataId << " rows=" << rowCount;
 }
 
 QVariantList DataCacheAdapter::getDataSetById(int dataId) {
@@ -193,8 +188,7 @@ bool DataCacheAdapter::removeDataSet(int dataId) {
 
 int DataCacheAdapter::removeDataSetsBySourceType(const std::string& sourceType) {
     int n = m_cache->removeDataSetsBySourceType(sourceType);
-    fprintf(stderr, "[DataCacheAdapter] removed %d datasets with sourceType=%s\n", n, sourceType.c_str());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] removed " << n << " datasets with sourceType=" << sourceType;
     return n;
 }
 

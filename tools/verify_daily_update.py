@@ -28,11 +28,10 @@ from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, parse_time_text, 
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "
-    "user": "root",
-    "password": "123456a",
+    "port": 5432,
+    "user": "astock",
+    "password": "astock123",
     "database": "astock_quant",
-    "charset": "utf8mb4",
 }
 
 

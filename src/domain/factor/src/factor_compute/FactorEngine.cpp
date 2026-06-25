@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <sstream>
 #include <limits>
 #include <memory>
 #include <thread>
@@ -73,51 +74,44 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
 
     s_computeOneDayCounter = 0;  // 每个因子重置计数器
 
-    fprintf(stderr, "[FE] compute ENTER: factorName=%s m_instanceManager=%p m_dataSvc=%p marketView=%p\n",
-            cacheKey.factorName.c_str(),
-            static_cast<void*>(m_instanceManager),
-            static_cast<void*>(m_dataSvc),
-            static_cast<const void*>(marketData.marketView));
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FE] compute ENTER: factorName=" << cacheKey.factorName
+        << " m_instanceManager=" << static_cast<void*>(m_instanceManager)
+        << " m_dataSvc=" << static_cast<void*>(m_dataSvc)
+        << " marketView=" << static_cast<const void*>(marketData.marketView);
 
     if (!m_instanceManager) {
-        fprintf(stderr, "[FE] compute ABORT: m_instanceManager is null\n");
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FE] compute ABORT: m_instanceManager is null";
         return result;
     }
 
     auto factor = m_instanceManager->createInstance(cacheKey.factorName);
-    fprintf(stderr, "[FE] compute: createInstance(%s) = %p\n",
-            cacheKey.factorName.c_str(), static_cast<void*>(factor.get()));
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FE] compute: createInstance(" << cacheKey.factorName << ") = " << static_cast<void*>(factor.get());
     if (!factor) {
-        fprintf(stderr, "[FE] compute ABORT: createInstance returned null\n");
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FE] compute ABORT: createInstance returned null";
         return result;
     }
 
     // 获取因子需要的字段 → 按需构建 MarketView
     if (m_dataSvc) {
         auto fieldReqs = factor->getDataRequirements();
-        fprintf(stderr, "[FE] compute: requiredFields=%zu optionalFields=%zu\n",
-                fieldReqs.requiredFields.size(), fieldReqs.optionalFields.size());
-        for (const auto& f : fieldReqs.requiredFields)
-            fprintf(stderr, "[FE] compute:   required: %s\n", f.c_str());
-        for (const auto& f : fieldReqs.optionalFields)
-            fprintf(stderr, "[FE] compute:   optional: %s\n", f.c_str());
-        fflush(stderr);
+        {
+            std::ostringstream oss;
+            oss << "[FE] compute: requiredFields=" << fieldReqs.requiredFields.size() << " optionalFields=" << fieldReqs.optionalFields.size();
+            for (const auto& f : fieldReqs.requiredFields)
+                oss << "\n[FE] compute:   required: " << f;
+            for (const auto& f : fieldReqs.optionalFields)
+                oss << "\n[FE] compute:   optional: " << f;
+            INTERNAL_DEBUG_STREAM << oss.str();
+        }
         std::vector<std::string> neededFields = fieldReqs.requiredFields;
         for (const auto& f : fieldReqs.optionalFields) {
             neededFields.push_back(f);
         }
-        fprintf(stderr, "[FE] compute: calling buildViewForFields (may take a while for large datasets)...\n");
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FE] compute: calling buildViewForFields (may take a while for large datasets)...";
         m_dataSvc->buildViewForFields(neededFields);
-        fprintf(stderr, "[FE] compute: buildViewForFields DONE\n");
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FE] compute: buildViewForFields DONE";
     } else {
-        fprintf(stderr, "[FE] compute: no m_dataSvc, skipping buildViewForFields\n");
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FE] compute: no m_dataSvc, skipping buildViewForFields";
     }
 
     // 从 DataSvc 获取数据视图
@@ -126,22 +120,18 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
         MarketMatrixBatch batch = m_dataSvc->loadBatch(0);
         view = batch.marketView;
     }
-    fprintf(stderr, "[FE] compute: view=%p dates=%zu instruments=%zu\n",
-            static_cast<const void*>(view),
-            view ? view->dates().size() : 0,
-            view ? view->instruments().size() : 0);
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FE] compute: view=" << static_cast<const void*>(view)
+        << " dates=" << (view ? view->dates().size() : 0)
+        << " instruments=" << (view ? view->instruments().size() : 0);
 
     if (!view) {
-        fprintf(stderr, "[FE] compute ABORT: view is null\n");
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FE] compute ABORT: view is null";
         return result;
     }
 
     CachedMarketDataViewHistoricalAdapter adapter(*view);
     auto symbols = adapter.getAvailableSymbols("");
-    fprintf(stderr, "[FE] compute: symbols=%zu\n", symbols.size());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FE] compute: symbols=" << symbols.size();
 
     int dateCount = 0, valueCount = 0;
     for (const auto& date : view->dates()) {
@@ -161,9 +151,8 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
             ++dateCount;
         }
     }
-    fprintf(stderr, "[FE] compute DONE: dates=%zu symbols=%zu validDates=%d values=%d\n",
-            view->dates().size(), symbols.size(), dateCount, valueCount);
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FE] compute DONE: dates=" << view->dates().size()
+        << " symbols=" << symbols.size() << " validDates=" << dateCount << " values=" << valueCount;
 
     return result;
 }

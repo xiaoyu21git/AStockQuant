@@ -1,5 +1,6 @@
 // yaml_facade.cpp
 #include "foundation/yaml/yaml_facade.h"
+#include "foundation/log/logging.hpp"
 #include <iostream>
 #include <fstream>
 #include <sstream>
@@ -43,10 +44,10 @@ public:
             
             return true;
         } catch (const YAML::Exception &e) {
-            std::cerr << "YAML加载错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "YAML加载错误: " << e.what();
             return false;
         } catch (const std::exception &e) {
-            std::cerr << "文件错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "文件错误: " << e.what();
             return false;
         }
     }
@@ -66,7 +67,7 @@ public:
             
             return true;
         } catch (const YAML::Exception &e) {
-            std::cerr << "YAML解析错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "YAML解析错误: " << e.what();
             return false;
         }
     }
@@ -76,7 +77,7 @@ public:
         try {
             std::ofstream file(filename);
             if (!file.is_open()) {
-                std::cerr << "无法打开文件: " << filename << std::endl;
+                INTERNAL_ERROR_STREAM << "无法打开文件: " << filename;
                 return false;
             }
             
@@ -91,7 +92,7 @@ public:
             
             return true;
         } catch (const YAML::Exception &e) {
-            std::cerr << "YAML保存错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "YAML保存错误: " << e.what();
             return false;
         }
     }
@@ -370,7 +371,7 @@ public:
             
             std::ifstream file(filename);
             if (!file.is_open()) {
-                std::cerr << "无法打开文件: " << filename << std::endl;
+                INTERNAL_ERROR_STREAM << "无法打开文件: " << filename;
                 return false;
             }
             
@@ -381,7 +382,7 @@ public:
             return loadMultiDocumentFromStringImpl(content);
             
         } catch (const std::exception &e) {
-            std::cerr << "多文档加载错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "多文档加载错误: " << e.what();
             return false;
         }
     }
@@ -432,7 +433,7 @@ public:
             return true;
             
         } catch (const YAML::Exception &e) {
-            std::cerr << "多文档解析错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "多文档解析错误: " << e.what();
             return false;
         }
     }
@@ -441,7 +442,7 @@ public:
         try {
             std::ofstream file(filename);
             if (!file.is_open()) {
-                std::cerr << "无法打开文件: " << filename << std::endl;
+                INTERNAL_ERROR_STREAM << "无法打开文件: " << filename;
                 return false;
             }
             
@@ -462,7 +463,7 @@ public:
             
             return true;
         } catch (const YAML::Exception &e) {
-            std::cerr << "多文档保存错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "多文档保存错误: " << e.what();
             return false;
         }
     }
@@ -585,7 +586,7 @@ private:
             extractDocumentSelector(doc);
             documents_.push_back(doc);
         } catch (const YAML::Exception &e) {
-            std::cerr << "文档解析错误: " << e.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "文档解析错误: " << e.what();
             // 创建空文档
             Document doc;
             documents_.push_back(doc);

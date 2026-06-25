@@ -877,14 +877,6 @@ inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
 #define CACHE_JSON_TO_STATS(json) foundation::Foundation::cache_json_to_stats(json)
 
 
-// 日志宏
-#define LOG_TRACE(msg) foundation::Foundation::log_trace(msg, __FILE__, __LINE__)
-#define LOG_DEBUG(msg) foundation::Foundation::log_debug(msg, __FILE__, __LINE__)
-#define LOG_INFO(msg)  foundation::Foundation::log_info(msg, __FILE__, __LINE__)
-#define LOG_WARN(msg)  foundation::Foundation::log_warn(msg, __FILE__, __LINE__)
-#define LOG_ERROR(msg) foundation::Foundation::log_error(msg, __FILE__, __LINE__)
-#define LOG_FATAL(msg) foundation::Foundation::log_fatal(msg, __FILE__, __LINE__)
-
 // 文件操作宏
 #define FILE_EXISTS(path) foundation::Foundation::file_exists(path)
 #define READ_FILE(path) foundation::Foundation::read_file(path)
@@ -928,7 +920,7 @@ inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
     #define FOUNDATION_ASSERT(expr, msg) \
         do { \
             if (!(expr)) { \
-                LOG_FATAL("Assertion failed: " msg); \
+                INTERNAL_ERROR_STREAM << "Assertion failed: " << msg; \
                 std::terminate(); \
             } \
         } while(0)
@@ -941,13 +933,13 @@ inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
 // 异常处理宏
 #define FOUNDATION_TRY try
 #define FOUNDATION_CATCH catch (const foundation::Exception& e) { \
-    LOG_ERROR(std::string("Exception: ") + e.what()); \
+    INTERNAL_ERROR_STREAM << "Exception: " << e.what(); \
     throw; \
 }
 
 #define FOUNDATION_CATCH_RETURN(value) \
     catch (const foundation::Exception& e) { \
-        LOG_ERROR(std::string("Exception: ") + e.what()); \
+        INTERNAL_ERROR_STREAM << "Exception: " << e.what(); \
         return value; \
     }
 

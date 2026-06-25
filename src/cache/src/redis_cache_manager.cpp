@@ -5,6 +5,7 @@
 #endif
 
 #include "redis_cache_manager.h"
+#include "foundation/log/logging.hpp"
 
 #include <hiredis.h>
 
@@ -52,7 +53,7 @@ public:
         }
 
         if (config_.enableCluster || config_.enableTls) {
-            std::cerr << "RedisCacheManager: cluster/TLS mode is not supported by the vendored hiredis build" << std::endl;
+            INTERNAL_ERROR_STREAM << "RedisCacheManager: cluster/TLS mode is not supported by the vendored hiredis build";
             return false;
         }
 
@@ -61,7 +62,7 @@ public:
         }
 
         initialized_ = true;
-        std::cout << "RedisCacheManager: initialized" << std::endl;
+        INTERNAL_INFO_STREAM << "RedisCacheManager: initialized";
         return true;
     }
 
@@ -547,12 +548,12 @@ private:
         struct timeval connectTimeout = toTimeval(config_.connectTimeout);
         context_ = redisConnectWithTimeout(config_.host.c_str(), config_.port, connectTimeout);
         if (context_ == nullptr) {
-            std::cerr << "RedisCacheManager: failed to allocate Redis context" << std::endl;
+            INTERNAL_ERROR_STREAM << "RedisCacheManager: failed to allocate Redis context";
             return false;
         }
 
         if (context_->err != 0) {
-            std::cerr << "RedisCacheManager: connect failed: " << context_->errstr << std::endl;
+            INTERNAL_ERROR_STREAM << "RedisCacheManager: connect failed: " << context_->errstr;
             disconnectLocked();
             return false;
         }
@@ -560,7 +561,7 @@ private:
         if (config_.operationTimeout.count() > 0) {
             struct timeval commandTimeout = toTimeval(config_.operationTimeout);
             if (redisSetTimeout(context_, commandTimeout) != REDIS_OK) {
-                std::cerr << "RedisCacheManager: failed to set command timeout" << std::endl;
+                INTERNAL_ERROR_STREAM << "RedisCacheManager: failed to set command timeout";
                 disconnectLocked();
                 return false;
             }
@@ -569,7 +570,7 @@ private:
         if (!config_.password.empty()) {
             redisReply* authReply = static_cast<redisReply*>(redisCommand(context_, "AUTH %s", config_.password.c_str()));
             if (!replyIsOk(authReply)) {
-                std::cerr << "RedisCacheManager: AUTH failed" << std::endl;
+                INTERNAL_ERROR_STREAM << "RedisCacheManager: AUTH failed";
                 if (authReply != nullptr) {
                     freeReplyObject(authReply);
                 }
@@ -582,7 +583,7 @@ private:
         if (config_.database != 0) {
             redisReply* selectReply = static_cast<redisReply*>(redisCommand(context_, "SELECT %d", config_.database));
             if (!replyIsOk(selectReply)) {
-                std::cerr << "RedisCacheManager: SELECT failed" << std::endl;
+                INTERNAL_ERROR_STREAM << "RedisCacheManager: SELECT failed";
                 if (selectReply != nullptr) {
                     freeReplyObject(selectReply);
                 }

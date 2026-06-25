@@ -6,6 +6,7 @@
 #include "database/MarketDataRepository.h"
 #include "database/NativeMySQLConnectionPool.h"
 #include "database/ISqlDatabase.h"
+#include "database/NativePgDatabase.h"
 #include "database/StrategyRepository.h"
 #include "FactorService.h"
 
@@ -338,6 +339,7 @@ StrategyBridge::StrategyBridge(QObject* parent)
     , m_repo(std::make_unique<StrategyRepository>())
     , m_listModel(new StrategyListModel(this))
 {
+    INTERNAL_INFO_STREAM << "[Bridge] CTOR";
 }
 
 StrategyBridge::~StrategyBridge() = default;
@@ -345,19 +347,60 @@ StrategyBridge::~StrategyBridge() = default;
 void StrategyBridge::init()
 {
     if (m_inited) return;
-    if (!m_repo || !m_repo->initialize()) {
-        setErr(QStringLiteral("initialize strategy repository failed"));
+    INTERNAL_INFO_STREAM << "[Bridge] init START";
+    try {
+        if (!m_repo || !m_repo->initialize()) {
+            INTERNAL_ERROR_STREAM << "[Bridge] init FAILED: repo init";
+            setErr(QStringLiteral("initialize strategy repository failed"));
+            emit operationFailed(kRepositoryErrorCode, m_err);
+            return;
+        }
+
+        // ── 向 StrategyManager 注入领域依赖（一次初始化，所有策略共享）──
+        auto& mgr = domain::strategy::StrategyManager::instance();
+
+        // 注入 FactorInstanceManager
+        auto* factorSvcBridge = FactorService::instance();
+        if (factorSvcBridge && factorSvcBridge->isInitialized()) {
+            mgr.setFactorInstanceManager(factorSvcBridge->instanceManager());
+        }
+
+        // 创建默认订单转发器并注入（生命周期由 StrategyBridge 持有）
+        {
+            auto symResolver = [](std::uint32_t id) -> std::string {
+                char buf[16];
+                const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
+                std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
+                return buf;
+            };
+            m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
+            mgr.setOrderListener(m_orderListener.get());
+            mgr.setDefaultOrderListener(m_orderListener.get());
+        }
+
+        INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";
+        m_inited = true;
+        emit initedChanged();
+        refreshModel();
+        INTERNAL_INFO_STREAM << "[Bridge] init COMPLETE";
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[Bridge] init EXCEPTION: " << e.what();
+        const QString msg = QString::fromUtf8(e.what());
+        INTERNAL_ERROR_STREAM << "[StrategyBridge] init exception: " << msg.toStdString();
+        setErr(QStringLiteral("strategy init failed: %1").arg(msg));
         emit operationFailed(kRepositoryErrorCode, m_err);
-        return;
+    } catch (...) {
+        INTERNAL_ERROR_STREAM << "[Bridge] init UNKNOWN EXCEPTION";
+        INTERNAL_ERROR_STREAM << "[StrategyBridge] init unknown exception";
+        setErr(QStringLiteral("strategy init failed: unknown error"));
+        emit operationFailed(kRepositoryErrorCode, m_err);
     }
-    m_inited = true;
-    emit initedChanged();
-    refreshModel();
 }
 
 void StrategyBridge::initAsync()
 {
-    QTimer::singleShot(0, this, [this]() { init(); });
+    INTERNAL_INFO_STREAM << "[Bridge] initAsync called";
+    init();
 }
 
 bool StrategyBridge::inited() const { return m_inited; }
@@ -593,173 +636,26 @@ bool StrategyBridge::start(const QString& strategyId)
 
     INTERNAL_INFO_STREAM << "[Live] start strategy: " << repositoryId.toStdString();
 
-    // QML 侧 startStrategyFromCard 已通过 localStatusOverrides 直接切按钮为"启动中"，
-    // C++ 不设中间态，等 worker 完成后 emit strategiesChanged 切换到"运行中"
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
 
-    // ── 异步执行引擎创建（工作线程：MySQL 查询 → 启动实盘循环）──
+    // ── 异步委托给 StrategyManager（工作线程：MySQL 查询 → 历史数据 → 启动实盘循环）──
     if (!m_startupPool) {
         m_startupPool = std::make_unique<foundation::thread::ThreadPoolExecutor>(
             1, 4, std::chrono::seconds(120), "StrategyBridgeStartup");
     }
     m_startupPool->post([this, repositoryId]() {
-        domain::strategy::RuntimeFactorSvc* rawFactorSvc = nullptr;
         try {
-        auto& mgr = domain::strategy::StrategyManager::instance();
-        if (!mgr.get(repositoryId.toStdString())) {
-            std::unique_ptr<domain::strategy::IRuntimeFactorService> factorSvc;
-            auto* factorSvcBridge = FactorService::instance();
-            if (factorSvcBridge && factorSvcBridge->isInitialized()) {
-                auto* instanceMgr = factorSvcBridge->instanceManager();
-                if (instanceMgr) {
-                    auto symbolResolver = [](std::uint32_t id) -> std::string {
-                        char buf[16];
-                        std::snprintf(buf, sizeof(buf), "%06u", id);
-                        return buf;
-                    };
-                    auto factorNameResolver = [](std::uint64_t fid) -> std::string {
-                        return std::to_string(fid);
-                    };
-                    auto rfs = std::make_unique<domain::strategy::RuntimeFactorSvc>(
-                        *instanceMgr,
-                        std::move(symbolResolver),
-                        std::move(factorNameResolver));
-                    rawFactorSvc = rfs.get();
-                    factorSvc = std::move(rfs);
-                }
-            }
-            mgr.createEngine(repositoryId.toStdString(), std::move(factorSvc));
-        }
-        auto* engine = mgr.get(repositoryId.toStdString());
-        if (!engine) {
-            QMetaObject::invokeMethod(this, [this]() {
-                setErr(QStringLiteral("引擎创建失败"));
-                emit operationFailed(kRepositoryErrorCode, m_err);
+            auto& mgr = domain::strategy::StrategyManager::instance();
+            mgr.startStrategy(repositoryId.toStdString());
+
+            QMetaObject::invokeMethod(this, [this, repositoryId]() {
+                m_runtimeStatus[repositoryId] = QStringLiteral("运行中");
+                if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("运行中"));
+                emit strategiesChanged();
+                emit started(repositoryId);
+                bridge::TradingRuntimeStatusService::instance()->refresh();
+                INTERNAL_INFO_STREAM << "[Live] engine started: " << repositoryId.toStdString();
             }, Qt::QueuedConnection);
-            return;
-        }
-
-        const auto result = engine->start();
-        if (!result.isOk()) {
-            QMetaObject::invokeMethod(this, [this]() {
-                setErr(QStringLiteral("引擎启动失败"));
-                emit operationFailed(kRepositoryErrorCode, m_err);
-            }, Qt::QueuedConnection);
-            return;
-        }
-
-        // ── 按因子需求查 DB，构建完整 MarketView ──
-        {
-            auto& pool = astock::database::NativeMySQLConnectionPool::instance();
-            if (pool.isInitialized()) {
-                auto db = pool.getConnection();
-                if (db && db->isOpen()) {
-                    auto now = std::chrono::system_clock::now();
-                    auto tt = std::chrono::system_clock::to_time_t(now);
-                    char endBuf[16];
-                    std::strftime(endBuf, sizeof(endBuf), "%Y-%m-%d", std::localtime(&tt));
-                    int lookbackDays = rawFactorSvc ? rawFactorSvc->getMaxLookbackDays() : 90;
-                    char startBuf[16];
-                    {
-                        auto tp = std::chrono::system_clock::now() - std::chrono::hours(24 * lookbackDays);
-                        auto t = std::chrono::system_clock::to_time_t(tp);
-                        std::strftime(startBuf, sizeof(startBuf), "%Y-%m-%d", std::localtime(&t));
-                    }
-
-                    // 领域层：获取因子需求字段
-                    std::vector<std::string> extraFields;
-                    if (rawFactorSvc) extraFields = rawFactorSvc->getRequiredFields();
-
-                    INTERNAL_INFO_STREAM << "[Live] loading market data: " << startBuf << " ~ " << endBuf
-                                         << " extraFields=" << extraFields.size();
-
-                    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
-                    if (extraFields.empty()) {
-                        // 无因子需求：基础 OHLCV
-                        auto rows = repo->queryAllMarketDailyBar(startBuf, endBuf);
-                        if (!rows.empty()) {
-                            QVariantList data;
-                            for (auto& r : rows) {
-                                QVariantMap row;
-                                row["symbol"] = QString::fromStdString(r.symbol);
-                                row["trade_date"] = QString::fromStdString(r.tradeDate);
-                                row["open"] = r.open;
-                                row["high"] = r.high;
-                                row["low"] = r.low;
-                                row["close"] = r.close;
-                                row["volume"] = r.volume;
-                                data.append(row);
-                            }
-                            QJsonDocument doc(QJsonArray::fromVariantList(data));
-                            auto root = foundation::json::JsonFacade::parse(
-                                doc.toJson(QJsonDocument::Compact).toStdString());
-                            m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
-                        }
-                    } else {
-                        // 有因子需求：带额外字段查询 + 零 JSON 构建
-                        auto rawRows = repo->queryAllMarketDailyBarWithFields(startBuf, endBuf, extraFields);
-                        if (!rawRows.empty()) {
-                            rawFactorSvc->buildLiveView(rawRows, extraFields);
-                        }
-                    }
-
-                    {
-                        size_t dates = 0, instrs = 0;
-                        const auto* v = rawFactorSvc ? rawFactorSvc->liveView() : m_liveMarketView.get();
-                        if (v) { dates = v->dates().size(); instrs = v->instruments().size(); }
-                        INTERNAL_INFO_STREAM << "[启动] 历史数据就绪: " << dates << "天 " << instrs
-                                             << "标的 fields=" << (extraFields.empty() ? 5 : 5 + extraFields.size());
-                        if (!extraFields.empty()) {
-                            std::string fs;
-                            for (size_t i = 0; i < std::min(extraFields.size(), size_t(5)); ++i) {
-                                if (i) fs += ",";
-                                fs += extraFields[i];
-                            }
-                            if (extraFields.size() > 5) fs += "...";
-                            INTERNAL_INFO_STREAM << "[启动] 额外字段: " << fs;
-                        }
-                    }
-                }
-            }
-        }
-
-        // 先注册订单监听器，再启动 loop，避免漏单
-        if (!m_orderListener) {
-            auto symResolver = [](std::uint32_t id) -> std::string {
-                char buf[16];
-                const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
-                std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
-                return buf;
-            };
-            m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
-        }
-        mgr.setOrderListener(m_orderListener.get());
-
-        engine->startLiveLoop();
-
-        QMetaObject::invokeMethod(this, [this, repositoryId]() {
-            m_runtimeStatus[repositoryId] = QStringLiteral("运行中");
-            if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("运行中"));
-            emit strategiesChanged();
-            emit started(repositoryId);
-            bridge::TradingRuntimeStatusService::instance()->refresh();
-            INTERNAL_INFO_STREAM << "[Live] engine started: " << repositoryId.toStdString();
-
-            // 延迟查询账户（等 SDK run() 就绪）
-            QTimer::singleShot(2000, this, [this]() {
-                auto& sys = app::system::TradingSystem::instance();
-                auto* engine = sys.tradeEngine();
-                if (!engine || !engine->gateway()) return;
-                engine->gateway()->queryAccount([](std::optional<domain::trading::AccountInfo> info) {
-                    if (!info) return;
-                    INTERNAL_INFO_STREAM << "[Live] account: available=" << info->availableCash()
-                                         << " total=" << info->totalAssets();
-                });
-                engine->gateway()->queryPositions([](const std::vector<domain::trading::PositionSnapshot>& pos) {
-                    INTERNAL_INFO_STREAM << "[Live] positions: " << pos.size() << " holdings";
-                });
-            });
-        }, Qt::QueuedConnection);
 
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[StrategyBridge] start worker exception: " << e.what();
@@ -796,12 +692,7 @@ bool StrategyBridge::stop(const QString& strategyId)
 
     // 用 QueuedConnection 让 QML 先渲染"停止中"，再执行阻塞的 stopLiveLoop
     QMetaObject::invokeMethod(this, [this, repositoryId]() {
-        auto& mgr = domain::strategy::StrategyManager::instance();
-        auto* engine = mgr.get(repositoryId.toStdString());
-        if (engine) {
-            engine->stopLiveLoop();
-            engine->stop();
-        }
+        domain::strategy::StrategyManager::instance().stopStrategy(repositoryId.toStdString());
         m_runtimeStatus[repositoryId] = QStringLiteral("已停止");
         if (m_listModel) m_listModel->updateDisplayStatus(repositoryId, QStringLiteral("已停止"));
         emit strategiesChanged();
@@ -819,10 +710,14 @@ void StrategyBridge::setupLiveMarketView(const QString& strategyId, const QStrin
     auto* engine = domain::strategy::StrategyManager::instance().get(id);
     if (!engine) return;
 
-    // 从 JSON 构建 CachedMarketDataView（公用 fromJson 工厂）
+    // QML 手动注入自定义数据集（用于调试/回放）
     auto root = foundation::json::JsonFacade::parse(datasetJson.toStdString());
-    m_liveMarketView = factor::compute::CachedMarketDataView::fromJson(root);
-    engine->setLiveMarketView(m_liveMarketView.get());
+    auto customView = factor::compute::CachedMarketDataView::fromJson(root);
+    if (customView) {
+        engine->setLiveMarketView(customView.get());
+        // 视图生命周期由 prepareMarketData() 统一管理；
+        // 手动注入的视图在 engine 下次 prepareMarketData() 时被覆盖
+    }
 }
 
 bool StrategyBridge::saveViewCfg(const QString& strategyId, const QVariantMap& visualConfig)

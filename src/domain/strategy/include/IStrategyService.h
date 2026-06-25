@@ -28,6 +28,12 @@ namespace domain::backtest {
 struct BacktestRequest;
 }
 
+namespace factor {
+namespace compute {
+class IMarketDataView;
+}
+}
+
 namespace domain::strategy {
 
 class IRuntimeFactorView {
@@ -205,6 +211,10 @@ public:
     [[nodiscard]] virtual StrategyInstanceId instanceId() const noexcept = 0;
     [[nodiscard]] virtual bool isEnabled() const noexcept = 0;
     [[nodiscard]] virtual rules::RuleSetId ruleSetId() const noexcept = 0;
+
+    /// @brief 策略是否依赖因子计算（因子策略=true，非因子策略=false）
+    /// 在 fromDb 创建时由策略类型决定，供 prepareMarketData 等路径使用。
+    [[nodiscard]] virtual bool usesFactors() const noexcept = 0;
 
     // 策略只消费当前因子结果快照，不持有更新职责，也不接触桥接对象。
     virtual void evaluate(const std::vector<RuntimeFactorSnapshot>& factorSnapshots,
@@ -535,6 +545,17 @@ public:
         auto now = std::chrono::steady_clock::now().time_since_epoch().count();
         return (now - last) / 1'000'000;
     }
+    /// @brief 根据策略需求自动查询 PG 历史行情并构建 MarketView
+    /// 内部自行计算日期范围、连接数据库、构建视图并注入引擎。
+    /// 非因子策略: 90 天 OHLCV → 注入 contextHistoricalView
+    /// 因子策略:   按因子最大回溯窗口 + 额外字段 → 注入 RuntimeFactorSvc::liveMarketView
+    /// @return true 表示历史数据加载成功
+    bool prepareMarketData();
+
+    /// @brief 获取当前持有的行情视图（供外部读取元数据）
+    [[nodiscard]] const factor::compute::IMarketDataView* liveMarketView() const noexcept {
+        return m_liveMarketView.get();
+    }
 
 private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
@@ -559,6 +580,8 @@ private:
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
+    std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
+    bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
 };
 
 class StrategyEngine::Builder final {

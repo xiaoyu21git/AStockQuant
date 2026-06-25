@@ -7,7 +7,7 @@ PG_CONFIG = {
     "user": "astock",
     "password": "astock123",
     "database": "astock_quant",
-    "options": "-c search_path=ref,mkt,fund,alpha,live,port,data,public",
+    "options": "-c search_path=ref,mkt,fund,alpha,live,port,data,public -c timescaledb.max_tuples_decompressed_per_dml_transaction=0",
 }
 
 def pg_connect():

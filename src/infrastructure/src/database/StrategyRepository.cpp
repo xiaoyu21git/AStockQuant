@@ -1,12 +1,23 @@
 #include "database/StrategyRepository.h"
 #include "database/NativeMySQLConnectionPool.h"
+#include "foundation/log/logging.hpp"
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <ctime>
 
 namespace astock { namespace database {
 
-static auto sdb() { return NativeMySQLConnectionPool::instance().getConnection(); }
+static std::shared_ptr<ISqlDatabase> sdb() {
+    try {
+        return NativeMySQLConnectionPool::instance().getConnection();
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() exception: " << e.what();
+        return nullptr;
+    } catch (...) {
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() unknown exception";
+        return nullptr;
+    }
+}
 static std::string toS(const QString& v) { return v.toStdString(); }
 static QString fromS(const std::string& v) { return QString::fromStdString(v); }
 static std::string toJson(const QVariantMap& m) {
@@ -47,10 +58,12 @@ PersistedStrategyData PersistedStrategyData::fromVariantMap(const QVariantMap& m
 StrategyRepository::StrategyRepository() = default;
 StrategyRepository::~StrategyRepository() = default;
 bool StrategyRepository::initialize() { return true; }
-bool StrategyRepository::clearAll() { return sdb()->executeUpdate("DELETE FROM strategy") >= 0; }
+bool StrategyRepository::clearAll() { auto db = sdb(); return db ? db->executeUpdate("DELETE FROM strategy") >= 0 : false; }
 
 std::optional<PersistedStrategyData> StrategyRepository::findById(const QString& id) {
-    auto r = sdb()->executeQuery("SELECT * FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}});
+    auto db = sdb();
+    if (!db) return {};
+    auto r = db->executeQuery("SELECT * FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}});
     if (r.isEmpty()) return {};
     auto& row = r.getRow(0);
     PersistedStrategyData d;
@@ -74,34 +87,48 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
 }
 
 std::optional<PersistedStrategyData> StrategyRepository::findByCode(const QString& code) {
-    auto r = sdb()->executeQuery("SELECT * FROM strategy WHERE strategy_code=?", {SqlParam{toS(code)}});
+    auto db = sdb();
+    if (!db) return {};
+    auto r = db->executeQuery("SELECT * FROM strategy WHERE strategy_code=?", {SqlParam{toS(code)}});
     if (r.isEmpty()) return {};
     return findById(fromS(r.getRow(0).getString("strategy_id")));
 }
 
 std::vector<PersistedStrategyData> StrategyRepository::findAll() {
-    auto r = sdb()->executeQuery("SELECT * FROM strategy ORDER BY created_at DESC");
-    std::vector<PersistedStrategyData> v;
-    for (auto& row : r.getRows()) {
-        PersistedStrategyData d;
-        d.strategyId = row.getString("strategy_id");
-        d.strategyCode = row.getString("strategy_code");
-        d.version = row.getString("version");
-        d.author = row.getString("author");
-        d.language = static_cast<StrategyLanguageCode>(row.getInt("language"));
-        d.status = strategy_view::StrategyLifecycleStatus::Active;
-        d.createdAt = QDateTime::fromString(fromS(row.getString("created_at")), Qt::ISODate);
-        d.updatedAt = QDateTime::fromString(fromS(row.getString("updated_at")), Qt::ISODate);
-        // 解析 metadata_json
-        auto metaJson = fromJson(row.getString("metadata_json"));
-        d.metadata.name = metaJson.value("name").toString().toStdString();
-        d.metadata.description = metaJson.value("description").toString().toStdString();
-        d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
-            metaJson.value("behaviorKind").toInt());
-        d.metadata.enabled = metaJson.value("enabled").toBool();
-        v.push_back(d);
+    try {
+        INTERNAL_INFO_STREAM << "[Repo] findAll START";
+        auto db = sdb();
+        if (!db) { INTERNAL_ERROR_STREAM << "[Repo] findAll FAILED: no db"; return {}; }
+        auto r = db->executeQuery("SELECT * FROM strategy ORDER BY created_at DESC");
+        INTERNAL_INFO_STREAM << "[Repo] findAll query returned " << static_cast<int>(r.rowCount()) << " rows";
+        std::vector<PersistedStrategyData> v;
+        for (auto& row : r.getRows()) {
+            PersistedStrategyData d;
+            d.strategyId = row.getString("strategy_id");
+            d.strategyCode = row.getString("strategy_code");
+            d.version = row.getString("version");
+            d.author = row.getString("author");
+            d.language = static_cast<StrategyLanguageCode>(row.getInt("language"));
+            d.status = strategy_view::StrategyLifecycleStatus::Active;
+            d.createdAt = QDateTime::fromString(fromS(row.getString("created_at")), Qt::ISODate);
+            d.updatedAt = QDateTime::fromString(fromS(row.getString("updated_at")), Qt::ISODate);
+            // 解析 metadata_json
+            auto metaJson = fromJson(row.getString("metadata_json"));
+            d.metadata.name = metaJson.value("name").toString().toStdString();
+            d.metadata.description = metaJson.value("description").toString().toStdString();
+            d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
+                metaJson.value("behaviorKind").toInt());
+            d.metadata.enabled = metaJson.value("enabled").toBool();
+            v.push_back(d);
+        }
+        return v;
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] findAll exception: " << e.what();
+        return {};
+    } catch (...) {
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] findAll unknown exception";
+        return {};
     }
-    return v;
 }
 
 std::vector<PersistedStrategyData> StrategyRepository::findByType(domain::backtest::StrategyStoredType) { return {}; }
@@ -112,6 +139,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findDraftStrategies() { r
 
 QString StrategyRepository::save(const PersistedStrategyData& d) {
     auto db = sdb();
+    if (!db) return {};
     auto id = d.strategyId.empty() ? "s_" + std::to_string(std::time(nullptr)) : d.strategyId;
     QString sid = fromS(id);
     db->executeUpdate(
@@ -135,7 +163,9 @@ QString StrategyRepository::saveStrategyInternal(const PersistedStrategyData& d,
 }
 
 bool StrategyRepository::update(const QString& id, const PersistedStrategyData& d) {
-    return sdb()->executeUpdate(
+    auto db = sdb();
+    if (!db) return false;
+    return db->executeUpdate(
         "UPDATE strategy SET strategy_code=?,metadata_json=?,strategy_identity_json=?,"
         "version=?,author=?,language=?,status=?,parameters=?,performance_metrics=?,"
         "runtime_json=?,updated_at=NOW() WHERE strategy_id=?",
@@ -146,34 +176,48 @@ bool StrategyRepository::update(const QString& id, const PersistedStrategyData& 
 }
 
 bool StrategyRepository::remove(const QString& id) {
-    return sdb()->executeUpdate("DELETE FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}}) > 0;
+    auto db = sdb();
+    if (!db) return false;
+    return db->executeUpdate("DELETE FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}}) > 0;
 }
 
 bool StrategyRepository::updateStatus(const QString& id, strategy_view::StrategyLifecycleStatus) {
-    return sdb()->executeUpdate("UPDATE strategy SET updated_at=NOW() WHERE strategy_id=?", {SqlParam{toS(id)}}) > 0;
+    auto db = sdb();
+    if (!db) return false;
+    return db->executeUpdate("UPDATE strategy SET updated_at=NOW() WHERE strategy_id=?", {SqlParam{toS(id)}}) > 0;
 }
 
 bool StrategyRepository::updateParameters(const QString& id, const QVariantMap& p) {
-    return sdb()->executeUpdate("UPDATE strategy SET parameters=?,updated_at=NOW() WHERE strategy_id=?",
+    auto db = sdb();
+    if (!db) return false;
+    return db->executeUpdate("UPDATE strategy SET parameters=?,updated_at=NOW() WHERE strategy_id=?",
         {SqlParam{toJson(p)},SqlParam{toS(id)}}) > 0;
 }
 
 bool StrategyRepository::updatePerformance(const QString& id, const QVariantMap& p) {
-    return sdb()->executeUpdate("UPDATE strategy SET performance_metrics=?,updated_at=NOW() WHERE strategy_id=?",
+    auto db = sdb();
+    if (!db) return false;
+    return db->executeUpdate("UPDATE strategy SET performance_metrics=?,updated_at=NOW() WHERE strategy_id=?",
         {SqlParam{toJson(p)},SqlParam{toS(id)}}) > 0;
 }
 
 size_t StrategyRepository::count() {
-    auto r = sdb()->executeQuery("SELECT COUNT(*) FROM strategy");
+    auto db = sdb();
+    if (!db) return 0;
+    auto r = db->executeQuery("SELECT COUNT(*) FROM strategy");
     return r.isEmpty() ? 0 : r.getRow(0).getInt("count");
 }
 
 bool StrategyRepository::exists(const QString& id) {
-    return !sdb()->executeQuery("SELECT 1 FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}}).isEmpty();
+    auto db = sdb();
+    if (!db) return false;
+    return !db->executeQuery("SELECT 1 FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}}).isEmpty();
 }
 
 bool StrategyRepository::existsByCode(const QString& code) {
-    return !sdb()->executeQuery("SELECT 1 FROM strategy WHERE strategy_code=?", {SqlParam{toS(code)}}).isEmpty();
+    auto db = sdb();
+    if (!db) return false;
+    return !db->executeQuery("SELECT 1 FROM strategy WHERE strategy_code=?", {SqlParam{toS(code)}}).isEmpty();
 }
 
 QString StrategyRepository::generateStrategyCode(const PersistedStrategyData& d) const { return fromS(d.strategyCode); }

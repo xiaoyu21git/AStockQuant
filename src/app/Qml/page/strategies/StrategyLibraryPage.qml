@@ -2087,17 +2087,17 @@ Rectangle {
                 runtimeSnapshotRevision++
             })
         }
-        
+
         // 注意：不再使用硬编码数据作为后备，完全依赖数据库数据
         // 策略数据将通过strategyListModel自动更新
         if (visible) {
-            strategyLibraryActivationTimer.start()
+            ensurePageServicesReady()
         }
     }
 
     onVisibleChanged: {
         if (visible && !pageServicesReady) {
-            strategyLibraryActivationTimer.start()
+            ensurePageServicesReady()
         }
     }
 
@@ -2110,13 +2110,6 @@ Rectangle {
             backtestWorkbenchLoader.item.selectedStrategyId = selectedStrategyId
             backtestWorkbenchLoader.item.selectedStrategyName = getSelectedStrategySummary() ? (getSelectedStrategySummary().strategyName || getSelectedStrategySummary().name || "") : ""
         }
-    }
-
-    Timer {
-        id: strategyLibraryActivationTimer
-        interval: 0
-        repeat: false
-        onTriggered: strategyLibraryPage.ensurePageServicesReady()
     }
 
     property var strategyService: StrategyBridge

@@ -12,7 +12,7 @@ namespace config {
 ConfigLoader::ConfigLoader() 
     : threadPool_(std::make_unique<foundation::thread::ThreadPoolExecutor>(4)) {
     
-    INTERNAL_INFO("ConfigLoader initialized");
+    INTERNAL_INFO_STREAM << "ConfigLoader initialized";
     
     // 初始化统计信息
     Stats initialStats;
@@ -279,7 +279,7 @@ bool ConfigLoader::isCacheExpired(const CacheItem& item) const {
 void ConfigLoader::clearCache() {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     cache_.clear();
-    INTERNAL_INFO("Config cache cleared");
+    INTERNAL_INFO_STREAM << "Config cache cleared";
 }
 
 void ConfigLoader::removeFromCache(const std::string& key) {

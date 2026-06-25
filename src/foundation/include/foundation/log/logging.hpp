@@ -291,7 +291,7 @@ private:
         foundation::internal::InternalLogLevel::level>( \
         __FILE__, __LINE__, func)
 
-// 各级别宏
+// 流式日志宏（全项目统一，仅此一套）
 #define INTERNAL_TRACE_STREAM \
     INTERNAL_LOG_STREAM(TRACE, __FUNCTION__)
 
@@ -306,39 +306,5 @@ private:
 
 #define INTERNAL_ERROR_STREAM \
     INTERNAL_LOG_STREAM(ERR, __FUNCTION__)
-
-// 快速日志宏（不带流式）
-#define INTERNAL_TRACE(msg) \
-    foundation::internal::InternalLogger::instance().trace( \
-        msg, __FILE__, __LINE__, __FUNCTION__)
-
-#define INTERNAL_DEBUG(msg) \
-    foundation::internal::InternalLogger::instance().debug( \
-        msg, __FILE__, __LINE__, __FUNCTION__)
-
-#define INTERNAL_INFO(msg) \
-    foundation::internal::InternalLogger::instance().info( \
-        msg, __FILE__, __LINE__, __FUNCTION__)
-
-#define INTERNAL_WARN(msg) \
-    foundation::internal::InternalLogger::instance().warn( \
-        msg, __FILE__, __LINE__, __FUNCTION__)
-
-#define INTERNAL_ERROR(msg) \
-    foundation::internal::InternalLogger::instance().error( \
-        msg, __FILE__, __LINE__, __FUNCTION__)
-
-// 条件日志宏
-#define INTERNAL_DEBUG_IF(condition, msg) \
-    if ((condition)) { INTERNAL_DEBUG(msg); }
-
-#define INTERNAL_INFO_IF(condition, msg) \
-    if ((condition)) { INTERNAL_INFO(msg); }
-
-#define INTERNAL_WARN_IF(condition, msg) \
-    if ((condition)) { INTERNAL_WARN(msg); }
-
-#define INTERNAL_ERROR_IF(condition, msg) \
-    if ((condition)) { INTERNAL_ERROR(msg); }
 
 #endif // FOUNDATION_INTERNAL_LOGGING_HPP

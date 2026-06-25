@@ -42,6 +42,10 @@ void TradingSystem::initialize() {
         notifyDataChanged();
     });
 
+    // ── 内部回调：成交/订单变更后自动同步持仓账户到最新状态 ──
+    // 注意：这些回调在 setGateway() 中注册到引擎，不覆盖桥接层通过 setOnXxx 设置的外部回调。
+    // 外部回调（TradeExecutionBridge 设置的 QML 信号）通过 m_onTradeFill / m_onOrderUpdate 链式转发。
+
     m_initialized = true;
     std::cout << "[TradingSystem] Initialized\n";
 }
@@ -59,10 +63,10 @@ void TradingSystem::initializeWithBroker(const std::string& token, const std::st
                       << (live ? " (live)" : " (lazy, awaiting JMC)")
                       << "\n";
         } else {
-            std::cerr << "[TradingSystem] WARNING: Broker gateway connect failed\n";
+            INTERNAL_ERROR_STREAM << "[TradingSystem] WARNING: Broker gateway connect failed";
         }
     } else {
-        std::cerr << "[TradingSystem] WARNING: No token configured, broker gateway not created\n";
+        INTERNAL_ERROR_STREAM << "[TradingSystem] WARNING: No token configured, broker gateway not created";
     }
 
     initialize();
@@ -216,6 +220,9 @@ domain::trading::SubmitResult TradingSystem::submitOrder(const domain::trading::
     if (!m_tradeEngine) {
         return domain::trading::SubmitResult::rejected("trading engine not initialized");
     }
+
+    // 每次下单前从 SDK 同步最新账户/持仓，保证风控检查基于实时数据
+    refreshPositionsFromBroker();
 
     domain::strategy::RiskInput riskInput = buildRiskInput(order);
     return m_tradeEngine->submitOrder(order, riskInput);

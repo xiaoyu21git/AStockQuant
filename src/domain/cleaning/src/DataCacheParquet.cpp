@@ -6,7 +6,7 @@
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 
-#include <cstdio>
+#include "foundation/log/logging.hpp"
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -186,33 +186,25 @@ void DataCache::saveDataSetFile(int dataId, const std::vector<J>& rows,
     std::string path = dataFilePath(dataId);
     auto outResult = arrow::io::FileOutputStream::Open(path);
     if (!outResult.ok()) {
-        fprintf(stderr, "[DataCache] saveArrow: cannot open %s: %s\n",
-                path.c_str(), outResult.status().ToString().c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: cannot open " << path << ": " << outResult.status().ToString();
         return;
     }
 
     auto writerResult = arrow::ipc::MakeFileWriter(outResult.ValueOrDie(), table->schema());
     if (!writerResult.ok()) {
-        fprintf(stderr, "[DataCache] saveArrow: writer error %s\n",
-                writerResult.status().ToString().c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: writer error " << writerResult.status().ToString();
         return;
     }
 
     auto writer = writerResult.ValueOrDie();
     auto writeStatus = writer->WriteTable(*table);
     if (!writeStatus.ok()) {
-        fprintf(stderr, "[DataCache] saveArrow: write error %s\n",
-                writeStatus.ToString().c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: write error " << writeStatus.ToString();
         return;
     }
     writer->Close();
 
-    fprintf(stderr, "[DataCache] saved Arrow IPC %s: %lld rows x %d cols\n",
-            path.c_str(), table->num_rows(), table->num_columns());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCache] saved Arrow IPC " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
 }
 
 std::vector<J> DataCache::loadDataSetFile(int dataId)
@@ -221,17 +213,13 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
 
     auto inResult = arrow::io::ReadableFile::Open(path);
     if (!inResult.ok()) {
-        fprintf(stderr, "[DataCache] loadArrow: cannot open %s: %s\n",
-                path.c_str(), inResult.status().ToString().c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: cannot open " << path << ": " << inResult.status().ToString();
         return {};
     }
 
     auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
     if (!readerResult.ok()) {
-        fprintf(stderr, "[DataCache] loadArrow: open error %s\n",
-                readerResult.status().ToString().c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: open error " << readerResult.status().ToString();
         return {};
     }
 
@@ -247,16 +235,12 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
 
     auto tableResult = arrow::Table::FromRecordBatches(batches);
     if (!tableResult.ok()) {
-        fprintf(stderr, "[DataCache] loadArrow: table error %s\n",
-                tableResult.status().ToString().c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: table error " << tableResult.status().ToString();
         return {};
     }
 
     auto table = tableResult.ValueOrDie();
-    fprintf(stderr, "[DataCache] loaded Arrow IPC %s: %lld rows x %d cols\n",
-            path.c_str(), table->num_rows(), table->num_columns());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCache] loaded Arrow IPC " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
 
     return tableToRows(table);
 }
@@ -267,8 +251,7 @@ std::shared_ptr<arrow::Table> DataCache::loadDataSetTable(int dataId)
 
     auto inResult = arrow::io::ReadableFile::Open(path);
     if (!inResult.ok()) {
-        fprintf(stderr, "[DataCache] loadTable: cannot open %s\n", path.c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[DataCache] loadTable: cannot open " << path;
         return nullptr;
     }
 
@@ -288,9 +271,7 @@ std::shared_ptr<arrow::Table> DataCache::loadDataSetTable(int dataId)
     if (!tableResult.ok()) return nullptr;
 
     auto table = tableResult.ValueOrDie();
-    fprintf(stderr, "[DataCache] loaded Arrow Table %s: %lld rows x %d cols\n",
-            path.c_str(), table->num_rows(), table->num_columns());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCache] loaded Arrow Table " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
     return table;
 }
 
@@ -389,9 +370,7 @@ void DataCache::finishArrowWrite(ArrowWriteToken token)
     auto* s = static_cast<ArrowWriteSession*>(token);
     if (s->writer) s->writer->Close();
     s->stream.reset();
-    fprintf(stderr, "[DataCache] saved Arrow IPC %s: %lld rows x %zu cols\n",
-            dataFilePath(s->dataId).c_str(), s->totalRows, s->fieldNames.size());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataCache] saved Arrow IPC " << dataFilePath(s->dataId) << ": " << s->totalRows << " rows x " << s->fieldNames.size() << " cols";
     delete s;
 }
 

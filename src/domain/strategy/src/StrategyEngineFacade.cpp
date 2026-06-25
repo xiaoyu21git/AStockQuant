@@ -6,10 +6,13 @@
 #include "../include/RuntimeFactorSvc.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/DatabaseConfig.h"
+#include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "../../backtest/include/BacktestRequest.h"
 #include "../../backtest/include/BacktestFillSimulator.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/IMarketDataView.h"
+#include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../factor/include/factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "../../factor/include/FactorMetricsCalculator.h"
 #include "../../trading/PositionAccountEngine.h"
@@ -19,10 +22,12 @@
 #include "foundation/log/logging.hpp"
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "foundation/Utils/Timestamp.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <sstream>
 #include <exception>
 #include <string>
 #include <utility>
@@ -64,13 +69,14 @@ std::vector<std::string> parseFactorIds(const std::string& json) {
 std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId,
                                                          std::unique_ptr<IRuntimeFactorService> factorSvc)
 {
+    try {
     auto& pool = astock::database::NativeMySQLConnectionPool::instance();
     if (!pool.isInitialized()) return nullptr;
 
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) return nullptr;
 
-    // 查询策略定义表获取参数 (MySQL: strategy 表, metadata_json 列)
+    // 查询策略定义表获取参数 (数据库: strategy 表, metadata_json 列)
     auto result = db->executeQuery(
         "SELECT metadata_json, parameters FROM strategy WHERE strategy_id = ?",
         {strategyId});
@@ -121,14 +127,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     const bool isFactorType = params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
                            || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MachineLearning;
 
-    fprintf(stderr, "[fromDb] strategyId=%s isFactorType=%d factorSvc=%p factorIds=%zu\n",
-            strategyId.c_str(), isFactorType,
-            static_cast<void*>(factorSvc.get()),
-            params.factorIds.size());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[fromDb] strategyId=" << strategyId << " isFactorType=" << isFactorType << " factorSvc=" << static_cast<void*>(factorSvc.get()) << " factorIds=" << params.factorIds.size();
 
     if (isFactorType && !factorSvc) {
-        fprintf(stderr, "[fromDb] ABORT: factor strategy but factorSvc is null\n"); fflush(stderr);
+        INTERNAL_WARN_STREAM << "[fromDb] ABORT: factor strategy but factorSvc is null";
         return nullptr;
     }
 
@@ -136,26 +138,24 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     auto engineBuilder = StrategyEngine::builder();
     if (factorSvc) {
         auto* rfsPtr = dynamic_cast<RuntimeFactorSvc*>(factorSvc.get());
-        fprintf(stderr, "[fromDb] factorSvc dynamic_cast to RuntimeFactorSvc = %p\n",
-                static_cast<void*>(rfsPtr));
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[fromDb] factorSvc dynamic_cast to RuntimeFactorSvc = " << static_cast<void*>(rfsPtr);
         if (rfsPtr && !params.factorIds.empty()) {
             rfsPtr->setFactorIds(params.factorIds);
         }
         engineBuilder.withFactorService(std::move(factorSvc));
     }
-    fprintf(stderr, "[fromDb] building engine...\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[fromDb] building engine...";
     auto engine = engineBuilder
         .maxStrategies(params.maxPositions)
         .build();
-    fprintf(stderr, "[fromDb] engine built: %p\n", static_cast<void*>(engine.get())); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[fromDb] engine built: " << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
 
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
 
-    if (isFactorType) {
+    if (isFactorType) {//策略中因子的开关。true 表示策略中使用了因子，false 表示策略中不使用因子
         // ── 因子策略 ──
         if (params.factorIds.empty()) {
             INTERNAL_WARN_STREAM << "[fromDb] factor strategy has no factor_ids configured";
@@ -256,6 +256,14 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     app::system::TradingSystem::instance().setRiskConfig(riskCfg);
 
     return engine;
+
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[fromDb] exception: " << e.what();
+        return nullptr;
+    } catch (...) {
+        INTERNAL_ERROR_STREAM << "[fromDb] unknown exception";
+        return nullptr;
+    }
 }
 
 StrategyEngine::Builder StrategyEngine::builder()
@@ -282,7 +290,85 @@ void StrategyEngine::setLiveMarketView(const void* view)
 {
     if (auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get())) {
         rfs->setLiveMarketView(static_cast<const factor::compute::IMarketDataView*>(view));
+    } else {
+        // 非因子策略：注入历史行情视图，否则 NonFactorStrategy::evaluate() 拿不到数据
+        setContextHistoricalView(view);
     }
+}
+
+bool StrategyEngine::prepareMarketData()
+{
+    // ── 根据策略因子开关决定字段需求与回溯窗口 ──
+    std::vector<std::string> extraFields;
+    int lookbackDays = 90;
+    if (m_hasFactorStrategies) {
+        auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
+        if (rfs) {
+            extraFields = rfs->getRequiredFields();
+            lookbackDays = std::max(90, rfs->getMaxLookbackDays());
+        }
+    }
+
+    // ── 计算日期范围 ──
+    const auto now = foundation::utils::Timestamp::now();
+    const std::string endDate = now.to_string("%Y-%m-%d");
+    const auto start = now - foundation::utils::Duration::days(lookbackDays);
+    const std::string startDate = start.to_string("%Y-%m-%d");
+
+    // ── 从连接池获取 PG 连接（线程缓存复用）──
+    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto db = pool.getConnection();
+    if (!db || !db->isOpen()) {
+        INTERNAL_ERROR_STREAM << "[Engine] prepareMarketData: PG connection failed";
+        return false;
+    }
+
+    if (!m_hasFactorStrategies) {
+        // ── 非因子策略：fromSqlRows 直接构建，零 Qt/JSON 中转 ──
+        std::ostringstream sql;
+        sql << "SELECT si.symbol, d.trade_date, d.open, d.high, d.low, d.close, d.volume"
+            << " FROM mkt.daily_bar d"
+            << " JOIN ref.symbol_info si ON d.symbol_id = si.id"
+            << " WHERE d.trade_date >= '" << startDate << "'"
+            << " AND d.trade_date <= '" << endDate << "'"
+            << " ORDER BY si.symbol, d.trade_date ASC";
+        auto result = db->executeQuery(sql.str());
+        auto rawRows = result.getRows();
+        INTERNAL_INFO_STREAM << "[Engine] query OHLCV: " << rawRows.size()
+                             << " rows, start=" << startDate << " end=" << endDate;
+        if (!rawRows.empty()) {
+            m_liveMarketView = factor::compute::CachedMarketDataView::fromSqlRows(rawRows, {});
+        }
+    }
+    else{
+        // ── 因子策略：MarketDataRepository → buildLiveView ──
+        auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
+        auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+        auto rawRows = repo->queryAllMarketDailyBarWithFields(startDate, endDate, extraFields);
+        INTERNAL_INFO_STREAM << "[Engine] query Factor: " << rawRows.size()<< " rows, fields=" << (5 + extraFields.size());
+        if (!rawRows.empty() && rfs) {
+            rfs->buildLiveView(rawRows, extraFields);
+        }
+    }
+
+    // ── 注入视图 ──
+    const factor::compute::IMarketDataView* v = nullptr;
+    if (m_hasFactorStrategies) {
+        auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
+        if (rfs) v = rfs->liveView();
+    } else {
+        v = m_liveMarketView.get();
+    }
+    if (v) {
+        setLiveMarketView(v);
+        INTERNAL_INFO_STREAM << "[Engine] 历史数据就绪: " << v->dates().size()
+                             << "天 " << v->instruments().size()
+                             << "标的 fields=" << (extraFields.empty() ? 5 : 5 + extraFields.size());
+        return true;
+    }
+
+    INTERNAL_WARN_STREAM << "[Engine] 历史数据为空: start=" << startDate << " end=" << endDate;
+    return false;
 }
 
 StrategyEngine::StrategyEngine(std::unique_ptr<IRuntimeFactorService> factorService,
@@ -305,6 +391,9 @@ StrategyServiceFlowResult StrategyEngine::registerStrategy(
     std::shared_ptr<IRuntimeStrategy> strategy,
     const RuntimeStrategyContext& context)
 {
+    if (strategy && strategy->usesFactors()) {
+        m_hasFactorStrategies = true;
+    }
     return strategyService_->registerStrategy(std::move(strategy), context);
 }
 
@@ -316,6 +405,9 @@ StrategyServiceFlowResult StrategyEngine::registerStrategies(
         return StrategyServiceFlowResult(StrategyServiceFlowCode::InvalidInput);
     }
     for (std::size_t i = 0; i < strategies.size(); ++i) {
+        if (strategies[i] && strategies[i]->usesFactors()) {
+            m_hasFactorStrategies = true;
+        }
         const StrategyServiceFlowResult result =
             strategyService_->registerStrategy(strategies[i], contexts[i]);
         if (!result.isOk()) {
@@ -499,9 +591,7 @@ void StrategyEngine::drainQueue()
     // 循环退出时报告丢 tick 统计
     auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
     if (dropped > 0) {
-        fprintf(stderr, "[StrategyEngine] drainQueue stopped: %llu ticks dropped during session\n",
-                static_cast<unsigned long long>(dropped));
-        fflush(stderr);
+        INTERNAL_WARN_STREAM << "[StrategyEngine] drainQueue stopped: " << static_cast<unsigned long long>(dropped) << " ticks dropped during session";
     }
 }
 
@@ -735,10 +825,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         auto volumeMat = view->volume();
 
         if (r == 0 || r == totalDays-1 || r % 100 == 0) {
-            fprintf(stderr, "[backtest] day %d/%d equity=%.2f positions=%zu\n",
-                    r, totalDays, posEngine.account().totalAsset(),
-                    posEngine.positions().size());
-            fflush(stderr);
+            INTERNAL_INFO_STREAM << "[backtest] day " << r << "/" << totalDays << " equity=" << posEngine.account().totalAsset() << " positions=" << posEngine.positions().size();
         }
 
         std::vector<MarketDataPoint> mdpBatch;
@@ -759,8 +846,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         if (ordersOpt.has_value()) {
             auto& orderList = ordersOpt.value();
             if (r == 0 || r % 100 == 0) {
-                fprintf(stderr, "[backtest] day %d orders=%zu\n", r, orderList.size());
-                fflush(stderr);
+                INTERNAL_INFO_STREAM << "[backtest] day " << r << " orders=" << orderList.size();
             }
             for (const auto& order : orderList) {
                 const std::uint32_t instrumentId = order.instrumentId().value;
@@ -881,20 +967,19 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    fprintf(stderr, "[backtest] loop done: days=%d finalEquity=%.2f fills=%d riskRejected=%d\n",
-            totalDays, posEngine.account().totalAsset(), totalFills, riskRejectedCount);
+    INTERNAL_INFO_STREAM << "[backtest] loop done: days=" << totalDays << " finalEquity=" << posEngine.account().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
     // 逐标的盈亏 top5
     std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
     std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });
     int showN = std::min(5, static_cast<int>(topStocks.size()));
     if (showN > 0) {
-        fprintf(stderr, "[backtest] top%d winners: ", showN);
-        for (int i = 0; i < showN; ++i) fprintf(stderr, "%s(%.0f) ", topStocks[i].first.c_str(), topStocks[i].second);
-        fprintf(stderr, "\n[backtest] top%d losers:  ", showN);
-        for (int i = 0; i < showN; ++i) fprintf(stderr, "%s(%.0f) ", topStocks[topStocks.size()-1-i].first.c_str(), topStocks[topStocks.size()-1-i].second);
-        fprintf(stderr, "\n");
+        std::ostringstream topOss;
+        topOss << "[backtest] top" << showN << " winners: ";
+        for (int i = 0; i < showN; ++i) topOss << topStocks[i].first << "(" << static_cast<int>(topStocks[i].second) << ") ";
+        topOss << "\n[backtest] top" << showN << " losers:  ";
+        for (int i = 0; i < showN; ++i) topOss << topStocks[topStocks.size()-1-i].first << "(" << static_cast<int>(topStocks[topStocks.size()-1-i].second) << ") ";
+        INTERNAL_INFO_STREAM << topOss.str();
     }
-    fflush(stderr);
 
     if (onProgress) onProgress(kLoopEnd);
 
@@ -993,7 +1078,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
     }
     if (onProgress) onProgress(100.0);
-    fprintf(stderr, "[backtest] success, returning result\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[backtest] success, returning result";
     result.success = true;
     return result;
 }

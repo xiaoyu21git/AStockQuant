@@ -19,11 +19,10 @@ from tools.history_start_policy import resolve_history_date_bounds
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "
-    "user": "root",
-    "password": "123456a",
+    "port": 5432,
+    "user": "astock",
+    "password": "astock123",
     "database": "astock_quant",
-    "charset": "utf8mb4",
     "autocommit": False,
 }
 
@@ -58,13 +57,13 @@ def print_summary(cursor, start_date: str, end_date: str) -> None:
     cursor.execute(
         """
         SELECT COUNT(*) AS total_rows,
-               SUM(pre_close IS NOT NULL AND pre_close > 0) AS eligible_rows,
-               SUM((change_amt IS NULL OR change_amt = 0) AND pre_close IS NOT NULL AND pre_close > 0) AS change_amt_target_rows,
-               SUM((change_pct IS NULL OR change_pct = 0) AND pre_close IS NOT NULL AND pre_close > 0) AS change_pct_target_rows,
-               SUM((amplitude IS NULL OR amplitude = 0) AND pre_close IS NOT NULL AND pre_close > 0) AS amplitude_target_rows,
-               SUM(close <> pre_close AND change_amt = 0 AND pre_close IS NOT NULL AND pre_close > 0) AS suspicious_change_amt_zero,
-               SUM(close <> pre_close AND change_pct = 0 AND pre_close IS NOT NULL AND pre_close > 0) AS suspicious_change_pct_zero,
-               SUM(high <> low AND amplitude = 0 AND pre_close IS NOT NULL AND pre_close > 0) AS suspicious_amplitude_zero
+               COUNT(*) FILTER (WHERE pre_close IS NOT NULL AND pre_close > 0) AS eligible_rows,
+               COUNT(*) FILTER (WHERE (change_amt IS NULL OR change_amt = 0) AND pre_close IS NOT NULL AND pre_close > 0) AS change_amt_target_rows,
+               COUNT(*) FILTER (WHERE (change_pct IS NULL OR change_pct = 0) AND pre_close IS NOT NULL AND pre_close > 0) AS change_pct_target_rows,
+               COUNT(*) FILTER (WHERE (amplitude IS NULL OR amplitude = 0) AND pre_close IS NOT NULL AND pre_close > 0) AS amplitude_target_rows,
+               COUNT(*) FILTER (WHERE close <> pre_close AND change_amt = 0 AND pre_close IS NOT NULL AND pre_close > 0) AS suspicious_change_amt_zero,
+               COUNT(*) FILTER (WHERE close <> pre_close AND change_pct = 0 AND pre_close IS NOT NULL AND pre_close > 0) AS suspicious_change_pct_zero,
+               COUNT(*) FILTER (WHERE high <> low AND amplitude = 0 AND pre_close IS NOT NULL AND pre_close > 0) AS suspicious_amplitude_zero
         FROM daily_bar
         WHERE trade_date BETWEEN %s AND %s
         """,
@@ -78,28 +77,29 @@ def print_samples(cursor, start_date: str, end_date: str, limit_sample: int) -> 
         return
     cursor.execute(
         """
-        SELECT symbol,
-               trade_date,
-               close,
-               pre_close,
-               high,
-               low,
-               change_amt,
-               ROUND(close - pre_close, 4) AS implied_change_amt,
-               change_pct,
-               ROUND(((close - pre_close) / pre_close) * 100, 4) AS implied_change_pct,
-               amplitude,
-               ROUND(((high - low) / pre_close) * 100, 4) AS implied_amplitude
-        FROM daily_bar
-        WHERE trade_date BETWEEN %s AND %s
-          AND pre_close IS NOT NULL
-          AND pre_close > 0
+        SELECT si.symbol,
+               d.trade_date,
+               d.close,
+               d.pre_close,
+               d.high,
+               d.low,
+               d.change_amt,
+               ROUND(d.close - d.pre_close, 4) AS implied_change_amt,
+               d.change_pct,
+               ROUND(((d.close - d.pre_close) / d.pre_close) * 100, 4) AS implied_change_pct,
+               d.amplitude,
+               ROUND(((d.high - d.low) / d.pre_close) * 100, 4) AS implied_amplitude
+        FROM daily_bar d
+        JOIN ref.symbol_info si ON d.symbol_id = si.id
+        WHERE d.trade_date BETWEEN %s AND %s
+          AND d.pre_close IS NOT NULL
+          AND d.pre_close > 0
           AND (
-                change_amt IS NULL OR change_amt = 0 OR
-                change_pct IS NULL OR change_pct = 0 OR
-                amplitude IS NULL OR amplitude = 0
+                d.change_amt IS NULL OR d.change_amt = 0 OR
+                d.change_pct IS NULL OR d.change_pct = 0 OR
+                d.amplitude IS NULL OR d.amplitude = 0
           )
-        ORDER BY trade_date DESC, symbol ASC
+        ORDER BY d.trade_date DESC, si.symbol ASC
         LIMIT %s
         """,
         (start_date, end_date, limit_sample),

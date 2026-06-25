@@ -215,7 +215,7 @@ bool JujinMarketConnector::isEnabledByEnvironment() const
 bool JujinMarketConnector::start()
 {
     if (m_started) {
-        std::cout << "[JujinMarketConnector] start skipped: already started\n";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] start skipped: already started";
         return true;
     }
 
@@ -239,7 +239,7 @@ bool JujinMarketConnector::start()
     m_marketSubscriptionBatchSize = static_cast<size_t>(
         (std::max)(1, cfg::readInt(configObj, "marketSubscriptionBatchSize",
                                    "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE", 4)));
-    std::cout << "[JujinMarketConnector] start requested\n";
+    INTERNAL_INFO_STREAM << "[JujinMarketConnector] start requested";
 
     // 直接读 trading_connection.json
     std::string token, accountId, gmStrategyId, accountRuntimeId;
@@ -280,12 +280,12 @@ bool JujinMarketConnector::start()
     config.extra_params["simtrade_only"] = "false";
     config.extra_params["read_only"] = "false";
 
-    std::cout << "[JujinMarketConnector] accountId=" << config.account_id
-              << " gmStrategyId=" << gmStrategyId
-              << " resolvedId=" << resolvedId
-              << " mode=" << config.extra_params["mode"]
-              << " simtradeOnly=" << config.extra_params["simtrade_only"]
-              << " readOnly=" << config.extra_params["read_only"] << "\n";
+    INTERNAL_INFO_STREAM << "[JujinMarketConnector] accountId=" << config.account_id
+                         << " gmStrategyId=" << gmStrategyId
+                         << " resolvedId=" << resolvedId
+                         << " mode=" << config.extra_params["mode"]
+                         << " simtradeOnly=" << config.extra_params["simtrade_only"]
+                         << " readOnly=" << config.extra_params["read_only"];
 
     m_api = std::make_unique<thirdparty::JujinApi>();
     m_api->set_event_bus(std::shared_ptr<engine::EventBus>(eventBus, [](engine::EventBus*) {}));
@@ -299,7 +299,7 @@ bool JujinMarketConnector::start()
     if (m_marketSubscriptionThread.joinable()) m_marketSubscriptionThread.join();
     m_marketSubscriptionThread = std::thread([this, eventBus]() { processSubscriptionRequests(eventBus); });
 
-    std::cerr << "[JMC] API connected. watchlist size=" << watchlistFromEnvironment().size() << "\n";
+    INTERNAL_ERROR_STREAM << "[JMC] API connected. watchlist size=" << watchlistFromEnvironment().size();
 
     const std::vector<std::string> watchlist = watchlistFromEnvironment();
     if (!watchlist.empty() && marketSessionAllowsSubscriptions()) {
@@ -318,7 +318,7 @@ bool JujinMarketConnector::start()
                 inst->next();
             }
             inst->release();
-            std::cerr << "[JMC] auto-subscribed " << cnt << " instruments\n";
+            INTERNAL_ERROR_STREAM << "[JMC] auto-subscribed " << cnt << " instruments";
         }
     }
 
@@ -378,7 +378,7 @@ bool JujinMarketConnector::start()
 
     std::unordered_set<std::string> boundIds = cfg::readBoundStrategyIds(configObj);
     publishExistingOrders(eventBus, token, config.account_id, resolvedId, boundIds);
-    std::cout << "[JujinMarketConnector] start completed\n";
+    INTERNAL_INFO_STREAM << "[JujinMarketConnector] start completed";
     return true;
 }
 
@@ -388,12 +388,12 @@ void JujinMarketConnector::stop()
     m_pendingWatchCv.notify_all();
 
     if (m_initialOrderSyncThread.joinable()) {
-        std::cout << "[JujinMarketConnector] waiting for initial order sync thread\n";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for initial order sync thread";
         m_initialOrderSyncThread.join();
     }
 
     if (m_marketSubscriptionThread.joinable()) {
-        std::cout << "[JujinMarketConnector] waiting for market subscription thread\n";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for market subscription thread";
         m_marketSubscriptionThread.join();
     }
 
@@ -414,11 +414,11 @@ void JujinMarketConnector::stop()
 
     if (!m_api) {
         m_started = false;
-        std::cout << "[JujinMarketConnector] stop skipped: api not initialized\n";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] stop skipped: api not initialized";
         return;
     }
 
-    std::cout << "[JujinMarketConnector] stopping\n";
+    INTERNAL_INFO_STREAM << "[JujinMarketConnector] stopping";
     {
         std::lock_guard<std::mutex> lock(m_subscriptionMutex);
         m_subscribedSymbols.clear();
@@ -438,7 +438,7 @@ void JujinMarketConnector::stop()
     m_api->disconnect();
     m_api.reset();
     m_started = false;
-    std::cout << "[JujinMarketConnector] stopped\n";
+    INTERNAL_INFO_STREAM << "[JujinMarketConnector] stopped";
 }
 
 std::string JujinMarketConnector::symbolName(const std::string& gmSymbol) const {
@@ -474,7 +474,7 @@ void JujinMarketConnector::enqueueWatchSymbol(const std::string& symbol)
 
 void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBus)
 {
-    std::cerr << "[JMC] subscription thread started\n" << std::flush;
+    INTERNAL_ERROR_STREAM << "[JMC] subscription thread started";
 
     // 从数据库 symbol_info 表拉全市场标的（SDK 的 get_instruments 实盘模式不可用）
     {
@@ -485,7 +485,7 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
             auto result = db->executeQuery(
                 "SELECT symbol, name FROM ref.symbol_info WHERE asset_class='STOCK' AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol");
                 int rows = static_cast<int>(result.rowCount());
-                std::cerr << "[JMC] DB query returned " << rows << " symbols\n" << std::flush;
+                INTERNAL_ERROR_STREAM << "[JMC] DB query returned " << rows << " symbols";
                 for (int i = 0; i < rows; ++i) {
                     const auto& row = result.getRow(i);
                     std::string sym = row.getString("symbol");
@@ -498,10 +498,10 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
                         enqueueWatchSymbol(sym);
                     }
                 }
-                std::cerr << "[JMC] enqueued " << rows << " instruments, names="
-                          << m_symbolNames.size() << "\n" << std::flush;
+                INTERNAL_ERROR_STREAM << "[JMC] enqueued " << rows << " instruments, names="
+                                      << m_symbolNames.size();
             } else {
-                std::cerr << "[JMC] DB connection failed\n" << std::flush;
+                INTERNAL_ERROR_STREAM << "[JMC] DB connection failed";
             }
     }
 
@@ -531,7 +531,7 @@ void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBu
         }
 
         if (!subscribeSymbolBatch(batch, eventBus)) {
-            std::cerr << "[JMC] subscribe batch failed size=" << batch.size() << "\n" << std::flush;
+            INTERNAL_ERROR_STREAM << "[JMC] subscribe batch failed size=" << batch.size();
         }
     }
 }
@@ -566,12 +566,12 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
         return true;
     }
 
-    std::cerr << "[JMC] " "JujinMarketConnector: subscribe market batch size=" << static_cast<unsigned long long>(normalizedSymbols.size());
+    INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: subscribe market batch size=" << static_cast<unsigned long long>(normalizedSymbols.size());
 
     if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::TICK, {})) {
         for (const std::string& symbol : normalizedSymbols) {
             if (!subscribeSymbol(symbol, eventBus)) {
-                std::cerr << "[JMC] " "JujinMarketConnector: failed to subscribe tick fallback symbol" << (symbol);
+                INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: failed to subscribe tick fallback symbol" << (symbol);
             }
         }
         return false;
@@ -579,7 +579,7 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
     if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::BAR_1M, {})) {
         for (const std::string& symbol : normalizedSymbols) {
             if (!subscribeSymbol(symbol, eventBus)) {
-                std::cerr << "[JMC] " "JujinMarketConnector: failed to subscribe bar fallback symbol" << (symbol);
+                INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: failed to subscribe bar fallback symbol" << (symbol);
             }
         }
         return false;
@@ -615,8 +615,8 @@ bool JujinMarketConnector::subscribeSymbol(const std::string& symbol, engine::Ev
         }
     }
 
-    std::cerr << "[JMC] " "JujinMarketConnector: subscribe market symbol" << (symbol)
-             << "->" << (normalizedSymbol);
+    INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: subscribe market symbol" << (symbol)
+                         << "->" << (normalizedSymbol);
 
     const std::vector<std::string> symbols{normalizedSymbol};
     if (!m_api->subscribe_market_data(symbols, thirdparty::MarketDataType::TICK, {})) {
@@ -665,8 +665,8 @@ void JujinMarketConnector::publishSubscriptionStatus(engine::EventBus* eventBus,
     event.metadata["active"] = active ? "true" : "false";
     const auto result = eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     if (!result) {
-        std::cerr << "[JMC] " "JujinMarketConnector: failed to publish subscription status"
-                   << (result.message);
+        INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: failed to publish subscription status"
+                              << (result.message);
     }
 }
 
@@ -694,7 +694,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
 
     m_initialOrderSyncThread = std::thread([this, rawEventBus, requestToken, requestAccountId,
                                             configuredRuntimeId, configuredBoundIds]() {
-        std::cout << "[JujinMarketConnector] initial unfinished-order sync started asynchronously\n";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] initial unfinished-order sync started asynchronously";
 
         // 1. Write Python script to temp file
 #ifdef _WIN32
@@ -705,7 +705,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
 #endif
         std::ofstream scriptFile(tmpPath, std::ios::out | std::ios::trunc);
         if (!scriptFile.is_open()) {
-            std::cerr << "[JujinMarketConnector] failed to create temp python script file\n";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] failed to create temp python script file";
             return;
         }
 
@@ -759,7 +759,7 @@ print(json.dumps(result, ensure_ascii=True))
 #endif
         if (!pipe) {
             std::remove(tmpPath.c_str());
-            std::cerr << "[JujinMarketConnector] python process start failed\n";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] python process start failed";
             return;
         }
 
@@ -776,19 +776,19 @@ print(json.dumps(result, ensure_ascii=True))
 
         if (m_stopRequested.load()) return;
         if (ret != 0) {
-            std::cerr << "[JujinMarketConnector] python exited code=" << ret
-                      << " output=" << output.substr(0, 256) << "\n";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] python exited code=" << ret
+                                  << " output=" << output.substr(0, 256);
             return;
         }
 
         // 3. Parse JSON
         auto doc = foundation::json::JsonFacade::parse(output);
         if (!doc.isArray()) {
-            std::cerr << "[JujinMarketConnector] invalid JSON array\n";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] invalid JSON array";
             return;
         }
         if (doc.size() == 0) {
-            std::cout << "[JujinMarketConnector] no orders found\n";
+            INTERNAL_INFO_STREAM << "[JujinMarketConnector] no orders found";
             return;
         }
 
@@ -848,8 +848,8 @@ print(json.dumps(result, ensure_ascii=True))
             rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
             ++publishedCount;
         }
-        std::cout << "[JujinMarketConnector] sync done published=" << publishedCount
-                  << " filtered=" << filteredCount << "\n";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] sync done published=" << publishedCount
+                             << " filtered=" << filteredCount;
     });
 }
 

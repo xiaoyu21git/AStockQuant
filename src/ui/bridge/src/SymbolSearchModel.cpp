@@ -1,7 +1,7 @@
 #include "SymbolSearchModel.h"
+#include "foundation/log/logging.hpp"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 
-#include <QDebug>
 #include <algorithm>
 
 SymbolSearchModel::SymbolSearchModel(QObject* parent)
@@ -29,22 +29,22 @@ QHash<int, QByteArray> SymbolSearchModel::roleNames() const {
 void SymbolSearchModel::init() {
     auto& pool = astock::database::NativeMySQLConnectionPool::instance();
     if (!pool.isInitialized()) {
-        qWarning() << "[SymbolSearch] DB pool not initialized";
+        INTERNAL_WARN_STREAM << "[SymbolSearch] DB pool not initialized";
         return;
     }
 
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) {
-        qWarning() << "[SymbolSearch] DB connection failed";
+        INTERNAL_WARN_STREAM << "[SymbolSearch] DB connection failed";
         return;
     }
 
     auto result = db->executeQuery(
         "SELECT symbol, name, exchange FROM symbol_info WHERE asset_class='STOCK' ORDER BY symbol");
     int rows = static_cast<int>(result.rowCount());
-    qDebug() << "[SymbolSearch] query returned" << rows << "rows";
+    INTERNAL_DEBUG_STREAM << "[SymbolSearch] query returned" << rows << "rows";
     if (rows == 0) {
-        qWarning() << "[SymbolSearch] symbol_info table empty or missing";
+        INTERNAL_WARN_STREAM << "[SymbolSearch] symbol_info table empty or missing";
         return;
     }
 
@@ -62,8 +62,8 @@ void SymbolSearchModel::init() {
     m_filtered.clear();
     for (int i = 0; i < m_all.size(); ++i) m_filtered.push_back(i);
     endResetModel();
-    qDebug() << "[SymbolSearch] loaded" << m_all.size() << "symbols, first="
-             << (m_all.isEmpty() ? "none" : m_all[0].symbol + " " + m_all[0].secName);
+    INTERNAL_DEBUG_STREAM << "[SymbolSearch] loaded" << m_all.size() << "symbols, first="
+             << (m_all.isEmpty() ? "none" : (m_all[0].symbol + " " + m_all[0].secName).toStdString());
     emit countChanged();
 }
 

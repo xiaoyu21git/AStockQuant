@@ -32,8 +32,7 @@ SignalSet SignalSetBuilder::build(
     signalSet.progress = {1, 1};
 
     if (timeCount <= 0 || instCount <= 0) {
-        LOG_WARN(std::string("SignalSetBuilder: empty dimensions, timeCount=")
-            + std::to_string(timeCount) + " instCount=" + std::to_string(instCount));
+        INTERNAL_WARN_STREAM << "SignalSetBuilder: empty dimensions, timeCount=" << timeCount << " instCount=" << instCount;
         return signalSet;
     }
 
@@ -62,29 +61,22 @@ SignalSet SignalSetBuilder::build(
 
     switch (mode) {
     case SignalEngineMode::SignalOnly:
-        LOG_INFO(std::string("SignalSetBuilder[SignalOnly] totalDates=")
-            + std::to_string(timeCount) + " matchedDates=" + std::to_string(matchedDates)
-            + " instruments=" + std::to_string(instCount)
-            + " matchedValues=" + std::to_string(totalMatchedValues));
+        INTERNAL_INFO_STREAM << "SignalSetBuilder[SignalOnly] totalDates=" << timeCount << " matchedDates=" << matchedDates << " instruments=" << instCount << " matchedValues=" << totalMatchedValues;
         break;
 
     case SignalEngineMode::FullPipeline:
-        LOG_INFO(std::string("SignalSetBuilder[FullPipeline] totalDates=")
-            + std::to_string(timeCount) + " matchedDates=" + std::to_string(matchedDates)
-            + " instruments=" + std::to_string(instCount)
-            + " matchedValues=" + std::to_string(totalMatchedValues));
+        INTERNAL_INFO_STREAM << "SignalSetBuilder[FullPipeline] totalDates=" << timeCount << " matchedDates=" << matchedDates << " instruments=" << instCount << " matchedValues=" << totalMatchedValues;
         break;
 
     case SignalEngineMode::Incremental:
         if (matchedDates == 0) {
-            LOG_WARN("SignalSetBuilder[Incremental] no valid signal for current date");
+            INTERNAL_WARN_STREAM << "SignalSetBuilder[Incremental] no valid signal for current date";
         }
         break;
     }
 
     if (matchedDates == 0 && factorValues.size() > 0) {
-        LOG_WARN(std::string("SignalSetBuilder: date format mismatch! dateStrs[0]=")
-            + dateStrs[0] + " fvKey0=" + factorValues.begin()->first);
+        INTERNAL_WARN_STREAM << "SignalSetBuilder: date format mismatch! dateStrs[0]=" << dateStrs[0] << " fvKey0=" << factorValues.begin()->first;
     }
 
     return signalSet;

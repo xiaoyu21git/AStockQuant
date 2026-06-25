@@ -206,10 +206,7 @@ private:
     StrategyListModel* m_listModel{nullptr};
     std::unique_ptr<domain::strategy::IOrderListener> m_orderListener;
 
-    // 实盘行情视图
-    std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
-
-    // 异步启动线程池
+    // 异步启动线程池（仅用于将工作从主线程卸到后台）
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_startupPool;
 
     // 策略运行时状态（内存单向控制，不查 DB/引擎）

@@ -1,5 +1,6 @@
 // internal/logger.cpp
 #include "foundation/log/logger.hpp"
+#include "foundation/log/logging.hpp"
 #include <iomanip>
 
 namespace foundation {
@@ -77,13 +78,13 @@ void ConsoleHandler::handle(LogLevel level, const std::string& message,
         std::string reset_code = "\033[0m";
         
         if (level == LogLevel::Found_ERROR || level == LogLevel::FATAL) {
-            std::cerr << color_code << formatted << reset_code << std::endl;
+            INTERNAL_ERROR_STREAM << color_code << formatted << reset_code;
         } else {
             std::cout << color_code << formatted << reset_code << std::endl;
         }
     } else {
         if (level == LogLevel::Found_ERROR || level == LogLevel::FATAL) {
-            std::cerr << formatted << std::endl;
+            INTERNAL_ERROR_STREAM << formatted;
         } else {
             std::cout << formatted << std::endl;
         }

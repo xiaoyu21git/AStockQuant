@@ -4,7 +4,7 @@
 #include <QJsonDocument>
 #include <QFile>
 #include <QIODevice>
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 #include <QHash>
 
 namespace AStockQuantEngine::UI {
@@ -867,7 +867,7 @@ MetaView* ViewLoader::createStrategyLibraryView() {
 QJsonObject ViewLoader::loadJsonFile(const QString& filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "Failed to open JSON file:" << filePath;
+        INTERNAL_WARN_STREAM << "Failed to open JSON file:" << filePath.toStdString();
         return QJsonObject();
     }
     
@@ -876,7 +876,7 @@ QJsonObject ViewLoader::loadJsonFile(const QString& filePath) {
     
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (doc.isNull()) {
-        qWarning() << "Failed to parse JSON from file:" << filePath;
+        INTERNAL_WARN_STREAM << "Failed to parse JSON from file:" << filePath.toStdString();
         return QJsonObject();
     }
     
@@ -886,7 +886,7 @@ QJsonObject ViewLoader::loadJsonFile(const QString& filePath) {
 void ViewLoader::saveJsonFile(const QString& filePath, const QJsonObject& json) {
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly)) {
-        qWarning() << "Failed to open JSON file for writing:" << filePath;
+        INTERNAL_WARN_STREAM << "Failed to open JSON file for writing:" << filePath.toStdString();
         return;
     }
     

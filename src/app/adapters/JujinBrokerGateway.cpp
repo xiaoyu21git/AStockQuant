@@ -23,9 +23,7 @@ void JujinBrokerGateway::tryResolveApi() const {
 bool JujinBrokerGateway::connect(const std::string& /*configJson*/) {
     tryResolveApi();
     if (!m_api) {
-        std::cerr << "[JujinBrokerGateway] shared JujinApi not yet available, "
-                     "will retry on first order\n"
-                  << std::flush;
+        INTERNAL_ERROR_STREAM << "[JujinBrokerGateway] shared JujinApi not yet available, will retry on first order";
     }
     return true;
 }

@@ -46,9 +46,8 @@ std::unique_ptr<cleaning::ICleaningRule> createCppRule(const std::string& ruleKe
     if (ruleKey == "stFilter")               return std::make_unique<STFilterRule>();
 
     // 未识别的规则键 — 打印警告，避免静默跳过
-    fprintf(stderr, "[CleaningSvcRefactored] WARNING: unknown cleaning rule key \"%s\", skipped. "
-                    "请检查规则名是否与 CoreCleaningRules.h 中的 ruleName() 一致\n", ruleKey.c_str());
-    fflush(stderr);
+    INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] WARNING: unknown cleaning rule key \"" << ruleKey << "\", skipped. "
+                    "请检查规则名是否与 CoreCleaningRules.h 中的 ruleName() 一致";
     return nullptr;
 }
 
@@ -94,7 +93,7 @@ bool DataCleaningServiceRefactored::initialize() {
     if (m_initialized) return true;
     DataCacheAdapter::instance().initialize(bridge::storage::persistentDatasetRootDir());
     m_initialized = true;
-    fprintf(stderr, "[CleaningSvcRefactored] initialized\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] initialized";
     return true;
 }
 
@@ -129,8 +128,7 @@ void DataCleaningServiceRefactored::cancelCleaning(const QString& requestId) {
         // 标记此请求已取消，防止回调中重复发信号
         if (!requestId.isEmpty()) m_impl->cancelledRequests.insert(requestId);
     }
-    fprintf(stderr, "[CleaningSvcRefactored] cancelCleaning: %s\n", requestId.toStdString().c_str());
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] cancelCleaning: " << requestId.toStdString();
 }
 
 // ── 从 DataSet 清洗（纯 C++ 类型，零 QVariant） ──
@@ -221,7 +219,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             const int poolSize = 5000;
             std::vector<cleaning::LightRow> pool(poolSize);
             bool engineFirst = true;
-            fprintf(stderr, "[CleaningSvc] rules=%d batches=%d\n", ruleCount, numBatches); fflush(stderr);
+            INTERNAL_INFO_STREAM << "[CleaningSvc] rules=" << ruleCount << " batches=" << numBatches;
 
             for (int bi = 0; bi < numBatches; ++bi) {
                 auto batch = reader->ReadRecordBatch(bi).ValueOrDie();
@@ -290,7 +288,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             }
             DataCacheAdapter::instance().finishArrowWrite(token, outputRows);
             message = QString("清洗完成: %1 → %2 条").arg(inputRows).arg(outputRows);
-            fprintf(stderr, "[CleaningSvc] done: %d -> %d rows removed=%d\n", inputRows, outputRows, inputRows - outputRows); fflush(stderr);
+            INTERNAL_INFO_STREAM << "[CleaningSvc] done: " << inputRows << " -> " << outputRows << " rows removed=" << (inputRows - outputRows);
 
         } catch (const std::exception& e) {
             message = QString("清洗异常: %1").arg(e.what());

@@ -1,6 +1,6 @@
 // PreviewDataModel.cpp
 #include "PreviewDataModel.h"
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonValue>
@@ -135,11 +135,11 @@ PreviewDataModel::PreviewDataModel(QObject* parent)
     m_roleNames[ChangeRole] = "change";
     m_roleNames[VolumeRole] = "volume";
     
-    qDebug() << "PreviewDataModel: 创建，最大显示条数:" << m_maxDisplayCount;
+    INTERNAL_DEBUG_STREAM << "PreviewDataModel: 创建，最大显示条数:" << m_maxDisplayCount;
 }
 
 PreviewDataModel::~PreviewDataModel() {
-    qDebug() << "PreviewDataModel: 销毁，数据条数:" << m_allData.size();
+    INTERNAL_DEBUG_STREAM << "PreviewDataModel: 销毁，数据条数:" << m_allData.size();
 }
 
 QString PreviewDataModel::previewItemCategoryKey(const PreviewItem& item)
@@ -236,7 +236,7 @@ void PreviewDataModel::updateData(const QVector<QVariantMap>& data) {
     //  更新数据，条数:" << data.size();
     
     if (data.size() > m_maxDisplayCount) {
-        qDebug() << "  数据量超过最大显示限制(" << m_maxDisplayCount 
+        INTERNAL_DEBUG_STREAM << "  数据量超过最大显示限制(" << m_maxDisplayCount 
                  << ")，仅使用前" << m_maxDisplayCount << "条";
     }
     
@@ -298,11 +298,11 @@ void PreviewDataModel::clearData() {
 
 void PreviewDataModel::appendData(const QVariantMap& item) {
     if (m_allData.size() >= m_maxDisplayCount) {
-        qDebug() << "PreviewDataModel::appendData: 已达最大显示条数，忽略新数据";
+        INTERNAL_DEBUG_STREAM << "PreviewDataModel::appendData: 已达最大显示条数，忽略新数据";
         return;
     }
     
-    qDebug() << "PreviewDataModel::appendData: 添加数据项";
+    INTERNAL_DEBUG_STREAM << "PreviewDataModel::appendData: 添加数据项";
     
     beginResetModel();
     m_allData.append(PreviewItem(item));
@@ -327,10 +327,10 @@ void PreviewDataModel::addDataBatch(const QVector<QVariantMap>& data) {
         return;
     }
     
-    qDebug() << "PreviewDataModel::addDataBatch: 批量添加" << data.size() << "条数据";
+    INTERNAL_DEBUG_STREAM << "PreviewDataModel::addDataBatch: 批量添加" << data.size() << "条数据";
     
     if (m_allData.size() >= m_maxDisplayCount) {
-        qDebug() << "PreviewDataModel::addDataBatch: 已达最大显示条数，无法添加";
+        INTERNAL_DEBUG_STREAM << "PreviewDataModel::addDataBatch: 已达最大显示条数，无法添加";
         return;
     }
 
@@ -355,7 +355,7 @@ void PreviewDataModel::addDataBatch(const QVector<QVariantMap>& data) {
     
     endResetModel();
     
-    qDebug() << "PreviewDataModel::addDataBatch: 成功添加" << count << "条数据";
+    INTERNAL_DEBUG_STREAM << "PreviewDataModel::addDataBatch: 成功添加" << count << "条数据";
     emit countChanged();
     emit totalCountChanged();
     emit currentCategoryChanged();
@@ -492,7 +492,7 @@ int PreviewDataModel::otherCount() const
 void PreviewDataModel::setPageSize(int size)
 {
     if (size <= 0) {
-        qWarning() << "PreviewDataModel::setPageSize: 无效的页大小" << size;
+        INTERNAL_WARN_STREAM << "PreviewDataModel::setPageSize: 无效的页大小" << size;
         return;
     }
 
@@ -512,7 +512,7 @@ void PreviewDataModel::setPageSize(int size)
 
 void PreviewDataModel::setMaxDisplayCount(int count) {
     if (count <= 0) {
-        qWarning() << "PreviewDataModel::setMaxDisplayCount: 无效的显示条数" << count;
+        INTERNAL_WARN_STREAM << "PreviewDataModel::setMaxDisplayCount: 无效的显示条数" << count;
         return;
     }
     
@@ -521,7 +521,7 @@ void PreviewDataModel::setMaxDisplayCount(int count) {
         
         // 如果当前数据超过新的限制，需要截断
         if (m_allData.size() > m_maxDisplayCount) {
-            qDebug() << "PreviewDataModel::setMaxDisplayCount: 数据超过新限制，截断到" 
+            INTERNAL_DEBUG_STREAM << "PreviewDataModel::setMaxDisplayCount: 数据超过新限制，截断到" 
                      << m_maxDisplayCount << "条";
             
             beginResetModel();
@@ -531,14 +531,14 @@ void PreviewDataModel::setMaxDisplayCount(int count) {
             emit countChanged();
         }
         
-        qDebug() << "PreviewDataModel::setMaxDisplayCount: 设置为" << count << "条";
+        INTERNAL_DEBUG_STREAM << "PreviewDataModel::setMaxDisplayCount: 设置为" << count << "条";
         emit maxDisplayCountChanged();
     }
 }
 
 QVariantMap PreviewDataModel::getRow(int index) const {
     if (index < 0 || index >= rowCount()) {
-        qWarning() << "PreviewDataModel::getRow: 索引越界:" << index << "数据大小:" << rowCount();
+        INTERNAL_WARN_STREAM << "PreviewDataModel::getRow: 索引越界:" << index << "数据大小:" << rowCount();
         return QVariantMap();
     }
     

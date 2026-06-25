@@ -8,7 +8,6 @@
 #include "factor_compute/AnalysisReportTypes.h"
 #include "../../domain/factor/include/factor_compute/FactorEngine.h"
 
-#include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
@@ -233,7 +232,7 @@ QVariantList FactorBacktestBridge::buildRatingChecks(const factor::compute::Fact
 
 FactorBacktestBridge::FactorBacktestBridge(QObject* parent)
     : QObject(parent), m_timeoutTimer(new QTimer(this))
-{ qDebug() << "[FactBacktestBridge] 实例已创建"; }
+{ INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] 实例已创建"; }
 
 FactorBacktestBridge::~FactorBacktestBridge() = default;
 
@@ -246,7 +245,7 @@ m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
     m_reporter        = std::make_unique<factor::compute::BacktestReporter>();
 
     if (!m_scheduler || !m_backtestDataSvc || !m_factorEngine || !m_reporter) {
-        qDebug() << "[FactBacktestBridge] 域组件创建失败";
+        INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] 域组件创建失败";
         m_scheduler.reset();
         m_backtestDataSvc.reset();
         m_factorEngine.reset();
@@ -257,7 +256,7 @@ m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
     // 2) 创建 Orchestrator 并注入依赖
     m_orchestrator = std::make_unique<Factor::backtest::FactorBacktestOrchestrator>();
     if (!m_orchestrator) {
-        qDebug() << "[FactBacktestBridge] 因子回测编排器初始化失败";
+        INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] 因子回测编排器初始化失败";
         return false;
     }
 
@@ -275,7 +274,7 @@ m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
         auto* instanceMgr = factorSvc->instanceManager();
         if (instanceMgr) {
             m_factorEngine->setInstanceManager(instanceMgr);
-            qDebug() << "[FactBacktestBridge] 复用 FactorService 的 FactorInstanceManager";
+            INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] 复用 FactorService 的 FactorInstanceManager";
         }
     }
 
@@ -366,7 +365,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
             m_arrowView = std::move(arrowView);
             m_backtestDataSvc->setMarketView(m_arrowView.get());
             m_backtestDataSvc->buildViewForFields({});
-            qDebug() << "[FactBacktestBridge] Arrow view injected, ID=" << capturedDatasetId;
+            INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] Arrow view injected, ID=" << capturedDatasetId;
             if (!m_arrowView || m_arrowView->instruments().empty()) {
                 QMetaObject::invokeMethod(this, [this]() {
                     emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));
@@ -638,7 +637,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
 // ── 其余辅助方法 ──
 
 void FactorBacktestBridge::startCompositeBacktest(const QVariantMap&, const QString&, const QString&, const QString&, const QVariantMap&)
-{ qDebug() << "[FactBacktestBridge] 组合回测暂未实现"; }
+{ INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] 组合回测暂未实现"; }
 
 void FactorBacktestBridge::cancelBacktest()
 { m_isRunning.store(false); emit isRunningChanged(); m_statusText = QStringLiteral("已取消"); emit statusChanged(); emit backtestCancelled(); }
@@ -739,14 +738,13 @@ int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& facto
     QString capturedMode = m_dataSourceMode;
     int capturedDatasetId = m_selectedDatasetId;
 
-    fprintf(stderr, "[FactorSupportCheck] worker started, requestId=%d, factors=%d\n", requestId, (int)ids.size()); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker started, requestId=" << requestId << ", factors=" << (int)ids.size();
     m_workerPool->post([this, requestId, ids, startDate, endDate, cacheSnapshot, capturedMode, capturedDatasetId]() {
-        fprintf(stderr, "[FactorSupportCheck] worker running, requestId=%d\n", requestId); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker running, requestId=" << requestId;
         QVariantMap map;
         try {
             auto* factorSvc = FactorService::instance();
-            fprintf(stderr, "[FactorSupportCheck] FactorService=%p, initialized=%d\n",
-                    (void*)factorSvc, factorSvc ? (int)factorSvc->isInitialized() : -1); fflush(stderr);
+            INTERNAL_INFO_STREAM << "[FactorSupportCheck] FactorService=" << (void*)factorSvc << ", initialized=" << (factorSvc ? (int)factorSvc->isInitialized() : -1);
             if (factorSvc && factorSvc->isInitialized()) {
                 map = factorSvc->buildFactorSupportMap(ids, startDate, endDate, cacheSnapshot,
                                                         capturedMode, capturedDatasetId);
@@ -778,11 +776,9 @@ int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& facto
             }
         }
 
-        fprintf(stderr, "[FactorSupportCheck] worker done, requestId=%d, mapSize=%d, emitting to main thread\n",
-                requestId, (int)map.size()); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker done, requestId=" << requestId << ", mapSize=" << (int)map.size();
         QMetaObject::invokeMethod(this, [this, requestId, map]() {
-            fprintf(stderr, "[FactorSupportCheck] main thread callback, requestId=%d, mapSize=%d\n",
-                    requestId, (int)map.size()); fflush(stderr);
+            INTERNAL_INFO_STREAM << "[FactorSupportCheck] main thread callback, requestId=" << requestId << ", mapSize=" << (int)map.size();
             m_supportMapRequestInFlight.store(false);
             emit supportMapRequestInFlightChanged();
             emit factorSupportMapReady(requestId, map);

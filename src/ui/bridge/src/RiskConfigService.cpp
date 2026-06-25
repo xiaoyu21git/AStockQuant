@@ -6,7 +6,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSaveFile>
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 
 namespace bridge {
 
@@ -123,7 +123,7 @@ bool RiskConfigService::writeConfigFile(const QVariantMap& config) const {
     QJsonDocument doc(QJsonObject::fromVariantMap(config));
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qWarning() << "[RiskConfigService] Cannot write config to" << path;
+        INTERNAL_WARN_STREAM << "[RiskConfigService] Cannot write config to" << path.toStdString();
         return false;
     }
     file.write(doc.toJson(QJsonDocument::Indented));
@@ -138,7 +138,7 @@ QVariantMap RiskConfigService::readConfigFile() const {
         return defaultConfiguration();
     }
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        qWarning() << "[RiskConfigService] Cannot read config from" << path;
+        INTERNAL_WARN_STREAM << "[RiskConfigService] Cannot read config from" << path.toStdString();
         return QVariantMap();
     }
     QByteArray data = file.readAll();
@@ -147,7 +147,7 @@ QVariantMap RiskConfigService::readConfigFile() const {
     QJsonParseError err;
     QJsonDocument doc = QJsonDocument::fromJson(data, &err);
     if (err.error != QJsonParseError::NoError) {
-        qWarning() << "[RiskConfigService] JSON parse error:" << err.errorString();
+        INTERNAL_WARN_STREAM << "[RiskConfigService] JSON parse error:" << err.errorString().toStdString();
         return QVariantMap();
     }
     return doc.object().toVariantMap();

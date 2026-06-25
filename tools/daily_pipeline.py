@@ -136,20 +136,63 @@ def phase2_local_backfill(c):
 # Phase 3: 单线程 Baostock 全量更新
 # ══════════════════════════════════════════════════
 
-def phase3_baostock_update(c, target_date: str):
-    print("[Phase3] Baostock single-threaded update...", flush=True)
+def phase3_baostock_update(c, target_date: str, start_date: str = None):
+    print(f"[Phase3] Baostock single-threaded update... target={target_date} start={start_date}", flush=True)
     with c.cursor() as cur:
         cur.execute("SELECT symbol FROM ref.symbol_info WHERE status NOT IN ('DELISTED','退市') AND symbol LIKE '%.%' ORDER BY symbol")
         symbols = [r[0] for r in cur.fetchall()]
     print(f"  {len(symbols)} symbols", flush=True)
 
     # 检查最新日期
-    latest = {}
+    latest: dict[str, str | None] = {}
+    coverage: dict[str, int] = {}  # 区间内实际数据天数
+    expected_count = 0  # 区间内预期交易日数
     print(f"  Checking latest dates (one pass)...", flush=True)
-    with c.cursor() as cur:
-        cur.execute("SELECT si.symbol, MAX(d.trade_date) FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id GROUP BY si.symbol")
-        for row in cur.fetchall(): latest[row[0]] = str(row[1]) if row[1] else None
-    need = [s for s in symbols if latest.get(s) is None or str(latest[s]) < target_date]
+
+    if start_date:
+        # 历史缺口模式：统计区间 [start_date, target_date] 内每个股票的数据覆盖
+        with c.cursor() as cur:
+            cur.execute("SELECT COUNT(*) FROM ref.trade_calendar WHERE trade_date BETWEEN %s AND %s",
+                       (start_date, target_date))
+            expected_count = cur.fetchone()[0]
+        print(f"  history mode: expected_count={expected_count} in [{start_date}, {target_date}]", flush=True)
+
+        # 取所有股票的区间内数据天数 + 最晚日期
+        with c.cursor() as cur:
+            cur.execute(
+                """SELECT si.symbol, MAX(d.trade_date), COUNT(DISTINCT d.trade_date)
+                FROM ref.symbol_info si
+                LEFT JOIN mkt.daily_bar d ON d.symbol_id = si.id
+                    AND d.trade_date BETWEEN %s AND %s
+                WHERE si.status NOT IN ('DELISTED','退市') AND si.symbol LIKE '%%.%%'
+                GROUP BY si.symbol""",
+                (start_date, target_date))
+            for row in cur.fetchall():
+                sym = row[0]
+                latest[sym] = str(row[1]) if row[1] else None
+                coverage[sym] = int(row[2]) if row[2] else 0
+
+        # 包含尾部缺口 + 内部缺口的股票
+        need = [
+            s for s in symbols
+            if latest.get(s) is None           # 区间内完全没有数据
+            or str(latest[s]) < target_date    # 尾部缺口
+            or coverage.get(s, 0) < expected_count  # 内部缺口
+        ]
+    else:
+        # 最新模式：仅检查尾部缺口
+        with c.cursor() as cur:
+            cur.execute(
+                """SELECT si.symbol, MAX(d.trade_date)
+                FROM mkt.daily_bar d
+                JOIN ref.symbol_info si ON d.symbol_id = si.id
+                WHERE si.status NOT IN ('DELISTED','退市') AND si.symbol LIKE '%%.%%'
+                GROUP BY si.symbol""")
+            for row in cur.fetchall():
+                latest[row[0]] = str(row[1]) if row[1] else None
+
+        need = [s for s in symbols if latest.get(s) is None or str(latest[s]) < target_date]
+
     print(f"  {len(need)} need update", flush=True)
     if not need:
         print("[Phase3] all up to date", flush=True)
@@ -163,9 +206,15 @@ def phase3_baostock_update(c, target_date: str):
     try:
         for i in range(0, len(need), BATCH):
             batch = need[i:i+BATCH]
-            sd = str(latest.get(batch[0], '2015-01-01'))
-            print(f"  DEBUG batch0={batch[0]} sd={sd}", flush=True)
-            start = min(sd, target_date)
+            if start_date:
+                # 历史缺口模式：直接从区间起点开始，保证内部缺口被补到
+                start = start_date
+            else:
+                # 最新模式：从批次中最早的最晚日期开始，补尾部缺口
+                batch_latest = [str(latest.get(s, '2015-01-01')) for s in batch]
+                sd = min(batch_latest)
+                start = min(sd, target_date)
+            print(f"  batch {i//BATCH+1}: start={start} symbols={len(batch)}", flush=True)
             df = baostock.fetch_daily_k_data_batch(batch, dt.date.fromisoformat(start), dt.date.fromisoformat(target_date))
             if not df.empty:
                 df = baostock.normalize_baostock_frame(df)
@@ -225,13 +274,14 @@ def upsert_baostock(c, df: pd.DataFrame) -> int:
 def main():
     p = argparse.ArgumentParser(description="日更流水线: Phase1(多线程补非Baostock) Phase2(SQL补) Phase3(单线程Baostock全量更新)")
     p.add_argument("--date", help="目标日期 YYYY-MM-DD")
+    p.add_argument("--start-date", help="起点日期 YYYY-MM-DD，用于填补内部历史缺口")
     p.add_argument("--phase1-only", action="store_true", help="仅运行Phase1")
     p.add_argument("--phase3-only", action="store_true", help="仅运行Phase3")
     p.add_argument("--skip-phase1", action="store_true")
     args = p.parse_args()
 
     target = args.date or (dt.date.today()-dt.timedelta(days=1)).strftime('%Y-%m-%d')
-    print(f"=== daily_pipeline target={target} ===", flush=True)
+    print(f"=== daily_pipeline target={target} start_date={args.start_date} ===", flush=True)
 
     c = conn()
 
@@ -258,7 +308,7 @@ def main():
     if not args.phase1_only:
         # Phase 3: 单线程 Baostock 全量更新
         print("--- Phase 3: Baostock single-threaded update ---", flush=True)
-        phase3_baostock_update(c, target)
+        phase3_baostock_update(c, target, start_date=args.start_date)
 
     c.close()
     print("=== done ===", flush=True)

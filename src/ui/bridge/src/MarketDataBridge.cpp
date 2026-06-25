@@ -2,7 +2,7 @@
 #include "GmMarketSource.h"
 
 #include <QDateTime>
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 #include <QTimer>
 #include <QDate>
 
@@ -35,7 +35,7 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
     auto q = GmMarketSource::fetchQuote(symbol.toStdString());
     if (!q || !q->valid) return;
     static int dbg = 0;
-    if (++dbg <= 5) qDebug() << "[MktBridge] " << symbol << "price=" << q->price << "preClose=" << q->preClose << "limitUp=" << q->isLimitUp() << "limitDown=" << q->isLimitDown();
+    if (++dbg <= 5) INTERNAL_DEBUG_STREAM << "[MktBridge] " << symbol.toStdString() << "price=" << q->price << "preClose=" << q->preClose << "limitUp=" << q->isLimitUp() << "limitDown=" << q->isLimitDown();
 
     QVariantMap snap;
     snap["symbol"]     = symbol;

@@ -17,15 +17,14 @@ JsonConfigProvider::JsonConfigProvider(
     envPrefixes_.push_back("CONFIG_");
     
     // 初始化日志
-    INTERNAL_DEBUG("JsonConfigProvider initialized with envSubstitution={}, includes={}",
-              enableEnvSubstitution_, enableIncludes_);
+    INTERNAL_DEBUG_STREAM << "JsonConfigProvider initialized with envSubstitution=" << enableEnvSubstitution_ << ", includes=" << enableIncludes_;
 }
 
 std::shared_ptr<ConfigNode> JsonConfigProvider::load(
     const std::string& path,
     const std::string& profile) const{
     
-    INTERNAL_INFO("Loading JSON config from: {}", path);
+    INTERNAL_INFO_STREAM << "Loading JSON config from: " << path;
     
     try {
         // 加载JSON文件
@@ -39,7 +38,7 @@ std::shared_ptr<ConfigNode> JsonConfigProvider::load(
         
         // 提取环境特定配置
         if (!profile.empty() && json.has(profile)) {
-            INTERNAL_DEBUG("Using profile-specific config: {}", profile);
+            INTERNAL_DEBUG_STREAM << "Using profile-specific config: " << profile;
             json = extractProfileConfig(json, profile);
         }
         
@@ -60,16 +59,16 @@ std::shared_ptr<ConfigNode> JsonConfigProvider::load(
         sourceInfo.size = foundation::fs::File::size(path);
         configNode->setSourceInfo(sourceInfo);
         
-        INTERNAL_INFO("JSON config loaded successfully: {}", path);
+        INTERNAL_INFO_STREAM << "JSON config loaded successfully: " << path;
         return configNode;
         
     } catch (const foundation::FileException& e) {
-        INTERNAL_ERROR("File error loading config {}: {}", path, e.what());
+        INTERNAL_ERROR_STREAM << "File error loading config " << path << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format("Failed to load config {}: {}", 
                                              path, e.what()));
     } catch (const std::exception& e) {
-        INTERNAL_ERROR("Error loading config {}: {}", path, e.what());
+        INTERNAL_ERROR_STREAM << "Error loading config " << path << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format("Failed to load config {}: {}", 
                                              path, e.what()));
@@ -80,7 +79,7 @@ void JsonConfigProvider::watch(
     const std::string& path,
     std::function<void(const std::shared_ptr<ConfigNode>&)> callback) {
     
-    INTERNAL_DEBUG("Setting up watch for JSON config: {}", path);
+    INTERNAL_DEBUG_STREAM << "Setting up watch for JSON config: " << path;
     
     // 简化实现：使用文件修改时间检查
     // 实际应使用文件系统监控
@@ -91,7 +90,7 @@ void JsonConfigProvider::watch(
     
     // 检查文件是否被修改（简化版）
     // 实际实现应使用foundation::fs的文件监控功能
-    INTERNAL_WARN("File watching not fully implemented for: {}", path);
+    INTERNAL_WARN_STREAM << "File watching not fully implemented for: " << path;
 }
 
 bool JsonConfigProvider::save(
@@ -99,10 +98,10 @@ bool JsonConfigProvider::save(
     const std::string& path) {
     
     try {
-        INTERNAL_INFO("Saving config to: {}", path);
+        INTERNAL_INFO_STREAM << "Saving config to: " << path;
         return config->saveToFile(path);
     } catch (const std::exception& e) {
-        INTERNAL_ERROR("Failed to save config to {}: {}", path, e.what());
+        INTERNAL_ERROR_STREAM << "Failed to save config to " << path << ": " << e.what();
         return false;
     }
 }
@@ -132,7 +131,7 @@ void JsonConfigProvider::substituteEnvironmentVariables(
     // 递归遍历JSON并进行环境变量替换
     // 这里需要根据JsonFacade的实际接口实现
     // 简化实现：假设JsonFacade有遍历方法
-    INTERNAL_DEBUG("Substituting environment variables in JSON");
+    INTERNAL_DEBUG_STREAM << "Substituting environment variables in JSON";
     
     // 实现细节取决于JsonFacade的接口
     // 这里提供一个框架
@@ -143,7 +142,7 @@ foundation::json::JsonFacade JsonConfigProvider::processIncludes(
     const std::string& baseDir,
     const std::string& profile) const {
     
-    INTERNAL_DEBUG("Processing includes from base directory: {}", baseDir);
+    INTERNAL_DEBUG_STREAM << "Processing includes from base directory: " << baseDir;
     
     // 克隆输入JSON
     auto result = json; // 假设JsonFacade支持拷贝
@@ -162,7 +161,7 @@ foundation::json::JsonFacade JsonConfigProvider::processIncludes(
                 ? baseDir + includeFile 
                 : baseDir + "/" + includeFile;
             
-            INTERNAL_DEBUG("Including config file: {}", includePath);
+            INTERNAL_DEBUG_STREAM << "Including config file: " << includePath;
             
             // 递归加载include文件
             auto includedConfig = load(includePath, profile);
@@ -173,7 +172,7 @@ foundation::json::JsonFacade JsonConfigProvider::processIncludes(
             // 这里需要根据JsonFacade的合并接口实现
             
         } catch (const std::exception& e) {
-            INTERNAL_WARN("Failed to include config file: {}", e.what());
+            INTERNAL_WARN_STREAM << "Failed to include config file: " << e.what();
         }
     }
     
@@ -188,7 +187,7 @@ foundation::json::JsonFacade JsonConfigProvider::extractProfileConfig(
     const std::string& profile) const {
     
     if (!json.has(profile)) {
-        INTERNAL_WARN("Profile '{}' not found in config, using default", profile);
+        INTERNAL_WARN_STREAM << "Profile '" << profile << "' not found in config, using default";
         return json;
     }
     

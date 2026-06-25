@@ -1,4 +1,5 @@
 #include "TradeExecutionEngine.h"
+#include "foundation/log/logging.hpp"
 
 #include <cmath>
 #include <mutex>
@@ -330,8 +331,7 @@ void TradeExecutionEngine::setGateway(std::unique_ptr<IBrokerGateway> gateway) {
             }
         });
         m_impl->m_gateway->setErrorCallback([this](const std::string& err) {
-            fprintf(stderr, "[TradeExecEngine] gateway error: %s\n", err.c_str());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[TradeExecEngine] gateway error: " << err;
         });
     }
 }

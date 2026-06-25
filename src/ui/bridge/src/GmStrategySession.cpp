@@ -4,7 +4,6 @@
 #include "Event/EventFormat.hpp"
 #include "../../../../thirdparty/gmsdk/strategy.h"
 
-#include <QDebug>
 #include <QDateTime>
 #include <QString>
 #include <QTimeZone>
@@ -1354,8 +1353,8 @@ public:
         eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
         static int tickLogCount = 0;
         if (++tickLogCount <= 5)
-            std::cerr << "[GmSession] on_tick #" << tickLogCount << " sym=" << symbol
-                      << " price=" << tick->price << "\n" << std::flush;
+            INTERNAL_ERROR_STREAM << "[GmSession] on_tick #" << tickLogCount << " sym=" << symbol
+                      << " price=" << tick->price;
     }
 
     void on_bar(GmBar* bar) override
@@ -1801,8 +1800,8 @@ bool GmStrategySession::initialize(const ConfigParams& config)
 
     if (config_flag_enabled(config.extra_params, "simtrade_only")) {
         ::set_simtrade_only();
-        qDebug() << "GmStrategySession: simtrade_only enabled for account"
-                 << QString::fromStdString(config.account_id);
+        INTERNAL_DEBUG_STREAM << "GmStrategySession: simtrade_only enabled for account"
+                 << QString::fromStdString(config.account_id).toStdString();
     }
 
     config_ = config;
@@ -2073,8 +2072,8 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                 int ret = strategy_->subscribe(gmSym.c_str(), frequency.c_str(), false);
                 static int subLogCount = 0;
                 if (++subLogCount <= 5)
-                    std::cerr << "[GmSession] subscribe(" << gmSym << "," << frequency
-                              << ") ret=" << ret << " subsTotal=" << subscriptions_.size() << "\n" << std::flush;
+                    INTERNAL_ERROR_STREAM << "[GmSession] subscribe(" << gmSym << "," << frequency
+                              << ") ret=" << ret << " subsTotal=" << subscriptions_.size();
             }
             publish_event("trading.subscription.changed", &command);
         }
@@ -2123,57 +2122,57 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
             const int volume = (std::max)(0, static_cast<int>(std::llround(command.quantity)));
             const int position_src = gm_credit_position_src_from_command(command);
             if (option_exercise) {
-                qDebug() << "GmStrategySession: option_exercise submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: option_exercise submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (option_covered_open) {
-                qDebug() << "GmStrategySession: option_covered_open submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: option_covered_open submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
                          << "orderType=" << gm_order_type_from_runtime(command.order_type)
                          << "price=" << command.price
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (option_covered_close) {
-                qDebug() << "GmStrategySession: option_covered_close submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: option_covered_close submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
                          << "orderType=" << gm_order_type_from_runtime(command.order_type)
                          << "price=" << command.price
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (credit_margin_buy) {
-                qDebug() << "GmStrategySession: credit_buying_on_margin submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: credit_buying_on_margin submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
                          << "price=" << command.price
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (credit_margin_sell) {
-                qDebug() << "GmStrategySession: credit_short_selling submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: credit_short_selling submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
                          << "price=" << command.price
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (credit_margin_close_long) {
-                qDebug() << "GmStrategySession: credit_repay_cash_by_selling_share submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: credit_repay_cash_by_selling_share submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
                          << "price=" << command.price
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (credit_margin_close_short) {
-                qDebug() << "GmStrategySession: credit_repay_share_by_buying_share submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: credit_repay_share_by_buying_share submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
                          << "price=" << command.price
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (credit_repay_share_direct) {
-                qDebug() << "GmStrategySession: credit_repay_share_directly submit"
-                         << "symbol=" << QString::fromStdString(command.symbol)
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: credit_repay_share_directly submit"
+                         << "symbol=" << QString::fromStdString(command.symbol).toStdString()
                          << "volume=" << volume
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             } else if (credit_repay_cash_direct) {
-                qDebug() << "GmStrategySession: credit_repay_cash_directly submit"
+                INTERNAL_DEBUG_STREAM << "GmStrategySession: credit_repay_cash_directly submit"
                          << "cashAmount=" << cash_amount
-                         << "account=" << QString::fromStdString(config_.account_id);
+                         << "account=" << QString::fromStdString(config_.account_id).toStdString();
             }
 
             const std::string cache_id = command.order_id.empty()
@@ -2313,13 +2312,13 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                         reject_log_text = "GmStrategySession: credit_repay_share_directly rejected";
                     }
 
-                    qWarning() << reject_log_text
-                               << "cacheOrderId=" << QString::fromStdString(order.order_id)
-                               << "gmOrderId=" << QString::fromStdString(actual_id)
-                               << "status=" << QString::fromStdString(order.status)
+                    INTERNAL_WARN_STREAM << reject_log_text
+                               << "cacheOrderId=" << QString::fromStdString(order.order_id).toStdString()
+                               << "gmOrderId=" << QString::fromStdString(actual_id).toStdString()
+                               << "status=" << QString::fromStdString(order.status).toStdString()
                                << "quantity=" << static_cast<qint64>(order.quantity)
                                << "price=" << order.price
-                               << "message=" << QString::fromStdString(order.message);
+                               << "message=" << QString::fromStdString(order.message).toStdString();
                 }
 
                 if (should_schedule_order_reconciliation(order)) {
@@ -2426,9 +2425,9 @@ void GmStrategySession::mark_runtime_started_locked()
     connected_ = true;
     state_ = TradingSessionState::Running;
     last_error_.clear();
-    qDebug() << "GmStrategySession: runtime entered running state"
-             << "sessionId=" << QString::fromStdString(session_id_)
-             << "accountId=" << QString::fromStdString(config_.account_id);
+    INTERNAL_DEBUG_STREAM << "GmStrategySession: runtime entered running state"
+             << "sessionId=" << QString::fromStdString(session_id_).toStdString()
+             << "accountId=" << QString::fromStdString(config_.account_id).toStdString();
     if (strategy_ && command_timer_id_ <= 0) {
         command_timer_id_ = strategy_->timer(250, 0);
     }
@@ -2453,32 +2452,32 @@ void GmStrategySession::mark_runtime_stopped_locked(const std::string& error_mes
 void GmStrategySession::sync_initial_state_locked()
 {
     if (!strategy_) {
-        std::cerr << "[GmSession] sync_initial_state: strategy_ is null\n";
+        INTERNAL_ERROR_STREAM << "[GmSession] sync_initial_state: strategy_ is null";
         return;
     }
 
     std::string error_message;
     auto* cashArr = strategy_->get_cash(config_.account_id.c_str());
-    std::cerr << "[GmSession] get_cash(" << config_.account_id << ") -> "
-              << (cashArr ? std::to_string(cashArr->count()) + " records, status=" + std::to_string(cashArr->status()) : "null") << "\n";
+    INTERNAL_ERROR_STREAM << "[GmSession] get_cash(" << config_.account_id << ") -> "
+              << (cashArr ? std::to_string(cashArr->count()) + " records, status=" + std::to_string(cashArr->status()) : "null");
     consume_array(cashArr, &error_message, [this](const GmCash& cash) {
         cache_account_locked(to_runtime_account(cash));
     });
     if (!error_message.empty()) {
-        std::cerr << "[GmSession] get_cash error: " << error_message << "\n";
+        INTERNAL_ERROR_STREAM << "[GmSession] get_cash error: " << error_message;
     }
 
     auto* posArr = strategy_->get_position(config_.account_id.c_str());
-    std::cerr << "[GmSession] get_position(" << config_.account_id << ") -> "
-              << (posArr ? std::to_string(posArr->count()) + " records, status=" + std::to_string(posArr->status()) : "null") << "\n";
+    INTERNAL_ERROR_STREAM << "[GmSession] get_position(" << config_.account_id << ") -> "
+              << (posArr ? std::to_string(posArr->count()) + " records, status=" + std::to_string(posArr->status()) : "null");
     consume_array(posArr, &error_message, [this](const GmPosition& position) {
         cache_position_locked(to_runtime_position(position));
     });
     if (!error_message.empty()) {
-        std::cerr << "[GmSession] get_position error: " << error_message << "\n";
+        INTERNAL_ERROR_STREAM << "[GmSession] get_position error: " << error_message;
     }
-    std::cerr << "[GmSession] sync done: account=" << (has_account_snapshot_ ? "yes" : "no")
-              << " positions=" << positions_.size() << "\n";
+    INTERNAL_ERROR_STREAM << "[GmSession] sync done: account=" << (has_account_snapshot_ ? "yes" : "no")
+              << " positions=" << positions_.size();
 
     consume_array(strategy_->get_orders(config_.account_id.c_str()), &error_message, [this](const GmOrder& order) {
         cache_runtime_order_alias(order, order_aliases_, order_contexts_);
@@ -2544,10 +2543,10 @@ void GmStrategySession::sync_initial_state_locked()
 
     if (!error_message.empty()) {
         last_error_ = error_message;
-        qWarning() << "GmStrategySession: initial state sync failed"
-                   << "sessionId=" << QString::fromStdString(session_id_)
-                   << "accountId=" << QString::fromStdString(config_.account_id)
-                   << "message=" << QString::fromStdString(error_message);
+        INTERNAL_WARN_STREAM << "GmStrategySession: initial state sync failed"
+                   << "sessionId=" << QString::fromStdString(session_id_).toStdString()
+                   << "accountId=" << QString::fromStdString(config_.account_id).toStdString()
+                   << "message=" << QString::fromStdString(error_message).toStdString();
     }
 }
 
@@ -2668,8 +2667,8 @@ void GmStrategySession::reconcile_pending_orders_locked()
 
     if (!error_message.empty()) {
         last_error_ = error_message;
-        qWarning() << "GmStrategySession: order reconciliation query failed"
-                   << QString::fromStdString(error_message);
+        INTERNAL_WARN_STREAM << "GmStrategySession: order reconciliation query failed"
+                   << QString::fromStdString(error_message).toStdString();
         for (const std::string& order_id : due_order_ids) {
             auto it = pending_order_reconciliations_.find(order_id);
             if (it == pending_order_reconciliations_.end()) {
@@ -2678,8 +2677,8 @@ void GmStrategySession::reconcile_pending_orders_locked()
 
             ++it->second.attempts;
             if (it->second.attempts >= 20) {
-                qWarning() << "GmStrategySession: giving up order reconciliation after query failures"
-                           << "cacheOrderId=" << QString::fromStdString(order_id);
+                INTERNAL_WARN_STREAM << "GmStrategySession: giving up order reconciliation after query failures"
+                           << "cacheOrderId=" << QString::fromStdString(order_id).toStdString();
                 pending_order_reconciliations_.erase(it);
             } else {
                 it->second.next_due_tick = reconciliation_tick_ + 4;
@@ -2689,8 +2688,8 @@ void GmStrategySession::reconcile_pending_orders_locked()
     }
 
     if (!execution_report_error.empty()) {
-        qWarning() << "GmStrategySession: execution report reconciliation query failed"
-                   << QString::fromStdString(execution_report_error);
+        INTERNAL_WARN_STREAM << "GmStrategySession: execution report reconciliation query failed"
+                   << QString::fromStdString(execution_report_error).toStdString();
     }
 
     for (const auto& entry : execution_aggregates) {
@@ -2739,9 +2738,9 @@ void GmStrategySession::reconcile_pending_orders_locked()
         const auto refreshed_it = refreshed_orders.find(order_id);
         if (refreshed_it == refreshed_orders.end()) {
             if (pending_it->second.attempts >= 20) {
-                qWarning() << "GmStrategySession: stopping order reconciliation without remote update"
-                           << "cacheOrderId=" << QString::fromStdString(order_id)
-                           << "accountId=" << QString::fromStdString(config_.account_id);
+                INTERNAL_WARN_STREAM << "GmStrategySession: stopping order reconciliation without remote update"
+                           << "cacheOrderId=" << QString::fromStdString(order_id).toStdString()
+                           << "accountId=" << QString::fromStdString(config_.account_id).toStdString();
                 pending_order_reconciliations_.erase(pending_it);
             } else {
                 pending_it->second.next_due_tick = reconciliation_tick_ + 4;
@@ -2762,13 +2761,13 @@ void GmStrategySession::reconcile_pending_orders_locked()
 
         if (changed) {
             if (is_error_order_status(current.status)) {
-                qWarning() << "GmStrategySession: reconciled terminal error order"
-                           << "cacheOrderId=" << QString::fromStdString(order_id)
-                           << "gmOrderId=" << QString::fromStdString(broker_order_id)
-                           << "status=" << QString::fromStdString(current.status)
+                INTERNAL_WARN_STREAM << "GmStrategySession: reconciled terminal error order"
+                           << "cacheOrderId=" << QString::fromStdString(order_id).toStdString()
+                           << "gmOrderId=" << QString::fromStdString(broker_order_id).toStdString()
+                           << "status=" << QString::fromStdString(current.status).toStdString()
                            << "filled=" << static_cast<qint64>(current.filled_quantity)
                            << "quantity=" << static_cast<qint64>(current.quantity)
-                           << "message=" << QString::fromStdString(current.message);
+                           << "message=" << QString::fromStdString(current.message).toStdString();
             }
 
             publish_runtime_order_status(event_bus_,

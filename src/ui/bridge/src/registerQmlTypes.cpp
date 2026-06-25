@@ -1,4 +1,5 @@
 #include "registerQmlTypes.hpp"
+#include "foundation/log/logging.hpp"
 
 #include <QQmlEngine>
 #include <QStringList>
@@ -82,20 +83,19 @@ namespace wang{
        qmlRegisterSingletonType<StrategyBridge>(
           url, 1, 0, "StrategyBridge",
           [](QQmlEngine*, QJSEngine*) -> QObject* {
+             INTERNAL_INFO_STREAM << "[QML] StrategyBridge singleton created";
              auto* bridge = new StrategyBridge();
              return bridge;
           });
 
       // FactorService - 因子服务桥接层（单例模式）
+      // instance() 内部已同步调用 initialize()，无需 QTimer 延迟
       qmlRegisterSingletonType<FactorService>(
          url, 1, 0, "FactorService",
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
             auto* service = FactorService::instance();
-            QTimer::singleShot(0, [service]() {
-                service->initialize();
-            });
             return service;
          }
       );

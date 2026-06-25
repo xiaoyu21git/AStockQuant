@@ -9,7 +9,7 @@
 #include <QJsonArray>
 #include <QMutexLocker>
 #include <QTimer>
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 
 namespace bridge {
 
@@ -21,8 +21,8 @@ TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
         m_currentConfig = defaultConfiguration();
     }
     m_initialized = true;
-    qDebug() << "[TradingConnectionConfig] created, boundStrategyId ="
-             << m_currentConfig.value("boundStrategyId").toString();
+    INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] created, boundStrategyId ="
+             << m_currentConfig.value("boundStrategyId").toString().toStdString();
 }
 
 QVariantMap TradingConnectionConfigService::currentConfiguration() const {
@@ -46,13 +46,13 @@ QVariantMap TradingConnectionConfigService::loadConfiguration() {
     }
     m_initialized = true;
 
-    qDebug() << "[TradingConnectionConfig] loaded config:"
-             << "\n  boundStrategyId =" << m_currentConfig.value("boundStrategyId").toString()
-             << "\n  gmStrategyId   =" << m_currentConfig.value("gmStrategyId").toString()
-             << "\n  strategyId     =" << m_currentConfig.value("strategyId").toString()
-             << "\n  runtimeStrategyId =" << m_currentConfig.value("runtimeStrategyId").toString()
-             << "\n  accountId      =" << m_currentConfig.value("accountId").toString()
-             << "\n  token          =" << m_currentConfig.value("token").toString().left(8) + "..."
+    INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] loaded config:"
+             << "\n  boundStrategyId =" << m_currentConfig.value("boundStrategyId").toString().toStdString()
+             << "\n  gmStrategyId   =" << m_currentConfig.value("gmStrategyId").toString().toStdString()
+             << "\n  strategyId     =" << m_currentConfig.value("strategyId").toString().toStdString()
+             << "\n  runtimeStrategyId =" << m_currentConfig.value("runtimeStrategyId").toString().toStdString()
+             << "\n  accountId      =" << m_currentConfig.value("accountId").toString().toStdString()
+             << "\n  token          =" << (m_currentConfig.value("token").toString().left(8) + "...").toStdString()
              << "\n  boundStrategies count =" << m_currentConfig.value("boundStrategies").toList().size();
 
     emit currentConfigurationChanged();
@@ -297,7 +297,7 @@ bool TradingConnectionConfigService::writeConfigFile(const QVariantMap& config) 
     QJsonDocument doc(QJsonObject::fromVariantMap(config));
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        qWarning() << "[TradingConnectionConfigService] Cannot write to" << path;
+        INTERNAL_WARN_STREAM << "[TradingConnectionConfigService] Cannot write to" << path.toStdString();
         return false;
     }
     file.write(doc.toJson(QJsonDocument::Indented));

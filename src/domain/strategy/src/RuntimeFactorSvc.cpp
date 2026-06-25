@@ -6,6 +6,7 @@
 #include "foundation/log/logging.hpp"
 
 #include <string>
+#include <sstream>
 #include <vector>
 
 namespace domain::strategy {
@@ -22,12 +23,7 @@ RuntimeFactorSvc::RuntimeFactorSvc(
 {
     m_engine = std::make_unique<factor::compute::FactorEngine>(0ULL);
     m_engine->setInstanceManager(&m_instanceManager);
-    fprintf(stderr, "[RFS] ctor: engine=%p instanceMgr=%p symbolResolver=%s factorNameResolver=%s\n",
-            static_cast<void*>(m_engine.get()),
-            static_cast<void*>(&m_instanceManager),
-            m_symbolResolver ? "yes" : "NULL",
-            m_factorNameResolver ? "yes" : "NULL");
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[RFS] ctor: engine=" << static_cast<void*>(m_engine.get()) << " instanceMgr=" << static_cast<void*>(&m_instanceManager) << " symbolResolver=" << (m_symbolResolver ? "yes" : "NULL") << " factorNameResolver=" << (m_factorNameResolver ? "yes" : "NULL");
 }
 
 void RuntimeFactorSvc::setMarketView(const factor::compute::IMarketDataView*) {
@@ -54,18 +50,16 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
             auto it = idToSym->find(id);
             return it != idToSym->end() ? it->second : std::string();
         };
-        fprintf(stderr, "[RFS] setLiveMarketView: rebuilt symbol resolver (%zu symbols)\n", symbols.size());
+        INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: rebuilt symbol resolver (" << symbols.size() << " symbols)";
     } else {
-        fprintf(stderr, "[RFS] setLiveMarketView: view=%p (no symbol strings available)\n", static_cast<const void*>(view));
+        INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: view=" << static_cast<const void*>(view) << " (no symbol strings available)";
     }
-    fflush(stderr);
 }
 
 void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc) {
     m_dataSvc = svc;
     m_engine->setDataService(svc);
-    fprintf(stderr, "[RFS] setDataService: svc=%p\n", static_cast<void*>(svc));
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[RFS] setDataService: svc=" << static_cast<void*>(svc);
 
     // 用 MarketView 中的真实股票代码替换硬编码解析器
     if (svc) {
@@ -88,8 +82,7 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
                     auto it = idToSym->find(id);
                     return it != idToSym->end() ? it->second : std::string();
                 };
-                fprintf(stderr, "[RFS] setDataService: rebuilt symbol resolver (%zu symbols)\n", symbols.size());
-                fflush(stderr);
+                INTERNAL_INFO_STREAM << "[RFS] setDataService: rebuilt symbol resolver (" << symbols.size() << " symbols)";
             }
         }
     }
@@ -172,25 +165,21 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
 
     // ── 回测: FactorEngine 全量算一次, 缓存 ──
     if (m_dataSvc) {
-        fprintf(stderr, "[RFS] getValues BACKTEST: instance=%s date=%s symbols=%zu\n",
-                instanceId.c_str(), dateBuf, symbolStrList.size());
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST: instance=" << instanceId << " date=" << dateBuf << " symbols=" << symbolStrList.size();
         if (m_factorCache.find(instanceId) == m_factorCache.end()) {
-            fprintf(stderr, "[RFS] getValues BACKTEST cache MISS, calling engine->compute...\n");
-            fflush(stderr);
+            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST cache MISS, calling engine->compute...";
             factor::compute::FactorCacheKey key;
             key.factorName = instanceId;
             factor::compute::MarketMatrixBatch batch;
             batch.batchIndex = 0;
             m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
             auto& cached = m_factorCache[instanceId];
-            fprintf(stderr, "[RFS] getValues BACKTEST cache FILLED: dates=%zu\n", cached.size());
+            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST cache FILLED: dates=" << cached.size();
             if (!cached.empty()) {
                 auto firstDate = cached.begin()->first;
                 auto lastDate = cached.rbegin()->first;
-                fprintf(stderr, "[RFS]   cache range: %s ~ %s\n", firstDate.c_str(), lastDate.c_str());
+                INTERNAL_INFO_STREAM << "[RFS]   cache range: " << firstDate << " ~ " << lastDate;
             }
-            fflush(stderr);
         }
         auto it = m_factorCache[instanceId].find(dateBuf);
         if (it != m_factorCache[instanceId].end()) {
@@ -199,19 +188,17 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
                     if (m_symbolResolver(id) == sym) { result[id] = val; break; }
             }
         } else {
-            fprintf(stderr, "[RFS] getValues BACKTEST: date %s NOT FOUND in cache (cache has %zu dates)\n",
-                    dateBuf, m_factorCache[instanceId].size());
+            INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " NOT FOUND in cache (cache has " << m_factorCache[instanceId].size() << " dates)";
             // 打印缓存中随机一个日期的前5个key，确认格式
             if (!m_factorCache[instanceId].empty()) {
                 auto& sampleDate = m_factorCache[instanceId].begin()->second;
-                fprintf(stderr, "[RFS]   cache sample keys: ");
-                int n=0; for (auto& [k,v] : sampleDate) { if (++n>5) break; fprintf(stderr, "%s ", k.c_str()); }
-                fprintf(stderr, "\n");
+                std::ostringstream sampleOss;
+                sampleOss << "[RFS]   cache sample keys: ";
+                int n=0; for (auto& [k,v] : sampleDate) { if (++n>5) break; sampleOss << k << " "; }
+                INTERNAL_WARN_STREAM << sampleOss.str();
             }
-            fflush(stderr);
         }
-        fprintf(stderr, "[RFS] getValues BACKTEST result: %zu values\n", result.size());
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST result: " << result.size() << " values";
         return result;
     }
 

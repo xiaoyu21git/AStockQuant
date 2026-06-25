@@ -15,7 +15,6 @@
 #include "../../domain/factor/include/factor_enums.h"
 #include "../../domain/factor/include/JsonFacadeHelpers.h"
 
-#include <QDebug>
 #include <QMutexLocker>
 #include <QThread>
 #include <QCoreApplication>
@@ -152,7 +151,7 @@ FactorService::FactorService(QObject* parent)
 
 FactorService::~FactorService()
 {
-    qDebug() << "[FactorService] 实例已销毁";
+    INTERNAL_DEBUG_STREAM << "[FactorService] 实例已销毁";
 }
 
 // ============ 初始化 ============
@@ -160,44 +159,44 @@ FactorService::~FactorService()
 bool FactorService::resolveBackend()
 {
     try {
-        fprintf(stderr, "[FS] resolveBackend START\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] resolveBackend START";
         std::lock_guard<std::mutex> lock(m_mutex);
 
         auto& dbManager = astock::database::DatabaseConnectionManager::instance();
-        fprintf(stderr, "[FS] dbManager OK\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] dbManager OK";
 
         // 纯 C++ 连接池 (NativeMySQLConnectionPool, 零 Qt 依赖)
         auto nativeDb = dbManager.getNativeConnection();
         if (!nativeDb) {
-            fprintf(stderr, "[FS] nativeDb=null\n"); fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[FS] nativeDb=null";
             emit errorOccurred(QStringLiteral("FactorService: 数据库连接池初始化失败"));
             return false;
         }
-        fprintf(stderr, "[FS] nativeDb OK\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] nativeDb OK";
 
         m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(nativeDb);
-        fprintf(stderr, "[FS] DataAvailabilityChecker OK\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] DataAvailabilityChecker OK";
 
-        fprintf(stderr, "[FS] creating FIM...\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] creating FIM...";
         m_instanceManager.reset(new factor::FactorInstanceManager(nativeDb, m_dataChecker));
-        fprintf(stderr, "[FS] FactorInstanceManager created\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] FactorInstanceManager created";
 
         m_detectionService = std::make_unique<FactorDetectionService>();
-        fprintf(stderr, "[FS] DetectionService OK\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] DetectionService OK";
 
         if (!m_viewModel) {
             m_viewModel = new FactorViewModel(this);
         }
-        fprintf(stderr, "[FS] ViewModel OK\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] ViewModel OK";
 
-        fprintf(stderr, "[FS] resolveBackend COMPLETE\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FS] resolveBackend COMPLETE";
         return true;
     } catch (const std::exception& e) {
-        fprintf(stderr, "[FS] EXCEPTION: %s\n", e.what()); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FS] EXCEPTION: " << e.what();
         emit errorOccurred(QStringLiteral("FactorService 异常: %1").arg(QString::fromStdString(e.what())));
         return false;
     } catch (...) {
-        fprintf(stderr, "[FS] UNKNOWN EXCEPTION crash\n"); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FS] UNKNOWN EXCEPTION crash";
         emit errorOccurred(QStringLiteral("FactorService 未知异常"));
         return false;
     }
@@ -206,7 +205,7 @@ bool FactorService::resolveBackend()
 void FactorService::initialize()
 {
     if (m_initialized.load()) {
-        qDebug() << "[FactorService] 已经初始化，跳过";
+        INTERNAL_DEBUG_STREAM << "[FactorService] 已经初始化，跳过";
         return;
     }
 
@@ -219,7 +218,7 @@ void FactorService::initialize()
     if (!success) {
         emit errorOccurred(QStringLiteral("因子服务初始化失败"));
     } else {
-        qDebug() << "[FactorService] 初始化完成";
+        INTERNAL_DEBUG_STREAM << "[FactorService] 初始化完成";
     }
 }
 
@@ -233,23 +232,23 @@ void FactorService::ensureViewModelPopulated()
     // m_viewModelPopulating 为 true 时直接跳过，避免 beginResetModel/endResetModel 嵌套崩溃
     bool expected = false;
     if (!m_viewModelPopulating.compare_exchange_strong(expected, true)) {
-        qDebug() << "[FactorService] ViewModel 填充进行中，跳过重入";
+        INTERNAL_DEBUG_STREAM << "[FactorService] ViewModel 填充进行中，跳过重入";
         return;
     }
 
     try {
         QVariantList factors = getAllFactors();
         if (factors.isEmpty()) {
-            qDebug() << "[FactorService] 因子列表为空，不更新ViewModel";
+            INTERNAL_DEBUG_STREAM << "[FactorService] 因子列表为空，不更新ViewModel";
             m_viewModelPopulating.store(false);
             return;
         }
         m_viewModel->updateData(factors);
-        qDebug() << "[FactorService] ViewModel已填充，" << factors.size() << "个因子";
+        INTERNAL_DEBUG_STREAM << "[FactorService] ViewModel已填充，" << factors.size() << "个因子";
     } catch (const std::exception& e) {
-        qWarning() << "[FactorService] 填充ViewModel异常:" << e.what();
+        INTERNAL_WARN_STREAM << "[FactorService] 填充ViewModel异常:" << e.what();
     } catch (...) {
-        qWarning() << "[FactorService] 填充ViewModel未知异常";
+        INTERNAL_WARN_STREAM << "[FactorService] 填充ViewModel未知异常";
     }
 
     m_viewModelPopulating.store(false);
@@ -287,7 +286,7 @@ FactorViewModel* FactorService::getViewModel()
 QVariantList FactorService::getAllFactors()
 {
     if (!m_instanceManager) {
-        qWarning() << "[FactorService] 实例管理器未初始化";
+        INTERNAL_WARN_STREAM << "[FactorService] 实例管理器未初始化";
         return {};
     }
 
@@ -298,9 +297,9 @@ QVariantList FactorService::getAllFactors()
             result.append(buildFactorInfoMap(info));
         }
     } catch (const std::exception& e) {
-        qWarning() << "[FactorService] getAllFactors 异常:" << e.what();
+        INTERNAL_WARN_STREAM << "[FactorService] getAllFactors 异常:" << e.what();
     } catch (...) {
-        qWarning() << "[FactorService] getAllFactors 未知异常";
+        INTERNAL_WARN_STREAM << "[FactorService] getAllFactors 未知异常";
     }
 
     return result;
@@ -318,9 +317,9 @@ QVariantMap FactorService::getFactorById(const QString& factorId)
             return buildFactorInfoMap(info);
         }
     } catch (const std::exception& e) {
-        qWarning() << "[FactorService] getFactorById 异常:" << e.what() << "factorId:" << factorId;
+        INTERNAL_WARN_STREAM << "[FactorService] getFactorById 异常:" << e.what() << "factorId:" << factorId.toStdString();
     } catch (...) {
-        qWarning() << "[FactorService] getFactorById 未知异常 factorId:" << factorId;
+        INTERNAL_WARN_STREAM << "[FactorService] getFactorById 未知异常 factorId:" << factorId.toStdString();
     }
 
     if (m_viewModel) {
@@ -402,7 +401,7 @@ QString FactorService::addFactor(const QVariantMap& factorData)
 
         factor::config::setSerializedConfig(config, config);
 
-        qDebug() << "[FactorService] 添加因子:" << factorId << factorName;
+        INTERNAL_DEBUG_STREAM << "[FactorService] 添加因子:" << factorId.toStdString() << factorName.toStdString();
 
         endMutation(true, QStringLiteral("因子创建成功"));
         emit factorAdded(factorId, factorData);
@@ -478,7 +477,7 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
         bool updated = m_instanceManager->updateInstanceConfig(toStd(factorId), config);
 
         if (updated) {
-            qDebug() << "[FactorService] 更新因子:" << factorId;
+            INTERNAL_DEBUG_STREAM << "[FactorService] 更新因子:" << factorId.toStdString();
             endMutation(true, QStringLiteral("因子更新成功"));
             emit factorUpdated(factorId, factorData);
         } else {
@@ -508,7 +507,7 @@ bool FactorService::deleteFactor(const QString& factorId)
 
     beginMutation();
     try {
-        qDebug() << "[FactorService] 删除因子:" << factorId;
+        INTERNAL_DEBUG_STREAM << "[FactorService] 删除因子:" << factorId.toStdString();
 
         if (m_viewModel) {
             ensureViewModelPopulated();
@@ -620,11 +619,11 @@ QString FactorService::generateFactorDataView(const QString& factorId)
 void FactorService::analyzeFactor(const QString& factorId)
 {
     if (factorId.isEmpty() || !m_initialized.load()) {
-        qWarning() << "[FactorService] analyzeFactor 无法执行: factorId为空或未初始化";
+        INTERNAL_WARN_STREAM << "[FactorService] analyzeFactor 无法执行: factorId为空或未初始化";
         return;
     }
 
-    qDebug() << "[FactorService] 请求分析因子:" << factorId;
+    INTERNAL_DEBUG_STREAM << "[FactorService] 请求分析因子:" << factorId.toStdString();
 
     emit operationCompleted(QStringLiteral("analyzeFactor"), true,
                            QStringLiteral("因子 '%1' 分析请求已提交").arg(factorId));

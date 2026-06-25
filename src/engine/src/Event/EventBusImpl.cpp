@@ -774,7 +774,7 @@ void EventBusImpl::process_batch_events() {
                         subscription.handler(event);
                     } catch (...) {
                         // 错误处理
-                        LOG_ERROR("Error in batch event handler for type: {}", event_type);
+                        INTERNAL_ERROR_STREAM << "Error in batch event handler for type: " << event_type;
                     }
                 }
             }
@@ -804,8 +804,8 @@ void EventBusImpl::process_batch_events() {
                         // 方式3：如果 Event 不可拷贝，只能处理一次
                         // callback(std::move(event));  // 这会清空 vector
                     } catch (...) {
-                        LOG_ERROR("Error in batch engine event handler for type: {}", 
-                                 static_cast<int>(event_type));
+                        INTERNAL_ERROR_STREAM << "Error in batch engine event handler for type: "
+                                 << static_cast<int>(event_type);
                     }
                 }
             }

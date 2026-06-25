@@ -2,13 +2,13 @@
 #include "factor_compute/SubMarketDataView.h"
 
 #include "foundation/Utils/Timestamp.h"
+#include "foundation/log/logging.hpp"
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <arrow/ipc/api.h>
 
 #include <algorithm>
-#include <cstdio>
 #include <cmath>
 #include <stdexcept>
 #include <unordered_map>
@@ -166,24 +166,20 @@ public:
         // ── 打开文件，建立 mmap + reader ──
         auto inResult = arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ);
         if (!inResult.ok()) {
-            fprintf(stderr, "[ArrowView] mmap failed: %s\n", inResult.status().ToString().c_str());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[ArrowView] mmap failed: " << inResult.status().ToString();
             return;
         }
         input_ = inResult.ValueOrDie();
 
         auto readerResult = arrow::ipc::RecordBatchFileReader::Open(input_);
         if (!readerResult.ok()) {
-            fprintf(stderr, "[ArrowView] reader open failed: %s\n",
-                    readerResult.status().ToString().c_str());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[ArrowView] reader open failed: " << readerResult.status().ToString();
             return;
         }
         reader_ = readerResult.ValueOrDie();
         const int nBatches = reader_->num_record_batches();
         if (nBatches == 0) {
-            fprintf(stderr, "[ArrowView] file has 0 batches\n");
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[ArrowView] file has 0 batches";
             return;
         }
 
@@ -216,8 +212,7 @@ public:
         nDates_ = static_cast<int>(dateKeys_.size());
         nInsts_ = static_cast<int>(localSymbolToInst_.size());
         if (nDates_ == 0 || nInsts_ == 0) {
-            fprintf(stderr, "[ArrowView] empty index: dates=%d insts=%d\n", nDates_, nInsts_);
-            fflush(stderr);
+            INTERNAL_WARN_STREAM << "[ArrowView] empty index: dates=" << nDates_ << " insts=" << nInsts_;
             return;
         }
 
@@ -244,10 +239,9 @@ public:
 
         indexReady_ = true;
 
-        fprintf(stderr, "[ArrowView] %s: %d dates x %d insts, %zu fields, batches=%d, rows=%lld (lazy load)\n",
-                path.c_str(), nDates_, nInsts_, availableFields_.size(), nBatches,
-                static_cast<long long>(totalRows));
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[ArrowView] " << path << ": " << nDates_ << " dates x " << nInsts_
+            << " insts, " << availableFields_.size() << " fields, batches=" << nBatches
+            << ", rows=" << static_cast<long long>(totalRows) << " (lazy load)";
     }
 
     // ── 懒加载核心列（全量，首次访问触发）──

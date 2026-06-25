@@ -44,7 +44,7 @@ DataFetchController::DataFetchController(QObject* parent)
     , m_cleaningSvc(new DataCleaningServiceRefactored(this))
     , m_previewModel(new PreviewDataModel(this))
 {
-    fprintf(stderr, "[DataFetchController] constructed\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[DataFetchController] constructed";
     QDateTime now = QDateTime::currentDateTime();
     m_startDate = now.addDays(-30).toString("yyyy-MM-dd");
     m_endDate = now.toString("yyyy-MM-dd");
@@ -494,7 +494,7 @@ bool DataFetchController::removeDataSet(int dataSetId) {
     return ok;
 }
 
-void DataFetchController::logInitMessage() { fprintf(stderr, "[DataFetchController] ready\n"); fflush(stderr); }
+void DataFetchController::logInitMessage() { INTERNAL_INFO_STREAM << "[DataFetchController] ready"; }
 
 void DataFetchController::onDataLoadProgress(int p, const QString& m) {
     if (m_progress != p) { m_progress = p; emit progressChanged(); }

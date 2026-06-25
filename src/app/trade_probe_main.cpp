@@ -123,7 +123,7 @@ bool initializeRuntimeEnvironment()
     const QString filesDir = QDir(baseDir).filePath(QStringLiteral("files"));
 
     if (!ensureDirectory(configDir) || !ensureDirectory(logsDir) || !ensureDirectory(filesDir)) {
-        std::cerr << "[tradeprobe] failed to prepare runtime directories" << std::endl;
+        INTERNAL_ERROR_STREAM << "[tradeprobe] failed to prepare runtime directories";
         return false;
     }
 
@@ -135,7 +135,7 @@ bool initializeRuntimeEnvironment()
     config.log_file = QDir(logsDir).filePath(QStringLiteral("astockquant_tradeprobe.log")).toStdString();
 
     if (!foundation::Foundation::instance().initialize(config)) {
-        std::cerr << "[tradeprobe] foundation initialization failed" << std::endl;
+        INTERNAL_ERROR_STREAM << "[tradeprobe] foundation initialization failed";
         return false;
     }
 
@@ -229,7 +229,7 @@ int main(int argc, char* argv[])
     if (!engine::get_engine_event_bus()) {
         ownedBus = engine::EventBus::create();
         if (!ownedBus || !ownedBus->start()) {
-            std::cerr << "[tradeprobe] failed to initialize EventBus" << std::endl;
+            INTERNAL_ERROR_STREAM << "[tradeprobe] failed to initialize EventBus";
             shutdownRuntimeEnvironment(ownedBus);
             return 1;
         }

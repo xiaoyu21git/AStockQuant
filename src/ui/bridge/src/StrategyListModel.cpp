@@ -1,8 +1,8 @@
 #include "../include/StrategyListModel.h"
+#include "foundation/log/logging.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLoggingCategory>
 #include <QString>
 
 StrategyListModel::StrategyListModel(QObject* parent)
@@ -67,38 +67,41 @@ QHash<int, QByteArray> StrategyListModel::roleNames() const
 
 void StrategyListModel::replaceAll(const QVariantList& items)
 {
+    INTERNAL_INFO_STREAM << "[ListModel] replaceAll START rows=" << static_cast<int>(items.size());
     QVector<StrategyRow> nextRows;
     nextRows.reserve(items.size());
-    qInfo() << "[StrategyListModel] replaceAll input rows=" << items.size();
+    INTERNAL_INFO_STREAM << "[StrategyListModel] replaceAll input rows=" << items.size();
 
     for (const QVariant& item : items) {
         const QVariantMap map = item.toMap();
         if (map.isEmpty()) {
-            qWarning() << "[StrategyListModel] skip empty map row";
+            INTERNAL_WARN_STREAM << "[StrategyListModel] skip empty map row";
             continue;
         }
 
         const StrategyRow row = fromVariantMap(map);
         if (row.strategyId.isEmpty()) {
-            qWarning().noquote() << QStringLiteral("[StrategyListModel] skip row: empty strategyId raw=%1")
+            INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] skip row: empty strategyId raw=%1")
                                         .arg(QString::fromUtf8(
                                             QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(
-                                                QJsonDocument::Compact)));
+                                                QJsonDocument::Compact))).toStdString();
             continue;
         }
 
-        qInfo().noquote() << QStringLiteral("[StrategyListModel] mapped row strategyId=%1 name=%2 status=%3 updatedAt=%4")
+        INTERNAL_INFO_STREAM << QStringLiteral("[StrategyListModel] mapped row strategyId=%1 name=%2 status=%3 updatedAt=%4")
                                  .arg(row.strategyId,
                                       row.name,
                                       QString::number(row.status),
-                                      row.updatedAt);
+                                      row.updatedAt).toStdString();
         nextRows.push_back(row);
     }
 
+    INTERNAL_INFO_STREAM << "[ListModel] replaceAll building model, nextRows=" << static_cast<int>(nextRows.size());
     beginResetModel();
     m_rows = std::move(nextRows);
     endResetModel();
     emit countChanged();
+    INTERNAL_INFO_STREAM << "[ListModel] replaceAll DONE";
 }
 
 void StrategyListModel::upsertOne(const QVariantMap& item)
@@ -180,11 +183,11 @@ StrategyListModel::StrategyRow StrategyListModel::fromVariantMap(const QVariantM
     row.displayStatus = map.value(QStringLiteral("displayStatus")).toString();
 
     if (row.name.isEmpty()) {
-        qWarning().noquote() << QStringLiteral("[StrategyListModel] mapped empty name for strategyId=%1 raw=%2")
+        INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] mapped empty name for strategyId=%1 raw=%2")
                                     .arg(row.strategyId,
                                          QString::fromUtf8(
                                              QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(
-                                                 QJsonDocument::Compact)));
+                                                 QJsonDocument::Compact))).toStdString();
     }
     return row;
 }

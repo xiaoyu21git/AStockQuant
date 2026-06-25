@@ -236,10 +236,11 @@ std::string buildFieldValidCondition(const std::string& normalizedField)
 
 std::string sqlQuoteIdentifier(const std::string& identifier)
 {
+    // PG 使用双引号引用标识符，转义内部双引号为两个双引号
     std::string quoted = identifier;
-    for (std::size_t pos = quoted.find('`'); pos != std::string::npos; pos = quoted.find('`', pos + 2))
-        quoted.replace(pos, 1, "``");
-    return "`" + quoted + "`";
+    for (std::size_t pos = quoted.find('"'); pos != std::string::npos; pos = quoted.find('"', pos + 2))
+        quoted.replace(pos, 1, "\"\"");
+    return "\"" + quoted + "\"";
 }
 
 std::unordered_set<std::string> loadTableColumns(
@@ -257,9 +258,12 @@ std::unordered_set<std::string> loadTableColumns(
             return it->second;
     }
 
+    // PG: 用 search_path 中的全部 schema 代替 MySQL 的 DATABASE()
     auto result = db->executeQuery(
         "SELECT COLUMN_NAME AS column_name FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+        "WHERE TABLE_SCHEMA = ANY(regexp_split_to_array("
+        "replace(current_setting('search_path'), ' ', ''), ',')) "
+        "AND TABLE_NAME = ?",
         { astock::database::SqlParam{std::string(tableName)} }
     );
 
@@ -392,7 +396,7 @@ DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
         selectStr += selectParts[i];
     }
 
-    std::string sql = "SELECT " + selectStr + " FROM `" + table + "`";
+    std::string sql = "SELECT " + selectStr + " FROM " + table;
     if (!datePred.empty())
         sql += " WHERE " + datePred;
 
@@ -502,6 +506,8 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
 {
     DataStatus result;
     try {
+        if (!db_) return createErrorStatus("database connection not initialized");
+
         if (!config::hasDataRequirementsConfig(config))
             return createErrorStatus("invalid factor config: missing dataRequirements");
 
@@ -591,7 +597,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
         std::string datePred = buildDatePredicate(table, dateCol);
         std::string symCol = symbolColumnForTable(table);
 
-        std::string totalSql = "SELECT COUNT(DISTINCT " + symCol + ") as total FROM `" + table + "`";
+        std::string totalSql = "SELECT COUNT(DISTINCT " + symCol + ") as total FROM " + table;
         if (!datePred.empty())
             totalSql += " WHERE " + datePred;
 
@@ -607,7 +613,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
             std::string validCondition = buildFieldValidCondition(nf);
             if (validCondition.empty()) continue;
 
-            std::string validSql = "SELECT COUNT(DISTINCT " + symCol + ") as valid FROM `" + table + "` WHERE ";
+            std::string validSql = "SELECT COUNT(DISTINCT " + symCol + ") as valid FROM " + table + " WHERE ";
             if (!datePred.empty())
                 validSql += datePred + " AND ";
             validSql += validCondition;
@@ -640,7 +646,7 @@ std::map<std::string, DataStatus> DataAvailabilityChecker::checkDateRange(
         if (table.empty()) return results;
 
         std::string dateCol = resolveDateColumn(table);
-        std::string sql = "SELECT DISTINCT " + dateCol + " AS data_date FROM `" + table + "` WHERE " + dateCol + " BETWEEN ? AND ? ORDER BY " + dateCol;
+        std::string sql = "SELECT DISTINCT " + dateCol + " AS data_date FROM " + table + " WHERE " + dateCol + " BETWEEN ? AND ? ORDER BY " + dateCol;
 
         auto datesResult = db_->executeQuery(sql,
             { astock::database::SqlParam{std::string(startDate)}, astock::database::SqlParam{std::string(endDate)} });
@@ -675,7 +681,7 @@ bool DataAvailabilityChecker::isFieldValid(const std::string& table,
         if (validCondition.empty()) return false;
 
         std::string datePred = buildDatePredicate(table, resolveDateColumn(table));
-        std::string sql = "SELECT COUNT(*) as count FROM `" + table + "` WHERE ";
+        std::string sql = "SELECT COUNT(*) as count FROM " + table + " WHERE ";
         if (!datePred.empty())
             sql += datePred + " AND ";
 

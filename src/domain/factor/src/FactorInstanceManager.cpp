@@ -17,7 +17,7 @@
 #include "FactorConfigAccess.h"
 #include "IFactorResolver.h"
 #include "infrastructure/include/database/ISqlDatabase.h"
-#include <cstdio>
+#include "foundation/log/logging.hpp"
 #include <algorithm>
 #include <chrono>
 #include <sstream>
@@ -195,12 +195,12 @@ FactorInstanceManager::FactorInstanceManager(
     std::shared_ptr<DataAvailabilityChecker> dataChecker)
     : db_(db), dataChecker_(dataChecker) {
 
-    fprintf(stderr, "[FIM] ctor START\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FIM] ctor START";
     threadPool_ = std::make_shared<foundation::thread::ThreadPoolExecutor>(4);
-    fprintf(stderr, "[FIM] threadpool OK\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FIM] threadpool OK";
 
     // refreshCache() 移除 — 策略需要的因子由 createInstance() 按需加载+缓存
-    fprintf(stderr, "[FIM] ctor DONE (lazy load)\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FIM] ctor DONE (lazy load)";
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
@@ -216,14 +216,10 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
     try {
         return creator(info, dataChecker_, *this);
     } catch (const std::exception& e) {
-        fprintf(stderr, "[FIM] createFactorFromInfo failed: %s type=%d error=%s\n",
-                instanceId.c_str(), static_cast<int>(factorType), e.what());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] createFactorFromInfo failed: " << instanceId << " type=" << static_cast<int>(factorType) << " error=" << e.what();
         return nullptr;
     } catch (...) {
-        fprintf(stderr, "[FIM] createFactorFromInfo failed: %s type=%d error=unknown\n",
-                instanceId.c_str(), static_cast<int>(factorType));
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] createFactorFromInfo failed: " << instanceId << " type=" << static_cast<int>(factorType) << " error=unknown";
         return nullptr;
     }
 }
@@ -369,37 +365,33 @@ bool FactorInstanceManager::updateInstanceConfig(
         }
 
     } catch (const std::exception& e) {
-        fprintf(stderr, "[FIM] updateInstanceConfig EXCEPTION: id=%s error=%s\n",
-                instanceId.c_str(), e.what());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] updateInstanceConfig EXCEPTION: id=" << instanceId << " error=" << e.what();
     } catch (...) {
-        fprintf(stderr, "[FIM] updateInstanceConfig UNKNOWN EXCEPTION: id=%s\n",
-                instanceId.c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] updateInstanceConfig UNKNOWN EXCEPTION: id=" << instanceId;
     }
 
     return false;
 }
 
 void FactorInstanceManager::refreshCache() {
-    fprintf(stderr, "[FIM] refreshCache START\n"); fflush(stderr);
+    INTERNAL_INFO_STREAM << "[FIM] refreshCache START";
     try {
         std::lock_guard<std::mutex> lock(cacheMutex_);
 
         instanceCache_.clear();
         infoCache_.clear();
 
-        fprintf(stderr, "[FIM] refreshCache calling loadAllInstancesFromDB\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FIM] refreshCache calling loadAllInstancesFromDB";
         auto allInstances = loadAllInstancesFromDB();
-        fprintf(stderr, "[FIM] refreshCache loaded %zu instances\n", allInstances.size()); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FIM] refreshCache loaded " << allInstances.size() << " instances";
         for (auto& info : allInstances) {
             infoCache_[info.instanceId] = info;
         }
-        fprintf(stderr, "[FIM] refreshCache DONE\n"); fflush(stderr);
+        INTERNAL_INFO_STREAM << "[FIM] refreshCache DONE";
     } catch (const std::exception& e) {
-        fprintf(stderr, "[FIM] refreshCache EXCEPTION: %s\n", e.what()); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] refreshCache EXCEPTION: " << e.what();
     } catch (...) {
-        fprintf(stderr, "[FIM] refreshCache UNKNOWN EXCEPTION (likely Foundation logger crash)\n"); fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] refreshCache UNKNOWN EXCEPTION (likely Foundation logger crash)";
         // 崩溃源：updateInstanceAvailability → DataAvailabilityChecker → Foundation logger
         // 缓存刷新失败不影响主流程，继续运行
     }
@@ -457,13 +449,9 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
         updateInstanceAvailability(info);
 
     } catch (const std::exception& e) {
-        fprintf(stderr, "[FIM] loadInstanceFromDB EXCEPTION: id=%s error=%s\n",
-                instanceId.c_str(), e.what());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] loadInstanceFromDB EXCEPTION: id=" << instanceId << " error=" << e.what();
     } catch (...) {
-        fprintf(stderr, "[FIM] loadInstanceFromDB UNKNOWN EXCEPTION: id=%s\n",
-                instanceId.c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] loadInstanceFromDB UNKNOWN EXCEPTION: id=" << instanceId;
     }
 
     return info;
@@ -495,12 +483,9 @@ void FactorInstanceManager::updateInstanceAvailability(
                 checkDate = latestResult.getRow(0).getString("latest_date");
             }
         } catch (const std::exception& e) {
-            fprintf(stderr, "[FIM] updateInstanceAvailability daily_bar query EXCEPTION: %s\n",
-                    e.what());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[FIM] updateInstanceAvailability daily_bar query EXCEPTION: " << e.what();
         } catch (...) {
-            fprintf(stderr, "[FIM] updateInstanceAvailability daily_bar query UNKNOWN EXCEPTION\n");
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[FIM] updateInstanceAvailability daily_bar query UNKNOWN EXCEPTION";
         }
     }
 
@@ -554,11 +539,9 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
         }
 
     } catch (const std::exception& e) {
-        fprintf(stderr, "[FIM] loadAllInstancesFromDB EXCEPTION: %s\n", e.what());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] loadAllInstancesFromDB EXCEPTION: " << e.what();
     } catch (...) {
-        fprintf(stderr, "[FIM] loadAllInstancesFromDB UNKNOWN EXCEPTION\n");
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[FIM] loadAllInstancesFromDB UNKNOWN EXCEPTION";
     }
 
     return instances;

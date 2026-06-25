@@ -33,8 +33,8 @@ Error publish_trigger_event(std::unique_ptr<Event> event) {
 
     std::lock_guard<std::mutex> lock(g_trigger_publisher_mutex);
     if (!g_trigger_publisher) {
-        LOG_WARN("Trigger event publisher not set, dropping event type={}",
-                 Event::type_to_string(event->type()));
+        INTERNAL_WARN_STREAM << "Trigger event publisher not set, dropping event type="
+                 << Event::type_to_string(event->type());
         return Error{Error::Code::DISCONNECTED, "Trigger event publisher not set"};
     }
 
@@ -163,7 +163,7 @@ public:
             }
                 
             default:
-                LOG_ERROR("Unknown time condition type: {}", static_cast<int>(condition_type_));
+                INTERNAL_ERROR_STREAM << "Unknown time condition type: " << static_cast<int>(condition_type_);
                 return false;
         }
     }
@@ -184,7 +184,7 @@ public:
                 return std::make_unique<TimeCondition>(interval_);
                 
             default:
-                LOG_ERROR("Cannot clone unknown time condition type");
+                INTERNAL_ERROR_STREAM << "Cannot clone unknown time condition type";
                 return std::make_unique<TimeCondition>(condition_type_, time1_);
         }
     }
@@ -250,7 +250,7 @@ public:
                 return !left_->check(event, current_time);
                 
             default:
-                LOG_ERROR("Unknown logical operator: {}", static_cast<int>(operator_));
+                INTERNAL_ERROR_STREAM << "Unknown logical operator: " << static_cast<int>(operator_);
                 return false;
         }
     }
@@ -266,7 +266,7 @@ public:
                 return std::make_unique<LogicalCondition>(left_->clone());
                 
             default:
-                LOG_ERROR("Cannot clone unknown logical operator");
+                INTERNAL_ERROR_STREAM << "Cannot clone unknown logical operator";
                 return std::make_unique<LogicalCondition>(left_->clone());
         }
     }
@@ -389,16 +389,16 @@ public:
             // 例如: "Event {{event_id}} triggered at {{time}}"
             
             switch (log_level_) {
-                case foundation::LogLevel::DEBUG: LOG_DEBUG("{}", message); break;
-                case foundation::LogLevel::INFO: LOG_INFO("{}", message); break;
-                case foundation::LogLevel::WARN: LOG_WARN("{}", message); break;
-                case foundation::LogLevel::Found_ERROR: LOG_ERROR("{}", message); break;
-                default: LOG_INFO("{}", message); break;
+                case foundation::LogLevel::DEBUG: INTERNAL_DEBUG_STREAM << message; break;
+                case foundation::LogLevel::INFO: INTERNAL_INFO_STREAM << message; break;
+                case foundation::LogLevel::WARN: INTERNAL_WARN_STREAM << message; break;
+                case foundation::LogLevel::Found_ERROR: INTERNAL_ERROR_STREAM << message; break;
+                default: INTERNAL_INFO_STREAM << message; break;
             }
             
             return Error{Error::Code::OK, "Log action executed successfully"};
         } catch (const std::exception& e) {
-            LOG_ERROR("Failed to execute log action: {}", e.what());
+            INTERNAL_ERROR_STREAM << "Failed to execute log action: " << e.what();
             return Error{Error::Code::NOT_FOUND, std::string("Failed to execute log action: ") + e.what()};
         }
     }
@@ -433,17 +433,17 @@ public:
             auto result = publish_trigger_event(std::move(new_event));
 
             if (result.code() != Error::Code::OK) {
-                LOG_ERROR("EventEmitAction: failed to publish event of type {}: {}",
-                          Event::type_to_string(event_type_), result.message);
+                INTERNAL_ERROR_STREAM << "EventEmitAction: failed to publish event of type "
+                          << Event::type_to_string(event_type_) << ": " << result.message();
                 return result;
             }
 
-            LOG_INFO("EventEmitAction: Published event of type {}",
-                     Event::type_to_string(event_type_));
+            INTERNAL_INFO_STREAM << "EventEmitAction: Published event of type "
+                     << Event::type_to_string(event_type_);
 
             return Error{Error::Code::OK, "Event emit action completed and published"};
         } catch (const std::exception& e) {
-            LOG_ERROR("Failed to execute event emit action: {}", e.what());
+            INTERNAL_ERROR_STREAM << "Failed to execute event emit action: " << e.what();
             return Error{Error::Code::NOT_FOUND, std::string("Failed to execute event emit action: ") + e.what()};
         }
     }
@@ -470,7 +470,7 @@ public:
         try {
             return callback_(triggering_event, current_time);
         } catch (const std::exception& e) {
-            LOG_ERROR("Callback action execution failed: {}", e.what());
+            INTERNAL_ERROR_STREAM << "Callback action execution failed: " << e.what();
             return Error{Error::Code::NOT_FOUND, std::string("Callback execution failed: ") + e.what()};
         }
     }
@@ -478,7 +478,7 @@ public:
     std::unique_ptr<TriggerAction> clone() const override {
         // 注意：函数对象不能安全地克隆
         // 在实际使用中可能需要其他机制
-        LOG_WARN("CallbackAction clone not fully implemented");
+        INTERNAL_WARN_STREAM << "CallbackAction clone not fully implemented";
         return std::make_unique<CallbackAction>(callback_);
     }
 };
@@ -508,11 +508,11 @@ public:
         , condition_(std::move(condition))
         , action_(std::move(action)) 
     {
-        LOG_DEBUG("Created trigger: {}", name_);
+        INTERNAL_DEBUG_STREAM << "Created trigger: " << name_;
     }
     
     ~TriggerImpl() override {
-        LOG_DEBUG("Destroyed trigger: {}", name_);
+        INTERNAL_DEBUG_STREAM << "Destroyed trigger: " << name_;
     }
     
     Error evaluate(const Event& event, foundation::Timestamp current_time) override {
@@ -528,21 +528,21 @@ public:
                 return Error{Error::Code::NOT_FOUND, "Condition not satisfied"};
             }
             
-            LOG_DEBUG("Trigger '{}' condition satisfied, executing action", name_);
+            INTERNAL_DEBUG_STREAM << "Trigger '" << name_ << "' condition satisfied, executing action";
             
             // 执行动作
             Error result = action_->execute(event, current_time);
             
             if (result.code() != 0) {
-                LOG_ERROR("Trigger '{}' action failed: {}", name_, result.message);
+                INTERNAL_ERROR_STREAM << "Trigger '" << name_ << "' action failed: " << result.message();
             } else {
-                LOG_DEBUG("Trigger '{}' action executed successfully", name_);
+                INTERNAL_DEBUG_STREAM << "Trigger '" << name_ << "' action executed successfully";
             }
             
             return result;
             
         } catch (const std::exception& e) {
-            LOG_ERROR("Trigger '{}' evaluation failed: {}", name_, e.what());
+            INTERNAL_ERROR_STREAM << "Trigger '" << name_ << "' evaluation failed: " << e.what();
             return Error{Error::Code::OK, std::string("Trigger evaluation failed: ") + e.what()};
         }
     }
@@ -560,7 +560,7 @@ public:
     void set_enabled(bool enabled) override {
         std::lock_guard<std::mutex> lock(mutex_);
         enabled_ = enabled;
-        LOG_DEBUG("Trigger '{}' {}", name_, enabled_ ? "enabled" : "disabled");
+        INTERNAL_DEBUG_STREAM << "Trigger '" << name_ << "' " << (enabled_ ? "enabled" : "disabled");
     }
     
     bool is_enabled() const override {

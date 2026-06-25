@@ -1,4 +1,5 @@
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "foundation/log/logging.hpp"
 #include <iostream>
 #include <sstream>
 #include <iomanip>
@@ -50,7 +51,7 @@ void ThreadPoolExecutor::initialize() {
         try {
             if (e) std::rethrow_exception(e);
         } catch (const std::exception& ex) {
-            std::cerr << "[ThreadPool] Uncaught exception: " << ex.what() << std::endl;
+            INTERNAL_ERROR_STREAM << "[ThreadPool] Uncaught exception: " << ex.what();
         }
     };
     

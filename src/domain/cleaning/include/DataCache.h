@@ -3,6 +3,7 @@
 #pragma once
 #include "DataFieldKeys.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/log/logging.hpp"
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -116,9 +117,7 @@ public:
         // 加载已有索引
         loadCatalog();
         m_initialized = true;
-        fprintf(stderr, "[DataCache] initialized, dir=%s, nextId=%d, existing datasets=%zu\n",
-                m_persistentDir.c_str(), m_nextDataSetId, m_index.size());
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[DataCache] initialized, dir=" << m_persistentDir << ", nextId=" << m_nextDataSetId << ", existing datasets=" << m_index.size();
         return true;
     }
 
@@ -168,9 +167,7 @@ public:
         m_index[dataId] = fullInfo;
         saveCatalog();
 
-        fprintf(stderr, "[DataCache] stored dataset %d: %s (%d rows, %zu fields)\n",
-                dataId, fullInfo.displayName.c_str(), fullInfo.rowCount, fullInfo.availableFields.size());
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[DataCache] stored dataset " << dataId << ": " << fullInfo.displayName << " (" << fullInfo.rowCount << " rows, " << fullInfo.availableFields.size() << " fields)";
         return dataId;
     }
 
@@ -340,7 +337,7 @@ private:
                         std::string apath = dataFilePath(info.id);
                         FILE* ftest = fopen(apath.c_str(), "rb");
                         if (!ftest) {
-                            fprintf(stderr, "[DataCache] skip stale dataset %d (no file)\n", info.id); fflush(stderr);
+                            INTERNAL_WARN_STREAM << "[DataCache] skip stale dataset " << info.id << " (no file)";
                             std::remove(infoFilePath(info.id).c_str());
                             std::remove(jsonDataFilePath(info.id).c_str());
                             m_indexStale = true;
@@ -392,15 +389,12 @@ private:
     static void writeFile(const std::string& path, const std::string& content) {
         FILE* f = fopen(path.c_str(), "wb");
         if (!f) {
-            fprintf(stderr, "[DataCache] writeFile: fopen failed for %s\n", path.c_str());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[DataCache] writeFile: fopen failed for " << path;
             return;
         }
         size_t written = fwrite(content.data(), 1, content.size(), f);
         if (written != content.size()) {
-            fprintf(stderr, "[DataCache] writeFile: fwrite partial write (%zu / %zu bytes) for %s\n",
-                    written, content.size(), path.c_str());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[DataCache] writeFile: fwrite partial write (" << written << " / " << content.size() << " bytes) for " << path;
             fclose(f);
             // 删除部分写入的损坏文件
             std::remove(path.c_str());
@@ -420,9 +414,7 @@ private:
         size_t nread = fread(&content[0], 1, static_cast<size_t>(sz), f);
         fclose(f);
         if (nread != static_cast<size_t>(sz)) {
-            fprintf(stderr, "[DataCache] readFile: fread partial read (%zu / %ld bytes) for %s\n",
-                    nread, sz, path.c_str());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[DataCache] readFile: fread partial read (" << nread << " / " << sz << " bytes) for " << path;
             return {};
         }
         return content;

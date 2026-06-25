@@ -22,12 +22,12 @@ std::string toStdString(const QString& value)
 FactorViewModel::FactorViewModel(QObject* parent)
     : QAbstractListModel(parent)
 {
-    LOG_DEBUG("FactorViewModel constructor");
+    INTERNAL_DEBUG_STREAM << "FactorViewModel constructor";
 }
 
 FactorViewModel::~FactorViewModel()
 {
-    LOG_DEBUG("FactorViewModel destructor");
+    INTERNAL_DEBUG_STREAM << "FactorViewModel destructor";
 }
 
 int FactorViewModel::rowCount(const QModelIndex& parent) const
@@ -149,14 +149,14 @@ void FactorViewModel::clearData()
 
 void FactorViewModel::appendData(const QVariantMap& factorData)
 {
-    LOG_DEBUG("FactorViewModel::appendData: 添加数据项");
+    INTERNAL_DEBUG_STREAM << "FactorViewModel::appendData: 添加数据项";
     
     FactorViewData factor = FactorViewData::fromVariantMap(factorData);
     
     // 检查是否已存在相同ID的因子
     for (int i = 0; i < m_factors.size(); ++i) {
         if (m_factors.at(i).factorId == factor.factorId) {
-            LOG_WARN(std::string("因子ID已存在: ") + toStdString(factor.factorId));
+            INTERNAL_WARN_STREAM << "因子ID已存在: " << toStdString(factor.factorId);
             return;
         }
     }
@@ -176,7 +176,7 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
         return;
     }
     
-    LOG_DEBUG("FactorViewModel::addDataBatch: 批量添加 " + std::to_string(factors.size()) + " 条数据");
+    INTERNAL_DEBUG_STREAM << "FactorViewModel::addDataBatch: 批量添加 " << factors.size() << " 条数据";
     
     int startRow = m_factors.size();
     int endRow = startRow + factors.size() - 1;
@@ -191,7 +191,7 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
     
     endInsertRows();
     
-    LOG_DEBUG("FactorViewModel::addDataBatch: 成功添加 " + std::to_string(factors.size()) + " 条数据");
+    INTERNAL_DEBUG_STREAM << "FactorViewModel::addDataBatch: 成功添加 " << factors.size() << " 条数据";
     emit countChanged();
     emit dataUpdated();
 }
@@ -199,8 +199,7 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
 QVariantMap FactorViewModel::getRow(int index) const
 {
     if (index < 0 || index >= m_factors.size()) {
-        LOG_WARN("FactorViewModel::getRow: 索引越界 index=" + std::to_string(index)
-                 + " size=" + std::to_string(m_factors.size()));
+        INTERNAL_WARN_STREAM << "FactorViewModel::getRow: 索引越界 index=" << index << " size=" << m_factors.size();
         return QVariantMap();
     }
     
@@ -304,7 +303,7 @@ void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& f
 {
     int index = findIndexById(factorId);
     if (index == -1) {
-        LOG_WARN(std::string("未找到因子: ") + toStdString(factorId));
+        INTERNAL_WARN_STREAM << "未找到因子: " << toStdString(factorId);
         return;
     }
     
@@ -324,7 +323,7 @@ void FactorViewModel::removeFactor(const QString& factorId)
 {
     int index = findIndexById(factorId);
     if (index == -1) {
-        LOG_WARN(std::string("未找到因子: ") + toStdString(factorId));
+        INTERNAL_WARN_STREAM << "未找到因子: " << toStdString(factorId);
         return;
     }
     
@@ -336,7 +335,7 @@ void FactorViewModel::removeFactor(const QString& factorId)
     emit countChanged();
     emit dataUpdated();
     
-    LOG_DEBUG(std::string("FactorViewModel::removeFactor 完成，删除因子: ") + toStdString(factorId));
+    INTERNAL_DEBUG_STREAM << "FactorViewModel::removeFactor 完成，删除因子: " << toStdString(factorId);
 }
 
 int FactorViewModel::findIndexById(const QString& factorId) const

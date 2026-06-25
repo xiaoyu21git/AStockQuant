@@ -109,7 +109,7 @@ public:
             return Error{Error::Code::OK, ""};
         } catch (const std::exception& e) {
             // ==================== 修改点6: 使用基类成员 ====================
-            LOG_ERROR("Failed to poll data from " + name_ + ": " + e.what());
+            INTERNAL_ERROR_STREAM << "Failed to poll data from " << name_ << ": " << e.what();
             
             // 更新状态为错误
             auto old_state = state_;
@@ -218,7 +218,7 @@ private:
             try {
                 listener->on_data_received(std::unique_ptr<Event>(event->clone().release()));
             } catch (const std::exception& e) {
-                LOG_ERROR("Data listener error: " + std::string(e.what()));
+                INTERNAL_ERROR_STREAM << "Data listener error: " << e.what();
             }
         }
     }
@@ -229,7 +229,7 @@ private:
             try {
                 listener->on_state_changed(old_state, new_state);
             } catch (const std::exception& e) {
-                std::cerr <<"Data listener error: " + std::string(e.what());
+                INTERNAL_ERROR_STREAM << "Data listener error: " + std::string(e.what());
             }
         }
     }

@@ -5,6 +5,7 @@
 #include "ICleaningRule.h"
 #include "DataFieldKeys.h"
 #include "LightRow.h"
+#include "foundation/log/logging.hpp"
 #include <algorithm>
 #include <atomic>
 #include <functional>
@@ -12,7 +13,6 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <cstdio>
 
 namespace cleaning {
 
@@ -93,8 +93,7 @@ public:
             // 每 1000 行检查取消标志
             if (processed > 0 && processed % 1000 == 0) {
                 if (m_cancelled.load(std::memory_order_relaxed)) {
-                    fprintf(stderr, "[CleaningEngine] cancelled after %d rows\n", processed);
-                    fflush(stderr);
+                    INTERNAL_INFO_STREAM << "[CleaningEngine] cancelled after " << processed << " rows";
                     return {};
                 }
             }
@@ -134,9 +133,7 @@ public:
 
         if (m_onProgress) m_onProgress(s.totalRecords, s.totalRecords, "done");
 
-        fprintf(stderr, "[CleaningEngine] %d -> %d rows (%d removed)\n",
-                s.totalRecords, s.keptRecords, s.removedRecords);
-        fflush(stderr);
+        INTERNAL_INFO_STREAM << "[CleaningEngine] " << s.totalRecords << " -> " << s.keptRecords << " rows (" << s.removedRecords << " removed)";
         return kept;
     }
 
@@ -167,7 +164,7 @@ public:
             ++processed;
         }
         if (isLast) { std::vector<LightRow> d; for (auto& rule : m_rules) rule->postCrossSectional(d);
-            fprintf(stderr, "[CleaningEngine] %d -> %d rows (%d removed)\n", m_lastStats.totalRecords, m_lastStats.keptRecords, m_lastStats.removedRecords); fflush(stderr); }
+            INTERNAL_INFO_STREAM << "[CleaningEngine] " << m_lastStats.totalRecords << " -> " << m_lastStats.keptRecords << " rows (" << m_lastStats.removedRecords << " removed)"; }
     }
 
     const CleaningStats& lastStats() const { return m_lastStats; }

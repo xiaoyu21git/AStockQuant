@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import sys
 from db_config import pg_connect
 from pathlib import Path
@@ -18,11 +19,10 @@ from tools.history_start_policy import resolve_history_date_bounds
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "
-    "user": "root",
-    "password": "123456a",
+    "port": 5432,
+    "user": "astock",
+    "password": "astock123",
     "database": "astock_quant",
-    "charset": "utf8mb4",
     "autocommit": False,
 }
 
@@ -60,11 +60,11 @@ def print_summary(cursor, start_date: str, end_date: str) -> None:
     cursor.execute(
         """
         SELECT COUNT(*) AS total_rows,
-               SUM(turnover_rate IS NULL) AS null_rows,
-               SUM(turnover_rate = 0) AS zero_rows,
-               SUM(turnover_rate > 0) AS positive_rows,
-               SUM(turnover > 0 AND circulating_market_cap > 0) AS repairable_rows,
-               SUM((turnover_rate IS NULL OR turnover_rate = 0) AND turnover > 0 AND circulating_market_cap > 0) AS target_rows
+               COUNT(*) FILTER (WHERE turnover_rate IS NULL) AS null_rows,
+               COUNT(*) FILTER (WHERE turnover_rate = 0) AS zero_rows,
+               COUNT(*) FILTER (WHERE turnover_rate > 0) AS positive_rows,
+               COUNT(*) FILTER (WHERE turnover > 0 AND circulating_market_cap > 0) AS repairable_rows,
+               COUNT(*) FILTER (WHERE (turnover_rate IS NULL OR turnover_rate = 0) AND turnover > 0 AND circulating_market_cap > 0) AS target_rows
         FROM daily_bar
         WHERE trade_date BETWEEN %s AND %s
         """,
@@ -80,18 +80,19 @@ def print_samples(cursor, start_date: str, end_date: str, limit_sample: int) -> 
 
     cursor.execute(
         """
-        SELECT symbol,
-               trade_date,
-               turnover,
-               circulating_market_cap,
-               turnover_rate,
-               ROUND((turnover / circulating_market_cap) * 100, 4) AS implied_turnover_rate
-        FROM daily_bar
-        WHERE trade_date BETWEEN %s AND %s
-          AND (turnover_rate IS NULL OR turnover_rate = 0)
-          AND turnover > 0
-          AND circulating_market_cap > 0
-        ORDER BY trade_date ASC, symbol ASC
+        SELECT si.symbol,
+               d.trade_date,
+               d.turnover,
+               d.circulating_market_cap,
+               d.turnover_rate,
+               ROUND((d.turnover / d.circulating_market_cap) * 100, 4) AS implied_turnover_rate
+        FROM daily_bar d
+        JOIN ref.symbol_info si ON si.id = d.symbol_id
+        WHERE d.trade_date BETWEEN %s AND %s
+          AND (d.turnover_rate IS NULL OR d.turnover_rate = 0)
+          AND d.turnover > 0
+          AND d.circulating_market_cap > 0
+        ORDER BY d.trade_date ASC, si.symbol ASC
         LIMIT %s
         """,
         (start_date, end_date, limit_sample),

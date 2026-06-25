@@ -1,6 +1,7 @@
 #include "factor_compute/CachedMarketDataView.h"
 #include "factor_compute/SubMarketDataView.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/log/logging.hpp"
 #include "database/MarketDataRepository.h"
 
 #include <algorithm>
@@ -526,7 +527,7 @@ bool CachedMarketDataView::saveToBinary(const std::string& filePath) const
 #else
     f = std::fopen(filePath.c_str(), "wb");
 #endif
-    if (!f) { fprintf(stderr, "[CMDV] saveToBinary: cannot open %s\n", filePath.c_str()); fflush(stderr); return false; }
+    if (!f) { INTERNAL_ERROR_STREAM << "[CMDV] saveToBinary: cannot open " << filePath; return false; }
 
     uint32_t magic = 0x42564453; // "BVDS"
     uint32_t version = 2;  // v2: +symbol strings
@@ -535,8 +536,7 @@ bool CachedMarketDataView::saveToBinary(const std::string& filePath) const
 
     // Lambda: 写失败时关闭文件并报错
     auto fail = [&](const char* msg) -> bool {
-        fprintf(stderr, "[CMDV] saveToBinary: %s (%s)\n", msg, filePath.c_str());
-        fflush(stderr);
+        INTERNAL_ERROR_STREAM << "[CMDV] saveToBinary: " << msg << " (" << filePath << ")";
         std::fclose(f);
         std::remove(filePath.c_str());
         return false;
@@ -588,9 +588,7 @@ bool CachedMarketDataView::saveToBinary(const std::string& filePath) const
     }
 
     std::fclose(f);
-    fprintf(stderr, "[CMDV] saveToBinary: %s (%d dates x %d insts, %d extra fields, %d symbols)\n",
-            filePath.c_str(), dc, ic, extraCount, symCount);
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[CMDV] saveToBinary: " << filePath << " (" << dc << " dates x " << ic << " insts, " << extraCount << " extra fields, " << symCount << " symbols)";
     return true;
 }
 
@@ -651,9 +649,7 @@ std::unique_ptr<CachedMarketDataView> CachedMarketDataView::fromBinary(const std
     }
 
     std::fclose(f);
-    fprintf(stderr, "[CMDV] fromBinary: %s (%d dates x %d insts, %d extra fields, %d symbols)\n",
-            filePath.c_str(), dc, ic, extraCount, static_cast<int>(view->impl_->m_symbolStrings.size()));
-    fflush(stderr);
+    INTERNAL_INFO_STREAM << "[CMDV] fromBinary: " << filePath << " (" << dc << " dates x " << ic << " insts, " << extraCount << " extra fields, " << static_cast<int>(view->impl_->m_symbolStrings.size()) << " symbols)";
     return view;
 }
 

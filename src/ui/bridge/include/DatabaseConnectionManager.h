@@ -5,6 +5,7 @@
 #include "../../../infrastructure/include/database/NativePgDatabase.h"
 #include "../../../infrastructure/include/database/DatabaseConfig.h"
 #include "../../../foundation/include/foundation.h"
+#include "foundation/log/logging.hpp"
 #include <memory>
 #include <mutex>
 #include <QDebug>
@@ -42,8 +43,7 @@ public:
             auto db = std::make_shared<astock::database::NativePgDatabase>(config);
             if (db->isOpen()) return db;
         } catch (const std::exception& e) {
-            fprintf(stderr, "[DB] PG connect failed: %s\n", e.what());
-            fflush(stderr);
+            INTERNAL_ERROR_STREAM << "[DB] PG connect failed: " << e.what();
         }
         return nullptr;
     }

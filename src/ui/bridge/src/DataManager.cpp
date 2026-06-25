@@ -1,6 +1,6 @@
 // DataManager.cpp
 #include "DataManager.h"
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 #include <QMutexLocker>
 
 // 静态成员初始化
@@ -17,11 +17,11 @@ DataManager* DataManager::instance() {
 
 DataManager::DataManager(QObject* parent)
     : QObject(parent) {
-    qDebug() << "DataManager: Created";
+    INTERNAL_DEBUG_STREAM << "DataManager: Created";
 }
 
 DataManager::~DataManager() {
-    qDebug() << "DataManager: Destroyed";
+    INTERNAL_DEBUG_STREAM << "DataManager: Destroyed";
 }
 
 void DataManager::storeData(const QString& key, const QVariantList& data) {
@@ -29,7 +29,7 @@ void DataManager::storeData(const QString& key, const QVariantList& data) {
     
     m_dataStore[key] = data;
     
-    qDebug() << "DataManager::storeData: Stored" << data.size() << "items with key" << key;
+    INTERNAL_DEBUG_STREAM << "DataManager::storeData: Stored" << data.size() << "items with key" << key.toStdString();
     emit dataStored(key, data.size());
 }
 
@@ -37,18 +37,18 @@ QVariantList DataManager::getData(const QString& key) {
     QMutexLocker locker(&m_mutex);
     
     if (m_dataStore.contains(key)) {
-        qDebug() << "DataManager::getData: Retrieved" << m_dataStore[key].size() << "items with key" << key;
+        INTERNAL_DEBUG_STREAM << "DataManager::getData: Retrieved" << m_dataStore[key].size() << "items with key" << key.toStdString();
         return m_dataStore[key];
     }
     
-    qDebug() << "DataManager::getData: No data found for key" << key;
+    INTERNAL_DEBUG_STREAM << "DataManager::getData: No data found for key" << key.toStdString();
     return QVariantList();
 }
 
 bool DataManager::hasData(const QString& key) {
     QMutexLocker locker(&m_mutex);
     bool has = m_dataStore.contains(key);
-    qDebug() << "DataManager::hasData: Key" << key << (has ? "exists" : "does not exist");
+    INTERNAL_DEBUG_STREAM << "DataManager::hasData: Key" << key.toStdString() << (has ? "exists" : "does not exist");
     return has;
 }
 
@@ -56,10 +56,10 @@ void DataManager::removeData(const QString& key) {
     QMutexLocker locker(&m_mutex);
     
     if (m_dataStore.remove(key)) {
-        qDebug() << "DataManager::removeData: Removed data with key" << key;
+        INTERNAL_DEBUG_STREAM << "DataManager::removeData: Removed data with key" << key.toStdString();
         emit dataRemoved(key);
     } else {
-        qDebug() << "DataManager::removeData: No data found for key" << key;
+        INTERNAL_DEBUG_STREAM << "DataManager::removeData: No data found for key" << key.toStdString();
     }
 }
 
@@ -69,7 +69,7 @@ void DataManager::clearAllData() {
     int count = m_dataStore.size();
     m_dataStore.clear();
     
-    qDebug() << "DataManager::clearAllData: Cleared" << count << "data entries";
+    INTERNAL_DEBUG_STREAM << "DataManager::clearAllData: Cleared" << count << "data entries";
     emit dataCleared();
 }
 
@@ -78,8 +78,8 @@ void DataManager::cacheStockData(const QString& symbol, const QString& startDate
     QString cacheKey = generateStockCacheKey(symbol, startDate, endDate);
     storeData(cacheKey, data);
     
-    qDebug() << "DataManager::cacheStockData: Cached" << data.size() 
-             << "items for" << symbol << "from" << startDate << "to" << endDate;
+    INTERNAL_DEBUG_STREAM << "DataManager::cacheStockData: Cached" << data.size()
+             << "items for" << symbol.toStdString() << "from" << startDate.toStdString() << "to" << endDate.toStdString();
 }
 
 QVariantList DataManager::getCachedStockData(const QString& symbol, const QString& startDate, 

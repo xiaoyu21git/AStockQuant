@@ -95,7 +95,7 @@ bool DatabaseProvider::connect() {
 
     MYSQL* conn = mysql_init(nullptr);
     if (!conn) {
-        std::cerr << "[DatabaseProvider] mysql_init failed" << std::endl;
+        INTERNAL_ERROR_STREAM << "[DatabaseProvider] mysql_init failed";
         std::cout << "[DatabaseProvider] mysql_init failed" << std::endl;
         status_ = ProviderStatus::ERROR;
         return false;
@@ -114,12 +114,12 @@ bool DatabaseProvider::connect() {
             nullptr,
             0u)) {
         const char* err = mysql_error(conn);
-        std::cerr << "[DatabaseProvider] mysql_real_connect failed: "
-                  << err << "\n"
+        INTERNAL_ERROR_STREAM << "[DatabaseProvider] mysql_real_connect failed: "
+                  << err
                   << "  host=" << host_
                   << " port=" << port
                   << " user=" << username_
-                  << " db=" << database_ << std::endl;
+                  << " db=" << database_;
         std::cout << "[DatabaseProvider] mysql_real_connect failed: "
                   << err << " host=" << host_
                   << " port=" << port

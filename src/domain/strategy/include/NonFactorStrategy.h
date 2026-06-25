@@ -36,6 +36,7 @@ public:
     [[nodiscard]] StrategyInstanceId instanceId() const noexcept final { return m_instanceId; }
     [[nodiscard]] bool isEnabled() const noexcept final { return true; }
     [[nodiscard]] rules::RuleSetId ruleSetId() const noexcept final { return rules::kRuleSetAllPass; }
+    [[nodiscard]] bool usesFactors() const noexcept final { return false; }
 
     void evaluate(const std::vector<RuntimeFactorSnapshot>&,
                   const RuntimeStrategyContext& context,

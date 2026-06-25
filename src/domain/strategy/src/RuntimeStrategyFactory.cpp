@@ -88,6 +88,7 @@ public:
     [[nodiscard]] domain::strategy::rules::RuleSetId ruleSetId() const noexcept override {
         return domain::strategy::rules::kRuleSetAllPass;
     }
+    [[nodiscard]] bool usesFactors() const noexcept override { return true; }
 
     void evaluate(const std::vector<domain::strategy::RuntimeFactorSnapshot>& factorSnapshots,
                   const domain::strategy::RuntimeStrategyContext& context,

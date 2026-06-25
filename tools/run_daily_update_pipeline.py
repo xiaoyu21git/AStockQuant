@@ -313,11 +313,13 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
     return min(start_dates), target_date
 
 
-def build_baostock_update_command(args: argparse.Namespace) -> list[str]:
-    """单线程 Baostock 全量日线更新"""
+def build_baostock_update_command(args: argparse.Namespace, start_date: dt.date | None = None) -> list[str]:
+    """单线程 Baostock 全量日线更新；start_date 用于填补历史内部缺口"""
     command = [sys.executable, "tools/daily_pipeline.py", "--phase3-only"]
     if args.target_date:
         command.extend(["--date", args.target_date])
+    if start_date is not None:
+        command.extend(["--start-date", start_date.isoformat()])
     return command
 
 def build_verify_command(args: argparse.Namespace) -> list[str]:
@@ -563,7 +565,7 @@ def main() -> int:
     if args.include_history_gaps and history_start_date <= history_end_date:
         if not execute_step(
             "daily history gap supplement",
-            build_baostock_update_command(args),
+            build_baostock_update_command(args, start_date=history_start_date),
             required=False,
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,

@@ -10,13 +10,9 @@
 // #include "engine/Engine.h"
 
 #include <iostream>
-#include <cstdio>
-#include <mutex>
 #include <QCoreApplication>
-#include <QDateTime>
 #include <QDir>
 #include <QElapsedTimer>
-#include <QFile>
 #include <QIcon>
 #include <QObject>
 #include <QQmlApplicationEngine>
@@ -44,86 +40,6 @@ struct RuntimeDirectories {
     QString tempDir;
     QString logFilePath;
 };
-
-std::mutex qtMessageHandlerMutex;
-QtMessageHandler previousQtMessageHandler = nullptr;
-QString qtMessageLogFilePath;
-bool qtMessageHandlerInstalled = false;
-
-QString qtMessageTypeLabel(QtMsgType type)
-{
-    switch (type) {
-    case QtDebugMsg:
-        return QStringLiteral("DEBUG");
-    case QtInfoMsg:
-        return QStringLiteral("INFO");
-    case QtWarningMsg:
-        return QStringLiteral("WARN");
-    case QtCriticalMsg:
-        return QStringLiteral("ERROR");
-    case QtFatalMsg:
-        return QStringLiteral("FATAL");
-    }
-
-    return QStringLiteral("LOG");
-}
-
-void qtMessageFileHandler(QtMsgType type, const QMessageLogContext& context, const QString& message)
-{
-    QString sanitizedMessage = message;
-    sanitizedMessage.replace(QChar('\r'), QStringLiteral("\\r"));
-    sanitizedMessage.replace(QChar('\n'), QStringLiteral("\\n"));
-
-    QString formatted = QStringLiteral("%1 [QT][%2]")
-        .arg(QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")),
-             qtMessageTypeLabel(type));
-
-    if (context.category && context.category[0] != '\0') {
-        formatted += QStringLiteral(" [%1]").arg(QString::fromUtf8(context.category));
-    }
-
-    formatted += QStringLiteral(" %1").arg(sanitizedMessage);
-
-    if (context.file && context.file[0] != '\0') {
-        formatted += QStringLiteral(" (%1:%2)")
-            .arg(QString::fromUtf8(context.file))
-            .arg(context.line);
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(qtMessageHandlerMutex);
-        if (!qtMessageLogFilePath.isEmpty()) {
-            QFile logFile(qtMessageLogFilePath);
-            if (logFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-                const QByteArray utf8 = formatted.toUtf8();
-                logFile.write(utf8);
-                logFile.write("\n", 1);
-            }
-        }
-    }
-
-    if (previousQtMessageHandler) {
-        previousQtMessageHandler(type, context, message);
-        return;
-    }
-
-    const QByteArray local8Bit = formatted.toLocal8Bit();
-    FILE* stream = (type == QtDebugMsg || type == QtInfoMsg) ? stdout : stderr;
-    std::fprintf(stream, "%s\n", local8Bit.constData());
-    std::fflush(stream);
-}
-
-void installQtMessageFileLogger(const QString& logFilePath)
-{
-    std::lock_guard<std::mutex> lock(qtMessageHandlerMutex);
-    qtMessageLogFilePath = logFilePath;
-    if (qtMessageHandlerInstalled) {
-        return;
-    }
-
-    previousQtMessageHandler = qInstallMessageHandler(qtMessageFileHandler);
-    qtMessageHandlerInstalled = true;
-}
 
 RuntimeDirectories runtimeDirectories()
 {
@@ -173,8 +89,8 @@ bool ensureDirectoryExists(const QString& path, const char* label)
         return true;
     }
 
-    std::cerr << "[AppBootstrap] ERROR: Failed to create " << label
-              << " directory: " << path.toStdString() << "\n";
+    INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Failed to create " << label
+                         << " directory: " << path.toStdString();
     return false;
 }
 
@@ -213,7 +129,7 @@ AppBootstrap::~AppBootstrap() = default;
 
 void AppBootstrap::init()
 {
-    std::cout << "[AppBootstrap] Starting initialization...\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Starting initialization...";
     
     // 重置状态
     m_initialized = false;
@@ -222,51 +138,51 @@ void AppBootstrap::init()
     // 阶段1: 配置初始化
     if (!initConfiguration()) {
         m_lastError = "Configuration initialization failed";
-        std::cerr << "[AppBootstrap] ERROR: " << m_lastError << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
         return;
     }
     
     // 阶段2: 服务初始化
     if (!initServices()) {
         m_lastError = "Services initialization failed";
-        std::cerr << "[AppBootstrap] ERROR: " << m_lastError << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
         return;
     }
     
     // 阶段3: 数据库初始化（如果需要）
     if (!initDatabase()) {
         // 数据库初始化失败可能不是致命的，记录警告
-        std::cout << "[AppBootstrap] WARNING: Database initialization failed\n";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] WARNING: Database initialization failed";
     }
     
     m_initialized = true;
-    std::cout << "[AppBootstrap] Initialization completed successfully\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Initialization completed successfully";
 }
 
 void AppBootstrap::start()
 {
     if (!m_initialized) {
         m_lastError = "Cannot start: application not initialized";
-        std::cerr << "[AppBootstrap] ERROR: " << m_lastError << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
         return;
     }
     
-    std::cout << "[AppBootstrap] Starting UI...\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Starting UI...";
     
     if (!initQmlEngine()) {
         m_lastError = "QML engine initialization failed";
-        std::cerr << "[AppBootstrap] ERROR: " << m_lastError << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
         return;
     }
     
     m_started = true;
     scheduleDeferredStartupInitialization();
-    std::cout << "[AppBootstrap] UI started successfully\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] UI started successfully";
 }
 
 void AppBootstrap::shutdown()
 {
-    std::cout << "[AppBootstrap] Shutting down...\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Shutting down...";
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
     shutdownOptionalConnectors();
@@ -277,21 +193,21 @@ void AppBootstrap::shutdown()
         m_eventBus->stop(true, 1000);
         m_eventBus.reset();
     }
-    
+
     // 按逆序清理
     m_vasAurora.reset();
     m_engine.reset();
     foundation::Foundation::instance().shutdown();
-    
+
     m_initialized = false;
     m_started = false;
-    
-    std::cout << "[AppBootstrap] Shutdown completed\n";
+
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Shutdown completed";
 }
 
 bool AppBootstrap::initConfiguration()
 {
-    std::cout << "[AppBootstrap] Initializing configuration...\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing configuration...";
     
     try {
         const RuntimeDirectories directories = runtimeDirectories();
@@ -300,8 +216,6 @@ bool AppBootstrap::initConfiguration()
         }
 
         configureProcessTempDirectory(directories);
-
-        installQtMessageFileLogger(directories.logFilePath);
 
         const std::string configDir = directories.configDir.toStdString();
         std::string profile = "development";
@@ -314,7 +228,7 @@ bool AppBootstrap::initConfiguration()
         foundationConfig.log_file = directories.logFilePath.toStdString();
 
         if (!foundation::Foundation::instance().initialize(foundationConfig)) {
-            std::cerr << "[AppBootstrap] ERROR: Foundation initialization failed\n";
+            INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Foundation initialization failed";
             return false;
         }
         
@@ -324,71 +238,71 @@ bool AppBootstrap::initConfiguration()
         auto& configManager = foundation::config::ConfigManager::instance();
         auto appName = configManager.get_app_config_string("app.name", "");
         if (appName.empty()) {
-            std::cout << "[AppBootstrap] WARNING: Application name not configured\n";
+            INTERNAL_INFO_STREAM << "[AppBootstrap] WARNING: Application name not configured";
         }
         
-        std::cout << "[AppBootstrap] Runtime directories ready: "
-                  << directories.configDir.toStdString() << ", "
-                  << directories.logsDir.toStdString() << ", "
-                  << directories.filesDir.toStdString() << ", "
-                  << directories.cacheDir.toStdString() << ", "
-                  << directories.tempDir.toStdString() << "\n";
-        std::cout << "[AppBootstrap] Configuration initialized\n";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Runtime directories ready: "
+                             << directories.configDir.toStdString() << ", "
+                             << directories.logsDir.toStdString() << ", "
+                             << directories.filesDir.toStdString() << ", "
+                             << directories.cacheDir.toStdString() << ", "
+                             << directories.tempDir.toStdString();
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Configuration initialized";
         return true;
         
     } catch (const std::exception& e) {
-        std::cerr << "[AppBootstrap] Configuration error: " << e.what() << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] Configuration error: " << e.what();
         return false;
     }
 }
 
 bool AppBootstrap::initServices()
 {
-    std::cout << "[AppBootstrap] Initializing services...\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing services...";
     
     try {
         if (!engine::get_engine_event_bus()) {
             m_eventBus = engine::EventBus::create();
             if (!m_eventBus) {
-                std::cerr << "[AppBootstrap] ERROR: Failed to create application EventBus\n";
+                INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Failed to create application EventBus";
                 return false;
             }
 
             if (!m_eventBus->start()) {
-                std::cerr << "[AppBootstrap] ERROR: Failed to start application EventBus\n";
+                INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Failed to start application EventBus";
                 return false;
             }
 
             engine::register_engine_event_bus(m_eventBus.get());
-            std::cout << "[AppBootstrap] Application EventBus initialized\n";
+            INTERNAL_INFO_STREAM << "[AppBootstrap] Application EventBus initialized";
         }
 
         // 初始化执行器（当前为空，保留占位）
         // executor_ = std::make_shared<InlineExecutor>();
-        
+
         // 初始化引擎（当前为空，保留占位）
         // engine_ = std::make_unique<Engine>(executor_);
-        
-        std::cout << "[AppBootstrap] Core services initialized; heavy bridge services stay on-demand after UI startup\n";
-        
-        std::cout << "[AppBootstrap] Services initialized\n";
+
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Core services initialized; heavy bridge services stay on-demand after UI startup";
+
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Services initialized";
         return true;
-        
+
     } catch (const std::exception& e) {
-        std::cerr << "[AppBootstrap] Services error: " << e.what() << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] Services error: " << e.what();
         return false;
     }
 }
 
 bool AppBootstrap::initDatabase()
 {
-    std::cout << "[AppBootstrap] Initializing database...\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing database...";
 
     // 提前初始化原生 MySQL 连接池，避免 QML 层首次查询时等待
     auto& dbMgr = astock::database::DatabaseConnectionManager::instance();
     auto conn = dbMgr.getNativeConnection();
     if (conn) {
-        std::cout << "[AppBootstrap] Native MySQL pool initialized\n";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Native MySQL pool initialized";
     }
 
     return true;
@@ -396,18 +310,18 @@ bool AppBootstrap::initDatabase()
 
 bool AppBootstrap::initQmlEngine()
 {
-    std::cout << "[AppBootstrap] Initializing QML engine...\n";
-    
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing QML engine...";
+
     try {
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
         applyRootWindowIcon(m_engine.get());
-        
-        std::cout << "[AppBootstrap] QML engine initialized\n";
+
+        INTERNAL_INFO_STREAM << "[AppBootstrap] QML engine initialized";
         return true;
-        
+
     } catch (const std::exception& e) {
-        std::cerr << "[AppBootstrap] QML engine error: " << e.what() << "\n";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] QML engine error: " << e.what();
         return false;
     }
 }
@@ -440,7 +354,7 @@ void AppBootstrap::initializeDeferredUiServices()
     scheduleOptionalConnectorReconcile();
 #endif
 
-    std::cout << "[AppBootstrap] Deferred startup: MarketDataBridge uses stub interface\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Deferred startup: MarketDataBridge uses stub interface";
 
     m_deferredUiServicesInitialized = true;
 
@@ -461,7 +375,7 @@ void AppBootstrap::initializeDeferredDomainServices()
 
     initializeDeferredTradingServices();
 
-    std::cout << "[AppBootstrap] Deferred startup phase 2/3: domain & trading services initialized\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Deferred startup phase 2/3: domain & trading services initialized";
 
     m_deferredDomainServicesInitialized = true;
 }
@@ -475,7 +389,7 @@ void AppBootstrap::initializeDeferredTradingServices()
     // ── 交易系统由 TradeExecutionBridge::ensureInitialized 延迟初始化 ──
     // (需 QML 加载配置后，通过 isLiveBridgeReady() 触发掘金网关连接)
 
-    std::cout << "[AppBootstrap] Deferred startup phase 3/3: ready\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Deferred startup phase 3/3: ready";
 
     m_deferredTradingServicesInitialized = true;
 }
@@ -506,19 +420,19 @@ void AppBootstrap::reconcileOptionalConnectors()
         m_jujinMarketConnector = std::make_unique<JujinMarketConnector>();
     }
 
-    std::cerr << "[AppBootstrap] JMC enabled, starting...\n";
+    INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC enabled, starting...";
     if (m_jujinMarketConnector->isEnabledByEnvironment()) {
         if (!m_jujinMarketConnector->start()) {
-            std::cerr << "[AppBootstrap] JMC start FAILED: " << m_jujinMarketConnector->lastError() << "\n";
+            INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC start FAILED: " << m_jujinMarketConnector->lastError();
         } else {
-            std::cerr << "[AppBootstrap] JMC started OK\n";
+            INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC started OK";
             // 交易网关挂到共享 JujinApi（JMC 已初始化共享 API）
             app::system::TradingSystem::instance().initializeWithBroker("jujin", "live");
         }
         return;
     }
 
-    std::cout << "[AppBootstrap] Jujin market connector disabled by environment\n";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Jujin market connector disabled by environment";
     m_jujinMarketConnector->stop();
 }
 

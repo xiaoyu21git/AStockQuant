@@ -1,4 +1,5 @@
 #include "UiLifecycleCoordinator.h"
+#include "foundation/log/logging.hpp"
 
 namespace bridge {
 
@@ -11,8 +12,10 @@ void UiLifecycleCoordinator::activateTradingPage() {
 }
 
 void UiLifecycleCoordinator::activateStrategyLibraryPage() {
+    INTERNAL_INFO_STREAM << "[Lifecycle] activateStrategyLibraryPage";
     m_strategyLibraryPageActivated = true;
     emit strategyLibraryPageActivated();
+    INTERNAL_INFO_STREAM << "[Lifecycle] activateStrategyLibraryPage DONE";
 }
 
 } // namespace bridge

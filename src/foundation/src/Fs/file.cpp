@@ -705,14 +705,14 @@ bool File::move(const std::string& src, const std::string& dst) {
     
     // 处理跨设备移动（errno == EXDEV）
     if (errno == EXDEV) {
-        std::cerr << "Cross-device move, using copy+delete: " 
-                  << src << " -> " << dst << std::endl;
+        INTERNAL_ERROR_STREAM << "Cross-device move, using copy+delete: "
+                             << src << " -> " << dst;
         if (copy(src, dst)) {
             return remove(src);
         }
     } else {
-        std::cerr << "rename failed (errno " << errno << "): " 
-                  << strerror(errno) << std::endl;
+        INTERNAL_ERROR_STREAM << "rename failed (errno " << errno << "): "
+                             << strerror(errno);
     }
     
     return false;

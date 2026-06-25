@@ -7,7 +7,7 @@
 
 #include <QDateTime>
 #include <QCoreApplication>
-#include <QDebug>
+#include "foundation/log/logging.hpp"
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
@@ -168,7 +168,7 @@ public:
 
         connected_ = true;
         publish_connection_event_locked("broker.connected");
-        qDebug() << "JujinApi: runtime session started" << QString::fromStdString(config_.account_id);
+        INTERNAL_DEBUG_STREAM << "JujinApi: runtime session started" << QString::fromStdString(config_.account_id).toStdString();
         return true;
     }
 
@@ -192,7 +192,7 @@ public:
 
         connected_ = false;
         publish_connection_event_locked("broker.disconnected");
-        qDebug() << "JujinApi: runtime session stopped" << QString::fromStdString(config_.account_id);
+        INTERNAL_DEBUG_STREAM << "JujinApi: runtime session stopped" << QString::fromStdString(config_.account_id).toStdString();
         return true;
     }
 

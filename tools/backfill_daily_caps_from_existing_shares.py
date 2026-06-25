@@ -13,11 +13,10 @@ import psycopg2
 
 MYSQL_CONFIG = {
     "host": "127.0.0.1",
-    "
-    "user": "root",
-    "password": "123456a",
+    "port": 5432,
+    "user": "astock",
+    "password": "astock123",
     "database": "astock_quant",
-    "charset": "utf8mb4",
     "autocommit": False,
 }
 
@@ -41,15 +40,16 @@ def get_connection():
 def load_target_symbols(cursor, start_date: str, end_date: str) -> List[str]:
     cursor.execute(
         """
-        SELECT DISTINCT symbol
-        FROM daily_bar
-        WHERE trade_date BETWEEN %s AND %s
-          AND close > 0
+        SELECT si.symbol
+        FROM mkt.daily_bar db
+        JOIN ref.symbol_info si ON si.id = db.symbol_id
+        WHERE db.trade_date BETWEEN %s AND %s
+          AND db.close > 0
           AND (
-                market_cap IS NULL OR market_cap <= 0 OR
-                circulating_market_cap IS NULL OR circulating_market_cap <= 0
+                db.market_cap IS NULL OR db.market_cap <= 0 OR
+                db.circulating_market_cap IS NULL OR db.circulating_market_cap <= 0
           )
-        ORDER BY symbol
+        ORDER BY si.symbol
         """,
         (start_date, end_date),
     )
@@ -63,16 +63,17 @@ def load_missing_rows(cursor, start_date: str, end_date: str, symbols: Sequence[
     placeholders = ", ".join(["%s"] * len(symbols))
     cursor.execute(
                 f"""
-        SELECT symbol, trade_date, close, market_cap, circulating_market_cap
-        FROM daily_bar
-        WHERE trade_date BETWEEN %s AND %s
-                    AND symbol IN ({placeholders})
-          AND close > 0
+        SELECT si.symbol, db.trade_date, db.close, db.market_cap, db.circulating_market_cap
+        FROM mkt.daily_bar db
+        JOIN ref.symbol_info si ON si.id = db.symbol_id
+        WHERE db.trade_date BETWEEN %s AND %s
+                    AND si.symbol IN ({placeholders})
+          AND db.close > 0
           AND (
-                market_cap IS NULL OR market_cap <= 0 OR
-                circulating_market_cap IS NULL OR circulating_market_cap <= 0
+                db.market_cap IS NULL OR db.market_cap <= 0 OR
+                db.circulating_market_cap IS NULL OR db.circulating_market_cap <= 0
           )
-        ORDER BY symbol, trade_date
+        ORDER BY si.symbol, db.trade_date
                 """,
                 (start_date, end_date, *symbols),
     )
@@ -87,19 +88,20 @@ def load_known_shares(cursor, symbols: Sequence[str]) -> DefaultDict[str, List[K
     placeholders = ", ".join(["%s"] * len(symbols))
     cursor.execute(
         f"""
-        SELECT symbol,
-               trade_date,
-               close,
-               market_cap,
-               circulating_market_cap
-        FROM daily_bar
-        WHERE symbol IN ({placeholders})
-          AND close > 0
+        SELECT si.symbol,
+               db.trade_date,
+               db.close,
+               db.market_cap,
+               db.circulating_market_cap
+        FROM mkt.daily_bar db
+        JOIN ref.symbol_info si ON si.id = db.symbol_id
+        WHERE si.symbol IN ({placeholders})
+          AND db.close > 0
           AND (
-                (market_cap IS NOT NULL AND market_cap > 0) OR
-                (circulating_market_cap IS NOT NULL AND circulating_market_cap > 0)
+                (db.market_cap IS NOT NULL AND db.market_cap > 0) OR
+                (db.circulating_market_cap IS NOT NULL AND db.circulating_market_cap > 0)
           )
-        ORDER BY symbol, trade_date
+        ORDER BY si.symbol, db.trade_date
         """,
         tuple(symbols),
     )
@@ -196,7 +198,7 @@ def apply_updates(cursor, updates: Sequence[Tuple[Optional[float], Optional[floa
         return 0
     cursor.executemany(
         """
-        UPDATE daily_bar
+        UPDATE mkt.daily_bar
         SET market_cap = CASE
                 WHEN (market_cap IS NULL OR market_cap <= 0) AND %s IS NOT NULL THEN %s
                 ELSE market_cap
@@ -206,7 +208,7 @@ def apply_updates(cursor, updates: Sequence[Tuple[Optional[float], Optional[floa
                 ELSE circulating_market_cap
             END,
             updated_at = CURRENT_TIMESTAMP
-        WHERE symbol = %s AND trade_date = %s
+        WHERE symbol_id = (SELECT id FROM ref.symbol_info WHERE symbol = %s) AND trade_date = %s
         """,
         [
             (market_cap, market_cap, circulating_market_cap, circulating_market_cap, symbol, trade_date)
