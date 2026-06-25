@@ -4,7 +4,7 @@
 #include "FactorService.h"
 #include "FactorViewModel.h"
 #include "FactorDetectionService.h"
-#include "DatabaseConnectionManager.h"
+#include "database/NativeMySQLConnectionPool.h"
 #include "foundation.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
@@ -162,11 +162,8 @@ bool FactorService::resolveBackend()
         INTERNAL_INFO_STREAM << "[FS] resolveBackend START";
         std::lock_guard<std::mutex> lock(m_mutex);
 
-        auto& dbManager = astock::database::DatabaseConnectionManager::instance();
-        INTERNAL_INFO_STREAM << "[FS] dbManager OK";
-
-        // 纯 C++ 连接池 (NativeMySQLConnectionPool, 零 Qt 依赖)
-        auto nativeDb = dbManager.getNativeConnection();
+        // 统一使用 NativeMySQLConnectionPool（基础设施层唯一 DB 连接入口）
+        auto nativeDb = astock::database::NativeMySQLConnectionPool::instance().getConnection();
         if (!nativeDb) {
             INTERNAL_ERROR_STREAM << "[FS] nativeDb=null";
             emit errorOccurred(QStringLiteral("FactorService: 数据库连接池初始化失败"));

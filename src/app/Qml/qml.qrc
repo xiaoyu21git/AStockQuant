@@ -117,9 +117,6 @@
         <file>components/GlobalSnackbar.qml</file>
         <file>components/GlobalWorkflow.qml</file>
         <file>components/Navigation/PageNavigator.qml</file>
-        <file>components/Risk/RiskCategoryCard.qml</file>
-        <file>components/Risk/RiskParameterInput.qml</file>
-        <file>components/Risk/RiskParameterSlider.qml</file>
         <file>components/Strategy/CreateStrategyDialog.qml</file>
         <file>components/Strategy/Creation/RuleComposerSummaryBar.qml</file>
         <file>components/Strategy/Creation/RuleGroupCard.qml</file>
@@ -164,7 +161,6 @@
         <file>page/dashboard/QtCandlestickChart.qml</file>
         <file>page/dashboard/StatusSummaryCard.qml</file>
         <file>page/dashboard/StrategiesPanel.qml</file>
-        <file>page/dashboard/TradingPanel.qml</file>
         <file>page/trading/TradingPage.qml</file>
         <file>page/leftSidebar/DynamicMenu.qml</file>
         <file>page/leftSidebar/FundOperationPanel.qml</file>
@@ -177,6 +173,14 @@
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>page/strategies/BacktestResultAnalysisView.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
+        <file>components/Trading/TradePanel.qml</file>
+        <file>components/Trading/TradeSymbolBar.qml</file>
+        <file>components/Trading/TradePendingList.qml</file>
+        <file>components/Trading/TradePendingRow.qml</file>
+        <file>components/Trading/TradeOrderSheet.qml</file>
+        <file>components/Trading/TradeFeePreview.qml</file>
+        <file>components/Trading/TradeQuickActions.qml</file>
+        <file>components/Trading/TradeUtils.js</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
         <file>config/views/risk_backtest_params.json</file>
@@ -185,6 +189,7 @@
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorMetaLoader.js</file>
         <file>utils/I18n.js</file>
+        <file>utils/OrderUtils.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StartupGateFormatter.js</file>
         <file>utils/StrategyStructureAdapter.js</file>

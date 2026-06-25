@@ -7,6 +7,7 @@
 
 #include "StrategyServiceTypes.h"
 #include "StrategyManager.h"
+#include "foundation/market/AStockSymbol.h"
 
 #include <cstdint>
 #include <string>
@@ -18,10 +19,6 @@ public:
     MarketDataAdapter() = default;
 
     /// @brief 推送单条行情到所有运行中的策略引擎
-    /// @param symbol       标的代码 (如 "000001.SZ", "600000.SH")
-    /// @param lastPrice    最新价
-    /// @param volume       成交量
-    /// @param tradingDay   交易日 (YYYYMMDD int32_t)
     void pushTick(const std::string& symbol, double lastPrice,
                   double volume, std::int32_t tradingDay) {
         InstrumentId instId(resolveInstrumentId(symbol));
@@ -31,19 +28,11 @@ public:
     }
 
     /// @brief 从 symbol 字符串解析 InstrumentId
-    /// ⚠️ 已知问题: 去前导零后 SZ/SH 相同代码会碰撞 ("000001.SZ" 和 "000001.SH" 都是 1)
-    /// 实盘应通过 RuntimeFactorSvc 的 symbol resolver 做反向查找，或使用 symbol → ID 映射表
+    /// @note 使用 AStockSymbol 统一解析，保留 6 位代码完整数值（SZ/SH 通过不同代码段区分，无碰撞）
     static InstrumentId resolveInstrumentId(const std::string& symbol) {
-        if (symbol.empty()) return InstrumentId{};
-        std::string code = symbol;
-        auto dotPos = code.find('.');
-        if (dotPos != std::string::npos) code = code.substr(0, dotPos);
-        while (code.size() > 1 && code[0] == '0') code.erase(0, 1);
-        try {
-            return InstrumentId{static_cast<std::uint32_t>(std::stoul(code))};
-        } catch (...) {
-            return InstrumentId{};
-        }
+        auto sym = foundation::market::AStockSymbol::fromString(symbol);
+        if (!sym.isValid()) return InstrumentId{};
+        return InstrumentId{sym.instrumentId()};
     }
 
     /// @brief 检查是否有运行中的引擎

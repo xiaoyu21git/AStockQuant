@@ -2,13 +2,31 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QSaveFile>
+#include "foundation/config/ConfigManager.hpp"
+#include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
 namespace bridge {
+
+namespace {
+
+foundation::config::ConfigNode toConfigNode(const QVariantMap& map) {
+    QJsonDocument doc(QJsonObject::fromVariantMap(map));
+    auto json = foundation::json::JsonFacade::parse(doc.toJson().toStdString());
+    return foundation::config::ConfigNode(json);
+}
+
+QVariantMap toVariantMap(const foundation::config::ConfigNode& node) {
+    if (node.isNull()) return {};
+    auto doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(node.toJsonString()));
+    return doc.object().toVariantMap();
+}
+
+} // namespace
 
 RiskConfigService::RiskConfigService(QObject* parent)
     : QObject(parent) {}
@@ -59,8 +77,9 @@ bool RiskConfigService::applyConfiguration(const QVariantMap& config) {
 }
 
 QString RiskConfigService::configFilePath() const {
-    const QString baseDir = QCoreApplication::applicationDirPath();
-    return QDir(baseDir).filePath(QStringLiteral("config/risk_config.json"));
+    return QString::fromStdString(
+        foundation::config::ConfigManager::instance()
+            .configFilePath(foundation::config::ConfigFile::RiskConfig));
 }
 
 QVariantMap RiskConfigService::defaultConfiguration() const {
@@ -87,6 +106,11 @@ QVariantMap RiskConfigService::defaultConfiguration() const {
     cfg["orderSizeLimitWan"] = 500.0;
     cfg["slippageLimitPercent"] = 2.0;
     cfg["turnoverLimitWan"] = 5000.0;
+
+    // 费率
+    cfg["commissionRate"] = 0.0003;
+    cfg["minCommission"] = 5.0;
+    cfg["stampTaxRate"] = 0.001;
 
     // VaR 参数
     cfg["varConfidenceLevel"] = 0.95;
@@ -117,40 +141,16 @@ QVariantMap RiskConfigService::normalizeConfiguration(const QVariantMap& raw) co
 }
 
 bool RiskConfigService::writeConfigFile(const QVariantMap& config) const {
-    const QString path = configFilePath();
-    QDir().mkpath(QFileInfo(path).absolutePath());
-
-    QJsonDocument doc(QJsonObject::fromVariantMap(config));
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        INTERNAL_WARN_STREAM << "[RiskConfigService] Cannot write config to" << path.toStdString();
-        return false;
-    }
-    file.write(doc.toJson(QJsonDocument::Indented));
-    file.close();
-    return true;
+    auto node = toConfigNode(config);
+    return foundation::config::ConfigManager::instance()
+        .saveConfigFile(foundation::config::ConfigFile::RiskConfig, node);
 }
 
 QVariantMap RiskConfigService::readConfigFile() const {
-    const QString path = configFilePath();
-    QFile file(path);
-    if (!file.exists()) {
-        return defaultConfiguration();
-    }
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        INTERNAL_WARN_STREAM << "[RiskConfigService] Cannot read config from" << path.toStdString();
-        return QVariantMap();
-    }
-    QByteArray data = file.readAll();
-    file.close();
-
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &err);
-    if (err.error != QJsonParseError::NoError) {
-        INTERNAL_WARN_STREAM << "[RiskConfigService] JSON parse error:" << err.errorString().toStdString();
-        return QVariantMap();
-    }
-    return doc.object().toVariantMap();
+    auto cfg = foundation::config::ConfigManager::instance()
+        .loadConfigFile(foundation::config::ConfigFile::RiskConfig);
+    if (!cfg || cfg->isNull()) return defaultConfiguration();
+    return toVariantMap(*cfg);
 }
 
 } // namespace bridge

@@ -6,7 +6,6 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
-#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -22,6 +21,7 @@
 #include "system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
 #include <ctime>
 #include "foundation/config/ConfigManager.hpp"
 
@@ -53,13 +53,21 @@ std::string toUpper(std::string s) noexcept
 // ========== 市场时段检测（纯时间判断，不依赖桥接层） ==========
 bool marketSessionAllowsSubscriptions()
 {
-    // SDK 的 subscribe() 随时可调用；券商只在交易时段推送数据
-    return true;
+    // A股交易时段：周一至周五 9:30-11:30 / 13:00-15:00
+    auto now = std::chrono::system_clock::now();
+    std::time_t t = std::chrono::system_clock::to_time_t(now);
+    std::tm* local = std::localtime(&t);
+
+    if (local->tm_wday < 1 || local->tm_wday > 5) return false; // 周末
+
+    int minutes = local->tm_hour * 60 + local->tm_min;
+    return (minutes >= 570 && minutes < 690)   // 9:30-11:30
+        || (minutes >= 780 && minutes < 900);   // 13:00-15:00
 }
 
 std::string marketSessionPhaseText()
 {
-    return marketSessionAllowsSubscriptions() ? "TRADING" : "CLOSED";
+    return marketSessionAllowsSubscriptions() ? "交易中" : "已收盘";
 }
 
 // ========== 配置读取（纯 C++） ==========
@@ -150,21 +158,23 @@ std::string toGmMarketSymbol(std::string symbol)
     if (symbol.empty()) return symbol;
     symbol = toUpper(symbol);
 
+    // 已是掘金格式 → 直接返回（含期货前缀）
     if (symbol.rfind("SHSE.", 0) == 0 || symbol.rfind("SZSE.", 0) == 0 || symbol.rfind("BSE.", 0) == 0
         || symbol.rfind("CFFEX.", 0) == 0 || symbol.rfind("SHFE.", 0) == 0 || symbol.rfind("DCE.", 0) == 0
         || symbol.rfind("CZCE.", 0) == 0 || symbol.rfind("INE.", 0) == 0 || symbol.rfind("GFEX.", 0) == 0)
         return symbol;
 
+    // 股票符号 → AStockSymbol 统一处理
+    auto sym = foundation::market::AStockSymbol::fromString(symbol);
+    if (sym.isValid()) return sym.gmSymbol();
+
+    // 期货后缀 "CFFEX" / "SHFE" 等 → 交易所前缀格式
     auto dot = symbol.find('.');
-    if (dot == std::string::npos) return symbol;
-    std::string code = symbol.substr(0, dot);
-    std::string exchange = symbol.substr(dot + 1);
-    if (exchange == "SH") return "SHSE." + code;
-    if (exchange == "SZ") return "SZSE." + code;
-    if (exchange == "BJ") return "BSE." + code;
-    if (exchange == "CFFEX" || exchange == "SHFE" || exchange == "DCE"
-        || exchange == "CZCE" || exchange == "INE" || exchange == "GFEX")
+    if (dot != std::string::npos) {
+        std::string code = symbol.substr(0, dot);
+        std::string exchange = symbol.substr(dot + 1);
         return exchange + "." + code;
+    }
     return symbol;
 }
 
@@ -232,28 +242,24 @@ bool JujinMarketConnector::start()
         }
     }
 
-    auto configObj = cfg::loadConfigObject();
+    auto& cfgMgr = foundation::config::ConfigManager::instance();
     m_maxMarketSubscriptions = static_cast<size_t>(
-        (std::max)(1, cfg::readInt(configObj, "maxMarketSubscriptions",
-                                   "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS", 500)));
+        (std::max)(1, cfgMgr.get_config_file_int(foundation::config::ConfigFile::Jujin,
+            "maxMarketSubscriptions", 500)));
     m_marketSubscriptionBatchSize = static_cast<size_t>(
-        (std::max)(1, cfg::readInt(configObj, "marketSubscriptionBatchSize",
-                                   "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE", 4)));
+        (std::max)(1, cfgMgr.get_config_file_int(foundation::config::ConfigFile::Jujin,
+            "marketSubscriptionBatchSize", 4)));
     INTERNAL_INFO_STREAM << "[JujinMarketConnector] start requested";
 
-    // 直接读 trading_connection.json
+    // 通过 ConfigManager 统一读取 trading_connection.json
     std::string token, accountId, gmStrategyId, accountRuntimeId;
     {
-        std::ifstream tc("./config/trading_connection.json");
-        if (tc.is_open()) {
-            std::string j((std::istreambuf_iterator<char>(tc)), std::istreambuf_iterator<char>());
-            auto root = foundation::json::JsonFacade::parse(j);
-            if (root.isObject()) {
-                token    = root.has("token")    ? root.get("token").asString()    : "";
-                accountId= root.has("accountId")? root.get("accountId").asString(): "";
-                gmStrategyId = root.has("gmStrategyId") ? root.get("gmStrategyId").asString() : "";
-                accountRuntimeId = root.has("accountRuntimeStrategyId") ? root.get("accountRuntimeStrategyId").asString() : "";
-            }
+        auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        if (cfg && !cfg->isNull()) {
+            token    = cfg->has("token")    ? cfg->get("token").asString()    : "";
+            accountId= cfg->has("accountId")? cfg->get("accountId").asString(): "";
+            gmStrategyId = cfg->has("gmStrategyId") ? cfg->get("gmStrategyId").asString() : "";
+            accountRuntimeId = cfg->has("accountRuntimeStrategyId") ? cfg->get("accountRuntimeStrategyId").asString() : "";
         }
     }
 
@@ -299,28 +305,7 @@ bool JujinMarketConnector::start()
     if (m_marketSubscriptionThread.joinable()) m_marketSubscriptionThread.join();
     m_marketSubscriptionThread = std::thread([this, eventBus]() { processSubscriptionRequests(eventBus); });
 
-    INTERNAL_ERROR_STREAM << "[JMC] API connected. watchlist size=" << watchlistFromEnvironment().size();
-
-    const std::vector<std::string> watchlist = watchlistFromEnvironment();
-    if (!watchlist.empty() && marketSessionAllowsSubscriptions()) {
-        for (const auto& symbol : watchlist) enqueueWatchSymbol(symbol);
-    } else if (marketSessionAllowsSubscriptions()) {
-        // 自动获取全市场标的并订阅
-        auto* inst = ::get_instruments("SZSE,SSE", "stock", "symbol");
-        if (!inst) {
-        } else if (inst->status() != 0) {
-            inst->release();
-        } else {
-            int cnt = 0;
-            while (!inst->is_end()) {
-                const char* sym = inst->get_string("symbol");
-                if (sym && std::strlen(sym) > 0) { enqueueWatchSymbol(sym); ++cnt; }
-                inst->next();
-            }
-            inst->release();
-            INTERNAL_ERROR_STREAM << "[JMC] auto-subscribed " << cnt << " instruments";
-        }
-    }
+    INTERNAL_INFO_STREAM << "[JMC] API 已连接，等待策略请求订阅";
 
     m_watchRequestSubscription = eventBus->subscribe("market.watch.ensure",
         [this](const engine::EventFormat& event) {
@@ -376,7 +361,31 @@ bool JujinMarketConnector::start()
     m_lastError.clear();
     publishSubscriptionStatus(eventBus, true);
 
-    std::unordered_set<std::string> boundIds = cfg::readBoundStrategyIds(configObj);
+    std::unordered_set<std::string> boundIds;
+    {
+        auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        if (cfg && !cfg->isNull()) {
+            if (cfg->has("boundStrategyId")) {
+                std::string v = trim(cfg->get("boundStrategyId").asString());
+                if (!v.empty()) boundIds.insert(v);
+            }
+            if (cfg->has("boundStrategies")) {
+                auto arr = cfg->get("boundStrategies");
+                if (arr.isArray()) {
+                    for (size_t i = 0; i < arr.size(); ++i) {
+                        auto entry = arr.at(i);
+                        if (entry.isObject()) {
+                            std::string v = trim(entry.get("strategyId").asString());
+                            if (!v.empty()) boundIds.insert(v);
+                        } else if (entry.isString()) {
+                            std::string v = trim(entry.asString());
+                            if (!v.empty()) boundIds.insert(v);
+                        }
+                    }
+                }
+            }
+        }
+    }
     publishExistingOrders(eventBus, token, config.account_id, resolvedId, boundIds);
     INTERNAL_INFO_STREAM << "[JujinMarketConnector] start completed";
     return true;
@@ -474,37 +483,14 @@ void JujinMarketConnector::enqueueWatchSymbol(const std::string& symbol)
 
 void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBus)
 {
-    INTERNAL_ERROR_STREAM << "[JMC] subscription thread started";
+    INTERNAL_INFO_STREAM << "[JMC] 订阅线程启动";
 
-    // 从数据库 symbol_info 表拉全市场标的（SDK 的 get_instruments 实盘模式不可用）
-    {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
-        auto& pool = astock::database::NativeMySQLConnectionPool::instance();
-        auto db = pool.getConnection();
-        if (db && db->isOpen()) {
-            auto result = db->executeQuery(
-                "SELECT symbol, name FROM ref.symbol_info WHERE asset_class='STOCK' AND status IN ('ACTIVE','ST','*ST') ORDER BY symbol");
-                int rows = static_cast<int>(result.rowCount());
-                INTERNAL_ERROR_STREAM << "[JMC] DB query returned " << rows << " symbols";
-                for (int i = 0; i < rows; ++i) {
-                    const auto& row = result.getRow(i);
-                    std::string sym = row.getString("symbol");
-                    std::string name = row.getString("name");
-                    if (!sym.empty()) {
-                        {
-                            std::lock_guard<std::mutex> lk(m_symbolNameMutex);
-                            m_symbolNames[toGmMarketSymbol(sym)] = name;
-                        }
-                        enqueueWatchSymbol(sym);
-                    }
-                }
-                INTERNAL_ERROR_STREAM << "[JMC] enqueued " << rows << " instruments, names="
-                                      << m_symbolNames.size();
-            } else {
-                INTERNAL_ERROR_STREAM << "[JMC] DB connection failed";
-            }
+    if (!marketSessionAllowsSubscriptions()) {
+        INTERNAL_INFO_STREAM << "[JMC] 当前非交易时段，跳过订阅";
+        return;
     }
 
+    // 仅按需订阅：策略通过 "market.watch.ensure" 事件请求的标的
     while (true) {
         std::vector<std::string> batch;
 
@@ -566,7 +552,7 @@ bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& 
         return true;
     }
 
-    INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: subscribe market batch size=" << static_cast<unsigned long long>(normalizedSymbols.size());
+    INTERNAL_INFO_STREAM << "[JMC] 批量订阅行情: " << normalizedSymbols.size() << " 只标的";
 
     if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::TICK, {})) {
         for (const std::string& symbol : normalizedSymbols) {
@@ -853,40 +839,6 @@ print(json.dumps(result, ensure_ascii=True))
     });
 }
 
-std::vector<std::string> JujinMarketConnector::watchlistFromEnvironment() const
-{
-    // 从 trading_connection.json 读
-    std::string raw;
-    {
-        std::ifstream tc("./config/trading_connection.json");
-        if (tc.is_open()) {
-            std::string j((std::istreambuf_iterator<char>(tc)), std::istreambuf_iterator<char>());
-            auto root = foundation::json::JsonFacade::parse(j);
-            if (root.isObject() && root.has("symbols"))
-                raw = root.get("symbols").asString();
-        }
-    }
-    if (!trim(raw).empty()) {
-        std::vector<std::string> result;
-        std::istringstream ss(raw);
-        std::string sym;
-        while (std::getline(ss, sym, ',')) {
-            sym = trim(sym);
-            if (!sym.empty()) result.push_back(sym);
-        }
-        return result;
-    }
-    return {};
-}
-
-std::string JujinMarketConnector::readEnvironment(const char* name, const char* fallback) const
-{
-    if (const char* value = std::getenv(name)) {
-        return value;
-    }
-
-    return fallback ? std::string(fallback) : std::string();
-}
 
 
 

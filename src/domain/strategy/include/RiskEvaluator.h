@@ -283,17 +283,24 @@ public:
 
 // ── 风控配置 (纯 C++，零 Qt) ──
 struct RiskConfig final {
-    double orderSizeLimitWan{0.0};
-    double slippageLimitPercent{0.0};
-    double turnoverLimitWan{0.0};
-    double stopLossPercent{0.0};
-    double takeProfitPercent{0.0};
-    double maxDrawdownLimitPercent{0.0};
-    double breakerLevel1Percent{0.0};
-    double breakerLevel2Percent{0.0};
-    double breakerLevel3Percent{0.0};
-    double maxPositionPercent{0.0};
-    double maxTotalExposurePercent{0.0};
+    // ── 风控阈值 ──
+    double orderSizeLimitWan{0.0};       // 单笔委托上限（万元）
+    double slippageLimitPercent{0.0};    // 滑点容忍（%）
+    double turnoverLimitWan{0.0};        // 日成交额上限（万元）
+    double stopLossPercent{0.0};         // 止损线（%）
+    double takeProfitPercent{0.0};       // 止盈线（%）
+    double maxDrawdownLimitPercent{0.0}; // 最大回撤限制（%）
+    double maxDailyLossPercent{0.0};     // 日内最大亏损（%）
+    double breakerLevel1Percent{0.0};    // 一级熔断（%）
+    double breakerLevel2Percent{0.0};    // 二级熔断（%）
+    double breakerLevel3Percent{0.0};    // 三级熔断（%）
+    double maxPositionPercent{0.0};      // 单标的持仓集中度（%）
+    double maxTotalExposurePercent{0.0}; // 总敞口上限（%）
+
+    // ── 费率 ──
+    double commissionRate{0.0};          // 手续费率（如 0.0003 = 万三）
+    double minCommission{0.0};           // 最低手续费（元，如 5.0）
+    double stampTaxRate{0.0};            // 印花税率（如 0.001 = 千一，仅卖出）
 
     /// @brief 构建默认风控配置（开发/模拟环境）
     static RiskConfig defaults() noexcept;

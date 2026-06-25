@@ -2072,8 +2072,8 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                 int ret = strategy_->subscribe(gmSym.c_str(), frequency.c_str(), false);
                 static int subLogCount = 0;
                 if (++subLogCount <= 5)
-                    INTERNAL_ERROR_STREAM << "[GmSession] subscribe(" << gmSym << "," << frequency
-                              << ") ret=" << ret << " subsTotal=" << subscriptions_.size();
+                    INTERNAL_INFO_STREAM << "[GmSession] 订阅行情: " << gmSym
+                              << " " << frequency << " 结果=" << ret << " 累计=" << subscriptions_.size();
             }
             publish_event("trading.subscription.changed", &command);
         }
@@ -2458,8 +2458,8 @@ void GmStrategySession::sync_initial_state_locked()
 
     std::string error_message;
     auto* cashArr = strategy_->get_cash(config_.account_id.c_str());
-    INTERNAL_ERROR_STREAM << "[GmSession] get_cash(" << config_.account_id << ") -> "
-              << (cashArr ? std::to_string(cashArr->count()) + " records, status=" + std::to_string(cashArr->status()) : "null");
+    INTERNAL_INFO_STREAM << "[GmSession] 账户查询: " << config_.account_id
+              << " -> " << (cashArr ? std::to_string(cashArr->count()) + " 条, status=" + std::to_string(cashArr->status()) : "无数据");
     consume_array(cashArr, &error_message, [this](const GmCash& cash) {
         cache_account_locked(to_runtime_account(cash));
     });
@@ -2468,16 +2468,16 @@ void GmStrategySession::sync_initial_state_locked()
     }
 
     auto* posArr = strategy_->get_position(config_.account_id.c_str());
-    INTERNAL_ERROR_STREAM << "[GmSession] get_position(" << config_.account_id << ") -> "
-              << (posArr ? std::to_string(posArr->count()) + " records, status=" + std::to_string(posArr->status()) : "null");
+    INTERNAL_INFO_STREAM << "[GmSession] 持仓查询: " << config_.account_id
+              << " -> " << (posArr ? std::to_string(posArr->count()) + " 条, status=" + std::to_string(posArr->status()) : "无数据");
     consume_array(posArr, &error_message, [this](const GmPosition& position) {
         cache_position_locked(to_runtime_position(position));
     });
     if (!error_message.empty()) {
         INTERNAL_ERROR_STREAM << "[GmSession] get_position error: " << error_message;
     }
-    INTERNAL_ERROR_STREAM << "[GmSession] sync done: account=" << (has_account_snapshot_ ? "yes" : "no")
-              << " positions=" << positions_.size();
+    INTERNAL_INFO_STREAM << "[GmSession] 同步完成: 账户=" << (has_account_snapshot_ ? "有" : "无")
+              << " 持仓数=" << positions_.size();
 
     consume_array(strategy_->get_orders(config_.account_id.c_str()), &error_message, [this](const GmOrder& order) {
         cache_runtime_order_alias(order, order_aliases_, order_contexts_);

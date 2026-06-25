@@ -412,18 +412,21 @@ void RiskEvaluator::applyConfig(RiskInput& input, const RiskConfig& config) {
 
 RiskConfig RiskConfig::defaults() noexcept {
     RiskConfig cfg;
-    // 开发/模拟环境默认值 — 适当宽松但非零，确保基本验证可用
-    cfg.orderSizeLimitWan     = 500.0;   // 单笔最多 500 万
-    cfg.slippageLimitPercent  = 2.0;     // 滑点容忍 2%
-    cfg.turnoverLimitWan      = 5000.0;  // 日成交额上限 5000 万
-    cfg.stopLossPercent       = 10.0;    // 止损线 10%
-    cfg.takeProfitPercent     = 20.0;    // 止盈线 20%
-    cfg.maxDrawdownLimitPercent = 12.0;  // 最大回撤 12%
-    cfg.breakerLevel1Percent  = 5.0;     // 一级熔断 5%
-    cfg.breakerLevel2Percent  = 8.0;     // 二级熔断 8%
-    cfg.breakerLevel3Percent  = 12.0;    // 三级熔断 12%
-    cfg.maxPositionPercent    = 15.0;    // 单标的集中度 15%
-    cfg.maxTotalExposurePercent = 67.0;  // 总敞口上限 67%
+    cfg.orderSizeLimitWan      = 500.0;
+    cfg.slippageLimitPercent   = 2.0;
+    cfg.turnoverLimitWan       = 5000.0;
+    cfg.stopLossPercent        = 10.0;
+    cfg.takeProfitPercent      = 20.0;
+    cfg.maxDrawdownLimitPercent = 12.0;
+    cfg.maxDailyLossPercent    = 5.0;
+    cfg.breakerLevel1Percent   = 5.0;
+    cfg.breakerLevel2Percent   = 8.0;
+    cfg.breakerLevel3Percent   = 12.0;
+    cfg.maxPositionPercent     = 15.0;
+    cfg.maxTotalExposurePercent = 67.0;
+    cfg.commissionRate         = 0.0003;  // 万三
+    cfg.minCommission          = 5.0;     // 最低 5 元
+    cfg.stampTaxRate           = 0.001;   // 千一（仅卖出）
     return cfg;
 }
 

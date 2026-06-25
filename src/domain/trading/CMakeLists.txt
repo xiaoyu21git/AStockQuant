@@ -5,6 +5,7 @@ add_library(domain_trading STATIC
     TradingTypes.cpp
     TradeExecutionEngine.cpp
     PositionAccountEngine.cpp
+    PnlCalculator.cpp
     src/OrderConflictDetector.cpp
     src/ExecutionCheckpointManager.cpp
     src/ExecutionSchedulingEngine.cpp

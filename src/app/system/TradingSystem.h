@@ -2,11 +2,14 @@
 // ─────────────────────────────────────────────────────────────────────
 // TradingSystem — 订单风控交易底层单例 (纯 C++，零 Qt)
 // 统一管理 TradeExecutionEngine / PositionAccountEngine / RiskEvaluator
+// 实现 IOrderListener，接收策略引擎订单并驱动执行 + 通知
 // ─────────────────────────────────────────────────────────────────────
 
 #include "../../domain/trading/TradeExecutionEngine.h"
 #include "../../domain/trading/PositionAccountEngine.h"
 #include "../../domain/strategy/include/RiskEvaluator.h"
+#include "../../domain/strategy/include/IOrderListener.h"
+#include "../../foundation/include/foundation/Utils/Uuid.h"
 
 #include <memory>
 #include <mutex>
@@ -17,9 +20,12 @@
 
 namespace app::system {
 
-class TradingSystem final {
+class TradingSystem final : public domain::strategy::IOrderListener {
 public:
     static TradingSystem& instance();
+
+    // ── IOrderListener ──
+    void onOrders(const std::vector<domain::strategy::OrderRequest>& orders) override;
 
     // ── 初始化 ──
     void initialize();
@@ -57,6 +63,14 @@ public:
     // ── 风控审批 ──
     domain::strategy::RiskResult evaluateOrderRisk(const domain::strategy::RiskInput& input);
 
+    // ── 策略订单通知回调（IOrderListener → 桥接层 → QML）──
+    using OrderGeneratedHandler = std::function<void(const domain::trading::TradeOrder&)>;
+    void setOnOrderGenerated(OrderGeneratedHandler h) { m_onOrderGenerated = std::move(h); }
+
+    using OrderSubmitResultHandler = std::function<void(
+        const domain::trading::TradeOrder&, const domain::trading::SubmitResult&)>;
+    void setOnOrderSubmitResult(OrderSubmitResultHandler h) { m_onOrderSubmitResult = std::move(h); }
+
     // ── 引擎回调（桥接层注册，用于转发成交/状态到 QML） ──
     using OrderUpdateHandler = std::function<void(const domain::trading::TradeOrder&)>;
     using TradeFillHandler = std::function<void(const domain::trading::TradeFill&)>;
@@ -77,7 +91,7 @@ private:
     const domain::trading::Position* findPosition(const std::string& symbol) const;
 
     TradingSystem() = default;
-    ~TradingSystem() = default;
+    ~TradingSystem();
     TradingSystem(const TradingSystem&) = delete;
     TradingSystem& operator=(const TradingSystem&) = delete;
 
@@ -91,6 +105,10 @@ private:
     mutable std::mutex m_priceMutex;
     std::unordered_map<std::string, double> m_latestPrices;
     DataChangedCallback m_onDataChanged;
+    OrderGeneratedHandler m_onOrderGenerated;
+    OrderSubmitResultHandler m_onOrderSubmitResult;
+    foundation::utils::Uuid m_accountSub;
+    foundation::utils::Uuid m_positionSub;
 };
 
 } // namespace app::system

@@ -11,6 +11,7 @@
 #include "foundation/utils/Time.hpp"
 #include <algorithm>
 #include <regex>
+#include <unordered_map>
 
 
 namespace foundation {
@@ -914,10 +915,7 @@ std::string ConfigManager::get_app_config_string(const std::string& key,
 }
 
 int ConfigManager::get_app_config_int(const std::string& key, int default_value) {
-    // if (!instance().initialized_) {
-    //     return default_value;
-    // }
-    
+
     try {
         auto& config =getAppConfig();
         // 1. 先获取 ConfigNode 对象
@@ -937,11 +935,7 @@ int ConfigManager::get_app_config_int(const std::string& key, int default_value)
 }
 
 double ConfigManager::get_app_config_double(const std::string& key, 
-                                        double default_value) {
-    // if (!instance().initialized_) {
-    //     return default_value;
-    // }
-    
+                                        double default_value) { 
     try {
         auto& config = getAppConfig();
         return config->get<double>(key, default_value, '.');
@@ -952,9 +946,7 @@ double ConfigManager::get_app_config_double(const std::string& key,
 
 bool ConfigManager::get_app_config_bool(const std::string& key, 
                                     bool default_value) {
-    // if (!instance().initialized_) {
-    //     return default_value;
-    // }
+
     
     try {
         auto& config = getAppConfig();
@@ -962,6 +954,115 @@ bool ConfigManager::get_app_config_bool(const std::string& key,
     } catch (...) {
         return default_value;
     }
+}
+
+// ============ 命名配置文件操作 (ConfigFile 枚举) ============
+
+namespace {
+
+const std::unordered_map<ConfigFile, std::string>& s_configFilePaths() {
+    static const std::unordered_map<ConfigFile, std::string> map = {
+        {ConfigFile::TradingConnection, "trading_connection.json"},
+        {ConfigFile::RiskConfig,        "risk_config.json"},
+        {ConfigFile::Jujin,             "jujin.json"},
+    };
+    return map;
+}
+
+} // namespace
+
+std::string ConfigManager::configFilePath(ConfigFile file) const {
+    if (configBaseDir_.empty()) {
+        INTERNAL_ERROR_STREAM << "[ConfigManager] 致命错误：ConfigManager 未初始化即调用 configFilePath";
+        std::abort();
+    }
+    auto it = s_configFilePaths().find(file);
+    if (it == s_configFilePaths().end()) {
+        INTERNAL_ERROR_STREAM << "[ConfigManager] 未知的配置文件枚举值: "
+                              << static_cast<int>(file);
+        std::abort();
+    }
+    return configBaseDir_ + "/" + it->second;
+}
+
+ConfigNode::Ptr ConfigManager::loadConfigFile(ConfigFile file) {
+    std::string path = configFilePath(file);
+    ConfigNode::Ptr node;
+
+    if (foundation::fs::File::exists(path)) {
+        ConfigLoader::LoadOptions opts;
+        opts.profile = currentProfile_;
+        opts.enableCache = false;
+        try {
+            node = loader_->load(path, opts);
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[ConfigManager] Failed to parse " << path
+                                 << ": " << e.what();
+            node = std::make_shared<ConfigNode>();
+        }
+    } else if (file == ConfigFile::Jujin) {
+        auto appCfg = getAppConfig();
+        auto legacy = appCfg->getPath("jujin.config", '.');
+        if (!legacy.isNull()) {
+            node = std::make_shared<ConfigNode>(legacy);
+            saveConfigFile(ConfigFile::Jujin, *node);
+            INTERNAL_INFO_STREAM << "[ConfigManager] migrated jujin.config → jujin.json";
+        } else {
+            node = std::make_shared<ConfigNode>();
+        }
+    } else {
+        node = std::make_shared<ConfigNode>();
+    }
+
+    return node;
+}
+
+
+bool ConfigManager::saveConfigFile(ConfigFile file, const ConfigNode& config) {
+    std::string targetPath = configFilePath(file);
+    if (!foundation::fs::File::atomicWrite(targetPath, config.toJsonString(true))) {
+        return false;
+    }
+
+    // 更新缓存 (写后读一致性)
+    {
+        std::unique_lock<std::shared_mutex> lock(m_fileCacheMutex);
+        m_fileConfigCache[file] = std::make_shared<ConfigNode>(config);
+    }
+    return true;
+}
+
+void ConfigManager::invalidateConfigFileCache(ConfigFile file) {
+    std::unique_lock<std::shared_mutex> lock(m_fileCacheMutex);
+    m_fileConfigCache.erase(file);
+}
+
+std::string ConfigManager::get_config_file_string(ConfigFile file,
+    const std::string& key, const std::string& defaultVal) {
+    auto cfg = loadConfigFile(file);
+    auto node = cfg->getPath(key, '.');
+    return node.isNull() ? defaultVal : node.asString();
+}
+
+int ConfigManager::get_config_file_int(ConfigFile file,
+    const std::string& key, int def) {
+    auto cfg = loadConfigFile(file);
+    auto node = cfg->getPath(key, '.');
+    return node.isNull() ? def : node.asInt(def);
+}
+
+double ConfigManager::get_config_file_double(ConfigFile file,
+    const std::string& key, double def) {
+    auto cfg = loadConfigFile(file);
+    auto node = cfg->getPath(key, '.');
+    return node.isNull() ? def : node.asDouble(def);
+}
+
+bool ConfigManager::get_config_file_bool(ConfigFile file,
+    const std::string& key, bool def) {
+    auto cfg = loadConfigFile(file);
+    auto node = cfg->getPath(key, '.');
+    return node.isNull() ? def : node.asBool(def);
 }
 
 ConfigNode::Ptr ConfigManager::loadDomainConfig(Domain domain) {

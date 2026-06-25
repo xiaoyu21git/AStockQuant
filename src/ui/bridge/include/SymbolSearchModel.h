@@ -27,6 +27,12 @@ public:
     Q_INVOKABLE void search(const QString& keyword);
     Q_INVOKABLE QVariantMap getRow(int index) const;
 
+    /// @brief 通过 symbol 查询股票名称（供持仓等需要名称的地方调用）
+    Q_INVOKABLE static QString nameForSymbol(const QString& symbol);
+
+    /// @brief 返回 "名称 代码" 格式的显示字符串，如 "平安银行 000001.SZ"
+    Q_INVOKABLE static QString displayName(const QString& symbol);
+
 signals:
     void countChanged();
 

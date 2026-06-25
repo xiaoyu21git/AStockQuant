@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 import AStock.Bridge 1.0 as Bridge
+import "../../utils/OrderUtils.js" as OrderUtils
 import "../../components/Trading" as TradingComponents
 import "../../utils/TradingPageAdapter.js" as TradeJs
 
@@ -1323,81 +1324,9 @@ Item {
         return translateOrderSide(side || rawAction)
     }
 
-    function translateOrderStatus(status) {
-        var text = String(status || "").trim().toUpperCase()
-        if (text === "REQUESTED") {
-            return "已请求"
-        }
-        if (text === "PENDING_RISK") {
-            return "风控审批中"
-        }
-        if (text === "SUBMITTED") {
-            return "已报"
-        }
-        if (text === "PENDING") {
-            return "待处理"
-        }
-        if (text === "PARTIALLY_FILLED") {
-            return "部分成交"
-        }
-        if (text === "PARTIAL_FILLED") {
-            return "部分成交"
-        }
-        if (text === "FILLED") {
-            return "已成"
-        }
-        if (text === "PENDING_CANCEL") {
-            return "撤单中"
-        }
-        if (text === "CANCELLED") {
-            return "已撤"
-        }
-        if (text === "REJECTED") {
-            return "已拒"
-        }
-        return text || "待处理"
-    }
-
-    function orderUnit(order) {
-        return order && (order.type === "futures" || order.type === "options") ? "手" : "股"
-    }
-
-    function normalizedOrderStatusValue(status) {
-        var rawText = String(status || "").trim()
-        if (rawText === "已请求") {
-            return "REQUESTED"
-        }
-        if (rawText === "风控审批中") {
-            return "PENDING_RISK"
-        }
-        if (rawText === "已报") {
-            return "SUBMITTED"
-        }
-        if (rawText === "待处理") {
-            return "PENDING"
-        }
-        if (rawText === "部分成交") {
-            return "PARTIAL_FILLED"
-        }
-        if (rawText === "已成") {
-            return "FILLED"
-        }
-        if (rawText === "撤单中") {
-            return "PENDING_CANCEL"
-        }
-        if (rawText === "已撤") {
-            return "CANCELLED"
-        }
-        if (rawText === "已拒") {
-            return "REJECTED"
-        }
-
-        var text = rawText.toUpperCase()
-        if (text === "PARTIALLY_FILLED") {
-            return "PARTIAL_FILLED"
-        }
-        return text
-    }
+    function translateOrderStatus(status) { return OrderUtils.translateOrderStatus(status) }
+    function orderUnit(order)               { return OrderUtils.orderUnit(order) }
+    function normalizedOrderStatusValue(s)  { return OrderUtils.normalizedOrderStatus(s) }
 
     function orderStatusPhaseValue(orderItem) {
         var status = normalizedOrderStatusValue(orderItem && orderItem.rawStatus ? orderItem.rawStatus : (orderItem ? orderItem.status : ""))

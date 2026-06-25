@@ -12,6 +12,7 @@ target_sources(foundation PRIVATE
     Fs/FileWatcher.cpp
     json/json_facade.cpp
     log/logger.cpp
+    market/AStockSymbol.cpp
     net/Net_facade.cpp
     net/http_request_builder.cpp
     thread/ThreadPoolExecutor.cpp

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "IOrderListener.h"
 #include "StrategyServiceTypes.h"
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
@@ -445,16 +446,6 @@ public:
         OrderRequest& outputOrder) const override;
 };
 
-/// @brief 实盘异步模式下，订单通过此回调通知上层，而非同步返回值。
-class IOrderListener {
-public:
-    virtual ~IOrderListener() = default;
-
-    /// @brief 当引擎后台线程处理完一批行情后调用。
-    /// @param orders 本次步进产生的订单列表（可能为空）。
-    virtual void onOrders(const std::vector<OrderRequest>& orders) = 0;
-};
-
 class StrategyEngine final {
 public:
     class Builder;
@@ -577,6 +568,7 @@ private:
     std::condition_variable m_queueCv;
     static constexpr size_t kMaxQueueSize = 5000;
     std::atomic<bool> m_loopRunning{false};
+    std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位，防御 drainQueue 误触发监听器
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};

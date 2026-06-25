@@ -137,39 +137,6 @@ TValue readScalarByKeys(const QVariantMap& payload,
 
 } // namespace
 
-// ── 策略订单监听器：将策略引擎信号转发到 TradingSystem 执行管道 ──
-namespace {
-
-using SymbolResolver = std::function<std::string(std::uint32_t instrumentId)>;
-
-class StrategyOrderForwarder final : public domain::strategy::IOrderListener {
-public:
-    explicit StrategyOrderForwarder(SymbolResolver resolver)
-        : m_resolver(std::move(resolver)) {}
-
-    void onOrders(const std::vector<domain::strategy::OrderRequest>& orders) override {
-        for (const auto& req : orders) {
-            if (!req.isValid()) continue;
-
-            domain::trading::TradeOrder order;
-            order.setSymbol(m_resolver(req.instrumentId().value));
-            order.setSide(req.side() == domain::strategy::RuntimeOrderSide::Buy
-                              ? domain::strategy::OrderDirection::Buy
-                              : domain::strategy::OrderDirection::Sell);
-            order.setQuantity(static_cast<std::int64_t>(req.quantity()));
-            order.setStrategyId(std::to_string(req.strategyInstanceId()));
-            order.setPrice(1.0);  // 实盘由券商网关确定实际成交价
-
-            app::system::TradingSystem::instance().submitOrder(order);
-        }
-    }
-
-private:
-    SymbolResolver m_resolver;
-};
-
-} // namespace
-
 QString StrategyBridge::readText(const QVariantMap& payload,
                                  std::initializer_list<const char*> keys) const
 {
@@ -365,17 +332,11 @@ void StrategyBridge::init()
             mgr.setFactorInstanceManager(factorSvcBridge->instanceManager());
         }
 
-        // 创建默认订单转发器并注入（生命周期由 StrategyBridge 持有）
+        // 注册 TradingSystem 为策略订单监听器
         {
-            auto symResolver = [](std::uint32_t id) -> std::string {
-                char buf[16];
-                const char* suffix = (id >= 600000 && id < 700000) ? ".SH" : ".SZ";
-                std::snprintf(buf, sizeof(buf), "%06u%s", id, suffix);
-                return buf;
-            };
-            m_orderListener = std::make_unique<StrategyOrderForwarder>(std::move(symResolver));
-            mgr.setOrderListener(m_orderListener.get());
-            mgr.setDefaultOrderListener(m_orderListener.get());
+            auto& ts = app::system::TradingSystem::instance();
+            mgr.setOrderListener(&ts);
+            mgr.setDefaultOrderListener(&ts);
         }
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";

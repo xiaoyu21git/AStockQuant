@@ -43,8 +43,6 @@ private:
     bool subscribeSymbolBatch(const std::vector<std::string>& symbols, engine::EventBus* eventBus);
     bool subscribeSymbol(const std::string& symbol, engine::EventBus* eventBus);
     void publishSubscriptionStatus(engine::EventBus* eventBus, bool active);
-    std::vector<std::string> watchlistFromEnvironment() const;
-    std::string readEnvironment(const char* name, const char* fallback = "") const;
 
     bool m_started = false;
     std::atomic<bool> m_stopRequested{false};

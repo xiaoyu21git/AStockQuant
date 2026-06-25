@@ -22,8 +22,9 @@
 #include <QtGlobal>
 #include "VasAurora.hpp"
 #include "../../app/system/TradingSystem.h"
+#include "../../domain/strategy/include/RiskEvaluator.h"
 #include "../../ui/bridge/include/MarketDataBridge.h"
-#include "../../ui/bridge/include/DatabaseConnectionManager.h"
+#include "database/NativeMySQLConnectionPool.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinMarketConnector.h"
@@ -233,6 +234,43 @@ bool AppBootstrap::initConfiguration()
         }
         
         foundation::config::ConfigManager::instance().initialize(profile, configDir);
+
+        // ── 统一预加载所有命名配置文件（一次性加载，避免各模块惰性调用的时序问题）──
+        {
+            auto& cfg = foundation::config::ConfigManager::instance();
+            using CF = foundation::config::ConfigFile;
+            for (auto f : {CF::TradingConnection, CF::RiskConfig, CF::Jujin}) {
+                auto node = cfg.loadConfigFile(f);
+                if (!node || node->isEmpty()) {
+                    INTERNAL_WARN_STREAM << "[AppBootstrap] 配置文件未就绪: "
+                                         << static_cast<int>(f);
+                }
+            }
+
+            // ── 同步风控 + 费率配置到 TradingSystem ──
+            auto riskNode = cfg.loadConfigFile(CF::RiskConfig);
+            if (riskNode && !riskNode->isEmpty()) {
+                using namespace domain::strategy;
+                RiskConfig c = RiskConfig::defaults();
+                c.stopLossPercent        = riskNode->getPath("stopLossPercent",'.').asDouble(c.stopLossPercent);
+                c.takeProfitPercent      = riskNode->getPath("takeProfitPercent",'.').asDouble(c.takeProfitPercent);
+                c.maxDrawdownLimitPercent = riskNode->getPath("maxDrawdownLimitPercent",'.').asDouble(c.maxDrawdownLimitPercent);
+                c.maxDailyLossPercent    = riskNode->getPath("maxDailyLossPercent",'.').asDouble(c.maxDailyLossPercent);
+                c.breakerLevel1Percent   = riskNode->getPath("breakerLevel1Percent",'.').asDouble(c.breakerLevel1Percent);
+                c.breakerLevel2Percent   = riskNode->getPath("breakerLevel2Percent",'.').asDouble(c.breakerLevel2Percent);
+                c.breakerLevel3Percent   = riskNode->getPath("breakerLevel3Percent",'.').asDouble(c.breakerLevel3Percent);
+                c.maxPositionPercent     = riskNode->getPath("maxPositionPercent",'.').asDouble(c.maxPositionPercent);
+                c.maxTotalExposurePercent = riskNode->getPath("maxTotalExposurePercent",'.').asDouble(c.maxTotalExposurePercent);
+                c.orderSizeLimitWan      = riskNode->getPath("orderSizeLimitWan",'.').asDouble(c.orderSizeLimitWan);
+                c.slippageLimitPercent   = riskNode->getPath("slippageLimitPercent",'.').asDouble(c.slippageLimitPercent);
+                c.turnoverLimitWan       = riskNode->getPath("turnoverLimitWan",'.').asDouble(c.turnoverLimitWan);
+                c.commissionRate         = riskNode->getPath("commissionRate",'.').asDouble(c.commissionRate);
+                c.minCommission          = riskNode->getPath("minCommission",'.').asDouble(c.minCommission);
+                c.stampTaxRate           = riskNode->getPath("stampTaxRate",'.').asDouble(c.stampTaxRate);
+                app::system::TradingSystem::instance().setRiskConfig(c);
+                INTERNAL_INFO_STREAM << "[AppBootstrap] 风控+费率配置已同步";
+            }
+        }
         
         // 简单验证关键配置 - 通过实例方法调用
         auto& configManager = foundation::config::ConfigManager::instance();
@@ -298,11 +336,10 @@ bool AppBootstrap::initDatabase()
 {
     INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing database...";
 
-    // 提前初始化原生 MySQL 连接池，避免 QML 层首次查询时等待
-    auto& dbMgr = astock::database::DatabaseConnectionManager::instance();
-    auto conn = dbMgr.getNativeConnection();
+    // 预热数据库连接池（NativeMySQLConnectionPool 自动惰性初始化）
+    auto conn = astock::database::NativeMySQLConnectionPool::instance().getConnection();
     if (conn) {
-        INTERNAL_INFO_STREAM << "[AppBootstrap] Native MySQL pool initialized";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Native PG pool warmed up";
     }
 
     return true;
@@ -420,12 +457,12 @@ void AppBootstrap::reconcileOptionalConnectors()
         m_jujinMarketConnector = std::make_unique<JujinMarketConnector>();
     }
 
-    INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC enabled, starting...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] JMC 启动中...";
     if (m_jujinMarketConnector->isEnabledByEnvironment()) {
         if (!m_jujinMarketConnector->start()) {
-            INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC start FAILED: " << m_jujinMarketConnector->lastError();
+            INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC 启动失败: " << m_jujinMarketConnector->lastError();
         } else {
-            INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC started OK";
+            INTERNAL_INFO_STREAM << "[AppBootstrap] JMC 启动成功";
             // 交易网关挂到共享 JujinApi（JMC 已初始化共享 API）
             app::system::TradingSystem::instance().initializeWithBroker("jujin", "live");
         }

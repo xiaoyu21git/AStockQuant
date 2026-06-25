@@ -1,6 +1,7 @@
 #include "TradingBridges.h"
 #include "TradingConnectionConfigService.h"
 #include "TradingRuntimeStatusService.h"
+#include "StockNameResolver.h"
 #include "JujinApi.h"
 #include "../../../app/system/TradingSystem.h"
 #include "../../../app/adapters/JujinBrokerGateway.h"
@@ -43,15 +44,9 @@ void TradeExecutionBridge::ensureInitialized() {
     auto& sys = app::system::TradingSystem::instance();
 
     if (!sys.initialized()) {
-        // 读取交易配置 → 掘金实盘 / 模拟网关
-        QString configPath = QDir(QCoreApplication::applicationDirPath())
-                             .filePath("config/trading_connection.json");
-        QFile f(configPath);
-        QVariantMap cfg;
-        if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            QJsonDocument doc = QJsonDocument::fromJson(f.readAll());
-            if (doc.isObject()) cfg = doc.object().toVariantMap();
-        }
+        // 通过 TradingConnectionConfigService 统一读取交易配置
+        auto* cfgSvc = TradingConnectionConfigService::instance();
+        QVariantMap cfg = cfgSvc->loadConfiguration();
         if (cfg.isEmpty()) {
             INTERNAL_ERROR_STREAM << "[Live] config file not found";
             return;
@@ -128,6 +123,32 @@ void TradeExecutionBridge::ensureInitialized() {
         statusEntry["status"]   = "updated";
         emit orderStatusChanged(statusEntry);
         emit orderStatusPublished(statusEntry);
+    });
+
+    // ── 策略订单产生通知 → QML ──
+    sys.setOnOrderGenerated([this](const domain::trading::TradeOrder& order) {
+        QVariantMap entry;
+        entry["symbol"]     = QString::fromStdString(order.symbol());
+        entry["side"]       = order.side() == domain::strategy::OrderDirection::Buy
+                                  ? "BUY" : "SELL";
+        entry["price"]      = order.price();
+        entry["quantity"]   = static_cast<double>(order.quantity());
+        entry["strategyId"] = QString::fromStdString(order.strategyId());
+        QMetaObject::invokeMethod(this, [this, entry]() {
+            emit orderGenerated(entry);
+        }, Qt::QueuedConnection);
+    });
+
+    // ── 订单提交结果通知 → QML ──
+    sys.setOnOrderSubmitResult([this](const domain::trading::TradeOrder& order,
+                                        const domain::trading::SubmitResult& result) {
+        QVariantMap entry;
+        entry["symbol"]   = QString::fromStdString(order.symbol());
+        entry["accepted"] = result.succeeded();
+        entry["reason"]   = QString::fromStdString(result.message());
+        QMetaObject::invokeMethod(this, [this, entry]() {
+            emit orderSubmitResult(entry);
+        }, Qt::QueuedConnection);
     });
 
     m_initialized = true;
@@ -361,7 +382,9 @@ QVariantList PositionAccountBridge::positions() const {
     const auto& posMap = app::system::TradingSystem::instance().positions();
     for (const auto& [key, pos] : posMap) {
         QVariantMap item;
-        item["symbol"] = QString::fromStdString(pos.symbol());
+        const QString sym = QString::fromStdString(pos.symbol());
+        item["symbol"] = sym;
+        item["name"]   = StockNameResolver::name(sym);
         item["side"] = pos.side() == domain::trading::PositionSide::Long ? "LONG" : "SHORT";
         item["type"] = pos.type() == domain::trading::PositionType::Stock ? "stock"
             : pos.type() == domain::trading::PositionType::MarginBuy ? "margin_buy"
@@ -480,7 +503,9 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
     QVariantList posList;
     for (const auto& [key, pos] : posMap) {
         QVariantMap item;
-        item["symbol"] = QString::fromStdString(pos.symbol());
+        const QString sym = QString::fromStdString(pos.symbol());
+        item["symbol"] = sym;
+        item["name"]   = StockNameResolver::name(sym);
         item["side"] = pos.side() == domain::trading::PositionSide::Long ? "LONG" : "SHORT";
         item["type"] = pos.type() == domain::trading::PositionType::Stock ? "stock"
             : pos.type() == domain::trading::PositionType::MarginBuy ? "margin_buy"

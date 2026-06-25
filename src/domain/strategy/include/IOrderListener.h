@@ -1,14 +1,22 @@
 #pragma once
 // ═════════════════════════════════════════════════════════════════════════
-// IOrderListener — 策略订单监听器接口
-// 委托给 IStrategyService.h 中的定义（避免重复定义）
+// IOrderListener — 策略订单监听器接口 (最小编译依赖)
 // ═════════════════════════════════════════════════════════════════════════
 
-#include "IStrategyService.h"
+#include "StrategyServiceTypes.h"
 
-// IOrderListener 定义在 IStrategyService.h 中
-// 此头文件保留作为兼容入口点
+#include <vector>
 
 namespace domain::strategy {
-// using IOrderListener = IOrderListener; (定义已在 IStrategyService.h 中)
+
+/// @brief 实盘异步模式下，订单通过此回调通知上层，而非同步返回值。
+class IOrderListener {
+public:
+    virtual ~IOrderListener() = default;
+
+    /// @brief 当引擎后台线程处理完一批行情后调用。
+    /// @param orders 本次步进产生的订单列表（可能为空）。
+    virtual void onOrders(const std::vector<OrderRequest>& orders) = 0;
+};
+
 } // namespace domain::strategy

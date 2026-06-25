@@ -82,9 +82,11 @@ public:
         } else if (json.isObject()) {
             type = DataType::OBJECT;
             std::map<std::string, ConfigNode> obj;
-            // 这里需要根据 JsonFacade 的实际接口遍历对象
-            // 简化实现：假设可以通过某种方式获取所有键
-            // obj["key"] = ConfigNode(json.get("key"));
+            for (const auto& key : json.keys()) {
+                ConfigNode child;
+                child.impl_->fromJson(json.get(key));
+                obj[key] = std::move(child);
+            }
             value = std::move(obj);
         }
     }

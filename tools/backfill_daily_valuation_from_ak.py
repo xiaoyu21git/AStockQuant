@@ -201,6 +201,20 @@ def fetch_symbol_valuation(symbol: str) -> pd.DataFrame:
     raise RuntimeError(f"{symbol}: {last_error}")
 
 
+# pe_ratio / pb_ratio 列为 NUMERIC(10,4)，最大值 999,999.9999
+# AKShare 偶有垃圾值（如负盈利导致 PE 极大），clamp 到安全范围
+_RATIO_MAX = 999_999.9999
+
+def _safe_ratio(val) -> Optional[float]:
+    """比率字段安全转换，溢出则返回上限"""
+    if val is None:
+        return None
+    v = float(val)
+    if not pd.isna(v) and abs(v) <= _RATIO_MAX:
+        return v
+    return None  # 溢出/垃圾值 → 不写入
+
+
 def build_updates(df: pd.DataFrame, start_date: dt.date, end_date: dt.date) -> List[Tuple[object, ...]]:
     if df is None or df.empty:
         return []
@@ -208,8 +222,8 @@ def build_updates(df: pd.DataFrame, start_date: dt.date, end_date: dt.date) -> L
     filtered = df[(df["trade_date"] >= start_date) & (df["trade_date"] <= end_date)].copy()
     updates: List[Tuple[object, ...]] = []
     for _, row in filtered.iterrows():
-        pe_ratio = None if pd.isna(row["pe_ratio"]) else float(row["pe_ratio"])
-        pb_ratio = None if pd.isna(row["pb_ratio"]) else float(row["pb_ratio"])
+        pe_ratio = _safe_ratio(row["pe_ratio"]) if not pd.isna(row["pe_ratio"]) else None
+        pb_ratio = _safe_ratio(row["pb_ratio"]) if not pd.isna(row["pb_ratio"]) else None
         market_cap = None if pd.isna(row["market_cap"]) else float(row["market_cap"])
         circulating_market_cap = None if pd.isna(row["circulating_market_cap"]) else float(row["circulating_market_cap"])
         updates.append(

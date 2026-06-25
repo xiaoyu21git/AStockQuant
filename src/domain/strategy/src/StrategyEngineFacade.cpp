@@ -575,7 +575,8 @@ void StrategyEngine::drainQueue()
 
         try {
             auto orders = step(mdp);
-            if (orders.has_value() && m_orderListener) {
+            if (orders.has_value() && m_orderListener
+                && !m_isBacktestMode.load(std::memory_order_acquire)) {
                 m_orderListener->onOrders(*orders);
             }
         } catch (const std::exception& e) {
@@ -727,6 +728,16 @@ StrategyBacktestResult StrategyEngine::backtest(
     const std::function<void(double)>& onProgress)
 {
     StrategyBacktestResult result;
+
+    // 防御：回测期间 drainQueue() 不得触发 IOrderListener
+    struct BacktestGuard {
+        std::atomic<bool>& flag;
+        explicit BacktestGuard(std::atomic<bool>& f) : flag(f) {
+            flag.store(true, std::memory_order_release);
+        }
+        ~BacktestGuard() { flag.store(false, std::memory_order_release); }
+    };
+    BacktestGuard backtestGuard(m_isBacktestMode);
 
     auto* dataSvc = static_cast<factor::compute::BacktestDataService*>(dataSvcPtr);
     if (!dataSvc) {
@@ -994,25 +1005,20 @@ StrategyBacktestResult StrategyEngine::backtest(
                 dailyReturns.push_back(equityCurve[i] / equityCurve[i - 1] - 1.0);
         }
 
-        result.metrics.maxDrawdown   = ::factor::FactorBacktestMetricsCalculator::calculateMaxDrawdown(dailyReturns);
-        result.metrics.winRate       = ::factor::FactorBacktestMetricsCalculator::calculateWinRate(dailyReturns);
-        result.metrics.profitFactor  = ::factor::FactorBacktestMetricsCalculator::calculateProfitFactor(dailyReturns);
-        double sum = 0.0;
-        for (double r2 : dailyReturns) sum += r2;
-        const double mean = dailyReturns.empty() ? 0.0 : sum / static_cast<double>(dailyReturns.size());
-        double sqSum = 0.0;
-        for (double r2 : dailyReturns) sqSum += (r2 - mean) * (r2 - mean);
-        result.metrics.volatility = std::sqrt(sqSum / std::max(1.0, static_cast<double>(dailyReturns.size()))) * std::sqrt(250.0);
-        result.metrics.annualizedReturn = (initialCapital > 0.0)
-            ? std::pow(equityCurve.back() / initialCapital, 250.0 / std::max(1, totalDays)) - 1.0
-            : 0.0;
-        double downsideDev = ::factor::FactorBacktestMetricsCalculator::calculateDownsideDeviation(dailyReturns);
-        result.metrics.sortinoRatio = (downsideDev > 1e-12)
-            ? result.metrics.annualizedReturn / (downsideDev * std::sqrt(250.0)) : 0.0;
-        result.metrics.calmarRatio   = (result.metrics.maxDrawdown > 1e-9)
-            ? result.metrics.annualizedReturn / result.metrics.maxDrawdown : 0.0;
-        if (result.metrics.volatility > 1e-12)
-            result.metrics.sharpeRatio = result.metrics.annualizedReturn / result.metrics.volatility;
+        using Metrics = ::factor::FactorBacktestMetricsCalculator;
+        result.metrics.maxDrawdown   = Metrics::calculateMaxDrawdown(dailyReturns);
+        result.metrics.winRate       = Metrics::calculateWinRate(dailyReturns);
+        result.metrics.profitFactor  = Metrics::calculateProfitFactor(dailyReturns);
+        result.metrics.volatility       = Metrics::calculateVolatility(dailyReturns);
+        result.metrics.annualizedReturn = Metrics::calculateAnnualizedReturn(
+            equityCurve.back(), initialCapital, totalDays);
+        double downsideDev = Metrics::calculateDownsideDeviation(dailyReturns);
+        result.metrics.sortinoRatio = Metrics::calculateSortinoRatio(
+            result.metrics.annualizedReturn, downsideDev);
+        result.metrics.calmarRatio  = Metrics::calculateCalmarRatio(
+            result.metrics.annualizedReturn, result.metrics.maxDrawdown);
+        result.metrics.sharpeRatio  = Metrics::calculateSharpeRatio(
+            result.metrics.annualizedReturn, result.metrics.volatility);
     }
 
     // 交易统计
@@ -1034,43 +1040,47 @@ StrategyBacktestResult StrategyEngine::backtest(
         result.timeSeries.drawdowns = dds;
     }
 
-    // 基准对比 (沪深300), 优先 View 后 DB
+    // 基准对比 (沪深300)，从 View 中提取基准价格序列
     {
         std::vector<double> bmRet;
-        // 从 View 找
-        bool fromView = false;
-        for (size_t c = 0; c < view->instruments().size(); ++c) {
-            if (view->instruments()[c].value == 300) { fromView = true; break; }
+        // 从 idToSymbol 反查基准标的的 instrumentId，再从 View 的 close 矩阵提取价格
+        std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
+        std::uint32_t bmId = 0;
+        for (const auto& [id, sym] : idToSymbol) {
+            if (sym == bmSym) { bmId = id; break; }
         }
-        if (!fromView) {
-            auto& pool = astock::database::NativeMySQLConnectionPool::instance();
-            if (pool.isInitialized()) {
-                auto db = pool.getConnection();
-                if (db && db->isOpen()) {
-                    auto& vd = view->dates();
-                    std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
-                    std::string sql = "SELECT close FROM daily_bar WHERE symbol='" + bmSym + "' AND trade_date BETWEEN "
-                        + std::to_string(vd.front().value) + " AND " + std::to_string(vd.back().value) + " ORDER BY trade_date";
-                    auto rs = db->executeQuery(sql);
-                    for (int i = 1; i < static_cast<int>(rs.rowCount()); ++i) {
-                        double prev = rs.getRow(i-1).getDouble("close");
-                        double curr = rs.getRow(i).getDouble("close");
-                        if (prev > 0) bmRet.push_back(curr/prev - 1.0);
-                    }
+        // fallback: 尝试 instrumentId == 300 (沪深300 指数代码)
+        if (bmId == 0) {
+            for (const auto& instr : view->instruments()) {
+                if (instr.value == 300) { bmId = instr.value; break; }
+            }
+        }
+        if (bmId != 0) {
+            auto closeMat = view->close();
+            const auto& instrs = view->instruments();
+            int benchCol = -1;
+            for (size_t c = 0; c < instrs.size(); ++c) {
+                if (instrs[c].value == bmId) { benchCol = static_cast<int>(c); break; }
+            }
+            if (benchCol >= 0) {
+                const std::size_t colCount = instrs.size();
+                bmRet.reserve(static_cast<size_t>(totalDays) - 1);
+                for (int r = 1; r < totalDays; ++r) {
+                    const std::size_t prevOff = static_cast<std::size_t>(r - 1) * colCount + static_cast<std::size_t>(benchCol);
+                    const std::size_t currOff = static_cast<std::size_t>(r)     * colCount + static_cast<std::size_t>(benchCol);
+                    double prev = static_cast<double>(closeMat.data[prevOff]);
+                    double curr = static_cast<double>(closeMat.data[currOff]);
+                    if (prev > 0.0) bmRet.push_back(curr / prev - 1.0);
                 }
             }
         }
         if (!bmRet.empty()) {
-            size_t n = std::min(dailyReturns.size(), bmRet.size());
-            double sSum=0, bSum=0;
-            for (size_t i=0;i<n;++i){sSum+=dailyReturns[i];bSum+=bmRet[i];}
-            double sM=sSum/n, bM=bSum/n, cov=0, bVar=0;
-            for (size_t i=0;i<n;++i){cov+=(dailyReturns[i]-sM)*(bmRet[i]-bM);bVar+=(bmRet[i]-bM)*(bmRet[i]-bM);}
-            result.metrics.beta = (bVar>1e-12)?cov/bVar:0;
-            result.metrics.alpha = (sM - result.metrics.beta * bM) * 250.0;  // 年化
-            double te2=0; for(size_t i=0;i<n;++i){double d=dailyReturns[i]-bmRet[i];te2+=d*d;}
-            result.metrics.trackingError = std::sqrt(te2/n)*std::sqrt(250.0);
-            result.metrics.informationRatio = (result.metrics.trackingError>1e-12)?(sM-bM)/(result.metrics.trackingError/std::sqrt(250.0)):0;
+            auto benchMetrics = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
+                dailyReturns, bmRet);
+            result.metrics.beta             = benchMetrics.beta;
+            result.metrics.alpha            = benchMetrics.alpha;
+            result.metrics.trackingError    = benchMetrics.trackingError;
+            result.metrics.informationRatio = benchMetrics.informationRatio;
         }
     }
 

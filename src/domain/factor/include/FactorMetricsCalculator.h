@@ -56,6 +56,26 @@ public:
     static double calculateWinRate(const std::vector<double>& periodicReturns);
     static double calculateProfitFactor(const std::vector<double>& periodicReturns);
 
+    /// @brief 年化波动率 = std(dailyReturns) × sqrt(250)
+    static double calculateVolatility(const std::vector<double>& dailyReturns);
+
+    /// @brief 年化收益率 = (finalEquity / initialCapital)^(250/totalDays) - 1
+    static double calculateAnnualizedReturn(double finalEquity, double initialCapital, int totalDays);
+
+    /// @brief 夏普比率 = 年化收益 / 年化波动率
+    static double calculateSharpeRatio(double annualizedReturn, double annualizedVolatility);
+
+    /// @brief 索提诺比率 = 年化收益 / (日下行标准差 × sqrt(250))
+    static double calculateSortinoRatio(double annualizedReturn, double dailyDownsideDeviation);
+
+    /// @brief 卡玛比率 = 年化收益 / 最大回撤
+    static double calculateCalmarRatio(double annualizedReturn, double maxDrawdown);
+
+    /// @brief 基准对比（输入已对齐的日收益率序列，无需日期对齐）
+    static BenchmarkComparisonSummary calculateBenchmarkMetrics(
+        const std::vector<double>& strategyDailyReturns,
+        const std::vector<double>& benchmarkDailyReturns);
+
 private:
     static FactorBacktestMetrics buildFactorMetrics(const Inputs& inputs);
     static double calculateRankIcMean(const Inputs& inputs);

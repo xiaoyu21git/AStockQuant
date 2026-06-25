@@ -1,5 +1,6 @@
 // DatabaseConnectionManager.h
-// 数据库连接管理器 - 单例模式，管理全局数据库连接
+// ⛔ DEPRECATED — 请使用 NativeMySQLConnectionPool (基础设施层唯一 DB 连接入口)
+// 保留此文件仅用于编译兼容，新代码禁止使用。
 #pragma once
 
 #include "../../../infrastructure/include/database/NativePgDatabase.h"

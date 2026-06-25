@@ -1,10 +1,42 @@
 #include "PositionAccountEngine.h"
 
+#include "../../foundation/include/foundation/market/AStockSymbol.h"
+
 #include <algorithm>
 #include <cmath>
 #include <mutex>
 
 namespace domain::trading {
+
+namespace {
+
+/// @brief 将不同来源的 symbol 统一标准化为 "000001.SZ" 格式
+std::string normalizeSymbol(const std::string& raw) {
+    if (raw.empty()) return raw;
+
+    // 掘金/SDK 格式 "SZSE.000001" / "SHSE.600000" → "000001.SZ" / "600000.SH"
+    auto dot = raw.find('.');
+    if (dot != std::string::npos) {
+        std::string first  = raw.substr(0, dot);
+        std::string second = raw.substr(dot + 1);
+        if (first == "SZSE") return second + ".SZ";
+        if (first == "SHSE") return second + ".SH";
+        if (first == "BSE")  return second + ".BJ";
+        // 掘金格式 "000001.SZSE" / "600000.SHSE"（交换所在后缀）
+        if (second == "SZSE") return first + ".SZ";
+        if (second == "SHSE") return first + ".SH";
+        if (second == "BSE")  return first + ".BJ";
+    }
+
+    try {
+        auto sym = foundation::market::AStockSymbol::fromString(raw);
+        return sym.isValid() ? sym.fullSymbol() : raw;
+    } catch (...) {
+        return raw;
+    }
+}
+
+} // anonymous namespace
 
 AccountSnapshot AccountSnapshot::createDefault(const std::string& accountId) {
     AccountSnapshot s;
@@ -32,10 +64,11 @@ const AccountSnapshot& PositionAccountEngine::account() const noexcept { return 
 void PositionAccountEngine::applyTradeFill(const TradeFillSummary& fill) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = m_positions.find(fill.symbol);
+    const std::string canonical = normalizeSymbol(fill.symbol);
+    auto it = m_positions.find(canonical);
     Position pos = it != m_positions.end() ? it->second : Position{};
     if (pos.symbol().empty()) {
-        pos.setSymbol(fill.symbol);
+        pos.setSymbol(canonical);
         pos.setExchange(fill.exchange);
     }
 
@@ -87,9 +120,9 @@ void PositionAccountEngine::applyTradeFill(const TradeFillSummary& fill) {
     pos.setUnrealizedPnl(unrealizedPnlForPosition(pos));
 
     if (newQty > 0) {
-        m_positions[fill.symbol] = std::move(pos);
+        m_positions[canonical] = std::move(pos);
     } else {
-        m_positions.erase(fill.symbol);
+        m_positions.erase(canonical);
     }
 
     if (isBuy) {
@@ -116,7 +149,10 @@ void PositionAccountEngine::applyTradeFill(const TradeFillSummary& fill) {
 void PositionAccountEngine::applyPositionEvent(const std::string& symbol, const Position& pos) {
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_positions[symbol] = pos;
+        const std::string canonical = normalizeSymbol(symbol);
+        Position normalized = pos;
+        normalized.setSymbol(canonical);
+        m_positions[canonical] = std::move(normalized);
     }
     if (m_onDataChanged) m_onDataChanged();
 }
@@ -138,7 +174,12 @@ void PositionAccountEngine::applyBrokerSnapshot(
     const std::vector<Position>& positions, const AccountSnapshot& acc) {
     std::lock_guard<std::mutex> lock(m_mutex);
     m_positions.clear();
-    for (const auto& p : positions) m_positions[p.symbol()] = p;
+    for (const auto& p : positions) {
+        const std::string canonical = normalizeSymbol(p.symbol());
+        Position normalized = p;
+        normalized.setSymbol(canonical);
+        m_positions[canonical] = std::move(normalized);
+    }
     m_account = acc;
 }
 

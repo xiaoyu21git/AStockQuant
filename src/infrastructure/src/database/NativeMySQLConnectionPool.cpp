@@ -37,7 +37,7 @@ std::shared_ptr<ISqlDatabase> NativeMySQLConnectionPool::getConnection()
             cfg.port     = cfgMgr.get_app_config_int("pg.port", 5432);
             cfg.database = cfgMgr.get_app_config_string("pg.database", "astock_quant");
             cfg.username = cfgMgr.get_app_config_string("pg.user", "astock");
-            cfg.password = cfgMgr.get_app_config_string("pg.password", "");
+            cfg.password = cfgMgr.get_app_config_string("pg.password", "astock123");
             cfg.charset  = "utf8";
             config_ = cfg; initialized_ = true;
         }

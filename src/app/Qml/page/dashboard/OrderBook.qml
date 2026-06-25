@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import "../../utils/OrderUtils.js" as OrderUtils
 
 Item {
     id: orderBook
@@ -9,32 +10,7 @@ Item {
     property var recentOrders: []
     property int activeTabIndex: 0
 
-    function normalizedOrderStatus(status) {
-        return String(status || "").toUpperCase()
-    }
-
-    function displayOrderStatus(status) {
-        var statusText = normalizedOrderStatus(status)
-        if (statusText === "SUBMITTED") {
-            return "已报"
-        }
-        if (statusText === "PENDING") {
-            return "待处理"
-        }
-        if (statusText === "PARTIAL_FILLED") {
-            return "部分成交"
-        }
-        if (statusText === "FILLED") {
-            return "已成交"
-        }
-        if (statusText === "CANCELLED") {
-            return "已撤单"
-        }
-        if (statusText === "REJECTED") {
-            return "已拒绝"
-        }
-        return statusText || "--"
-    }
+    function displayOrderStatus(status) { return OrderUtils.translateOrderStatus(status) }
 
     readonly property var orderEntries: recentOrders && recentOrders.length > 0 ? recentOrders.slice(0, 7).map(function(order, index) {
         var statusText = String(order.status || "")
@@ -45,11 +21,7 @@ Item {
             type: statusText === "FILLED" ? "bid" : (statusText === "SUBMITTED" ? "current" : "ask"),
             status: displayOrderStatus(statusText || "--")
         }
-    }) : [
-        { price: 12.52, amount: 1200, total: 15024, type: "ask", status: "挂单" },
-        { price: 12.50, amount: 800, total: 10000, type: "current", status: "最新" },
-        { price: 12.48, amount: 1600, total: 19968, type: "bid", status: "回流" }
-    ]
+    }) : []
     
     Rectangle {
         anchors.fill: parent

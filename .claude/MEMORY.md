@@ -1,1 +1,2 @@
 - [代码修改强制前置检查](pre-edit-checklist.md) — 每次修改代码前必须三步自问：找模板、选最简、查目标
+- [指标计算封装原则](encapsulated-metrics-principle.md) — 每个指标计算必须封装为独立函数，输入→输出，回测和实盘共用同一套公式

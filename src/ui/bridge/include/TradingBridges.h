@@ -70,6 +70,11 @@ signals:
     void tradeFilled(const QVariantMap& tradeFill);
     void tradeFillPublished(const QVariantMap& tradeFill);        // QML 别名
 
+    /// @brief 策略引擎产生订单时立即通知（无论 TradingSystem 是否初始化）
+    void orderGenerated(const QVariantMap& orderInfo);
+    /// @brief 订单提交结果（成功/风控拒绝/引擎未初始化/无价格）
+    void orderSubmitResult(const QVariantMap& result);
+
 private:
     void ensureInitialized();
     void appendRecentOrder(const QVariantMap& order);

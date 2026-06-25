@@ -142,7 +142,6 @@ qt_add_qml_module(astockquantapp
         Qml/page/dashboard/QtCandlestickChart.qml
         Qml/page/dashboard/StatusSummaryCard.qml
         Qml/page/dashboard/StrategiesPanel.qml
-        Qml/page/dashboard/TradingPanel.qml
         Qml/page/dashboard/OrderBook.qml
         Qml/page/monitoring/MonitoringPage.qml
         Qml/page/trading/TradingPage.qml
@@ -161,9 +160,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/BaseQuantCard.qml
         Qml/components/FactorCard.qml
         Qml/components/StrategyCard.qml
-        Qml/components/Risk/RiskCategoryCard.qml
-        Qml/components/Risk/RiskParameterSlider.qml
-        Qml/components/Risk/RiskParameterInput.qml
         Qml/components/DatePicker.qml
         Qml/components/ThemeSwitcher.qml
         Qml/components/GlobalSnackbar.qml
@@ -264,6 +260,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/RiskBacktestMetaLoader.js
         Qml/utils/StrategyDataAdapter.js
         Qml/utils/FactorDataAdapter.js
+        Qml/utils/OrderUtils.js
         Qml/utils/TradingPageAdapter.js
         Qml/utils/TradeTestingPageAdapter.js
         Qml/utils/MarketEnvironmentProfile.js

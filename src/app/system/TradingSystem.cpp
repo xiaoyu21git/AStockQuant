@@ -1,10 +1,12 @@
 #include "TradingSystem.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/MarketDataAdapter.h"
+#include "../../foundation/include/foundation/market/AStockSymbol.h"
 #include "../adapters/JujinBrokerGateway.h"
 
 #include "../../engine/include/JujinApi.h"
 #include "../../engine/include/GlobalEventBusRegistry.h"
+#include "../../engine/include/Event/EventFormat.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +17,13 @@ namespace app::system {
 TradingSystem& TradingSystem::instance() {
     static TradingSystem sys;
     return sys;
+}
+
+TradingSystem::~TradingSystem() {
+    if (auto* bus = engine::get_engine_event_bus()) {
+        if (!m_accountSub.is_null())  bus->unsubscribe(m_accountSub);
+        if (!m_positionSub.is_null()) bus->unsubscribe(m_positionSub);
+    }
 }
 
 void TradingSystem::setBrokerGateway(std::unique_ptr<domain::trading::IBrokerGatewayEx> gw) {
@@ -42,9 +51,40 @@ void TradingSystem::initialize() {
         notifyDataChanged();
     });
 
-    // ── 内部回调：成交/订单变更后自动同步持仓账户到最新状态 ──
-    // 注意：这些回调在 setGateway() 中注册到引擎，不覆盖桥接层通过 setOnXxx 设置的外部回调。
-    // 外部回调（TradeExecutionBridge 设置的 QML 信号）通过 m_onTradeFill / m_onOrderUpdate 链式转发。
+    // ── 订阅 GmStrategySession 推送的账户/持仓变更事件 ──
+    if (auto* bus = engine::get_engine_event_bus()) {
+        m_accountSub = bus->subscribe(engine::EventTypes::TRADING_ACCOUNT_UPDATED,
+            [this](const engine::EventFormat& e) {
+                auto avail   = e.get<double>("available");
+                auto balance = e.get<double>("balance");
+                auto mv      = e.get<double>("market_value");
+                if (avail.has_value() && m_positionEngine) {
+                    domain::trading::AccountSnapshot snap;
+                    snap.setAvailableCash(avail.value());
+                    snap.setTotalAsset(balance.value_or(0.0));
+                    snap.setMarketValue(mv.value_or(0.0));
+                    m_positionEngine->applyAccountEvent(snap);
+                }
+            });
+
+        m_positionSub = bus->subscribe(engine::EventTypes::TRADING_POSITION_UPDATED,
+            [this](const engine::EventFormat& e) {
+                auto sym = e.get<std::string>("symbol");
+                auto qty = e.get<std::int64_t>("quantity");
+                auto price = e.get<double>("price");
+                auto mv   = e.get<double>("market_value");
+                if (sym.has_value() && m_positionEngine) {
+                    domain::trading::Position pos;
+                    pos.setSymbol(*sym);
+                    pos.setQuantity(qty.value_or(0));
+                    pos.setLastPrice(price.value_or(0.0));
+                    pos.setMarketValue(mv.value_or(0.0));
+                    pos.setSide(qty.value_or(0) >= 0 ? domain::trading::PositionSide::Long
+                                                      : domain::trading::PositionSide::Short);
+                    m_positionEngine->applyPositionEvent(*sym, pos);
+                }
+            });
+    }
 
     m_initialized = true;
     std::cout << "[TradingSystem] Initialized\n";
@@ -216,14 +256,62 @@ const domain::trading::Position* TradingSystem::findPosition(const std::string& 
     return (it != posMap.end()) ? &it->second : nullptr;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// IOrderListener — 接收策略引擎订单
+// ═══════════════════════════════════════════════════════════════
+
+void TradingSystem::onOrders(
+    const std::vector<domain::strategy::OrderRequest>& orders)
+{
+    for (const auto& req : orders) {
+        if (!req.isValid()) continue;
+
+        // ① Symbol 解析
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%06u",
+                      req.instrumentId().value);
+        const std::string symbol =
+            foundation::market::AStockSymbol::fromCode(buf).fullSymbol();
+
+        // ② OrderRequest → TradeOrder
+        domain::trading::TradeOrder order;
+        order.setSymbol(symbol);
+        order.setSide(req.side() == domain::strategy::RuntimeOrderSide::Buy
+                          ? domain::strategy::OrderDirection::Buy
+                          : domain::strategy::OrderDirection::Sell);
+        order.setQuantity(static_cast<std::int64_t>(req.quantity()));
+        order.setStrategyId(std::to_string(req.strategyInstanceId()));
+        order.setPrice(latestPrice(symbol));
+
+        // ③ 回调：订单已产生（无论后续提交结果如何）
+        if (m_onOrderGenerated) {
+            m_onOrderGenerated(order);
+        }
+
+        // ④ 无价格时通知
+        if (order.price() <= 0.0) {
+            if (m_onOrderSubmitResult) {
+                auto r = domain::trading::SubmitResult::rejected(
+                    "no latest price");
+                m_onOrderSubmitResult(order, r);
+            }
+            continue;
+        }
+
+        // ⑤ 提交并通知结果
+        auto result = submitOrder(order);
+        if (m_onOrderSubmitResult) {
+            m_onOrderSubmitResult(order, result);
+        }
+    }
+}
+
 domain::trading::SubmitResult TradingSystem::submitOrder(const domain::trading::TradeOrder& order) {
     if (!m_tradeEngine) {
         return domain::trading::SubmitResult::rejected("trading engine not initialized");
     }
 
-    // 每次下单前从 SDK 同步最新账户/持仓，保证风控检查基于实时数据
-    refreshPositionsFromBroker();
-
+    // 账户/持仓由 GmStrategySession 实时推送更新，无需轮询
     domain::strategy::RiskInput riskInput = buildRiskInput(order);
     return m_tradeEngine->submitOrder(order, riskInput);
 }

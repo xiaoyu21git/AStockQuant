@@ -809,6 +809,96 @@ double FactorBacktestMetricsCalculator::calculateProfitFactor(const std::vector<
     return grossProfit / grossLossAbs;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 通用绩效指标（回测 + 实盘共用）
+// ═══════════════════════════════════════════════════════════════
+
+double FactorBacktestMetricsCalculator::calculateVolatility(
+    const std::vector<double>& dailyReturns)
+{
+    if (dailyReturns.empty()) return 0.0;
+
+    double sum = 0.0;
+    for (double r : dailyReturns) sum += r;
+    const double mean = sum / static_cast<double>(dailyReturns.size());
+
+    double sqSum = 0.0;
+    for (double r : dailyReturns) {
+        const double diff = r - mean;
+        sqSum += diff * diff;
+    }
+    return std::sqrt(sqSum / static_cast<double>(dailyReturns.size())) * std::sqrt(250.0);
+}
+
+double FactorBacktestMetricsCalculator::calculateAnnualizedReturn(
+    double finalEquity, double initialCapital, int totalDays)
+{
+    if (initialCapital <= 0.0 || totalDays <= 0) return 0.0;
+    const double result = std::pow(finalEquity / initialCapital,
+                                   250.0 / static_cast<double>(totalDays)) - 1.0;
+    return std::isfinite(result) ? result : 0.0;
+}
+
+double FactorBacktestMetricsCalculator::calculateSharpeRatio(
+    double annualizedReturn, double annualizedVolatility)
+{
+    return (annualizedVolatility > 1e-12) ? annualizedReturn / annualizedVolatility : 0.0;
+}
+
+double FactorBacktestMetricsCalculator::calculateSortinoRatio(
+    double annualizedReturn, double dailyDownsideDeviation)
+{
+    const double annualizedDownside = dailyDownsideDeviation * std::sqrt(250.0);
+    return (annualizedDownside > 1e-12) ? annualizedReturn / annualizedDownside : 0.0;
+}
+
+double FactorBacktestMetricsCalculator::calculateCalmarRatio(
+    double annualizedReturn, double maxDrawdown)
+{
+    return (maxDrawdown > 1e-9) ? annualizedReturn / maxDrawdown : 0.0;
+}
+
+FactorBacktestMetricsCalculator::BenchmarkComparisonSummary
+FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
+    const std::vector<double>& strategyDailyReturns,
+    const std::vector<double>& benchmarkDailyReturns)
+{
+    BenchmarkComparisonSummary result;
+    const size_t n = std::min(strategyDailyReturns.size(), benchmarkDailyReturns.size());
+    if (n == 0) return result;
+
+    double sSum = 0.0, bSum = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        sSum += strategyDailyReturns[i];
+        bSum += benchmarkDailyReturns[i];
+    }
+    const double sM = sSum / static_cast<double>(n);
+    const double bM = bSum / static_cast<double>(n);
+
+    double cov = 0.0, bVar = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const double sDiff = strategyDailyReturns[i] - sM;
+        const double bDiff = benchmarkDailyReturns[i] - bM;
+        cov  += sDiff * bDiff;
+        bVar += bDiff * bDiff;
+    }
+
+    result.beta  = (bVar > 1e-12) ? cov / bVar : 0.0;
+    result.alpha = (sM - result.beta * bM) * 250.0;  // 年化
+
+    double te2 = 0.0;
+    for (size_t i = 0; i < n; ++i) {
+        const double d = strategyDailyReturns[i] - benchmarkDailyReturns[i];
+        te2 += d * d;
+    }
+    result.trackingError = std::sqrt(te2 / static_cast<double>(n)) * std::sqrt(250.0);
+    result.informationRatio = (result.trackingError > 1e-12)
+        ? (sM - bM) / (result.trackingError / std::sqrt(250.0)) : 0.0;
+
+    result.hasValidAlignment = true;
+    return result;
+}
+
 FactorBacktestMetrics::Rating FactorQuality::evaluate(const FactorBacktestMetrics& metrics)
 {
     return FactorBacktestMetricsCalculator::evaluateCoreRating(metrics);

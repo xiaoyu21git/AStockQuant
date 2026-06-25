@@ -101,6 +101,13 @@ public:
     // 临时文件
     static std::string createTempFile();
     static std::string createTempFile(const std::string& content);
+
+    /// @brief 原子写入 — 先写临时文件，flush 后 rename，崩溃不损坏原文件
+    /// @param path 目标文件路径
+    /// @param content 写入内容
+    /// @return true 成功
+    /// @note 临时文件与目标文件在同一目录，避免跨文件系统 rename 失败
+    static bool atomicWrite(const std::string& path, const std::string& content);
 };
 
 } // namespace fs

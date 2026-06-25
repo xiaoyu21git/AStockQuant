@@ -7,6 +7,7 @@
 #include <memory>
 #include <cstring>
 #include <algorithm>
+#include <chrono>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -783,21 +784,21 @@ std::string File::createTempFile(const std::string& content) {
 #ifdef _WIN32
     char tmpPath[MAX_PATH] = {0};
     char tmpFile[MAX_PATH] = {0};
-    
+
     if (GetTempPathA(MAX_PATH, tmpPath) == 0) {
         return "";
     }
-    
+
     if (GetTempFileNameA(tmpPath, "tmp", 0, tmpFile) == 0) {
         return "";
     }
-    
+
     std::string result(tmpFile);
-    
+
     if (!content.empty()) {
         writeText(result, content);
     }
-    
+
     return result;
 #else
     char tmpFile[] = "/tmp/tmp_XXXXXX";
@@ -805,16 +806,47 @@ std::string File::createTempFile(const std::string& content) {
     if (fd == -1) {
         return "";
     }
-    
+
     close(fd);
     std::string result(tmpFile);
-    
+
     if (!content.empty()) {
         writeText(result, content);
     }
-    
+
     return result;
 #endif
+}
+
+bool File::atomicWrite(const std::string& path, const std::string& content) {
+    // 临时文件与目标文件在同一目录 — 避免跨文件系统 rename 失败
+    std::string dir = directory(path);
+    std::string tmpPath;
+    if (!dir.empty()) {
+        tmpPath = dir + "/.atomic_tmp_"
+            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    } else {
+        tmpPath = path + ".tmp."
+            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+    }
+
+    // 1. 写临时文件并 flush
+    {
+        FileWriter writer(tmpPath, false, true);
+        if (!writer.write(content)) {
+            remove(tmpPath);
+            return false;
+        }
+        writer.flush();
+    }
+
+    // 2. 原子 rename (move 内部已处理跨平台)
+    if (!move(tmpPath, path)) {
+        remove(tmpPath);
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace fs

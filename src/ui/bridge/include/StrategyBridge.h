@@ -25,10 +25,6 @@ class StrategyEngine;
 
 class StrategyListModel;
 
-namespace domain::strategy {
-class IOrderListener;
-}
-
 #include "database/StrategyRepository.h"
 
 class StrategyBridge : public QObject {
@@ -204,7 +200,6 @@ private:
     QString m_selId;
     std::unique_ptr<class astock::database::StrategyRepository> m_repo;
     StrategyListModel* m_listModel{nullptr};
-    std::unique_ptr<domain::strategy::IOrderListener> m_orderListener;
 
     // 异步启动线程池（仅用于将工作从主线程卸到后台）
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_startupPool;

@@ -1,4 +1,5 @@
 #include "SymbolSearchModel.h"
+#include "StockNameResolver.h"
 #include "foundation/log/logging.hpp"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 
@@ -75,6 +76,16 @@ QVariantMap SymbolSearchModel::getRow(int index) const {
     map["secName"]  = e.secName;
     map["exchange"] = e.exchange;
     return map;
+}
+
+QString SymbolSearchModel::nameForSymbol(const QString& symbol)
+{
+    return StockNameResolver::name(symbol);
+}
+
+QString SymbolSearchModel::displayName(const QString& symbol)
+{
+    return StockNameResolver::displayName(symbol);
 }
 
 void SymbolSearchModel::search(const QString& keyword) {

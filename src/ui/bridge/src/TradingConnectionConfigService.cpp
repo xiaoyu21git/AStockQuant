@@ -2,16 +2,36 @@
 
 #include <QCoreApplication>
 #include <QDir>
-#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QMutexLocker>
 #include <QTimer>
+#include "foundation/config/ConfigManager.hpp"
+#include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
 namespace bridge {
+
+namespace {
+
+/// QVariantMap → ConfigNode (通过 JSON 字符串中转)
+foundation::config::ConfigNode toConfigNode(const QVariantMap& map) {
+    QJsonDocument doc(QJsonObject::fromVariantMap(map));
+    auto json = foundation::json::JsonFacade::parse(doc.toJson().toStdString());
+    return foundation::config::ConfigNode(json);
+}
+
+/// ConfigNode → QVariantMap (通过 JSON 字符串中转)
+QVariantMap toVariantMap(const foundation::config::ConfigNode& node) {
+    if (node.isNull()) return {};
+    auto doc = QJsonDocument::fromJson(
+        QByteArray::fromStdString(node.toJsonString()));
+    return doc.object().toVariantMap();
+}
+
+} // namespace
 
 TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
     : QObject(parent) {
@@ -237,8 +257,9 @@ void TradingConnectionConfigService::refreshClientProcessStatusAsync() {
 // ═══════════════════════════════════════════════════════════════════
 
 QString TradingConnectionConfigService::resolveConfigFilePath() const {
-    const QString baseDir = QCoreApplication::applicationDirPath();
-    return QDir(baseDir).filePath(QStringLiteral("config/trading_connection.json"));
+    return QString::fromStdString(
+        foundation::config::ConfigManager::instance()
+            .configFilePath(foundation::config::ConfigFile::TradingConnection));
 }
 
 QVariantMap TradingConnectionConfigService::normalizeConfiguration(const QVariantMap& raw) const {
@@ -291,33 +312,16 @@ QVariantMap TradingConnectionConfigService::normalizeConfiguration(const QVarian
 }
 
 bool TradingConnectionConfigService::writeConfigFile(const QVariantMap& config) const {
-    const QString path = m_configFilePath;
-    QDir().mkpath(QFileInfo(path).absolutePath());
-
-    QJsonDocument doc(QJsonObject::fromVariantMap(config));
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        INTERNAL_WARN_STREAM << "[TradingConnectionConfigService] Cannot write to" << path.toStdString();
-        return false;
-    }
-    file.write(doc.toJson(QJsonDocument::Indented));
-    file.close();
-    return true;
+    auto node = toConfigNode(config);
+    return foundation::config::ConfigManager::instance()
+        .saveConfigFile(foundation::config::ConfigFile::TradingConnection, node);
 }
 
 QVariantMap TradingConnectionConfigService::readConfigFile() const {
-    QFile file(m_configFilePath);
-    if (!file.exists()) return QVariantMap();
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) return QVariantMap();
-
-    QByteArray data = file.readAll();
-    file.close();
-
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(data, &err);
-    if (err.error != QJsonParseError::NoError) return QVariantMap();
-
-    return normalizeConfiguration(doc.object().toVariantMap());
+    auto cfg = foundation::config::ConfigManager::instance()
+        .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+    if (!cfg || cfg->isNull()) return QVariantMap();
+    return normalizeConfiguration(toVariantMap(*cfg));
 }
 
 QVariantMap TradingConnectionConfigService::buildStartupGateResult(

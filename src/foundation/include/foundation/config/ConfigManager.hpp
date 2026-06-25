@@ -18,6 +18,15 @@
 namespace foundation {
 namespace config {
 
+/// @brief 配置文件名枚举 —— 每个值对应 config/ 下唯一的具体文件
+/// @note 仅包含已通过 ConfigManager 统一加载的配置文件；
+///       QML 视图 UI 配置 (factor_common.json 等) 不在本枚举范围内
+enum class ConfigFile {
+    TradingConnection,   // config/trading_connection.json
+    RiskConfig,          // config/risk_config.json
+    Jujin,               // config/jujin.json
+};
+
 class ConfigManager {
     // 配置变更结构体
 public:
@@ -154,9 +163,35 @@ public:
      int get_app_config_int(const std::string& key, int default_value = 0);
      double get_app_config_double(const std::string& key, 
                                        double default_value = 0.0);
-     bool get_app_config_bool(const std::string& key, 
+     bool get_app_config_bool(const std::string& key,
                                    bool default_value = false);
-    
+
+    // ── 命名配置文件操作 (ConfigFile 枚举 → 具体文件) ──
+
+    /// @brief 解析配置文件完整路径 (configBaseDir_ + "/" + 相对路径)
+    /// @note 若 ConfigManager 尚未初始化 (configBaseDir_ 为空) 则 abort
+    std::string configFilePath(ConfigFile file) const;
+
+    /// @brief 加载配置文件 (双重检查锁 + 自动缓存)
+    /// @return 成功返回 ConfigNode；文件不存在/解析失败 → 返回空 ConfigNode (isNull()==true)
+    ConfigNode::Ptr loadConfigFile(ConfigFile file);
+
+    /// @brief 保存配置文件 (原子写入: 临时文件 → flush → rename)
+    /// 成功后自动更新缓存 (read-after-write 一致性)
+    /// @return true 成功, false 失败 (原文件不受影响)
+    bool saveConfigFile(ConfigFile file, const ConfigNode& config);
+
+    /// @brief 清除指定文件的缓存 (下次 loadConfigFile 将重新读磁盘)
+    void invalidateConfigFileCache(ConfigFile file);
+
+    // ── 命名配置文件快速取值 (内部自动调用 loadConfigFile，按需加载) ──
+
+    std::string get_config_file_string(ConfigFile file, const std::string& key,
+                                       const std::string& defaultVal = "");
+    int         get_config_file_int(ConfigFile file, const std::string& key, int def = 0);
+    double      get_config_file_double(ConfigFile file, const std::string& key, double def = 0.0);
+    bool        get_config_file_bool(ConfigFile file, const std::string& key, bool def = false);
+
     // ============ 工具方法 ============
     
     const std::string& getCurrentProfile() const { return currentProfile_; }
@@ -212,6 +247,10 @@ private:
     mutable std::shared_mutex configMutex_;
     mutable std::mutex listenersMutex_;
     mutable std::mutex runtimeConfigMutex_;
+
+    // 命名配置文件缓存 (ConfigFile → ConfigNode)
+    mutable std::shared_mutex m_fileCacheMutex;
+    std::map<ConfigFile, ConfigNode::Ptr> m_fileConfigCache;
 };
 
 // ============ 便捷宏 ============

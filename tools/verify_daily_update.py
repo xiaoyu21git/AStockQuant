@@ -82,7 +82,7 @@ def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
                        s.delist_date,
                        MAX(d.trade_date) AS latest_trade_date
                 FROM symbol_info s
-                LEFT JOIN daily_bar d ON d.symbol = s.symbol
+                LEFT JOIN daily_bar d ON d.symbol_id = s.id
                 WHERE s.asset_class = 'STOCK' AND s.status IN %s
                 GROUP BY s.symbol
                 """,

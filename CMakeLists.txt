@@ -13,6 +13,8 @@ if(MSVC)
         "$<$<COMPILE_LANGUAGE:CXX>:/FS>"
         "$<$<COMPILE_LANGUAGE:C>:/utf-8>"
         "$<$<COMPILE_LANGUAGE:CXX>:/utf-8>"
+        "$<$<COMPILE_LANGUAGE:C>:/wd4828>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/wd4828>"
         "$<$<COMPILE_LANGUAGE:CXX>:/Zc:__cplusplus>"
     )
 endif()
