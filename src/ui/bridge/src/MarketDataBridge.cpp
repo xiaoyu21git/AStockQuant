@@ -1,5 +1,8 @@
 #include "MarketDataBridge.h"
 #include "GmMarketSource.h"
+#include "Event/EventBus.hpp"
+#include "Event/EventFormat.hpp"
+#include "GlobalEventBusRegistry.h"
 
 #include <QDateTime>
 #include "foundation/log/logging.hpp"
@@ -78,6 +81,7 @@ void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     if (symbol.isEmpty()) return;
     m_pollSymbols.insert(symbol);
     updateSnapshot(symbol);
+    publishWatchEnsure(symbol);
 }
 
 void MarketDataBridge::activateDefaultWatchlist() {
@@ -96,6 +100,7 @@ QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
     auto* self = const_cast<MarketDataBridge*>(this);
     self->updateSnapshot(symbol);
     self->m_pollSymbols.insert(symbol);
+    self->publishWatchEnsure(symbol);
 
     it = m_marketSnapshots.find(symbol);
     if (it != m_marketSnapshots.end()) return it->toMap();
@@ -116,7 +121,12 @@ QString MarketDataBridge::getNextTradingDay(const QString& d) {
     do { dt = dt.addDays(1); } while (dt.dayOfWeek() > 5);
     return dt.toString("yyyy-MM-dd");
 }
-void MarketDataBridge::subscribeRealtime(const QStringList& symbols) { for (const auto& s : symbols) m_pollSymbols.insert(s); }
+void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
+    for (const auto& s : symbols) {
+        m_pollSymbols.insert(s);
+        publishWatchEnsure(s);
+    }
+}
 void MarketDataBridge::unsubscribeRealtime() { m_pollSymbols.clear(); }
 
 QVariantMap MarketDataBridge::getTradingStatus(const QString& symbol) const {
@@ -155,6 +165,14 @@ QVariantMap MarketDataBridge::getTradingStatus(const QString& symbol) const {
     }
 
     return s;
+}
+
+void MarketDataBridge::publishWatchEnsure(const QString& symbol) {
+    auto* bus = engine::get_engine_event_bus();
+    if (!bus || symbol.isEmpty()) return;
+    engine::EventFormat evt("market.watch.ensure", engine::Event_Core::EventSource::SYSTEM);
+    evt.set("symbol", symbol.toStdString());
+    bus->publish(evt, static_cast<int>(engine::EventPriority::HIGH));
 }
 
 } // namespace bridge

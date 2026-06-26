@@ -48,6 +48,7 @@ signals:
 
 private:
     void updateSnapshot(const QString& symbol);
+    void publishWatchEnsure(const QString& symbol);
 
     bool m_initialized{false};
     bool m_connected{false};

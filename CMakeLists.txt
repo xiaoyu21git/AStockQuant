@@ -127,6 +127,20 @@ set(ARROW_BUILD_UTILITIES OFF CACHE BOOL "" FORCE)
 set(ARROW_COMPUTE ON CACHE BOOL "" FORCE)
 set(ARROW_IPC ON CACHE BOOL "" FORCE)
 set(ARROW_USE_BOOST ON CACHE BOOL "" FORCE)
+set(ARROW_UTF8PROC_USE_SHARED OFF CACHE BOOL "" FORCE)
+
+# ==================== 本地第三方库路径（供 Arrow find_package 使用，避免网络下载） ====================
+# re2（Google 正则引擎）
+set(re2_ROOT "G:/C++/lib/re2-2022-06-01" CACHE PATH "re2 local source root" FORCE)
+set(RE2_LIB "${CMAKE_BINARY_DIR}/thirdparty/re2/Release/re2.lib" CACHE FILEPATH "re2 static library" FORCE)
+set(RE2_INCLUDE_DIR "G:/C++/lib/re2-2022-06-01" CACHE PATH "re2 include directory" FORCE)
+set(re2_SOURCE "SYSTEM" CACHE STRING "Use local re2" FORCE)
+
+# utf8proc（UTF-8 规范化）
+set(utf8proc_ROOT "G:/C++/lib/utf8proc-2.7.0" CACHE PATH "utf8proc local source root" FORCE)
+set(utf8proc_LIB "${CMAKE_BINARY_DIR}/thirdparty/utf8proc/Release/utf8proc_static.lib" CACHE FILEPATH "utf8proc static library" FORCE)
+set(utf8proc_INCLUDE_DIR "G:/C++/lib/utf8proc-2.7.0" CACHE PATH "utf8proc include directory" FORCE)
+set(utf8proc_SOURCE "SYSTEM" CACHE STRING "Use local utf8proc" FORCE)
 
 set(ARROW_LOCAL_SOURCE_DIR_HINTS
     "G:/C++/lib/apache-arrow-15.0.0"
