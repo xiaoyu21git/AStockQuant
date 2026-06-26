@@ -3,6 +3,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
+#include "foundation/config/ConfigManager.hpp"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 #include <cstdio>
@@ -38,10 +39,59 @@ public:
         : m_token(token), m_strategyId(strategyId), m_impl(impl) {
         set_token(token.c_str());
         if (!strategyId.empty()) set_strategy_id(strategyId.c_str());
-        set_mode(1);
+        auto cfg = foundation::config::ConfigManager::instance()
+            .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        int mode = 1;
+        std::string accountId;
+        if (cfg && !cfg->isNull()) {
+            if (cfg->has("mode")) { auto m = cfg->get("mode"); mode = m.isNumber() ? m.asInt() : 1; }
+            bool useSimAccount = (mode == 2
+                              || (cfg->has("simtradeOnly") && cfg->get("simtradeOnly").asBool())
+                              || (cfg->has("accountProfile") && cfg->get("accountProfile").asString() == "simulation"));
+            accountId = useSimAccount
+                ? (cfg->has("simAccountId") ? cfg->get("simAccountId").asString() : "")
+                : (cfg->has("liveAccountId") ? cfg->get("liveAccountId").asString() : "");
+            if (accountId.empty())
+                accountId = cfg->has("accountId") ? cfg->get("accountId").asString() : "";
+        }
+        if (!accountId.empty()) set_account_id(accountId.c_str());
+        set_mode(mode);
     }
 
-    void on_init() override {}
+
+    void on_init() override {
+
+        auto* bus = get_engine_event_bus();
+        if (!bus || !bus->is_running()) return;
+        auto* arr = get_cash(nullptr);
+        if (arr && arr->status() == 0 && arr->count() > 0) {
+            auto& cash = arr->at(0);
+            EventFormat evt("trading.account.updated", Event_Core::EventSource::MARKET_DATA);
+            evt.set("account_id", cash.account_id);
+            evt.set("available", cash.available);
+            evt.set("total_asset", cash.nav);
+            evt.set("market_value", cash.market_value);
+            evt.set("frozen", cash.frozen);
+            bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        }
+        if (arr) arr->release();
+        auto* posArr = get_position(nullptr);
+        if (posArr && posArr->status() == 0 && posArr->count() > 0) {
+            for (size_t i = 0; i < posArr->count(); ++i) {
+                auto& p = posArr->at(i);
+                EventFormat evt("trading.position.updated", Event_Core::EventSource::MARKET_DATA);
+                evt.set("symbol", GmSessionEngine::fromGmSymbol(p.symbol));
+                evt.set("quantity", static_cast<int64_t>((p.side == 2) ? -p.volume : p.volume));
+                evt.set("available_qty", static_cast<int64_t>(p.available));
+                evt.set("cost_price", p.vwap);
+                evt.set("last_price", p.price);
+                evt.set("market_value", p.market_value);
+                evt.set("unrealized_pnl", p.fpnl);
+                bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+            }
+        }
+        if (posArr) posArr->release();
+    }
 
     void on_tick(Tick* tick) override {
         if (!tick) return;
@@ -300,6 +350,8 @@ double GmSessionEngine::fetchPreClose(const std::string& symbol) {
 // ═══════════════════════════════════════════════════════════════════
 
 void* GmSessionEngine::strategy() const { return m_strategy.get(); }
+
+
 // 符号转换
 // ═══════════════════════════════════════════════════════════════════
 

@@ -318,6 +318,34 @@ void TradeExecutionEngine::initCallbacks() {
             m_impl->m_tradeFillCallback(tf);
         }
     });
+    engine::TradeEngine::instance().setOnOrderUpdate([this](const engine::OrderUpdate& u) {
+        if (m_impl->m_orderUpdateCallback) {
+            TradeOrder updated;
+            updated.setBrokerOrderId(u.brokerOrderId);
+            updated.setSymbol(u.symbol);
+            updated.setFilledPrice(u.filledPrice);
+            updated.setFilledQuantity(u.filledQuantity);
+            updated.setStatusMessage(u.message);
+            switch (u.status) {
+                case 3: updated.setStatus(OrderStatusValue::Filled); break;
+                case 2: updated.setStatus(OrderStatusValue::PartiallyFilled); break;
+                case 5: updated.setStatus(OrderStatusValue::Cancelled); break;
+                case 6: updated.setStatus(OrderStatusValue::Rejected); break;
+                case 7: updated.setStatus(OrderStatusValue::Expired); break;
+                default: updated.setStatus(OrderStatusValue::Submitted); break;
+            }
+            std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+            for (auto& o : m_impl->m_recentOrders) {
+                if (o.brokerOrderId() == u.brokerOrderId) {
+                    o.setStatus(updated.status());
+                    o.setFilledPrice(updated.filledPrice());
+                    o.setFilledQuantity(updated.filledQuantity());
+                    break;
+                }
+            }
+            m_impl->m_orderUpdateCallback(updated);
+        }
+    });
 }
 
 void TradeExecutionEngine::setGateway(std::unique_ptr<IBrokerGateway>) {

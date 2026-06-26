@@ -106,7 +106,7 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
                               static_cast<int>(req.quantity),
                               toGmSide(req.side),
                               toGmOrderType(req.orderType),
-                              1,        // position_effect: open
+                              1,
                               req.price, 0, 0, 0.0, 0,
                               req.strategyId.empty() ? nullptr : req.strategyId.c_str());
     if (gm.cl_ord_id[0]) {

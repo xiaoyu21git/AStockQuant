@@ -113,7 +113,7 @@ public:
     std::optional<GmQuote> fetchQuote(const std::string& symbol);
     double fetchPreClose(const std::string& symbol);
 
-    // ── 底层 Strategy 指针（上层引擎共享）──
+    // ── 底层 Strategy 指针 ──
     void* strategy() const;
 
     // ── 符号转换 ──
