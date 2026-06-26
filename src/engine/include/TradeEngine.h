@@ -2,46 +2,9 @@
 // 哑管道：接单 → gmsdk。不判断，不风控，不查账户，不管订单对账。
 #pragma once
 
-#include <cstdint>
-#include <functional>
-#include <memory>
-#include <string>
+#include "GmSessionEngine.h"
 
 namespace engine {
-
-struct OrderRequest {
-    std::string symbol;
-    std::string strategyId;
-    double      price    = 0.0;
-    int64_t     quantity = 0;
-    enum Side   { Buy, Sell };
-    enum Type   { Limit, Market };
-    Side side      = Buy;
-    Type orderType = Limit;
-};
-
-struct OrderResult {
-    std::string brokerOrderId;
-    bool        accepted = false;
-    std::string message;
-};
-
-struct OrderUpdate {
-    std::string brokerOrderId;
-    std::string symbol;
-    double      filledPrice    = 0.0;
-    int64_t     filledQuantity = 0;
-    enum Status { Submitted, PartialFilled, Filled, Cancelled, Rejected, Expired };
-    Status      status = Submitted;
-    std::string message;
-};
-
-struct TradeFill {
-    std::string fillId, brokerOrderId, symbol;
-    double      price = 0.0;
-    int64_t     quantity = 0;
-    double      commission = 0.0;
-};
 
 class TradeEngine {
 public:

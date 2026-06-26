@@ -1,4 +1,5 @@
 #include "TradeExecutionEngine.h"
+#include "../../engine/include/TradeEngine.h"
 #include "foundation/log/logging.hpp"
 
 #include <cmath>
@@ -212,80 +213,43 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
         return SubmitResult::riskRejected(riskResult.code(), riskResult.description());
     }
 
-    // Stage 4: submit via gateway
-    if (!m_impl->m_gateway) {
-        return SubmitResult::rejected("no broker gateway configured",
+    // Stage 4: submit via TradeEngine
+    if (!engine::TradeEngine::instance().initialized()) {
+        return SubmitResult::rejected("TradeEngine not initialized",
                                        OrderValidationCode::MissingRequiredFields);
     }
 
-    OrderRequest request = OrderRequest::create(
-        StrategyId(order.strategyId()),
-        SymbolCode(order.symbol()),
-        order.side() == strategy::OrderDirection::Buy ? OrderSide::Buy : OrderSide::Sell,
-        OrderType::Limit,
-        order.price(),
-        order.quantity());
+    engine::OrderRequest engineReq;
+    engineReq.symbol     = order.symbol();
+    engineReq.strategyId = order.strategyId();
+    engineReq.price      = order.price();
+    engineReq.quantity   = order.quantity();
+    engineReq.side       = order.side() == strategy::OrderDirection::Buy
+                           ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
+    engineReq.orderType  = engine::OrderRequest::Limit;
 
-    // ── 受理订单：标记 Submitted，同步通知上层 ──
+    auto result = engine::TradeEngine::instance().submitOrder(engineReq);
+
+    // ── 受理订单 ──
     {
         TradeOrder accepted = order;
         accepted.setStatus(OrderStatusValue::Submitted);
         accepted.setStatusMessage("accepted");
+        accepted.setBrokerOrderId(result.brokerOrderId);
         m_impl->appendRecentOrder(accepted);
         if (m_impl->m_orderAcceptedCallback) {
             m_impl->m_orderAcceptedCallback(accepted);
         }
     }
 
-    // ── 异步网关提交：回调中读取真实状态 ──
-    m_impl->m_gateway->submitOrder(request, [this, order](const OrderStatus& status) {
-        TradeOrder updated = order;
-        updated.setBrokerOrderId(status.brokerOrderId().text());
-        updated.setStatus(status.statusValue());
-        updated.setFilledPrice(status.filledPrice());
-        updated.setFilledQuantity(status.filledQuantity());
-        if (status.statusValue() == OrderStatusValue::Rejected) {
-            updated.setStatusMessage(status.attribute("error", "gateway rejected"));
-        }
-
-        // 更新引擎内订单记录
-        {
-            std::lock_guard<std::mutex> lock(m_impl->m_mutex);
-            for (auto& o : m_impl->m_recentOrders) {
-                if (o.symbol() == updated.symbol() && o.side() == updated.side()
-                    && o.price() == updated.price() && o.quantity() == updated.quantity()
-                    && o.status() == OrderStatusValue::Submitted) {
-                    o.setBrokerOrderId(updated.brokerOrderId());
-                    o.setStatus(updated.status());
-                    o.setFilledPrice(updated.filledPrice());
-                    o.setFilledQuantity(updated.filledQuantity());
-                    o.setStatusMessage(updated.statusMessage());
-                    break;
-                }
-            }
-        }
-
-        if (m_impl->m_orderUpdateCallback) {
-            m_impl->m_orderUpdateCallback(updated);
-        }
-    });
-
-    return SubmitResult::success(BrokerOrderId(""));
+    if (!result.accepted) {
+        return SubmitResult::rejected(result.message);
+    }
+    return SubmitResult::success(BrokerOrderId(result.brokerOrderId));
 }
 
 bool TradeExecutionEngine::cancelOrder(BrokerOrderId brokerOrderId) {
-    if (!m_impl->m_gateway) return false;
-    m_impl->m_gateway->cancelOrder(brokerOrderId, [this, brokerOrderId](const OrderStatus& status) {
-        TradeOrder updated;
-        updated.setBrokerOrderId(status.brokerOrderId().text());
-        updated.setStatus(status.statusValue());
-        updated.setStatusMessage(status.attribute("error",
-            status.statusValue() == OrderStatusValue::Cancelled ? "cancelled" : "cancel failed"));
-        if (m_impl->m_orderUpdateCallback) {
-            m_impl->m_orderUpdateCallback(updated);
-        }
-    });
-    return true;
+    return engine::TradeEngine::instance().cancelOrder(brokerOrderId.text());
 }
 
 // ============================================================================
@@ -318,26 +282,26 @@ const std::vector<TradeOrder>& TradeExecutionEngine::recentOrders() const noexce
 }
 
 // ============================================================================
-// Gateway injection
+// 回调注册 — 直接连 TradeEngine，不经过 BrokerGateway
 // ============================================================================
-void TradeExecutionEngine::setGateway(std::unique_ptr<IBrokerGateway> gateway) {
-    m_impl->m_gateway = std::move(gateway);
-    if (m_impl->m_gateway) {
-        // 注册成交回报：网关推送成交 → 更新仓位 → 通知上层
-        m_impl->m_gateway->setTradeCallback([this](const TradeFill& fill) {
-            // 更新 PositionAccountEngine
-            if (m_impl->m_tradeFillCallback) {
-                m_impl->m_tradeFillCallback(fill);
-            }
-        });
-        m_impl->m_gateway->setErrorCallback([this](const std::string& err) {
-            INTERNAL_ERROR_STREAM << "[TradeExecEngine] gateway error: " << err;
-        });
-    }
+void TradeExecutionEngine::initCallbacks() {
+    engine::TradeEngine::instance().setOnTradeFill([this](const engine::TradeFill& fill) {
+        if (m_impl->m_tradeFillCallback) {
+            domain::trading::TradeFill tf;
+            tf.setBrokerOrderId(BrokerOrderId(fill.brokerOrderId));
+            tf.setPrice(fill.price);
+            tf.setQuantity(fill.quantity);
+            m_impl->m_tradeFillCallback(tf);
+        }
+    });
+}
+
+void TradeExecutionEngine::setGateway(std::unique_ptr<IBrokerGateway>) {
+    // 不再使用 BrokerGateway — 订单直接走 TradeEngine
 }
 
 IBrokerGateway* TradeExecutionEngine::gateway() const noexcept {
-    return m_impl->m_gateway.get();
+    return nullptr;
 }
 
 // ============================================================================

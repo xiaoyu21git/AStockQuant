@@ -1,31 +1,10 @@
 // AccountEngine.h — 账户引擎（engine 层，零 Qt，不依赖其他引擎）
-// 职责：账户/持仓查询，接收 gmsdk 回调。共享 GmSdkSingleton 的 Strategy。
+// 职责：账户/持仓查询，接收 gmsdk 回调。共享 GmSessionEngine 的 Strategy。
 #pragma once
 
-#include <cstdint>
-#include <functional>
-#include <string>
-#include <vector>
+#include "GmSessionEngine.h"
 
 namespace engine {
-
-struct AccountInfo {
-    std::string accountId;
-    double      totalAsset   = 0.0;
-    double      availableCash = 0.0;
-    double      marketValue   = 0.0;
-    double      frozenCash    = 0.0;
-};
-
-struct Position {
-    std::string symbol;
-    int64_t     quantity      = 0;
-    int64_t     availableQty  = 0;
-    double      costPrice     = 0.0;
-    double      lastPrice     = 0.0;
-    double      marketValue   = 0.0;
-    double      unrealizedPnl = 0.0;
-};
 
 class AccountEngine {
 public:

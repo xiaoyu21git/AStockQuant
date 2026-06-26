@@ -262,83 +262,10 @@ double GmSessionEngine::fetchPreClose(const std::string& symbol) {
 // 下单
 // ═══════════════════════════════════════════════════════════════════
 
-OrderResult GmSessionEngine::submitOrder(const OrderRequest& req) {
-    OrderResult r;
-    auto* s = static_cast<SessionStrategy*>(m_strategy.get());
-    if (!s) { r.message = "not initialized"; return r; }
-    std::string gm = toGmSymbol(req.symbol);
-    if (gm.empty()) { r.message = "invalid symbol"; return r; }
-    Order o = s->place_order(gm.c_str(), static_cast<int>(req.quantity),
-                             toGmSide(req.side), toGmType(req.orderType),
-                             1, req.price, 0, 0, 0.0, 0,
-                             req.strategyId.empty() ? nullptr : req.strategyId.c_str());
-    if (o.cl_ord_id[0]) { r.brokerOrderId = o.cl_ord_id; r.accepted = true; }
-    else { auto err = s->get_last_error_detail(); r.message = (err && err[0]) ? err : "rejected"; }
-    return r;
-}
-
-bool GmSessionEngine::cancelOrder(const std::string& id) {
-    if (id.empty()) return false;
-    auto* s = static_cast<SessionStrategy*>(m_strategy.get());
-    if (!s) return false;
-    s->order_cancel(id.c_str(), ""); return true;
-}
 
 // ═══════════════════════════════════════════════════════════════════
-// 查询
-// ═══════════════════════════════════════════════════════════════════
 
-AccountInfo GmSessionEngine::queryAccount() {
-    AccountInfo a; auto* s = static_cast<SessionStrategy*>(m_strategy.get()); if (!s) return a;
-    auto* arr = s->get_cash(nullptr);
-    if (!arr || arr->status() || !arr->count()) { if (arr) arr->release(); return a; }
-    auto& c = arr->at(0);
-    a.accountId = c.account_id; a.totalAsset = c.nav; a.availableCash = c.available;
-    a.marketValue = c.market_value; a.frozenCash = c.frozen;
-    arr->release(); return a;
-}
-
-std::vector<Position> GmSessionEngine::queryPositions() {
-    std::vector<Position> r; auto* s = static_cast<SessionStrategy*>(m_strategy.get()); if (!s) return r;
-    auto* arr = s->get_position(nullptr);
-    if (!arr || arr->status()) { if (arr) arr->release(); return r; }
-    for (size_t i = 0; i < arr->count(); ++i) {
-        auto& p = arr->at(i);
-        r.push_back({fromGm(p.symbol), (p.side == 2) ? -p.volume : p.volume,
-                     p.available, p.vwap, p.price, p.market_value, p.fpnl});
-    }
-    arr->release(); return r;
-}
-
-std::vector<OrderRecord> GmSessionEngine::queryOrders(const std::string& account) {
-    std::vector<OrderRecord> r; auto* s = static_cast<SessionStrategy*>(m_strategy.get()); if (!s) return r;
-    auto* arr = s->get_orders(account.empty() ? nullptr : account.c_str());
-    if (!arr || arr->status()) { if (arr) arr->release(); return r; }
-    for (size_t i = 0; i < arr->count(); ++i) {
-        auto& o = arr->at(i);
-        r.push_back({o.cl_ord_id, fromGm(o.symbol), o.strategy_id,
-                     static_cast<double>(o.price), static_cast<int64_t>(o.volume),
-                     static_cast<int64_t>(o.filled_volume), static_cast<double>(o.filled_vwap),
-                     o.side, o.status});
-    }
-    arr->release(); return r;
-}
-
-std::vector<OrderRecord> GmSessionEngine::queryUnfinishedOrders(const std::string& account) {
-    std::vector<OrderRecord> r; auto* s = static_cast<SessionStrategy*>(m_strategy.get()); if (!s) return r;
-    auto* arr = s->get_unfinished_orders(account.empty() ? nullptr : account.c_str());
-    if (!arr || arr->status()) { if (arr) arr->release(); return r; }
-    for (size_t i = 0; i < arr->count(); ++i) {
-        auto& o = arr->at(i);
-        r.push_back({o.cl_ord_id, fromGm(o.symbol), o.strategy_id,
-                     static_cast<double>(o.price), static_cast<int64_t>(o.volume),
-                     static_cast<int64_t>(o.filled_volume), static_cast<double>(o.filled_vwap),
-                     o.side, o.status});
-    }
-    arr->release(); return r;
-}
-
-// ═══════════════════════════════════════════════════════════════════
+void* GmSessionEngine::strategy() const { return m_strategy.get(); }
 // 符号转换
 // ═══════════════════════════════════════════════════════════════════
 

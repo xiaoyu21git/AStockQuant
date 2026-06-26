@@ -237,7 +237,9 @@ public:
     TradeExecutionEngine();
     ~TradeExecutionEngine();
 
-    // Dependency injection
+    // 回调注册（替代 BrokerGateway）
+    void initCallbacks();
+    // 保留接口兼容
     void setGateway(std::unique_ptr<IBrokerGateway> gateway);
     IBrokerGateway* gateway() const noexcept;
 

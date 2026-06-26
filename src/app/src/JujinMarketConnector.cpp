@@ -1,5 +1,8 @@
 ﻿#include "JujinMarketConnector.h"
 #include "../../engine/include/GmSessionEngine.h"
+#include "../../engine/include/TradeEngine.h"
+#include "../../engine/include/AccountEngine.h"
+#include "../../engine/include/OrderManager.h"
 
 #include <algorithm>
 #include <cctype>
@@ -261,8 +264,12 @@ bool JujinMarketConnector::start()
         m_lastError = "GmSessionEngine 初始化失败";
         return false;
     }
+    // 上层引擎共享 Strategy
+    auto* s = engine::GmSessionEngine::instance().strategy();
+    engine::TradeEngine::instance().initialize(s);
+    engine::AccountEngine::instance().initialize(s);
+    engine::OrderManager::instance().initialize(s);
     INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 初始化成功";
-    INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 已运行，等待策略请求订阅";
 
     // ── 订阅 GmSessionEngine 发布的行情事件 → 推送到策略引擎 ──
     // GmStrategySession::on_tick() 发布 "trading.market.tick"

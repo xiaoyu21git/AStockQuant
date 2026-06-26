@@ -2,9 +2,10 @@
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/MarketDataAdapter.h"
 #include "../../foundation/include/foundation/market/AStockSymbol.h"
-#include "../adapters/JujinBrokerGateway.h"
+
 
 #include "../../engine/include/GmSessionEngine.h"
+#include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/GlobalEventBusRegistry.h"
 #include "../../engine/include/Event/EventFormat.hpp"
 
@@ -38,9 +39,7 @@ void TradingSystem::initialize() {
     m_tradeEngine = std::make_unique<domain::trading::TradeExecutionEngine>();
     m_positionEngine = std::make_unique<domain::trading::PositionAccountEngine>();
 
-    if (m_brokerGateway) {
-        m_tradeEngine->setGateway(std::move(m_brokerGateway));
-    }
+    m_tradeEngine->initCallbacks();
 
     // 连接持仓变更回调：同步更新峰值资产
     m_positionEngine->setOnDataChanged([this]() {
@@ -93,34 +92,18 @@ void TradingSystem::initialize() {
 void TradingSystem::initializeWithBroker(const std::string& token, const std::string& accountId) {
     if (m_initialized) return;
 
-    if (!token.empty()) {
-        auto gw = std::make_unique<app::adapters::JujinBrokerGateway>();
-        const std::string configJson = R"({"token":")" + token + R"(","accountId":")" + accountId + R"("})";
-        if (gw->connect(configJson)) {
-            const bool live = gw->isConnected();
-            setBrokerGateway(std::move(gw));
-            std::cout << "[TradingSystem] Broker gateway connected"
-                      << (live ? " (live)" : " (lazy, awaiting JMC)")
-                      << "\n";
-        } else {
-            INTERNAL_ERROR_STREAM << "[TradingSystem] WARNING: Broker gateway connect failed";
-        }
-    } else {
-        INTERNAL_ERROR_STREAM << "[TradingSystem] WARNING: No token configured, broker gateway not created";
-    }
-
     initialize();
 
     // ── 从 SDK 同步账户/持仓 ──
     if (m_positionEngine) {
-        auto acc = engine::GmSessionEngine::instance().queryAccount();
+        auto acc = engine::AccountEngine::instance().account();
         domain::trading::AccountSnapshot snap;
         snap.setAccountId(accountId);
         snap.setAvailableCash(acc.availableCash);
         snap.setTotalAsset(acc.totalAsset);
         snap.setMarketValue(acc.marketValue);
         m_positionEngine->applyAccountEvent(snap);
-        for (auto& p : engine::GmSessionEngine::instance().queryPositions()) {
+        for (auto& p : engine::AccountEngine::instance().positions()) {
             domain::trading::Position pos;
             pos.setSymbol(p.symbol);
             pos.setLastPrice(p.lastPrice);
@@ -134,17 +117,17 @@ void TradingSystem::initializeWithBroker(const std::string& token, const std::st
 
 void TradingSystem::refreshPositionsFromBroker() {
     if (!m_positionEngine) return;
-    auto& eng = engine::GmSessionEngine::instance();
+    auto& eng = engine::AccountEngine::instance();
     if (!eng.initialized()) return;
 
-    auto acc = eng.queryAccount();
+    auto acc = eng.account();
     domain::trading::AccountSnapshot snap;
     snap.setAvailableCash(acc.availableCash);
     snap.setTotalAsset(acc.totalAsset);
     snap.setMarketValue(acc.marketValue);
     m_positionEngine->applyAccountEvent(snap);
 
-    for (auto& p : eng.queryPositions()) {
+    for (auto& p : eng.positions()) {
         domain::trading::Position pos;
         pos.setSymbol(p.symbol);
         pos.setLastPrice(p.lastPrice);

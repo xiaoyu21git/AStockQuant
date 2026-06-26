@@ -3,8 +3,9 @@
 #include "TradingRuntimeStatusService.h"
 #include "StockNameResolver.h"
 #include "../../engine/include/GmSessionEngine.h"
+#include "../../engine/include/AccountEngine.h"
 #include "../../../app/system/TradingSystem.h"
-#include "../../../app/adapters/JujinBrokerGateway.h"
+
 #include "../../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
 #include "foundation/log/logging.hpp"
@@ -55,23 +56,12 @@ void TradeExecutionBridge::ensureInitialized() {
             INTERNAL_ERROR_STREAM << "[Live] token not configured";
             return;
         }
-        auto gw = std::make_unique<app::adapters::JujinBrokerGateway>();
-        QJsonObject obj;
-        obj["token"] = cfg.value("token").toString();
-        obj["accountId"] = cfg.value("accountId", cfg.value("account_id")).toString();
-        QJsonDocument doc(obj);
-        if (!gw->connect(doc.toJson(QJsonDocument::Compact).toStdString())) {
-            INTERNAL_ERROR_STREAM << "[Live] Jujin gateway connect failed: " << gw->lastError();
-            return;
-        }
-        sys.setBrokerGateway(std::move(gw));
-        INTERNAL_INFO_STREAM << "[Live] Jujin gateway connected";
         sys.initialize();
 
         // 从 SDK 同步账户/持仓到 PositionAccountEngine（QML 从这里读数据）
         {
-            auto& eng = engine::GmSessionEngine::instance();
-            auto acc = eng.queryAccount();
+            auto& eng = engine::AccountEngine::instance();
+            auto acc = eng.account();
             INTERNAL_ERROR_STREAM << "[TradingBridge] SDK account: total=" << acc.totalAsset
                       << " available=" << acc.availableCash << " mv=" << acc.marketValue;
             domain::trading::AccountSnapshot snap;
@@ -85,7 +75,7 @@ void TradeExecutionBridge::ensureInitialized() {
                 pe->applyAccountEvent(snap);
                 INTERNAL_ERROR_STREAM << "[TradingBridge] account synced to PositionEngine";
             }
-            for (auto& p : eng.queryPositions()) {
+            for (auto& p : eng.positions()) {
                 domain::trading::Position pos;
                 pos.setSymbol(p.symbol);
                 pos.setLastPrice(p.lastPrice);

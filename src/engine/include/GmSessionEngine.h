@@ -117,10 +117,6 @@ public:
     std::optional<GmQuote> fetchQuote(const std::string& symbol);
     double fetchPreClose(const std::string& symbol);
 
-    // ── 下单 ──
-    OrderResult submitOrder(const OrderRequest& req);
-    bool        cancelOrder(const std::string& brokerOrderId);
-
     // ── 交易回调 ──
     using OrderUpdateCb = std::function<void(const OrderUpdate&)>;
     using TradeFillCb   = std::function<void(const TradeFill&)>;
@@ -133,11 +129,8 @@ public:
     void setAccountCallback(AccountCb cb);
     void setPositionCallback(PositionCb cb);
 
-    // ── 查询 ──
-    AccountInfo           queryAccount();
-    std::vector<Position> queryPositions();
-    std::vector<OrderRecord> queryOrders(const std::string& account = "");
-    std::vector<OrderRecord> queryUnfinishedOrders(const std::string& account = "");
+    // ── 底层 Strategy 指针（上层引擎共享）──
+    void* strategy() const;
 
     // ── 符号转换 ──
     static std::string toGmSymbol(const std::string& internal);
