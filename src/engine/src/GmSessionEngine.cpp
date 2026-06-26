@@ -35,12 +35,14 @@ class SessionStrategy : public ::Strategy {
 public:
     SessionStrategy(const std::string& token, const std::string& strategyId,
                     GmSessionEngine::Impl* impl)
-        : m_token(token), m_strategyId(strategyId), m_impl(impl) {}
+        : m_token(token), m_strategyId(strategyId), m_impl(impl) {
+        set_token(token.c_str());
+        if (!strategyId.empty()) set_strategy_id(strategyId.c_str());
+        set_mode(1);
+    }
 
     void on_init() override {
-        set_token(m_token.c_str());
-        if (!m_strategyId.empty()) set_strategy_id(m_strategyId.c_str());
-        set_mode(1);
+        // 账户/持仓按需查询 — AccountEngine::account() 调用时触发 get_cash/get_position
     }
 
     void on_tick(Tick* tick) override {

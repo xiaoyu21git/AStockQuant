@@ -33,7 +33,7 @@ public:
     void applyPositionEvent(const std::string& symbol, const Position& p);
 
 private:
-    AccountEngine() = default;
+    AccountEngine();
     ~AccountEngine() = default;
 
     void* m_strategy = nullptr;

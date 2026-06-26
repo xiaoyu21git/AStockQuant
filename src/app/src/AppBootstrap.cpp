@@ -23,6 +23,10 @@
 #include "VasAurora.hpp"
 #include "../../app/system/TradingSystem.h"
 #include "../../domain/strategy/include/RiskEvaluator.h"
+#include "../../engine/include/GmSessionEngine.h"
+#include "../../engine/include/TradeEngine.h"
+#include "../../engine/include/AccountEngine.h"
+#include "../../engine/include/OrderManager.h"
 #include "../../ui/bridge/include/MarketDataBridge.h"
 #include "database/NativeMySQLConnectionPool.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
@@ -315,13 +319,29 @@ bool AppBootstrap::initServices()
             INTERNAL_INFO_STREAM << "[AppBootstrap] Application EventBus initialized";
         }
 
-        // 初始化执行器（当前为空，保留占位）
-        // executor_ = std::make_shared<InlineExecutor>();
-
-        // 初始化引擎（当前为空，保留占位）
-        // engine_ = std::make_unique<Engine>(executor_);
-
-        INTERNAL_INFO_STREAM << "[AppBootstrap] Core services initialized; heavy bridge services stay on-demand after UI startup";
+        // ── GmSessionEngine（唯一 gmsdk 连接）在 QML 之前初始化 ──
+        {
+            std::string token, accountId, strategyId;
+            auto cfg = foundation::config::ConfigManager::instance()
+                .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+            if (cfg && !cfg->isNull()) {
+                token      = cfg->has("token")      ? cfg->get("token").asString()      : "";
+                accountId  = cfg->has("accountId")  ? cfg->get("accountId").asString()  : "";
+                strategyId = cfg->has("gmStrategyId")? cfg->get("gmStrategyId").asString(): "";
+            }
+            if (!token.empty()) {
+                // AccountEngine 先订阅 EventBus，再启动 GmSessionEngine（避开 on_init 事件丢失）
+                engine::AccountEngine::instance();
+                auto& sdk = engine::GmSessionEngine::instance();
+                if (sdk.initialize(token, strategyId.empty() ? accountId : strategyId)) {
+                    auto* s = sdk.strategy();
+                    engine::TradeEngine::instance().initialize(s);
+                    engine::AccountEngine::instance().initialize(s);
+                    engine::OrderManager::instance().initialize(s);
+                    INTERNAL_INFO_STREAM << "[AppBootstrap] GmSessionEngine initialized";
+                }
+            }
+        }
 
         INTERNAL_INFO_STREAM << "[AppBootstrap] Services initialized";
         return true;
@@ -434,20 +454,6 @@ void AppBootstrap::initializeDeferredTradingServices()
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 void AppBootstrap::scheduleOptionalConnectorReconcile()
 {
-    if (m_optionalConnectorReconcilePending) {
-        return;
-    }
-
-    m_optionalConnectorReconcilePending = true;
-    if (QObject* context = QCoreApplication::instance()) {
-        QTimer::singleShot(0, context, [this]() {
-            m_optionalConnectorReconcilePending = false;
-            reconcileOptionalConnectors();
-        });
-        return;
-    }
-
-    m_optionalConnectorReconcilePending = false;
     reconcileOptionalConnectors();
 }
 
@@ -463,8 +469,6 @@ void AppBootstrap::reconcileOptionalConnectors()
             INTERNAL_ERROR_STREAM << "[AppBootstrap] JMC 启动失败: " << m_jujinMarketConnector->lastError();
         } else {
             INTERNAL_INFO_STREAM << "[AppBootstrap] JMC 启动成功";
-            // 交易网关挂到共享 JujinApi（JMC 已初始化共享 API）
-            app::system::TradingSystem::instance().initializeWithBroker("jujin", "live");
         }
         return;
     }
