@@ -1,6 +1,10 @@
 #include "TradeExecutionEngine.h"
 #include "../../engine/include/TradeEngine.h"
+#include "../../engine/include/Event/EventBus.hpp"
+#include "../../engine/include/Event/EventFormat.hpp"
+#include "../../engine/include/GlobalEventBusRegistry.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/Utils/Uuid.h"
 
 #include <cmath>
 #include <mutex>
@@ -37,6 +41,10 @@ public:
     TradeExecutionEngine::OrderAcceptedCallback m_orderAcceptedCallback;
     TradeExecutionEngine::OrderUpdateCallback m_orderUpdateCallback;
     TradeExecutionEngine::TradeFillCallback m_tradeFillCallback;
+
+    // EventBus 订阅
+    foundation::utils::Uuid m_orderSub;
+    foundation::utils::Uuid m_fillSub;
 
     // ── Helper ──
     static std::string scopeKey(const std::string& executionScopeId) {
@@ -328,7 +336,45 @@ TradeExecutionEngine& TradeExecutionEngine::instance() {
 }
 
 TradeExecutionEngine::TradeExecutionEngine()
-    : m_impl(std::make_unique<Impl>()) { m_initialized = true; }
+    : m_impl(std::make_unique<Impl>()) {
+    m_initialized = true;
+
+    auto* bus = engine::get_engine_event_bus();
+    if (bus) {
+        m_impl->m_orderSub = bus->subscribe("trading.order.updated",
+            [this](const engine::EventFormat& e) {
+                auto id     = e.get<std::string>("broker_order_id");
+                auto status = e.get<std::int64_t>("status");
+                auto filledPrice = e.get<double>("filled_price");
+                auto filledQty  = e.get<std::int64_t>("filled_quantity");
+                if (!id) return;
+                std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+                for (auto& o : m_impl->m_recentOrders) {
+                    if (o.brokerOrderId() == *id) {
+                        if (filledPrice) o.setFilledPrice(*filledPrice);
+                        if (filledQty)  o.setFilledQuantity(*filledQty);
+                        if (status) {
+                            OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
+                            o.setStatus(st);
+                        }
+                        if (m_impl->m_orderUpdateCallback)
+                            m_impl->m_orderUpdateCallback(o);
+                        break;
+                    }
+                }
+            });
+        m_impl->m_fillSub = bus->subscribe("trading.execution.report",
+            [this](const engine::EventFormat& e) {
+                TradeFill fill;
+                fill.setBrokerOrderId(BrokerOrderId(e.get<std::string>("broker_order_id").value_or("")));
+                fill.setFillId(FillId(e.get<std::string>("exec_id").value_or("")));
+                fill.setPrice(e.get<double>("price").value_or(0.0));
+                fill.setQuantity(e.get<std::int64_t>("quantity").value_or(0));
+                if (m_impl->m_tradeFillCallback)
+                    m_impl->m_tradeFillCallback(fill);
+            });
+    }
+}
 
 TradeExecutionEngine::~TradeExecutionEngine() = default;
 

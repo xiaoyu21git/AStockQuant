@@ -1,5 +1,8 @@
-// TradeEngine.cpp — 交易引擎实现，共享 GmSdkSingleton 的 ::Strategy
+// TradeEngine.cpp — 交易引擎实现
 #include "TradeEngine.h"
+#include "Event/EventBus.hpp"
+#include "Event/EventFormat.hpp"
+#include "GlobalEventBusRegistry.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 namespace engine {

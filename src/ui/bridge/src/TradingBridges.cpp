@@ -4,6 +4,7 @@
 #include "StockNameResolver.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/AccountEngine.h"
+#include "../../../domain/trading/TradeExecutionEngine.h"
 #include "../../../app/system/TradingSystem.h"
 
 #include "../../../engine/include/GlobalEventBusRegistry.h"
@@ -31,7 +32,7 @@ TradeExecutionBridge::TradeExecutionBridge(QObject* parent)
 
 bool TradeExecutionBridge::initialized() const { return m_initialized; }
 bool TradeExecutionBridge::liveBridgeReady() const {
-    return m_initialized && app::system::TradingSystem::instance().initialized();
+    return m_initialized && domain::trading::TradeExecutionEngine::instance().initialized();
 }
 bool TradeExecutionBridge::isLiveBridgeReady() {
     const_cast<TradeExecutionBridge*>(this)->ensureInitialized();
@@ -43,57 +44,15 @@ QString TradeExecutionBridge::lastErrorMessage() const { return m_lastErrorMessa
 
 void TradeExecutionBridge::ensureInitialized() {
     if (m_initialized) return;
-    auto& sys = app::system::TradingSystem::instance();
+    auto& engine = domain::trading::TradeExecutionEngine::instance();
 
-    if (!sys.initialized()) {
-        // 通过 TradingConnectionConfigService 统一读取交易配置
-        auto* cfgSvc = TradingConnectionConfigService::instance();
-        QVariantMap cfg = cfgSvc->loadConfiguration();
-        if (cfg.isEmpty()) {
-            INTERNAL_ERROR_STREAM << "[Live] config file not found";
-            return;
-        }
-        if (cfg.value("token").toString().isEmpty()) {
-            INTERNAL_ERROR_STREAM << "[Live] token not configured";
-            return;
-        }
-        sys.initialize();
-
-        // 从 SDK 同步账户/持仓到 PositionAccountEngine（QML 从这里读数据）
-        {
-            auto& eng = engine::AccountEngine::instance();
-            auto acc = eng.account();
-            INTERNAL_ERROR_STREAM << "[TradingBridge] SDK account: total=" << acc.totalAsset
-                      << " available=" << acc.availableCash << " mv=" << acc.marketValue;
-            domain::trading::AccountSnapshot snap;
-            snap.setAccountId(cfg.value("accountId",
-                               cfg.value("liveAccountId",
-                               cfg.value("simAccountId"))).toString().toStdString());
-            snap.setAvailableCash(acc.availableCash);
-            snap.setTotalAsset(acc.totalAsset);
-            snap.setMarketValue(acc.marketValue);
-            if (auto* pe = sys.positionEngine()) {
-                pe->applyAccountEvent(snap);
-                INTERNAL_ERROR_STREAM << "[TradingBridge] account synced to PositionEngine";
-            }
-            for (auto& p : eng.positions()) {
-                domain::trading::Position pos;
-                pos.setSymbol(p.symbol);
-                pos.setLastPrice(p.lastPrice);
-                pos.setQuantity(p.quantity);
-                pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
-                                            : domain::trading::PositionSide::Short);
-                if (auto* pe = sys.positionEngine()) {
-                    pe->applyPositionEvent(p.symbol, pos);
-                }
-            }
-        }
-
-        bridge::TradingRuntimeStatusService::instance()->refresh();
+    if (!engine.initialized()) {
+        INTERNAL_ERROR_STREAM << "[Live] TradeExecutionEngine not initialized, waiting for GmSessionEngine startup";
+        return;
     }
 
-    // ── 注册引擎回调：将领域层成交/状态事件转发到 QML 信号 ──
-    sys.setOnTradeFill([this](const domain::trading::TradeFill& fill) {
+    // ── 注册回调：TradeExecutionEngine → QML 信号 ──
+    engine.setOnTradeFill([this](const domain::trading::TradeFill& fill) {
         QVariantMap entry;
         entry["brokerOrderId"] = QString::fromStdString(fill.brokerOrderId().text());
         entry["fillId"]      = QString::fromStdString(fill.fillId().text());
@@ -104,8 +63,7 @@ void TradeExecutionBridge::ensureInitialized() {
         emit tradeFilled(entry);
         emit tradeFillPublished(entry);
     });
-
-    sys.setOnOrderUpdate([this](const domain::trading::TradeOrder& updated) {
+    engine.setOnOrderUpdate([this](const domain::trading::TradeOrder& updated) {
         QVariantMap statusEntry;
         statusEntry["symbol"]   = QString::fromStdString(updated.symbol());
         statusEntry["side"]     = updated.side() == domain::strategy::OrderDirection::Buy
@@ -116,9 +74,7 @@ void TradeExecutionBridge::ensureInitialized() {
         emit orderStatusChanged(statusEntry);
         emit orderStatusPublished(statusEntry);
     });
-
-    // ── 策略订单产生通知 → QML ──
-    sys.setOnOrderGenerated([this](const domain::trading::TradeOrder& order) {
+    engine.setOnOrderGenerated([this](const domain::trading::TradeOrder& order) {
         QVariantMap entry;
         entry["symbol"]     = QString::fromStdString(order.symbol());
         entry["side"]       = order.side() == domain::strategy::OrderDirection::Buy
@@ -130,9 +86,7 @@ void TradeExecutionBridge::ensureInitialized() {
             emit orderGenerated(entry);
         }, Qt::QueuedConnection);
     });
-
-    // ── 订单提交结果通知 → QML ──
-    sys.setOnOrderSubmitResult([this](const domain::trading::TradeOrder& order,
+    engine.setOnOrderSubmitResult([this](const domain::trading::TradeOrder& order,
                                         const domain::trading::SubmitResult& result) {
         QVariantMap entry;
         entry["symbol"]   = QString::fromStdString(order.symbol());
@@ -150,7 +104,7 @@ void TradeExecutionBridge::ensureInitialized() {
 
 QString TradeExecutionBridge::liveBridgeStatusMessage() const {
     if (!m_initialized) return QStringLiteral("未初始化");
-    return app::system::TradingSystem::instance().initialized()
+    return domain::trading::TradeExecutionEngine::instance().initialized()
         ? QStringLiteral("可执行") : QStringLiteral("待连接");
 }
 
@@ -382,41 +336,33 @@ void PositionAccountBridge::refresh() {
 QVariantMap PositionAccountBridge::accountSnapshot() const {
     QVariantMap map;
     if (!m_initialized) return map;
-    const auto& acc = app::system::TradingSystem::instance().accountSnapshot();
-    map["totalAsset"] = acc.totalAsset();
-    map["marketValue"] = acc.marketValue();
-    map["availableCash"] = acc.availableCash();
-    map["realizedPnl"] = acc.realizedPnl();
-    map["unrealizedPnl"] = acc.unrealizedPnl();
-    map["accountId"] = QString::fromStdString(acc.accountId());
+    auto acc = engine::AccountEngine::instance().account();
+    map["totalAsset"]    = acc.totalAsset;
+    map["marketValue"]   = acc.marketValue;
+    map["availableCash"] = acc.availableCash;
+    map["realizedPnl"]   = 0.0;
+    map["unrealizedPnl"] = 0.0;
+    map["accountId"]     = QString::fromStdString(acc.accountId);
     return map;
 }
 
 QVariantList PositionAccountBridge::positions() const {
     QVariantList list;
     if (!m_initialized) return list;
-    const auto& posMap = app::system::TradingSystem::instance().positions();
-    for (const auto& [key, pos] : posMap) {
+    for (auto& p : engine::AccountEngine::instance().positions()) {
         QVariantMap item;
-        const QString sym = QString::fromStdString(pos.symbol());
+        const QString sym = QString::fromStdString(p.symbol);
         item["symbol"] = sym;
         item["name"]   = StockNameResolver::name(sym);
-        item["side"] = pos.side() == domain::trading::PositionSide::Long ? "LONG" : "SHORT";
-        item["type"] = pos.type() == domain::trading::PositionType::Stock ? "stock"
-            : pos.type() == domain::trading::PositionType::MarginBuy ? "margin_buy"
-            : pos.type() == domain::trading::PositionType::MarginSell ? "margin_sell"
-            : pos.type() == domain::trading::PositionType::Futures ? "futures"
-            : "options";
-        item["quantity"] = static_cast<double>(pos.quantity());
-        item["availableQuantity"] = static_cast<double>(pos.availableQuantity());
-        item["closeableQuantity"] = static_cast<double>(pos.closeableQuantity());
-        item["costBasis"] = pos.costBasis();
-        item["lastPrice"] = pos.lastPrice();
-        item["marketValue"] = pos.marketValue();
-        item["unrealizedPnl"] = pos.unrealizedPnl();
-        item["underlying"] = QString::fromStdString(pos.underlying());
-        item["optionType"] = QString::fromStdString(pos.optionType());
-        item["expiry"] = QString::fromStdString(pos.expiry());
+        item["side"]   = p.quantity >= 0 ? "LONG" : "SHORT";
+        item["type"]   = "stock";
+        item["quantity"]          = static_cast<double>(p.quantity);
+        item["availableQuantity"] = static_cast<double>(p.availableQty);
+        item["closeableQuantity"] = static_cast<double>(p.availableQty);
+        item["costBasis"]         = p.costPrice;
+        item["lastPrice"]         = p.lastPrice;
+        item["marketValue"]       = p.marketValue;
+        item["unrealizedPnl"]     = p.unrealizedPnl;
         list.append(item);
     }
     return list;
@@ -468,11 +414,11 @@ void RiskControlBridge::initialize() {
 }
 
 void RiskControlBridge::refresh() {
-    if (!app::system::TradingSystem::instance().initialized()) return;
+    if (!engine::AccountEngine::instance().initialized()) return;
 
-    const auto& acc = app::system::TradingSystem::instance().accountSnapshot();
-    double totalAsset = acc.totalAsset();
-    double marketValue = acc.marketValue();
+    auto acc = engine::AccountEngine::instance().account();
+    double totalAsset = acc.totalAsset;
+    double marketValue = acc.marketValue;
 
     bool changed = false;
     auto check = [&](double& oldVal, double newVal, double eps = 0.01) {
@@ -500,38 +446,35 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
     snapshot["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
     snapshot["strategyId"] = strategy.value("strategyId");
 
-    if (!app::system::TradingSystem::instance().initialized()) {
+    if (!engine::AccountEngine::instance().initialized()) {
         snapshot["status"] = "unavailable";
         snapshot["positions"] = QVariantList();
         snapshot["diagnostics"] = QVariantMap();
         return snapshot;
     }
 
-    const auto& acc = app::system::TradingSystem::instance().accountSnapshot();
-    snapshot["totalAsset"] = acc.totalAsset();
-    snapshot["marketValue"] = acc.marketValue();
-    snapshot["availableCash"] = acc.availableCash();
-    snapshot["realizedPnl"] = acc.realizedPnl();
-    snapshot["unrealizedPnl"] = acc.unrealizedPnl();
+    auto acc = engine::AccountEngine::instance().account();
+    snapshot["totalAsset"] = acc.totalAsset;
+    snapshot["marketValue"] = acc.marketValue;
+    snapshot["availableCash"] = acc.availableCash;
+    snapshot["realizedPnl"] = 0.0;
+    snapshot["unrealizedPnl"] = 0.0;
     snapshot["status"] = "ok";
 
-    const auto& posMap = app::system::TradingSystem::instance().positions();
+    auto positions = engine::AccountEngine::instance().positions();
     QVariantList posList;
-    for (const auto& [key, pos] : posMap) {
+    for (auto& p : positions) {
         QVariantMap item;
-        const QString sym = QString::fromStdString(pos.symbol());
+        const QString sym = QString::fromStdString(p.symbol);
         item["symbol"] = sym;
         item["name"]   = StockNameResolver::name(sym);
-        item["side"] = pos.side() == domain::trading::PositionSide::Long ? "LONG" : "SHORT";
-        item["type"] = pos.type() == domain::trading::PositionType::Stock ? "stock"
-            : pos.type() == domain::trading::PositionType::MarginBuy ? "margin_buy"
-            : pos.type() == domain::trading::PositionType::MarginSell ? "margin_sell"
-            : "options";
-        item["quantity"] = static_cast<double>(pos.quantity());
-        item["costBasis"] = pos.costBasis();
-        item["lastPrice"] = pos.lastPrice();
-        item["marketValue"] = pos.marketValue();
-        item["unrealizedPnl"] = pos.unrealizedPnl();
+        item["side"]     = p.quantity >= 0 ? "LONG" : "SHORT";
+        item["type"]     = "stock";
+        item["quantity"]   = static_cast<double>(p.quantity);
+        item["costBasis"]  = p.costPrice;
+        item["lastPrice"]  = p.lastPrice;
+        item["marketValue"] = p.marketValue;
+        item["unrealizedPnl"] = p.unrealizedPnl;
         posList.append(item);
     }
     snapshot["positions"] = posList;

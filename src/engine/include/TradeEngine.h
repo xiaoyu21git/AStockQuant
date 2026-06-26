@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GmSessionEngine.h"
+#include "foundation/Utils/Uuid.h"
 
 namespace engine {
 
@@ -32,6 +33,8 @@ private:
     void* m_strategy = nullptr;
     OrderUpdateFn m_onOrderUpdate;
     TradeFillFn   m_onTradeFill;
+    foundation::utils::Uuid m_orderSub;
+    foundation::utils::Uuid m_fillSub;
 };
 
 } // namespace engine
