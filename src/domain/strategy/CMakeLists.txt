@@ -11,6 +11,7 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyEngineFacade.cpp
     src/StrategyManager.cpp
     src/RiskEvaluator.cpp
+    src/RiskManager.cpp
     src/RiskControl.cpp
     src/StrategyFactory.cpp
     src/StrategyLifecycleManager.cpp

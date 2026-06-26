@@ -8,6 +8,7 @@
 
 #include "../../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
+#include "../../../domain/strategy/include/RiskManager.h"
 #include "foundation/log/logging.hpp"
 
 #include <QVariantMap>
@@ -210,6 +211,30 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
 
     emit orderRequested(orderMap);
     emit orderRequestPublished(orderMap);
+
+    // ── 手动单账户风控 ──
+    {
+        QString accountId = TradingConnectionConfigService::instance()
+            ->currentConfiguration().value("accountId").toString();
+        engine::OrderRequest engineReq;
+        engineReq.symbol    = order.symbol();
+        engineReq.price     = order.price();
+        engineReq.quantity  = order.quantity();
+        engineReq.side      = (order.side() == domain::strategy::OrderDirection::Buy)
+                              ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
+        engineReq.orderType = engine::OrderRequest::Limit;
+
+        auto riskResult = domain::strategy::RiskManager::instance()
+            .checkManualOrder(accountId.toStdString(), engineReq);
+        if (!riskResult.approved()) {
+            QVariantMap out;
+            out["accepted"] = false;
+            out["message"]  = QString::fromStdString(riskResult.description());
+            setLastError(QString::fromStdString(riskResult.description()));
+            emit orderStatusChanged({{"status", "REJECTED"}, {"message", out["message"]}});
+            return out;
+        }
+    }
 
     auto result = app::system::TradingSystem::instance().submitOrder(order);
 

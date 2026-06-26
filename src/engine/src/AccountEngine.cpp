@@ -1,4 +1,4 @@
-// AccountEngine.cpp — 账户引擎实现，共享 GmSdkSingleton 的 ::Strategy
+// AccountEngine.cpp — 账户引擎实现，共享 GmSessionEngine 的 ::Strategy
 #include "AccountEngine.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
@@ -24,55 +24,83 @@ bool AccountEngine::initialize(void* strategy) {
     return true;
 }
 
-void AccountEngine::shutdown() { m_strategy = nullptr; }
+void AccountEngine::shutdown() {
+    m_strategy = nullptr;
+    m_cacheValid = false;
+    m_cachedPositions.clear();
+}
 bool AccountEngine::initialized() const { return m_strategy != nullptr; }
 
-AccountInfo AccountEngine::account() const {
-    AccountInfo a;
+AccountInfo AccountEngine::account() {
+    if (m_cacheValid) return m_cachedAccount;
     auto* s = static_cast<::Strategy*>(m_strategy);
-    if (!s) return a;
+    if (!s) return {};
     auto* arr = s->get_cash(nullptr);
     if (!arr || arr->status() != 0 || arr->count() == 0) {
-        if (arr) arr->release(); return a;
+        if (arr) arr->release(); return {};
     }
     auto& cash = arr->at(0);
-    a.accountId = cash.account_id; a.totalAsset = cash.nav;
-    a.availableCash = cash.available; a.marketValue = cash.market_value;
-    a.frozenCash = cash.frozen;
+    m_cachedAccount.accountId = cash.account_id;
+    m_cachedAccount.totalAsset = cash.nav;
+    m_cachedAccount.availableCash = cash.available;
+    m_cachedAccount.marketValue = cash.market_value;
+    m_cachedAccount.frozenCash = cash.frozen;
     arr->release();
-    return a;
+    m_cacheValid = true;
+    return m_cachedAccount;
 }
 
-std::vector<Position> AccountEngine::positions() const {
-    std::vector<Position> result;
+std::vector<Position> AccountEngine::positions() {
+    if (m_cacheValid && !m_cachedPositions.empty()) {
+        std::vector<Position> result;
+        for (auto& [sym, p] : m_cachedPositions) result.push_back(p);
+        return result;
+    }
     auto* s = static_cast<::Strategy*>(m_strategy);
-    if (!s) return result;
+    if (!s) return {};
     auto* arr = s->get_position(nullptr);
-    if (!arr || arr->status() != 0) { if (arr) arr->release(); return result; }
+    if (!arr || arr->status() != 0) { if (arr) arr->release(); return {}; }
+    m_cachedPositions.clear();
     for (size_t i = 0; i < arr->count(); ++i) {
         auto& gp = arr->at(i);
         Position p;
-        p.symbol        = fromGm(gp.symbol);
-        p.quantity      = (gp.side == 2) ? -gp.volume : gp.volume;
-        p.availableQty  = gp.available;
-        p.costPrice     = gp.vwap;
-        p.lastPrice     = gp.price;
-        p.marketValue   = gp.market_value;
+        p.symbol = fromGm(gp.symbol);
+        p.quantity = (gp.side == 2) ? -gp.volume : gp.volume;
+        p.availableQty = gp.available;
+        p.costPrice = gp.vwap;
+        p.lastPrice = gp.price;
+        p.marketValue = gp.market_value;
         p.unrealizedPnl = gp.fpnl;
-        result.push_back(p);
+        m_cachedPositions[p.symbol] = p;
     }
     arr->release();
+    m_cacheValid = true;
+    std::vector<Position> result;
+    for (auto& [sym, p] : m_cachedPositions) result.push_back(p);
     return result;
 }
 
-void AccountEngine::setOnAccountChanged(AccountFn cb)  { m_onAccountChanged  = std::move(cb); }
-void AccountEngine::setOnPositionChanged(PositionFn cb) { m_onPositionChanged = std::move(cb); }
+void AccountEngine::setOnDataChanged(DataFn cb) { m_onDataChanged = std::move(cb); }
 
 void AccountEngine::onCash(const AccountInfo& a) {
-    if (m_onAccountChanged) m_onAccountChanged(a);
+    m_cachedAccount = a;
+    m_cacheValid = true;
+    if (m_onDataChanged) m_onDataChanged();
 }
+
 void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
-    if (m_onPositionChanged) m_onPositionChanged(positions);
+    for (auto& p : positions)
+        m_cachedPositions[p.symbol] = p;
+    if (m_onDataChanged) m_onDataChanged();
+}
+
+void AccountEngine::applyAccountEvent(const AccountInfo& a) {
+    onCash(a);
+}
+
+void AccountEngine::applyPositionEvent(const std::string& symbol, const Position& p) {
+    m_cachedPositions[symbol] = p;
+    if (m_onDataChanged) m_onDataChanged();
 }
 
 } // namespace engine

@@ -17,8 +17,11 @@
 #include "../../factor/include/FactorMetricsCalculator.h"
 #include "../../trading/PositionAccountEngine.h"
 #include "../include/RiskEvaluator.h"
+#include "../include/RiskManager.h"
+#include "../../../engine/include/GmSessionEngine.h"
 #include "../../../app/system/TradingSystem.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/market/AStockSymbol.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -577,7 +580,28 @@ void StrategyEngine::drainQueue()
             auto orders = step(mdp);
             if (orders.has_value() && m_orderListener
                 && !m_isBacktestMode.load(std::memory_order_acquire)) {
-                m_orderListener->onOrders(*orders);
+                // 策略信号风控
+                for (auto& req : *orders) {
+                    if (!req.isValid()) continue;
+                    char buf[16];
+                    std::snprintf(buf, sizeof(buf), "%06u", req.instrumentId().value);
+                    engine::OrderRequest engineReq;
+                    engineReq.symbol   = foundation::market::AStockSymbol::fromCode(buf).fullSymbol();
+                    engineReq.price    = 0.0;
+                    engineReq.quantity = static_cast<int64_t>(req.quantity());
+                    engineReq.side     = (req.side() == strategy::RuntimeOrderSide::Buy)
+                                         ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
+                    auto riskResult = RiskManager::instance()
+                        .checkAutoSignal(m_accountId, engineReq, 0.5);
+                    if (!riskResult.approved()) {
+                        INTERNAL_WARN_STREAM << "[StrategyEngine] risk rejected: "
+                                             << riskResult.description();
+                        continue;
+                    }
+                    // 通过风控的订单逐个发送
+                    std::vector<OrderRequest> approved{req};
+                    m_orderListener->onOrders(approved);
+                }
             }
         } catch (const std::exception& e) {
             INTERNAL_WARN_STREAM << "[StrategyEngine] tick processing failed: "

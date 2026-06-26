@@ -10,6 +10,7 @@
 #include "IBrokerGateway.h"
 #include "TradingTypes.h"
 #include "../strategy/include/RiskEvaluator.h"
+#include "../strategy/include/IOrderListener.h"
 
 #include <cstdint>
 #include <functional>
@@ -232,14 +233,24 @@ private:
 };
 
 // ── Engine ──
-class TradeExecutionEngine final {
+class TradeExecutionEngine final : public strategy::IOrderListener {
 public:
+    static TradeExecutionEngine& instance();
+
     TradeExecutionEngine();
     ~TradeExecutionEngine();
 
-    // 回调注册（替代 BrokerGateway）
+    bool initialized() const { return m_initialized; }
+
+    // ── IOrderListener ──
+    void onOrders(const std::vector<strategy::OrderRequest>& orders) override;
+
+    using OrderGeneratedHandler = std::function<void(const TradeOrder&)>;
+    void setOnOrderGenerated(OrderGeneratedHandler h);
+    using OrderSubmitResultHandler = std::function<void(const TradeOrder&, const SubmitResult&)>;
+    void setOnOrderSubmitResult(OrderSubmitResultHandler h);
+
     void initCallbacks();
-    // 保留接口兼容
     void setGateway(std::unique_ptr<IBrokerGateway> gateway);
     IBrokerGateway* gateway() const noexcept;
 
@@ -273,6 +284,9 @@ public:
 private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
+    bool m_initialized{false};
+    OrderGeneratedHandler m_onOrderGenerated;
+    OrderSubmitResultHandler m_onOrderSubmitResult;
 };
 
 } // namespace domain::trading

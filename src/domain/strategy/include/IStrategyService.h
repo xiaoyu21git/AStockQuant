@@ -529,6 +529,9 @@ public:
         return m_droppedTicks.load(std::memory_order_acquire);
     }
 
+    /// @brief 设置交易账户（风控需要）
+    void setAccountId(std::string id) { m_accountId = std::move(id); }
+
     /// @brief 距上次处理 tick 的毫秒数（>5000 可能卡死）
     [[nodiscard]] std::int64_t lastProcessedMsAgo() const noexcept {
         auto last = m_lastProcessedAt.load(std::memory_order_acquire);
@@ -572,6 +575,7 @@ private:
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
+    std::string m_accountId;
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
 };

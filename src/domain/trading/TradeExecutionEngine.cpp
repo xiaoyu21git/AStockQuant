@@ -322,10 +322,46 @@ void TradeExecutionEngine::setOnTradeFill(TradeFillCallback cb) noexcept {
 // ============================================================================
 // Lifecycle
 // ============================================================================
+TradeExecutionEngine& TradeExecutionEngine::instance() {
+    static TradeExecutionEngine engine;
+    return engine;
+}
+
 TradeExecutionEngine::TradeExecutionEngine()
-    : m_impl(std::make_unique<Impl>()) {}
+    : m_impl(std::make_unique<Impl>()) { m_initialized = true; }
 
 TradeExecutionEngine::~TradeExecutionEngine() = default;
+
+void TradeExecutionEngine::setOnOrderGenerated(OrderGeneratedHandler h) { m_onOrderGenerated = std::move(h); }
+void TradeExecutionEngine::setOnOrderSubmitResult(OrderSubmitResultHandler h) { m_onOrderSubmitResult = std::move(h); }
+
+void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& orders) {
+    for (const auto& req : orders) {
+        if (!req.isValid()) continue;
+
+        TradeOrder order;
+        order.setSymbol(std::to_string(req.instrumentId().value));
+        order.setSide(req.side() == strategy::RuntimeOrderSide::Buy
+                          ? strategy::OrderDirection::Buy
+                          : strategy::OrderDirection::Sell);
+        order.setQuantity(static_cast<std::int64_t>(req.quantity()));
+        order.setStrategyId(std::to_string(req.strategyInstanceId()));
+        order.setPrice(0.0);
+
+        if (m_onOrderGenerated) m_onOrderGenerated(order);
+
+        strategy::RiskInput risk;
+        risk.setStrategyId(order.strategyId());
+        risk.setSymbol(order.symbol());
+        risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
+        risk.setPrice(order.price());
+        risk.setQuantity(order.quantity());
+        risk.setAutoStrategySignal(true);
+
+        auto result = submitOrder(order, risk);
+        if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+    }
+}
 
 // ============================================================================
 // Impl helpers
