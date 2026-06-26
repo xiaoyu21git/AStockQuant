@@ -42,7 +42,6 @@ add_library(astockquantapp SHARED
     src/AppBootstrap.cpp
     src/VasAurora.cpp
     facade/MarketDataFacade.cpp
-    system/TradingSystem.cpp
 )
 
 if(ENABLE_JUJIN_MARKET)

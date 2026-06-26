@@ -15,7 +15,7 @@
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../factor/include/factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "../../factor/include/FactorMetricsCalculator.h"
-#include "../../trading/PositionAccountEngine.h"
+#include "../../trading/TradingTypes.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
 #include "../../../engine/include/GmSessionEngine.h"
@@ -817,12 +817,19 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    domain::trading::PositionAccountEngine posEngine;
+    double backtestCash = req.costSpec.initialCapital.value;
+    std::unordered_map<std::string, domain::trading::Position> backtestPositions;
+    auto btAccount = [&]() {
+        domain::trading::AccountSnapshot a;
+        a.setTotalAsset(backtestCash);
+        a.setAvailableCash(backtestCash);
+        return a;
+    };
     domain::trading::AccountSnapshot acc;
     acc.setAvailableCash(req.costSpec.initialCapital.value);
     acc.setTotalAsset(req.costSpec.initialCapital.value);
     acc.setAccountId(req.strategyIdentity.strategyId.text());
-    posEngine.applyAccountEvent(acc);
+    // removed
 
     domain::backtest::FillSimulatorParams fillParams;
     fillParams.commissionRate = req.costSpec.commissionRate.value;
@@ -860,7 +867,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         auto volumeMat = view->volume();
 
         if (r == 0 || r == totalDays-1 || r % 100 == 0) {
-            INTERNAL_INFO_STREAM << "[backtest] day " << r << "/" << totalDays << " equity=" << posEngine.account().totalAsset() << " positions=" << posEngine.positions().size();
+            INTERNAL_INFO_STREAM << "[backtest] day " << r << "/" << totalDays << " equity=" << btAccount().totalAsset() << " positions=" << backtestPositions.size();
         }
 
         std::vector<MarketDataPoint> mdpBatch;
@@ -906,13 +913,13 @@ StrategyBacktestResult StrategyEngine::backtest(
                 riskInput.setStrategyActive(true);
                 riskInput.setSignalStrength(0.5);         // 回测默认信号强度
                 riskInput.setPositionSnapshotReady(true);  // 回测持仓快照可用
-                const auto& accSnap = posEngine.account();
+                auto accSnap = btAccount();
                 riskInput.setCurrentTotalAsset(accSnap.totalAsset());
                 riskInput.setCurrentMarketValue(accSnap.marketValue());
                 riskInput.setTradingSessionOpen(true);
                 // 卖出单：填充可卖数量
                 if (!riskInput.isBuyOrder()) {
-                    const auto& posMap = posEngine.positions();
+                    const auto& posMap = backtestPositions;
                     auto pit = posMap.find(symbol);
                     riskInput.setCloseableQuantity(pit != posMap.end()
                         ? pit->second.quantity() : 0);
@@ -933,16 +940,16 @@ StrategyBacktestResult StrategyEngine::backtest(
                         domain::trading::Position pos;
                         pos.setSymbol(symbol);
                         pos.setSide(domain::trading::PositionSide::Long);
-                        const auto& buyPosMap = posEngine.positions();
+                        const auto& buyPosMap = backtestPositions;
                         std::int64_t existingQty = buyPosMap.count(symbol)
                             ? buyPosMap.at(symbol).quantity() : 0LL;
                         if (existingQty == 0) buyPriceMap[symbol] = closePrice;
                         pos.setQuantity(existingQty + static_cast<std::int64_t>(order.quantity()));
                         pos.setLastPrice(closePrice);
-                        posEngine.applyPositionEvent(symbol, pos);
+                        backtestPositions[symbol] = pos;
                     }
                 } else {
-                    const auto& posMap = posEngine.positions();
+                    const auto& posMap = backtestPositions;
                     auto it = posMap.find(symbol);
                     const std::int64_t held = (it != posMap.end()) ? it->second.quantity() : 0LL;
                     const std::int64_t qty = static_cast<std::int64_t>(order.quantity());
@@ -963,11 +970,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                         pos.setSide(domain::trading::PositionSide::Long);
                         pos.setQuantity(held - sellQty);
                         pos.setLastPrice(closePrice);
-                        if (pos.quantity() > 0) posEngine.applyPositionEvent(symbol, pos);
+                        if (pos.quantity() > 0) backtestPositions[symbol] = pos;
                         else {
                             domain::trading::Position empty;
                             empty.setSymbol(symbol); empty.setQuantity(0);
-                            posEngine.applyPositionEvent(symbol, empty);
+                            backtestPositions.erase(symbol);
                         }
                     }
                 }
@@ -976,7 +983,7 @@ StrategyBacktestResult StrategyEngine::backtest(
 
         // 更新账户
         double marketValue = 0.0;
-        for (const auto& [sym, pos] : posEngine.positions()) {
+        for (const auto& [sym, pos] : backtestPositions) {
             if (pos.quantity() > 0) {
                 for (const auto& mdp : mdpBatch) {
                     auto symIt = idToSymbol.find(mdp.instrumentId().value);
@@ -992,7 +999,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         newAcc.setAvailableCash(cash);
         newAcc.setMarketValue(marketValue);
         newAcc.setTotalAsset(equity);
-        posEngine.applyAccountEvent(newAcc);
+        backtestCash = newAcc.availableCash();
         equityCurve.push_back(equity);
 
         if (onProgress && totalDays > 0) {
@@ -1002,7 +1009,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    INTERNAL_INFO_STREAM << "[backtest] loop done: days=" << totalDays << " finalEquity=" << posEngine.account().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
+    INTERNAL_INFO_STREAM << "[backtest] loop done: days=" << totalDays << " finalEquity=" << btAccount().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
     // 逐标的盈亏 top5
     std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
     std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });

@@ -23,6 +23,7 @@
 #include "VasAurora.hpp"
 
 #include "../../domain/strategy/include/RiskEvaluator.h"
+#include "../../domain/strategy/include/RiskManager.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"

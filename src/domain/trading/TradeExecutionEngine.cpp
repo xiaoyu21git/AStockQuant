@@ -200,6 +200,8 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order) {
     risk.setStrategyBound(true);
     risk.setStrategyActive(true);
     risk.setAutoStrategySignal(!order.strategyId().empty());
+    risk.setPositionSnapshotReady(true);
+    risk.setTradingSessionOpen(true);
     return submitOrder(order, risk);
 }
 

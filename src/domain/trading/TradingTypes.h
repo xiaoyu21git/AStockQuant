@@ -405,5 +405,66 @@ inline constexpr const char* CAP_ALGO_TWAP = "algo_twap";
 inline constexpr const char* CAP_ALGO_VWAP = "algo_vwap";
 inline constexpr const char* CAP_SHORT_SELLING = "short_selling";
 
+
+// ── Moved from PositionAccountEngine.h (types only, engine class removed) ──
+
+enum class PositionSide : int { Long = 0, Short = 1 };
+enum class PositionType : int { Stock = 0, MarginBuy, MarginSell, Futures, Options };
+enum class TradeAction : int { None = 0, MarginSell, CloseShort };
+enum class ExchangeCode : int { Unknown = 0, SHSE, SZSE, BSE, CFFEX, SHFE, DCE, CZCE, INE, GFEX };
+
+class Position final {
+public:
+    Position() = default;
+    const std::string& symbol() const noexcept { return m_symbol; }
+    void setSymbol(std::string v) { m_symbol = std::move(v); }
+    ExchangeCode exchange() const noexcept { return m_exchange; }
+    void setExchange(ExchangeCode v) noexcept { m_exchange = v; }
+    PositionSide side() const noexcept { return m_side; }
+    void setSide(PositionSide v) noexcept { m_side = v; }
+    PositionType type() const noexcept { return m_type; }
+    void setType(PositionType v) noexcept { m_type = v; }
+    std::int64_t quantity() const noexcept { return m_quantity; }
+    void setQuantity(std::int64_t v) noexcept { m_quantity = v; }
+    std::int64_t availableQuantity() const noexcept { return m_availableQuantity; }
+    void setAvailableQuantity(std::int64_t v) noexcept { m_availableQuantity = v; }
+    std::int64_t closeableQuantity() const noexcept { return m_closeableQuantity; }
+    void setCloseableQuantity(std::int64_t v) noexcept { m_closeableQuantity = v; }
+    double costBasis() const noexcept { return m_costBasis; }
+    void setCostBasis(double v) noexcept { m_costBasis = v; }
+    double lastPrice() const noexcept { return m_lastPrice; }
+    void setLastPrice(double v) noexcept { m_lastPrice = v; }
+    double marketValue() const noexcept { return m_marketValue; }
+    void setMarketValue(double v) noexcept { m_marketValue = v; }
+    double unrealizedPnl() const noexcept { return m_unrealizedPnl; }
+    void setUnrealizedPnl(double v) noexcept { m_unrealizedPnl = v; }
+private:
+    std::string m_symbol; ExchangeCode m_exchange{ExchangeCode::Unknown};
+    PositionSide m_side{PositionSide::Long}; PositionType m_type{PositionType::Stock};
+    std::int64_t m_quantity{0}, m_availableQuantity{0}, m_closeableQuantity{0};
+    double m_costBasis{0}, m_lastPrice{0}, m_marketValue{0}, m_unrealizedPnl{0};
+};
+
+class AccountSnapshot final {
+public:
+    AccountSnapshot() = default;
+    const std::string& accountId() const noexcept { return m_accountId; }
+    void setAccountId(std::string v) { m_accountId = std::move(v); }
+    double availableCash() const noexcept { return m_availableCash; }
+    void setAvailableCash(double v) noexcept { m_availableCash = v; }
+    double marketValue() const noexcept { return m_marketValue; }
+    void setMarketValue(double v) noexcept { m_marketValue = v; }
+    double totalAsset() const noexcept { return m_totalAsset; }
+    void setTotalAsset(double v) noexcept { m_totalAsset = v; }
+    double dailyTurnoverNotional() const noexcept { return m_dailyTurnoverNotional; }
+    void setDailyTurnoverNotional(double v) noexcept { m_dailyTurnoverNotional = v; }
+    double realizedPnl() const noexcept { return m_realizedPnl; }
+    void setRealizedPnl(double v) noexcept { m_realizedPnl = v; }
+    double unrealizedPnl() const noexcept { return m_unrealizedPnl; }
+    void setUnrealizedPnl(double v) noexcept { m_unrealizedPnl = v; }
+private:
+    std::string m_accountId; double m_availableCash{1000000}, m_marketValue{0};
+    double m_realizedPnl{0}, m_unrealizedPnl{0}, m_totalAsset{1000000}, m_dailyTurnoverNotional{0};
+};
 } // namespace trading
 } // namespace domain

@@ -4,7 +4,6 @@ cmake_minimum_required(VERSION 3.15)
 add_library(domain_trading STATIC
     TradingTypes.cpp
     TradeExecutionEngine.cpp
-    PositionAccountEngine.cpp
     PnlCalculator.cpp
     src/OrderConflictDetector.cpp
     src/ExecutionCheckpointManager.cpp

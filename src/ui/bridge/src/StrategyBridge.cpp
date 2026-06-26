@@ -12,6 +12,7 @@
 
 
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
+#include "../../domain/trading/TradeExecutionEngine.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
