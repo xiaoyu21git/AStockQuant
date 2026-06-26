@@ -5,6 +5,10 @@ target_sources(engine PRIVATE
     Engineimpl.cpp
     EngineContext.cpp
     GlobalEventBusRegistry.cpp
+    AccountEngine.cpp
+    GmSessionEngine.cpp
+    OrderManager.cpp
+    TradeEngine.cpp
     Event/Event.cpp
     Event/DispatchWorker.cpp
     Event/EventBusImpl.cpp

@@ -21,7 +21,6 @@
     factor_check/FactorSupportScopeCacheCore.cpp
     factor_check/FactorSupportScopeKeyCore.cpp
     MarketDataBridge.cpp
-    GmMarketSource.cpp
     TradingBridges.cpp
     StrategyListModel.cpp
     TradingConnectionConfigService.cpp
@@ -33,10 +32,6 @@
     StrategyPerformanceModel.cpp
     StockNameResolver.cpp
     SymbolSearchModel.cpp
-    JujinApi.cpp
-    GmStrategySession.cpp
-    TradingCommandQueue.cpp
-    TradingRuntimeManager.cpp
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})

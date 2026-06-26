@@ -1,4 +1,5 @@
 ﻿#include "JujinMarketConnector.h"
+#include "../../engine/include/GmSessionEngine.h"
 
 #include <algorithm>
 #include <cctype>
@@ -13,7 +14,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
-#include "../../engine/include/JujinApi.h"
+// JujinApi removed
 #include "JujinTypes.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "MarketSubscriptionStatusRegistry.h"
@@ -235,20 +236,7 @@ bool JujinMarketConnector::start()
         return false;
     }
 
-    if (thirdparty::JujinApi* sharedApi = engine::get_shared_jujin_api()) {
-        if (sharedApi != m_api.get()) {
-            m_lastError = "shared jujin trading session already exists";
-            return false;
-        }
-    }
-
     auto& cfgMgr = foundation::config::ConfigManager::instance();
-    m_maxMarketSubscriptions = static_cast<size_t>(
-        (std::max)(1, cfgMgr.get_config_file_int(foundation::config::ConfigFile::Jujin,
-            "maxMarketSubscriptions", 500)));
-    m_marketSubscriptionBatchSize = static_cast<size_t>(
-        (std::max)(1, cfgMgr.get_config_file_int(foundation::config::ConfigFile::Jujin,
-            "marketSubscriptionBatchSize", 4)));
     INTERNAL_INFO_STREAM << "[JujinMarketConnector] start requested";
 
     // 通过 ConfigManager 统一读取 trading_connection.json
@@ -268,54 +256,15 @@ bool JujinMarketConnector::start()
         return false;
     }
 
-    std::string resolvedId = trim(accountRuntimeId);
-    if (resolvedId.empty()) resolvedId = trim(gmStrategyId);
-    if (resolvedId.empty()) {
-        m_lastError = "JMC: missing gmStrategyId";
+    // ── 初始化 GmSessionEngine（唯一 gmsdk 连接）──
+    if (!engine::GmSessionEngine::instance().initialize(token, accountId)) {
+        m_lastError = "GmSessionEngine 初始化失败";
         return false;
     }
+    INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 初始化成功";
+    INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 已运行，等待策略请求订阅";
 
-    thirdparty::ConfigParams config;
-    config.platform = thirdparty::PlatformType::JUJIN;
-    config.token = token;
-    config.account_id = accountId;
-    config.server_url = "";
-
-    config.extra_params["runtime_strategy_id"] = resolvedId;
-    config.extra_params["mode"] = "1";
-    config.extra_params["simtrade_only"] = "false";
-    config.extra_params["read_only"] = "false";
-
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] accountId=" << config.account_id
-                         << " gmStrategyId=" << gmStrategyId
-                         << " resolvedId=" << resolvedId
-                         << " mode=" << config.extra_params["mode"]
-                         << " simtradeOnly=" << config.extra_params["simtrade_only"]
-                         << " readOnly=" << config.extra_params["read_only"];
-
-    m_api = std::make_unique<thirdparty::JujinApi>();
-    m_api->set_event_bus(std::shared_ptr<engine::EventBus>(eventBus, [](engine::EventBus*) {}));
-
-    if (!m_api->initialize(config)) { m_lastError = "initialize failed"; m_api.reset(); return false; }
-    if (!m_api->connect()) { m_lastError = "connect failed"; m_api.reset(); return false; }
-
-    engine::register_shared_jujin_api(m_api.get());
-    m_stopRequested.store(false);
-
-    if (m_marketSubscriptionThread.joinable()) m_marketSubscriptionThread.join();
-    m_marketSubscriptionThread = std::thread([this, eventBus]() { processSubscriptionRequests(eventBus); });
-
-    INTERNAL_INFO_STREAM << "[JMC] API 已连接，等待策略请求订阅";
-
-    m_watchRequestSubscription = eventBus->subscribe("market.watch.ensure",
-        [this](const engine::EventFormat& event) {
-            if (!m_api || !marketSessionAllowsSubscriptions()) return;
-            auto symbolValue = event.get<std::string>("symbol");
-            if (symbolValue.has_value() && !symbolValue->empty())
-                enqueueWatchSymbol(*symbolValue);
-        });
-
-    // ── 订阅 C++ SDK 行情事件 → 推送到策略引擎 ──
+    // ── 订阅 GmSessionEngine 发布的行情事件 → 推送到策略引擎 ──
     // GmStrategySession::on_tick() 发布 "trading.market.tick"
     // 字段: symbol, price(double), volume(double, 瞬时成交量), tradingDay(int64, YYYYMMDD)
     m_tradingTickSubscription = eventBus->subscribe("trading.market.tick",
@@ -359,7 +308,6 @@ bool JujinMarketConnector::start()
 
     m_started = true;
     m_lastError.clear();
-    publishSubscriptionStatus(eventBus, true);
 
     std::unordered_set<std::string> boundIds;
     {
@@ -386,7 +334,7 @@ bool JujinMarketConnector::start()
             }
         }
     }
-    publishExistingOrders(eventBus, token, config.account_id, resolvedId, boundIds);
+    publishExistingOrders(eventBus, token, accountId, "", boundIds);
     INTERNAL_INFO_STREAM << "[JujinMarketConnector] start completed";
     return true;
 }
@@ -394,23 +342,13 @@ bool JujinMarketConnector::start()
 void JujinMarketConnector::stop()
 {
     m_stopRequested.store(true);
-    m_pendingWatchCv.notify_all();
 
     if (m_initialOrderSyncThread.joinable()) {
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for initial order sync thread";
         m_initialOrderSyncThread.join();
     }
 
-    if (m_marketSubscriptionThread.joinable()) {
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for market subscription thread";
-        m_marketSubscriptionThread.join();
-    }
-
     if (engine::EventBus* bus = engine::get_engine_event_bus()) {
-        if (m_watchRequestSubscription) {
-            bus->unsubscribe(m_watchRequestSubscription);
-            m_watchRequestSubscription = foundation::utils::Uuid();
-        }
         if (m_tradingTickSubscription) {
             bus->unsubscribe(m_tradingTickSubscription);
             m_tradingTickSubscription = foundation::utils::Uuid();
@@ -421,31 +359,7 @@ void JujinMarketConnector::stop()
         }
     }
 
-    if (!m_api) {
-        m_started = false;
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] stop skipped: api not initialized";
-        return;
-    }
-
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] stopping";
-    {
-        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
-        m_subscribedSymbols.clear();
-    }
-    {
-        std::lock_guard<std::mutex> lock(m_pendingWatchMutex);
-        m_pendingWatchQueue.clear();
-        m_pendingWatchSymbols.clear();
-    }
-
-    publishSubscriptionStatus(engine::get_engine_event_bus(), false);
-
-    if (engine::get_shared_jujin_api() == m_api.get()) {
-        engine::register_shared_jujin_api(nullptr);
-    }
-
-    m_api->disconnect();
-    m_api.reset();
+    engine::GmSessionEngine::instance().shutdown();
     m_started = false;
     INTERNAL_INFO_STREAM << "[JujinMarketConnector] stopped";
 }
@@ -456,205 +370,9 @@ std::string JujinMarketConnector::symbolName(const std::string& gmSymbol) const 
     return it != m_symbolNames.end() ? it->second : "";
 }
 
-void JujinMarketConnector::enqueueWatchSymbol(const std::string& symbol)
-{
-    const std::string normalizedSymbol = toGmMarketSymbol(symbol);
-    if (normalizedSymbol.empty()) {
-        return;
-    }
 
-    {
-        std::lock_guard<std::mutex> subscriptionLock(m_subscriptionMutex);
-        if (m_subscribedSymbols.find(normalizedSymbol) != m_subscribedSymbols.end()) {
-            return;
-        }
-    }
 
-    {
-        std::lock_guard<std::mutex> pendingLock(m_pendingWatchMutex);
-        if (m_pendingWatchSymbols.find(normalizedSymbol) != m_pendingWatchSymbols.end()) {
-            return;
-        }
-        m_pendingWatchQueue.push_back(normalizedSymbol);
-        m_pendingWatchSymbols.insert(normalizedSymbol);
-    }
-    m_pendingWatchCv.notify_one();
-}
 
-void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBus)
-{
-    INTERNAL_INFO_STREAM << "[JMC] 订阅线程启动";
-
-    if (!marketSessionAllowsSubscriptions()) {
-        INTERNAL_INFO_STREAM << "[JMC] 当前非交易时段，跳过订阅";
-        return;
-    }
-
-    // 仅按需订阅：策略通过 "market.watch.ensure" 事件请求的标的
-    while (true) {
-        std::vector<std::string> batch;
-
-        {
-            std::unique_lock<std::mutex> lock(m_pendingWatchMutex);
-            m_pendingWatchCv.wait(lock, [this]() {
-                return m_stopRequested.load() || !m_pendingWatchQueue.empty();
-            });
-
-            if (m_stopRequested.load() && m_pendingWatchQueue.empty()) {
-                break;
-            }
-
-            while (!m_pendingWatchQueue.empty() && batch.size() < m_marketSubscriptionBatchSize) {
-                const std::string symbol = m_pendingWatchQueue.front();
-                m_pendingWatchQueue.pop_front();
-                m_pendingWatchSymbols.erase(symbol);
-                batch.push_back(symbol);
-            }
-        }
-
-        if (batch.empty()) {
-            continue;
-        }
-
-        if (!subscribeSymbolBatch(batch, eventBus)) {
-            INTERNAL_ERROR_STREAM << "[JMC] subscribe batch failed size=" << batch.size();
-        }
-    }
-}
-
-bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& symbols, engine::EventBus* eventBus)
-{
-    if (!m_api || !eventBus || !eventBus->is_running() || symbols.empty()) {
-        return false;
-    }
-
-    std::vector<std::string> normalizedSymbols;
-    normalizedSymbols.reserve(symbols.size());
-
-    {
-        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
-        for (const std::string& rawSymbol : symbols) {
-            const std::string normalizedSymbol = toGmMarketSymbol(rawSymbol);
-            if (normalizedSymbol.empty()) {
-                continue;
-            }
-            if (m_subscribedSymbols.find(normalizedSymbol) != m_subscribedSymbols.end()) {
-                continue;
-            }
-            if (m_subscribedSymbols.size() + normalizedSymbols.size() >= m_maxMarketSubscriptions) {
-                continue;
-            }
-            normalizedSymbols.push_back(normalizedSymbol);
-        }
-    }
-
-    if (normalizedSymbols.empty()) {
-        return true;
-    }
-
-    INTERNAL_INFO_STREAM << "[JMC] 批量订阅行情: " << normalizedSymbols.size() << " 只标的";
-
-    if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::TICK, {})) {
-        for (const std::string& symbol : normalizedSymbols) {
-            if (!subscribeSymbol(symbol, eventBus)) {
-                INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: failed to subscribe tick fallback symbol" << (symbol);
-            }
-        }
-        return false;
-    }
-    if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::BAR_1M, {})) {
-        for (const std::string& symbol : normalizedSymbols) {
-            if (!subscribeSymbol(symbol, eventBus)) {
-                INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: failed to subscribe bar fallback symbol" << (symbol);
-            }
-        }
-        return false;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
-        for (const std::string& symbol : normalizedSymbols) {
-            m_subscribedSymbols.insert(symbol);
-        }
-    }
-
-    publishSubscriptionStatus(eventBus, true);
-
-    return true;
-}
-
-bool JujinMarketConnector::subscribeSymbol(const std::string& symbol, engine::EventBus* eventBus)
-{
-    if (!m_api || !eventBus || !eventBus->is_running()) {
-        return false;
-    }
-
-    const std::string normalizedSymbol = toGmMarketSymbol(symbol);
-    if (normalizedSymbol.empty()) {
-        return false;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
-        if (m_subscribedSymbols.find(normalizedSymbol) != m_subscribedSymbols.end()) {
-            return true;
-        }
-    }
-
-    INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: subscribe market symbol" << (symbol)
-                         << "->" << (normalizedSymbol);
-
-    const std::vector<std::string> symbols{normalizedSymbol};
-    if (!m_api->subscribe_market_data(symbols, thirdparty::MarketDataType::TICK, {})) {
-        return false;
-    }
-    if (!m_api->subscribe_market_data(symbols, thirdparty::MarketDataType::BAR_1M, {})) {
-        return false;
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
-        m_subscribedSymbols.insert(normalizedSymbol);
-    }
-
-    publishSubscriptionStatus(eventBus, true);
-
-    return true;
-}
-
-void JujinMarketConnector::publishSubscriptionStatus(engine::EventBus* eventBus, bool active)
-{
-    if (!eventBus || !eventBus->is_running()) {
-        return;
-    }
-
-    std::size_t subscribedCount = 0;
-    {
-        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
-        subscribedCount = m_subscribedSymbols.size();
-    }
-
-    MarketSubscriptionStatusRegistry::update(
-        static_cast<int>(subscribedCount),
-        static_cast<int>(m_maxMarketSubscriptions),
-        active);
-
-    engine::EventFormat event = engine::EventFormat::create_from_strings(
-        kRuntimeSubscriptionStatusEvent,
-        "JUJIN_MARKET_CONNECTOR",
-        0);
-    event.set("subscription_count", static_cast<int64_t>(subscribedCount));
-    event.set("subscription_limit", static_cast<int64_t>(m_maxMarketSubscriptions));
-    event.set("active", active);
-    event.metadata["subscription_count"] = std::to_string(subscribedCount);
-    event.metadata["subscription_limit"] = std::to_string(m_maxMarketSubscriptions);
-    event.metadata["active"] = active ? "true" : "false";
-    const auto result = eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
-    if (!result) {
-        INTERNAL_ERROR_STREAM << "[JMC] JujinMarketConnector: failed to publish subscription status"
-                              << (result.message);
-    }
-}
 
 const std::string& JujinMarketConnector::lastError() const
 {

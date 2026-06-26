@@ -2,7 +2,7 @@
 #include "TradingConnectionConfigService.h"
 #include "TradingRuntimeStatusService.h"
 #include "StockNameResolver.h"
-#include "JujinApi.h"
+#include "../../engine/include/GmSessionEngine.h"
 #include "../../../app/system/TradingSystem.h"
 #include "../../../app/adapters/JujinBrokerGateway.h"
 #include "../../../engine/include/GlobalEventBusRegistry.h"
@@ -69,25 +69,26 @@ void TradeExecutionBridge::ensureInitialized() {
         sys.initialize();
 
         // 从 SDK 同步账户/持仓到 PositionAccountEngine（QML 从这里读数据）
-        if (auto* api = engine::get_shared_jujin_api()) {
-            auto acc = api->query_account();
-            INTERNAL_ERROR_STREAM << "[TradingBridge] SDK account: total=" << acc.total_asset
-                      << " available=" << acc.available << " mv=" << acc.market_value;
+        {
+            auto& eng = engine::GmSessionEngine::instance();
+            auto acc = eng.queryAccount();
+            INTERNAL_ERROR_STREAM << "[TradingBridge] SDK account: total=" << acc.totalAsset
+                      << " available=" << acc.availableCash << " mv=" << acc.marketValue;
             domain::trading::AccountSnapshot snap;
             snap.setAccountId(cfg.value("accountId",
                                cfg.value("liveAccountId",
                                cfg.value("simAccountId"))).toString().toStdString());
-            snap.setAvailableCash(acc.available);
-            snap.setTotalAsset(acc.total_asset);
-            snap.setMarketValue(acc.market_value);
+            snap.setAvailableCash(acc.availableCash);
+            snap.setTotalAsset(acc.totalAsset);
+            snap.setMarketValue(acc.marketValue);
             if (auto* pe = sys.positionEngine()) {
                 pe->applyAccountEvent(snap);
                 INTERNAL_ERROR_STREAM << "[TradingBridge] account synced to PositionEngine";
             }
-            for (auto& p : api->query_positions()) {
+            for (auto& p : eng.queryPositions()) {
                 domain::trading::Position pos;
                 pos.setSymbol(p.symbol);
-                pos.setLastPrice(p.price);
+                pos.setLastPrice(p.lastPrice);
                 pos.setQuantity(p.quantity);
                 pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
                                             : domain::trading::PositionSide::Short);

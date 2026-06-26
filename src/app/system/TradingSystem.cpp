@@ -4,7 +4,7 @@
 #include "../../foundation/include/foundation/market/AStockSymbol.h"
 #include "../adapters/JujinBrokerGateway.h"
 
-#include "../../engine/include/JujinApi.h"
+#include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/GlobalEventBusRegistry.h"
 #include "../../engine/include/Event/EventFormat.hpp"
 
@@ -112,44 +112,42 @@ void TradingSystem::initializeWithBroker(const std::string& token, const std::st
     initialize();
 
     // ── 从 SDK 同步账户/持仓 ──
-    if (auto* api = engine::get_shared_jujin_api()) {
-        if (m_positionEngine) {
-            auto acc = api->query_account();
-            domain::trading::AccountSnapshot snap;
-            snap.setAccountId(accountId);
-            snap.setAvailableCash(acc.available);
-            snap.setTotalAsset(acc.total_asset);
-            snap.setMarketValue(acc.market_value);
-            m_positionEngine->applyAccountEvent(snap);
-            for (auto& p : api->query_positions()) {
-                domain::trading::Position pos;
-                pos.setSymbol(p.symbol);
-                pos.setLastPrice(p.price);
-                pos.setQuantity(p.quantity);
-                pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
-                                            : domain::trading::PositionSide::Short);
-                m_positionEngine->applyPositionEvent(p.symbol, pos);
-            }
+    if (m_positionEngine) {
+        auto acc = engine::GmSessionEngine::instance().queryAccount();
+        domain::trading::AccountSnapshot snap;
+        snap.setAccountId(accountId);
+        snap.setAvailableCash(acc.availableCash);
+        snap.setTotalAsset(acc.totalAsset);
+        snap.setMarketValue(acc.marketValue);
+        m_positionEngine->applyAccountEvent(snap);
+        for (auto& p : engine::GmSessionEngine::instance().queryPositions()) {
+            domain::trading::Position pos;
+            pos.setSymbol(p.symbol);
+            pos.setLastPrice(p.lastPrice);
+            pos.setQuantity(p.quantity);
+            pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
+                                        : domain::trading::PositionSide::Short);
+            m_positionEngine->applyPositionEvent(p.symbol, pos);
         }
     }
 }
 
 void TradingSystem::refreshPositionsFromBroker() {
     if (!m_positionEngine) return;
-    auto* api = engine::get_shared_jujin_api();
-    if (!api) return;
+    auto& eng = engine::GmSessionEngine::instance();
+    if (!eng.initialized()) return;
 
-    auto acc = api->query_account();
+    auto acc = eng.queryAccount();
     domain::trading::AccountSnapshot snap;
-    snap.setAvailableCash(acc.available);
-    snap.setTotalAsset(acc.total_asset);
-    snap.setMarketValue(acc.market_value);
+    snap.setAvailableCash(acc.availableCash);
+    snap.setTotalAsset(acc.totalAsset);
+    snap.setMarketValue(acc.marketValue);
     m_positionEngine->applyAccountEvent(snap);
 
-    for (auto& p : api->query_positions()) {
+    for (auto& p : eng.queryPositions()) {
         domain::trading::Position pos;
         pos.setSymbol(p.symbol);
-        pos.setLastPrice(p.price);
+        pos.setLastPrice(p.lastPrice);
         pos.setQuantity(p.quantity);
         pos.setSide(p.quantity >= 0 ? domain::trading::PositionSide::Long
                                     : domain::trading::PositionSide::Short);

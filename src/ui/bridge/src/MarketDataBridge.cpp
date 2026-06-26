@@ -1,44 +1,72 @@
 #include "MarketDataBridge.h"
-#include "GmMarketSource.h"
-#include "Event/EventBus.hpp"
-#include "Event/EventFormat.hpp"
-#include "GlobalEventBusRegistry.h"
+#include "../../engine/include/GmSessionEngine.h"
 
 #include <QDateTime>
-#include "foundation/log/logging.hpp"
-#include <QTimer>
 #include <QDate>
+#include "foundation/log/logging.hpp"
 
 namespace bridge {
 
 MarketDataBridge::MarketDataBridge(QObject* parent) : QObject(parent) {}
+
+MarketDataBridge::~MarketDataBridge() = default;
 
 void MarketDataBridge::initialize() {
     if (m_initialized) return;
     m_initialized = true;
     m_connected = true;
 
-    m_pollTimer = new QTimer(this);
-    QObject::connect(m_pollTimer, &QTimer::timeout, this, [this]() {
-        for (const auto& sym : m_pollSymbols)
-            updateSnapshot(sym);
-    });
-    m_pollTimer->start(3000);
+    // 从 GmSessionEngine 收实时 tick 推送
+    engine::GmSessionEngine::instance().setTickCallback(
+        [this](const engine::GmTickData& td) {
+            QString qSym = QString::fromStdString(td.symbol);
+            auto it = m_marketSnapshots.find(qSym);
+            if (it == m_marketSnapshots.end()) {
+                updateSnapshot(qSym);
+                it = m_marketSnapshots.find(qSym);
+                if (it == m_marketSnapshots.end()) return;
+            }
+
+            auto snap = it->toMap();
+            snap["price"]     = td.price;
+            snap["open"]      = td.open;
+            snap["high"]      = td.high;
+            snap["low"]       = td.low;
+            snap["volume"]    = td.lastVolume > 0 ? td.lastVolume : td.cumVolume;
+            snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+            snap["source"]    = QStringLiteral("掘金推送");
+
+            QVariantList bids, asks;
+            for (size_t i = 0; i < (std::min)(td.bidPrices.size(), td.bidVolumes.size()); ++i)
+                bids.append(QVariantMap{{"price", td.bidPrices[i]}, {"volume", static_cast<qint64>(td.bidVolumes[i])}});
+            for (size_t i = 0; i < (std::min)(td.askPrices.size(), td.askVolumes.size()); ++i)
+                asks.append(QVariantMap{{"price", td.askPrices[i]}, {"volume", static_cast<qint64>(td.askVolumes[i])}});
+            if (!bids.empty() || !asks.empty())
+                snap["depthSnapshot"] = QVariantMap{{"bids", bids}, {"asks", asks}};
+
+            double preClose = snap.value("preClose").toDouble();
+            if (preClose > 0) {
+                double pct = (td.price - preClose) / preClose * 100.0;
+                snap["changePct"] = pct;
+                snap["changePercent"] = pct;
+            }
+
+            m_marketSnapshots[qSym] = snap;
+            emit marketSnapshotsChanged();
+        });
 
     emit initializedChanged();
     emit connectedChanged();
 }
 
 void MarketDataBridge::initializeAsync() {
-    QTimer::singleShot(0, this, [this]() { initialize(); });
+    initialize();
 }
 
 void MarketDataBridge::updateSnapshot(const QString& symbol) {
     if (symbol.isEmpty()) return;
-    auto q = GmMarketSource::fetchQuote(symbol.toStdString());
+    auto q = engine::GmSessionEngine::instance().fetchQuote(symbol.toStdString());
     if (!q || !q->valid) return;
-    static int dbg = 0;
-    if (++dbg <= 5) INTERNAL_DEBUG_STREAM << "[MktBridge] " << symbol.toStdString() << "price=" << q->price << "preClose=" << q->preClose << "limitUp=" << q->isLimitUp() << "limitDown=" << q->isLimitDown();
 
     QVariantMap snap;
     snap["symbol"]     = symbol;
@@ -56,7 +84,6 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
     snap["limitDown"]      = q->isLimitDown();
     snap["limitPct"]       = q->limitPct();
 
-    // 封单分析：涨停看买一封单，跌停看卖一封单
     if (q->isLimitUp() && !q->bids.empty()) {
         snap["sealedVolume"] = q->bids[0].volume;
         snap["sealedAmount"] = q->bids[0].volume * q->bids[0].price;
@@ -79,9 +106,9 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
 
 void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     if (symbol.isEmpty()) return;
-    m_pollSymbols.insert(symbol);
+    m_trackedSymbols.insert(symbol);
     updateSnapshot(symbol);
-    publishWatchEnsure(symbol);
+    engine::GmSessionEngine::instance().subscribeTick(symbol.toStdString());
 }
 
 void MarketDataBridge::activateDefaultWatchlist() {
@@ -96,11 +123,10 @@ QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
     auto it = m_marketSnapshots.find(symbol);
     if (it != m_marketSnapshots.end()) return it->toMap();
 
-    // 缓存没有，立即拉一次
     auto* self = const_cast<MarketDataBridge*>(this);
     self->updateSnapshot(symbol);
-    self->m_pollSymbols.insert(symbol);
-    self->publishWatchEnsure(symbol);
+    self->m_trackedSymbols.insert(symbol);
+    engine::GmSessionEngine::instance().subscribeTick(symbol.toStdString());
 
     it = m_marketSnapshots.find(symbol);
     if (it != m_marketSnapshots.end()) return it->toMap();
@@ -121,13 +147,17 @@ QString MarketDataBridge::getNextTradingDay(const QString& d) {
     do { dt = dt.addDays(1); } while (dt.dayOfWeek() > 5);
     return dt.toString("yyyy-MM-dd");
 }
+
 void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
     for (const auto& s : symbols) {
-        m_pollSymbols.insert(s);
-        publishWatchEnsure(s);
+        m_trackedSymbols.insert(s);
+        engine::GmSessionEngine::instance().subscribeTick(s.toStdString());
     }
 }
-void MarketDataBridge::unsubscribeRealtime() { m_pollSymbols.clear(); }
+
+void MarketDataBridge::unsubscribeRealtime() {
+    m_trackedSymbols.clear();
+}
 
 QVariantMap MarketDataBridge::getTradingStatus(const QString& symbol) const {
     QVariantMap s;
@@ -165,14 +195,6 @@ QVariantMap MarketDataBridge::getTradingStatus(const QString& symbol) const {
     }
 
     return s;
-}
-
-void MarketDataBridge::publishWatchEnsure(const QString& symbol) {
-    auto* bus = engine::get_engine_event_bus();
-    if (!bus || symbol.isEmpty()) return;
-    engine::EventFormat evt("market.watch.ensure", engine::Event_Core::EventSource::SYSTEM);
-    evt.set("symbol", symbol.toStdString());
-    bus->publish(evt, static_cast<int>(engine::EventPriority::HIGH));
 }
 
 } // namespace bridge

@@ -3,7 +3,6 @@ cmake_minimum_required(VERSION 3.15)
 
 add_library(app_adapters STATIC
     JujinBrokerGateway.cpp
-    JujinSession.cpp
     SimulatedBrokerGateway.cpp
 )
 

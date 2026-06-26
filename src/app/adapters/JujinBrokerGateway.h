@@ -1,19 +1,15 @@
 #pragma once
-// JujinBrokerGateway — 掘金券商网关 (纯 C++, 零 Qt)
-// 复用 JMC 已创建的 JujinApi（共享 GmStrategySession），不重复建 SDK 实例
+// JujinBrokerGateway — 掘金券商网关，直连 TradeEngine
 
 #include "../../domain/trading/IBrokerGateway.h"
-
 #include <string>
-
-namespace thirdparty { class JujinApi; }
 
 namespace app::adapters {
 
 class JujinBrokerGateway final : public domain::trading::IBrokerGatewayEx {
 public:
-    JujinBrokerGateway();
-    ~JujinBrokerGateway() override;
+    JujinBrokerGateway() = default;
+    ~JujinBrokerGateway() override = default;
 
     bool connect(const std::string& configJson) override;
     void disconnect() override;
@@ -24,7 +20,6 @@ public:
                      domain::trading::OrderCallback onResult) override;
     void cancelOrder(domain::trading::BrokerOrderId brokerOrderId,
                      domain::trading::OrderCallback onResult) override;
-
     void queryOrder(domain::trading::BrokerOrderId brokerOrderId,
                     domain::trading::OrderQueryCallback onResult) override;
     void queryPositions(domain::trading::PositionsQueryCallback onResult) override;
@@ -45,10 +40,6 @@ public:
                      domain::trading::TradeCallback onResult) override;
 
 private:
-    /// @brief 懒解析共享 JujinApi（JMC 可能尚未启动），const 安全
-    void tryResolveApi() const;
-
-    mutable thirdparty::JujinApi* m_api = nullptr;  // 共享实例，不持有所有权，懒解析
     domain::trading::TradeCallback m_tradeCallback;
     domain::trading::ErrorCallback m_errorCallback;
     mutable std::string m_lastError;

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <QObject>
-#include <QTimer>
 #include <QString>
 #include <QStringList>
 #include <QVariantList>
@@ -19,6 +18,7 @@ class MarketDataBridge : public QObject {
     Q_PROPERTY(QVariantMap marketSnapshots READ marketSnapshots NOTIFY marketSnapshotsChanged)
 public:
     explicit MarketDataBridge(QObject* parent = nullptr);
+    ~MarketDataBridge() override;
 
     bool initialized() const { return m_initialized; }
     bool isConnected() const { return m_connected; }
@@ -48,16 +48,13 @@ signals:
 
 private:
     void updateSnapshot(const QString& symbol);
-    void publishWatchEnsure(const QString& symbol);
 
     bool m_initialized{false};
     bool m_connected{false};
     QString m_primarySymbol;
     QVariantMap m_marketSnapshots;
     QStringList m_watchlist;
-    QSet<QString> m_pollSymbols;
-    QTimer* m_pollTimer = nullptr;
-    QHash<QString, int> m_subRefCount;
+    QSet<QString> m_trackedSymbols;
 };
 
 } // namespace bridge

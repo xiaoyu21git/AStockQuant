@@ -84,7 +84,7 @@ def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
                 FROM symbol_info s
                 LEFT JOIN daily_bar d ON d.symbol_id = s.id
                 WHERE s.asset_class = 'STOCK' AND s.status IN %s
-                GROUP BY s.symbol
+                GROUP BY s.symbol, s.name, s.status, s.delist_date
                 """,
                 (TRACKED_SYMBOL_STATUSES,),
             )
