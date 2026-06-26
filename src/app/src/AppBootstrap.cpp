@@ -21,7 +21,7 @@
 #include <QTimer>
 #include <QtGlobal>
 #include "VasAurora.hpp"
-#include "../../app/system/TradingSystem.h"
+
 #include "../../domain/strategy/include/RiskEvaluator.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/TradeEngine.h"
@@ -271,7 +271,7 @@ bool AppBootstrap::initConfiguration()
                 c.commissionRate         = riskNode->getPath("commissionRate",'.').asDouble(c.commissionRate);
                 c.minCommission          = riskNode->getPath("minCommission",'.').asDouble(c.minCommission);
                 c.stampTaxRate           = riskNode->getPath("stampTaxRate",'.').asDouble(c.stampTaxRate);
-                app::system::TradingSystem::instance().setRiskConfig(c);
+                domain::strategy::RiskManager::instance().setRiskConfig(c);
                 INTERNAL_INFO_STREAM << "[AppBootstrap] 风控+费率配置已同步";
             }
         }

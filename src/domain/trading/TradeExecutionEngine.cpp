@@ -189,6 +189,20 @@ TradeExecutionEngine::Impl::checkPendingOrderConflict(const TradeOrder& order) c
 // ============================================================================
 // Submit pipeline
 // ============================================================================
+SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order) {
+    strategy::RiskInput risk;
+    risk.setStrategyId(order.strategyId());
+    risk.setSymbol(order.symbol());
+    risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
+    risk.setPrice(order.price());
+    risk.setQuantity(order.quantity());
+    risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
+    risk.setStrategyBound(true);
+    risk.setStrategyActive(true);
+    risk.setAutoStrategySignal(!order.strategyId().empty());
+    return submitOrder(order, risk);
+}
+
 SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
                                                 const strategy::RiskInput& riskContext) {
     // Stage 1: validation

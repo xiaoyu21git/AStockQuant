@@ -255,8 +255,8 @@ public:
     IBrokerGateway* gateway() const noexcept;
 
     // ── Order operations ──
-    SubmitResult submitOrder(const TradeOrder& order,
-                             const strategy::RiskInput& riskContext);
+    SubmitResult submitOrder(const TradeOrder& order);  // 自动构建 RiskInput
+    SubmitResult submitOrder(const TradeOrder& order, const strategy::RiskInput& riskContext);
     bool cancelOrder(BrokerOrderId brokerOrderId);
 
     // ── Queries ──

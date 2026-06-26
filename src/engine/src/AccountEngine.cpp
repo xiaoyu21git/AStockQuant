@@ -23,11 +23,9 @@ AccountEngine& AccountEngine::instance() {
 
 AccountEngine::AccountEngine() {
     auto* bus = get_engine_event_bus();
-    INTERNAL_INFO_STREAM << "[AccountEngine] constructor: bus=" << (void*)bus << " running=" << (bus ? bus->is_running() : false);
     if (bus) {
         m_accountSub = bus->subscribe("trading.account.updated",
             [this](const EventFormat& e) {
-                INTERNAL_INFO_STREAM << "[AccountEngine] received account.updated event";
                 AccountInfo a;
                 a.accountId     = e.get<std::string>("account_id").value_or("");
                 a.availableCash = e.get<double>("available").value_or(0.0);
@@ -81,12 +79,8 @@ bool AccountEngine::initialized() const { return m_strategy != nullptr; }
 AccountInfo AccountEngine::account() {
     if (m_cacheValid) return m_cachedAccount;
     auto* s = static_cast<::Strategy*>(m_strategy);
-    INTERNAL_INFO_STREAM << "[AccountEngine] account(): strategy=" << (void*)s << " cacheValid=" << m_cacheValid;
     if (!s) return {};
     auto* arr = s->get_cash(nullptr);
-    INTERNAL_INFO_STREAM << "[AccountEngine] account(): get_cash ptr=" << (void*)arr
-                         << " status=" << (arr ? arr->status() : -1)
-                         << " count=" << (arr ? (int)arr->count() : -1);
     if (!arr || arr->status() != 0 || arr->count() == 0) {
         if (arr) arr->release(); return {};
     }

@@ -48,10 +48,42 @@ TradeEngine& TradeEngine::instance() {
 bool TradeEngine::initialize(void* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
+
+    auto* bus = get_engine_event_bus();
+    if (bus) {
+        m_orderSub = bus->subscribe("trading.order.updated",
+            [this](const EventFormat& e) {
+                OrderUpdate u;
+                u.brokerOrderId  = e.get<std::string>("broker_order_id").value_or("");
+                u.symbol         = e.get<std::string>("symbol").value_or("");
+                u.filledPrice    = e.get<double>("filled_price").value_or(0.0);
+                u.filledQuantity = e.get<std::int64_t>("filled_quantity").value_or(0);
+                u.message        = e.get<std::string>("message").value_or("");
+                auto status      = e.get<std::int64_t>("status");
+                if (status) u.status = static_cast<OrderUpdate::Status>(*status);
+                onOrderStatus(u);
+            });
+        m_fillSub = bus->subscribe("trading.execution.report",
+            [this](const EventFormat& e) {
+                TradeFill f;
+                f.fillId        = e.get<std::string>("exec_id").value_or("");
+                f.brokerOrderId = e.get<std::string>("broker_order_id").value_or("");
+                f.symbol        = e.get<std::string>("symbol").value_or("");
+                f.price         = e.get<double>("price").value_or(0.0);
+                f.quantity      = e.get<std::int64_t>("quantity").value_or(0);
+                f.commission    = e.get<double>("commission").value_or(0.0);
+                onTradeFill(f);
+            });
+    }
     return true;
 }
 
 void TradeEngine::shutdown() {
+    auto* bus = get_engine_event_bus();
+    if (bus) {
+        if (!m_orderSub.is_null()) bus->unsubscribe(m_orderSub);
+        if (!m_fillSub.is_null())  bus->unsubscribe(m_fillSub);
+    }
     m_strategy = nullptr;
 }
 

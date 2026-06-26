@@ -5,7 +5,7 @@
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../../domain/trading/TradeExecutionEngine.h"
-#include "../../../app/system/TradingSystem.h"
+
 
 #include "../../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
@@ -190,7 +190,7 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
         }
     }
 
-    auto result = app::system::TradingSystem::instance().submitOrder(order);
+    auto result = domain::trading::TradeExecutionEngine::instance().submitOrder(order);
 
     // ── 记录结果 ──
     QVariantMap out;
@@ -236,7 +236,7 @@ bool TradeExecutionBridge::submitBridgeOrder(const QVariantMap& request) {
 bool TradeExecutionBridge::cancelOrder(const QString& brokerOrderId) {
     if (!m_initialized) return false;
     domain::trading::BrokerOrderId id(brokerOrderId.toStdString());
-    auto* engine = app::system::TradingSystem::instance().tradeEngine();
+    auto* engine = &domain::trading::TradeExecutionEngine::instance();
     if (!engine) {
         setLastError(QStringLiteral("交易引擎未初始化"));
         return false;
@@ -248,7 +248,7 @@ bool TradeExecutionBridge::cancelOrder(const QString& brokerOrderId) {
 
 bool TradeExecutionBridge::resumeExecutionPause(const QString& executionScopeId,
                                                   const QString& pausedBatchId) {
-    auto* engine = app::system::TradingSystem::instance().tradeEngine();
+    auto* engine = &domain::trading::TradeExecutionEngine::instance();
     if (!engine) {
         setLastError(QStringLiteral("交易引擎未初始化"));
         return false;
@@ -261,7 +261,7 @@ bool TradeExecutionBridge::resumeExecutionPause(const QString& executionScopeId,
 
 bool TradeExecutionBridge::approveExecutionCheckpoint(const QString& executionScopeId,
                                                         const QString& batchId) {
-    auto* engine = app::system::TradingSystem::instance().tradeEngine();
+    auto* engine = &domain::trading::TradeExecutionEngine::instance();
     if (!engine) {
         setLastError(QStringLiteral("交易引擎未初始化"));
         return false;
@@ -274,7 +274,7 @@ bool TradeExecutionBridge::approveExecutionCheckpoint(const QString& executionSc
 
 bool TradeExecutionBridge::cancelManualTestOrder(const QString& orderId) {
     domain::trading::BrokerOrderId id(orderId.toStdString());
-    auto* engine = app::system::TradingSystem::instance().tradeEngine();
+    auto* engine = &domain::trading::TradeExecutionEngine::instance();
     if (!engine) {
         setLastError(QStringLiteral("交易引擎未初始化"));
         return false;

@@ -10,7 +10,7 @@
 #include "database/StrategyRepository.h"
 #include "FactorService.h"
 
-#include "../../app/system/TradingSystem.h"
+
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/factor/include/factor_compute/CachedMarketDataView.h"
@@ -332,11 +332,11 @@ void StrategyBridge::init()
             mgr.setFactorInstanceManager(factorSvcBridge->instanceManager());
         }
 
-        // 注册 TradingSystem 为策略订单监听器
+        // 注册 TradeExecutionEngine 为策略订单监听器
         {
-            auto& ts = app::system::TradingSystem::instance();
-            mgr.setOrderListener(&ts);
-            mgr.setDefaultOrderListener(&ts);
+            auto& engine = domain::trading::TradeExecutionEngine::instance();
+            mgr.setOrderListener(&engine);
+            mgr.setDefaultOrderListener(&engine);
         }
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";

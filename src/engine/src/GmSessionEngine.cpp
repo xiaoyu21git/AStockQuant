@@ -41,9 +41,7 @@ public:
         set_mode(1);
     }
 
-    void on_init() override {
-        // 账户/持仓按需查询 — AccountEngine::account() 调用时触发 get_cash/get_position
-    }
+    void on_init() override {}
 
     void on_tick(Tick* tick) override {
         if (!tick) return;

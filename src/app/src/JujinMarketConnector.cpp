@@ -292,7 +292,7 @@ bool JujinMarketConnector::start()
                     totalTicks = 0;
                     lastReport = now;
                 }
-                app::system::TradingSystem::instance().pushMarketData(
+                domain::strategy::MarketDataAdapter().pushTick(
                     *sym, *price, vol.value_or(0.0),
                     date.has_value() ? static_cast<std::int32_t>(*date) : 0);
             }
@@ -307,7 +307,7 @@ bool JujinMarketConnector::start()
             auto vol   = event.get<double>("volume");
             auto date  = event.get<std::int64_t>("tradingDay");
             if (sym.has_value() && price.has_value()) {
-                app::system::TradingSystem::instance().pushMarketData(
+                domain::strategy::MarketDataAdapter().pushTick(
                     *sym, *price, vol.value_or(0.0),
                     date.has_value() ? static_cast<std::int32_t>(*date) : 0);
             }

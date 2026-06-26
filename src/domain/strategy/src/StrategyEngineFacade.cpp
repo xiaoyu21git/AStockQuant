@@ -19,7 +19,7 @@
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
 #include "../../../engine/include/GmSessionEngine.h"
-#include "../../../app/system/TradingSystem.h"
+
 #include "foundation/json/json_facade.h"
 #include "foundation/market/AStockSymbol.h"
 #include "foundation/log/logging.hpp"
@@ -256,7 +256,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     domain::strategy::RiskConfig riskCfg = domain::strategy::RiskConfig::defaults();
     riskCfg.stopLossPercent   = params.stopLossPercent;
     riskCfg.takeProfitPercent = params.takeProfitPercent;
-    app::system::TradingSystem::instance().setRiskConfig(riskCfg);
+    domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
 
     return engine;
 
