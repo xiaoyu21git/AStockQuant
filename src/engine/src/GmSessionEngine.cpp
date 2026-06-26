@@ -63,8 +63,6 @@ public:
             if (q.bid_price > 0) { td.bidPrices.push_back(q.bid_price); td.bidVolumes.push_back(q.bid_volume); }
             if (q.ask_price > 0) { td.askPrices.push_back(q.ask_price); td.askVolumes.push_back(q.ask_volume); }
         }
-        std::lock_guard<std::mutex> lock(e.m_tickMutex);
-        if (e.m_impl && e.m_impl->tickCallback) e.m_impl->tickCallback(td);
 
         auto* bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
@@ -97,7 +95,18 @@ public:
             case 7: u.status = OrderUpdate::Expired;       break;
             default: u.status = OrderUpdate::Submitted;    break;
         }
-        if (e.m_impl && e.m_impl->orderUpdateCb) e.m_impl->orderUpdateCb(u);
+
+        auto* bus = get_engine_event_bus();
+        if (bus && bus->is_running()) {
+            EventFormat evt("trading.order.updated", Event_Core::EventSource::MARKET_DATA);
+            evt.set("broker_order_id", u.brokerOrderId);
+            evt.set("symbol", u.symbol);
+            evt.set("filled_price", u.filledPrice);
+            evt.set("filled_quantity", static_cast<int64_t>(u.filledQuantity));
+            evt.set("status", static_cast<int64_t>(u.status));
+            evt.set("message", u.message);
+            bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        }
     }
 
     void on_execution_report(ExecRpt* rpt) override {
@@ -109,7 +118,18 @@ public:
         f.price = static_cast<double>(rpt->price);
         f.quantity = static_cast<int64_t>(rpt->volume);
         f.commission = static_cast<double>(rpt->commission);
-        if (e.m_impl && e.m_impl->tradeFillCb) e.m_impl->tradeFillCb(f);
+
+        auto* bus = get_engine_event_bus();
+        if (bus && bus->is_running()) {
+            EventFormat evt("trading.execution.report", Event_Core::EventSource::MARKET_DATA);
+            evt.set("exec_id", f.fillId);
+            evt.set("broker_order_id", f.brokerOrderId);
+            evt.set("symbol", f.symbol);
+            evt.set("price", f.price);
+            evt.set("quantity", static_cast<int64_t>(f.quantity));
+            evt.set("commission", f.commission);
+            bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        }
     }
 
     void on_cash(Cash* cash) override {
@@ -119,7 +139,17 @@ public:
         a.accountId = cash->account_id; a.totalAsset = cash->nav;
         a.availableCash = cash->available; a.marketValue = cash->market_value;
         a.frozenCash = cash->frozen;
-        if (e.m_impl && e.m_impl->accountCb) e.m_impl->accountCb(a);
+
+        auto* bus = get_engine_event_bus();
+        if (bus && bus->is_running()) {
+            EventFormat evt("trading.account.updated", Event_Core::EventSource::MARKET_DATA);
+            evt.set("account_id", a.accountId);
+            evt.set("available", a.availableCash);
+            evt.set("total_asset", a.totalAsset);
+            evt.set("market_value", a.marketValue);
+            evt.set("frozen", a.frozenCash);
+            bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        }
     }
 
     void on_position(::Position* pos) override {
@@ -131,7 +161,19 @@ public:
         p.availableQty = pos->available; p.costPrice = pos->vwap;
         p.lastPrice = pos->price; p.marketValue = pos->market_value;
         p.unrealizedPnl = pos->fpnl;
-        if (e.m_impl && e.m_impl->positionCb) e.m_impl->positionCb({p});
+
+        auto* bus = get_engine_event_bus();
+        if (bus && bus->is_running()) {
+            EventFormat evt("trading.position.updated", Event_Core::EventSource::MARKET_DATA);
+            evt.set("symbol", p.symbol);
+            evt.set("quantity", p.quantity);
+            evt.set("available_qty", p.availableQty);
+            evt.set("cost_price", p.costPrice);
+            evt.set("last_price", p.lastPrice);
+            evt.set("market_value", p.marketValue);
+            evt.set("unrealized_pnl", p.unrealizedPnl);
+            bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        }
     }
 
 private:
@@ -213,14 +255,6 @@ void GmSessionEngine::unsubscribeTick(const std::string& symbol) {
 // 回调设置
 // ═══════════════════════════════════════════════════════════════════
 
-void GmSessionEngine::setTickCallback(TickCallback cb) {
-    std::lock_guard<std::mutex> lock(m_tickMutex);
-    if (m_impl) m_impl->tickCallback = std::move(cb);
-}
-void GmSessionEngine::setOrderUpdateCallback(OrderUpdateCb cb) { if (m_impl) m_impl->orderUpdateCb = std::move(cb); }
-void GmSessionEngine::setTradeFillCallback(TradeFillCb cb)     { if (m_impl) m_impl->tradeFillCb   = std::move(cb); }
-void GmSessionEngine::setAccountCallback(AccountCb cb)         { if (m_impl) m_impl->accountCb     = std::move(cb); }
-void GmSessionEngine::setPositionCallback(PositionCb cb)       { if (m_impl) m_impl->positionCb    = std::move(cb); }
 
 // ═══════════════════════════════════════════════════════════════════
 // 行情查询

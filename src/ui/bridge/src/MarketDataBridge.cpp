@@ -16,44 +16,7 @@ void MarketDataBridge::initialize() {
     m_initialized = true;
     m_connected = true;
 
-    // 从 GmSessionEngine 收实时 tick 推送
-    engine::GmSessionEngine::instance().setTickCallback(
-        [this](const engine::GmTickData& td) {
-            QString qSym = QString::fromStdString(td.symbol);
-            auto it = m_marketSnapshots.find(qSym);
-            if (it == m_marketSnapshots.end()) {
-                updateSnapshot(qSym);
-                it = m_marketSnapshots.find(qSym);
-                if (it == m_marketSnapshots.end()) return;
-            }
-
-            auto snap = it->toMap();
-            snap["price"]     = td.price;
-            snap["open"]      = td.open;
-            snap["high"]      = td.high;
-            snap["low"]       = td.low;
-            snap["volume"]    = td.lastVolume > 0 ? td.lastVolume : td.cumVolume;
-            snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-            snap["source"]    = QStringLiteral("掘金推送");
-
-            QVariantList bids, asks;
-            for (size_t i = 0; i < (std::min)(td.bidPrices.size(), td.bidVolumes.size()); ++i)
-                bids.append(QVariantMap{{"price", td.bidPrices[i]}, {"volume", static_cast<qint64>(td.bidVolumes[i])}});
-            for (size_t i = 0; i < (std::min)(td.askPrices.size(), td.askVolumes.size()); ++i)
-                asks.append(QVariantMap{{"price", td.askPrices[i]}, {"volume", static_cast<qint64>(td.askVolumes[i])}});
-            if (!bids.empty() || !asks.empty())
-                snap["depthSnapshot"] = QVariantMap{{"bids", bids}, {"asks", asks}};
-
-            double preClose = snap.value("preClose").toDouble();
-            if (preClose > 0) {
-                double pct = (td.price - preClose) / preClose * 100.0;
-                snap["changePct"] = pct;
-                snap["changePercent"] = pct;
-            }
-
-            m_marketSnapshots[qSym] = snap;
-            emit marketSnapshotsChanged();
-        });
+    // 行情数据由 ensureWatchSymbol → updateSnapshot() 触发 fetchQuote() 拉取
 
     emit initializedChanged();
     emit connectedChanged();

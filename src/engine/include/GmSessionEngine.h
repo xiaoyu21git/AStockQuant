@@ -109,25 +109,9 @@ public:
     void subscribeTick(const std::string& symbol);
     void unsubscribeTick(const std::string& symbol);
 
-    // ── 行情回调 ──
-    using TickCallback = std::function<void(const GmTickData&)>;
-    void setTickCallback(TickCallback cb);
-
     // ── 行情查询 ──
     std::optional<GmQuote> fetchQuote(const std::string& symbol);
     double fetchPreClose(const std::string& symbol);
-
-    // ── 交易回调 ──
-    using OrderUpdateCb = std::function<void(const OrderUpdate&)>;
-    using TradeFillCb   = std::function<void(const TradeFill&)>;
-    void setOrderUpdateCallback(OrderUpdateCb cb);
-    void setTradeFillCallback(TradeFillCb cb);
-
-    // ── 账户回调 ──
-    using AccountCb  = std::function<void(const AccountInfo&)>;
-    using PositionCb = std::function<void(const std::vector<Position>&)>;
-    void setAccountCallback(AccountCb cb);
-    void setPositionCallback(PositionCb cb);
 
     // ── 底层 Strategy 指针（上层引擎共享）──
     void* strategy() const;
@@ -140,11 +124,6 @@ public:
     struct Impl {
         std::atomic<bool> initialized{false};
         std::thread       strategyThread;
-        OrderUpdateCb orderUpdateCb;
-        TradeFillCb   tradeFillCb;
-        AccountCb     accountCb;
-        TickCallback tickCallback;
-        PositionCb    positionCb;
     };
     struct StrategyDeleter { void operator()(void*); };
 

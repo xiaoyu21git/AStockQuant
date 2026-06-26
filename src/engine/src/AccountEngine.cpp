@@ -1,5 +1,8 @@
 // AccountEngine.cpp — 账户引擎实现，共享 GmSessionEngine 的 ::Strategy
 #include "AccountEngine.h"
+#include "Event/EventBus.hpp"
+#include "Event/EventFormat.hpp"
+#include "GlobalEventBusRegistry.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 namespace engine {
@@ -21,10 +24,50 @@ AccountEngine& AccountEngine::instance() {
 bool AccountEngine::initialize(void* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
+
+    auto* bus = get_engine_event_bus();
+    if (bus) {
+        m_accountSub = bus->subscribe("trading.account.updated",
+            [this](const EventFormat& e) {
+                AccountInfo a;
+                a.accountId     = e.get<std::string>("account_id").value_or("");
+                a.availableCash = e.get<double>("available").value_or(0.0);
+                a.totalAsset    = e.get<double>("total_asset").value_or(0.0);
+                a.marketValue   = e.get<double>("market_value").value_or(0.0);
+                a.frozenCash    = e.get<double>("frozen").value_or(0.0);
+                onCash(a);
+            });
+        m_positionSub = bus->subscribe("trading.position.updated",
+            [this](const EventFormat& e) {
+                Position p;
+                p.symbol        = e.get<std::string>("symbol").value_or("");
+                p.quantity      = e.get<std::int64_t>("quantity").value_or(0);
+                p.availableQty  = e.get<std::int64_t>("available_qty").value_or(0);
+                p.costPrice     = e.get<double>("cost_price").value_or(0.0);
+                p.lastPrice     = e.get<double>("last_price").value_or(0.0);
+                p.marketValue   = e.get<double>("market_value").value_or(0.0);
+                p.unrealizedPnl = e.get<double>("unrealized_pnl").value_or(0.0);
+                onPositionUpdate({p});
+            });
+        m_tickSub = bus->subscribe("trading.market.tick",
+            [this](const EventFormat& e) {
+                auto sym   = e.get<std::string>("symbol");
+                auto price = e.get<double>("price");
+                if (!sym || !price) return;
+                m_cachedPositions[*sym].lastPrice = *price;
+                if (m_onDataChanged) m_onDataChanged();
+            });
+    }
     return true;
 }
 
 void AccountEngine::shutdown() {
+    auto* bus = get_engine_event_bus();
+    if (bus) {
+        if (!m_accountSub.is_null())  bus->unsubscribe(m_accountSub);
+        if (!m_positionSub.is_null()) bus->unsubscribe(m_positionSub);
+        if (!m_tickSub.is_null())     bus->unsubscribe(m_tickSub);
+    }
     m_strategy = nullptr;
     m_cacheValid = false;
     m_cachedPositions.clear();

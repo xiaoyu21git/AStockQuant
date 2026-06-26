@@ -3,6 +3,7 @@
 #pragma once
 
 #include "GmSessionEngine.h"
+#include "foundation/Utils/Uuid.h"
 #include <unordered_map>
 
 namespace engine {
@@ -40,6 +41,9 @@ private:
     std::unordered_map<std::string, Position> m_cachedPositions;
     DataFn m_onDataChanged;
     bool m_cacheValid = false;
+    foundation::utils::Uuid m_accountSub;
+    foundation::utils::Uuid m_positionSub;
+    foundation::utils::Uuid m_tickSub;
 };
 
 } // namespace engine
