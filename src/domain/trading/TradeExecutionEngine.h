@@ -85,6 +85,9 @@ public:
     [[nodiscard]] bool isBoardLotMode() const noexcept { return m_isBoardLotMode; }
     void setBoardLotMode(bool v) noexcept { m_isBoardLotMode = v; }
 
+    [[nodiscard]] const std::string& clientOrderId() const noexcept { return m_clientOrderId; }
+    void setClientOrderId(std::string v) { m_clientOrderId = std::move(v); }
+
     // Execution batch metadata
     [[nodiscard]] const std::string& batchId() const noexcept { return m_batchId; }
     void setBatchId(std::string v) { m_batchId = std::move(v); }
@@ -150,6 +153,7 @@ private:
     double m_cashAmount{0.0};
     ActionKind m_actionKind{ActionKind::Normal};
     bool m_isBoardLotMode{true};
+    std::string m_clientOrderId;
 
     std::string m_brokerOrderId;
     OrderStatusValue m_status{OrderStatusValue::Pending};
@@ -253,6 +257,9 @@ public:
     void initCallbacks();
     void setGateway(std::unique_ptr<IBrokerGateway> gateway);
     IBrokerGateway* gateway() const noexcept;
+
+    // ── 注册外部提交的订单 (直连网关绕过管线), 使 EventBus 回调能追踪状态 ──
+    void registerOrder(const TradeOrder& order);
 
     // ── Order operations ──
     SubmitResult submitOrder(const TradeOrder& order);  // 自动构建 RiskInput

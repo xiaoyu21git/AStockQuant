@@ -100,6 +100,8 @@ Item {
         ? Number(positionAccountService.accountSnapshot.availableCash)
         : 800000
     property var executionLogs: []
+    property var executionLogKeyByBrokerId: ({})
+    property string lastSubmittedRequestId: ""
     property var strategyRuntimeSnapshot: ({})
     property string runtimeSnapshotDigest: ""
     property string lastWatchTraceKey: ""
@@ -120,10 +122,29 @@ Item {
         return Qt.formatDateTime(new Date(), "hh:mm:ss")
     }
 
-    function pushExecutionLog(kind, title, detail, severity) {
+    function pushExecutionLog(kind, title, detail, severity, orderKey) {
+        // ── 若传入 orderKey → 在同一行上更新字段, 不新增条目 ──
+        var effectiveKey = String(orderKey || "").trim()
+        if (effectiveKey.length > 0) {
+            var existingLogs = root.executionLogs ? root.executionLogs.slice(0) : []
+            var i
+            for (i = 0; i < existingLogs.length; ++i) {
+                if (String(existingLogs[i].orderKey || "") === effectiveKey) {
+                    existingLogs[i].kind     = String(kind || existingLogs[i].kind)
+                    existingLogs[i].title    = String(title || existingLogs[i].title)
+                    existingLogs[i].detail   = String(detail || "").trim()
+                    existingLogs[i].severity = String(severity || existingLogs[i].severity)
+                    existingLogs[i].time     = root.executionLogTimeText()
+                    root.executionLogs       = existingLogs
+                    return
+                }
+            }
+        }
+        // ── 无匹配 key → 新增条目 ──
         var nextLogs = root.executionLogs ? root.executionLogs.slice(0) : []
         nextLogs.unshift({
             id: String(Date.now()) + "|" + String(Math.random()),
+            orderKey: effectiveKey,
             time: root.executionLogTimeText(),
             kind: String(kind || "info"),
             title: String(title || "状态更新"),
@@ -377,11 +398,13 @@ Item {
         if (!matchesBoundStrategyPayload(orderRequest)) {
             return
         }
+        var key = String(orderRequest.clientOrderId || root.lastSubmittedRequestId || "")
         pushExecutionLog(
             "request",
             resolveLiveOrderAction(orderRequest) + " 委托已提交",
             logRequestDetails(orderRequest),
-            "info")
+            "info",
+            key)
     }
 
     function appendOrderStatusLog(orderStatus) {
@@ -415,11 +438,14 @@ Item {
         var severity = rawStatus === "REJECTED"
             ? (isExecutionRuleReject ? "warning" : "error")
             : "info"
+        // ── 同一条订单的状态变更在原记录上更新 ──
+        var orderKey = String(orderStatus.brokerOrderId || orderStatus.clientOrderId || root.lastSubmittedRequestId || "").trim()
         pushExecutionLog(
             isExecutionRuleReject ? "rule" : "status",
             isExecutionRuleReject ? "执行规则阻断" : "委托状态更新",
             detailParts.join(" · "),
-            severity)
+            severity,
+            orderKey)
     }
 
     function appendTradeFillLog(tradeFill) {
@@ -848,14 +874,13 @@ Item {
     }
 
     function canQuickClosePosition(positionData) {
-        var quantity = normalizePositionQuantity(positionData ? positionData.closeableQuantity : 0, positionData ? positionData.type : "stock")
-        if (quantity <= 0) {
-            return false
-        }
-        if (positionData.type === "futures" || positionData.type === "options") {
-            return quantity >= 1
-        }
-        return quantity >= 100 && quantity % 100 === 0
+        var data = positionData || ({})
+        // closeableQuantity=0 时不能短路, 走 || 链
+        var rawQty = safeNumber(data.closeableQuantity || data.availableQuantity || data.quantity, 0)
+        var quantity = normalizePositionQuantity(rawQty, data.type || "stock")
+        if (quantity <= 0) return false
+        if (data.type === "futures" || data.type === "options") return quantity >= 1
+        return Math.floor(quantity / 100) >= 1
     }
 
     function buildGroupedDisplayPositions(rows) {
@@ -1975,24 +2000,28 @@ Item {
     }
 
     function buildQuickCloseRequest(positionData) {
-        var mode = String(positionData && positionData.type ? positionData.type : "stock").trim().toLowerCase()
-        var closeQuantity = normalizePositionQuantity(positionData && positionData.closeableQuantity !== undefined
-            ? positionData.closeableQuantity
-            : 0, mode)
+        var data = positionData || ({})
+        var mode = String(data.type || "stock").trim().toLowerCase()
+        // closeableQuantity=0 时不能短路, 需要走 || 链到 quantity
+        var rawCloseQty = safeNumber(data.closeableQuantity || data.availableQuantity || data.quantity, 0)
+        var closeQuantity = normalizePositionQuantity(rawCloseQty, mode)
 
         if (closeQuantity <= 0) {
             return { error: "当前仓位没有可平数量" }
         }
 
-        if ((mode === "stock" || mode === "margin_buy" || mode === "margin_sell")
-                && (closeQuantity < 100 || closeQuantity % 100 !== 0)) {
-            return { error: "当前可平数量不足100股或不是100股整数倍" }
+        // 股票/融资融券向下取整到整手(100股), A股买卖均为100的整数倍
+        if (mode === "stock" || mode === "margin_buy" || mode === "margin_sell") {
+            closeQuantity = Math.floor(closeQuantity / 100) * 100
+            if (closeQuantity < 100) {
+                return { error: "当前可平数量不足1手(100股)" }
+            }
         }
 
         var requestSide = "SELL"
         var requestPositionEffect = ""
         var requestAction = "sell"
-        var positionSide = String(positionData && positionData.positionSide ? positionData.positionSide : "LONG").trim().toUpperCase()
+        var positionSide = String(data.positionSide || "LONG").trim().toUpperCase()
 
         if (mode === "margin_buy") {
             requestSide = "SELL"
@@ -2012,14 +2041,14 @@ Item {
             requestAction = positionSide === "SHORT" ? "optionCoveredClose" : "optionSell"
         }
 
-        var requestSymbol = serviceSymbolForMode(mode, positionData.symbol)
+        var requestSymbol = serviceSymbolForMode(mode, data.symbol)
         if (!requestSymbol) {
             return { error: invalidSymbolMessageForMode(mode) }
         }
 
         var liveQuote = resolveLiveQuote(requestSymbol)
         var livePrice = safeNumber(liveQuote && liveQuote.price !== undefined ? liveQuote.price : 0, 0)
-        var fallbackPrice = safeNumber(positionData && (positionData.lastPrice || positionData.avgPrice), 0)
+        var fallbackPrice = safeNumber(data.lastPrice || data.avgPrice, 0)
         var useMarket = hasRealtimeQuote(liveQuote) && livePrice > 0
         var requestPrice = useMarket ? livePrice : (fallbackPrice > 0 ? fallbackPrice : livePrice)
         if (requestPrice <= 0) {
@@ -2040,9 +2069,9 @@ Item {
             request.positionEffect = requestPositionEffect
         }
         if (mode === "options") {
-            request.underlying = positionData.underlying
-            request.optionType = positionData.optionType
-            request.expiry = positionData.expiry
+            request.underlying = data.underlying
+            request.optionType = data.optionType
+            request.expiry = data.expiry
         }
 
         return {
@@ -2051,27 +2080,19 @@ Item {
         }
     }
 
-    function quickClosePosition(positionData) {
-        var resolved = buildQuickCloseRequest(positionData)
-        if (resolved.error) {
-            showPageToast(resolved.error, true)
-            return
-        }
+    function quickClosePosition(symbol, type) {
         if (!tradeExecutionService) {
-            showPageToast("交易服务未就绪，暂时无法一键平仓", true)
+            showPageToast("交易服务未就绪", true)
             return
         }
-
-        if (tradeExecutionService.submitBridgeOrder(resolved.request)) {
+        var mode = String(type || "stock").trim().toLowerCase()
+        var result = tradeExecutionService.quickClosePosition(String(symbol || ""), mode)
+        if (result && result.accepted) {
             syncPendingOrders()
-            showPageToast("已提交" + resolved.actionLabel + "委托，等待风控审批", false)
-            return
+            showPageToast(String(result.message || "平仓委托已提交"), false)
+        } else {
+            showPageToast(String(result ? (result.message || "平仓失败") : "平仓失败"), true)
         }
-
-        var submitError = tradeExecutionService.lastErrorMessage
-            ? String(tradeExecutionService.lastErrorMessage).trim()
-            : ""
-        showPageToast(submitError.length > 0 ? submitError : "一键平仓委托提交失败", true)
     }
 
     function buildRuleRetryRequest(orderData) {
@@ -2429,6 +2450,9 @@ Item {
                 return
             }
 
+            var clientOrderId = "co_" + String(Date.now()) + "_" + String(Math.random()).slice(2, 8)
+            root.lastSubmittedRequestId = clientOrderId
+
             var bridgeRequest = {
                 strategyId: root.boundStrategyId,
                 symbol: requestSymbol,
@@ -2437,7 +2461,8 @@ Item {
                 quantity: requestQuantity,
                 orderType: requestOrderType,
                 mode: mode,
-                action: action
+                action: action,
+                clientOrderId: clientOrderId
             }
             if (action === "repay") {
                 bridgeRequest.cashAmount = requestPrice * requestQuantity
@@ -2862,6 +2887,7 @@ Item {
                                         model: groupData.positions || []
 
                                         Rectangle {
+                                            id: positionRow
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: 46
                                             radius: 14
@@ -2942,9 +2968,15 @@ Item {
 
                                                     MouseArea {
                                                         anchors.fill: parent
-                                                        enabled: positionData.canQuickClose
-                                                        cursorShape: positionData.canQuickClose ? Qt.PointingHandCursor : Qt.ForbiddenCursor
-                                                        onClicked: root.quickClosePosition(positionData)
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: {
+                                                            var sym = String(positionRow.positionData.symbol || "")
+                                                            var typ = String(positionRow.positionData.type || "stock")
+                                                            var result = tradeExecutionService.quickClosePosition(sym, typ)
+                                                            var msg = String(result ? (result.gwError || result.message || "") : "")
+                                                            root.showPageToast(msg, !(result && result.accepted))
+                                                            if (result && result.accepted) root.syncPendingOrders()
+                                                        }
                                                     }
                                                 }
                                             }
@@ -3407,8 +3439,40 @@ Item {
             root.appendOrderRequestLog(orderRequest)
         }
 
+        function onOrderGenerated(orderInfo) {
+            if (!root.matchesBoundStrategyPayload(orderInfo)) {
+                return
+            }
+            root.pushExecutionLog(
+                "request",
+                "策略产生委托",
+                root.logRequestDetails(orderInfo),
+                "info")
+        }
+
+        function onOrderSubmitResult(result) {
+            if (!result) {
+                return
+            }
+            if (result.accepted) {
+                return
+            }
+            root.pushExecutionLog(
+                "status",
+                "委托提交失败",
+                String(result.symbol || "") + " · " + String(result.reason || result.message || "未知原因"),
+                "error")
+            root.syncPendingOrders()
+        }
+
         function onOrderStatusPublished(orderStatus) {
             root.appendOrderStatusLog(orderStatus)
+            root.syncPendingOrders()
+        }
+
+        function onOrderStatusChanged(statusEntry) {
+            // orderStatusChanged/orderStatusPublished 是成对发射的别名信号
+            // Published 负责写执行日志, Changed 只刷新委托列表, 避免日志重复
             root.syncPendingOrders()
         }
 

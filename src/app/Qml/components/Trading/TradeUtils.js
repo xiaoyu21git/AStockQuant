@@ -49,12 +49,13 @@ function orderSideLabel(side) {
 
 function orderStatusLabel(status) {
     var map = {
-        "pending": "待报",
-        "submitted": "已报",
-        "partial": "部成",
-        "filled": "全成",
-        "cancelled": "已撤",
-        "rejected": "废单"
+        "pending": "待报", "PENDING": "待报",
+        "submitted": "已报", "SUBMITTED": "已报",
+        "partial": "部成", "PARTIAL": "部成", "PARTIAL_FILLED": "部成", "PARTIALLY_FILLED": "部成",
+        "filled": "全成", "FILLED": "全成",
+        "cancelled": "已撤", "CANCELLED": "已撤",
+        "rejected": "废单", "REJECTED": "废单",
+        "expired": "过期", "EXPIRED": "过期"
     }
     return map[status] || status || "--"
 }

@@ -307,13 +307,18 @@ QVariantMap TradingFormPanelHelper::buildOrderPresentation(
     const QVariantMap& orderData) const {
 
     QVariantMap pres;
-    QString rawStatus = orderData.value("status").toString();
+    // rawStatus 是 mapServiceOrders 输出的原始状态字符串(大写), status 可能是已翻译的中文
+    QString rawStatus = orderData.value("rawStatus").toString();
+    if (rawStatus.isEmpty())
+        rawStatus = orderData.value("status").toString();
     QString status = canonicalOrderStatus(rawStatus);
     pres["normalizedStatus"] = status;
 
-    // 标题金额
+    // 数量 — mapServiceOrders 输出字段为 qty, 兼容旧字段 quantity
+    double quantity = orderData.value("qty").toDouble();
+    if (quantity <= 0.0)
+        quantity = orderData.value("quantity").toDouble();
     double price = orderData.value("price").toDouble();
-    double quantity = orderData.value("quantity").toDouble();
     double amount = price * quantity;
     pres["headlineAmount"] = formatAmountCompact(amount);
 
@@ -321,8 +326,10 @@ QVariantMap TradingFormPanelHelper::buildOrderPresentation(
     pres["priceSummary"] = formatDisplayPrice(price, 2) +
         QStringLiteral(" × ") + QString::number(static_cast<qint64>(quantity));
 
-    // 成交摘要
-    double filledQty = orderData.value("filledQuantity").toDouble();
+    // 成交摘要 — mapServiceOrders 输出字段为 filledQty, 兼容 filledQuantity
+    double filledQty = orderData.value("filledQty").toDouble();
+    if (filledQty <= 0.0)
+        filledQty = orderData.value("filledQuantity").toDouble();
     pres["filledSummary"] = filledQty > 0.0
         ? QStringLiteral("已成交 ") + QString::number(static_cast<qint64>(filledQty))
         : QStringLiteral("等待成交");

@@ -11,6 +11,7 @@
 #include <QVariantList>
 #include <QTimer>
 #include <QDateTime>
+#include "foundation/Utils/Uuid.h"
 
 namespace bridge {
 
@@ -53,6 +54,10 @@ public:
                                                  const QString& batchId);
     Q_INVOKABLE bool cancelManualTestOrder(const QString& orderId);
 
+    /// @brief 一键平仓: 查持仓 → 构建平仓单 → 提交, 一步到位
+    /// 返回 QVariantMap {accepted: bool, message: string}
+    Q_INVOKABLE QVariantMap quickClosePosition(const QString& symbol, const QString& mode);
+
     // ── 管理 ──
     Q_INVOKABLE void clearRecentOrders();
 
@@ -79,10 +84,14 @@ private:
     void ensureInitialized();
     void appendRecentOrder(const QVariantMap& order);
     void setLastError(const QString& message);
+    void publishOrderStatusUpdate(const QString& brokerOrderId,
+                                  const QString& status,
+                                  const QString& message);
 
     bool m_initialized{false};
     QVariantMap m_tradingConfig;
     QVariantList m_recentOrders;
+    foundation::utils::Uuid m_orderUpdateSub;  // EventBus subscription
     QString m_lastErrorMessage;
 };
 

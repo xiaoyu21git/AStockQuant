@@ -51,9 +51,11 @@ Rectangle {
             Layout.fillWidth: true
             text: {
                 if (!root.orderData) return "--"
-                var qty = root.orderData.quantity || 0
+                var qty = root.orderData.qty || root.orderData.quantity || 0
                 var price = root.orderData.price || 0
-                return qty + "股" + (price > 0 ? " @ " + Utils.formatPrice(price) : "")
+                var isFutOpt = root.orderData.type === "futures" || root.orderData.type === "options"
+                var unit = root.orderData.unit || (isFutOpt ? "手" : "股")
+                return qty + unit + (price > 0 ? " @ " + Utils.formatPrice(price) : "")
             }
             font.pixelSize: 11; font.family: "Inter, Noto Sans SC"
             color: Const.Constants.textSecondary; elide: Text.ElideRight
@@ -62,7 +64,11 @@ Rectangle {
         // 状态
         Text {
             Layout.preferredWidth: 36
-            text: Utils.orderStatusLabel(root.orderData ? root.orderData.status || "" : "")
+            text: {
+                if (!root.orderData) return "--"
+                var raw = root.orderData.rawStatus || root.orderData.status || ""
+                return Utils.orderStatusLabel(raw)
+            }
             font.pixelSize: 11; font.family: "Inter, Noto Sans SC"
             color: Const.Constants.textSecondary
             horizontalAlignment: Text.AlignHCenter
@@ -72,8 +78,8 @@ Rectangle {
         Rectangle {
             visible: {
                 if (!root.orderData) return false
-                var s = root.orderData.status || ""
-                return s === "pending" || s === "submitted" || s === "partial"
+                var s = (root.orderData.rawStatus || root.orderData.status || "").toUpperCase()
+                return s === "PENDING" || s === "SUBMITTED" || s === "PARTIAL_FILLED"
             }
             width: 40; height: 22; radius: 3
             color: Const.Constants.lossRed + "22"

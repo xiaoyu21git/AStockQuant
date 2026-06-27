@@ -102,13 +102,16 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     std::string gmSym = toGm(req.symbol);
     if (gmSym.empty()) { r.message = "invalid symbol: " + req.symbol; return r; }
 
+    // place_order(symbol, volume, side, order_type, position_effect,
+    //             price, duration, qualifier, stop_price, order_business, ACCOUNT)
+    // 最后一个参数是 account(NULL=使用策略默认账户), 不是 strategy_id
     Order gm = s->place_order(gmSym.c_str(),
                               static_cast<int>(req.quantity),
                               toGmSide(req.side),
                               toGmOrderType(req.orderType),
                               1,
                               req.price, 0, 0, 0.0, 0,
-                              req.strategyId.empty() ? nullptr : req.strategyId.c_str());
+                              NULL);  // 使用策略默认账户
     if (gm.cl_ord_id[0]) {
         r.brokerOrderId = gm.cl_ord_id; r.accepted = true;
     } else {
@@ -122,7 +125,8 @@ bool TradeEngine::cancelOrder(const std::string& brokerOrderId) {
     if (brokerOrderId.empty()) return false;
     auto* s = static_cast<::Strategy*>(m_strategy);
     if (!s) return false;
-    s->order_cancel(brokerOrderId.c_str(), "");
+    // order_cancel(cl_ord_id, account) — account=NULL 使用策略默认账户
+    s->order_cancel(brokerOrderId.c_str(), NULL);
     return true;
 }
 

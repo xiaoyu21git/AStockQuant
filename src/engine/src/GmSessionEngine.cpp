@@ -143,8 +143,17 @@ public:
             case 5: u.status = OrderUpdate::Cancelled;     break;
             case 6: u.status = OrderUpdate::Rejected;      break;
             case 7: u.status = OrderUpdate::Expired;       break;
+            case 8: u.status = OrderUpdate::Rejected;      break; // 废单/拒绝
             default: u.status = OrderUpdate::Submitted;    break;
         }
+
+        INTERNAL_INFO_STREAM << "[GmSdk] on_order_status cl_ord_id=" << u.brokerOrderId
+                             << " symbol=" << u.symbol
+                             << " gmStatus=" << o->status
+                             << " mappedStatus=" << static_cast<int>(u.status)
+                             << " filledVol=" << u.filledQuantity
+                             << " filledPrice=" << u.filledPrice
+                             << " msg=" << u.message;
 
         auto* bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
@@ -156,6 +165,8 @@ public:
             evt.set("status", static_cast<int64_t>(u.status));
             evt.set("message", u.message);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        } else {
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_order_status EventBus not running, order update dropped";
         }
     }
 

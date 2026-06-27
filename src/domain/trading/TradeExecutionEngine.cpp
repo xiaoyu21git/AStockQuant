@@ -254,8 +254,8 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
 
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
 
-    // ── 受理订单 ──
-    {
+    // ── 仅网关成功受理后才触发回调 — 避免虚假 "已报" 状态 ──
+    if (result.accepted) {
         TradeOrder accepted = order;
         accepted.setStatus(OrderStatusValue::Submitted);
         accepted.setStatusMessage("accepted");
@@ -264,16 +264,18 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
         if (m_impl->m_orderAcceptedCallback) {
             m_impl->m_orderAcceptedCallback(accepted);
         }
+        return SubmitResult::success(BrokerOrderId(result.brokerOrderId));
     }
 
-    if (!result.accepted) {
-        return SubmitResult::rejected(result.message);
-    }
-    return SubmitResult::success(BrokerOrderId(result.brokerOrderId));
+    return SubmitResult::rejected(result.message);
 }
 
 bool TradeExecutionEngine::cancelOrder(BrokerOrderId brokerOrderId) {
     return engine::TradeEngine::instance().cancelOrder(brokerOrderId.text());
+}
+
+void TradeExecutionEngine::registerOrder(const TradeOrder& order) {
+    m_impl->appendRecentOrder(order);
 }
 
 // ============================================================================
@@ -391,20 +393,35 @@ TradeExecutionEngine::TradeExecutionEngine()
                 auto status = e.get<std::int64_t>("status");
                 auto filledPrice = e.get<double>("filled_price");
                 auto filledQty  = e.get<std::int64_t>("filled_quantity");
-                if (!id) return;
+                if (!id) {
+                    INTERNAL_ERROR_STREAM << "[TradeExecEng] order.updated event missing broker_order_id";
+                    return;
+                }
                 std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+                bool found = false;
                 for (auto& o : m_impl->m_recentOrders) {
                     if (o.brokerOrderId() == *id) {
+                        found = true;
                         if (filledPrice) o.setFilledPrice(*filledPrice);
                         if (filledQty)  o.setFilledQuantity(*filledQty);
                         if (status) {
                             OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
                             o.setStatus(st);
+                            INTERNAL_INFO_STREAM << "[TradeExecEng] order.updated id=" << *id
+                                                 << " evtStatus=" << *status
+                                                 << " newSt=" << static_cast<int>(st)
+                                                 << " filledQty=" << o.filledQuantity()
+                                                 << " cb=" << (m_impl->m_orderUpdateCallback ? 1 : 0);
                         }
                         if (m_impl->m_orderUpdateCallback)
                             m_impl->m_orderUpdateCallback(o);
                         break;
                     }
+                }
+                if (!found) {
+                    INTERNAL_ERROR_STREAM << "[TradeExecEng] order.updated id=" << *id
+                                          << " NOT found in recentOrders (count="
+                                          << m_impl->m_recentOrders.size() << ")";
                 }
             });
         m_impl->m_fillSub = bus->subscribe("trading.execution.report",
