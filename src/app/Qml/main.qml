@@ -331,13 +331,30 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         marketData: window.marketData
                     }
-                    
+
+                    // 实盘总览 Dashboard（图表/跑马灯/市场热力/绩效分析）
+                    MainContent {
+                        id: liveTradingDashboard
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        pageMode: "live-trading"
+                        currentMenuCode: window.currentMenuCode
+                        marketDataService: Bridge.MarketDataBridge
+                        positionAccountService: Bridge.PositionAccountBridge
+                        tradeExecutionService: Bridge.TradeExecutionBridge
+                        strategyService: null
+                        marketData: window.marketData
+                        statusCards: window.statusCards
+                        positions: window.positions
+                        strategies: window.strategies
+                    }
+
                     // 监控面板页面
                     Loader {
                         id: monitoringPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 8 || item !== null
+                        active: mainStack.currentIndex === 9 || item !== null
                         asynchronous: true
                         sourceComponent: monitoringPageComponent
                     }
@@ -347,7 +364,7 @@ ApplicationWindow {
                         id: settingsPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 9 || item !== null
+                        active: mainStack.currentIndex === 10 || item !== null
                         asynchronous: true
                         sourceComponent: settingsPageComponent
                     }
@@ -597,8 +614,8 @@ ApplicationWindow {
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
             "risk_management": 6,      // 风险管理 -> riskManagementPage (索引6)
             "live_trading": 7,         // 实盘交易 -> TradingPage (索引7)
-            "monitoring": 8,           // 监控面板 -> monitoringPage
-            "settings": 9              // 系统设置 -> settingsPage
+            "monitoring": 9,           // 监控面板 -> monitoringPage
+            "settings": 10             // 系统设置 -> settingsPage
         };
         
         // 二级菜单映射到对应的页面
@@ -618,19 +635,19 @@ ApplicationWindow {
             "risk_reporting": 6,              // 风险报告 -> 风险管理 (索引6)
             "compliance_check": 6,            // 合规检查 -> 风险管理 (索引6)
             "trade_execution": 7,             // 交易执行 -> TradingPage
-            "position_management": 7,         // 仓位管理 -> TradingPage
-            "fund_management": 7,             // 资金管理 -> TradingPage
-            "trade_records": 7,               // 交易记录 -> TradingPage
-            "performance_analysis": 7,        // 绩效分析 -> TradingPage
-            "real_time_monitoring": 8,        // 实时监控 -> 监控面板
-            "alert_center": 8,                // 报警中心 -> 监控面板
-            "system_status": 8,               // 系统状态 -> 监控面板
-            "log_viewer": 8,                  // 日志查看 -> 监控面板
-            "personal_settings": 9,           // 个人设置 -> 系统设置
-            "trade_settings": 9,              // 交易设置 -> 系统设置
-            "notification_settings": 9,       // 通知设置 -> 系统设置
-            "permission_management": 9,       // 权限管理 -> 系统设置
-            "system_configuration": 9         // 系统配置 -> 系统设置
+            "position_management": 8,         // 仓位管理 -> 实盘总览 Dashboard
+            "fund_management": 8,             // 资金管理 -> 实盘总览 Dashboard
+            "trade_records": 8,               // 交易记录 -> 实盘总览 Dashboard
+            "performance_analysis": 8,        // 绩效分析 -> 实盘总览 Dashboard
+            "real_time_monitoring": 9,        // 实时监控 -> 监控面板
+            "alert_center": 9,                // 报警中心 -> 监控面板
+            "system_status": 9,               // 系统状态 -> 监控面板
+            "log_viewer": 9,                  // 日志查看 -> 监控面板
+            "personal_settings": 10,          // 个人设置 -> 系统设置
+            "trade_settings": 10,             // 交易设置 -> 系统设置
+            "notification_settings": 10,      // 通知设置 -> 系统设置
+            "permission_management": 10,      // 权限管理 -> 系统设置
+            "system_configuration": 10        // 系统配置 -> 系统设置
         };
         
         // 首先检查一级菜单
