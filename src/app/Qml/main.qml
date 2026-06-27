@@ -330,6 +330,7 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         marketData: window.marketData
+                        currentMenuCode: window.currentMenuCode
                     }
 
                     // 实盘总览 Dashboard（图表/跑马灯/市场热力/绩效分析）

@@ -11,6 +11,12 @@ Item {
     id: root
 
     property var marketData: []
+    property string currentMenuCode: ""
+
+    // ── 视图模式 ──
+    readonly property bool isPositionView: currentMenuCode === "position_management"
+    readonly property bool isTradeView: !isPositionView || currentMenuCode === "trade_execution"
+
     property var marketSnapshot: ({
         price: 0,
         priceStr: "--",
@@ -3576,7 +3582,8 @@ Item {
             Layout.fillWidth: false
             Layout.preferredWidth: Math.min(pageContent.width, root.tradingSectionMaxWidth)
             Layout.alignment: Qt.AlignHCenter
-            implicitHeight: Math.max(formPanelHeight, depthPanelHeight)
+            visible: !root.isPositionView
+            implicitHeight: visible ? Math.max(formPanelHeight, depthPanelHeight) : 0
             readonly property real formPanelHeight: formPanelLoader.item
                 ? formPanelLoader.item.implicitHeight
                 : 800
@@ -3682,7 +3689,7 @@ Item {
                         width: Math.min(tradingContent.formPanelPreferredWidth, tradingPanels.width)
                         height: tradingContent.formPanelHeight > 0 ? tradingContent.formPanelHeight : implicitHeight
                         asynchronous: true
-                        active: root.formPanelRequested
+                        active: root.formPanelRequested && !root.isPositionView
                         sourceComponent: formPanelComponent
                     }
 
@@ -3730,7 +3737,7 @@ Item {
                         width: Math.min(tradingContent.depthPanelPreferredWidth, tradingPanels.width)
                         height: implicitHeight
                         asynchronous: true
-                        active: root.depthPanelRequested
+                        active: root.depthPanelRequested && !root.isPositionView
                         sourceComponent: depthPanelComponent
                     }
 
