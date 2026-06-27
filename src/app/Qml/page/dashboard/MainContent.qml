@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
+import "../../utils/OrderUtils.js" as OrderUtils
 
 Item {
     id: mainContent
@@ -367,48 +368,10 @@ Item {
         return formatInstrumentLabel(snapshot.symbol || symbol || "--", snapshot.name || "")
     }
 
-    function normalizedOrderStatus(status) {
-        return String(status || "").toUpperCase()
-    }
-
-    function displayOrderStatus(status) {
-        var statusText = normalizedOrderStatus(status)
-        if (statusText === "SUBMITTED") {
-            return "\u5df2\u63d0\u4ea4"
-        }
-        if (statusText === "PENDING") {
-            return "\u5f85\u6210\u4ea4"
-        }
-        if (statusText === "PARTIAL_FILLED") {
-            return "\u90e8\u5206\u6210\u4ea4"
-        }
-        if (statusText === "FILLED") {
-            return "\u5df2\u6210\u4ea4"
-        }
-        if (statusText === "CANCELLED") {
-            return "\u5df2\u64a4\u5355"
-        }
-        if (statusText === "REJECTED") {
-            return "\u5df2\u62d2\u5355"
-        }
-        return statusText || "--"
-    }
-
-    function displayOrderSide(side) {
-        var sideText = String(side || "").toUpperCase()
-        if (sideText === "BUY") {
-            return "\u4e70\u5165"
-        }
-        if (sideText === "SELL") {
-            return "\u5356\u51fa"
-        }
-        return sideText || "--"
-    }
-
-    function isUnfinishedOrderStatus(status) {
-        var statusText = normalizedOrderStatus(status)
-        return statusText === "SUBMITTED" || statusText === "PENDING" || statusText === "PARTIAL_FILLED"
-    }
+    function normalizedOrderStatus(status) { return OrderUtils.normalizedOrderStatus(status) }
+    function displayOrderStatus(status) { return OrderUtils.translateOrderStatus(status) }
+    function displayOrderSide(side) { return OrderUtils.displayOrderSide(side) }
+    function isUnfinishedOrderStatus(status) { return OrderUtils.isUnfinishedOrderStatus(status) }
 
     function prioritizeTradeRecordOrders(orders) {
         if (!orders || orders.length === 0) {

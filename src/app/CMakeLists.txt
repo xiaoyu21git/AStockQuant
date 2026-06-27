@@ -181,6 +181,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/Trading/TradingChartWorkspace.qml
         Qml/components/Trading/TradingFormPanel.qml
         Qml/components/Trading/DepthMarketPanel.qml
+        Qml/components/Trading/OrderFormSection.qml
+        Qml/components/Trading/OrderActionBar.qml
         Qml/components/Trading/RuntimeRuleObserverPanel.qml
         Qml/components/Base/ActionButton.qml
         Qml/components/Base/ActionChip.qml
@@ -260,8 +262,9 @@ qt_add_qml_module(astockquantapp
         Qml/utils/StrategyDataAdapter.js
         Qml/utils/FactorDataAdapter.js
         Qml/utils/OrderUtils.js
-        Qml/utils/TradingPageAdapter.js
-        Qml/utils/TradeTestingPageAdapter.js
+        Qml/utils/TradingConstants.js
+
+
         Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml

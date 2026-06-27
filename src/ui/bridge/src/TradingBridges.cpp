@@ -7,6 +7,8 @@
 #include "../../engine/include/TradeEngine.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 #include "../../../domain/trading/TradeExecutionEngine.h"
+#include "../../../domain/trading/include/PositionUtils.h"
+#include "../../../domain/trading/include/OrderUtils.h"
 
 
 #include "../../../engine/include/GlobalEventBusRegistry.h"
@@ -610,6 +612,32 @@ void TradeExecutionBridge::clearRecentOrders() {
     emit recentOrdersChanged();
 }
 
+// ── Domain 工具方法 (薄转发到 OrderUtils.h) ──
+
+QString TradeExecutionBridge::resolveLiveOrderType(
+    const QString& rawType, const QString& optionType,
+    const QString& underlying, const QString& exchange) const {
+    return QString::fromUtf8(domain::trading::resolveLiveOrderType(
+        rawType.toStdString(), optionType.toStdString(),
+        underlying.toStdString(), exchange.toStdString()));
+}
+
+QString TradeExecutionBridge::resolveLiveOrderAction(
+    const QString& rawType, const QString& side,
+    const QString& positionEffect, const QString& action) const {
+    return QString::fromUtf8(domain::trading::resolveLiveOrderAction(
+        rawType.toStdString(), side.toStdString(),
+        positionEffect.toStdString(), action.toStdString()));
+}
+
+QString TradeExecutionBridge::translateOrderSide(const QString& side) const {
+    return QString::fromUtf8(domain::trading::translateOrderSide(side.toStdString()));
+}
+
+bool TradeExecutionBridge::isFuturesExchange(const QString& exchange) const {
+    return domain::trading::isFuturesExchange(exchange.toStdString());
+}
+
 void TradeExecutionBridge::appendRecentOrder(const QVariantMap& order) {
     m_recentOrders.prepend(order);
     if (m_recentOrders.size() > 50) m_recentOrders.removeLast();
@@ -711,6 +739,37 @@ void PositionAccountBridge::appendOrderStatus(const QVariantMap& status) {
     m_recentOrderStatuses.prepend(status);
     if (m_recentOrderStatuses.size() > 50) m_recentOrderStatuses.removeLast();
     emit recentOrderStatusesChanged();
+}
+
+// ── Domain 工具方法 (薄转发到 PositionUtils.h 自由函数) ──
+
+double PositionAccountBridge::normalizePositionQuantity(double rawQty, const QString& type) const {
+    return static_cast<double>(
+        domain::trading::normalizePositionQuantity(rawQty, type.toStdString()));
+}
+
+double PositionAccountBridge::calculatePositionMarketValue(const QVariantList& rawPositions) const {
+    double total = 0.0;
+    for (const auto& item : rawPositions) {
+        total += item.toMap().value("marketValue", 0.0).toDouble();
+    }
+    return total;
+}
+
+QString PositionAccountBridge::positionTypeTitle(const QString& type) const {
+    return QString::fromUtf8(domain::trading::positionTypeTitle(type.toStdString()));
+}
+
+QString PositionAccountBridge::positionUnit(const QString& type) const {
+    return QString::fromUtf8(domain::trading::positionUnit(type.toStdString()));
+}
+
+QString PositionAccountBridge::positionSideLabel(const QString& side) const {
+    return QString::fromUtf8(domain::trading::positionSideLabel(side.toStdString()));
+}
+
+QString PositionAccountBridge::closeableLabel(const QString& type, const QString& side) const {
+    return QString::fromUtf8(domain::trading::closeableLabel(type.toStdString(), side.toStdString()));
 }
 
 // ═══════════════════════════════════════════════════════════════════

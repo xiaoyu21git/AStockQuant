@@ -173,16 +173,10 @@
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>page/strategies/BacktestResultAnalysisView.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
-        <file>components/Trading/TradePanel.qml</file>
-        <file>components/Trading/TradeSymbolBar.qml</file>
-        <file>components/Trading/TradePendingList.qml</file>
-        <file>components/Trading/TradePendingRow.qml</file>
-        <file>components/Trading/TradeOrderSheet.qml</file>
-        <file>components/Trading/TradeFeePreview.qml</file>
-        <file>components/Trading/TradeQuickActions.qml</file>
-        <file>components/Trading/TradeUtils.js</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
+        <file>components/Trading/OrderFormSection.qml</file>
+        <file>components/Trading/OrderActionBar.qml</file>
         <file>config/views/risk_backtest_params.json</file>
         <file>config/views/factor_common.json</file>
         <file>config/views/factor_common_params.json</file>
@@ -193,8 +187,9 @@
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StartupGateFormatter.js</file>
         <file>utils/StrategyStructureAdapter.js</file>
-        <file>utils/TradingPageAdapter.js</file>
-        <file>utils/TradeTestingPageAdapter.js</file>
+        <file>utils/TradingConstants.js</file>
+
+
         <file>utils/StrategyCreationUtils.js</file>
         <file>components/Base/qmldir</file>
     </qresource>

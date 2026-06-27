@@ -2,12 +2,13 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import AStock.Bridge 1.0 as Bridge
+import "../../utils/TradingConstants.js" as Const
 
 Rectangle {
     id: root
     radius: 28
-    color: "#091120"
-    border.color: "#1f3148"
+    color: Const.tradingPanelBg
+    border.color: Const.tradingPanelBorder
     border.width: 1
     implicitHeight: compactMode ? 800 : 980
 
@@ -397,7 +398,7 @@ Rectangle {
 
                 Text {
                     text: "📌 期货合约"
-                    color: "#8ba4c7"
+                    color: Const.tradingLabelSecondary
                     font.pixelSize: compactSectionLabelFont
                 }
 
@@ -406,7 +407,7 @@ Rectangle {
                     Layout.preferredHeight: compactInputHeight
                     text: root.futuresCode
                     placeholderText: "如 RB2410"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: compactInputFont
                     horizontalAlignment: TextInput.AlignHCenter
                     verticalAlignment: TextInput.AlignVCenter
@@ -417,8 +418,8 @@ Rectangle {
                     onTextChanged: root.futuresCode = text
                     background: Rectangle {
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: Const.tradingInputBg
+                        border.color: Const.tradingInputBorder
                         border.width: 1
                     }
                 }
@@ -434,14 +435,14 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactQuickButtonHeight
                             radius: compactInputRadius
-                            color: "#10243a"
-                            border.color: "#214362"
+                            color: Const.tradingButtonBg
+                            border.color: Const.tradingInputActiveBorder
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactQuickButtonFont
                             }
 
@@ -463,7 +464,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.futuresLots
                         placeholderText: "手数"
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -474,8 +475,8 @@ Rectangle {
                         onTextChanged: root.futuresLots = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -498,14 +499,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "-"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -522,7 +523,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.futuresPrice
                         placeholderText: root.currentReferenceText
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -533,8 +534,8 @@ Rectangle {
                         onTextChanged: root.futuresPrice = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -543,14 +544,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "+"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -576,7 +577,7 @@ Rectangle {
 
                 Text {
                     text: "💳 融资买入"
-                    color: "#8ba4c7"
+                    color: Const.tradingLabelSecondary
                     font.pixelSize: compactSectionLabelFont
                 }
 
@@ -585,7 +586,7 @@ Rectangle {
                     Layout.preferredHeight: compactInputHeight
                     text: root.marginBuyCode
                     placeholderText: "股票代码"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: compactInputFont
                     horizontalAlignment: TextInput.AlignHCenter
                     verticalAlignment: TextInput.AlignVCenter
@@ -596,8 +597,8 @@ Rectangle {
                     onTextChanged: root.marginBuyCode = text
                     background: Rectangle {
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: Const.tradingInputBg
+                        border.color: Const.tradingInputBorder
                         border.width: 1
                     }
                 }
@@ -605,7 +606,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: String(root.marginBuyEquityDisplay.identitySummary || "")
-                    color: String(root.marginBuyEquityDisplay.identityColor || "#7ea1c5")
+                    color: String(root.marginBuyEquityDisplay.identityColor || Const.tradingLabelTertiary)
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -621,14 +622,14 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactQuickButtonHeight
                             radius: compactInputRadius
-                            color: "#10243a"
-                            border.color: "#214362"
+                            color: Const.tradingButtonBg
+                            border.color: Const.tradingInputActiveBorder
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactQuickButtonFont
                             }
 
@@ -650,7 +651,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.marginBuyShares
                         placeholderText: "股数"
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -661,8 +662,8 @@ Rectangle {
                         onTextChanged: root.marginBuyShares = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -685,14 +686,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "-"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -709,7 +710,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.marginBuyPrice
                         placeholderText: root.currentReferenceText
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -720,8 +721,8 @@ Rectangle {
                         onTextChanged: root.marginBuyPrice = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -730,14 +731,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "+"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -761,14 +762,14 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactQuickButtonHeight
                             radius: compactInputRadius
-                            color: "#10243a"
-                            border.color: "#214362"
+                            color: Const.tradingButtonBg
+                            border.color: Const.tradingInputActiveBorder
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: tradingFormHelper.equityShortcutButtonText(modelData.code, modelData.label, "margin_buy", marketSnapshot || ({}), depthSnapshot || ({}))
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactQuickButtonFont
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -785,7 +786,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: String(root.marginBuyEquityDisplay.priceSummary || "")
-                    color: "#7ea1c5"
+                    color: Const.tradingLabelTertiary
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -793,7 +794,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: String(root.marginBuyEquityDisplay.amountSummary || "")
-                    color: "#7ea1c5"
+                    color: Const.tradingLabelTertiary
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -811,7 +812,7 @@ Rectangle {
 
                 Text {
                     text: "📉 融券卖出"
-                    color: "#8ba4c7"
+                    color: Const.tradingLabelSecondary
                     font.pixelSize: compactSectionLabelFont
                 }
 
@@ -820,7 +821,7 @@ Rectangle {
                     Layout.preferredHeight: compactInputHeight
                     text: root.marginSellCode
                     placeholderText: "股票代码"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: compactInputFont
                     horizontalAlignment: TextInput.AlignHCenter
                     verticalAlignment: TextInput.AlignVCenter
@@ -831,8 +832,8 @@ Rectangle {
                     onTextChanged: root.marginSellCode = text
                     background: Rectangle {
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: Const.tradingInputBg
+                        border.color: Const.tradingInputBorder
                         border.width: 1
                     }
                 }
@@ -840,7 +841,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: String(root.marginSellEquityDisplay.identitySummary || "")
-                    color: String(root.marginSellEquityDisplay.identityColor || "#7ea1c5")
+                    color: String(root.marginSellEquityDisplay.identityColor || Const.tradingLabelTertiary)
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -856,14 +857,14 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactQuickButtonHeight
                             radius: compactInputRadius
-                            color: "#10243a"
-                            border.color: "#214362"
+                            color: Const.tradingButtonBg
+                            border.color: Const.tradingInputActiveBorder
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactQuickButtonFont
                             }
 
@@ -885,7 +886,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.marginSellShares
                         placeholderText: "股数"
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -896,8 +897,8 @@ Rectangle {
                         onTextChanged: root.marginSellShares = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -920,14 +921,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "-"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -944,7 +945,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.marginSellPrice
                         placeholderText: root.currentReferenceText
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -955,8 +956,8 @@ Rectangle {
                         onTextChanged: root.marginSellPrice = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -965,14 +966,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "+"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -996,14 +997,14 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactQuickButtonHeight
                             radius: compactInputRadius
-                            color: "#10243a"
-                            border.color: "#214362"
+                            color: Const.tradingButtonBg
+                            border.color: Const.tradingInputActiveBorder
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: tradingFormHelper.equityShortcutButtonText(modelData.code, modelData.label, "margin_sell", marketSnapshot || ({}), depthSnapshot || ({}))
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactQuickButtonFont
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -1020,7 +1021,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: String(root.marginSellEquityDisplay.priceSummary || "")
-                    color: "#7ea1c5"
+                    color: Const.tradingLabelTertiary
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -1028,7 +1029,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: String(root.marginSellEquityDisplay.amountSummary || "")
-                    color: "#7ea1c5"
+                    color: Const.tradingLabelTertiary
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -1046,7 +1047,7 @@ Rectangle {
 
                 Text {
                     text: "🎯 期权合约"
-                    color: "#8ba4c7"
+                    color: Const.tradingLabelSecondary
                     font.pixelSize: compactSectionLabelFont
                 }
 
@@ -1055,7 +1056,7 @@ Rectangle {
                     Layout.preferredHeight: compactInputHeight
                     text: root.optionCode
                     placeholderText: "如 10004411"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: compactInputFont
                     horizontalAlignment: TextInput.AlignHCenter
                     verticalAlignment: TextInput.AlignVCenter
@@ -1066,8 +1067,8 @@ Rectangle {
                     onTextChanged: root.optionCode = text
                     background: Rectangle {
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: Const.tradingInputBg
+                        border.color: Const.tradingInputBorder
                         border.width: 1
                     }
                 }
@@ -1077,7 +1078,7 @@ Rectangle {
                     Layout.preferredHeight: compactInputHeight
                     text: root.optionUnderlying
                     placeholderText: "标的代码"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: compactInputFont
                     horizontalAlignment: TextInput.AlignHCenter
                     verticalAlignment: TextInput.AlignVCenter
@@ -1088,8 +1089,8 @@ Rectangle {
                     onTextChanged: root.optionUnderlying = text
                     background: Rectangle {
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: Const.tradingInputBg
+                        border.color: Const.tradingInputBorder
                         border.width: 1
                     }
                 }
@@ -1105,14 +1106,14 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactQuickButtonHeight
                             radius: compactInputRadius
-                            color: "#10243a"
-                            border.color: "#214362"
+                            color: Const.tradingButtonBg
+                            border.color: Const.tradingInputActiveBorder
                             border.width: 1
 
                             Text {
                                 anchors.centerIn: parent
                                 text: modelData
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactQuickButtonFont
                             }
 
@@ -1134,7 +1135,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.optionLots
                         placeholderText: "手数(1/1, 1/2...)"
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -1145,8 +1146,8 @@ Rectangle {
                         onTextChanged: root.optionLots = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -1169,14 +1170,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "-"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -1193,7 +1194,7 @@ Rectangle {
                         Layout.preferredHeight: compactInputHeight
                         text: root.optionPrice
                         placeholderText: root.currentReferenceText
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: compactInputFont
                         horizontalAlignment: TextInput.AlignHCenter
                         verticalAlignment: TextInput.AlignVCenter
@@ -1204,8 +1205,8 @@ Rectangle {
                         onTextChanged: root.optionPrice = text
                         background: Rectangle {
                             radius: compactInputRadius
-                            color: "#0f2238"
-                            border.color: "#20364f"
+                            color: Const.tradingInputBg
+                            border.color: Const.tradingInputBorder
                             border.width: 1
                         }
                     }
@@ -1214,14 +1215,14 @@ Rectangle {
                         Layout.preferredWidth: compactInputHeight
                         Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
 
                         Text {
                             anchors.centerIn: parent
                             text: "+"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: compactButtonFont
                             font.weight: Font.DemiBold
                         }
@@ -1277,8 +1278,8 @@ Rectangle {
                     width: ListView.view.width
                     height: compactOrderRowHeight
                     radius: compactMode ? 12 : 14
-                    color: "#0b1625"
-                    border.color: orderUi.normalizedStatus === "CANCELLED" ? "#5a2a2a" : "#164b5c"
+                    color: Const.tradingOrderItemBg
+                    border.color: orderUi.normalizedStatus === "CANCELLED" ? Const.tradingOrderItemCancelledBorder : Const.tradingOrderItemBorder
                     border.width: 1
 
                     RowLayout {
@@ -1292,7 +1293,7 @@ Rectangle {
 
                             Text {
                                 text: orderData.symbol + "  " + orderData.action + "  " + String(orderUi.headlineAmount || "")
-                                color: "#0ff"
+                                color: Const.tradingAccentCyan
                                 font.pixelSize: compactMetaFont
                                 font.weight: Font.DemiBold
                                 elide: Text.ElideRight
@@ -1303,7 +1304,7 @@ Rectangle {
                                     + "  ·  " + orderData.time
                                     + "  ·  " + orderData.status
                                     + (String(orderUi.filledSummary || "").length > 0 ? "  ·  " + String(orderUi.filledSummary || "") : "")
-                                color: "#8aaeff"
+                                color: Const.tradingOrderText
                                 font.pixelSize: compactMode ? 10 : 11
                                 elide: Text.ElideRight
                             }
@@ -1311,7 +1312,7 @@ Rectangle {
                             Text {
                                 visible: String(orderUi.auxiliarySummary || "").length > 0
                                 text: String(orderUi.auxiliarySummary || "")
-                                color: "#5f85a8"
+                                color: Const.tradingOrderDetailText
                                 font.pixelSize: compactMode ? 9 : 10
                                 elide: Text.ElideMiddle
                             }
@@ -1320,8 +1321,8 @@ Rectangle {
                         Rectangle {
                             visible: orderUi.canCancel === true
                             radius: compactMode ? 12 : 14
-                            color: "#3f1d24"
-                            border.color: "#ff8888"
+                            color: Const.tradingCancelBg
+                            border.color: Const.tradingCancelText
                             border.width: 1
                             implicitWidth: compactMode ? 56 : 72
                             implicitHeight: compactMode ? 24 : 30
@@ -1329,7 +1330,7 @@ Rectangle {
                             Text {
                                 anchors.centerIn: parent
                                 text: "撤单"
-                                color: "#ff8888"
+                                color: Const.tradingCancelText
                                 font.pixelSize: compactMode ? 10 : 11
                             }
 
@@ -1343,8 +1344,8 @@ Rectangle {
                         Rectangle {
                             visible: orderUi.canApproveManualCheckpoint === true
                             radius: compactMode ? 12 : 14
-                            color: "#15334a"
-                            border.color: "#67E8F9"
+                            color: Const.tradingCheckpointBg
+                            border.color: Const.tradingCheckpointText
                             border.width: 1
                             implicitWidth: compactMode ? 88 : 110
                             implicitHeight: compactMode ? 24 : 30
@@ -1352,7 +1353,7 @@ Rectangle {
                             Text {
                                 anchors.centerIn: parent
                                 text: String(orderUi.checkpointActionLabel || "人工确认")
-                                color: "#67E8F9"
+                                color: Const.tradingCheckpointText
                                 font.pixelSize: compactMode ? 10 : 11
                             }
 
@@ -1366,8 +1367,8 @@ Rectangle {
                         Rectangle {
                             visible: orderUi.canResumeExecutionPause === true
                             radius: compactMode ? 12 : 14
-                            color: "#3a2a14"
-                            border.color: "#FBBF24"
+                            color: Const.tradingResumeBg
+                            border.color: Const.tradingResumeText
                             border.width: 1
                             implicitWidth: compactMode ? 88 : 110
                             implicitHeight: compactMode ? 24 : 30
@@ -1375,7 +1376,7 @@ Rectangle {
                             Text {
                                 anchors.centerIn: parent
                                 text: String(orderUi.executionPauseActionLabel || "恢复执行")
-                                color: "#FBBF24"
+                                color: Const.tradingResumeText
                                 font.pixelSize: compactMode ? 10 : 11
                             }
 
@@ -1393,7 +1394,7 @@ Rectangle {
                 anchors.centerIn: parent
                 visible: root.pendingOrders.length === 0
                 text: "暂无委托订单"
-                color: "#4a6a8a"
+                color: Const.tradingEmptyText
                 font.pixelSize: compactMetaFont
             }
         }
@@ -1404,8 +1405,8 @@ Rectangle {
         anchors.margins: 1
         radius: 27
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0d1728" }
-            GradientStop { position: 1.0; color: "#08101d" }
+            GradientStop { position: 0.0; color: Const.tradingPanelGradientStart }
+            GradientStop { position: 1.0; color: Const.tradingPanelGradientEnd }
         }
     }
 
@@ -1422,14 +1423,14 @@ Rectangle {
 
                 Text {
                     text: "交易执行"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: compactTitleFont
                     font.weight: Font.DemiBold
                 }
 
                 Text {
                     text: "下单 / 撤单 / 当前委托"
-                    color: "#8ba4c7"
+                    color: Const.tradingLabelSecondary
                     font.pixelSize: compactBodyFont
                 }
             }
@@ -1438,8 +1439,8 @@ Rectangle {
 
             Rectangle {
                 radius: compactMode ? 12 : 14
-                color: "#10243a"
-                border.color: "#1d446d"
+                color: Const.tradingButtonBg
+                border.color: Const.tradingChipBorder
                 border.width: 1
                 implicitWidth: compactMode ? 108 : 126
                 implicitHeight: compactMode ? 40 : 52
@@ -1450,13 +1451,13 @@ Rectangle {
 
                     Text {
                         text: "可用资金"
-                        color: "#89a2c8"
+                        color: Const.tradingLabelLight
                         font.pixelSize: compactMetaFont
                     }
 
                     Text {
                         text: "¥" + Number(root.availableCapital).toLocaleString(Qt.locale(), "f", 0)
-                        color: "#e2e8f0"
+                        color: Const.tradingValueText
                         font.pixelSize: compactMode ? 12 : 14
                         font.weight: Font.DemiBold
                     }
@@ -1475,14 +1476,14 @@ Rectangle {
                     Layout.fillWidth: true
                     implicitHeight: compactChipHeight
                     radius: compactMode ? 12 : 18
-                    color: index === root.currentTabIndex ? "#14f1ff" : "#0f1b2d"
-                    border.color: index === root.currentTabIndex ? "#14f1ff" : "#1d3147"
+                    color: index === root.currentTabIndex ? Const.tradingTabActiveBorder : Const.tradingTabInactiveBg
+                    border.color: index === root.currentTabIndex ? Const.tradingTabActiveBorder : Const.tradingTabInactiveBorder
                     border.width: 1
 
                     Text {
                         anchors.centerIn: parent
                         text: modelData.icon + " " + modelData.label
-                        color: index === root.currentTabIndex ? "#03111a" : "#b2c5de"
+                        color: index === root.currentTabIndex ? Const.tradingTabActiveText : Const.tradingTabInactiveText
                         font.pixelSize: compactMetaFont
                         font.weight: Font.Bold
                     }
@@ -1499,8 +1500,8 @@ Rectangle {
         Rectangle {
             Layout.fillWidth: true
             radius: compactMode ? 16 : 20
-            color: "#0c1828"
-            border.color: "#1e3147"
+            color: Const.tradingHeaderBg
+            border.color: Const.tradingHeaderBorder
             border.width: 1
             implicitHeight: compactMode ? 70 : 94
 
@@ -1515,13 +1516,13 @@ Rectangle {
 
                     Text {
                         text: "当前模式"
-                        color: "#8ba4c7"
+                        color: Const.tradingLabelSecondary
                         font.pixelSize: compactMetaFont
                     }
 
                     Text {
                         text: String(root.headerDisplay.currentModeDisplayTitle || "")
-                        color: "#eff6ff"
+                        color: Const.tradingBrightText
                         font.pixelSize: compactMode ? 13 : 16
                         font.weight: Font.DemiBold
                     }
@@ -1532,13 +1533,13 @@ Rectangle {
 
                     Text {
                         text: "参考价格"
-                        color: "#8ba4c7"
+                        color: Const.tradingLabelSecondary
                         font.pixelSize: compactMetaFont
                     }
 
                     Text {
                         text: String(root.headerDisplay.modePriceText || "--")
-                        color: "#0ff"
+                        color: Const.tradingAccentCyan
                         font.pixelSize: compactMode ? 17 : 22
                         font.weight: Font.Bold
                     }
@@ -1550,8 +1551,8 @@ Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: compactMode ? 286 : 360
             radius: compactMode ? 16 : 20
-            color: "#091321"
-            border.color: "#1b3047"
+            color: Const.tradingPanelBgAlt
+            border.color: Const.tradingFormAreaBorder
             border.width: 1
 
             ColumnLayout {
@@ -1571,7 +1572,7 @@ Rectangle {
 
                             Text {
                                 text: "📌 股票代码"
-                                color: "#8ba4c7"
+                                color: Const.tradingLabelSecondary
                                 font.pixelSize: compactSectionLabelFont
                             }
 
@@ -1580,7 +1581,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: compactInputHeight
                                 placeholderText: "输代码/名称搜索"
-                                color: "#f8fafc"
+                                color: Const.tradingTitleText
                                 font.pixelSize: compactInputFont
                                 horizontalAlignment: TextInput.AlignHCenter
                                 verticalAlignment: TextInput.AlignVCenter
@@ -1602,8 +1603,8 @@ Rectangle {
                                 }
                                 background: Rectangle {
                                     radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
+                                    color: Const.tradingInputBg
+                                    border.color: Const.tradingInputBorder
                                     border.width: 1
                                 }
                             }
@@ -1611,7 +1612,7 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: String(root.stockEquityDisplay.identitySummary || "")
-                                color: String(root.stockEquityDisplay.identityColor || "#7ea1c5")
+                                color: String(root.stockEquityDisplay.identityColor || Const.tradingLabelTertiary)
                                 font.pixelSize: compactMetaFont
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -1627,14 +1628,14 @@ Rectangle {
                                         Layout.fillWidth: true
                                         implicitHeight: compactQuickButtonHeight
                                         radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
+                                        color: Const.tradingButtonBg
+                                        border.color: Const.tradingInputActiveBorder
                                         border.width: 1
 
                                         Text {
                                             anchors.centerIn: parent
                                             text: modelData
-                                            color: "#dbeafe"
+                                            color: Const.tradingLightBlue
                                             font.pixelSize: compactQuickButtonFont
                                         }
 
@@ -1656,7 +1657,7 @@ Rectangle {
                                     Layout.preferredHeight: compactInputHeight
                                     text: root.stockShares
                                     placeholderText: "股数(100倍数)"
-                                    color: "#f8fafc"
+                                    color: Const.tradingTitleText
                                     font.pixelSize: compactInputFont
                                     horizontalAlignment: TextInput.AlignHCenter
                                     verticalAlignment: TextInput.AlignVCenter
@@ -1667,8 +1668,8 @@ Rectangle {
                                     onTextChanged: root.stockShares = text
                                     background: Rectangle {
                                         radius: compactInputRadius
-                                        color: "#0f2238"
-                                        border.color: "#20364f"
+                                        color: Const.tradingInputBg
+                                        border.color: Const.tradingInputBorder
                                         border.width: 1
                                     }
                                 }
@@ -1691,14 +1692,14 @@ Rectangle {
                                     Layout.preferredWidth: compactInputHeight
                                     Layout.preferredHeight: compactInputHeight
                                     radius: compactInputRadius
-                                    color: "#10243a"
-                                    border.color: "#214362"
+                                    color: Const.tradingButtonBg
+                                    border.color: Const.tradingInputActiveBorder
                                     border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: "-"
-                                        color: "#dbeafe"
+                                        color: Const.tradingLightBlue
                                         font.pixelSize: compactButtonFont
                                         font.weight: Font.DemiBold
                                     }
@@ -1715,7 +1716,7 @@ Rectangle {
                                     Layout.preferredHeight: compactInputHeight
                                     text: root.stockPrice
                                     placeholderText: root.currentReferenceText
-                                    color: "#f8fafc"
+                                    color: Const.tradingTitleText
                                     font.pixelSize: compactInputFont
                                     horizontalAlignment: TextInput.AlignHCenter
                                     verticalAlignment: TextInput.AlignVCenter
@@ -1726,8 +1727,8 @@ Rectangle {
                                     onTextChanged: root.stockPrice = text
                                     background: Rectangle {
                                         radius: compactInputRadius
-                                        color: "#0f2238"
-                                        border.color: "#20364f"
+                                        color: Const.tradingInputBg
+                                        border.color: Const.tradingInputBorder
                                         border.width: 1
                                     }
                                 }
@@ -1736,14 +1737,14 @@ Rectangle {
                                     Layout.preferredWidth: compactInputHeight
                                     Layout.preferredHeight: compactInputHeight
                                     radius: compactInputRadius
-                                    color: "#10243a"
-                                    border.color: "#214362"
+                                    color: Const.tradingButtonBg
+                                    border.color: Const.tradingInputActiveBorder
                                     border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
                                         text: "+"
-                                        color: "#dbeafe"
+                                        color: Const.tradingLightBlue
                                         font.pixelSize: compactButtonFont
                                         font.weight: Font.DemiBold
                                     }
@@ -1767,14 +1768,14 @@ Rectangle {
                                         Layout.fillWidth: true
                                         implicitHeight: compactQuickButtonHeight
                                         radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
+                                        color: Const.tradingButtonBg
+                                        border.color: Const.tradingInputActiveBorder
                                         border.width: 1
 
                                         Text {
                                             anchors.centerIn: parent
                                             text: tradingFormHelper.equityShortcutButtonText(modelData.code, modelData.label, "stock", marketSnapshot || ({}), depthSnapshot || ({}))
-                                            color: "#dbeafe"
+                                            color: Const.tradingLightBlue
                                             font.pixelSize: compactQuickButtonFont
                                             horizontalAlignment: Text.AlignHCenter
                                         }
@@ -1791,7 +1792,7 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: String(root.stockEquityDisplay.priceSummary || "")
-                                color: "#7ea1c5"
+                                color: Const.tradingLabelTertiary
                                 font.pixelSize: compactMetaFont
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -1799,7 +1800,7 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: String(root.stockEquityDisplay.amountSummary || "")
-                                color: "#7ea1c5"
+                                color: Const.tradingLabelTertiary
                                 font.pixelSize: compactMetaFont
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -1841,20 +1842,9 @@ Rectangle {
             }
         }
 
-        Rectangle {
+        OrderActionBar {
+            compactMode: root.compactMode
             Layout.fillWidth: true
-            radius: compactMode ? 14 : 18
-            color: "#0b1625"
-            border.color: "#1d3147"
-            border.width: 1
-            implicitHeight: root.currentMode === "futures" || root.currentMode === "options" || root.currentMode === "margin_buy"
-                ? (compactMode ? 74 : 112)
-                : (compactMode ? 42 : 64)
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: compactMode ? 10 : 14
-                spacing: compactMode ? 6 : 10
 
                 RowLayout {
                     visible: root.currentMode === "stock"
@@ -1864,7 +1854,7 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
-                        color: "#cc0022"
+                        color: Const.tradingBuyRed
 
                         Text {
                             anchors.centerIn: parent
@@ -1886,12 +1876,12 @@ Rectangle {
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
                         readonly property bool sellEnabled: !root.positionAvailabilityError
-                        color: sellEnabled ? "#00cc88" : "#334155"
+                        color: sellEnabled ? Const.tradingSellGreen : Const.tradingDisabledBtnBg
 
                         Text {
                             anchors.centerIn: parent
                             text: "卖出"
-                            color: parent.sellEnabled ? "white" : "#94a3b8"
+                            color: parent.sellEnabled ? "white" : Const.tradingDisabledBtnText
                             font.pixelSize: compactButtonFont
                             font.weight: Font.Bold
                         }
@@ -1916,7 +1906,7 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#cc0022"
+                            color: Const.tradingBuyRed
 
                             Text {
                                 anchors.centerIn: parent
@@ -1937,7 +1927,7 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#00cc88"
+                            color: Const.tradingSellGreen
 
                             Text {
                                 anchors.centerIn: parent
@@ -1962,12 +1952,12 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#334155"
+                            color: Const.tradingDisabledBtnBg
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "平多"
-                                color: "#ffccd5"
+                                color: Const.tradingCloseBtnText
                                 font.pixelSize: compactButtonFont
                                 font.weight: Font.Bold
                             }
@@ -1983,12 +1973,12 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#334155"
+                            color: Const.tradingDisabledBtnBg
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "平空"
-                                color: "#ffccd5"
+                                color: Const.tradingCloseBtnText
                                 font.pixelSize: compactButtonFont
                                 font.weight: Font.Bold
                             }
@@ -2013,7 +2003,7 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#8b5cf6"
+                            color: Const.tradingPurpleBtn
 
                             Text {
                                 anchors.centerIn: parent
@@ -2035,12 +2025,12 @@ Rectangle {
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
                             readonly property bool closeLongEnabled: !root.positionAvailabilityError
-                            color: closeLongEnabled ? "#00cc88" : "#334155"
+                            color: closeLongEnabled ? Const.tradingSellGreen : Const.tradingDisabledBtnBg
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "卖出平仓"
-                                color: parent.closeLongEnabled ? "white" : "#94a3b8"
+                                color: parent.closeLongEnabled ? "white" : Const.tradingDisabledBtnText
                                 font.pixelSize: compactButtonFont
                                 font.weight: Font.Bold
                             }
@@ -2058,7 +2048,7 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
-                        color: "#3b82f6"
+                        color: Const.tradingBlueBtn
 
                         Text {
                             anchors.centerIn: parent
@@ -2084,7 +2074,7 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
-                        color: "#8b5cf6"
+                        color: Const.tradingPurpleBtn
 
                         Text {
                             anchors.centerIn: parent
@@ -2105,7 +2095,7 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
-                        color: "#3b82f6"
+                        color: Const.tradingBlueBtn
 
                         Text {
                             anchors.centerIn: parent
@@ -2134,7 +2124,7 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#f59e0b"
+                            color: Const.tradingAmberBtn
 
                             Text {
                                 anchors.centerIn: parent
@@ -2155,7 +2145,7 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#7c3aed"
+                            color: Const.tradingPurpleBtnDark
 
                             Text {
                                 anchors.centerIn: parent
@@ -2180,12 +2170,12 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#334155"
+                            color: Const.tradingDisabledBtnBg
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "备兑开仓"
-                                color: "#ffccd5"
+                                color: Const.tradingCloseBtnText
                                 font.pixelSize: compactButtonFont
                                 font.weight: Font.Bold
                             }
@@ -2201,12 +2191,12 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#475569"
+                            color: Const.tradingGrayBtn
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "备兑平仓"
-                                color: "#dbeafe"
+                                color: Const.tradingLightBlue
                                 font.pixelSize: compactButtonFont
                                 font.weight: Font.Bold
                             }
@@ -2226,12 +2216,12 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
-                            color: "#334155"
+                            color: Const.tradingDisabledBtnBg
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "行权"
-                                color: "#ffccd5"
+                                color: Const.tradingCloseBtnText
                                 font.pixelSize: compactButtonFont
                                 font.weight: Font.Bold
                             }
@@ -2248,12 +2238,11 @@ Rectangle {
                         }
                     }
                 }
-            }
         }
 
         Text {
             text: "执行回报"
-            color: "#ff8888"
+            color: Const.tradingCancelText
             font.pixelSize: compactMetaFont
             font.weight: Font.DemiBold
         }
@@ -2262,8 +2251,8 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: 18
-            color: "#08111e"
-            border.color: "#182a40"
+            color: Const.tradingOrderListBg
+            border.color: Const.tradingOrderListBorder
             border.width: 1
 
             Loader {
@@ -2285,7 +2274,7 @@ Rectangle {
                         width: compactMode ? 260 : 320
                         height: compactMode ? 18 : 22
                         radius: 9
-                        color: "#10243a"
+                        color: Const.tradingButtonBg
                         opacity: index === 0 ? 0.9 : index === 1 ? 0.65 : 0.45
                     }
                 }
@@ -2299,8 +2288,8 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 20
         radius: compactMode ? 14 : 18
-        color: root.toastError ? "#3b0d0d" : "#041f24"
-        border.color: root.toastError ? "#ff6b6b" : "#0ff"
+        color: root.toastError ? Const.tradingToastErrorBg : Const.tradingToastSuccessBg
+        border.color: root.toastError ? Const.tradingToastErrorBorder : "#0ff"
         border.width: 1
         implicitHeight: compactMode ? 34 : 38
         implicitWidth: toastLabel.implicitWidth + 28
@@ -2309,7 +2298,7 @@ Rectangle {
             id: toastLabel
             anchors.centerIn: parent
             text: root.toastMessage
-            color: root.toastError ? "#ffd5d5" : "#b6feff"
+            color: root.toastError ? Const.tradingToastErrorText : Const.tradingToastSuccessText
             font.pixelSize: compactMetaFont
         }
     }
@@ -2323,7 +2312,7 @@ Rectangle {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         padding: 2
         opacity: 0.92
-        background: Rectangle { radius: 6; color: "#080E1A"; border.color: "#38BDF8"; border.width: 1.5 }
+        background: Rectangle { radius: 6; color: Const.tradingSearchPopupBg; border.color: Const.tradingSearchPopupBorder; border.width: 1.5 }
 
         onVisibleChanged: {
             if (visible) {
@@ -2344,7 +2333,7 @@ Rectangle {
             delegate: Rectangle {
                 id: row
                 width: searchList.width; height: 34
-                color: rowMa.containsMouse ? "#1E3A5F" : "transparent"; radius: 4
+                color: rowMa.containsMouse ? Const.tradingSearchPopupHover : "transparent"; radius: 4
                 property var item: symbolSearch.getRow(index)
                 Text {
                     anchors.verticalCenter: parent.verticalCenter
@@ -2355,7 +2344,7 @@ Rectangle {
                         var dot = sym.indexOf('.'); var code = dot > 0 ? sym.substring(0, dot) : sym
                         return code + "  " + nm
                     }
-                    color: "#E2E8F0"; font.pixelSize: 12
+                    color: Const.tradingSearchPopupText; font.pixelSize: 12
                 }
                 MouseArea {
                     id: rowMa

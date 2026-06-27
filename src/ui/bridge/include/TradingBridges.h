@@ -61,6 +61,14 @@ public:
     // ── 管理 ──
     Q_INVOKABLE void clearRecentOrders();
 
+    // ── Domain 工具方法 (薄转发到 OrderUtils.h / PositionUtils.h 自由函数) ──
+    Q_INVOKABLE QString resolveLiveOrderType(const QString& rawType, const QString& optionType,
+                                              const QString& underlying, const QString& exchange) const;
+    Q_INVOKABLE QString resolveLiveOrderAction(const QString& rawType, const QString& side,
+                                                const QString& positionEffect, const QString& action) const;
+    Q_INVOKABLE QString translateOrderSide(const QString& side) const;
+    Q_INVOKABLE bool isFuturesExchange(const QString& exchange) const;
+
 signals:
     void initializedChanged();
     void liveBridgeReadyChanged();
@@ -116,6 +124,14 @@ public:
     Q_INVOKABLE void requestInitialSnapshot();
     Q_INVOKABLE bool initialSnapshotLoaded() const;
     Q_INVOKABLE void initialize();
+
+    // ── Domain 工具方法 (薄转发到 PositionAccountEngine 静态方法) ──
+    Q_INVOKABLE double normalizePositionQuantity(double rawQty, const QString& type) const;
+    Q_INVOKABLE double calculatePositionMarketValue(const QVariantList& rawPositions) const;
+    Q_INVOKABLE QString positionTypeTitle(const QString& type) const;
+    Q_INVOKABLE QString positionUnit(const QString& type) const;
+    Q_INVOKABLE QString positionSideLabel(const QString& side) const;
+    Q_INVOKABLE QString closeableLabel(const QString& type, const QString& side) const;
 
 signals:
     void initializedChanged();

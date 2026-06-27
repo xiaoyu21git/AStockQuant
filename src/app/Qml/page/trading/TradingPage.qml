@@ -5,7 +5,7 @@ import ConsoleUi 1.0
 import AStock.Bridge 1.0 as Bridge
 import "../../utils/OrderUtils.js" as OrderUtils
 import "../../components/Trading" as TradingComponents
-import "../../utils/TradingPageAdapter.js" as TradeJs
+import "../../utils/TradingConstants.js" as Const
 
 Item {
     id: root
@@ -180,7 +180,6 @@ Item {
         root.marketStateSyncQueued = false
         root.snapshotRefreshQueued = false
         root.serviceBindingsActive = false
-        TradeJs.clearCallbacks()
     }
 
     function reactivateVisiblePage() {
@@ -528,15 +527,15 @@ Item {
     function ruleHitToneColor(ruleHit) {
         var stageCode = String(ruleHit && ruleHit.stageCode ? ruleHit.stageCode : "").trim()
         if (stageCode === "ExecutionScheduling") {
-            return "#f59e0b"
+            return Const.tradingStatusWarning
         }
         if (stageCode === "PreTradeRisk") {
-            return "#fb7185"
+            return Const.tradingStatusPreTradeRisk
         }
         if (stageCode === "BrokerSubmission") {
-            return "#38bdf8"
+            return Const.tradingStatusBrokerSubmission
         }
-        return "#94a3b8"
+        return Const.tradingStatusDefault
     }
 
     function ruleHitBadgeText(ruleHit) {
@@ -711,15 +710,15 @@ Item {
 
     function executionLogSeverityColor(level) {
         if (level === "error") {
-            return "#ef4444"
+            return Const.tradingStatusError
         }
         if (level === "success") {
-            return "#10b981"
+            return Const.tradingStatusSuccess
         }
         if (level === "warning") {
-            return "#f59e0b"
+            return Const.tradingStatusWarning
         }
-        return "#3b82f6"
+        return Const.tradingStatusInfo
     }
 
     function safeNumber(value, fallback) {
@@ -797,33 +796,36 @@ Item {
     }
 
     function positionTypeTitle(type) {
-        if (type === "margin_buy") {
-            return "融资"
+        if (positionAccountService && typeof positionAccountService.positionTypeTitle === "function") {
+            return positionAccountService.positionTypeTitle(String(type || "stock"))
         }
-        if (type === "margin_sell") {
-            return "融券"
-        }
-        if (type === "futures") {
-            return "期货"
-        }
-        if (type === "options") {
-            return "期权"
-        }
+        // fallback (可移除: Phase 5 C++ 编译通过后）
+        if (type === "margin_buy") return "融资"
+        if (type === "margin_sell") return "融券"
+        if (type === "futures") return "期货"
+        if (type === "options") return "期权"
         return "股票"
     }
 
     function positionUnit(type) {
+        if (positionAccountService && typeof positionAccountService.positionUnit === "function") {
+            return positionAccountService.positionUnit(String(type || "stock"))
+        }
         return type === "futures" || type === "options" ? "手" : "股"
     }
 
     function positionSideLabel(side) {
+        if (positionAccountService && typeof positionAccountService.positionSideLabel === "function") {
+            return positionAccountService.positionSideLabel(String(side || "LONG"))
+        }
         return side === "SHORT" ? "空头" : "多头"
     }
 
     function closeableLabel(type, side) {
-        if (type === "futures" || type === "options" || side === "SHORT") {
-            return "可平"
+        if (positionAccountService && typeof positionAccountService.closeableLabel === "function") {
+            return positionAccountService.closeableLabel(String(type || "stock"), String(side || "LONG"))
         }
+        if (type === "futures" || type === "options" || side === "SHORT") return "可平"
         return "可卖"
     }
 
@@ -1254,98 +1256,77 @@ Item {
     }
 
     function translateOrderSide(side) {
+        if (tradeExecutionService && typeof tradeExecutionService.translateOrderSide === "function") {
+            return tradeExecutionService.translateOrderSide(String(side || ""))
+        }
         var text = String(side || "").trim().toUpperCase()
-        if (text === "BUY") {
-            return "买入"
-        }
-        if (text === "SELL") {
-            return "卖出"
-        }
-        return text || "待处理"
+        return text === "BUY" ? "买入" : (text === "SELL" ? "卖出" : (text || "待处理"))
     }
 
     function boolishOrderValue(value) {
-        if (typeof value === "boolean") {
-            return value
-        }
-        if (typeof value === "number") {
-            return value !== 0
-        }
+        if (typeof value === "boolean") return value
+        if (typeof value === "number") return value !== 0
         var text = String(value === undefined || value === null ? "" : value).trim().toLowerCase()
         return text === "1" || text === "true" || text === "yes"
     }
 
     function isFuturesExchange(exchange) {
+        if (tradeExecutionService && typeof tradeExecutionService.isFuturesExchange === "function") {
+            return tradeExecutionService.isFuturesExchange(String(exchange || ""))
+        }
         var text = String(exchange || "").trim().toUpperCase()
         return text === "CFFEX" || text === "SHFE" || text === "DCE"
             || text === "CZCE" || text === "INE" || text === "GFEX"
     }
 
     function resolveLiveOrderType(raw) {
-        var explicitType = String(raw && raw.type ? raw.type : "").trim().toLowerCase()
-        if (explicitType.length > 0) {
-            return explicitType
+        if (tradeExecutionService && typeof tradeExecutionService.resolveLiveOrderType === "function") {
+            return tradeExecutionService.resolveLiveOrderType(
+                String(raw && raw.type ? raw.type : ""),
+                String(raw && raw.optionType ? raw.optionType : ""),
+                String(raw && raw.underlying ? raw.underlying : ""),
+                String(raw && raw.exchange ? raw.exchange : ""))
         }
-
+        var explicitType = String(raw && raw.type ? raw.type : "").trim().toLowerCase()
+        if (explicitType.length > 0) return explicitType
         var optionType = String(raw && raw.optionType ? raw.optionType : "").trim().toLowerCase()
         var underlying = String(raw && raw.underlying ? raw.underlying : "").trim()
-        if (optionType.length > 0 || underlying.length > 0) {
-            return "options"
-        }
-
-        if (isFuturesExchange(raw && raw.exchange ? raw.exchange : "")) {
-            return "futures"
-        }
-
+        if (optionType.length > 0 || underlying.length > 0) return "options"
+        if (isFuturesExchange(raw && raw.exchange ? raw.exchange : "")) return "futures"
         return "stock"
     }
 
     function resolveLiveOrderAction(raw) {
+        if (tradeExecutionService && typeof tradeExecutionService.resolveLiveOrderAction === "function") {
+            return tradeExecutionService.resolveLiveOrderAction(
+                resolveLiveOrderType(raw),
+                String(raw && raw.side ? raw.side : ""),
+                String(raw && raw.positionEffect ? raw.positionEffect : (raw && raw.position_effect_text ? raw.position_effect_text : "")),
+                String(raw && raw.action ? raw.action : ""))
+        }
         var type = resolveLiveOrderType(raw)
         var rawAction = String(raw && raw.action ? raw.action : "").trim()
         if (rawAction.length > 0) {
             var actionLabel = tradeActionLabel(type, rawAction)
-            if (actionLabel !== rawAction) {
-                return actionLabel
-            }
+            if (actionLabel !== rawAction) return actionLabel
         }
-
         var side = String(raw && raw.side ? raw.side : "").trim().toUpperCase()
         var positionEffect = String(
             raw && raw.positionEffect ? raw.positionEffect
                 : (raw && raw.position_effect_text ? raw.position_effect_text : "")
         ).trim().toUpperCase()
-
         if (type === "futures") {
-            if (side === "BUY" && positionEffect === "OPEN") {
-                return "开多"
-            }
-            if (side === "SELL" && positionEffect === "OPEN") {
-                return "开空"
-            }
-            if (side === "SELL" && positionEffect === "CLOSE") {
-                return "平多"
-            }
-            if (side === "BUY" && positionEffect === "CLOSE") {
-                return "平空"
-            }
+            if (side === "BUY" && positionEffect === "OPEN")  return "开多"
+            if (side === "SELL" && positionEffect === "OPEN")  return "开空"
+            if (side === "SELL" && positionEffect === "CLOSE") return "平多"
+            if (side === "BUY" && positionEffect === "CLOSE")  return "平空"
         }
-
         if (type === "options") {
-            if (side === "BUY" && positionEffect === "OPEN") {
-                return "买入开仓"
-            }
-            if (side === "SELL" && positionEffect === "CLOSE") {
-                return "卖出平仓"
-            }
-            if (side === "SELL" && positionEffect === "OPEN") {
-                return "备兑开仓"
-            }
-            if (side === "BUY" && positionEffect === "CLOSE") {
-                return "买入平仓"
-            }
+            if (side === "BUY" && positionEffect === "OPEN")  return "买入开仓"
+            if (side === "SELL" && positionEffect === "CLOSE") return "卖出平仓"
+            if (side === "SELL" && positionEffect === "OPEN")  return "备兑开仓"
+            if (side === "BUY" && positionEffect === "CLOSE")  return "买入平仓"
         }
-
         return translateOrderSide(side || rawAction)
     }
 
@@ -1849,36 +1830,6 @@ Item {
         return result
     }
 
-    function mapSimulatedOrders(sourceList) {
-        var result = []
-        var index
-
-        for (index = 0; index < (sourceList ? sourceList.length : 0); ++index) {
-            var raw = sourceList[index] || ({})
-            result.push({
-                id: raw.id,
-                rawOrderId: raw.id,
-                clientOrderId: raw.id,
-                brokerOrderId: "",
-                cancelOrderId: raw.id,
-                source: "simulation",
-                symbol: raw.symbol || "--",
-                type: raw.type || "stock",
-                action: raw.action || "待处理",
-                qty: Number(raw.qty || 0),
-                price: Number(raw.price || 0),
-                cashAmount: Number(raw.cashAmount || 0),
-                message: String(raw.message || "").trim(),
-                time: raw.time || "--",
-                status: raw.status || "待处理",
-                rawStatus: String(raw.rawStatus || raw.status || ""),
-                filledQty: Number(raw.filledQty !== undefined ? raw.filledQty : (raw.filledQuantity !== undefined ? raw.filledQuantity : 0))
-            })
-        }
-
-        return result
-    }
-
     function showPageToast(message, isError) {
         root.toastMessage = message
         root.toastError = !!isError
@@ -1927,8 +1878,7 @@ Item {
         var toastPayloads = []
         var lists = [
             mapServiceOrders(positionAccountService ? (positionAccountService.recentOrderStatuses || []) : [], { skipLocalRequest: true }),
-            mapServiceOrders(tradeExecutionService ? (tradeExecutionService.recentOrders || []) : [], { skipLocalRequest: true }),
-            mapSimulatedOrders(TradeJs.getOrders())
+            mapServiceOrders(tradeExecutionService ? (tradeExecutionService.recentOrders || []) : [], { skipLocalRequest: true })
         ]
         var listIndex
         var itemIndex
@@ -2312,44 +2262,6 @@ Item {
             true)
     }
 
-    function submitFallbackTrade(mode, action, payload) {
-        if (mode === "stock") {
-            return TradeJs.stockTrade(action, payload.code, payload.shares, payload.priceType, payload.priceInput)
-        }
-        if (mode === "futures") {
-            return TradeJs.futuresTrade(action, payload.code, payload.lots, payload.priceType, payload.priceInput)
-        }
-        if (mode === "margin_buy") {
-            if (action === "repay") {
-                return TradeJs.repayTrade(payload.code)
-            }
-            return TradeJs.marginBuyTrade(payload.code, payload.shares, payload.priceType, payload.priceInput)
-        }
-        if (mode === "margin_sell") {
-            if (action === "returnStock") {
-                return TradeJs.returnStockTrade(payload.code)
-            }
-            return TradeJs.marginSellTrade(payload.code, payload.shares, payload.priceType, payload.priceInput)
-        }
-        if (mode === "options") {
-            var optionAction = action === "optionBuy" ? "buy"
-                : action === "optionSell" ? "sell"
-                : action === "optionClose" ? "close"
-                : action === "optionCoveredClose" ? "coveredClose"
-                : "exercise"
-            return TradeJs.optionTrade(
-                optionAction,
-                payload.code,
-                payload.underlying,
-                payload.lots,
-                payload.priceType,
-                payload.priceInput,
-                payload.optionType,
-                payload.expiry)
-        }
-        return false
-    }
-
     function submitTrade(mode, action, payload) {
         var realBridgeAction = isBridgeManagedTrade(mode, action)
         var quote
@@ -2490,18 +2402,11 @@ Item {
         }
 
         if (realBridgeAction) {
-            if (submitFallbackTrade(mode, action, payload)) {
-                syncPendingOrders()
-                showPageToast("交易服务未就绪，已回退为本地模拟委托", false)
-            } else {
-                showPageToast("交易服务未就绪", true)
-            }
+            showPageToast("交易执行服务未连接，请检查运行环境", true)
             return
         }
 
-        if (submitFallbackTrade(mode, action, payload)) {
-            syncPendingOrders()
-        }
+        showPageToast("当前环境不支持交易", true)
     }
 
     function cancelPendingOrder(orderId) {
@@ -2561,19 +2466,11 @@ Item {
             }
         }
 
-        TradeJs.cancelOrder(orderId)
-        syncPendingOrders()
+        showPageToast("撤单服务不可用", true)
     }
 
     function bindCallbacks() {
-        TradeJs.setCallbacks({
-            onOrderListChanged: function() {
-                root.syncPendingOrders()
-            },
-            onToast: function(message, isError) {
-                root.showPageToast(message, isError)
-            }
-        })
+        // Bridge 层事件已通过 Connections 处理，无需 JS 回调
     }
 
     function syncMarketState() {
@@ -2703,8 +2600,8 @@ Item {
             width: holdingsPanelLoader.width
             implicitHeight: holdingsPanelPreferredHeight
             radius: 24
-            color: "#091321"
-            border.color: "#1c314b"
+            color: Const.tradingPanelBgAlt
+            border.color: Const.tradingPanelBorderAlt
             border.width: 1
             clip: true
 
@@ -2722,7 +2619,7 @@ Item {
 
                         Text {
                             text: "持仓管理"
-                            color: "#f8fafc"
+                            color: Const.tradingTitleText
                             font.pixelSize: 18
                             font.weight: Font.DemiBold
                         }
@@ -2732,8 +2629,8 @@ Item {
 
                     Rectangle {
                         radius: 14
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
                         implicitWidth: 82
                         implicitHeight: 34
@@ -2741,7 +2638,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: "刷新仓位"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: 11
                             font.weight: Font.Medium
                         }
@@ -2755,8 +2652,8 @@ Item {
 
                     Rectangle {
                         radius: 14
-                        color: "#0d2236"
-                        border.color: "#274765"
+                        color: Const.tradingSkeletonBgAlt
+                        border.color: Const.tradingSkeletonBorder
                         border.width: 1
                         implicitWidth: holdingsCountText.implicitWidth + 20
                         implicitHeight: 34
@@ -2765,7 +2662,7 @@ Item {
                             id: holdingsCountText
                             anchors.centerIn: parent
                             text: String(root.displayPositions.length) + " 条仓位"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: 12
                             font.weight: Font.Medium
                         }
@@ -2804,8 +2701,8 @@ Item {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 68
                             radius: 16
-                            color: "#0d1728"
-                            border.color: "#21354c"
+                            color: Const.tradingSkeletonBg
+                            border.color: Const.tradingSkeletonBorder
                             border.width: 1
 
                             ColumnLayout {
@@ -2815,13 +2712,13 @@ Item {
 
                                 Text {
                                     text: modelData.title
-                                    color: "#8ba4c7"
+                                    color: Const.tradingLabelSecondary
                                     font.pixelSize: 11
                                 }
 
                                 Text {
                                     text: modelData.value
-                                    color: "#f8fafc"
+                                    color: Const.tradingTitleText
                                     font.pixelSize: 15
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -2829,7 +2726,7 @@ Item {
 
                                 Text {
                                     text: modelData.detail
-                                    color: "#64748b"
+                                    color: Const.tradingEmptyText
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
                                 }
@@ -2846,7 +2743,7 @@ Item {
                         anchors.centerIn: parent
                         visible: groupedDisplayPositions.length === 0
                         text: "收到持仓、账户或成交回流后，这里会显示股票、融资融券、期货、期权仓位列表"
-                        color: "#64748b"
+                        color: Const.tradingEmptyText
                         font.pixelSize: 12
                     }
 
@@ -2878,7 +2775,7 @@ Item {
 
                                     Text {
                                         text: groupData.title || "当前持仓"
-                                        color: "#dbeafe"
+                                        color: Const.tradingLightBlue
                                         font.pixelSize: 12
                                         font.weight: Font.DemiBold
                                     }
@@ -2891,8 +2788,8 @@ Item {
                                             Layout.fillWidth: true
                                             Layout.preferredHeight: 46
                                             radius: 14
-                                            color: "#0d1728"
-                                            border.color: "#21354c"
+                                            color: Const.tradingSkeletonBg
+                                            border.color: Const.tradingSkeletonBorder
                                             border.width: 1
 
                                             readonly property var positionData: modelData || ({})
@@ -2909,7 +2806,7 @@ Item {
 
                                                     Text {
                                                         text: resolvePositionDisplayName(positionData)
-                                                        color: "#f8fafc"
+                                                        color: Const.tradingTitleText
                                                         font.pixelSize: 11
                                                         font.weight: Font.DemiBold
                                                         elide: Text.ElideRight
@@ -2919,7 +2816,7 @@ Item {
                                                         text: positionData.typeLabel + " · " + positionData.positionSideLabel
                                                             + " · 数量 " + Number(positionData.quantity || 0) + positionData.unit
                                                             + " · " + positionData.closeableLabel + " " + Number(positionData.closeableQuantity || 0) + positionData.unit
-                                                        color: "#8ba4c7"
+                                                        color: Const.tradingLabelSecondary
                                                         font.pixelSize: 9
                                                         elide: Text.ElideRight
                                                     }
@@ -2932,7 +2829,7 @@ Item {
 
                                                     Text {
                                                         text: "市值 " + formatCurrencyText(positionData.currentValue || 0)
-                                                        color: "#f8fafc"
+                                                        color: Const.tradingTitleText
                                                         font.pixelSize: 9
                                                         elide: Text.ElideRight
                                                     }
@@ -2943,7 +2840,7 @@ Item {
                                                             : ((Number(positionData.pnl || 0) >= 0 ? "+" : "-")
                                                                 + formatCurrencyText(Math.abs(Number(positionData.pnl || 0)))
                                                                 + " · 成本 " + formatCurrencyText(positionData.avgPrice || 0))
-                                                        color: Number(positionData.pnl || 0) >= 0 ? "#fb7185" : "#34d399"
+                                                        color: Number(positionData.pnl || 0) >= 0 ? Const.tradingStatusPreTradeRisk : Const.tradingSellGreen
                                                         font.pixelSize: 8
                                                         elide: Text.ElideRight
                                                     }
@@ -2953,15 +2850,15 @@ Item {
                                                     Layout.preferredWidth: 62
                                                     Layout.preferredHeight: 24
                                                     radius: 10
-                                                    color: positionData.canQuickClose ? "#3f1d24" : "#1f2937"
-                                                    border.color: positionData.canQuickClose ? "#fda4af" : "#334155"
+                                                    color: positionData.canQuickClose ? Const.tradingQuickCloseBg : Const.tradingQuickCloseDisabledBg
+                                                    border.color: positionData.canQuickClose ? Const.tradingQuickCloseBorder : Const.tradingQuickCloseDisabledBorder
                                                     border.width: 1
                                                     opacity: positionData.canQuickClose ? 1 : 0.55
 
                                                     Text {
                                                         anchors.centerIn: parent
                                                         text: "一键平仓"
-                                                        color: positionData.canQuickClose ? "#ffe4e6" : "#94a3b8"
+                                                        color: positionData.canQuickClose ? Const.tradingQuickCloseText : Const.tradingStatusDefault
                                                         font.pixelSize: 9
                                                         font.weight: Font.Medium
                                                     }
@@ -2994,7 +2891,7 @@ Item {
                         anchors.bottomMargin: 0
                         visible: groupedDisplayPositions.length > 0 && root.holdingsPanelScrollable
                         text: "向下滚动查看更多持仓"
-                        color: "#64748b"
+                        color: Const.tradingEmptyText
                         font.pixelSize: 10
                     }
                 }
@@ -3009,8 +2906,8 @@ Item {
             width: strategyStatusPanelLoader.width
             implicitHeight: 392
             radius: 24
-            color: "#091321"
-            border.color: "#1c314b"
+            color: Const.tradingPanelBgAlt
+            border.color: Const.tradingPanelBorderAlt
             border.width: 1
             clip: true
 
@@ -3028,7 +2925,7 @@ Item {
 
                         Text {
                             text: "策略状态与执行日志"
-                            color: "#f8fafc"
+                            color: Const.tradingTitleText
                             font.pixelSize: 18
                             font.weight: Font.DemiBold
                         }
@@ -3037,7 +2934,7 @@ Item {
                             text: root.boundStrategyId.length > 0
                                 ? (root.boundStrategyName.length > 0 ? root.boundStrategyName : root.boundStrategyId)
                                 : "当前未绑定真实交易策略"
-                            color: "#8ba4c7"
+                            color: Const.tradingLabelSecondary
                             font.pixelSize: 11
                         }
                     }
@@ -3046,8 +2943,8 @@ Item {
 
                     Rectangle {
                         radius: 12
-                        color: "#10243a"
-                        border.color: "#214362"
+                        color: Const.tradingButtonBg
+                        border.color: Const.tradingInputActiveBorder
                         border.width: 1
                         implicitWidth: 88
                         implicitHeight: 32
@@ -3055,7 +2952,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: "刷新状态"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: 11
                             font.weight: Font.Medium
                         }
@@ -3069,8 +2966,8 @@ Item {
 
                     Rectangle {
                         radius: 12
-                        color: "#0d2236"
-                        border.color: "#274765"
+                        color: Const.tradingSkeletonBgAlt
+                        border.color: Const.tradingSkeletonBorder
                         border.width: 1
                         implicitWidth: 78
                         implicitHeight: 32
@@ -3078,7 +2975,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: "清空日志"
-                            color: "#dbeafe"
+                            color: Const.tradingLightBlue
                             font.pixelSize: 11
                             font.weight: Font.Medium
                         }
@@ -3091,7 +2988,7 @@ Item {
                     }
                 }
 
-                RowLayout {
+                Flow {
                     Layout.fillWidth: true
                     spacing: 10
 
@@ -3099,11 +2996,11 @@ Item {
                         model: root.tradingStatusCards()
 
                         Rectangle {
-                            Layout.fillWidth: true
+                            width: Math.max(160, (parent.width - 40) / 5)
                             Layout.preferredHeight: 72
                             radius: 16
-                            color: "#0d1728"
-                            border.color: "#21354c"
+                            color: Const.tradingSkeletonBg
+                            border.color: Const.tradingSkeletonBorder
                             border.width: 1
 
                             ColumnLayout {
@@ -3113,13 +3010,13 @@ Item {
 
                                 Text {
                                     text: modelData.title
-                                    color: "#8ba4c7"
+                                    color: Const.tradingLabelSecondary
                                     font.pixelSize: 11
                                 }
 
                                 Text {
                                     text: modelData.value
-                                    color: "#f8fafc"
+                                    color: Const.tradingTitleText
                                     font.pixelSize: 14
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
@@ -3128,7 +3025,7 @@ Item {
 
                                 Text {
                                     text: modelData.detail
-                                    color: "#64748b"
+                                    color: Const.tradingEmptyText
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
@@ -3142,8 +3039,8 @@ Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 92
                     radius: 18
-                    color: "#08111e"
-                    border.color: "#182a40"
+                    color: Const.tradingOrderListBg
+                    border.color: Const.tradingOrderListBorder
                     border.width: 1
 
                     Item {
@@ -3154,7 +3051,7 @@ Item {
                             anchors.centerIn: parent
                             visible: root.recentRuleHits.length === 0
                             text: "最近规则命中会汇总在这里，独立于执行日志保留"
-                            color: "#64748b"
+                            color: Const.tradingEmptyText
                             font.pixelSize: 11
                         }
 
@@ -3168,7 +3065,7 @@ Item {
 
                                 Text {
                                     text: "规则命中历史"
-                                    color: "#f8fafc"
+                                    color: Const.tradingTitleText
                                     font.pixelSize: 12
                                     font.weight: Font.DemiBold
                                 }
@@ -3177,7 +3074,7 @@ Item {
 
                                 Text {
                                     text: "最近 " + String(Math.min(root.recentRuleHits.length, 3)) + " 条"
-                                    color: "#64748b"
+                                    color: Const.tradingEmptyText
                                     font.pixelSize: 10
                                 }
                             }
@@ -3189,7 +3086,7 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 22
                                     radius: 9
-                                    color: "#0b1625"
+                                    color: Const.tradingOrderItemBg
                                     border.color: Qt.rgba(0, 0, 0, 0)
 
                                     RowLayout {
@@ -3218,8 +3115,8 @@ Item {
                                         Rectangle {
                                             visible: root.ruleHitGroupText(modelData).length > 0
                                             radius: 8
-                                            color: "#1e293b"
-                                            border.color: "#475569"
+                                            color: Const.tradingButtonBg
+                                            border.color: Const.tradingGrayBtn
                                             border.width: 1
                                             Layout.preferredHeight: 16
                                             Layout.preferredWidth: Math.min(groupBadgeLabel.implicitWidth + 14, 128)
@@ -3228,7 +3125,7 @@ Item {
                                                 id: groupBadgeLabel
                                                 anchors.centerIn: parent
                                                 text: root.ruleHitGroupText(modelData)
-                                                color: "#cbd5e1"
+                                                color: Const.tradingLightBlue
                                                 font.pixelSize: 9
                                                 font.weight: Font.Medium
                                                 elide: Text.ElideRight
@@ -3239,7 +3136,7 @@ Item {
 
                                         Text {
                                             text: root.ruleHitTitle(modelData)
-                                            color: "#e2e8f0"
+                                            color: Const.tradingValueText
                                             font.pixelSize: 10
                                             font.weight: Font.DemiBold
                                             elide: Text.ElideRight
@@ -3248,7 +3145,7 @@ Item {
 
                                         Text {
                                             text: root.ruleHitDetail(modelData)
-                                            color: "#8ba4c7"
+                                            color: Const.tradingLabelSecondary
                                             font.pixelSize: 9
                                             elide: Text.ElideRight
                                             Layout.fillWidth: true
@@ -3264,15 +3161,15 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     radius: 18
-                    color: "#08111e"
-                    border.color: "#182a40"
+                    color: Const.tradingOrderListBg
+                    border.color: Const.tradingOrderListBorder
                     border.width: 1
 
                     Text {
                         anchors.centerIn: parent
                         visible: root.executionLogs.length === 0
                         text: "策略一旦发起委托、收到回报或状态变化，这里会追加真实执行日志"
-                        color: "#64748b"
+                        color: Const.tradingEmptyText
                         font.pixelSize: 12
                     }
 
@@ -3288,8 +3185,8 @@ Item {
                             width: ListView.view.width
                             height: 48
                             radius: 14
-                            color: "#0b1625"
-                            border.color: "#163047"
+                            color: Const.tradingOrderItemBg
+                            border.color: Const.tradingOrderItemBorder
                             border.width: 1
 
                             RowLayout {
@@ -3320,7 +3217,7 @@ Item {
 
                                     Text {
                                         text: modelData.title
-                                        color: "#f8fafc"
+                                        color: Const.tradingTitleText
                                         font.pixelSize: 11
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideRight
@@ -3329,7 +3226,7 @@ Item {
 
                                     Text {
                                         text: modelData.detail
-                                        color: "#8ba4c7"
+                                        color: Const.tradingLabelSecondary
                                         font.pixelSize: 10
                                         elide: Text.ElideRight
                                         Layout.fillWidth: true
@@ -3338,7 +3235,7 @@ Item {
 
                                 Text {
                                     text: modelData.time
-                                    color: "#64748b"
+                                    color: Const.tradingEmptyText
                                     font.pixelSize: 10
                                     Layout.alignment: Qt.AlignTop
                                 }
@@ -3351,9 +3248,6 @@ Item {
     }
 
     Component.onCompleted: {
-        if (typeof TradeJs.setDepthLevelCount === "function") {
-            TradeJs.setDepthLevelCount(root.requestedDepthLevels)
-        }
         if (visible) {
             Qt.callLater(root.performDeferredPageInitialization)
         }
@@ -3373,7 +3267,7 @@ Item {
         Qt.callLater(root.reactivateVisiblePage)
     }
 
-    Component.onDestruction: TradeJs.clearCallbacks()
+    Component.onDestruction: {}
 
     Connections {
         target: strategyService
@@ -3527,7 +3421,7 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#0F172A"
+        color: Const.tradingPageBg
     }
 
     Flickable {
@@ -3572,8 +3466,8 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         radius: 24
-                        color: "#091321"
-                        border.color: "#1c314b"
+                        color: Const.tradingPanelBgAlt
+                        border.color: Const.tradingPanelBorderAlt
                         border.width: 1
                         visible: !root.holdingsSectionRequested || holdingsPanelLoader.status !== Loader.Ready
 
@@ -3584,7 +3478,7 @@ Item {
 
                             Text {
                                 text: "持仓管理"
-                                color: "#f8fafc"
+                                color: Const.tradingTitleText
                                 font.pixelSize: 18
                                 font.weight: Font.DemiBold
                             }
@@ -3596,8 +3490,8 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: index === 0 ? 72 : 44
                                     radius: 16
-                                    color: index === 0 ? "#0d2236" : "#0d1728"
-                                    border.color: "#21354c"
+                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
+                                    border.color: Const.tradingSkeletonBorder
                                     border.width: 1
                                     opacity: 0.78 - index * 0.12
                                 }
@@ -3624,8 +3518,8 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         radius: 24
-                        color: "#091321"
-                        border.color: "#1c314b"
+                        color: Const.tradingPanelBgAlt
+                        border.color: Const.tradingPanelBorderAlt
                         border.width: 1
                         visible: !root.strategyStatusSectionRequested || strategyStatusPanelLoader.status !== Loader.Ready
 
@@ -3636,7 +3530,7 @@ Item {
 
                             Text {
                                 text: "策略状态与执行日志"
-                                color: "#f8fafc"
+                                color: Const.tradingTitleText
                                 font.pixelSize: 18
                                 font.weight: Font.DemiBold
                             }
@@ -3648,8 +3542,8 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: index === 0 ? 72 : 40
                                     radius: 16
-                                    color: index === 0 ? "#0d2236" : "#0d1728"
-                                    border.color: "#21354c"
+                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
+                                    border.color: Const.tradingSkeletonBorder
                                     border.width: 1
                                     opacity: 0.8 - index * 0.1
                                 }
@@ -3668,7 +3562,7 @@ Item {
 
                 Text {
                     text: "交易执行"
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: 30
                     font.weight: Font.Bold
                 }
@@ -3771,39 +3665,33 @@ Item {
 
                         onDepthLevelsChanged: function(levels) {
                             root.requestedDepthLevels = Math.min(10, Math.max(5, Number(levels || 5)))
-                            if (typeof TradeJs.setDepthLevelCount === "function") {
-                                TradeJs.setDepthLevelCount(root.requestedDepthLevels)
-                            }
                             root.syncMarketState()
                         }
                     }
                 }
 
-                RowLayout {
+                Flow {
                     id: tradingPanels
                     width: Math.min(parent.width, tradingContent.formPanelPreferredWidth + tradingContent.depthPanelPreferredWidth + spacing)
-                    height: parent.height
                     anchors.top: parent.top
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
 
                     Loader {
                         id: formPanelLoader
-                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
-                        Layout.alignment: Qt.AlignTop
-                        Layout.fillHeight: true
+                        width: Math.min(tradingContent.formPanelPreferredWidth, tradingPanels.width)
+                        height: tradingContent.formPanelHeight > 0 ? tradingContent.formPanelHeight : implicitHeight
                         asynchronous: true
                         active: root.formPanelRequested
                         sourceComponent: formPanelComponent
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
-                        Layout.fillHeight: true
-                        Layout.alignment: Qt.AlignTop
+                        width: Math.min(tradingContent.formPanelPreferredWidth, tradingPanels.width)
+                        height: Math.max(400, tradingPanels.height)
                         radius: 24
-                        color: "#091321"
-                        border.color: "#1c314b"
+                        color: Const.tradingPanelBgAlt
+                        border.color: Const.tradingPanelBorderAlt
                         border.width: 1
                         visible: formPanelLoader.status !== Loader.Ready
 
@@ -3814,7 +3702,7 @@ Item {
 
                             Text {
                                 text: "交易表单"
-                                color: "#f8fafc"
+                                color: Const.tradingTitleText
                                 font.pixelSize: 18
                                 font.weight: Font.DemiBold
                             }
@@ -3826,8 +3714,8 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: index === 0 ? 54 : 42
                                     radius: 14
-                                    color: index === 0 ? "#0d2236" : "#0d1728"
-                                    border.color: "#21354c"
+                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
+                                    border.color: Const.tradingSkeletonBorder
                                     border.width: 1
                                     opacity: 0.82 - index * 0.08
                                 }
@@ -3839,22 +3727,19 @@ Item {
 
                     Loader {
                         id: depthPanelLoader
-                        Layout.preferredWidth: tradingContent.depthPanelPreferredWidth
-                        Layout.minimumWidth: 0
-                        Layout.fillHeight: true
-                        Layout.alignment: Qt.AlignTop
+                        width: Math.min(tradingContent.depthPanelPreferredWidth, tradingPanels.width)
+                        height: implicitHeight
                         asynchronous: true
                         active: root.depthPanelRequested
                         sourceComponent: depthPanelComponent
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: tradingContent.depthPanelPreferredWidth
-                        Layout.fillHeight: true
-                        Layout.alignment: Qt.AlignTop
+                        width: Math.min(tradingContent.depthPanelPreferredWidth, tradingPanels.width)
+                        height: 400
                         radius: 24
-                        color: "#091321"
-                        border.color: "#1c314b"
+                        color: Const.tradingPanelBgAlt
+                        border.color: Const.tradingPanelBorderAlt
                         border.width: 1
                         visible: depthPanelLoader.status !== Loader.Ready
 
@@ -3865,7 +3750,7 @@ Item {
 
                             Text {
                                 text: "行情与盘口"
-                                color: "#f8fafc"
+                                color: Const.tradingTitleText
                                 font.pixelSize: 18
                                 font.weight: Font.DemiBold
                             }
@@ -3877,8 +3762,8 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: index === 0 ? 66 : 38
                                     radius: 14
-                                    color: index === 0 ? "#0d2236" : "#0d1728"
-                                    border.color: "#21354c"
+                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
+                                    border.color: Const.tradingSkeletonBorder
                                     border.width: 1
                                     opacity: 0.82 - index * 0.07
                                 }

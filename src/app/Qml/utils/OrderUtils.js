@@ -44,3 +44,19 @@ function normalizedOrderStatus(statusValue) {
     }
     return "UNKNOWN"
 }
+
+function displayOrderSide(side) {
+    var sideText = String(side || "").toUpperCase()
+    if (sideText === "BUY") {
+        return "买入"
+    }
+    if (sideText === "SELL") {
+        return "卖出"
+    }
+    return sideText || "--"
+}
+
+function isUnfinishedOrderStatus(status) {
+    var statusText = normalizedOrderStatus(status)
+    return statusText === "SUBMITTED" || statusText === "PENDING" || statusText === "PARTIAL_FILLED"
+}

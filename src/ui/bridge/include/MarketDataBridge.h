@@ -38,6 +38,13 @@ public:
     Q_INVOKABLE void unsubscribeRealtime();
     Q_INVOKABLE QVariantMap getTradingStatus(const QString& symbol) const;
 
+    // ── Domain 工具方法 (薄转发到 MarketDataUtils.h) ──
+    Q_INVOKABLE int priceDigitsForMode(const QString& mode) const;
+    Q_INVOKABLE double boardLimitRatio(const QString& symbol) const;
+    Q_INVOKABLE bool hasRealtimeQuote(const QString& source, const QString& updatedAt) const;
+    Q_INVOKABLE bool hasSnapshotQuote(const QString& source, const QString& updatedAt) const;
+    Q_INVOKABLE QString invalidSymbolMessageForMode(const QString& mode) const;
+
 signals:
     void initializedChanged();
     void connectedChanged();

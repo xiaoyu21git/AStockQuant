@@ -1,5 +1,6 @@
 #include "MarketDataBridge.h"
 #include "../../engine/include/GmSessionEngine.h"
+#include "../../../domain/trading/include/MarketDataUtils.h"
 
 #include <QDateTime>
 #include <QDate>
@@ -158,6 +159,28 @@ QVariantMap MarketDataBridge::getTradingStatus(const QString& symbol) const {
     }
 
     return s;
+}
+
+// ── Domain 工具方法 (薄转发到 MarketDataUtils.h) ──
+
+int MarketDataBridge::priceDigitsForMode(const QString& mode) const {
+    return domain::trading::priceDigitsForMode(mode.toStdString());
+}
+
+double MarketDataBridge::boardLimitRatio(const QString& symbol) const {
+    return domain::trading::boardLimitRatio(symbol.toStdString());
+}
+
+bool MarketDataBridge::hasRealtimeQuote(const QString& source, const QString& updatedAt) const {
+    return domain::trading::hasRealtimeQuote(source.toStdString(), updatedAt.toStdString());
+}
+
+bool MarketDataBridge::hasSnapshotQuote(const QString& source, const QString& updatedAt) const {
+    return domain::trading::hasSnapshotQuote(source.toStdString(), updatedAt.toStdString());
+}
+
+QString MarketDataBridge::invalidSymbolMessageForMode(const QString& mode) const {
+    return QString::fromUtf8(domain::trading::invalidSymbolMessageForMode(mode.toStdString()));
 }
 
 } // namespace bridge

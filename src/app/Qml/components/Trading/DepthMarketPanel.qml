@@ -1,14 +1,15 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../utils/TradingConstants.js" as Const
 
 Rectangle {
     id: root
     signal depthLevelsChanged(int levels)
 
     radius: 28
-    color: "#07101c"
-    border.color: "#1b2c40"
+    color: Const.depthPanelBg
+    border.color: Const.depthPanelBorder
     border.width: 1
     implicitHeight: compactMode ? 600 : 760
 
@@ -44,8 +45,8 @@ Rectangle {
         return ""
     }
     function statusBadgeColor() {
-        if (marketSnapshot && marketSnapshot.limitUp) return "#cc0022"
-        if (marketSnapshot && marketSnapshot.limitDown) return "#008822"
+        if (marketSnapshot && marketSnapshot.limitUp) return Const.tradingBuyRed
+        if (marketSnapshot && marketSnapshot.limitDown) return Const.depthLimitDownGreen
         return "transparent"
     }
     function sealedInfo() {
@@ -252,15 +253,15 @@ Rectangle {
         return "等待桥接行情"
     }
 
-    readonly property color trendColor: !hasDisplayPrice ? "#94a3b8" : (trendUp() ? "#cc0022" : "#008822")
+    readonly property color trendColor: !hasDisplayPrice ? Const.tradingStatusDefault : (trendUp() ? Const.tradingBuyRed : Const.depthLimitDownGreen)
 
     Rectangle {
         anchors.fill: parent
         anchors.margins: 1
         radius: 27
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0b1524" }
-            GradientStop { position: 1.0; color: "#060c16" }
+            GradientStop { position: 0.0; color: Const.depthGradientStart }
+            GradientStop { position: 1.0; color: Const.depthGradientEnd }
         }
     }
 
@@ -279,14 +280,14 @@ Rectangle {
                     text: ((marketSnapshot && marketSnapshot.name ? String(marketSnapshot.name) + "  ·  " : "")
                         + (marketSnapshot && marketSnapshot.symbol ? String(marketSnapshot.symbol) : activeSymbol)
                         + "  ·  " + modeName())
-                    color: "#eff6ff"
+                    color: Const.tradingBrightText
                     font.pixelSize: compactHeaderFont
                     font.weight: Font.DemiBold
                 }
 
                 Text {
                     text: quoteStateText()
-                    color: "#7f96b8"
+                    color: Const.depthLabelText
                     font.pixelSize: compactMode ? 10 : 12
                 }
             }
@@ -330,7 +331,7 @@ Rectangle {
                     }
                     Text {
                         text: root.sealedInfo()
-                        color: "#94a3b8"; font.pixelSize: compactMode ? 9 : 11
+                        color: Const.tradingStatusDefault; font.pixelSize: compactMode ? 9 : 11
                         visible: root.sealedInfo() !== ""
                     }
                 }
@@ -347,8 +348,8 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: compactStatCardHeight
                 radius: 16
-                color: "#0c1828"
-                border.color: "#1b3047"
+                color: Const.tradingHeaderBg
+                border.color: Const.tradingFormAreaBorder
                 border.width: 1
 
                 Column {
@@ -359,13 +360,13 @@ Rectangle {
 
                     Text {
                         text: "总委买"
-                        color: "#7f96b8"
+                        color: Const.depthLabelText
                         font.pixelSize: compactMetaFont
                     }
 
                     Text {
                         text: formatVolume(depthSnapshot.totalBid)
-                        color: "#eff6ff"
+                        color: Const.tradingBrightText
                         font.pixelSize: compactMode ? 13 : 16
                         font.weight: Font.DemiBold
                     }
@@ -376,8 +377,8 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: compactStatCardHeight
                 radius: 16
-                color: "#0c1828"
-                border.color: "#1b3047"
+                color: Const.tradingHeaderBg
+                border.color: Const.tradingFormAreaBorder
                 border.width: 1
 
                 Column {
@@ -388,13 +389,13 @@ Rectangle {
 
                     Text {
                         text: "总委卖"
-                        color: "#7f96b8"
+                        color: Const.depthLabelText
                         font.pixelSize: compactMetaFont
                     }
 
                     Text {
                         text: formatVolume(depthSnapshot.totalAsk)
-                        color: "#eff6ff"
+                        color: Const.tradingBrightText
                         font.pixelSize: compactMode ? 13 : 16
                         font.weight: Font.DemiBold
                     }
@@ -405,8 +406,8 @@ Rectangle {
                 Layout.fillWidth: true
                 implicitHeight: compactStatCardHeight
                 radius: 16
-                color: "#0c1828"
-                border.color: "#1b3047"
+                color: Const.tradingHeaderBg
+                border.color: Const.tradingFormAreaBorder
                 border.width: 1
 
                 Column {
@@ -417,13 +418,13 @@ Rectangle {
 
                     Text {
                         text: "逐笔数"
-                        color: "#7f96b8"
+                        color: Const.depthLabelText
                         font.pixelSize: compactMetaFont
                     }
 
                     Text {
                         text: String(root.tickRows.length)
-                        color: "#eff6ff"
+                        color: Const.tradingBrightText
                         font.pixelSize: compactMode ? 13 : 16
                         font.weight: Font.DemiBold
                     }
@@ -442,8 +443,8 @@ Rectangle {
                 Layout.fillHeight: true
                 Layout.alignment: Qt.AlignTop
                 radius: 22
-                color: "#091321"
-                border.color: "#1b3047"
+                color: Const.tradingPanelBgAlt
+                border.color: Const.tradingFormAreaBorder
                 border.width: 1
                 clip: true
 
@@ -458,7 +459,7 @@ Rectangle {
 
                         Text {
                             text: "盘口列表"
-                            color: "#eff6ff"
+                            color: Const.tradingBrightText
                             font.pixelSize: compactSectionTitleFont
                             font.weight: Font.DemiBold
                         }
@@ -472,14 +473,14 @@ Rectangle {
                                 radius: compactMode ? 8 : 10
                                 implicitWidth: compactMode ? 28 : 36
                                 implicitHeight: compactDepthChipHeight
-                                color: root.requestedDepthLevels === modelData ? "#176b78" : "#0d1a2b"
-                                border.color: root.requestedDepthLevels === modelData ? "#39c6d6" : "#28405d"
+                                color: root.requestedDepthLevels === modelData ? Const.depthActiveLevelBg : Const.depthInactiveLevelBg
+                                border.color: root.requestedDepthLevels === modelData ? Const.depthActiveLevelBorder : Const.depthInactiveLevelBorder
                                 border.width: 1
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: String(modelData)
-                                    color: root.requestedDepthLevels === modelData ? "#effbff" : "#8ea8cb"
+                                    color: root.requestedDepthLevels === modelData ? Const.depthActiveLevelText : Const.depthInactiveLevelText
                                     font.pixelSize: compactMode ? 9 : 11
                                     font.weight: Font.DemiBold
                                 }
@@ -496,7 +497,7 @@ Rectangle {
                     Text {
                         Layout.fillWidth: true
                         text: "显示 " + root.visibleDepthLevels + " / " + root.requestedDepthLevels + " 档"
-                        color: "#7f96b8"
+                        color: Const.depthLabelText
                         font.pixelSize: compactMetaFont
                     }
 
@@ -504,7 +505,7 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactDepthHeaderHeight
                         radius: compactMode ? 10 : 12
-                        color: "#0d1a2b"
+                        color: Const.depthInactiveLevelBg
 
                         RowLayout {
                             anchors.fill: parent
@@ -513,34 +514,34 @@ Rectangle {
 
                             Text {
                                 text: "档"
-                                color: "#7f96b8"
+                                color: Const.depthLabelText
                                 font.pixelSize: compactMetaFont
                                 Layout.preferredWidth: compactDepthSideWidth
                             }
                             Text {
                                 text: "价格"
-                                color: "#7f96b8"
+                                color: Const.depthLabelText
                                 font.pixelSize: compactMetaFont
                                 Layout.preferredWidth: compactDepthPriceWidth
                                 horizontalAlignment: Text.AlignRight
                             }
                             Text {
                                 text: "手数"
-                                color: "#7f96b8"
+                                color: Const.depthLabelText
                                 font.pixelSize: compactMetaFont
                                 Layout.preferredWidth: compactDepthLotWidth
                                 horizontalAlignment: Text.AlignRight
                             }
                             Text {
                                 text: root.shareCountLabel
-                                color: "#7f96b8"
+                                color: Const.depthLabelText
                                 font.pixelSize: compactMetaFont
                                 Layout.preferredWidth: compactDepthShareWidth
                                 horizontalAlignment: Text.AlignRight
                             }
                             Text {
                                 text: "金额"
-                                color: "#7f96b8"
+                                color: Const.depthLabelText
                                 font.pixelSize: compactMetaFont
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignRight
@@ -570,8 +571,8 @@ Rectangle {
                                 anchors.fill: parent
                                 visible: rowData.kind === "depth"
                                 radius: compactMode ? 9 : 12
-                                color: rowData.isBid ? "#0f201f" : "#251316"
-                                border.color: rowData.isBid ? "#1b5d57" : "#6d2931"
+                                color: rowData.isBid ? Const.depthBidRowBg : Const.depthAskRowBg
+                                border.color: rowData.isBid ? Const.depthBidRowBorder : Const.depthAskRowBorder
                                 border.width: 1
                             }
 
@@ -583,7 +584,7 @@ Rectangle {
                                 anchors.leftMargin: compactMode ? 2 : 6
                                 anchors.rightMargin: compactMode ? 2 : 6
                                 height: 1
-                                color: "#1f5f6a"
+                                color: Const.depthAggregateBar
                             }
 
                             RowLayout {
@@ -594,35 +595,35 @@ Rectangle {
 
                                 Text {
                                     text: rowData.side + rowData.level
-                                    color: rowData.isBid ? "#5eead4" : "#fca5a5"
+                                    color: rowData.isBid ? Const.depthBidText : Const.depthAskText
                                     font.pixelSize: compactBookTagFont
                                     font.weight: Font.DemiBold
                                     Layout.preferredWidth: compactDepthSideWidth
                                 }
                                 Text {
                                     text: root.formatPrice(rowData.price)
-                                    color: "#eff6ff"
+                                    color: Const.tradingBrightText
                                     font.pixelSize: compactBookPriceFont
                                     Layout.preferredWidth: compactDepthPriceWidth
                                     horizontalAlignment: Text.AlignRight
                                 }
                                 Text {
                                     text: root.formatLotCount(rowData.volume)
-                                    color: "#9fb4d2"
+                                    color: Const.depthInfoText
                                     font.pixelSize: compactBookVolumeFont
                                     Layout.preferredWidth: compactDepthLotWidth
                                     horizontalAlignment: Text.AlignRight
                                 }
                                 Text {
                                     text: root.formatShareCount(rowData.volume)
-                                    color: "#9fb4d2"
+                                    color: Const.depthInfoText
                                     font.pixelSize: compactBookVolumeFont
                                     Layout.preferredWidth: compactDepthShareWidth
                                     horizontalAlignment: Text.AlignRight
                                 }
                                 Text {
                                     text: root.formatAmount(rowData.price, rowData.volume)
-                                    color: rowData.isBid ? "#8ef1d8" : "#ffb4b8"
+                                    color: rowData.isBid ? Const.depthBidVolumeText : Const.depthAskVolumeText
                                     font.pixelSize: compactBookVolumeFont
                                     Layout.fillWidth: true
                                     horizontalAlignment: Text.AlignRight
@@ -636,7 +637,7 @@ Rectangle {
                         Layout.fillWidth: true
                         visible: root.depthTableRows.length === 0
                         text: "暂无盘口数据"
-                        color: "#7f96b8"
+                        color: Const.depthLabelText
                         font.pixelSize: compactMetaFont
                         horizontalAlignment: Text.AlignHCenter
                     }
@@ -659,8 +660,8 @@ Rectangle {
                 Layout.fillHeight: true
                 Layout.alignment: Qt.AlignTop
                 radius: 22
-                color: "#091321"
-                border.color: "#1b3047"
+                color: Const.tradingPanelBgAlt
+                border.color: Const.tradingFormAreaBorder
                 border.width: 1
                 clip: true
 
@@ -671,7 +672,7 @@ Rectangle {
 
                     Text {
                         text: "L2"
-                        color: "#eff6ff"
+                        color: Const.tradingBrightText
                         font.pixelSize: compactSectionTitleFont
                         font.weight: Font.DemiBold
                     }
@@ -680,19 +681,19 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactMode ? 24 : 32
                         radius: compactMode ? 10 : 12
-                        color: "#0d1a2b"
+                        color: Const.depthInactiveLevelBg
 
                         RowLayout {
                             anchors.fill: parent
                             anchors.margins: compactMode ? 6 : 10
 
-                            Text { text: "时间"; color: "#7f96b8"; font.pixelSize: compactMetaFont }
+                            Text { text: "时间"; color: Const.depthLabelText; font.pixelSize: compactMetaFont }
                             Item { Layout.fillWidth: true }
-                            Text { text: "方向"; color: "#7f96b8"; font.pixelSize: compactMetaFont }
+                            Text { text: "方向"; color: Const.depthLabelText; font.pixelSize: compactMetaFont }
                             Item { Layout.fillWidth: true }
-                            Text { text: "价格"; color: "#7f96b8"; font.pixelSize: compactMetaFont }
+                            Text { text: "价格"; color: Const.depthLabelText; font.pixelSize: compactMetaFont }
                             Item { Layout.fillWidth: true }
-                            Text { text: "成交量"; color: "#7f96b8"; font.pixelSize: compactMetaFont }
+                            Text { text: "成交量"; color: Const.depthLabelText; font.pixelSize: compactMetaFont }
                         }
                     }
 
@@ -708,8 +709,8 @@ Rectangle {
                             width: ListView.view.width
                             height: compactTradeRowHeight
                             radius: compactMode ? 10 : 12
-                            color: "#0c1828"
-                            border.color: tickData.direction === "buy" ? "#184f4a" : "#6c2b2f"
+                            color: Const.tradingHeaderBg
+                            border.color: tickData.direction === "buy" ? Const.depthTickBuyBorder : Const.depthTickSellBorder
                             border.width: 1
 
                             RowLayout {
@@ -718,7 +719,7 @@ Rectangle {
 
                                 Text {
                                     text: tickData.time
-                                    color: "#cbd5e1"
+                                    color: Const.depthTickNeutralText
                                     font.pixelSize: compactMetaFont
                                 }
 
@@ -726,7 +727,7 @@ Rectangle {
 
                                 Text {
                                     text: tickData.direction === "buy" ? "买盘" : "卖盘"
-                                    color: tickData.direction === "buy" ? "#5eead4" : "#fca5a5"
+                                    color: tickData.direction === "buy" ? Const.depthBidText : Const.depthAskText
                                     font.pixelSize: compactMetaFont
                                     font.weight: Font.DemiBold
                                 }
@@ -735,7 +736,7 @@ Rectangle {
 
                                 Text {
                                     text: root.formatPrice(tickData.price)
-                                    color: "#eff6ff"
+                                    color: Const.tradingBrightText
                                     font.pixelSize: compactMetaFont
                                 }
 
@@ -743,7 +744,7 @@ Rectangle {
 
                                 Text {
                                     text: root.formatVolume(tickData.volume)
-                                    color: "#9fb4d2"
+                                    color: Const.depthInfoText
                                     font.pixelSize: compactMetaFont
                                 }
                             }

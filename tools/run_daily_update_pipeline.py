@@ -613,6 +613,15 @@ def main() -> int:
                 return finalize(step_results[-1]["exit_code"])
 
     if not execute_step(
+        "auto-fix lagging daily (akshare)",
+        [sys.executable, "tools/verify_daily_update.py", "--sample-limit", str(args.sample_limit), "--auto-fix"],
+        required=False,
+        continue_on_failure=True,
+        results=step_results,
+    ):
+        pass
+
+    if not execute_step(
         "daily verify",
         build_verify_command(args),
         required=True,
