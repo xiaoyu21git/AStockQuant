@@ -11,12 +11,6 @@ Item {
     id: root
 
     property var marketData: []
-    property string currentMenuCode: ""
-
-    // ── 视图模式 ──
-    readonly property bool isPositionView: currentMenuCode === "position_management"
-    readonly property bool isTradeView: !isPositionView || currentMenuCode === "trade_execution"
-
     property var marketSnapshot: ({
         price: 0,
         priceStr: "--",
@@ -2910,7 +2904,7 @@ Item {
 
         Rectangle {
             width: strategyStatusPanelLoader.width
-            implicitHeight: 392
+            implicitHeight: 300
             radius: 24
             color: Const.tradingPanelBgAlt
             border.color: Const.tradingPanelBorderAlt
@@ -2994,7 +2988,7 @@ Item {
                     }
                 }
 
-                Flow {
+                RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
 
@@ -3002,7 +2996,7 @@ Item {
                         model: root.tradingStatusCards()
 
                         Rectangle {
-                            width: Math.max(160, (parent.width - 40) / 5)
+                            Layout.fillWidth: true
                             Layout.preferredHeight: 72
                             radius: 16
                             color: Const.tradingSkeletonBg
@@ -3189,7 +3183,7 @@ Item {
 
                         delegate: Rectangle {
                             width: ListView.view.width
-                            height: 48
+                            height: 32
                             radius: 14
                             color: Const.tradingOrderItemBg
                             border.color: Const.tradingOrderItemBorder
@@ -3508,56 +3502,13 @@ Item {
                     }
                 }
 
-                Item {
+                // ── K线图 ──
+                TradingComponents.CompactChart {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 392
-
-                    Loader {
-                        id: strategyStatusPanelLoader
-                        width: parent.width
-                        height: parent.height
-                        asynchronous: true
-                        active: root.strategyStatusSectionRequested
-                        sourceComponent: strategyStatusPanelComponent
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 24
-                        color: Const.tradingPanelBgAlt
-                        border.color: Const.tradingPanelBorderAlt
-                        border.width: 1
-                        visible: !root.strategyStatusSectionRequested || strategyStatusPanelLoader.status !== Loader.Ready
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 18
-                            spacing: 12
-
-                            Text {
-                                text: "策略状态与执行日志"
-                                color: Const.tradingTitleText
-                                font.pixelSize: 18
-                                font.weight: Font.DemiBold
-                            }
-
-                            Repeater {
-                                model: 4
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: index === 0 ? 72 : 40
-                                    radius: 16
-                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
-                                    border.color: Const.tradingSkeletonBorder
-                                    border.width: 1
-                                    opacity: 0.8 - index * 0.1
-                                }
-                            }
-
-                            Item { Layout.fillHeight: true }
-                        }
-                    }
+                    Layout.preferredHeight: 260
+                    symbol: root.activeSymbol
+                    marketDataService: root.marketDataService
+                    displayPositions: root.displayPositions
                 }
 
                 RowLayout {
@@ -3580,10 +3531,9 @@ Item {
                 Item {
             id: tradingViewport
             Layout.fillWidth: false
-            Layout.preferredWidth: root.isPositionView ? 0 : Math.min(pageContent.width, root.tradingSectionMaxWidth)
+            Layout.preferredWidth: Math.min(pageContent.width, root.tradingSectionMaxWidth)
             Layout.alignment: Qt.AlignHCenter
-            clip: true
-            implicitHeight: root.isPositionView ? 0 : Math.max(formPanelHeight, depthPanelHeight)
+            implicitHeight: Math.max(formPanelHeight, depthPanelHeight)
             readonly property real formPanelHeight: formPanelLoader.item
                 ? formPanelLoader.item.implicitHeight
                 : 800
@@ -3677,25 +3627,28 @@ Item {
                     }
                 }
 
-                Flow {
+                RowLayout {
                     id: tradingPanels
                     width: Math.min(parent.width, tradingContent.formPanelPreferredWidth + tradingContent.depthPanelPreferredWidth + spacing)
+                    height: parent.height
                     anchors.top: parent.top
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 12
 
                     Loader {
                         id: formPanelLoader
-                        width: Math.min(tradingContent.formPanelPreferredWidth, tradingPanels.width)
-                        height: tradingContent.formPanelHeight > 0 ? tradingContent.formPanelHeight : implicitHeight
+                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
+                        Layout.alignment: Qt.AlignTop
+                        Layout.fillHeight: true
                         asynchronous: true
-                        active: root.formPanelRequested && !root.isPositionView
+                        active: root.formPanelRequested
                         sourceComponent: formPanelComponent
                     }
 
                     Rectangle {
-                        width: Math.min(tradingContent.formPanelPreferredWidth, tradingPanels.width)
-                        height: Math.max(400, tradingPanels.height)
+                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
                         radius: 24
                         color: Const.tradingPanelBgAlt
                         border.color: Const.tradingPanelBorderAlt
@@ -3734,16 +3687,19 @@ Item {
 
                     Loader {
                         id: depthPanelLoader
-                        width: Math.min(tradingContent.depthPanelPreferredWidth, tradingPanels.width)
-                        height: implicitHeight
+                        Layout.preferredWidth: tradingContent.depthPanelPreferredWidth
+                        Layout.minimumWidth: 0
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
                         asynchronous: true
-                        active: root.depthPanelRequested && !root.isPositionView
+                        active: root.depthPanelRequested
                         sourceComponent: depthPanelComponent
                     }
 
                     Rectangle {
-                        width: Math.min(tradingContent.depthPanelPreferredWidth, tradingPanels.width)
-                        height: 400
+                        Layout.preferredWidth: tradingContent.depthPanelPreferredWidth
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
                         radius: 24
                         color: Const.tradingPanelBgAlt
                         border.color: Const.tradingPanelBorderAlt
@@ -3782,6 +3738,59 @@ Item {
                 }
             }
         }
+
+                // ── 策略状态与执行日志 ──
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 300
+
+                    Loader {
+                        id: strategyStatusPanelLoader
+                        width: parent.width
+                        height: parent.height
+                        asynchronous: true
+                        active: root.strategyStatusSectionRequested
+                        sourceComponent: strategyStatusPanelComponent
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 24
+                        color: Const.tradingPanelBgAlt
+                        border.color: Const.tradingPanelBorderAlt
+                        border.width: 1
+                        visible: !root.strategyStatusSectionRequested || strategyStatusPanelLoader.status !== Loader.Ready
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            spacing: 12
+
+                            Text {
+                                text: "策略状态与执行日志"
+                                color: Const.tradingTitleText
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                            }
+
+                            Repeater {
+                                model: 4
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: index === 0 ? 72 : 40
+                                    radius: 16
+                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
+                                    border.color: Const.tradingSkeletonBorder
+                                    border.width: 1
+                                    opacity: 0.8 - index * 0.1
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
+                        }
+                    }
+                }
             }
         }
     }

@@ -1,6 +1,8 @@
 #include "MarketDataBridge.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../../domain/trading/include/MarketDataUtils.h"
+#include "../../../infrastructure/include/database/MarketDataRepository.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 
 #include <QDateTime>
 #include <QDate>
@@ -103,7 +105,39 @@ QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
     return empty;
 }
 
-void MarketDataBridge::loadBars(const QStringList&, const QString&, const QString&) {}
+void MarketDataBridge::loadBars(const QStringList& symbols, const QString& startDate, const QString& endDate) {
+    if (symbols.isEmpty()) return;
+
+    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) return;
+
+    astock::infrastructure::database::MarketDataRepository repo(std::move(db));
+    QVariantList result;
+
+    for (const auto& sym : symbols) {
+        if (sym.trimmed().isEmpty()) continue;
+        auto rows = repo.queryDailyBar(
+            sym.trimmed().toStdString(),
+            startDate.toStdString(),
+            endDate.toStdString());
+
+        for (const auto& row : rows) {
+            QVariantMap item;
+            item["symbol"] = QString::fromStdString(row.symbol);
+            item["date"]   = QString::fromStdString(row.tradeDate);
+            item["time"]   = item["date"];
+            item["open"]   = row.open;
+            item["high"]   = row.high;
+            item["low"]    = row.low;
+            item["close"]  = row.close;
+            item["volume"] = row.volume;
+            result.append(item);
+        }
+    }
+
+    m_bars = result;
+    emit barsChanged();
+}
 QVariantMap MarketDataBridge::getCrossSection(const QString&, const QString&, const QStringList&) { return {}; }
 QVariantList MarketDataBridge::getIndexConstituents(const QString&, const QString&) { return {}; }
 QString MarketDataBridge::getNextTradingDay(const QString& d) {

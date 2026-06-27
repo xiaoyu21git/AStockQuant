@@ -330,7 +330,6 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         marketData: window.marketData
-                        currentMenuCode: window.currentMenuCode
                     }
 
                     // 实盘总览 Dashboard（图表/跑马灯/市场热力/绩效分析）
@@ -577,7 +576,6 @@ ApplicationWindow {
             "compliance_check": 4,
             "live_trading": 5,
             "trade_execution": 5,
-            "position_management": 5,
             "fund_management": 5,
             "trade_records": 5,
             "performance_analysis": 5
@@ -636,7 +634,6 @@ ApplicationWindow {
             "risk_reporting": 6,              // 风险报告 -> 风险管理 (索引6)
             "compliance_check": 6,            // 合规检查 -> 风险管理 (索引6)
             "trade_execution": 7,             // 交易执行 -> TradingPage
-            "position_management": 7,         // 仓位管理 -> TradingPage (持仓面板)
             "fund_management": 8,             // 资金管理 -> 实盘总览 Dashboard
             "trade_records": 8,               // 交易记录 -> 实盘总览 Dashboard
             "performance_analysis": 8,        // 绩效分析 -> 实盘总览 Dashboard

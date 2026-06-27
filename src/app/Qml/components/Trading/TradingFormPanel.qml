@@ -10,7 +10,7 @@ Rectangle {
     color: Const.tradingPanelBg
     border.color: Const.tradingPanelBorder
     border.width: 1
-    implicitHeight: compactMode ? 800 : 980
+    implicitHeight: compactMode ? 620 : 980
 
     property var marketSnapshot: ({})
     property var depthSnapshot: ({})
@@ -22,23 +22,23 @@ Rectangle {
     property bool positionAvailabilityError: false
     property bool compactMode: false
     readonly property var tradingFormHelper: Bridge.TradingFormPanelHelper
-    readonly property int compactTitleFont: compactMode ? 18 : 24
-    readonly property int compactBodyFont: compactMode ? 11 : 13
-    readonly property int compactMetaFont: compactMode ? 10 : 12
-    readonly property int compactButtonFont: compactMode ? 10 : 13
-    readonly property int compactButtonHeight: compactMode ? 28 : 38
-    readonly property int compactChipHeight: compactMode ? 32 : 46
-    readonly property int compactOrderRowHeight: compactMode ? 58 : 72
-    readonly property int compactSectionLabelFont: compactMode ? 10 : 12
-    readonly property int compactInputFont: compactMode ? 10 : 12
-    readonly property int compactInputHeight: compactMode ? 30 : 38
-    readonly property int compactInputRadius: compactMode ? 10 : 12
-    readonly property int compactInputHorizontalPadding: compactMode ? 10 : 12
+    readonly property int compactTitleFont: compactMode ? 15 : 24
+    readonly property int compactBodyFont: compactMode ? 10 : 13
+    readonly property int compactMetaFont: compactMode ? 9 : 12
+    readonly property int compactButtonFont: compactMode ? 9 : 13
+    readonly property int compactButtonHeight: compactMode ? 26 : 38
+    readonly property int compactChipHeight: compactMode ? 28 : 46
+    readonly property int compactOrderRowHeight: compactMode ? 48 : 72
+    readonly property int compactSectionLabelFont: compactMode ? 9 : 12
+    readonly property int compactInputFont: compactMode ? 9 : 12
+    readonly property int compactInputHeight: compactMode ? 26 : 38
+    readonly property int compactInputRadius: compactMode ? 8 : 12
+    readonly property int compactInputHorizontalPadding: compactMode ? 8 : 12
     readonly property int compactInputVerticalPadding: compactMode ? 0 : 1
-    readonly property int compactQuickButtonHeight: compactMode ? 24 : 30
-    readonly property int compactQuickButtonFont: compactMode ? 9 : 10
-    readonly property int compactActionHeight: compactMode ? 28 : 38
-    readonly property int compactActionRadius: compactMode ? 12 : 16
+    readonly property int compactQuickButtonHeight: compactMode ? 20 : 30
+    readonly property int compactQuickButtonFont: compactMode ? 8 : 10
+    readonly property int compactActionHeight: compactMode ? 26 : 38
+    readonly property int compactActionRadius: compactMode ? 10 : 16
 
     property int currentTabIndex: 0
     property bool deferredOrderListReady: false
@@ -1503,7 +1503,7 @@ Rectangle {
             color: Const.tradingHeaderBg
             border.color: Const.tradingHeaderBorder
             border.width: 1
-            implicitHeight: compactMode ? 70 : 94
+            implicitHeight: compactMode ? 52 : 94
 
             RowLayout {
                 anchors.fill: parent
@@ -1549,7 +1549,7 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: compactMode ? 286 : 360
+            Layout.preferredHeight: compactMode ? 220 : 360
             radius: compactMode ? 16 : 20
             color: Const.tradingPanelBgAlt
             border.color: Const.tradingFormAreaBorder

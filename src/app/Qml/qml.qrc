@@ -175,6 +175,8 @@
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
+        <file>components/Trading/CompactChart.qml</file>
+        <file>components/Trading/KLineChart.qml</file>
         <file>components/Trading/OrderFormSection.qml</file>
         <file>components/Trading/OrderActionBar.qml</file>
         <file>config/views/risk_backtest_params.json</file>

@@ -28,7 +28,6 @@ QtObject {
         
         // 实盘交易相关页面
         "trade_execution": { stackIndex: 8, pageName: "交易执行", moduleId: "live-trading" },
-        "position_management": { stackIndex: 9, pageName: "仓位管理", moduleId: "live-trading" },
         "fund_management": { stackIndex: 9, pageName: "资金管理", moduleId: "live-trading" },
         "trade_records": { stackIndex: 9, pageName: "交易记录", moduleId: "live-trading" },
         "performance_analysis": { stackIndex: 9, pageName: "绩效分析", moduleId: "live-trading" },
@@ -60,7 +59,7 @@ QtObject {
             "risk_reporting", "compliance_check"
         ],
         "live-trading": [
-            "trade_execution", "position_management", "fund_management",
+            "trade_execution", "fund_management",
             "trade_records", "performance_analysis"
         ],
         "monitoring": [

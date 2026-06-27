@@ -16,6 +16,7 @@ class MarketDataBridge : public QObject {
     Q_PROPERTY(bool connected READ isConnected NOTIFY connectedChanged)
     Q_PROPERTY(QString primarySymbol READ primarySymbol NOTIFY primarySymbolChanged)
     Q_PROPERTY(QVariantMap marketSnapshots READ marketSnapshots NOTIFY marketSnapshotsChanged)
+    Q_PROPERTY(QVariantList bars READ bars NOTIFY barsChanged)
 public:
     explicit MarketDataBridge(QObject* parent = nullptr);
     ~MarketDataBridge() override;
@@ -24,6 +25,7 @@ public:
     bool isConnected() const { return m_connected; }
     QString primarySymbol() const { return m_primarySymbol; }
     QVariantMap marketSnapshots() const { return m_marketSnapshots; }
+    QVariantList bars() const { return m_bars; }
 
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void initializeAsync();
@@ -60,6 +62,7 @@ private:
     bool m_connected{false};
     QString m_primarySymbol;
     QVariantMap m_marketSnapshots;
+    QVariantList m_bars;
     QStringList m_watchlist;
     QSet<QString> m_trackedSymbols;
 };

@@ -181,6 +181,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/Trading/TradingChartWorkspace.qml
         Qml/components/Trading/TradingFormPanel.qml
         Qml/components/Trading/DepthMarketPanel.qml
+        Qml/components/Trading/CompactChart.qml
+        Qml/components/Trading/KLineChart.qml
         Qml/components/Trading/OrderFormSection.qml
         Qml/components/Trading/OrderActionBar.qml
         Qml/components/Trading/RuntimeRuleObserverPanel.qml
