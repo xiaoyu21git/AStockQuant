@@ -3580,10 +3580,10 @@ Item {
                 Item {
             id: tradingViewport
             Layout.fillWidth: false
-            Layout.preferredWidth: Math.min(pageContent.width, root.tradingSectionMaxWidth)
+            Layout.preferredWidth: root.isPositionView ? 0 : Math.min(pageContent.width, root.tradingSectionMaxWidth)
             Layout.alignment: Qt.AlignHCenter
-            visible: !root.isPositionView
-            implicitHeight: visible ? Math.max(formPanelHeight, depthPanelHeight) : 0
+            clip: true
+            implicitHeight: root.isPositionView ? 0 : Math.max(formPanelHeight, depthPanelHeight)
             readonly property real formPanelHeight: formPanelLoader.item
                 ? formPanelLoader.item.implicitHeight
                 : 800
