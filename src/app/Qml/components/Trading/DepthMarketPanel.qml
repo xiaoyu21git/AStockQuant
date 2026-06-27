@@ -11,7 +11,7 @@ Rectangle {
     color: Const.depthPanelBg
     border.color: Const.depthPanelBorder
     border.width: 1
-    implicitHeight: compactMode ? 600 : 760
+    implicitHeight: compactMode ? 720 : 760
 
     property var marketSnapshot: ({})
     property var depthSnapshot: ({ bids: [], asks: [], totalBid: 0, totalAsk: 0 })

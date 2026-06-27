@@ -921,7 +921,7 @@ Item {
         for (index = 0; index < groupCount; ++index) {
             rowCount += groups[index].positions ? groups[index].positions.length : 0
         }
-        return Math.max(208, 144 + groupCount * 28 + rowCount * 54)
+        return Math.max(200, 140 + groupCount * 28 + rowCount * 72)
     }
 
     function calculatePositionMarketValue(rawPositions) {
@@ -2786,8 +2786,8 @@ Item {
                                         Rectangle {
                                             id: positionRow
                                             Layout.fillWidth: true
-                                            Layout.preferredHeight: 46
-                                            radius: 14
+                                            Layout.preferredHeight: 62
+                                            radius: 10
                                             color: Const.tradingSkeletonBg
                                             border.color: Const.tradingSkeletonBorder
                                             border.width: 1
@@ -2796,60 +2796,69 @@ Item {
 
                                             RowLayout {
                                                 anchors.fill: parent
-                                                anchors.margins: 7
-                                                spacing: 5
+                                                anchors.margins: 10
+                                                spacing: 10
 
                                                 ColumnLayout {
-                                                    Layout.preferredWidth: Math.max(160, root.width * 0.165)
-                                                    Layout.alignment: Qt.AlignVCenter
-                                                    spacing: 1
+                                                    Layout.preferredWidth: 170
+                                                    Layout.minimumWidth: 150
+                                                    spacing: 2
 
                                                     Text {
                                                         text: resolvePositionDisplayName(positionData)
                                                         color: Const.tradingTitleText
-                                                        font.pixelSize: 11
-                                                        font.weight: Font.DemiBold
-                                                        elide: Text.ElideRight
+                                                        font.pixelSize: 12; font.weight: Font.Medium
+                                                        elide: Text.ElideRight; Layout.fillWidth: true
                                                     }
 
                                                     Text {
-                                                        text: positionData.typeLabel + " · " + positionData.positionSideLabel
-                                                            + " · 数量 " + Number(positionData.quantity || 0) + positionData.unit
-                                                            + " · " + positionData.closeableLabel + " " + Number(positionData.closeableQuantity || 0) + positionData.unit
+                                                        text: Number(positionData.quantity || 0) + positionData.unit
+                                                            + " / " + positionData.closeableLabel + " " + Number(positionData.closeableQuantity || 0) + positionData.unit
+                                                        color: Const.tradingLabelTertiary
+                                                        font.pixelSize: 10; elide: Text.ElideRight; Layout.fillWidth: true
+                                                    }
+                                                }
+
+                                                ColumnLayout {
+                                                    Layout.preferredWidth: 110
+                                                    spacing: 2; Layout.alignment: Qt.AlignRight
+
+                                                    Text {
+                                                        text: "现价 " + formatCurrencyText(positionData.lastPrice || 0)
                                                         color: Const.tradingLabelSecondary
-                                                        font.pixelSize: 9
-                                                        elide: Text.ElideRight
+                                                        font.pixelSize: 10; horizontalAlignment: Text.AlignRight
+                                                        Layout.fillWidth: true
+                                                    }
+                                                    Text {
+                                                        text: "成本 " + formatCurrencyText(positionData.avgPrice || 0)
+                                                        color: Const.tradingLabelTertiary
+                                                        font.pixelSize: 9; horizontalAlignment: Text.AlignRight
+                                                        Layout.fillWidth: true
                                                     }
                                                 }
 
                                                 ColumnLayout {
                                                     Layout.fillWidth: true
-                                                    Layout.alignment: Qt.AlignVCenter
-                                                    spacing: 1
+                                                    spacing: 2; Layout.alignment: Qt.AlignRight
 
                                                     Text {
-                                                        text: "市值 " + formatCurrencyText(positionData.currentValue || 0)
-                                                        color: Const.tradingTitleText
-                                                        font.pixelSize: 9
-                                                        elide: Text.ElideRight
+                                                        text: formatCurrencyText(positionData.currentValue || 0)
+                                                        color: Const.tradingValueText
+                                                        font.pixelSize: 13; font.weight: Font.DemiBold
+                                                        horizontalAlignment: Text.AlignRight; Layout.fillWidth: true
                                                     }
-
                                                     Text {
-                                                        text: String(positionData.detailText || "").length > 0
-                                                            ? String(positionData.detailText || "")
-                                                            : ((Number(positionData.pnl || 0) >= 0 ? "+" : "-")
-                                                                + formatCurrencyText(Math.abs(Number(positionData.pnl || 0)))
-                                                                + " · 成本 " + formatCurrencyText(positionData.avgPrice || 0))
+                                                        text: (Number(positionData.pnl || 0) >= 0 ? "+" : "-")
+                                                            + formatCurrencyText(Math.abs(Number(positionData.pnl || 0)))
+                                                            + " · " + Number(positionData.pnlRate || 0).toFixed(1) + "%"
                                                         color: Number(positionData.pnl || 0) >= 0 ? Const.tradingStatusPreTradeRisk : Const.tradingSellGreen
-                                                        font.pixelSize: 8
-                                                        elide: Text.ElideRight
+                                                        font.pixelSize: 10; horizontalAlignment: Text.AlignRight
+                                                        Layout.fillWidth: true
                                                     }
                                                 }
 
                                                 Rectangle {
-                                                    Layout.preferredWidth: 62
-                                                    Layout.preferredHeight: 24
-                                                    radius: 10
+                                                    implicitWidth: 52; implicitHeight: 26; radius: 8
                                                     color: positionData.canQuickClose ? Const.tradingQuickCloseBg : Const.tradingQuickCloseDisabledBg
                                                     border.color: positionData.canQuickClose ? Const.tradingQuickCloseBorder : Const.tradingQuickCloseDisabledBorder
                                                     border.width: 1
@@ -2857,10 +2866,9 @@ Item {
 
                                                     Text {
                                                         anchors.centerIn: parent
-                                                        text: "一键平仓"
+                                                        text: "平仓"
                                                         color: positionData.canQuickClose ? Const.tradingQuickCloseText : Const.tradingStatusDefault
-                                                        font.pixelSize: 9
-                                                        font.weight: Font.Medium
+                                                        font.pixelSize: 10; font.weight: Font.Medium
                                                     }
 
                                                     MouseArea {
@@ -3544,8 +3552,8 @@ Item {
             Item {
                 id: tradingContent
                 anchors.fill: parent
-                readonly property real formPanelPreferredWidth: Math.min(430, Math.max(360, width * 0.39))
-                readonly property real depthPanelPreferredWidth: Math.min(530, Math.max(450, width * 0.45))
+                readonly property real formPanelPreferredWidth: Math.min(380, Math.max(320, width * 0.32))
+                readonly property real depthPanelPreferredWidth: Math.min(580, Math.max(480, width * 0.56))
 
                 Component {
                     id: formPanelComponent
@@ -3629,61 +3637,11 @@ Item {
 
                 RowLayout {
                     id: tradingPanels
-                    width: Math.min(parent.width, tradingContent.formPanelPreferredWidth + tradingContent.depthPanelPreferredWidth + spacing)
+                    width: Math.min(parent.width, tradingContent.depthPanelPreferredWidth)
                     height: parent.height
                     anchors.top: parent.top
                     anchors.horizontalCenter: parent.horizontalCenter
-                    spacing: 12
-
-                    Loader {
-                        id: formPanelLoader
-                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
-                        Layout.alignment: Qt.AlignTop
-                        Layout.fillHeight: true
-                        asynchronous: true
-                        active: root.formPanelRequested
-                        sourceComponent: formPanelComponent
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
-                        Layout.fillHeight: true
-                        Layout.alignment: Qt.AlignTop
-                        radius: 24
-                        color: Const.tradingPanelBgAlt
-                        border.color: Const.tradingPanelBorderAlt
-                        border.width: 1
-                        visible: formPanelLoader.status !== Loader.Ready
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 18
-                            spacing: 12
-
-                            Text {
-                                text: "交易表单"
-                                color: Const.tradingTitleText
-                                font.pixelSize: 18
-                                font.weight: Font.DemiBold
-                            }
-
-                            Repeater {
-                                model: 6
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: index === 0 ? 54 : 42
-                                    radius: 14
-                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
-                                    border.color: Const.tradingSkeletonBorder
-                                    border.width: 1
-                                    opacity: 0.82 - index * 0.08
-                                }
-                            }
-
-                            Item { Layout.fillHeight: true }
-                        }
-                    }
+                    spacing: 0
 
                     Loader {
                         id: depthPanelLoader
@@ -3739,58 +3697,6 @@ Item {
             }
         }
 
-                // ── 策略状态与执行日志 ──
-                Item {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 300
-
-                    Loader {
-                        id: strategyStatusPanelLoader
-                        width: parent.width
-                        height: parent.height
-                        asynchronous: true
-                        active: root.strategyStatusSectionRequested
-                        sourceComponent: strategyStatusPanelComponent
-                    }
-
-                    Rectangle {
-                        anchors.fill: parent
-                        radius: 24
-                        color: Const.tradingPanelBgAlt
-                        border.color: Const.tradingPanelBorderAlt
-                        border.width: 1
-                        visible: !root.strategyStatusSectionRequested || strategyStatusPanelLoader.status !== Loader.Ready
-
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 18
-                            spacing: 12
-
-                            Text {
-                                text: "策略状态与执行日志"
-                                color: Const.tradingTitleText
-                                font.pixelSize: 18
-                                font.weight: Font.DemiBold
-                            }
-
-                            Repeater {
-                                model: 4
-
-                                Rectangle {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: index === 0 ? 72 : 40
-                                    radius: 16
-                                    color: index === 0 ? Const.tradingSkeletonBgAlt : Const.tradingSkeletonBg
-                                    border.color: Const.tradingSkeletonBorder
-                                    border.width: 1
-                                    opacity: 0.8 - index * 0.1
-                                }
-                            }
-
-                            Item { Layout.fillHeight: true }
-                        }
-                    }
-                }
             }
         }
     }

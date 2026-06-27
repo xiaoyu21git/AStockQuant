@@ -184,7 +184,7 @@ def _auto_fix_lagging_symbols(summary: dict, sample_limit: int = 20) -> None:
 
     lagging = summary.get("all_lagging_samples", [])
     target_date = summary["target_date"]
-    ordinary = [s for s in lagging if s.get("special_state") is None]
+    ordinary = [s for s in lagging if s.get("special_state") in (None, "ST")]
 
     if not ordinary:
         print("auto-fix: 无普通落后标的需补齐")
