@@ -369,6 +369,16 @@ ApplicationWindow {
                         sourceComponent: settingsPageComponent
                     }
 
+                    // 动态工作区
+                    Loader {
+                        id: dynamicWorkspacePage
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 11 || item !== null
+                        asynchronous: true
+                        sourceComponent: dynamicWorkspacePageComponent
+                    }
+
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -457,6 +467,12 @@ ApplicationWindow {
         id: monitoringPageComponent
 
         MonitoringPage {}
+    }
+
+    Component {
+        id: dynamicWorkspacePageComponent
+
+        DynamicWorkspacePage {}
     }
 
     DepositDialog {
@@ -577,7 +593,7 @@ ApplicationWindow {
             "live_trading": 5,
             "trade_execution": 5,
             "fund_management": 5,
-            "trade_records": 5,
+            "dynamic_workspace": 11,
             "performance_analysis": 5
         }
 
@@ -612,6 +628,7 @@ ApplicationWindow {
             "strategy_factor": 1,      // 策略与因子 -> StrategyLibraryPage (索引1)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
             "risk_management": 6,      // 风险管理 -> riskManagementPage (索引6)
+            "dynamic_workspace": 11,    // 动态区
             "live_trading": 7,         // 实盘交易 -> TradingPage (索引7)
             "monitoring": 9,           // 监控面板 -> monitoringPage
             "settings": 10             // 系统设置 -> settingsPage
@@ -635,7 +652,7 @@ ApplicationWindow {
             "compliance_check": 6,            // 合规检查 -> 风险管理 (索引6)
             "trade_execution": 7,             // 交易执行 -> TradingPage
             "fund_management": 8,             // 资金管理 -> 实盘总览 Dashboard
-            "trade_records": 8,               // 交易记录 -> 实盘总览 Dashboard
+            "dynamic_workspace": 11,           // 动态区
             "performance_analysis": 8,        // 绩效分析 -> 实盘总览 Dashboard
             "real_time_monitoring": 9,        // 实时监控 -> 监控面板
             "alert_center": 9,                // 报警中心 -> 监控面板

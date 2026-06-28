@@ -21,24 +21,27 @@ Rectangle {
     property var positionAvailabilitySummary: ({})
     property bool positionAvailabilityError: false
     property bool compactMode: false
+    property real scaleFactor: 1.0
     readonly property var tradingFormHelper: Bridge.TradingFormPanelHelper
-    readonly property int compactTitleFont: compactMode ? 15 : 24
-    readonly property int compactBodyFont: compactMode ? 10 : 13
-    readonly property int compactMetaFont: compactMode ? 9 : 12
-    readonly property int compactButtonFont: compactMode ? 9 : 13
-    readonly property int compactButtonHeight: compactMode ? 26 : 38
-    readonly property int compactChipHeight: compactMode ? 28 : 46
-    readonly property int compactOrderRowHeight: compactMode ? 48 : 72
-    readonly property int compactSectionLabelFont: compactMode ? 9 : 12
-    readonly property int compactInputFont: compactMode ? 9 : 12
-    readonly property int compactInputHeight: compactMode ? 26 : 38
-    readonly property int compactInputRadius: compactMode ? 8 : 12
-    readonly property int compactInputHorizontalPadding: compactMode ? 8 : 12
-    readonly property int compactInputVerticalPadding: compactMode ? 0 : 1
-    readonly property int compactQuickButtonHeight: compactMode ? 20 : 30
-    readonly property int compactQuickButtonFont: compactMode ? 8 : 10
-    readonly property int compactActionHeight: compactMode ? 26 : 38
-    readonly property int compactActionRadius: compactMode ? 10 : 16
+
+    function _s(v) { return Math.max(1, Math.round(v * scaleFactor)) }
+    readonly property int compactTitleFont: _s(compactMode ? 15 : 24)
+    readonly property int compactBodyFont: _s(compactMode ? 10 : 13)
+    readonly property int compactMetaFont: _s(compactMode ? 9 : 12)
+    readonly property int compactButtonFont: _s(compactMode ? 9 : 13)
+    readonly property int compactButtonHeight: _s(compactMode ? 26 : 38)
+    readonly property int compactChipHeight: _s(compactMode ? 28 : 46)
+    readonly property int compactOrderRowHeight: _s(compactMode ? 48 : 72)
+    readonly property int compactSectionLabelFont: _s(compactMode ? 9 : 12)
+    readonly property int compactInputFont: _s(compactMode ? 9 : 12)
+    readonly property int compactInputHeight: _s(compactMode ? 26 : 38)
+    readonly property int compactInputRadius: _s(compactMode ? 8 : 12)
+    readonly property int compactInputHorizontalPadding: _s(compactMode ? 8 : 12)
+    readonly property int compactInputVerticalPadding: _s(compactMode ? 0 : 1)
+    readonly property int compactQuickButtonHeight: _s(compactMode ? 20 : 30)
+    readonly property int compactQuickButtonFont: _s(compactMode ? 8 : 10)
+    readonly property int compactActionHeight: _s(compactMode ? 26 : 38)
+    readonly property int compactActionRadius: _s(compactMode ? 10 : 16)
 
     property int currentTabIndex: 0
     property bool deferredOrderListReady: false

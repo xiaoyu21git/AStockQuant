@@ -278,12 +278,31 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
         Qml/components/FactorWorkbench/Backtest/GroupConfigPanel.qml
         Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
+        Qml/page/dynamicworkspace/DynamicWorkspacePage.qml
+        Qml/page/dynamicworkspace/WidgetRegistry.qml
+        Qml/components/DynamicWorkspace/WidgetCanvas.qml
+        Qml/components/DynamicWorkspace/WidgetFrame.qml
+        Qml/components/DynamicWorkspace/WidgetPalette.qml
+        Qml/components/DynamicWorkspace/widgets/AccountCardWidget.qml
+        Qml/components/DynamicWorkspace/widgets/ChartWorkspaceWidget.qml
+        Qml/components/DynamicWorkspace/widgets/DepthPanelWidget.qml
+        Qml/components/DynamicWorkspace/widgets/KLineChartWidget.qml
+        Qml/components/DynamicWorkspace/widgets/MetricCardWidget.qml
+        Qml/components/DynamicWorkspace/widgets/OrderFormWidget.qml
+        Qml/components/DynamicWorkspace/widgets/StrategyStatusWidget.qml
+        Qml/components/DynamicWorkspace/widgets/TextLabelWidget.qml
+        Qml/components/DynamicWorkspace/widgets/TradeListWidget.qml
+        Qml/components/DynamicWorkspace/widgets/PositionsWidget.qml
+        Qml/components/DynamicWorkspace/widgets/TradingSummaryWidget.qml
     SOURCES
        # Qml/resources/
     RESOURCES
         Qml/components/Backtest/qmldir
         Qml/components/DataAnalysis/qmldir
         Qml/components/FactorWorkbench/Creation/components/qmldir
+        Qml/components/DynamicWorkspace/qmldir
+        Qml/components/Trading/qmldir
+        Qml/page/dynamicworkspace/qmldir
         Qml/page/risk/qmldir
         Qml/page/settings/qmldir
         Qml/page/strategies/qmldir

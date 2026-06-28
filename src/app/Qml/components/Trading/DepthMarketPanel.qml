@@ -19,24 +19,26 @@ Rectangle {
     property string activeMode: "stock"
     property string activeSymbol: "000001"
     property bool compactMode: false
+    property real scaleFactor: 1.0
     property int selectedDepthLevels: 5
     readonly property int requestedDepthLevels: selectedDepthLevels > 10 ? 10 : (selectedDepthLevels < 5 ? 5 : selectedDepthLevels)
-    readonly property int compactHeaderFont: compactMode ? 15 : 20
-    readonly property int compactSectionTitleFont: compactMode ? 12 : 15
-    readonly property int compactStatCardHeight: compactMode ? 48 : 64
-    readonly property int compactBookRowHeight: compactMode ? 24 : 30
-    readonly property int compactTradeRowHeight: compactMode ? 26 : 34
-    readonly property int compactMidPriceHeight: compactMode ? 26 : 34
-    readonly property int compactOrderBookHeight: compactMode ? 310 : 420
-    readonly property int compactPanelGap: compactMode ? 6 : 12
-    readonly property int compactBookTagFont: compactMode ? 8 : 11
-    readonly property int compactBookPriceFont: compactMode ? 10 : 12
-    readonly property int compactBookVolumeFont: compactMode ? 8 : 11
-    readonly property int compactMetaFont: compactMode ? 9 : 11
-    readonly property int compactTradePanelWidth: compactMode ? 150 : 256
-    readonly property int compactDepthChipHeight: compactMode ? 20 : 26
-    readonly property int compactDepthHeaderHeight: compactMode ? 24 : 30
-    readonly property int compactDepthSideWidth: compactMode ? 24 : 34
+    function _s(v) { return Math.max(1, Math.round(v * scaleFactor)) }
+    readonly property int compactHeaderFont: _s(compactMode ? 15 : 20)
+    readonly property int compactSectionTitleFont: _s(compactMode ? 12 : 15)
+    readonly property int compactStatCardHeight: _s(compactMode ? 48 : 64)
+    readonly property int compactBookRowHeight: _s(compactMode ? 24 : 30)
+    readonly property int compactTradeRowHeight: _s(compactMode ? 26 : 34)
+    readonly property int compactMidPriceHeight: _s(compactMode ? 26 : 34)
+    readonly property int compactOrderBookHeight: _s(compactMode ? 310 : 420)
+    readonly property int compactPanelGap: _s(compactMode ? 6 : 12)
+    readonly property int compactBookTagFont: _s(compactMode ? 8 : 11)
+    readonly property int compactBookPriceFont: _s(compactMode ? 10 : 12)
+    readonly property int compactBookVolumeFont: _s(compactMode ? 8 : 11)
+    readonly property int compactMetaFont: _s(compactMode ? 9 : 11)
+    readonly property int compactTradePanelWidth: _s(compactMode ? 150 : 256)
+    readonly property int compactDepthChipHeight: _s(compactMode ? 20 : 26)
+    readonly property int compactDepthHeaderHeight: _s(compactMode ? 24 : 30)
+    readonly property int compactDepthSideWidth: _s(compactMode ? 24 : 34)
 
     readonly property bool isLimitBoard: !!(marketSnapshot && (marketSnapshot.limitUp || marketSnapshot.limitDown))
     function statusBadgeText() {
@@ -59,10 +61,10 @@ Rectangle {
         var side = marketSnapshot.limitUp ? "买一封单" : "卖一封单"
         return side + ": " + volStr + " 约" + amtStr
     }
-    readonly property int compactDepthPriceWidth: compactMode ? 40 : 60
-    readonly property int compactDepthLotWidth: compactMode ? 28 : 44
-    readonly property int compactDepthShareWidth: compactMode ? 38 : 56
-    readonly property int compactDepthAmountWidth: compactMode ? 48 : 68
+    readonly property int compactDepthPriceWidth: _s(compactMode ? 40 : 60)
+    readonly property int compactDepthLotWidth: _s(compactMode ? 28 : 44)
+    readonly property int compactDepthShareWidth: _s(compactMode ? 38 : 56)
+    readonly property int compactDepthAmountWidth: _s(compactMode ? 48 : 68)
     readonly property bool l2PanelVisible: !!(depthSnapshot && depthSnapshot.live && tickRows && tickRows.length > 0)
     readonly property string shareCountLabel: activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell"
         ? "股数"

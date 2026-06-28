@@ -49,9 +49,8 @@ QtObject {
             title: "实盘交易",
             items: [
                 {title: "交易执行", icon: "⚡", badge: "实时", code: "trade_execution"},
-                {title: "仓位管理", icon: "💰", badge: "", code: "position_management"},
+                {title: "动态区", icon: "🖥️", badge: "", code: "dynamic_workspace"},
                 {title: "资金管理", icon: "💵", badge: "", code: "fund_management"},
-                {title: "交易记录", icon: "📝", badge: "", code: "trade_records"},
                 {title: "绩效分析", icon: "📈", badge: "", code: "performance_analysis"}
             ]
         },
