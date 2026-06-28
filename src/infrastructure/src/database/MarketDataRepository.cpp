@@ -315,8 +315,7 @@ MarketDataRepository::queryDailyBarJoined(
     std::ostringstream sql;
     sql << "SELECT " << cleaning::kline_columns::sqlSelect() << ","
         << cleaning::symbol_info_columns::sqlSelect()
-        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id d"
-        << " JOIN ref.symbol_info s ON d.symbol_id = s.id"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info s ON d.symbol_id = s.id"
         << " WHERE d.trade_date >= " << safeStr(startDate)
         << " AND d.trade_date <= " << safeStr(endDate)
         << " ORDER BY d.symbol, d.trade_date ASC";
@@ -340,8 +339,7 @@ MarketDataRepository::queryDailyBarJoined(
     std::ostringstream sql;
     sql << "SELECT " << cleaning::kline_columns::sqlSelect() << ","
         << cleaning::symbol_info_columns::sqlSelect()
-        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id d"
-        << " JOIN ref.symbol_info s ON d.symbol_id = s.id"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info s ON d.symbol_id = s.id"
         << " WHERE d.symbol IN " << symbolList(symbols)
         << " AND d.trade_date >= " << safeStr(startDate)
         << " AND d.trade_date <= " << safeStr(endDate)

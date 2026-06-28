@@ -2,7 +2,6 @@
     registerQmlTypes.cpp
     MetaData.cpp
     DataManager.cpp
-    DataUIController.cpp
     CleanedDataController.cpp
     DataCacheAdapter.cpp
     DataCleaningServiceRefactored.cpp

@@ -227,15 +227,25 @@ public:
     }
 };
 
+enum class DataSourceType { Kline, Financial, Unknown };
+
+inline DataSourceType sourceTypeFromName(const std::string& name) {
+    if (name == "kline_daily" || name == "kline_weekly"
+        || name == "kline_monthly" || name == "minute_data")
+        return DataSourceType::Kline;
+    if (name == "financial") return DataSourceType::Financial;
+    return DataSourceType::Unknown;
+}
+
 /// @brief 根据类型名获取数据源实例
 inline IDataSource* sourceByName(const std::string& name) {
     static KlineDataSource s_kline;
     static FinancialDataSource s_fin;
-    if (name == "kline_daily" || name == "kline_weekly"
-        || name == "kline_monthly" || name == "minute_data")
-        return &s_kline;
-    if (name == "financial") return &s_fin;
-    return nullptr;
+    switch (sourceTypeFromName(name)) {
+    case DataSourceType::Kline:     return &s_kline;
+    case DataSourceType::Financial: return &s_fin;
+    default:                       return nullptr;
+    }
 }
 
 /// @brief 根据类型名返回仅该类型的 Schema（不含 symbol_info 元数据）
@@ -249,8 +259,7 @@ inline FieldSchema typeSchemaWithMeta(const std::string& name) {
     auto* src = sourceByName(name);
     if (!src) return {};
     FieldSchema s = src->detectSchema(nullptr, {}, {});
-    if (name == "kline_daily" || name == "kline_weekly"
-        || name == "kline_monthly" || name == "minute_data") {
+    if (sourceTypeFromName(name) == DataSourceType::Kline) {
         // K线 JOIN 了 symbol_info，合并元数据字段
         for (auto& f : symbol_info_columns::names()) s.names.push_back(f);
     }
@@ -279,8 +288,7 @@ inline FieldSchema fullSchemaForTypes(const std::vector<std::string>& typeNames)
         if (!src) continue;
         FieldSchema s = src->detectSchema(nullptr, {}, {});
         // K线查询时 JOIN 了 symbol_info，附加元数据列
-        if (t == "kline_daily" || t == "kline_weekly"
-            || t == "kline_monthly" || t == "minute_data") {
+        if (sourceTypeFromName(t) == DataSourceType::Kline) {
             for (auto& n : symbol_info_columns::names()) s.names.push_back(n);
         }
         // 财务查询时也通过 si.symbol JOIN 了 symbol_info

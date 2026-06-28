@@ -6,6 +6,7 @@
 #include "foundation/json/json_facade.h"
 #include "DataSourceRegistry.h"
 #include "database/MarketDataRepository.h"
+#include "DataTableAssembler.h"
 #include <arrow/api.h>
 #include "database/NativeMySQLConnectionPool.h"
 
@@ -156,7 +157,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int totalMonths = (y2 - y1) * 12 + (m2 - m1) + 1;
         int monthCount = totalMonths;
         int doneMonths = 0;
-        QMetaObject::invokeMethod(self.get(), [self, monthCount]() { if (self) self->updateStatus(QString("开始下载 %1 个批次...").arg(monthCount), 30); }, Qt::BlockingQueuedConnection);
+        QMetaObject::invokeMethod(self.get(), [self, monthCount]() { if (self) self->updateStatus(QString("开始下载 %1 个批次...").arg(monthCount), 30); }, Qt::QueuedConnection);
 
         // ── 构建统一 Schema（DataSourceRegistry 唯一定义点）──
         std::vector<std::string> typeNames;
@@ -210,7 +211,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         }
         QMetaObject::invokeMethod(self.get(), [self]() {
             if (self) self->updateStatus("财务数据已加载，开始下载K线...", 30);
-        }, Qt::BlockingQueuedConnection);
+        }, Qt::QueuedConnection);
 
         // index_code 映射（直接 Arrow 构建时用）
         std::map<std::string, std::string> indexMap;
@@ -254,98 +255,12 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 if (rows.empty()) continue;
                 int64_t nRows = static_cast<int64_t>(rows.size());
 
-                // ── 直接构建 Arrow Table（零 JsonFacade，零碎片）──
-                std::vector<std::shared_ptr<arrow::ArrayBuilder>> builders;
-                std::vector<std::shared_ptr<arrow::Field>> schemaFields;
-                builders.reserve(allFields.size());
-                schemaFields.reserve(allFields.size());
-                for (const auto& fname : allFields) {
-                    if (numericFields.count(fname)) {
-                        builders.push_back(std::make_shared<arrow::DoubleBuilder>());
-                        schemaFields.push_back(arrow::field(fname, arrow::float64()));
-                    } else {
-                        builders.push_back(std::make_shared<arrow::StringBuilder>());
-                        schemaFields.push_back(arrow::field(fname, arrow::utf8()));
-                    }
-                }
-
-                for (int64_t ri = 0; ri < nRows; ++ri) {
-                    const auto& vals = rows[ri].getValues();
-                    std::string sym, td;
-                    auto si = vals.find("symbol");
-                    auto ti = vals.find("trade_date");
-                    if (si != vals.end()) sym = si->second;
-                    if (ti != vals.end()) td = ti->second;
-
-                    const std::unordered_map<std::string, std::string>* fv = nullptr;
-                    if (!sym.empty() && !td.empty()) {
-                        auto fit = finCache.find(sym);
-                        if (fit != finCache.end() && !fit->second.empty()) {
-                            auto it = std::upper_bound(fit->second.begin(), fit->second.end(), td,
-                                [](const std::string& d, const auto& rp) { return d < rp.first; });
-                            if (it != fit->second.begin()) fv = &(it - 1)->second;
-                        }
-                    }
-
-                    for (size_t ci = 0; ci < allFields.size(); ++ci) {
-                        const auto& cn = allFields[ci];
-                        bool isNum = numericFields.count(cn) > 0;
-
-                        // 优先级: SQL行 > 财务缓存 > null
-                        auto vit = vals.find(cn);
-                        if (vit != vals.end() && !vit->second.empty()) {
-                            if (isNum) {
-                                char* e = nullptr;
-                                double d = strtod(vit->second.c_str(), &e);
-                                if (e && static_cast<size_t>(e - vit->second.c_str()) == vit->second.size())
-                                    static_cast<arrow::DoubleBuilder*>(builders[ci].get())->Append(d);
-                                else
-                                    static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(vit->second);
-                            } else {
-                                static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(vit->second);
-                            }
-                        } else if (fv) {
-                            auto fit = fv->find(cn);
-                            if (fit != fv->end() && !fit->second.empty()) {
-                                if (isNum) {
-                                    char* e = nullptr;
-                                    double d = strtod(fit->second.c_str(), &e);
-                                    if (e && static_cast<size_t>(e - fit->second.c_str()) == fit->second.size())
-                                        static_cast<arrow::DoubleBuilder*>(builders[ci].get())->Append(d);
-                                    else
-                                        static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(fit->second);
-                                } else {
-                                    static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(fit->second);
-                                }
-                            } else {
-                                if (isNum) static_cast<arrow::DoubleBuilder*>(builders[ci].get())->AppendNull();
-                                else       static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
-                            }
-                        } else if (cn == "index_code" && !sym.empty()) {
-                            // 从 indexMap 注入指数成分
-                            auto im = indexMap.find(sym);
-                            if (im != indexMap.end())
-                                static_cast<arrow::StringBuilder*>(builders[ci].get())->Append(im->second);
-                            else
-                                static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
-                        } else {
-                            if (isNum) static_cast<arrow::DoubleBuilder*>(builders[ci].get())->AppendNull();
-                            else       static_cast<arrow::StringBuilder*>(builders[ci].get())->AppendNull();
-                        }
-                    }
-                }
+                // ── 委托领域层构建 Arrow Table ──
+                auto table = domain::data::DataTableAssembler::buildFromSqlRows(
+                    rows, allFields, numericFields, finCache, indexMap);
                 rows.clear(); rows.shrink_to_fit();
 
-                std::vector<std::shared_ptr<arrow::ChunkedArray>> columns;
-                columns.reserve(builders.size());
-                for (auto& b : builders) {
-                    std::shared_ptr<arrow::Array> arr;
-                    b->Finish(&arr);
-                    columns.push_back(std::make_shared<arrow::ChunkedArray>(arr));
-                }
-                auto table = arrow::Table::Make(arrow::schema(schemaFields), columns, nRows);
-
-                DataCacheAdapter::instance().appendArrowTable(token, table);
+                if (table) DataCacheAdapter::instance().appendArrowTable(token, table);
                 totalRows += static_cast<int>(nRows);
             }
             // 本月 K线已写完，清除不会再被后续月份引用的旧财报
@@ -364,7 +279,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 int pct=30+(dm*68)/qMax(1,tm);
                 self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr),pct);
                 emit self->dataFetchProgress(pct,QString("下载 %1/%2 月").arg(dm).arg(tm));
-            }, Qt::BlockingQueuedConnection);
+            }, Qt::QueuedConnection);
         }
         dl_end:
         DataCacheAdapter::instance().finishArrowWrite(token, totalRows);

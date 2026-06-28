@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """
-日更流水线 — 三阶段：
-  Phase 1: 多线程补齐非Baostock字段 (市值/复权因子) — AKShare/Juejin
-  Phase 2: 本地计算补全 (change_amt/amplitude/turnover_rate) — SQL
-  Phase 3: 单线程 Baostock 更新全部能获取的字段
+日更流水线 ── 四阶段:
+  Phase 1: 多线程补齐非Baostock字段 (市值/流通市值 ── AKShare)  (复权因子 ── Juejin)
+  Phase 2: 本地SQL计算补全 (change_amt / amplitude / turnover_rate)
+  Phase 3: Baostock 增量日线更新 (OHLCV/PE/PB ── 仅补缺口)
+  Phase 4: 日线衍生字段回填 (周线/月线聚合)
+
+每个阶段输出明确的:
+  [开始] 阶段名 ── 补什么数据
+  [检查] 需补标的数 / 需补行数
+  [完成] 实际写入行数 / 耗时
 """
 from __future__ import annotations
 import argparse, datetime as dt, os, sys, time, traceback
@@ -19,168 +25,237 @@ SLEEP = 0.2
 
 def conn(): return pg_connect()
 
-# symbol → symbol_id 映射缓存
-_sym_cache = {}
-def sym_id(symbol):
-    if symbol not in _sym_cache:
-        c = conn()
-        with c.cursor() as cur:
-            cur.execute("SELECT id FROM ref.symbol_info WHERE symbol=%s", (symbol,))
-            row = cur.fetchone()
-            _sym_cache[symbol] = row[0] if row else None
-        c.close()
-    return _sym_cache[symbol]
+def now(): return dt.datetime.now().strftime('%H:%M:%S')
 
-# 批量 symbol → symbol_id（用于 IN 子句）
-def sym_list(symbols):
+def elapsed(start_time): return f"{time.time()-start_time:.1f}s"
+
+def phase_header(phase: str, desc: str, target_cols: str):
+    print(f"\n{'='*60}")
+    print(f"[{now()}] Phase {phase} ── {desc}")
+    print(f"        目标字段: {target_cols}")
+    print(f"{'='*60}", flush=True)
+
+def phase_done(phase: str, rows: int, elapsed_s: float):
+    print(f"[{now()}] Phase {phase} 完成 ── 写入 {rows} 行 / 耗时 {elapsed_s:.1f}s", flush=True)
+
+# ══════════════════════════════════════════════════
+# 预加载 symbol → symbol_id 映射
+# ══════════════════════════════════════════════════
+
+def load_sym_to_id(c):
+    with c.cursor() as cur:
+        cur.execute("SELECT symbol, id FROM ref.symbol_info")
+        return dict(cur.fetchall())
+
+def sym_list(c, symbols):
     if not symbols: return {}
-    c = conn()
-    try:
-        with c.cursor() as cur:
-            cur.execute("SELECT symbol, id FROM ref.symbol_info WHERE symbol = ANY(%s)", (list(symbols),))
-            return {row[0]: row[1] for row in cur.fetchall()}
-    finally:
-        c.close()
+    with c.cursor() as cur:
+        cur.execute("SELECT symbol, id FROM ref.symbol_info WHERE symbol = ANY(%s)", (list(symbols),))
+        return {row[0]: row[1] for row in cur.fetchall()}
+
 
 # ══════════════════════════════════════════════════
-# Phase 1: 多线程补齐非 Baostock 字段
+# Phase 1a: 市值 ── AKShare
 # ══════════════════════════════════════════════════
 
-def backfill_market_cap_akshare(symbols: list[str]):
-    """多线程从 AKShare 拉取市值/PE/PB"""
+def phase1a_market_cap(c, sym_to_id: dict[str, int]):
+    """补 market_cap / circulating_market_cap ── AKShare"""
+    phase_header("1a", "市值/流通市值 回填", "market_cap, circulating_market_cap")
+
+    with c.cursor() as cur:
+        cur.execute("SELECT DISTINCT symbol FROM mkt.daily_bar WHERE (market_cap IS NULL OR market_cap=0) AND symbol LIKE '%.%'")
+        need = [r[0] for r in cur.fetchall()]
+    print(f"[{now()}] [检查] 市值缺失标的: {len(need)}", flush=True)
+    if not need:
+        print(f"[{now()}] [跳过] 无缺失", flush=True)
+        return
+
     import akshare as ak
-    results = {"ok":0, "fail":0}
+    t0 = time.time()
+    ok, fail, updated = 0, 0, 0
+
     def fetch_one(sym):
         try:
             code = sym.split('.')[0]
             df = ak.stock_individual_info_em(symbol=code)
             if df is None or df.empty: return None
             row = {r['item']: r['value'] for _, r in df.iterrows()}
+            sid = sym_to_id.get(sym)
+            if not sid: return None
+            mc = row.get('总市值')
+            cmc = row.get('流通市值')
             return {
-                'symbol': sym,
-                'market_cap': float(row.get('总市值', 0)) if row.get('总市值') else None,
-                'circulating_market_cap': float(row.get('流通市值', 0)) if row.get('流通市值') else None,
+                'symbol_id': sid,
+                'market_cap': float(mc) if mc else None,
+                'circulating_market_cap': float(cmc) if cmc else None,
             }
         except: return None
 
-    print(f"  [Phase1/mcap] AKShare multi-threaded: {len(symbols)} symbols, workers=8", flush=True)
+    print(f"[{now()}] [启动] AKShare 多线程, 8 workers", flush=True)
     with ThreadPoolExecutor(max_workers=8) as ex:
-        futures = {ex.submit(fetch_one, s): s for s in symbols}
+        futures = {ex.submit(fetch_one, s): s for s in need}
         for f in as_completed(futures):
             r = f.result()
             if r and r['market_cap']:
                 try:
-                    c = conn()
-                    with c.cursor() as cur:
-                        cur.execute("UPDATE mkt.daily_bar SET market_cap=%s, circulating_market_cap=%s WHERE symbol_id=(SELECT id FROM ref.symbol_info WHERE symbol=%s) AND trade_date=(SELECT MAX(trade_date) FROM mkt.daily_bar WHERE symbol_id=(SELECT id FROM ref.symbol_info WHERE symbol=%s)",
-                                  (r['market_cap'], r['circulating_market_cap'], r['symbol'], r['symbol']))
-                    c.commit(); c.close()
-                    results['ok'] += 1
-                except: results['fail'] += 1
-    print(f"  [Phase1/mcap] done: ok={results['ok']} fail={results['fail']}", flush=True)
+                    c2 = conn()
+                    with c2.cursor() as cur:
+                        cur.execute(
+                            "UPDATE mkt.daily_bar SET market_cap=%s, circulating_market_cap=%s"
+                            " WHERE symbol_id=%s AND trade_date="
+                            "(SELECT MAX(trade_date) FROM mkt.daily_bar WHERE symbol_id=%s)",
+                            (r['market_cap'], r['circulating_market_cap'], r['symbol_id'], r['symbol_id']))
+                    c2.commit(); c2.close()
+                    ok += 1; updated += 1
+                except: fail += 1
+            else:
+                fail += 1
 
-def backfill_adjust_factors_juejin(symbols: list[str]):
-    """多线程从 Juejin 拉取复权因子"""
+    phase_done("1a", updated, time.time()-t0)
+    print(f"        成功={ok} 失败={fail}", flush=True)
+
+
+# ══════════════════════════════════════════════════
+# Phase 1b: 复权因子 ── Juejin
+# ══════════════════════════════════════════════════
+
+def phase1b_adjust_factors(c, sym_to_id: dict[str, int]):
+    """补 pre_adjust_factor / post_adjust_factor ── Juejin API"""
+    phase_header("1b", "复权因子 回填", "pre_adjust_factor, post_adjust_factor")
+
+    with c.cursor() as cur:
+        cur.execute("SELECT DISTINCT symbol FROM mkt.daily_bar WHERE (pre_adjust_factor IS NULL OR pre_adjust_factor=0) AND symbol LIKE '%.%'")
+        need = [r[0] for r in cur.fetchall()]
+    print(f"[{now()}] [检查] 复权因子缺失标的: {len(need)}", flush=True)
+    if not need:
+        print(f"[{now()}] [跳过] 无缺失", flush=True)
+        return
+
     try:
         from gm.api import set_token
         set_token(os.environ.get('GM_TOKEN', ''))
     except: pass
 
-    results = {"ok":0, "fail":0}
+    t0 = time.time()
+    ok, fail, total_rows = 0, 0, 0
+
     def fetch_one(sym):
         try:
             from gm.api import history
-            df = history(sym, '1d', '2023-01-01', dt.date.today().strftime('%Y-%m-%d'), adjust=1, df=True)
+            sid = sym_to_id.get(sym)
+            if not sid: return None
+            df = history(sym, '1d', '2015-01-01', dt.date.today().strftime('%Y-%m-%d'), adjust=1, df=True)
             if df is None or df.empty: return None
-            df['symbol'] = sym
-            return df[['symbol','bob','eob','pre_adjust_factor','post_adjust_factor']].dropna()
+            return [(sid, str(row['bob'])[:10], float(row['pre_adjust_factor']), float(row['post_adjust_factor']))
+                    for _, row in df.iterrows()
+                    if row.get('pre_adjust_factor') and row.get('post_adjust_factor')]
         except: return None
 
-    print(f"  [Phase1/adj] Juejin multi-threaded: {len(symbols)} symbols, workers=4", flush=True)
-    if not symbols: return
+    print(f"[{now()}] [启动] Juejin 多线程, 4 workers", flush=True)
     with ThreadPoolExecutor(max_workers=4) as ex:
-        futures = {ex.submit(fetch_one, s): s for s in symbols}
+        futures = {ex.submit(fetch_one, s): s for s in need}
         for f in as_completed(futures):
-            r = f.result()
-            if r is not None and not r.empty:
+            rows = f.result()
+            if rows:
                 try:
-                    c = conn()
-                    with c.cursor() as cur:
-                        for _, row in r.iterrows():
-                            cur.execute("UPDATE mkt.daily_bar SET pre_adjust_factor=%s, post_adjust_factor=%s WHERE symbol_id=(SELECT id FROM ref.symbol_info WHERE symbol=%s) AND trade_date=%s",
-                                      (float(row['pre_adjust_factor']), float(row['post_adjust_factor']), row['symbol'], str(row['bob'])[:10]))
-                    c.commit(); c.close()
-                    results['ok'] += 1
-                except: results['fail'] += 1
-    print(f"  [Phase1/adj] done: ok={results['ok']} fail={results['fail']}", flush=True)
+                    c2 = conn()
+                    with c2.cursor() as cur:
+                        cur.executemany(
+                            "UPDATE mkt.daily_bar SET pre_adjust_factor=%s, post_adjust_factor=%s"
+                            " WHERE symbol_id=%s AND trade_date=%s",
+                            [(pre, post, sid, td) for sid, td, pre, post in rows])
+                    c2.commit(); c2.close()
+                    ok += 1; total_rows += len(rows)
+                except: fail += 1
+            else:
+                fail += 1
+
+    phase_done("1b", total_rows, time.time()-t0)
+    print(f"        标的成功={ok} 失败={fail}", flush=True)
+
 
 # ══════════════════════════════════════════════════
-# Phase 2: 本地 SQL 计算补全
+# Phase 2: 本地计算补全
 # ══════════════════════════════════════════════════
 
 def phase2_local_backfill(c):
-    print("[Phase2] local SQL backfill...", flush=True)
+    """change_amt / amplitude / turnover_rate ── SQL 表达式"""
+    phase_header("2", "本地SQL计算补全", "change_amt, amplitude, turnover_rate")
+
     updates = [
-        ("change_amt", "UPDATE mkt.daily_bar SET change_amt=ROUND(close-pre_close,4), updated_at=CURRENT_TIMESTAMP WHERE change_amt IS NULL AND close>0 AND pre_close>0"),
-        ("amplitude", "UPDATE mkt.daily_bar SET amplitude=ROUND((high-low)/pre_close*100,4), updated_at=CURRENT_TIMESTAMP WHERE amplitude IS NULL AND high>0 AND low>0 AND pre_close>0"),
-        ("turnover_rate", "UPDATE mkt.daily_bar SET turnover_rate=ROUND(turnover/circulating_market_cap*100,4), updated_at=CURRENT_TIMESTAMP WHERE turnover_rate IS NULL AND turnover>0 AND circulating_market_cap>0"),
+        ("change_amt",     "UPDATE mkt.daily_bar SET change_amt=ROUND(close-pre_close,4), updated_at=CURRENT_TIMESTAMP WHERE change_amt IS NULL AND close>0 AND pre_close>0"),
+        ("amplitude",      "UPDATE mkt.daily_bar SET amplitude=ROUND((high-low)/pre_close*100,4), updated_at=CURRENT_TIMESTAMP WHERE amplitude IS NULL AND high>0 AND low>0 AND pre_close>0"),
+        ("turnover_rate",  "UPDATE mkt.daily_bar SET turnover_rate=ROUND(turnover/circulating_market_cap*100,4), updated_at=CURRENT_TIMESTAMP WHERE turnover_rate IS NULL AND turnover>0 AND circulating_market_cap>0"),
     ]
+    t0 = time.time()
+    total = 0
     for name, sql in updates:
+        print(f"[{now()}] [计算] {name} ...", flush=True)
         with c.cursor() as cur:
             cur.execute(sql)
             n = cur.rowcount
         c.commit()
-        print(f"  {name}: {n} rows", flush=True)
+        total += n
+        print(f"        → {n} 行", flush=True)
+
+    phase_done("2", total, time.time()-t0)
+
 
 # ══════════════════════════════════════════════════
-# Phase 3: 单线程 Baostock 全量更新
+# Phase 3: Baostock 日线增量
 # ══════════════════════════════════════════════════
 
 def phase3_baostock_update(c, target_date: str, start_date: str = None):
-    print(f"[Phase3] Baostock single-threaded update... target={target_date} start={start_date}", flush=True)
+    """日线 OHLCV/PE/PB ── Baostock 单线程增量"""
+    gap_desc = f"历史缺口 [{start_date}..{target_date}]" if start_date else f"尾部缺口 → {target_date}"
+    phase_header("3", f"Baostock 日线增量 ── {gap_desc}",
+                 "open,high,low,close,pre_close,volume,turnover,change_pct,turnover_rate,pe_ratio,pb_ratio")
+
     with c.cursor() as cur:
         cur.execute("SELECT symbol FROM ref.symbol_info WHERE status NOT IN ('DELISTED','退市') AND symbol LIKE '%.%' ORDER BY symbol")
         symbols = [r[0] for r in cur.fetchall()]
-    print(f"  {len(symbols)} symbols", flush=True)
+    print(f"[{now()}] [检查] 全市场标的: {len(symbols)}", flush=True)
 
-    # 检查最新日期
     latest: dict[str, str | None] = {}
-    coverage: dict[str, int] = {}  # 区间内实际数据天数
-    expected_count = 0  # 区间内预期交易日数
-    print(f"  Checking latest dates (one pass)...", flush=True)
+    coverage: dict[str, int] = {}
+    expected_per_sym: dict[str, int] = {}
+    t0 = time.time()
 
     if start_date:
-        # 历史缺口模式：统计区间 [start_date, target_date] 内每个股票的数据覆盖
+        import bisect
         with c.cursor() as cur:
-            cur.execute("SELECT COUNT(*) FROM ref.trade_calendar WHERE trade_date BETWEEN %s AND %s",
+            cur.execute("SELECT trade_date FROM ref.trade_calendar WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date",
                        (start_date, target_date))
-            expected_count = cur.fetchone()[0]
-        print(f"  history mode: expected_count={expected_count} in [{start_date}, {target_date}]", flush=True)
+            all_tdays = [r[0] for r in cur.fetchall()]
+        print(f"[{now()}] [检查] 区间交易日: {len(all_tdays)} 天", flush=True)
 
-        # 取所有股票的区间内数据天数 + 最晚日期
         with c.cursor() as cur:
             cur.execute(
-                """SELECT si.symbol, MAX(d.trade_date), COUNT(DISTINCT d.trade_date)
+                """SELECT si.symbol, si.list_date, MAX(d.trade_date), COUNT(DISTINCT d.trade_date)
                 FROM ref.symbol_info si
                 LEFT JOIN mkt.daily_bar d ON d.symbol_id = si.id
                     AND d.trade_date BETWEEN %s AND %s
                 WHERE si.status NOT IN ('DELISTED','退市') AND si.symbol LIKE '%%.%%'
-                GROUP BY si.symbol""",
+                GROUP BY si.symbol, si.list_date""",
                 (start_date, target_date))
             for row in cur.fetchall():
                 sym = row[0]
-                latest[sym] = str(row[1]) if row[1] else None
-                coverage[sym] = int(row[2]) if row[2] else 0
+                list_date = row[1]
+                latest[sym] = str(row[2]) if row[2] else None
+                coverage[sym] = int(row[3]) if row[3] else 0
+                effective_start = max(list_date or start_date, start_date)
+                expected_per_sym[sym] = len(all_tdays) - bisect.bisect_left(all_tdays, effective_start)
 
-        # 包含尾部缺口 + 内部缺口的股票
         need = [
             s for s in symbols
-            if latest.get(s) is None           # 区间内完全没有数据
-            or str(latest[s]) < target_date    # 尾部缺口
-            or coverage.get(s, 0) < expected_count  # 内部缺口
+            if latest.get(s) is None
+            or str(latest[s]) < target_date
+            or coverage.get(s, 0) < expected_per_sym.get(s, 0)
         ]
+        no_data_count = sum(1 for s in need if latest.get(s) is None)
+        tail_count     = sum(1 for s in need if latest.get(s) is not None and str(latest[s]) < target_date and coverage.get(s,0) >= expected_per_sym.get(s,0))
+        internal_count = len(need) - no_data_count - tail_count
     else:
-        # 最新模式：仅检查尾部缺口
         with c.cursor() as cur:
             cur.execute(
                 """SELECT si.symbol, MAX(d.trade_date)
@@ -190,55 +265,64 @@ def phase3_baostock_update(c, target_date: str, start_date: str = None):
                 GROUP BY si.symbol""")
             for row in cur.fetchall():
                 latest[row[0]] = str(row[1]) if row[1] else None
-
         need = [s for s in symbols if latest.get(s) is None or str(latest[s]) < target_date]
+        no_data_count = sum(1 for s in need if latest.get(s) is None)
+        tail_count = len(need) - no_data_count
+        internal_count = 0
 
-    print(f"  {len(need)} need update", flush=True)
+    print(f"[{now()}] [检查] 需更新标的: {len(need)} (无数据={no_data_count} 尾部缺口={tail_count} 内部缺口={internal_count})", flush=True)
     if not need:
-        print("[Phase3] all up to date", flush=True)
+        print(f"[{now()}] [跳过] 数据已是最新", flush=True)
         return
 
     if not baostock.login():
-        print("[Phase3] Baostock login FAILED", flush=True)
+        print(f"[{now()}] [失败] Baostock 登录失败", flush=True)
         return
+    print(f"[{now()}] [启动] Baostock 单线程, 每批{BATCH}只, 间隔{SLEEP}s", flush=True)
 
     fetched = written = 0
     try:
         for i in range(0, len(need), BATCH):
             batch = need[i:i+BATCH]
             if start_date:
-                # 历史缺口模式：直接从区间起点开始，保证内部缺口被补到
-                start = start_date
+                from datetime import timedelta
+                starts = []
+                for s in batch:
+                    lat = latest.get(s)
+                    cov = coverage.get(s, 0)
+                    exp = expected_per_sym.get(s, 0)
+                    if lat is None:
+                        starts.append(start_date)
+                    elif str(lat) < target_date and cov >= exp:
+                        starts.append((dt.date.fromisoformat(str(lat)) + timedelta(days=1)).isoformat())
+                    else:
+                        starts.append(start_date)
+                start = min(starts)
             else:
-                # 最新模式：从批次中最早的最晚日期开始，补尾部缺口
-                batch_latest = [str(latest.get(s, '2015-01-01')) for s in batch]
-                sd = min(batch_latest)
-                start = min(sd, target_date)
-            print(f"  batch {i//BATCH+1}: start={start} symbols={len(batch)}", flush=True)
+                batch_latest = [str(latest.get(s, target_date)) for s in batch]
+                start = min(batch_latest)
+
             df = baostock.fetch_daily_k_data_batch(batch, dt.date.fromisoformat(start), dt.date.fromisoformat(target_date))
             if not df.empty:
                 df = baostock.normalize_baostock_frame(df)
-                if 'trade_date' not in df.columns:
-                    print(f"  WARN: trade_date missing, cols={list(df.columns)[:10]}", flush=True)
-                    continue
-                df['_target'] = pd.to_datetime(target_date)
-                df = df[pd.to_datetime(df['trade_date']) <= df['_target']].drop(columns=['_target'])
-                fetched += len(df)
-                w = upsert_baostock(c, df)
-                written += w
-            pct = (i+len(batch))*100//len(need) if need else 100
-            print(f"  [{min(pct,100)}%] batch {i//BATCH+1}: fetched={len(df) if not df.empty else 0} written={written}", flush=True)
+                if 'trade_date' in df.columns:
+                    df['_target'] = pd.to_datetime(target_date)
+                    df = df[pd.to_datetime(df['trade_date']) <= df['_target']].drop(columns=['_target'])
+                    fetched += len(df)
+                    w = upsert_baostock(c, df, batch)
+                    written += w
+            pct = (i+len(batch))*100//len(need)
+            print(f"  [{now()}] {min(pct,100)}% batch {i//BATCH+1}: {start}..{target_date} symbols={len(batch)} fetched={len(df) if not df.empty else 0} total_written={written}", flush=True)
             time.sleep(SLEEP)
     finally:
         baostock.logout()
-    print(f"[Phase3 done] fetched={fetched} written={written}", flush=True)
 
-def upsert_baostock(c, df: pd.DataFrame) -> int:
-    """只更新 Baostock 能提供的字段"""
+    phase_done("3", written, time.time()-t0)
+
+
+def upsert_baostock(c, df: pd.DataFrame, batch_symbols: list[str]) -> int:
     if df.empty: return 0
-    # 先批量查 symbol → symbol_id 映射
-    symbols = df['symbol'].unique().tolist()
-    id_map = sym_list(symbols)
+    id_map = sym_list(c, df['symbol'].unique().tolist())
 
     sql = """INSERT INTO mkt.daily_bar (symbol_id,trade_date,open,high,low,close,pre_close,volume,turnover,change_pct,
         turnover_rate,pe_ratio,pb_ratio,data_source)
@@ -267,51 +351,103 @@ def upsert_baostock(c, df: pd.DataFrame) -> int:
     c.commit()
     return w
 
+
+# ══════════════════════════════════════════════════
+# Phase 4: 周线/月线 聚合 (从日线派生)
+# ══════════════════════════════════════════════════
+
+def phase4_aggregate_bars(c, target_date: str):
+    """从 daily_bar 聚合 weekly_bar / monthly_bar"""
+    phase_header("4", "周线/月线 聚合", "weekly_bar, monthly_bar (OHLCV)")
+
+    t0 = time.time()
+    total = 0
+
+    # 周线
+    sql_weekly = """
+        INSERT INTO mkt.weekly_bar (symbol_id, trade_date, open, high, low, close, volume, turnover)
+        SELECT symbol_id, date_trunc('week', trade_date)::date,
+               (ARRAY_AGG(open ORDER BY trade_date))[1],
+               MAX(high), MIN(low),
+               (ARRAY_AGG(close ORDER BY trade_date DESC))[1],
+               SUM(volume), SUM(turnover)
+        FROM mkt.daily_bar
+        WHERE trade_date >= date_trunc('week', %s::date)::date - INTERVAL '1 week'
+        GROUP BY symbol_id, date_trunc('week', trade_date)::date
+        ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
+            open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
+            volume=EXCLUDED.volume, turnover=EXCLUDED.turnover
+    """
+    with c.cursor() as cur:
+        cur.execute(sql_weekly, (target_date,))
+        total += cur.rowcount
+    c.commit()
+    print(f"[{now()}] 周线 → {cur.rowcount} 行", flush=True)
+
+    # 月线
+    sql_monthly = """
+        INSERT INTO mkt.monthly_bar (symbol_id, trade_date, open, high, low, close, volume, turnover)
+        SELECT symbol_id, date_trunc('month', trade_date)::date,
+               (ARRAY_AGG(open ORDER BY trade_date))[1],
+               MAX(high), MIN(low),
+               (ARRAY_AGG(close ORDER BY trade_date DESC))[1],
+               SUM(volume), SUM(turnover)
+        FROM mkt.daily_bar
+        WHERE trade_date >= date_trunc('month', %s::date)::date - INTERVAL '1 month'
+        GROUP BY symbol_id, date_trunc('month', trade_date)::date
+        ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
+            open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
+            volume=EXCLUDED.volume, turnover=EXCLUDED.turnover
+    """
+    with c.cursor() as cur:
+        cur.execute(sql_monthly, (target_date,))
+        total += cur.rowcount
+    c.commit()
+    print(f"[{now()}] 月线 → {cur.rowcount} 行", flush=True)
+
+    phase_done("4", total, time.time()-t0)
+
+
 # ══════════════════════════════════════════════════
 # main
 # ══════════════════════════════════════════════════
 
 def main():
-    p = argparse.ArgumentParser(description="日更流水线: Phase1(多线程补非Baostock) Phase2(SQL补) Phase3(单线程Baostock全量更新)")
+    p = argparse.ArgumentParser(description="日更流水线")
     p.add_argument("--date", help="目标日期 YYYY-MM-DD")
-    p.add_argument("--start-date", help="起点日期 YYYY-MM-DD，用于填补内部历史缺口")
-    p.add_argument("--phase1-only", action="store_true", help="仅运行Phase1")
-    p.add_argument("--phase3-only", action="store_true", help="仅运行Phase3")
+    p.add_argument("--start-date", help="历史缺口起点 YYYY-MM-DD")
+    p.add_argument("--phase1-only", action="store_true")
+    p.add_argument("--phase3-only", action="store_true")
     p.add_argument("--skip-phase1", action="store_true")
+    p.add_argument("--skip-phase4", action="store_true")
     args = p.parse_args()
 
     target = args.date or (dt.date.today()-dt.timedelta(days=1)).strftime('%Y-%m-%d')
-    print(f"=== daily_pipeline target={target} start_date={args.start_date} ===", flush=True)
+
+    print(f"\n{'#'*60}")
+    print(f"# 日更流水线  target={target}  start={args.start_date or '(尾部模式)'}")
+    print(f"# 启动: {now()}")
+    print(f"{'#'*60}", flush=True)
 
     c = conn()
+    sym_to_id = load_sym_to_id(c)
+    print(f"  symbol→id 映射: {len(sym_to_id)} 条", flush=True)
 
     if not args.phase3_only:
-        # Phase 1: 多线程补齐非 Baostock 字段
         if not args.skip_phase1:
-            print("--- Phase 1: Multi-threaded non-Baostock backfill ---", flush=True)
-            with c.cursor() as cur:
-                cur.execute("SELECT DISTINCT symbol FROM daily_bar WHERE (market_cap IS NULL OR market_cap=0) AND symbol LIKE '%.%'")
-                mcap_need = [r[0] for r in cur.fetchall()]
-            if mcap_need:
-                backfill_market_cap_akshare(mcap_need)
-
-            with c.cursor() as cur:
-                cur.execute("SELECT DISTINCT symbol FROM daily_bar WHERE (pre_adjust_factor IS NULL OR pre_adjust_factor=0) AND symbol LIKE '%.%'")
-                adj_need = [r[0] for r in cur.fetchall()]
-            if adj_need:
-                backfill_adjust_factors_juejin(adj_need)
-
-        # Phase 2: 本地计算
-        print("--- Phase 2: Local SQL backfill ---", flush=True)
+            phase1a_market_cap(c, sym_to_id)
+            phase1b_adjust_factors(c, sym_to_id)
         phase2_local_backfill(c)
 
     if not args.phase1_only:
-        # Phase 3: 单线程 Baostock 全量更新
-        print("--- Phase 3: Baostock single-threaded update ---", flush=True)
         phase3_baostock_update(c, target, start_date=args.start_date)
 
+    if not args.skip_phase4:
+        phase4_aggregate_bars(c, target)
+
     c.close()
-    print("=== done ===", flush=True)
+    print(f"\n[#] 流水线结束: {now()}", flush=True)
+
 
 if __name__ == '__main__':
     main()

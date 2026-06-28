@@ -8,6 +8,8 @@
 
 namespace cleaning {
 
+constexpr int kLightMaxCols = 60;
+
 struct LightValue {
     enum Type : uint8_t { Null, Bool, Double, String } type = Null;
     double d = 0.0; bool b = false; std::string s;
@@ -32,8 +34,8 @@ public:
     static LightSchema& instance() { static LightSchema s; return s; }
     void init(const std::vector<std::string>& ns) {
         if (built_) return;
-        for (size_t i = 0; i < ns.size() && i < 60; ++i) nameToIdx_[ns[i]] = static_cast<int>(i);
-        size_ = static_cast<int>(std::min(ns.size(), size_t(60))); built_ = true;
+        for (size_t i = 0; i < ns.size() && i < kLightMaxCols; ++i) nameToIdx_[ns[i]] = static_cast<int>(i);
+        size_ = static_cast<int>(std::min(ns.size(), static_cast<size_t>(kLightMaxCols))); built_ = true;
     }
     int index(const char* n) const { if(!built_)return -1; auto it=nameToIdx_.find(n); return it!=nameToIdx_.end()?it->second:-1; }
     int size() const { return size_; } bool built() const { return built_; }
@@ -44,8 +46,8 @@ private:
 };
 
 class LightRow {
-    static constexpr int kMaxCols = 60;
 public:
+    static constexpr int kMaxCols = kLightMaxCols;
     LightRow() : isSingle_(false) { values_.fill(LightValue{}); }
     explicit LightRow(LightValue v) : isSingle_(true), single_(std::move(v)) {}
 
