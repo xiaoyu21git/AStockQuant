@@ -1,8 +1,8 @@
-#include "factor_check/FactorDetectionCoreService.h"
+#include "factor_check/FactorSupportInfo.h"
 
 #include <sstream>
 
-namespace factor::bridge::check {
+namespace factor::check {
 
 namespace {
 
@@ -20,8 +20,8 @@ std::string joinFields(const std::vector<FieldKey>& fields)
 
 } // namespace
 
-SupportInfo FactorDetectionCoreService::makeRuntimeInitFailure(const FactorId& factorId,
-                                                               const std::string& runtimeErrorDetail)
+SupportInfo FactorSupportInfoBuilder::makeRuntimeInitFailure(const FactorId& factorId,
+                                                              const std::string& runtimeErrorDetail)
 {
     SupportInfo info;
     info.factorId = factorId;
@@ -33,7 +33,7 @@ SupportInfo FactorDetectionCoreService::makeRuntimeInitFailure(const FactorId& f
     return info;
 }
 
-SupportInfo FactorDetectionCoreService::makeInstanceMissing(const FactorId& factorId)
+SupportInfo FactorSupportInfoBuilder::makeInstanceMissing(const FactorId& factorId)
 {
     SupportInfo info;
     info.factorId = factorId;
@@ -43,9 +43,9 @@ SupportInfo FactorDetectionCoreService::makeInstanceMissing(const FactorId& fact
     return info;
 }
 
-SupportInfo FactorDetectionCoreService::makeInstanceCreateFailed(const FactorId& factorId,
-                                                                 const InstanceId& instanceId,
-                                                                 factor::FactorType runtimeType)
+SupportInfo FactorSupportInfoBuilder::makeInstanceCreateFailed(const FactorId& factorId,
+                                                                const InstanceId& instanceId,
+                                                                factor::FactorType runtimeType)
 {
     SupportInfo info;
     info.factorId = factorId;
@@ -57,9 +57,9 @@ SupportInfo FactorDetectionCoreService::makeInstanceCreateFailed(const FactorId&
     return info;
 }
 
-SupportInfo FactorDetectionCoreService::makeInvalidBacktestWindow(const FactorId& factorId,
-                                                                  const InstanceId& instanceId,
-                                                                  factor::FactorType runtimeType)
+SupportInfo FactorSupportInfoBuilder::makeInvalidBacktestWindow(const FactorId& factorId,
+                                                                 const InstanceId& instanceId,
+                                                                 factor::FactorType runtimeType)
 {
     SupportInfo info;
     info.factorId = factorId;
@@ -72,7 +72,20 @@ SupportInfo FactorDetectionCoreService::makeInvalidBacktestWindow(const FactorId
     return info;
 }
 
-SupportInfo FactorDetectionCoreService::makeOutcomeBased(const OutcomeSupportRequest& request)
+SupportInfo FactorSupportInfoBuilder::makeRuntimeNotReady(const FactorId& factorId,
+                                                          const std::string& detail)
+{
+    SupportInfo info;
+    info.factorId = factorId;
+    info.category = SupportCategory::RuntimeNotReady;
+    info.reason = SupportReason::RuntimeNotReady;
+    info.runFailureCode = RunFailureCode::MissingExecutionModule;
+    info.runtimeErrorDetail = detail;
+    info.supported = false;
+    return info;
+}
+
+SupportInfo FactorSupportInfoBuilder::makeOutcomeBased(const OutcomeSupportRequest& request)
 {
     SupportInfo info;
     info.factorId = request.factorId;
@@ -121,6 +134,11 @@ SupportInfo FactorDetectionCoreService::makeOutcomeBased(const OutcomeSupportReq
         info.category = SupportCategory::InsufficientHistory;
         info.reason = SupportReason::InsufficientHistory;
         break;
+    case OutcomeCode::RuntimeNotReady:
+        info.category = SupportCategory::RuntimeNotReady;
+        info.reason = SupportReason::RuntimeNotReady;
+        info.runFailureCode = RunFailureCode::MissingExecutionModule;
+        break;
     case OutcomeCode::Supported:
         info.category = SupportCategory::Supported;
         info.reason = SupportReason::FieldCheckPassed;
@@ -130,7 +148,7 @@ SupportInfo FactorDetectionCoreService::makeOutcomeBased(const OutcomeSupportReq
     return info;
 }
 
-std::string FactorDetectionCoreService::categoryToken(SupportCategory category)
+std::string FactorSupportInfoBuilder::categoryToken(SupportCategory category)
 {
     switch (category) {
     case SupportCategory::Supported:
@@ -153,11 +171,13 @@ std::string FactorDetectionCoreService::categoryToken(SupportCategory category)
         return "dataset-empty";
     case SupportCategory::InsufficientHistory:
         return "insufficient-history";
+    case SupportCategory::RuntimeNotReady:
+        return "runtime-not-ready";
     }
     return "missing-field";
 }
 
-std::string FactorDetectionCoreService::reasonMessage(const SupportInfo& info)
+std::string FactorSupportInfoBuilder::reasonMessage(const SupportInfo& info)
 {
     switch (info.reason) {
     case SupportReason::FieldCheckPassed:
@@ -189,6 +209,8 @@ std::string FactorDetectionCoreService::reasonMessage(const SupportInfo& info)
         }
         return "缓存集缺少因子检查所需字段: " + joinFields(info.missingFields)
             + "；以下字段存在但无有效非空值: " + joinFields(info.emptyValueFields);
+    case SupportReason::RuntimeNotReady:
+        return info.runtimeErrorDetail;
     case SupportReason::InsufficientHistory: {
         std::ostringstream oss;
         oss << "缓存集仅覆盖 " << info.availableTradeDateCount << " 个交易日，低于该因子所需的 "
@@ -200,4 +222,4 @@ std::string FactorDetectionCoreService::reasonMessage(const SupportInfo& info)
     return {};
 }
 
-} // namespace factor::bridge::check
+} // namespace factor::check

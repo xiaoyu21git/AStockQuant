@@ -1,4 +1,4 @@
-#include "factor_check/FactorSupportScopeKeyCore.h"
+#include "factor_check/FactorSupportScopeKey.h"
 
 #include <algorithm>
 #include <array>
@@ -10,7 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace factor::bridge::check {
+namespace factor::check {
 
 namespace {
 
@@ -238,4 +238,4 @@ std::string buildScopeKeyHexMd5(const std::string& dataSourceMode,
         cacheSnapshotJson));
 }
 
-} // namespace factor::bridge::check
+} // namespace factor::check

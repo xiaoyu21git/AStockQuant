@@ -52,6 +52,10 @@ struct BacktestRunConfig {
     std::string benchmarkSymbol = "000300.SH";
     std::string adjustPriceType = "pre";   // "pre" / "post"
     int marketEnvironmentProfile = 0;
+
+    // ── 预检预注入字段 (从预检结果传入，避免 Orchestrator 重复 createInstance) ──
+    std::vector<std::string> preResolvedExtraFields;  // 已排除核心5字段的额外字段列表
+    bool hasPreResolvedFields{false};                  // 为 true 时跳过 orchestrator 的 createInstance 步骤
 };
 
 } // namespace Factor::backtest

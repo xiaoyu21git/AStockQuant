@@ -374,13 +374,44 @@ void FactorBacktestBridge::startBacktestWithFactors(
                 return;
             }
         }
-        // ② 校验 + 运行
+        // ② 前置校验 — 将 Orchestrator 运行时检查提升到此，失败直接 emit backtestFailed
         if (!m_orchestrator) {
             QMetaObject::invokeMethod(this, [this]() {
                 emit backtestFailed(QStringLiteral("回测编排器未初始化"));
                 m_isRunning.store(false); emit isRunningChanged();
             }, Qt::QueuedConnection);
             return;
+        }
+        if (!m_scheduler) {
+            QMetaObject::invokeMethod(this, [this]() {
+                emit backtestFailed(QStringLiteral("回测调度器未初始化"));
+                m_isRunning.store(false); emit isRunningChanged();
+            }, Qt::QueuedConnection);
+            return;
+        }
+        if (!m_factorEngine || !m_factorEngine->hasInstanceManager()) {
+            QMetaObject::invokeMethod(this, [this]() {
+                emit backtestFailed(QStringLiteral("FactorService 未初始化 — 因子实例不可用"));
+                m_isRunning.store(false); emit isRunningChanged();
+            }, Qt::QueuedConnection);
+            return;
+        }
+        if (!m_backtestDataSvc || !m_backtestDataSvc->getView()) {
+            QMetaObject::invokeMethod(this, [this]() {
+                emit backtestFailed(QStringLiteral("缓存数据集未加载，请先选择数据"));
+                m_isRunning.store(false); emit isRunningChanged();
+            }, Qt::QueuedConnection);
+            return;
+        }
+        {
+            auto* arrowView = static_cast<factor::compute::ArrowMarketDataView*>(m_backtestDataSvc->getView());
+            if (arrowView->dates().empty() || arrowView->instruments().empty()) {
+                QMetaObject::invokeMethod(this, [this]() {
+                    emit backtestFailed(QStringLiteral("缓存集为空 — 无交易日或股票数据"));
+                    m_isRunning.store(false); emit isRunningChanged();
+                }, Qt::QueuedConnection);
+                return;
+            }
         }
 
         m_orchestrator->run(
@@ -675,13 +706,13 @@ QVariantMap FactorBacktestBridge::buildFactorSupportMap(
     const QString& endDate,
     const QVariantMap& cacheSnapshot)
 {
-    auto buildFallbackMap = [&factorIds](const QString& reason) {
+    auto buildFallbackMap = [&factorIds](const QString& reason, const QString& category) {
         QVariantMap map;
         for (const QVariant& id : factorIds) {
             QVariantMap i;
-            i["supported"] = true;
+            i["supported"] = false;
             i["reason"] = reason;
-            i["category"] = QStringLiteral("unknown");
+            i["category"] = category;
             map[id.toString()] = i;
         }
         return map;
@@ -702,18 +733,23 @@ QVariantMap FactorBacktestBridge::buildFactorSupportMap(
             return map;
         } catch (const std::exception& e) {
             QVariantMap map = buildFallbackMap(
-                QStringLiteral("因子检测异常: ") + QString::fromStdString(e.what()));
+                QStringLiteral("因子检测异常: ") + QString::fromStdString(e.what()),
+                QStringLiteral("runtime-init-failed"));
             m_factorSupportMapCache = map;
             return map;
         } catch (...) {
-            QVariantMap map = buildFallbackMap(QStringLiteral("因子检测未知异常，已跳过检测"));
+            QVariantMap map = buildFallbackMap(
+                QStringLiteral("因子检测未知异常，已跳过检测"),
+                QStringLiteral("runtime-init-failed"));
             m_factorSupportMapCache = map;
             return map;
         }
     }
 
-    // FactorService 未就绪时的回退
-    QVariantMap map = buildFallbackMap(QStringLiteral("FactorService 未初始化，跳过检测"));
+    // FactorService 未就绪 — 不可回测
+    QVariantMap map = buildFallbackMap(
+        QStringLiteral("FactorService 未初始化，请稍后重试"),
+        QStringLiteral("runtime-init-failed"));
     m_factorSupportMapCache = map;
     return map;
 }
@@ -751,27 +787,26 @@ int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& facto
             } else {
                 for (const QString& id : ids) {
                     QVariantMap i;
-                    i["supported"] = true;
+                    i["supported"] = false;
                     i["reason"] = QStringLiteral("FactorService 未初始化");
-                    i["category"] = QStringLiteral("unknown");
+                    i["category"] = QStringLiteral("runtime-init-failed");
                     map[id] = i;
                 }
             }
         } catch (const std::exception& e) {
-            // 检测抛异常时也要返回兜底结果，避免按钮永灰
             for (const QString& id : ids) {
                 QVariantMap i;
-                i["supported"] = true;
+                i["supported"] = false;
                 i["reason"] = QStringLiteral("因子检测异常: ") + QString::fromStdString(e.what());
-                i["category"] = QStringLiteral("unknown");
+                i["category"] = QStringLiteral("runtime-init-failed");
                 map[id] = i;
             }
         } catch (...) {
             for (const QString& id : ids) {
                 QVariantMap i;
-                i["supported"] = true;
+                i["supported"] = false;
                 i["reason"] = QStringLiteral("因子检测未知异常，已跳过检测");
-                i["category"] = QStringLiteral("unknown");
+                i["category"] = QStringLiteral("runtime-init-failed");
                 map[id] = i;
             }
         }

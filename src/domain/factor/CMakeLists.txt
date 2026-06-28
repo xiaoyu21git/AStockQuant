@@ -17,6 +17,7 @@ include(CheckSymbolExists)
 # 鍖呭惈鐩綍
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../factor_check/include
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/foundation/include
     ${CMAKE_SOURCE_DIR}/src/infrastructure/include
@@ -186,6 +187,10 @@ set(FACTOR_SOURCES
     src/factor_compute/AnalysisModule.cpp
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
+    ../factor_check/src/FactorSupportEvaluator.cpp
+    ../factor_check/src/FactorSupportInfo.cpp
+    ../factor_check/src/FactorSupportScopeCache.cpp
+    ../factor_check/src/FactorSupportScopeKey.cpp
 )
 
 # 因子系统头文件
@@ -241,6 +246,10 @@ set(FACTOR_HEADERS
     include/FactorBacktestTypes.h
     include/FactorMetricsCalculator.h
     include/BacktestRunConfig.h
+    ../factor_check/include/factor_check/FactorSupportEvaluator.h
+    ../factor_check/include/factor_check/FactorSupportInfo.h
+    ../factor_check/include/factor_check/FactorSupportScopeCache.h
+    ../factor_check/include/factor_check/FactorSupportScopeKey.h
 )
 
 set(FACTOR_COMPUTE_SOURCES

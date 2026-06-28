@@ -647,13 +647,13 @@ QVariantMap FactorService::buildFactorSupportMap(
     int selectedDatasetId)
 {
     if (!m_detectionService || !m_instanceManager) {
-        // 回退：全部标记为支持
+        // 服务未就绪时返回 unsupported，不允许 UI 显示"可回测"
         QVariantMap map;
         for (const QString& id : factorIds) {
             QVariantMap info;
-            info["supported"] = true;
-            info["reason"] = QStringLiteral("因子服务未就绪，跳过检测");
-            info["category"] = QStringLiteral("unknown");
+            info["supported"] = false;
+            info["reason"] = QStringLiteral("因子服务未就绪，请稍后重试");
+            info["category"] = QStringLiteral("runtime-init-failed");
             map[id] = info;
         }
         return map;

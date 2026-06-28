@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace factor::bridge::check {
+namespace factor::check {
 
 std::string md5Hex(const std::string& input);
 
@@ -18,4 +18,4 @@ std::string buildScopeKeyHexMd5(const std::string& dataSourceMode,
                                 const std::string& endDate,
                                 const std::string& cacheSnapshotJson);
 
-} // namespace factor::bridge::check
+} // namespace factor::check

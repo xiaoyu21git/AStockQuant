@@ -1,12 +1,12 @@
-#include "factor_check/FactorSupportCheckCore.h"
+#include "factor_check/FactorSupportEvaluator.h"
 
 #include <algorithm>
 
-namespace factor::bridge::check {
+namespace factor::check {
 
-EvaluationResult evaluateSupport(const Input& input)
+FactorCheckResult FactorSupportEvaluator::evaluate(const FactorCheckInput& input) const
 {
-    EvaluationResult result;
+    FactorCheckResult result;
 
     if (!input.useCacheMode && input.hasPartialBacktestWindow) {
         result.code = OutcomeCode::InvalidBacktestWindow;
@@ -89,4 +89,4 @@ EvaluationResult evaluateSupport(const Input& input)
     return result;
 }
 
-} // namespace factor::bridge::check
+} // namespace factor::check

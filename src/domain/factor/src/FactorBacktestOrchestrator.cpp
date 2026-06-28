@@ -87,8 +87,11 @@ void FactorBacktestOrchestrator::run(
         : config.factorIds;
 
     // ── 收集因子需要的额外字段 ──
+    // 优先使用预检阶段预注入的字段，避免重复 createInstance + getDataRequirements
     std::vector<std::string> neededExtraFields;
-    {
+    if (config.hasPreResolvedFields) {
+        neededExtraFields = config.preResolvedExtraFields;
+    } else {
         auto collectFields = [&](const std::string& fid) {
             auto factor = m_engine->instanceManager()->createInstance(fid);
             if (factor) {
@@ -105,18 +108,18 @@ void FactorBacktestOrchestrator::run(
             for (const auto& fid : factorIdList)
                 collectFields(fid);
         }
+        std::sort(neededExtraFields.begin(), neededExtraFields.end());
+        neededExtraFields.erase(
+            std::unique(neededExtraFields.begin(), neededExtraFields.end()),
+            neededExtraFields.end());
+        neededExtraFields.erase(
+            std::remove_if(neededExtraFields.begin(), neededExtraFields.end(),
+                [](const std::string& f) {
+                    return f == "open" || f == "high" || f == "low" || f == "close" || f == "volume"
+                        || f == "symbol" || f == "trade_date";
+                }),
+            neededExtraFields.end());
     }
-    std::sort(neededExtraFields.begin(), neededExtraFields.end());
-    neededExtraFields.erase(
-        std::unique(neededExtraFields.begin(), neededExtraFields.end()),
-        neededExtraFields.end());
-    neededExtraFields.erase(
-        std::remove_if(neededExtraFields.begin(), neededExtraFields.end(),
-            [](const std::string& f) {
-                return f == "open" || f == "high" || f == "low" || f == "close" || f == "volume"
-                    || f == "symbol" || f == "trade_date";
-            }),
-        neededExtraFields.end());
 
     if (onProgress) onProgress(5.0, "data indexed");
 

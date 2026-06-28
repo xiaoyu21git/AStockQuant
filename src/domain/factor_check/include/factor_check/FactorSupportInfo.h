@@ -3,10 +3,10 @@
 #include <string>
 #include <vector>
 
-#include "factor_check/FactorSupportCheckCore.h"
-#include "../../../domain/factor/include/factor_enums.h"
+#include "factor_check/FactorSupportEvaluator.h"
+#include "factor_enums.h"
 
-namespace factor::bridge::check {
+namespace factor::check {
 
 struct FactorId final {
     std::string value;
@@ -31,6 +31,7 @@ enum class SupportCategory {
     DatasetInvalid = 7,
     DatasetEmpty = 8,
     InsufficientHistory = 9,
+    RuntimeNotReady = 10,
 };
 
 enum class SupportReason {
@@ -46,6 +47,7 @@ enum class SupportReason {
     EmptyDataset = 9,
     MissingOrEmptyFields = 10,
     InsufficientHistory = 11,
+    RuntimeNotReady = 12,
 };
 
 enum class RunFailureCode {
@@ -89,7 +91,7 @@ struct OutcomeSupportRequest final {
     bool supported{false};
 };
 
-class FactorDetectionCoreService final {
+class FactorSupportInfoBuilder final {
 public:
     static SupportInfo makeRuntimeInitFailure(const FactorId& factorId,
                                               const std::string& runtimeErrorDetail);
@@ -104,10 +106,13 @@ public:
                                                  const InstanceId& instanceId,
                                                  factor::FactorType runtimeType);
 
+    static SupportInfo makeRuntimeNotReady(const FactorId& factorId,
+                                            const std::string& detail);
+
     static SupportInfo makeOutcomeBased(const OutcomeSupportRequest& request);
 
     static std::string categoryToken(SupportCategory category);
     static std::string reasonMessage(const SupportInfo& info);
 };
 
-} // namespace factor::bridge::check
+} // namespace factor::check

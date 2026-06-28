@@ -1,8 +1,8 @@
 #include "FactorDetectionService.h"
-#include "factor_check/FactorSupportCheckCore.h"
-#include "factor_check/FactorDetectionCoreService.h"
-#include "factor_check/FactorSupportScopeCacheCore.h"
-#include "factor_check/FactorSupportScopeKeyCore.h"
+#include "factor_check/FactorSupportEvaluator.h"
+#include "factor_check/FactorSupportInfo.h"
+#include "factor_check/FactorSupportScopeCache.h"
+#include "factor_check/FactorSupportScopeKey.h"
 
 #include "AppStoragePaths.h"
 #include "DataFetchFieldContractUtils.h"
@@ -28,18 +28,18 @@
 
 namespace {
 
-QString toRunFailureToken(const factor::bridge::check::RunFailureCode code)
+QString toRunFailureToken(const factor::check::RunFailureCode code)
 {
     switch (code) {
-    case factor::bridge::check::RunFailureCode::InvalidRunSpec:
+    case factor::check::RunFailureCode::InvalidRunSpec:
         return QStringLiteral("InvalidRunSpec");
-    case factor::bridge::check::RunFailureCode::MissingExecutionModule:
+    case factor::check::RunFailureCode::MissingExecutionModule:
         return QStringLiteral("MissingExecutionModule");
-    case factor::bridge::check::RunFailureCode::MissingResolvedSymbols:
+    case factor::check::RunFailureCode::MissingResolvedSymbols:
         return QStringLiteral("MissingResolvedSymbols");
-    case factor::bridge::check::RunFailureCode::MissingSelectedFactors:
+    case factor::check::RunFailureCode::MissingSelectedFactors:
         return QStringLiteral("MissingSelectedFactors");
-    case factor::bridge::check::RunFailureCode::None:
+    case factor::check::RunFailureCode::None:
         return QString();
     }
 
@@ -106,20 +106,20 @@ std::string toStdString(const QString& value)
     return value.toStdString();
 }
 
-std::vector<factor::bridge::check::FieldKey> toFieldKeys(const QStringList& fields)
+std::vector<factor::check::FieldKey> toFieldKeys(const QStringList& fields)
 {
-    std::vector<factor::bridge::check::FieldKey> result;
+    std::vector<factor::check::FieldKey> result;
     result.reserve(static_cast<size_t>(fields.size()));
     for (const QString& field : fields) {
         const QString normalized = field.trimmed();
         if (!normalized.isEmpty()) {
-            result.push_back(factor::bridge::check::FieldKey{normalized.toStdString()});
+            result.push_back(factor::check::FieldKey{normalized.toStdString()});
         }
     }
     return result;
 }
 
-QStringList fromFieldKeys(const std::vector<factor::bridge::check::FieldKey>& fields)
+QStringList fromFieldKeys(const std::vector<factor::check::FieldKey>& fields)
 {
     QStringList result;
     result.reserve(static_cast<int>(fields.size()));
@@ -195,7 +195,7 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
     const QString cacheFilePath = overrides.cacheFilePathOverrideForTests
         ? overrides.cacheFilePathOverrideForTests().trimmed()
         : persistentCacheFilePath(request.dataSourceMode, request.selectedDatasetId);
-    const factor::bridge::check::PersistedFactorEntryMap persistedScopeEntries =
+    const factor::check::PersistedFactorEntryMap persistedScopeEntries =
         loadScopeEntries(cacheFilePath, result.scopeKey);
 
     QVariantMap supportMap;
@@ -250,7 +250,7 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
 
     if (!cacheFilePath.isEmpty()) {
         // 从已有持久化条目拷贝起点 — persistScopeEntries 是 scope 级别全量覆盖，不能只传增量
-        factor::bridge::check::PersistedFactorEntryMap updatedScopeEntries = persistedScopeEntries;
+        factor::check::PersistedFactorEntryMap updatedScopeEntries = persistedScopeEntries;
         const std::string checkedAt = toStdString(QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
         for (const QString& factorIdValue : normalizedFactorIds) {
             const QString factorId = factorIdValue.trimmed();
@@ -264,7 +264,7 @@ FactorDetectionService::DetectionResult FactorDetectionService::buildSupportMap(
                 continue; // 第一轮就解析失败的因子无法持久化，跳过
             }
 
-            updatedScopeEntries[factorId.toStdString()] = factor::bridge::check::PersistedFactorEntry{
+            updatedScopeEntries[factorId.toStdString()] = factor::check::PersistedFactorEntry{
                 definitionFingerprint.toStdString(),
                 checkedAt,
                 toCompactJsonString(supportInfo),
@@ -471,7 +471,7 @@ QStringList FactorDetectionService::normalizedRequiredFields(
     return dedupeStringList(fields);
 }
 
-QVariantMap FactorDetectionService::buildSupportInfo(const factor::bridge::check::SupportInfo& typedInfo) const
+QVariantMap FactorDetectionService::buildSupportInfo(const factor::check::SupportInfo& typedInfo) const
 {
     const QStringList requiredFields = fromFieldKeys(typedInfo.requiredFields);
     const QStringList missingFields = fromFieldKeys(typedInfo.missingFields);
@@ -482,9 +482,9 @@ QVariantMap FactorDetectionService::buildSupportInfo(const factor::bridge::check
     info[QStringLiteral("runtimeType")] = static_cast<int>(typedInfo.runtimeType);
     info[QStringLiteral("supported")] = typedInfo.supported;
     info[QStringLiteral("category")] =
-        QString::fromStdString(factor::bridge::check::FactorDetectionCoreService::categoryToken(typedInfo.category));
+        QString::fromStdString(factor::check::FactorSupportInfoBuilder::categoryToken(typedInfo.category));
     info[QStringLiteral("reason")] =
-        QString::fromStdString(factor::bridge::check::FactorDetectionCoreService::reasonMessage(typedInfo));
+        QString::fromStdString(factor::check::FactorSupportInfoBuilder::reasonMessage(typedInfo));
     info[QStringLiteral("requiredFields")] = toVariantList(requiredFields);
     info[QStringLiteral("missingFields")] = toVariantList(missingFields);
     info[QStringLiteral("sourceTable")] = static_cast<int>(typedInfo.sourceTable);
@@ -530,7 +530,7 @@ QString FactorDetectionService::buildScopeKey(const Request& request) const
 {
     const QByteArray cacheSnapshotBytes =
         QJsonDocument::fromVariant(request.cacheSnapshot).toJson(QJsonDocument::Compact);
-    const std::string scopeKey = factor::bridge::check::buildScopeKeyHexMd5(
+    const std::string scopeKey = factor::check::buildScopeKeyHexMd5(
         normalizedDataSourceMode(request.dataSourceMode).toStdString(),
         request.selectedDatasetId,
         request.startDate.trimmed().toStdString(),
@@ -541,7 +541,7 @@ QString FactorDetectionService::buildScopeKey(const Request& request) const
 
 QString FactorDetectionService::buildDefinitionFingerprint(const factor::FactorInstanceInfo& info) const
 {
-    return QString::fromStdString(factor::bridge::check::md5Hex(info.toJson().toString()));
+    return QString::fromStdString(factor::check::md5Hex(info.toJson().toString()));
 }
 
 QString FactorDetectionService::legacyCacheFilePath() const
@@ -553,24 +553,24 @@ QString FactorDetectionService::legacyCacheFilePath() const
     return targetPath;
 }
 
-factor::bridge::check::PersistedFactorEntryMap FactorDetectionService::loadScopeEntries(
+factor::check::PersistedFactorEntryMap FactorDetectionService::loadScopeEntries(
     const QString& filePath,
     const QString& scopeKey) const
 {
-    return factor::bridge::check::loadScopeEntries(
+    return factor::check::loadScopeEntries(
         toStdString(filePath.trimmed()),
         toStdString(scopeKey.trimmed()));
 }
 
 void FactorDetectionService::persistScopeEntries(const QString& filePath,
                                                  const QString& scopeKey,
-                                                 const factor::bridge::check::PersistedFactorEntryMap& scopeEntries) const
+                                                 const factor::check::PersistedFactorEntryMap& scopeEntries) const
 {
     if (filePath.trimmed().isEmpty() || scopeKey.trimmed().isEmpty()) {
         return;
     }
 
-    factor::bridge::check::persistScopeEntries(
+    factor::check::persistScopeEntries(
         toStdString(filePath.trimmed()),
         toStdString(scopeKey.trimmed()),
         scopeEntries,
@@ -597,19 +597,9 @@ factor::FactorInstanceInfo FactorDetectionService::resolveInstanceInfo(
         return instanceInfoOverride(resolvedInstanceId);
     }
 
-    {
-        const std::lock_guard<std::mutex> lock(m_instanceInfoCacheMutex);
-        const auto it = m_instanceInfoCache.constFind(resolvedInstanceId);
-        if (it != m_instanceInfoCache.constEnd()) {
-            return it.value();
-        }
-    }
-
+    // 统一使用 FactorInstanceManager 的共享缓存 (infoCache_)
     if (instanceManager) {
-        const factor::FactorInstanceInfo info = instanceManager->getInstanceInfo(resolvedInstanceId.toStdString());
-        const std::lock_guard<std::mutex> lock(m_instanceInfoCacheMutex);
-        m_instanceInfoCache.insert(resolvedInstanceId, info);
-        return info;
+        return instanceManager->getInstanceInfo(resolvedInstanceId.toStdString());
     }
 
     factor::FactorInstanceInfo info;
@@ -626,22 +616,10 @@ std::shared_ptr<factor::BaseFactor> FactorDetectionService::resolveFactorInstanc
         return factorInstanceOverride(resolvedInstanceId);
     }
 
-    {
-        const std::lock_guard<std::mutex> lock(m_factorInstanceCacheMutex);
-        const auto it = m_factorInstanceCache.constFind(resolvedInstanceId);
-        if (it != m_factorInstanceCache.constEnd()) {
-            return it.value();
-        }
-    }
-
+    // 统一使用 FactorInstanceManager 的共享缓存 (instanceCache_)
+    // createInstance 写入共享缓存，后续 Orchestrator 调用时直接命中
     if (instanceManager) {
-        const std::shared_ptr<factor::BaseFactor> instance =
-            instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString());
-        if (instance) {
-            const std::lock_guard<std::mutex> lock(m_factorInstanceCacheMutex);
-            m_factorInstanceCache.insert(resolvedInstanceId, instance);
-        }
-        return instance;
+        return instanceManager->createInstance(resolvedInstanceId.toStdString());
     }
     return nullptr;
 }
@@ -653,9 +631,9 @@ QVariantMap FactorDetectionService::buildRuntimeFailureSupportMap(const QStringL
     const QStringList normalized = dedupeFactorIds(factorIds);
     for (const QString& factorIdValue : normalized) {
         const QString factorId = factorIdValue.trimmed();
-        const factor::bridge::check::SupportInfo typedInfo =
-            factor::bridge::check::FactorDetectionCoreService::makeRuntimeInitFailure(
-                factor::bridge::check::FactorId{factorId.toStdString()},
+        const factor::check::SupportInfo typedInfo =
+            factor::check::FactorSupportInfoBuilder::makeRuntimeInitFailure(
+                factor::check::FactorId{factorId.toStdString()},
                 reason.toStdString());
         supportMap.insert(factorId, buildSupportInfo(typedInfo));
     }
@@ -767,9 +745,9 @@ QVariantMap FactorDetectionService::detectSingleFactor(
     const QString normalizedFactorId = factorId.trimmed();
     const QString resolvedInstanceId = resolveInstanceId(normalizedFactorId, overrides.resolveInstanceIdOverrideForTests);
     if (resolvedInstanceId.isEmpty()) {
-        const factor::bridge::check::SupportInfo typedInfo =
-            factor::bridge::check::FactorDetectionCoreService::makeInstanceMissing(
-                factor::bridge::check::FactorId{normalizedFactorId.toStdString()});
+        const factor::check::SupportInfo typedInfo =
+            factor::check::FactorSupportInfoBuilder::makeInstanceMissing(
+                factor::check::FactorId{normalizedFactorId.toStdString()});
         supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
         return supportMap;
     }
@@ -784,10 +762,10 @@ QVariantMap FactorDetectionService::detectSingleFactor(
         runtimeContext.instanceManager);
     const factor::FactorType runtimeType = resolveRuntimeType(info, factorInstance);
     if (!factorInstance) {
-        const factor::bridge::check::SupportInfo typedInfo =
-            factor::bridge::check::FactorDetectionCoreService::makeInstanceCreateFailed(
-                factor::bridge::check::FactorId{normalizedFactorId.toStdString()},
-                factor::bridge::check::InstanceId{resolvedInstanceId.toStdString()},
+        const factor::check::SupportInfo typedInfo =
+            factor::check::FactorSupportInfoBuilder::makeInstanceCreateFailed(
+                factor::check::FactorId{normalizedFactorId.toStdString()},
+                factor::check::InstanceId{resolvedInstanceId.toStdString()},
                 runtimeType);
         supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
         return supportMap;
@@ -795,10 +773,10 @@ QVariantMap FactorDetectionService::detectSingleFactor(
 
     const bool hasPartialBacktestWindow = request.startDate.trimmed().isEmpty() != request.endDate.trimmed().isEmpty();
     if (!sharedContext.useCacheMode && hasPartialBacktestWindow) {
-        const factor::bridge::check::SupportInfo typedInfo =
-            factor::bridge::check::FactorDetectionCoreService::makeInvalidBacktestWindow(
-                factor::bridge::check::FactorId{normalizedFactorId.toStdString()},
-                factor::bridge::check::InstanceId{resolvedInstanceId.toStdString()},
+        const factor::check::SupportInfo typedInfo =
+            factor::check::FactorSupportInfoBuilder::makeInvalidBacktestWindow(
+                factor::check::FactorId{normalizedFactorId.toStdString()},
+                factor::check::InstanceId{resolvedInstanceId.toStdString()},
                 runtimeType);
         supportMap.insert(normalizedFactorId, buildSupportInfo(typedInfo));
         return supportMap;
@@ -846,7 +824,25 @@ QVariantMap FactorDetectionService::detectSingleFactor(
         ? (std::max)(1, overrides.requiredWarmupTradingDaysOverrideForTests.value(resolvedInstanceId))
         : (std::max)(1, factorInstance->getBoundaryRules().minDataPoints);
 
-    factor::bridge::check::Input input;
+    // ── P2: DataAvailabilityChecker SQL 级字段验证汇入预检 ──
+    // 在 metadata 的 availableFields/unusableFields 之上，
+    // 追加数据库实际查询结果，消除"元数据存在但实际无有效值"的分裂
+    std::unordered_set<std::string> mergedUnusableFields = sharedContext.unusableFieldSet;
+    if (runtimeContext.dataChecker && runtimeContext.database) {
+        auto dataStatus = runtimeContext.dataChecker->checkFactorData(
+            info.config,
+            resolvedInstanceId.toStdString(),
+            request.startDate.toStdString(),
+            request.endDate.toStdString());
+        for (const auto& missingField : dataStatus.missingFields) {
+            mergedUnusableFields.insert(missingField);
+        }
+        for (const auto& invalidField : dataStatus.invalidFields) {
+            mergedUnusableFields.insert(invalidField);
+        }
+    }
+
+    factor::check::FactorCheckInput input;
     input.useCacheMode = sharedContext.useCacheMode;
     input.hasPartialBacktestWindow = hasPartialBacktestWindow;
     input.customExpressionRequired = (runtimeType == factor::FactorType::CUSTOM);
@@ -857,24 +853,24 @@ QVariantMap FactorDetectionService::detectSingleFactor(
     input.availableTradeDateCount = sharedContext.availableTradeDateCount;
     input.requiredWarmupTradingDays = requiredWarmupTradingDays;
     input.availableFields = sharedContext.availableFieldSet;
-    input.unusableFields = sharedContext.unusableFieldSet;
+    input.unusableFields = mergedUnusableFields;
     input.requiredFields.reserve(static_cast<size_t>(requiredFields.size()));
     for (const QString& requiredField : requiredFields) {
         input.requiredFields.push_back(requiredField.trimmed().toLower().toStdString());
     }
 
-    const factor::bridge::check::EvaluationResult evaluation =
-        factor::bridge::check::evaluateSupport(input);
+    const factor::check::FactorCheckResult evaluation =
+        factor::check::FactorSupportEvaluator{}.evaluate(input);
     const QStringList missingFields = dedupeStringList(toQStringList(evaluation.missingFields));
     const QStringList emptyValueFields = dedupeStringList(toQStringList(evaluation.emptyValueFields));
 
-    const std::vector<factor::bridge::check::FieldKey> requiredFieldKeys = toFieldKeys(requiredFields);
-    const std::vector<factor::bridge::check::FieldKey> missingFieldKeys = toFieldKeys(missingFields);
-    const std::vector<factor::bridge::check::FieldKey> emptyValueFieldKeys = toFieldKeys(emptyValueFields);
+    const std::vector<factor::check::FieldKey> requiredFieldKeys = toFieldKeys(requiredFields);
+    const std::vector<factor::check::FieldKey> missingFieldKeys = toFieldKeys(missingFields);
+    const std::vector<factor::check::FieldKey> emptyValueFieldKeys = toFieldKeys(emptyValueFields);
 
-    factor::bridge::check::OutcomeSupportRequest outcomeRequest;
-    outcomeRequest.factorId = factor::bridge::check::FactorId{normalizedFactorId.toStdString()};
-    outcomeRequest.instanceId = factor::bridge::check::InstanceId{resolvedInstanceId.toStdString()};
+    factor::check::OutcomeSupportRequest outcomeRequest;
+    outcomeRequest.factorId = factor::check::FactorId{normalizedFactorId.toStdString()};
+    outcomeRequest.instanceId = factor::check::InstanceId{resolvedInstanceId.toStdString()};
     outcomeRequest.runtimeType = runtimeType;
     outcomeRequest.sourceTable = sourceTable;
     outcomeRequest.useCacheMode = sharedContext.useCacheMode;
@@ -886,10 +882,10 @@ QVariantMap FactorDetectionService::detectSingleFactor(
     outcomeRequest.code = evaluation.code;
     outcomeRequest.supported = evaluation.supported;
 
-    factor::bridge::check::SupportInfo typedInfo =
-        factor::bridge::check::FactorDetectionCoreService::makeOutcomeBased(outcomeRequest);
+    factor::check::SupportInfo typedInfo =
+        factor::check::FactorSupportInfoBuilder::makeOutcomeBased(outcomeRequest);
 
-    if (evaluation.code == factor::bridge::check::OutcomeCode::MissingOrEmptyFields) {
+    if (evaluation.code == factor::check::OutcomeCode::MissingOrEmptyFields) {
         typedInfo.missingFields = toFieldKeys(dedupeStringList(missingFields + emptyValueFields));
     }
 

@@ -4,7 +4,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace factor::bridge::check {
+namespace factor::check {
 
 enum class OutcomeCode {
     Supported = 0,
@@ -16,9 +16,10 @@ enum class OutcomeCode {
     DatasetEmpty = 6,
     MissingOrEmptyFields = 7,
     InsufficientHistory = 8,
+    RuntimeNotReady = 9,
 };
 
-struct Input final {
+struct FactorCheckInput final {
     bool useCacheMode{false};
     bool hasPartialBacktestWindow{false};
     bool customExpressionRequired{false};
@@ -35,13 +36,16 @@ struct Input final {
     std::unordered_set<std::string> unusableFields;
 };
 
-struct EvaluationResult final {
+struct FactorCheckResult final {
     OutcomeCode code{OutcomeCode::Supported};
     bool supported{true};
     std::vector<std::string> missingFields;
     std::vector<std::string> emptyValueFields;
 };
 
-[[nodiscard]] EvaluationResult evaluateSupport(const Input& input);
+class FactorSupportEvaluator final {
+public:
+    [[nodiscard]] FactorCheckResult evaluate(const FactorCheckInput& input) const;
+};
 
-} // namespace factor::bridge::check
+} // namespace factor::check

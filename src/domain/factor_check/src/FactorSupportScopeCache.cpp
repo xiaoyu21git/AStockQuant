@@ -1,11 +1,11 @@
-#include "factor_check/FactorSupportScopeCacheCore.h"
+#include "factor_check/FactorSupportScopeCache.h"
 
 #include <filesystem>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
 
-namespace factor::bridge::check {
+namespace factor::check {
 
 namespace {
 
@@ -173,4 +173,4 @@ bool persistScopeEntries(const std::string& filePath,
     return writeRoot(filePath, root);
 }
 
-} // namespace factor::bridge::check
+} // namespace factor::check

@@ -24,32 +24,35 @@ void scanFields(const std::vector<J>& rows,
                 std::unordered_set<std::string>& numericFields)
 {
     std::unordered_map<std::string, bool> fieldNumeric;
-    // 按数据类型定义字段
-    // 从数据中动态检测字段（避免硬编码）
-    static const int KNOWN_COUNT_KLINE = 30;
-    static const int KNOWN_COUNT_FINANCIAL = 22;
-    static const char* knownFieldsData[] = {
-        // 通用
-        CF::SYMBOL, "name", "code", "stock_code", CF::TRADE_DATE,
-        "industry", MF::INDUSTRY_CODE,
-        // K线数值
-        MF::OPEN, MF::HIGH, MF::LOW, MF::CLOSE, MF::PRE_CLOSE,
-        MF::VOLUME, MF::TURNOVER, MF::CHANGE_PCT, MF::CHANGE_AMT, MF::AMPLITUDE,
-        MF::TURNOVER_RATE, MF::PE_RATIO, MF::PB_RATIO, MF::MARKET_CAP,
-        MF::CIRCULATING_MARKET_CAP, MF::PRE_ADJ_FACTOR, MF::POST_ADJ_FACTOR,
-        // K线字符串
-        "asset_class", "status", CF::DATA_SOURCE, "trade_status",
-        F_F::DISCLOSURE_DATE, F_F::REPORT_TYPE,
-        // 财务
-        F_F::REPORT_DATE, F_F::SYMBOL_ID, F_F::INDICATOR_ID,
-        F_F::EPS, F_F::BPS, F_F::ROA, F_F::ROE, F_F::PROFIT_MARGIN, F_F::GROSS_MARGIN, F_F::OPERATING_MARGIN,
-        F_F::DEBT_TO_EQUITY, F_F::CURRENT_RATIO, F_F::QUICK_RATIO,
-        F_F::OPERATING_CASH_FLOW, F_F::INVESTING_CASH_FLOW, F_F::FINANCING_CASH_FLOW,
-        F_F::TOTAL_REVENUE, F_F::NET_PROFIT, F_F::TOTAL_ASSETS, F_F::TOTAL_LIABILITIES, F_F::EQUITY,
-        F_F::DIVIDEND_YIELD, F_F::PAYOUT_RATIO, F_F::DIVIDEND_STABILITY,
-        F_F::EFFECTIVE_DISCLOSURE_DATE
-    };
-    std::vector<const char*> knownFields(knownFieldsData, knownFieldsData + sizeof(knownFieldsData)/sizeof(knownFieldsData[0]));
+    // 已知字段名从 DataFieldKeys 聚合（唯一定义点），不再硬编码
+    // 动态扫描：哪些字段实际存在于数据中、是数值还是字符串
+    const std::vector<const char*> knownFields = []() {
+        const auto mk = [](std::initializer_list<const char*> fields) {
+            return std::vector<const char*>(fields);
+        };
+        // CF/MF/F_F/XF — 仅 DataFieldKeys.h 中定义了字段名常量
+        auto v = mk({CF::SYMBOL, CF::TRADE_DATE, CF::DATA_SOURCE,
+                     MF::OPEN, MF::HIGH, MF::LOW, MF::CLOSE, MF::PRE_CLOSE,
+                     MF::VOLUME, MF::TURNOVER, MF::CHANGE_PCT, MF::CHANGE_AMT, MF::AMPLITUDE,
+                     MF::TURNOVER_RATE, MF::PE_RATIO, MF::PB_RATIO, MF::MARKET_CAP,
+                     MF::CIRCULATING_MARKET_CAP, MF::PRE_ADJ_FACTOR, MF::POST_ADJ_FACTOR,
+                     MF::INDUSTRY_CODE});
+        auto f = mk({F_F::REPORT_DATE, F_F::REPORT_TYPE, F_F::DISCLOSURE_DATE,
+                     F_F::EFFECTIVE_DISCLOSURE_DATE, F_F::SYMBOL_ID, F_F::INDICATOR_ID,
+                     F_F::EPS, F_F::BPS, F_F::ROA, F_F::ROE,
+                     F_F::PROFIT_MARGIN, F_F::GROSS_MARGIN, F_F::OPERATING_MARGIN,
+                     F_F::DEBT_TO_EQUITY, F_F::CURRENT_RATIO, F_F::QUICK_RATIO,
+                     F_F::OPERATING_CASH_FLOW, F_F::INVESTING_CASH_FLOW, F_F::FINANCING_CASH_FLOW,
+                     F_F::TOTAL_REVENUE, F_F::NET_PROFIT, F_F::TOTAL_ASSETS, F_F::TOTAL_LIABILITIES, F_F::EQUITY,
+                     F_F::DIVIDEND_YIELD, F_F::PAYOUT_RATIO, F_F::DIVIDEND_STABILITY});
+        auto x = mk({XF::NAME, XF::EXCHANGE, XF::STATUS, XF::LIST_DATE, XF::DELIST_DATE});
+        // 兼容别名 — 不在 DataFieldKeys 中但实际数据可能出现
+        std::vector<const char*> aliases = {"code", "stock_code", "industry", "asset_class", "trade_status"};
+        v.insert(v.end(), f.begin(), f.end());
+        v.insert(v.end(), x.begin(), x.end());
+        v.insert(v.end(), aliases.begin(), aliases.end());
+        return v;
+    }();
     for (const auto& row : rows) {
         if (!row.isObject()) continue;
         for (const char* f : knownFields) {

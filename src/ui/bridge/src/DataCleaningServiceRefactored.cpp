@@ -24,31 +24,36 @@
 using J = cleaning::LightRow;
 
 
+// 注册所有清洗规则到 RuleFactoryRegistry（在 initialize 时调用一次）
+static void registerAllCleaningRules() {
+    using namespace cleaning;
+    auto& reg = RuleFactoryRegistry::instance();
+    reg.registerFactory("completeness",           [](auto&){ return std::make_unique<CompletenessRule>(); });
+    reg.registerFactory("duplicateRemoval",       [](auto& c){ return std::make_unique<DuplicateRemovalRule>(c); });
+    reg.registerFactory("financialDateValidity",  [](auto&){ return std::make_unique<FinancialDateValidityRule>(); });
+    reg.registerFactory("financialMetricSanitize",[](auto&){ return std::make_unique<FinancialMetricSanitizeRule>(); });
+    reg.registerFactory("suspensionFill",         [](auto& c){ return std::make_unique<SuspensionFillRule>(c); });
+    reg.registerFactory("missingValueFill",       [](auto& c){ return std::make_unique<MissingValueFillRule>(c); });
+    reg.registerFactory("adjustedPrice",          [](auto&){ return std::make_unique<AdjustedPriceRule>(); });
+    reg.registerFactory("priceValidity",          [](auto& c){ return std::make_unique<PriceValidityRule>(c); });
+    reg.registerFactory("volumeFilter",           [](auto& c){ return std::make_unique<VolumeFilterRule>(c); });
+    reg.registerFactory("limitMoveTag",           [](auto& c){ return std::make_unique<LimitMoveTagRule>(c); });
+    reg.registerFactory("valuationSanitize",      [](auto&){ return std::make_unique<ValuationSanitizeRule>(); });
+    reg.registerFactory("fieldStandardization",   [](auto&){ return std::make_unique<FieldStandardizationRule>(); });
+    reg.registerFactory("reportDateAlignment",    [](auto&){ return std::make_unique<ReportDateAlignmentRule>(); });
+    reg.registerFactory("survivorBias",           [](auto&){ return std::make_unique<SurvivorBiasRule>(); });
+    reg.registerFactory("newStockFilter",         [](auto& c){ return std::make_unique<NewStockFilterRule>(c); });
+    reg.registerFactory("stFilter",               [](auto&){ return std::make_unique<STFilterRule>(); });
+}
+
 // 根据规则 key 名字符串创建对应的纯 C++ 规则实例
 std::unique_ptr<cleaning::ICleaningRule> createCppRule(const std::string& ruleKey, const std::string& configJson) {
-    using namespace cleaning;
-    if (ruleKey == "completeness")           return std::make_unique<CompletenessRule>();
-    if (ruleKey == "duplicateRemoval")        return std::make_unique<DuplicateRemovalRule>(configJson);
-    if (ruleKey == "financialDateValidity")   return std::make_unique<FinancialDateValidityRule>();
-    if (ruleKey == "financialMetricSanitize") return std::make_unique<FinancialMetricSanitizeRule>();
-    if (ruleKey == "suspensionFill")          return std::make_unique<SuspensionFillRule>(configJson);
-    if (ruleKey == "missingValueFill")        return std::make_unique<MissingValueFillRule>(configJson);
-    if (ruleKey == "adjustedPrice")           return std::make_unique<AdjustedPriceRule>();
-    if (ruleKey == "priceValidity")           return std::make_unique<PriceValidityRule>(configJson);
-    if (ruleKey == "volumeFilter")            return std::make_unique<VolumeFilterRule>(configJson);
-    if (ruleKey == "limitMoveTag")            return std::make_unique<LimitMoveTagRule>(configJson);
-    if (ruleKey == "valuationSanitize")       return std::make_unique<ValuationSanitizeRule>();
-    if (ruleKey == "fieldStandardization")    return std::make_unique<FieldStandardizationRule>();
-    // P0-2: 新增 4 个纯 C++ 规则（与 Qt 桥接层行为对齐）
-    if (ruleKey == "reportDateAlignment")    return std::make_unique<ReportDateAlignmentRule>();
-    if (ruleKey == "survivorBias")           return std::make_unique<SurvivorBiasRule>();
-    if (ruleKey == "newStockFilter")         return std::make_unique<NewStockFilterRule>(configJson);
-    if (ruleKey == "stFilter")               return std::make_unique<STFilterRule>();
-
-    // 未识别的规则键 — 打印警告，避免静默跳过
-    INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] WARNING: unknown cleaning rule key \"" << ruleKey << "\", skipped. "
-                    "请检查规则名是否与 CoreCleaningRules.h 中的 ruleName() 一致";
-    return nullptr;
+    auto rule = cleaning::RuleFactoryRegistry::instance().create(ruleKey, configJson);
+    if (!rule) {
+        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] WARNING: unknown cleaning rule key \""
+            << ruleKey << "\", skipped. 请检查规则名是否与 CoreCleaningRules.h 中的 ruleName() 一致";
+    }
+    return rule;
 }
 
 // ── 内部实现 ──
@@ -92,6 +97,7 @@ DataCleaningServiceRefactored::~DataCleaningServiceRefactored() {
 bool DataCleaningServiceRefactored::initialize() {
     if (m_initialized) return true;
     DataCacheAdapter::instance().initialize(bridge::storage::persistentDatasetRootDir());
+    registerAllCleaningRules();
     m_initialized = true;
     INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] initialized";
     return true;
@@ -228,19 +234,34 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                 if (n > poolSize) pool.resize(static_cast<size_t>(n));
                 inputRows += static_cast<int>(n);
 
-                // 填池：从 Arrow 列直接读取
+                // 填池：预提取列数组 + 字段名 + 类型，避免行循环内 shared_ptr 分配 + hash 查找
                 int nCols = batch->num_columns();
+                std::vector<std::shared_ptr<arrow::Array>> colOwners(static_cast<size_t>(nCols));
+                std::vector<const arrow::DoubleArray*> doublePtrs(static_cast<size_t>(nCols), nullptr);
+                std::vector<const arrow::StringArray*> stringPtrs(static_cast<size_t>(nCols), nullptr);
+                std::vector<std::string> colNames(static_cast<size_t>(nCols));
+                std::vector<bool> colIsNum(static_cast<size_t>(nCols), false);
+
+                for (int c = 0; c < nCols; ++c) {
+                    colOwners[static_cast<size_t>(c)] = batch->column(c);
+                    colNames[static_cast<size_t>(c)] = schema->field(c)->name();
+                    colIsNum[static_cast<size_t>(c)] = numericFields.count(colNames[static_cast<size_t>(c)]) > 0;
+                    if (colIsNum[static_cast<size_t>(c)])
+                        doublePtrs[static_cast<size_t>(c)] = static_cast<const arrow::DoubleArray*>(colOwners[static_cast<size_t>(c)].get());
+                    else
+                        stringPtrs[static_cast<size_t>(c)] = static_cast<const arrow::StringArray*>(colOwners[static_cast<size_t>(c)].get());
+                }
+
                 for (int64_t ri = 0; ri < n; ++ri) {
                     auto& row = pool[static_cast<size_t>(ri)];
                     if (!row.isObject()) row = J::createObject();
-                    for (int c = 0; c < nCols; ++c) {
-                        auto arr = batch->column(c);
-                        const char* fn = schema->field(c)->name().c_str();
-                        if (arr->IsNull(ri)) { row.setNull(fn); continue; }
-                        if (numericFields.count(fn)) {
-                            row.setDouble(fn, std::static_pointer_cast<arrow::DoubleArray>(arr)->Value(ri));
+                    for (size_t c = 0; c < static_cast<size_t>(nCols); ++c) {
+                        if (colIsNum[c]) {
+                            if (doublePtrs[c]->IsNull(ri)) row.setNull(colNames[c].c_str());
+                            else row.setDouble(colNames[c].c_str(), doublePtrs[c]->Value(ri));
                         } else {
-                            row.setString(fn, std::static_pointer_cast<arrow::StringArray>(arr)->GetString(ri));
+                            if (stringPtrs[c]->IsNull(ri)) row.setNull(colNames[c].c_str());
+                            else row.setString(colNames[c].c_str(), stringPtrs[c]->GetString(ri));
                         }
                     }
                 }
