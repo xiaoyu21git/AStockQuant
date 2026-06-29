@@ -291,10 +291,11 @@ void StrategyEngine::setContextHistoricalView(const void* view)
 
 void StrategyEngine::setLiveMarketView(const void* view)
 {
+    auto* v = static_cast<const factor::compute::IMarketDataView*>(view);
     if (auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get())) {
-        rfs->setLiveMarketView(static_cast<const factor::compute::IMarketDataView*>(view));
-    } else {
-        // 非因子策略：注入历史行情视图，否则 NonFactorStrategy::evaluate() 拿不到数据
+        rfs->setLiveMarketView(v);
+    }
+    if (!m_hasFactorStrategies) {
         setContextHistoricalView(view);
     }
 }
@@ -589,10 +590,11 @@ void StrategyEngine::drainQueue()
                     engineReq.symbol   = foundation::market::AStockSymbol::fromCode(buf).fullSymbol();
                     engineReq.price    = 0.0;
                     engineReq.quantity = static_cast<int64_t>(req.quantity());
-                    engineReq.side     = (req.side() == strategy::RuntimeOrderSide::Buy)
-                                         ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
+                    engineReq.side      = (req.side() == strategy::RuntimeOrderSide::Buy)
+                                          ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
+                    engineReq.orderType = engine::OrderRequest::Market;
                     auto riskResult = RiskManager::instance()
-                        .checkAutoSignal(m_accountId, engineReq, 0.5);
+                        .checkAutoSignal(m_accountId, engineReq, req.score());
                     if (!riskResult.approved()) {
                         INTERNAL_WARN_STREAM << "[StrategyEngine] risk rejected: "
                                              << riskResult.description();

@@ -3,11 +3,16 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <map>
+#include <set>
 
 namespace domain::strategy {
 
 namespace {
 DefaultOrderBuilder kDefaultOrderBuilder;
+
+using SigKey = std::pair<std::uint32_t, std::uint8_t>;
+std::map<StrategyInstanceId, std::set<SigKey>> s_lastKeys;
 }
 
 StrategyService::StrategyService(IRuntimeFactorService& factorService,
@@ -409,6 +414,17 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
             evaluateEntrySignals(entry, generatedSignalCount);
         if (!evaluateResult.isOk()) {
             return evaluateResult;
+        }
+
+        if (!signalBuffer_.empty()) {
+            std::set<SigKey> cur;
+            for (const auto& s : signalBuffer_)
+                cur.emplace(s.instrumentId().value, static_cast<std::uint8_t>(s.side()));
+            if (cur == s_lastKeys[entry.strategy->instanceId()]) {
+                signalBuffer_.clear();
+                continue;
+            }
+            s_lastKeys[entry.strategy->instanceId()] = std::move(cur);
         }
 
         for (const StrategySignal& signal : signalBuffer_) {

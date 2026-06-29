@@ -247,15 +247,18 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
         return StrategyServiceFlowResult(StrategyServiceFlowCode::OrderBuildFailed);
     }
 
-    // 下单数量始终受运行时上下文约束；仅在未配置上限时使用默认值。
-    const std::uint32_t quantity = context.maxOrderQuantity() > 0
-        ? context.maxOrderQuantity()
-        : kDefaultOrderQuantity;
+    const double weight = std::fabs(signal.targetWeight());
+    const std::uint32_t base = context.maxOrderQuantity() > 0
+        ? context.maxOrderQuantity() : kDefaultOrderQuantity;
+    std::uint32_t quantity = static_cast<std::uint32_t>(weight * base);
+    if (quantity < 100) quantity = 100;
+    quantity = quantity / 100 * 100;
     outputOrder = OrderRequest(
         signal.strategyInstanceId(),
         signal.instrumentId(),
         signal.side(),
-        quantity);
+        quantity,
+        signal.score());
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 

@@ -60,7 +60,7 @@ public:
 
 
     void on_init() override {
-
+        try {
         auto* bus = get_engine_event_bus();
         if (!bus || !bus->is_running()) return;
         auto* arr = get_cash(nullptr);
@@ -91,10 +91,16 @@ public:
             }
         }
         if (posArr) posArr->release();
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_init exception: " << e.what();
+        } catch (...) {
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_init unknown exception";
+        }
     }
 
     void on_tick(Tick* tick) override {
         if (!tick) return;
+        try {
         auto& e = GmSessionEngine::instance();
         GmTickData td;
         td.symbol     = e.fromGmSymbol(tick->symbol);
@@ -125,6 +131,11 @@ public:
             evt.set("volume", td.lastVolume > 0 ? td.lastVolume : td.cumVolume);
             evt.set("tradingDay", td.tradingDay);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        }
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_tick exception: " << e.what();
+        } catch (...) {
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_tick unknown exception";
         }
     }
 
@@ -276,7 +287,13 @@ bool GmSessionEngine::initialize(const std::string& token, const std::string& ac
     m_impl = std::make_unique<Impl>();
     m_strategy.reset(new SessionStrategy(token, accountId, m_impl.get()));
     m_impl->strategyThread = std::thread([this]() {
-        static_cast<SessionStrategy*>(m_strategy.get())->run();
+        try {
+            static_cast<SessionStrategy*>(m_strategy.get())->run();
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[GmSession] run() exception: " << e.what();
+        } catch (...) {
+            INTERNAL_ERROR_STREAM << "[GmSession] run() unknown exception";
+        }
     });
     m_impl->initialized.store(true);
     return true;

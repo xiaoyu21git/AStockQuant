@@ -77,12 +77,6 @@ ValidationResult TradeExecutionEngine::validateOrder(const TradeOrder& order) {
         return ValidationResult::reject(OrderValidationCode::MissingRequiredFields, "strategyId is empty");
     }
 
-    bool priceOptional = (order.actionKind() == ActionKind::CashRepay
-                       || order.actionKind() == ActionKind::ShareReturn);
-    if (!priceOptional && order.price() <= 0.0) {
-        return ValidationResult::reject(OrderValidationCode::InvalidPrice, "invalid price");
-    }
-
     bool quantityOptional = (order.actionKind() == ActionKind::CashRepay);
     if (!quantityOptional && order.quantity() <= 0) {
         return ValidationResult::reject(OrderValidationCode::InvalidQuantity, "invalid quantity");
@@ -250,7 +244,9 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     engineReq.quantity   = order.quantity();
     engineReq.side       = order.side() == strategy::OrderDirection::Buy
                            ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
-    engineReq.orderType  = engine::OrderRequest::Limit;
+    engineReq.orderType  = riskContext.isAutoStrategySignal()
+                           ? engine::OrderRequest::Market
+                           : engine::OrderRequest::Limit;
 
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
 
@@ -454,6 +450,7 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         order.setQuantity(static_cast<std::int64_t>(req.quantity()));
         order.setStrategyId(std::to_string(req.strategyInstanceId()));
         order.setPrice(0.0);
+        order.setSignalStrength(req.score());
 
         if (m_onOrderGenerated) m_onOrderGenerated(order);
 
@@ -463,7 +460,12 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
         risk.setPrice(order.price());
         risk.setQuantity(order.quantity());
+        risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
+        risk.setStrategyBound(true);
+        risk.setStrategyActive(true);
         risk.setAutoStrategySignal(true);
+        risk.setPositionSnapshotReady(true);
+        risk.setTradingSessionOpen(true);
 
         auto result = submitOrder(order, risk);
         if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
