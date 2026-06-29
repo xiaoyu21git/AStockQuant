@@ -7,8 +7,8 @@ import "../../utils/TradingConstants.js" as Const
 Rectangle {
     id: root
 
-    property string symbol: ""
     property var marketDataService: null
+    property string symbol: ""
     property var displayPositions: []
     property var signals: []
 
@@ -30,6 +30,8 @@ Rectangle {
         if (s.indexOf("8") === 0 || s.indexOf("4") === 0) return s + ".BJ"
         return s
     }
+
+    Component.onCompleted: { if (root.symbol && root.marketDataService) loadKline() }
 
     function loadKline() {
         var sym = normalizeSymbol(root.symbol)
@@ -56,7 +58,12 @@ Rectangle {
         return result
     }
 
-    onSymbolChanged: { if (root.symbol) loadKline() }
+    onSymbolChanged: {
+        if (root.symbol) {
+            klineCache = {}  // 清缓存强制重新加载, 避免 updateTodayBar 的 1 根 bar 被缓存
+            loadKline()
+        }
+    }
 
     Connections {
         target: root.marketDataService

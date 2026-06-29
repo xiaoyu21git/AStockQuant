@@ -33,6 +33,13 @@ Trading.TradingFormPanel {
     toastError: toastErr
     availableCapital: availableCash
 
+    // 标的变更 → C++ → C++推送数据到所有控件
+    onModeContextChanged: function(mode, symbol) {
+        if (symbol && marketService && marketService.ensureWatchSymbol) {
+            marketService.ensureWatchSymbol(symbol.toUpperCase().trim())
+        }
+    }
+
     onExecuteTrade: function(mode, action, payload) {
         var sym = String(payload && payload.code || "").trim().toUpperCase()
         if (!sym) { showToast("请输入有效代码", true); return }

@@ -130,13 +130,13 @@ Rectangle {
                 cursorShape: root.dragActive ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                 preventStealing: true
 
-                onPressed: {
+                onPressed: function(mouse) {
                     root.dragStartPos = Qt.point(mouse.x, mouse.y)
                     root.dragActive = false
                     mouse.accepted = true
                 }
 
-                onPositionChanged: {
+                onPositionChanged: function(mouse) {
                     if (!root.dragActive) {
                         var dx = mouse.x - root.dragStartPos.x
                         var dy = mouse.y - root.dragStartPos.y
@@ -152,14 +152,14 @@ Rectangle {
                     }
                 }
 
-                onReleased: {
+                onReleased: function(mouse) {
                     if (root.dragActive) {
                         root.dragActive = false
                         root.dragEnded(root.instanceId)
                     }
                 }
 
-                onCanceled: {
+                onCanceled: function(mouse) {
                     if (root.dragActive) {
                         root.dragActive = false
                         root.dragEnded(root.instanceId)
@@ -207,8 +207,9 @@ Rectangle {
         propagateComposedEvents: true
         onEntered: root.hovered = true
         onExited: root.hovered = false
-        onClicked: mouse.accepted = false
-        onPressed: mouse.accepted = false
+        onClicked: function(mouse) { mouse.accepted = false }
+        onPressed: function(mouse) { mouse.accepted = false }
+        onReleased: function(mouse) { mouse.accepted = false }
     }
 
     // ============ 合并指示 ============
@@ -266,11 +267,11 @@ Rectangle {
             cursorShape: Qt.SplitHCursor
             property int origCS: 0
             property real pxPerUnit: 0
-            onPressed: {
+            onPressed: function(mouse) {
                 origCS = root.gridColSpan
                 pxPerUnit = Math.max(30, root.width / 12)
             }
-            onPositionChanged: {
+            onPositionChanged: function(mouse) {
                 var d = Math.round(mouse.x / pxPerUnit)
                 var nv = Math.max(1, Math.min(12, origCS + d))
                 if (nv !== root.gridColSpan)
@@ -295,11 +296,11 @@ Rectangle {
             cursorShape: Qt.SplitVCursor
             property int origRS: 0
             property real pxPerUnit: 0
-            onPressed: {
+            onPressed: function(mouse) {
                 origRS = root.gridRowSpan
                 pxPerUnit = Math.max(40, root.height / 8)
             }
-            onPositionChanged: {
+            onPositionChanged: function(mouse) {
                 var d = Math.round(mouse.y / pxPerUnit)
                 var nv = Math.max(1, origRS + d)
                 if (nv !== root.gridRowSpan)
@@ -337,12 +338,12 @@ Rectangle {
             property int origRS: 0
             property real pxPerUnitX: 0
             property real pxPerUnitY: 0
-            onPressed: {
+            onPressed: function(mouse) {
                 origCS = root.gridColSpan; origRS = root.gridRowSpan
                 pxPerUnitX = Math.max(30, root.width / 12)
                 pxPerUnitY = Math.max(40, root.height / 8)
             }
-            onPositionChanged: {
+            onPositionChanged: function(mouse) {
                 var dc = Math.round(mouse.x / pxPerUnitX)
                 var dr = Math.round(mouse.y / pxPerUnitY)
                 var nc = Math.max(1, Math.min(12, origCS + dc))

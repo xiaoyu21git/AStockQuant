@@ -5,71 +5,94 @@ QtObject {
     id: root
 
     property var widgetTypes: ({
+        // ====================================================================
+        // 保留 (不变)
+        // ====================================================================
         "order_form": {
             label: "下单控件", icon: "📝",
-            description: "完整下单面板 (TradingFormPanel)",
+            description: "完整下单面板 (股票/期货/融资/融券/期权)",
             defaultColSpan: 6, defaultRowSpan: 4,
             source: "../../components/DynamicWorkspace/widgets/OrderFormWidget.qml"
         },
         "kline_chart": {
             label: "K线图表", icon: "📈",
-            description: "日/周/月K线 + 信号标注",
+            description: "日/周/月K线 + 信号标注 + 十字光标",
             defaultColSpan: 8, defaultRowSpan: 3,
             source: "../../components/DynamicWorkspace/widgets/KLineChartWidget.qml"
         },
+
+        // ====================================================================
+        // 全新重做 (支持三级密度模式 + 响应式列裁剪)
+        // ====================================================================
         "depth_panel": {
             label: "五档盘口", icon: "📊",
-            description: "实时五档买卖盘 + 逐笔成交",
+            description: "实时买卖盘口 + L2逐笔成交 + 汇总统计 (3级密度)",
             defaultColSpan: 4, defaultRowSpan: 3,
             source: "../../components/DynamicWorkspace/widgets/DepthPanelWidget.qml"
         },
         "account_card": {
             label: "账户概览", icon: "💰",
-            description: "总资产/市值/可用/盈亏",
+            description: "总资产/市值/可用/盈亏 + 自适应卡片网格",
             defaultColSpan: 6, defaultRowSpan: 1,
             source: "../../components/DynamicWorkspace/widgets/AccountCardWidget.qml"
         },
-        "strategy_status": {
-            label: "策略状态", icon: "🎯",
-            description: "策略运行规则评估面板",
+        "position_list": {
+            label: "持仓列表", icon: "📋",
+            description: "分组持仓 (股票/融资/期货/期权) + 排序 + 汇总条",
+            defaultColSpan: 8, defaultRowSpan: 2,
+            source: "../../components/DynamicWorkspace/widgets/PositionListWidget.qml"
+        },
+        "order_list": {
+            label: "委托成交", icon: "📜",
+            description: "委托/成交双视图切换 + 状态颜色标识 + 列自适应",
             defaultColSpan: 6, defaultRowSpan: 2,
-            source: "../../components/DynamicWorkspace/widgets/StrategyStatusWidget.qml"
+            source: "../../components/DynamicWorkspace/widgets/OrderListWidget.qml"
+        },
+        "strategy_monitor": {
+            label: "策略监控", icon: "🎯",
+            description: "策略运行状态 + 信号计数 + 规则命中历史",
+            defaultColSpan: 6, defaultRowSpan: 2,
+            source: "../../components/DynamicWorkspace/widgets/StrategyMonitorWidget.qml"
+        },
+        "execution_log": {
+            label: "执行日志", icon: "📝",
+            description: "订单全链路日志 (提交→回报→成交→拒绝)",
+            defaultColSpan: 6, defaultRowSpan: 2,
+            source: "../../components/DynamicWorkspace/widgets/ExecutionLogWidget.qml"
         },
         "chart_workspace": {
             label: "图表工作区", icon: "📉",
-            description: "K线 + 盘口 + 仓位联动",
+            description: "K线 + 盘口联动 + 持仓信息条 (宽度自适应)",
             defaultColSpan: 12, defaultRowSpan: 3,
             source: "../../components/DynamicWorkspace/widgets/ChartWorkspaceWidget.qml"
         },
-        "metric_card": {
-            label: "指标卡片", icon: "📊",
-            description: "自定义数值指标",
-            defaultColSpan: 4, defaultRowSpan: 1,
-            source: "../../components/DynamicWorkspace/widgets/MetricCardWidget.qml"
-        },
+
+        // ====================================================================
+        // 兼容别名 (旧持久化数据迁移)
+        // ====================================================================
         "positions": {
-            label: "持仓概览", icon: "💰",
-            description: "实时持仓列表 (代码/数量/市值/盈亏)",
+            label: "持仓列表 (旧)", icon: "📋",
+            description: "已迁移到 position_list",
             defaultColSpan: 8, defaultRowSpan: 2,
-            source: "../../components/DynamicWorkspace/widgets/PositionsWidget.qml"
-        },
-        "trading_summary": {
-            label: "交易概览", icon: "📊",
-            description: "账户统计 + 订单汇总 + 风险指标",
-            defaultColSpan: 6, defaultRowSpan: 2,
-            source: "../../components/DynamicWorkspace/widgets/TradingSummaryWidget.qml"
+            source: "../../components/DynamicWorkspace/widgets/PositionListWidget.qml"
         },
         "trade_list": {
-            label: "交易列表", icon: "📋",
-            description: "实时委托/成交列表",
+            label: "交易列表 (旧)", icon: "📜",
+            description: "已迁移到 order_list",
             defaultColSpan: 6, defaultRowSpan: 2,
-            source: "../../components/DynamicWorkspace/widgets/TradeListWidget.qml"
+            source: "../../components/DynamicWorkspace/widgets/OrderListWidget.qml"
         },
-        "text_label": {
-            label: "文本标签", icon: "📝",
-            description: "自定义文本备注",
-            defaultColSpan: 6, defaultRowSpan: 1,
-            source: "../../components/DynamicWorkspace/widgets/TextLabelWidget.qml"
+        "trading_summary": {
+            label: "交易概览 (旧)", icon: "📊",
+            description: "已合并到 account_card",
+            defaultColSpan: 6, defaultRowSpan: 2,
+            source: "../../components/DynamicWorkspace/widgets/AccountCardWidget.qml"
+        },
+        "strategy_status": {
+            label: "策略状态 (旧)", icon: "🎯",
+            description: "已迁移到 strategy_monitor",
+            defaultColSpan: 6, defaultRowSpan: 2,
+            source: "../../components/DynamicWorkspace/widgets/StrategyMonitorWidget.qml"
         }
     })
 
@@ -78,15 +101,24 @@ QtObject {
     }
 
     function getWidgetTypes() {
+        // 仅返回主类型 (排除兼容别名)
+        var mainTypes = [
+            "order_form", "kline_chart",
+            "depth_panel", "account_card", "position_list", "order_list",
+            "strategy_monitor", "execution_log", "chart_workspace"
+        ]
         var result = []
-        for (var key in root.widgetTypes) {
+        for (var i = 0; i < mainTypes.length; i++) {
+            var key = mainTypes[i]
             var m = root.widgetTypes[key]
-            result.push({
-                typeName: key, label: m.label, icon: m.icon,
-                description: m.description,
-                defaultColSpan: m.defaultColSpan,
-                defaultRowSpan: m.defaultRowSpan, source: m.source
-            })
+            if (m) {
+                result.push({
+                    typeName: key, label: m.label, icon: m.icon,
+                    description: m.description,
+                    defaultColSpan: m.defaultColSpan,
+                    defaultRowSpan: m.defaultRowSpan, source: m.source
+                })
+            }
         }
         return result
     }

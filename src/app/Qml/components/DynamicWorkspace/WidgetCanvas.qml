@@ -29,6 +29,7 @@ Item {
     property string mergeSide: ""
 
     property real contentHeight: 0
+    property bool _relayoutPending: false
 
     function relayout() {
         if (!root.model || root.model.count === 0) { root.contentHeight = 0; return }
@@ -52,14 +53,16 @@ Item {
         }
         if (cur && cur.widgets.length > 0) rows.push(cur)
 
-        // ---- 高度: 自然 vs 视口, 取大者 ----
+        // ---- 高度: 以 rowSpan 为绝对高度单位, 不再强制填满视口 ----
+        //      naturalH = minRowHeight * totalRS + gaps
+        //      控件高度 = naturalH * (row.maxRS / totalRS) ≈ minRowHeight * row.maxRS
+        //      拖拽 resize → rowSpan 变化 → 高度立即可见变化
         var totalRS = 0
         for (var ri = 0; ri < rows.length; ri++) totalRS += rows[ri].maxRS
         var gapH = Math.max(0, rows.length - 1) * root.gap
         var naturalH = root.minRowHeight * totalRS + gapH
-        var usedH = Math.max(h, naturalH)
 
-        var availH = usedH - gapH
+        var availH = naturalH - gapH
         var y = 0
 
         for (ri = 0; ri < rows.length; ri++) {
@@ -167,6 +170,7 @@ Item {
         contentHeight: root.contentHeight
         clip: true
         boundsBehavior: Flickable.StopAtBounds
+        // 始终显示滚动条, 方便发现可滚动区域
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
         Item {
@@ -191,8 +195,24 @@ Item {
                     onDragEnded: root.onFrameDragEnded(instanceId)
                     onResizeRequest: root.widgetResizeRequest(instanceId, colSpan, rowSpan)
                 }
+                // delegate 创建完成后触发重排 (防抖: 多个 delegate 合批为一次)
+                onItemAdded: {
+                    root.markModelChanged()
+                    if (!root._relayoutPending) {
+                        root._relayoutPending = true
+                        Qt.callLater(function() {
+                            root._relayoutPending = false
+                            root.relayout()
+                        })
+                    }
+                }
             }
         }
+    }
+
+    // 首次加载完成后滚回顶部
+    function scrollToTop() {
+        flick.contentY = 0
     }
 
     function clearState() {
@@ -201,7 +221,27 @@ Item {
         root.mergeTargetId = ""; root.mergeSide = ""
     }
 
-    onWidthChanged: Qt.callLater(root.relayout)
-    onHeightChanged: Qt.callLater(root.relayout)
-    Component.onCompleted: Qt.callLater(root.relayout)
+    // 仅在模型变更或真实 resize 时重排, 切页导致的 0→size 变化跳过
+    property int _modelRevision: 0
+    property real _lastW: 0
+    property real _lastH: 0
+
+    function markModelChanged() {
+        _modelRevision++
+    }
+
+    function relayoutIfNeeded() {
+        // 尺寸无效 → 跳过
+        if (root.width <= 0 || root.height <= 0) return
+        // 尺寸未变且模型未变 → 跳过 (切页恢复场景)
+        if (root.width === _lastW && root.height === _lastH && _modelRevision === 0) return
+        _lastW = root.width
+        _lastH = root.height
+        _modelRevision = 0
+        root.relayout()
+    }
+
+    onWidthChanged: Qt.callLater(root.relayoutIfNeeded)
+    onHeightChanged: Qt.callLater(root.relayoutIfNeeded)
+    Component.onCompleted: Qt.callLater(root.relayoutIfNeeded)
 }

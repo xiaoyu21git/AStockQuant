@@ -19,6 +19,8 @@ Item {
     Component.onCompleted: {
         if (layoutSettings.savedLayout) {
             root.loadLayout(layoutSettings.savedLayout)
+        } else {
+            root.loadDefaultLayout()
         }
     }
 
@@ -37,7 +39,48 @@ Item {
 
     ListModel {
         id: workspaceModel
-        // { instanceId, typeName, title, colSpan, rowSpan, widgetConfig }
+    }
+
+    // ============ 默认交易布局 ============
+    // rowSpan 1 ≈ 120px, 按实际交易场景排列
+    readonly property var defaultLayoutItems: [
+        // Row 1: 账户概览全宽 (120px)
+        { typeName: "account_card",     colSpan: 12, rowSpan: 1 },
+        // Row 2: 左K线 + 右下单 (480px)
+        { typeName: "kline_chart",      colSpan: 8, rowSpan: 4 },
+        { typeName: "order_form",       colSpan: 4, rowSpan: 4 },
+        // Row 3: 五档盘口全宽 (360px)
+        { typeName: "depth_panel",      colSpan: 12, rowSpan: 3 },
+        // Row 4: 策略监控 + 执行日志 (240px)
+        { typeName: "strategy_monitor", colSpan: 6, rowSpan: 2 },
+        { typeName: "execution_log",    colSpan: 6, rowSpan: 2 },
+        // Row 5: 持仓列表 + 委托列表 (240px)
+        { typeName: "position_list",    colSpan: 6, rowSpan: 2 },
+        { typeName: "order_list",       colSpan: 6, rowSpan: 2 }
+    ]
+
+    function loadDefaultLayout() {
+        workspaceModel.clear()
+        for (var i = 0; i < defaultLayoutItems.length; i++) {
+            var item = defaultLayoutItems[i]
+            var meta = widgetRegistry.getWidgetMeta(item.typeName)
+            if (!meta) continue
+            workspaceModel.append({
+                instanceId: generateInstanceId(),
+                typeName: item.typeName,
+                title: meta.label,
+                colSpan: item.colSpan,
+                rowSpan: item.rowSpan,
+                widgetConfig: ({})
+            })
+        }
+        Qt.callLater(function() {
+            widgetCanvas.markModelChanged()
+            widgetCanvas.relayout()
+            widgetCanvas.scrollToTop()
+        })
+        root.schedulePersist()
+        console.log("DynamicWorkspace: default layout loaded, items:", workspaceModel.count)
     }
 
     // ============ 布局 ============
@@ -65,12 +108,19 @@ Item {
                     anchors.rightMargin: 16
                     spacing: 8
 
-                    // 标题
                     Text {
                         text: "动态工作区"
                         color: root.textPrimary
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
+                    }
+
+                    // 自动保存状态指示
+                    Text {
+                        text: statusText
+                        color: root.textTertiary
+                        font.pixelSize: 11
+                        visible: statusText.length > 0
                     }
 
                     Item { Layout.fillWidth: true }
@@ -83,28 +133,12 @@ Item {
                         onClicked: widgetPalette.open()
                     }
 
-                    // 保存布局
+                    // 重置为默认布局
                     AppComponents.ButtonSecondary {
-                        buttonText: "保存布局"
-                        implicitWidth: 90
+                        buttonText: "默认布局"
+                        implicitWidth: 80
                         implicitHeight: 34
-                        onClicked: root.saveLayout()
-                    }
-
-                    // 加载布局
-                    AppComponents.ButtonSecondary {
-                        buttonText: "加载布局"
-                        implicitWidth: 90
-                        implicitHeight: 34
-                        onClicked: root.loadLayout(root.lastSavedLayout)
-                    }
-
-                    // 重置
-                    AppComponents.ButtonSecondary {
-                        buttonText: "重置"
-                        implicitWidth: 70
-                        implicitHeight: 34
-                        onClicked: root.resetLayout()
+                        onClicked: root.loadDefaultLayout()
                     }
                 }
             }
@@ -119,7 +153,6 @@ Item {
                     root.removeWidget(instanceId)
                 }
                 onWidgetConfigRequest: function(instanceId) {
-                    // Phase 2: 控件配置
                     console.log("DynamicWorkspace: config requested for", instanceId)
                 }
                 onWidgetReorderRequest: function(fromIndex, toIndex) {
@@ -145,17 +178,26 @@ Item {
         }
     }
 
+    // ============ 自动保存状态 ============
+    property string statusText: ""
+    Timer {
+        id: statusClearTimer
+        interval: 2000
+        repeat: false
+        onTriggered: statusText = ""
+    }
+
     // ============ 方法 ============
 
-    property string lastSavedLayout: ""
-
-    // 防抖持久化: 每次变更后 500ms 自动写入磁盘
+    // 防抖持久化: 每次变更后 800ms 自动写入磁盘
     Timer {
         id: persistTimer
-        interval: 500
+        interval: 800
         repeat: false
         onTriggered: {
             layoutSettings.savedLayout = root.saveLayout()
+            statusText = "✓ 已自动保存"
+            statusClearTimer.restart()
         }
     }
 
@@ -181,6 +223,7 @@ Item {
             rowSpan: meta.defaultRowSpan,
             widgetConfig: ({})
         })
+        widgetCanvas.markModelChanged()
         Qt.callLater(widgetCanvas.relayout)
         root.schedulePersist()
     }
@@ -192,6 +235,7 @@ Item {
                 break
             }
         }
+        widgetCanvas.markModelChanged()
         Qt.callLater(widgetCanvas.relayout)
         root.schedulePersist()
     }
@@ -204,10 +248,8 @@ Item {
         var toId = workspaceModel.get(toIndex).instanceId
 
         if (side === "top" || side === "bottom") {
-            // 上下: 插入为新行, 保持 colSpan=12
             var insertAt = side === "top" ? toIndex : toIndex + 1
             workspaceModel.move(fromIndex, insertAt > fromIndex ? insertAt - 1 : insertAt, 1)
-            // 确保全宽
             for (var i = 0; i < workspaceModel.count; i++) {
                 if (workspaceModel.get(i).instanceId === fromId) {
                     workspaceModel.setProperty(i, "colSpan", 12)
@@ -215,7 +257,6 @@ Item {
                 }
             }
         } else {
-            // 左右: 插入同行, 平分 colSpan
             insertAt = side === "left" ? toIndex : toIndex + 1
             workspaceModel.move(fromIndex, insertAt > fromIndex ? insertAt - 1 : insertAt, 1)
 
@@ -231,6 +272,7 @@ Item {
                 workspaceModel.setProperty(idxB, "colSpan", 12 - half)
             }
         }
+        widgetCanvas.markModelChanged()
         Qt.callLater(widgetCanvas.relayout)
         root.schedulePersist()
     }
@@ -242,6 +284,7 @@ Item {
             return
         }
         workspaceModel.move(fromIndex, toIndex, 1)
+        widgetCanvas.markModelChanged()
         Qt.callLater(widgetCanvas.relayout)
         root.schedulePersist()
     }
@@ -254,6 +297,7 @@ Item {
                 if (workspaceModel.get(i).colSpan !== cs || workspaceModel.get(i).rowSpan !== rs) {
                     workspaceModel.setProperty(i, "colSpan", cs)
                     workspaceModel.setProperty(i, "rowSpan", rs)
+                    widgetCanvas.markModelChanged()
                     Qt.callLater(widgetCanvas.relayout)
                 }
                 break
@@ -262,11 +306,14 @@ Item {
         root.schedulePersist()
     }
 
+    // ============ 持久化核心 ============
+    readonly property int layoutVersion: 2
+
     function saveLayout() {
-        var layout = []
+        var items = []
         for (var i = 0; i < workspaceModel.count; i++) {
             var item = workspaceModel.get(i)
-            layout.push({
+            items.push({
                 typeName: item.typeName,
                 title: item.title,
                 colSpan: item.colSpan,
@@ -274,71 +321,53 @@ Item {
                 widgetConfig: item.widgetConfig
             })
         }
-        var json = JSON.stringify(layout, null, 2)
-        lastSavedLayout = json
-        console.log("DynamicWorkspace: layout saved, items:", layout.length)
-        return json
+        var wrapper = { version: layoutVersion, items: items }
+        return JSON.stringify(wrapper)
     }
 
     function loadLayout(json) {
-        // 1. 异常处理
-        if (!json || typeof json !== "string") {
-            console.warn("DynamicWorkspace: invalid layout input")
-            return false
-        }
+        if (!json || typeof json !== "string") return false
         var data
-        try {
-            data = JSON.parse(json)
-        } catch (e) {
-            console.warn("DynamicWorkspace: invalid JSON layout", e)
+        try { data = JSON.parse(json) } catch (e) { return false }
+
+        var layout
+        if (data && typeof data.version === "number") {
+            layout = data.items || []
+        } else if (Array.isArray(data)) {
+            layout = data
+        } else {
             return false
         }
 
-        if (!Array.isArray(data)) {
-            console.warn("DynamicWorkspace: layout must be an array")
-            return false
-        }
-        var layout = data
-
-        // 2. 清空
         workspaceModel.clear()
-
-        // 3. 逐条校验并恢复
         var restored = 0
         for (var i = 0; i < layout.length; i++) {
             var item = layout[i]
-            if (!item.typeName) {
-                console.warn("DynamicWorkspace: skipping layout item without typeName", JSON.stringify(item))
-                continue
-            }
+            if (!item.typeName) continue
             var meta = widgetRegistry.getWidgetMeta(item.typeName)
-            if (!meta) {
-                console.warn("DynamicWorkspace: unknown widget type", item.typeName)
-                continue
-            }
+            if (!meta) continue
+
+            var cs = (typeof item.colSpan === "number" && item.colSpan > 0)
+                ? Math.max(1, Math.min(12, item.colSpan)) : meta.defaultColSpan
+            var rs = (typeof item.rowSpan === "number" && item.rowSpan > 0)
+                ? Math.max(1, item.rowSpan) : meta.defaultRowSpan
+
             workspaceModel.append({
                 instanceId: generateInstanceId(),
                 typeName: item.typeName,
                 title: item.title || meta.label,
-                colSpan: (typeof item.colSpan === "number" && item.colSpan > 0) ? item.colSpan : meta.defaultColSpan,
-                rowSpan: (typeof item.rowSpan === "number" && item.rowSpan > 0) ? item.rowSpan : meta.defaultRowSpan,
+                colSpan: cs,
+                rowSpan: rs,
                 widgetConfig: item.widgetConfig || ({})
             })
             restored++
         }
-        console.log("DynamicWorkspace: layout loaded, items:", restored)
-        Qt.callLater(widgetCanvas.relayout)
+        Qt.callLater(function() {
+            widgetCanvas.markModelChanged()
+            widgetCanvas.relayout()
+            widgetCanvas.scrollToTop()
+        })
         root.schedulePersist()
-        return true
-    }
-
-    function resetLayout() {
-        if (workspaceModel.count > 0) {
-            lastSavedLayout = saveLayout()
-        }
-        workspaceModel.clear()
-        widgetCanvas.clearState()
-        Qt.callLater(widgetCanvas.relayout)
-        root.schedulePersist()
+        return restored > 0
     }
 }

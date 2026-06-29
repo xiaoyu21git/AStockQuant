@@ -271,17 +271,55 @@ Rectangle {
                         var range = viewportPriceRange()
                         var bw = Math.max(1, cw * 0.7)
 
-                        // ── 网格线 ──
-                        var gridSteps = 5
-                        ctx.strokeStyle = "#1a2a3a"
-                        ctx.lineWidth = 0.5
-                        for (var g = 1; g < gridSteps; g++) {
-                            var gy = h * g / gridSteps
+                        // ── 主图区域高度 ──
+                        var chartAreaH = h * root.chartRatio
+
+                        // ── 价格横线网格 (基于价格区间, 仅主图区域) ──
+                        var priceSpan = range.max - range.min
+                        var gridPriceStep = priceSpan > 50 ? (priceSpan > 200 ? 10 : 5)
+                                            : priceSpan > 10 ? 1 : 0.5
+                        // 对网格步长取整
+                        if (gridPriceStep >= 10) gridPriceStep = Math.ceil(gridPriceStep / 10) * 10
+                        else if (gridPriceStep >= 1) gridPriceStep = Math.ceil(gridPriceStep)
+                        else if (gridPriceStep >= 0.1) gridPriceStep = Math.ceil(gridPriceStep * 10) / 10
+
+                        var gridPrice = Math.floor(range.min / gridPriceStep) * gridPriceStep
+                        for (var g = 0; g < 20; g++) {
+                            var gp = gridPrice + g * gridPriceStep
+                            if (gp > range.max) break
+                            var gy2 = priceToY(gp, range, chartAreaH)
+                            if (gy2 < 0 || gy2 > chartAreaH) continue
+                            var isMajor = (gp % (gridPriceStep * 5) < 0.001)
+                            ctx.strokeStyle = isMajor ? "#253850" : "#182536"
+                            ctx.lineWidth = isMajor ? 0.8 : 0.4
                             ctx.beginPath()
-                            ctx.moveTo(0, gy)
-                            ctx.lineTo(w, gy)
+                            ctx.moveTo(0, gy2)
+                            ctx.lineTo(w, gy2)
                             ctx.stroke()
                         }
+
+                        // ── 网格价格标注 ──
+                        ctx.fillStyle = "#8899aa"
+                        ctx.font = "9px monospace"
+                        ctx.textAlign = "right"
+                        gridPrice = Math.floor(range.min / gridPriceStep) * gridPriceStep
+                        for (var gg = 0; gg < 20; gg++) {
+                            var gpr = gridPrice + gg * gridPriceStep
+                            if (gpr > range.max) break
+                            var gpy = priceToY(gpr, range, chartAreaH)
+                            if (gpy < 2 || gpy > chartAreaH - 12) continue
+                            if ((gpr % (gridPriceStep * 5) < 0.001) || gridPriceStep >= 5)
+                                ctx.fillText(gpr.toFixed(gridPriceStep >= 1 ? 0 : 2), w - 4, gpy - 3)
+                        }
+
+                        // ── K线/量能分隔线 ──
+                        ctx.strokeStyle = "#556677"
+                        ctx.lineWidth = 1.5
+                        ctx.setLineDash([])
+                        ctx.beginPath()
+                        ctx.moveTo(0, chartAreaH)
+                        ctx.lineTo(w, chartAreaH)
+                        ctx.stroke()
 
                         // ── MA 均线 ──
                         var allCandles = candles || []
@@ -294,7 +332,11 @@ Rectangle {
                         for (var maIdx = 0; maIdx < maData.length; maIdx++) {
                             var ma = maData[maIdx]
                             ctx.strokeStyle = maColors[maIdx]
-                            ctx.lineWidth = 1
+                            ctx.lineWidth = 1.5
+                            // MA5 实线, MA10 虚线, MA20 点线
+                            if (maIdx === 0) ctx.setLineDash([])
+                            else if (maIdx === 1) ctx.setLineDash([4, 3])
+                            else ctx.setLineDash([2, 4])
                             ctx.beginPath()
                             var firstPoint = true
                             for (var i = 0; i < vc.length; i++) {
@@ -303,12 +345,13 @@ Rectangle {
                                 var maVal = ma[globalIdx]
                                 if (isNaN(maVal)) continue
                                 var x = i * cw + cw / 2
-                                var y = priceToY(maVal, range, h)
+                                var y = priceToY(maVal, range, chartAreaH)
                                 if (firstPoint) { ctx.moveTo(x, y); firstPoint = false }
                                 else ctx.lineTo(x, y)
                             }
                             ctx.stroke()
                         }
+                        ctx.setLineDash([])
 
                         // ── 蜡烛图 ──
                         for (var ci = 0; ci < vc.length; ci++) {
@@ -322,10 +365,10 @@ Rectangle {
                             var borderColor = isUp ? "#dc2626" : "#059669"
 
                             var cx = ci * cw
-                            var openY = priceToY(open, range, h)
-                            var closeY = priceToY(close, range, h)
-                            var highY = priceToY(high, range, h)
-                            var lowY = priceToY(low, range, h)
+                            var openY = priceToY(open, range, chartAreaH)
+                            var closeY = priceToY(close, range, chartAreaH)
+                            var highY = priceToY(high, range, chartAreaH)
+                            var lowY = priceToY(low, range, chartAreaH)
 
                             // 影线
                             ctx.strokeStyle = borderColor
@@ -356,7 +399,7 @@ Rectangle {
                                 if (sigIdx < 0) continue
                                 var sigPrice = Number(sig.price || 0)
                                 if (sigPrice <= 0) continue
-                                var sigY = priceToY(sigPrice, range, h)
+                                var sigY = priceToY(sigPrice, range, chartAreaH)
                                 var sigX = sigIdx * cw + cw / 2
                                 var sigType = String(sig.type || "").toLowerCase()
                                 var qty = Number(sig.quantity || 0)
@@ -429,9 +472,9 @@ Rectangle {
                             ctx.setLineDash([4, 4])
                             ctx.beginPath()
                             ctx.moveTo(hx, 0)
-                            ctx.lineTo(hx, h)
+                            ctx.lineTo(hx, chartAreaH)
                             ctx.stroke()
-                            var hy = priceToY(hoverPrice, range, h)
+                            var hy = priceToY(hoverPrice, range, chartAreaH)
                             ctx.beginPath()
                             ctx.moveTo(0, hy)
                             ctx.lineTo(w, hy)
@@ -439,14 +482,6 @@ Rectangle {
                             ctx.setLineDash([])
                         }
 
-                        // ── 价格轴标注 ──
-                        ctx.fillStyle = Const.tradingLabelSecondary
-                        ctx.font = "10px monospace"
-                        ctx.textAlign = "right"
-                        for (var gy2 = 1; gy2 <= gridSteps; gy2++) {
-                            var price = range.max - (range.max - range.min) * gy2 / gridSteps
-                            ctx.fillText(price.toFixed(2), w - 4, h * gy2 / gridSteps + 3)
-                        }
                     }
                 }
 
@@ -527,6 +562,14 @@ Rectangle {
                         var bw = Math.max(1, cw * 0.7)
                         var maxVol = viewportVolumeMax()
                         if (maxVol <= 0) return
+
+                        // 量能区顶部边界线
+                        ctx.strokeStyle = "#334155"
+                        ctx.lineWidth = 1.5
+                        ctx.beginPath()
+                        ctx.moveTo(0, 0)
+                        ctx.lineTo(w, 0)
+                        ctx.stroke()
 
                         ctx.strokeStyle = "#1a2a3a"
                         ctx.lineWidth = 0.5

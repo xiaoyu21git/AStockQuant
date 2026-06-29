@@ -265,6 +265,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/FactorDataAdapter.js
         Qml/utils/OrderUtils.js
         Qml/utils/TradingConstants.js
+        Qml/utils/TradingWidgetBase.js
 
 
         Qml/utils/MarketEnvironmentProfile.js
@@ -286,14 +287,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/DynamicWorkspace/widgets/AccountCardWidget.qml
         Qml/components/DynamicWorkspace/widgets/ChartWorkspaceWidget.qml
         Qml/components/DynamicWorkspace/widgets/DepthPanelWidget.qml
+        Qml/components/DynamicWorkspace/widgets/ExecutionLogWidget.qml
         Qml/components/DynamicWorkspace/widgets/KLineChartWidget.qml
-        Qml/components/DynamicWorkspace/widgets/MetricCardWidget.qml
         Qml/components/DynamicWorkspace/widgets/OrderFormWidget.qml
-        Qml/components/DynamicWorkspace/widgets/StrategyStatusWidget.qml
-        Qml/components/DynamicWorkspace/widgets/TextLabelWidget.qml
-        Qml/components/DynamicWorkspace/widgets/TradeListWidget.qml
-        Qml/components/DynamicWorkspace/widgets/PositionsWidget.qml
-        Qml/components/DynamicWorkspace/widgets/TradingSummaryWidget.qml
+        Qml/components/DynamicWorkspace/widgets/OrderListWidget.qml
+        Qml/components/DynamicWorkspace/widgets/PositionListWidget.qml
+        Qml/components/DynamicWorkspace/widgets/StrategyMonitorWidget.qml
     SOURCES
        # Qml/resources/
     RESOURCES

@@ -1593,16 +1593,18 @@ Rectangle {
                                 leftPadding: compactInputHorizontalPadding
                                 rightPadding: compactInputHorizontalPadding
                                 property bool suppressTextChange: false
-                                text: root.stockDisplayName || root.stockCode
+                                text: root.stockDisplayName || root.stockCode || ""
                                 onTextChanged: {
                                     if (suppressTextChange) return
                                     var t = text.trim()
-                                    root.stockDisplayName = ""
+                                    suppressTextChange = true
+                                    root.stockDisplayName = t
                                     root.stockCode = t
                                     symbolSearch.search(t)
                                     Qt.callLater(function() {
                                         searchPopup.visible = symbolSearch.count > 0
                                     })
+                                    suppressTextChange = false
                                 }
                                 background: Rectangle {
                                     radius: compactInputRadius
@@ -2315,14 +2317,17 @@ Rectangle {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         padding: 2
         opacity: 0.92
+        property var _formRef: root
+        property var _fieldRef: stockCodeField
         background: Rectangle { radius: 6; color: Const.tradingSearchPopupBg; border.color: Const.tradingSearchPopupBorder; border.width: 1.5 }
 
         onVisibleChanged: {
             if (visible) {
-                var pt = stockCodeField.mapToItem(null, 0, stockCodeField.height)
+                var fld = _fieldRef
+                var pt = fld ? fld.mapToItem(null, 0, fld.height) : ({x:0, y:0})
                 x = pt.x
                 y = pt.y
-                width = Math.max(220, stockCodeField.width)
+                width = fld ? Math.max(220, fld.width) : 220
                 var rows = Math.min(symbolSearch.count, 3)
                 height = rows > 0 ? rows * 34 + 8 : 40
             }
@@ -2333,6 +2338,9 @@ Rectangle {
             anchors.fill: parent; anchors.margins: 2
             model: symbolSearch
             clip: true; spacing: 1
+            property var _formRef: root
+            property var _fieldRef: stockCodeField
+            property var _popupRef: searchPopup
             delegate: Rectangle {
                 id: row
                 width: searchList.width; height: 34
@@ -2354,12 +2362,22 @@ Rectangle {
                     anchors.fill: parent; hoverEnabled: true
                     onClicked: {
                         var it = row.item || {}
-                        root.stockCode = it.symbol || ""
-                        root.stockDisplayName = it.secName || ""
-                        stockCodeField.suppressTextChange = true
-                        stockCodeField.text = root.stockDisplayName
-                        stockCodeField.suppressTextChange = false
-                        searchPopup.visible = false
+                        var sym = it.symbol || ""
+                        var nm = it.secName || ""
+                        var lv = row.ListView.view
+                        var frm = lv._formRef
+                        var fld = lv._fieldRef
+                        var pop = lv._popupRef
+                        if (frm) {
+                            frm.stockCode = sym
+                            frm.stockDisplayName = nm
+                        }
+                        if (fld) {
+                            fld.suppressTextChange = true
+                            fld.text = nm
+                            fld.suppressTextChange = false
+                        }
+                        if (pop) pop.visible = false
                     }
                 }
             }
