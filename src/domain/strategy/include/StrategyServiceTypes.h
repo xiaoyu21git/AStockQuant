@@ -2,6 +2,7 @@
 
 #include "../../strategies/include/StrategyDefinitionTypes.h"
 #include "../../types/InstrumentId.h"
+#include "../../trading/TradingTypes.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -395,40 +396,10 @@ public:
     }
 };
 
-struct OrderRequest final {
-private:
-    StrategyInstanceId strategyInstanceId_{0};
-    InstrumentId instrumentId_{};
-    RuntimeOrderSide side_{RuntimeOrderSide::Buy};
-    std::uint32_t quantity_{0};
-    double score_{0.5};
-
-public:
-    OrderRequest() = default;
-    OrderRequest(StrategyInstanceId strategyInstanceId,
-                 InstrumentId instrumentId,
-                 RuntimeOrderSide side,
-                 std::uint32_t quantity,
-                 double score = 0.5)
-        : strategyInstanceId_(strategyInstanceId)
-        , instrumentId_(instrumentId)
-        , side_(side)
-        , quantity_(quantity)
-        , score_(score)
-    {
-    }
-
-    [[nodiscard]] StrategyInstanceId strategyInstanceId() const noexcept { return strategyInstanceId_; }
-    [[nodiscard]] const InstrumentId& instrumentId() const noexcept { return instrumentId_; }
-    [[nodiscard]] RuntimeOrderSide side() const noexcept { return side_; }
-    [[nodiscard]] std::uint32_t quantity() const noexcept { return quantity_; }
-    [[nodiscard]] double score() const noexcept { return score_; }
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return strategyInstanceId_ > 0 && instrumentId_.isValid() && quantity_ > 0;
-    }
-};
+// 统一定单类型 → domain::trading
+using OrderRequest = domain::trading::OrderRequest;
+using OrderSide    = domain::trading::OrderSide;
+using OrderType    = domain::trading::OrderType;
 
 struct StrategyExecutionStats final {
 private:

@@ -18,6 +18,7 @@
 #include "../../trading/TradingTypes.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
+#include "../../../engine/include/AccountEngine.h"
 #include "../../../engine/include/GmSessionEngine.h"
 
 #include "foundation/json/json_facade.h"
@@ -41,6 +42,16 @@ using namespace std::chrono_literals;
 namespace domain::strategy {
 
 namespace {
+
+/// @brief 生成客户端幂等订单ID (纳秒时间戳 + 原子计数器)
+std::string generateClOrdId() {
+    static std::atomic<uint64_t> s_counter{0};
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    uint64_t seq = s_counter.fetch_add(1, std::memory_order_relaxed);
+    std::ostringstream oss;
+    oss << std::hex << now << "_" << seq;
+    return oss.str();
+}
 
 /// @brief 非因子策略使用的空因子服务 — 所有操作均为 no-op
 class NoOpFactorService final : public IRuntimeFactorService {
@@ -581,27 +592,55 @@ void StrategyEngine::drainQueue()
             auto orders = step(mdp);
             if (orders.has_value() && m_orderListener
                 && !m_isBacktestMode.load(std::memory_order_acquire)) {
-                // 策略信号风控
-                for (auto& req : *orders) {
-                    if (!req.isValid()) continue;
-                    char buf[16];
-                    std::snprintf(buf, sizeof(buf), "%06u", req.instrumentId().value);
-                    engine::OrderRequest engineReq;
-                    engineReq.symbol   = foundation::market::AStockSymbol::fromCode(buf).fullSymbol();
-                    engineReq.price    = 0.0;
-                    engineReq.quantity = static_cast<int64_t>(req.quantity());
-                    engineReq.side      = (req.side() == strategy::RuntimeOrderSide::Buy)
-                                          ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
-                    engineReq.orderType = engine::OrderRequest::Market;
+                // 策略信号风控 — 调用方负责获取账户快照(风控自己不查)
+                auto& accEng = engine::AccountEngine::instance();
+                auto account   = accEng.account();
+                auto positions = accEng.positions();
+
+                // 防御: 账户未初始化或 tick 价格异常时跳过本批次
+                if (account.totalAsset <= 0) {
+                    INTERNAL_ERROR_STREAM << "[StrategyEngine] account totalAsset=0, "
+                                          << "skipping risk checks for this tick";
+                    continue;  // 跳过本 tick, 不跳过整个循环
+                }
+                double tickPrice = mdp.lastPrice();
+                if (tickPrice <= 0) {
+                    INTERNAL_WARN_STREAM << "[StrategyEngine] tick price=" << tickPrice
+                                         << " for " << mdp.instrumentId().value
+                                         << ", using 0 (risk amount will be 0)";
+                }
+
+                for (auto& order : *orders) {
+                    if (!order.isValid()) continue;
+
+                    // 补齐下单必填字段 (此处保证到达 TradeEngine 时完整)
+                    order.setClOrdId(generateClOrdId());             // 幂等ID
+                    order.setAccountId(account.accountId);           // 真实账户ID
+                    order.setCurrency("CNY");                        // A股人民币
+                    auto symObj = foundation::market::AStockSymbol::fromCode(
+                        order.symbol());
+                    order.setSymbol(symObj.fullSymbol());            // → "600000.SH"
+                    order.setExchange(symObj.suffix().substr(1));    // ".SH" → "SH"
+
+                    // 市价单: 用 tick 最新价填充 (仅当价格有效时)
+                    if (order.orderType() == OrderType::Market && tickPrice > 0) {
+                        order.setPrice(tickPrice);
+                    }
+
+                    // 风控 — 信号强度从扩展槽读取
+                    double signalScore = order.extensionAs<double>(
+                        domain::trading::ExtKey::kSignalScore, 0.5);
                     auto riskResult = RiskManager::instance()
-                        .checkAutoSignal(m_accountId, engineReq, req.score());
+                        .checkAutoSignal(order, account, positions,
+                                         tickPrice, signalScore);
                     if (!riskResult.approved()) {
                         INTERNAL_WARN_STREAM << "[StrategyEngine] risk rejected: "
                                              << riskResult.description();
                         continue;
                     }
-                    // 通过风控的订单逐个发送
-                    std::vector<OrderRequest> approved{req};
+
+                    // 通过风控 → 原样传递
+                    std::vector<OrderRequest> approved{order};
                     m_orderListener->onOrders(approved);
                 }
             }
@@ -892,10 +931,18 @@ StrategyBacktestResult StrategyEngine::backtest(
             if (r == 0 || r % 100 == 0) {
                 INTERNAL_INFO_STREAM << "[backtest] day " << r << " orders=" << orderList.size();
             }
-            for (const auto& order : orderList) {
-                const std::uint32_t instrumentId = order.instrumentId().value;
+            for (auto& order : orderList) {
+                // symbol 在策略层已填为纯数字码 (如 "600000")
+                const std::string& symStr = order.symbol();
+                const std::uint32_t instrumentId = static_cast<std::uint32_t>(
+                    std::stoul(symStr.empty() ? "0" : symStr));
                 const std::string symbol = idToSymbol.count(instrumentId)
-                    ? idToSymbol.at(instrumentId) : std::to_string(instrumentId);
+                    ? idToSymbol.at(instrumentId) : symStr;
+
+                // 补齐 symbol 后缀
+                char codeBuf[16];
+                std::snprintf(codeBuf, sizeof(codeBuf), "%06u", instrumentId);
+                order.setSymbol(foundation::market::AStockSymbol::fromCode(codeBuf).fullSymbol());
                 double closePrice = 0.0;
                 for (const auto& mdp : mdpBatch) {
                     if (mdp.instrumentId().value == instrumentId) {
@@ -908,7 +955,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 domain::strategy::RiskInput riskInput;
                 riskInput.setStrategyId(req.strategyIdentity.strategyId.text());
                 riskInput.setSymbol(symbol);
-                riskInput.setBuyOrder(order.side() == RuntimeOrderSide::Buy);
+                riskInput.setBuyOrder(order.side() == OrderSide::Buy);
                 riskInput.setPrice(closePrice);
                 riskInput.setQuantity(static_cast<std::int64_t>(order.quantity()));
                 riskInput.setStrategyBound(true);
@@ -934,7 +981,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 }
 
                 // ── 成交模拟 (BacktestFillSimulator — 公共类) ──
-                if (order.side() == RuntimeOrderSide::Buy) {
+                if (order.side() == OrderSide::Buy) {
                     double remaining = fillSim.cashAfterBuy(cash, closePrice,
                         static_cast<std::int64_t>(order.quantity()));
                     if (remaining >= 0.0) {

@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../../domain/trading/TradingTypes.h"
+
 namespace engine {
 
 // ═══════════════════════════════════════════════════════════════════
@@ -41,15 +43,10 @@ struct GmQuote {
     bool   isLimitDown() const;
 };
 
-struct OrderRequest {
-    std::string symbol, strategyId;
-    double price = 0;
-    int64_t quantity = 0;
-    enum Side { Buy, Sell };
-    enum Type { Limit, Market };
-    Side side = Buy;
-    Type orderType = Limit;
-};
+// 统一定单类型 (定义在 domain::trading::OrderRequest)
+using OrderRequest = domain::trading::OrderRequest;
+using OrderSide    = domain::trading::OrderSide;
+using OrderType    = domain::trading::OrderType;
 
 struct OrderResult {
     std::string brokerOrderId;

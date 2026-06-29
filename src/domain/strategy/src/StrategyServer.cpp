@@ -511,10 +511,10 @@ StrategyServiceFlowResult StrategyService::handleRuleEvaluationResult(
         publishDiagnostics(DiagnosticsEvent(
             DiagnosticsEventCode::OrderBuilt,
             StrategyServiceFlowCode::Ok,
-            orderRequest.strategyInstanceId(),
-            orderRequest.instrumentId(),
+            static_cast<std::uint64_t>(std::stoull(orderRequest.strategyId())),
+            InstrumentId(static_cast<std::uint32_t>(std::stoul(orderRequest.symbol()))),
             static_cast<double>(orderRequest.quantity()),
-            static_cast<double>(orderRequest.side() == RuntimeOrderSide::Buy ? 1 : -1)));
+            static_cast<double>(orderRequest.side() == OrderSide::Buy ? 1 : -1)));
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
@@ -585,10 +585,10 @@ StrategyServiceFlowResult StrategyService::flushPendingOrders()
         publishDiagnostics(DiagnosticsEvent(
             DiagnosticsEventCode::OrderSubmitted,
             StrategyServiceFlowCode::Ok,
-            order.strategyInstanceId(),
-            order.instrumentId(),
+            static_cast<std::uint64_t>(std::stoull(order.strategyId())),
+            InstrumentId(static_cast<std::uint32_t>(std::stoul(order.symbol()))),
             static_cast<double>(order.quantity()),
-            static_cast<double>(order.side() == RuntimeOrderSide::Buy ? 1 : -1)));
+            static_cast<double>(order.side() == OrderSide::Buy ? 1 : -1)));
     }
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }

@@ -89,8 +89,7 @@ void SimulatedBrokerGateway::submitOrder(
 
     OrderStatus status;
     status.setBrokerOrderId(m_impl->generateBrokerOrderId());
-    status.setCorrelationId(request.correlationId());
-    status.setStatusValue(OrderStatusValue::Submitted);
+    status.setStatusValue(OrderStatusValue::New);
     status.setUpdateTime(foundation::utils::Timestamp::now());
 
     if (onResult) {

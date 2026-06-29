@@ -1,12 +1,11 @@
-// RiskManager.cpp — 风控管理器实现
+// RiskManager.cpp — 风控纯函数实现 (零外部调用)
 #include "../include/RiskManager.h"
-#include "../../../engine/include/AccountEngine.h"
+
+#include <algorithm>
+#include <cmath>
+#include <string>
 
 namespace domain::strategy {
-
-// ═══════════════════════════════════════════════════════════════════
-// 单例
-// ═══════════════════════════════════════════════════════════════════
 
 RiskManager& RiskManager::instance() {
     static RiskManager mgr;
@@ -16,35 +15,40 @@ RiskManager& RiskManager::instance() {
 void RiskManager::setRiskConfig(const RiskConfig& config) { m_config = config; }
 const RiskConfig& RiskManager::riskConfig() const { return m_config; }
 
-// ═══════════════════════════════════════════════════════════════════
-// 涨跌停
-// ═══════════════════════════════════════════════════════════════════
+// ── 纯函数: 涨跌停检查 ──
+bool RiskManager::isPriceAtLimit(double currentPrice, double preClose, bool isBuy) {
+    if (preClose <= 0) return false;
+    // A股涨跌停 10%, 科创板 20%, 北交所 30% — 由上层根据 symbol 判断并传入正确的 limitPct
+    // 这里只做最基础的 10% 判断, 调用方可根据品种调整
+    constexpr double kDefaultLimitPct = 9.9; // 留 0.1% 容差
+    double changePct = (currentPrice - preClose) / preClose * 100.0;
+    if (isBuy)  return changePct >= kDefaultLimitPct;
+    else        return changePct <= -kDefaultLimitPct;
+}
 
-bool RiskManager::priceAtLimit(const std::string& symbol, double price, bool isBuy) const {
-    auto q = engine::GmSessionEngine::instance().fetchQuote(symbol);
-    if (!q || !q->valid) return false;
-    if (isBuy)  return q->isLimitUp();
-    else        return q->isLimitDown();
+// ── 公共: 找持仓 ──
+namespace {
+    const engine::Position* findPosition(const std::string& symbol,
+                                         const std::vector<engine::Position>& positions) {
+        for (auto& p : positions) {
+            if (p.symbol == symbol) return &p;
+        }
+        return nullptr;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
 // 手动下单风控
 // ═══════════════════════════════════════════════════════════════════
 
-RiskResult RiskManager::checkManualOrder(const std::string& accountId,
-                                         const engine::OrderRequest& req) {
-    auto& accEng = engine::AccountEngine::instance();
-    auto account = accEng.account();
-    auto positions = accEng.positions();
+RiskResult RiskManager::checkManualOrder(const engine::OrderRequest& req,
+                                         const engine::AccountInfo& account,
+                                         const std::vector<engine::Position>& positions,
+                                         double currentPrice) {
+    const engine::Position* existingPos = findPosition(req.symbol(), positions);
 
-    // 找当前标的持仓
-    const engine::Position* existingPos = nullptr;
-    for (auto& p : positions) {
-        if (p.symbol == req.symbol) { existingPos = &p; break; }
-    }
-
-    const double orderAmount = req.price * static_cast<double>(req.quantity);
-    const bool isBuy = (req.side == engine::OrderRequest::Buy);
+    const double orderAmount = req.price() * static_cast<double>(req.quantity());
+    const bool isBuy = (req.side() == engine::OrderSide::Buy);
 
     // ── 1. 资金检查 ──
     if (isBuy && account.availableCash < orderAmount) {
@@ -54,14 +58,15 @@ RiskResult RiskManager::checkManualOrder(const std::string& accountId,
     }
 
     // ── 2. 卖空超量 ──
-    if (!isBuy && (!existingPos || existingPos->availableQty < req.quantity)) {
+    if (!isBuy && (!existingPos || existingPos->availableQty < req.quantity())) {
         return RiskResult::rejected(RiskRejectCode::SellQuantityExceedsHolding, 1.0,
-            "可卖量不足: 需要 " + std::to_string(req.quantity)
+            "可卖量不足: 需要 " + std::to_string(req.quantity())
             + " 可卖 " + std::to_string(existingPos ? existingPos->availableQty : 0));
     }
 
     // ── 3. 涨跌停 ──
-    if (priceAtLimit(req.symbol, req.price, isBuy)) {
+    double preClose = existingPos ? existingPos->lastPrice : currentPrice;
+    if (isPriceAtLimit(currentPrice, preClose, isBuy)) {
         return RiskResult::rejected(RiskRejectCode::PriceInvalid, 1.0,
             isBuy ? "当前价在涨停板, 无法买入" : "当前价在跌停板, 无法卖出");
     }
@@ -96,20 +101,15 @@ RiskResult RiskManager::checkManualOrder(const std::string& accountId,
 // 策略信号风控
 // ═══════════════════════════════════════════════════════════════════
 
-RiskResult RiskManager::checkAutoSignal(const std::string& accountId,
-                                        const engine::OrderRequest& req,
+RiskResult RiskManager::checkAutoSignal(const engine::OrderRequest& req,
+                                        const engine::AccountInfo& account,
+                                        const std::vector<engine::Position>& positions,
+                                        double currentPrice,
                                         double signalStrength) {
-    auto& accEng = engine::AccountEngine::instance();
-    auto account = accEng.account();
-    auto positions = accEng.positions();
+    const engine::Position* existingPos = findPosition(req.symbol(), positions);
 
-    const engine::Position* existingPos = nullptr;
-    for (auto& p : positions) {
-        if (p.symbol == req.symbol) { existingPos = &p; break; }
-    }
-
-    const double orderAmount = req.price * static_cast<double>(req.quantity);
-    const bool isBuy = (req.side == engine::OrderRequest::Buy);
+    const double orderAmount = req.price() * static_cast<double>(req.quantity());
+    const bool isBuy = (req.side() == engine::OrderSide::Buy);
 
     // ── 1. 信号强度 ──
     if (signalStrength < 0.1) {

@@ -71,7 +71,7 @@ void TradeExecutionBridge::ensureInitialized() {
     auto orderStatusValueToString = [](domain::trading::OrderStatusValue v) -> QString {
         using domain::trading::OrderStatusValue;
         switch (v) {
-            case OrderStatusValue::Submitted:        return QStringLiteral("SUBMITTED");
+            case OrderStatusValue::New:              return QStringLiteral("SUBMITTED");
             case OrderStatusValue::PartiallyFilled:  return QStringLiteral("PARTIAL_FILLED");
             case OrderStatusValue::Filled:           return QStringLiteral("FILLED");
             case OrderStatusValue::Cancelled:        return QStringLiteral("CANCELLED");
@@ -332,18 +332,20 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
 
     // ── 手动单账户风控 ──
     {
-        QString accountId = TradingConnectionConfigService::instance()
-            ->currentConfiguration().value("accountId").toString();
+        auto& accEng = engine::AccountEngine::instance();
+        auto account   = accEng.account();
+        auto positions = accEng.positions();
+
         engine::OrderRequest engineReq;
-        engineReq.symbol    = order.symbol();
-        engineReq.price     = order.price();
-        engineReq.quantity  = order.quantity();
-        engineReq.side      = (order.side() == domain::strategy::OrderDirection::Buy)
-                              ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
-        engineReq.orderType = engine::OrderRequest::Limit;
+        engineReq.setSymbol(order.symbol());
+        engineReq.setPrice(order.price());
+        engineReq.setQuantity(order.quantity());
+        engineReq.setSide((order.side() == domain::strategy::OrderDirection::Buy)
+                          ? engine::OrderSide::Buy : engine::OrderSide::Sell);
+        engineReq.setOrderType(engine::OrderType::Limit);
 
         auto riskResult = domain::strategy::RiskManager::instance()
-            .checkManualOrder(accountId.toStdString(), engineReq);
+            .checkManualOrder(engineReq, account, positions, order.price());
         if (!riskResult.approved()) {
             QVariantMap out;
             out["accepted"] = false;
@@ -594,7 +596,7 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
         trackOrder.setPrice(price);
         trackOrder.setSide(side == "BUY" ? domain::strategy::OrderDirection::Buy
                                          : domain::strategy::OrderDirection::Sell);
-        trackOrder.setStatus(domain::trading::OrderStatusValue::Submitted);
+        trackOrder.setStatus(domain::trading::OrderStatusValue::New);
         trackOrder.setStatusMessage("accepted");
         domain::trading::TradeExecutionEngine::instance().registerOrder(trackOrder);
     }

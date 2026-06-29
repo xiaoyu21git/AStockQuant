@@ -238,22 +238,22 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     }
 
     engine::OrderRequest engineReq;
-    engineReq.symbol     = order.symbol();
-    engineReq.strategyId = order.strategyId();
-    engineReq.price      = order.price();
-    engineReq.quantity   = order.quantity();
-    engineReq.side       = order.side() == strategy::OrderDirection::Buy
-                           ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
-    engineReq.orderType  = riskContext.isAutoStrategySignal()
-                           ? engine::OrderRequest::Market
-                           : engine::OrderRequest::Limit;
+    engineReq.setSymbol(order.symbol());
+    engineReq.setStrategyId(order.strategyId());
+    engineReq.setPrice(order.price());
+    engineReq.setQuantity(order.quantity());
+    engineReq.setSide(order.side() == strategy::OrderDirection::Buy
+                      ? engine::OrderSide::Buy : engine::OrderSide::Sell);
+    engineReq.setOrderType(riskContext.isAutoStrategySignal()
+                           ? engine::OrderType::Market
+                           : engine::OrderType::Limit);
 
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
 
     // ── 仅网关成功受理后才触发回调 — 避免虚假 "已报" 状态 ──
     if (result.accepted) {
         TradeOrder accepted = order;
-        accepted.setStatus(OrderStatusValue::Submitted);
+        accepted.setStatus(OrderStatusValue::New);
         accepted.setStatusMessage("accepted");
         accepted.setBrokerOrderId(result.brokerOrderId);
         m_impl->appendRecentOrder(accepted);
@@ -330,7 +330,7 @@ void TradeExecutionEngine::initCallbacks() {
                 case 5: updated.setStatus(OrderStatusValue::Cancelled); break;
                 case 6: updated.setStatus(OrderStatusValue::Rejected); break;
                 case 7: updated.setStatus(OrderStatusValue::Expired); break;
-                default: updated.setStatus(OrderStatusValue::Submitted); break;
+                default: updated.setStatus(OrderStatusValue::New); break;
             }
             std::lock_guard<std::mutex> lock(m_impl->m_mutex);
             for (auto& o : m_impl->m_recentOrders) {
@@ -443,14 +443,15 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         if (!req.isValid()) continue;
 
         TradeOrder order;
-        order.setSymbol(std::to_string(req.instrumentId().value));
-        order.setSide(req.side() == strategy::RuntimeOrderSide::Buy
+        order.setSymbol(req.symbol());
+        order.setSide(req.side() == OrderSide::Buy
                           ? strategy::OrderDirection::Buy
                           : strategy::OrderDirection::Sell);
         order.setQuantity(static_cast<std::int64_t>(req.quantity()));
-        order.setStrategyId(std::to_string(req.strategyInstanceId()));
-        order.setPrice(0.0);
-        order.setSignalStrength(req.score());
+        order.setStrategyId(req.strategyId());
+        order.setPrice(req.price());
+        order.setSignalStrength(
+            req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
 
         if (m_onOrderGenerated) m_onOrderGenerated(order);
 

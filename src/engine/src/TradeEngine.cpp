@@ -12,8 +12,8 @@ namespace engine {
 // ═══════════════════════════════════════════════════════════════════
 
 namespace {
-int toGmSide(OrderRequest::Side s)       { return s == OrderRequest::Buy ? 1 : 2; }
-int toGmOrderType(OrderRequest::Type t)   { return t == OrderRequest::Limit ? 1 : 2; }
+int toGmSide(OrderSide s)       { return s == OrderSide::Buy ? 1 : 2; }
+int toGmOrderType(OrderType t)   { return t == OrderType::Limit ? 1 : 2; }
 std::string toGm(const std::string& internal) {
     auto dot = internal.find('.');
     if (dot == std::string::npos) return "";
@@ -99,19 +99,23 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     OrderResult r;
     auto* s = static_cast<::Strategy*>(m_strategy);
     if (!s) { r.message = "TradeEngine not initialized"; return r; }
-    std::string gmSym = toGm(req.symbol);
-    if (gmSym.empty()) { r.message = "invalid symbol: " + req.symbol; return r; }
+    std::string gmSym = toGm(req.symbol());
+    if (gmSym.empty()) { r.message = "invalid symbol: " + req.symbol(); return r; }
 
-    // place_order(symbol, volume, side, order_type, position_effect,
-    //             price, duration, qualifier, stop_price, order_business, ACCOUNT)
-    // 最后一个参数是 account(NULL=使用策略默认账户), 不是 strategy_id
-    Order gm = s->place_order(gmSym.c_str(),
-                              static_cast<int>(req.quantity),
-                              toGmSide(req.side),
-                              toGmOrderType(req.orderType),
-                              1,
-                              req.price, 0, 0, 0.0, 0,
-                              NULL);  // 使用策略默认账户
+    // 构造 gmsdk 原生结构体，字段完整映射
+    ::OrderRequest gmReq{};
+    std::strncpy(gmReq.symbol, gmSym.c_str(), sizeof(gmReq.symbol) - 1);
+    gmReq.side            = toGmSide(req.side());
+    gmReq.position_effect = static_cast<int>(req.positionEffect());
+    gmReq.order_type      = toGmOrderType(req.orderType());
+    gmReq.price           = req.price();
+    gmReq.volume          = static_cast<long long>(req.quantity());
+    gmReq.stop_price      = req.extensionAs<double>(
+                                domain::trading::ExtKey::kStopPrice, 0.0);
+    gmReq.order_business  = static_cast<int>(req.extensionAs<int64_t>(
+                                domain::trading::ExtKey::kOrderBusiness, 0));
+
+    Order gm = s->place_order(gmReq, req.accountId().c_str());
     if (gm.cl_ord_id[0]) {
         r.brokerOrderId = gm.cl_ord_id; r.accepted = true;
     } else {

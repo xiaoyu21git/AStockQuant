@@ -253,12 +253,19 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
     std::uint32_t quantity = static_cast<std::uint32_t>(weight * base);
     if (quantity < 100) quantity = 100;
     quantity = quantity / 100 * 100;
-    outputOrder = OrderRequest(
-        signal.strategyInstanceId(),
-        signal.instrumentId(),
-        signal.side(),
-        quantity,
-        signal.score());
+
+    // 填充统一定单类型
+    char codeBuf[16];
+    std::snprintf(codeBuf, sizeof(codeBuf), "%06u", signal.instrumentId().value);
+    outputOrder.setSymbol(codeBuf);                  // "600000" (drainQueue补.SH后缀)
+    outputOrder.setStrategyId(std::to_string(signal.strategyInstanceId()));
+    outputOrder.setSide((signal.side() == RuntimeOrderSide::Buy)
+                        ? OrderSide::Buy : OrderSide::Sell);
+    outputOrder.setQuantity(static_cast<int64_t>(quantity));
+    outputOrder.setExtension(domain::trading::ExtKey::kSignalScore, signal.score());
+    outputOrder.setOrderType(OrderType::Market);
+    outputOrder.setPrice(0);                         // drainQueue 用 tick 价补
+
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 

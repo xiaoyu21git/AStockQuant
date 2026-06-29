@@ -253,8 +253,8 @@ private:
     GmSessionEngine::Impl* m_impl = nullptr;
 };
 
-int toGmSide(OrderRequest::Side s) { return s == OrderRequest::Buy ? 1 : 2; }
-int toGmType(OrderRequest::Type t) { return t == OrderRequest::Limit ? 1 : 2; }
+int toGmSide(OrderSide s) { return s == OrderSide::Buy ? 1 : 2; }
+int toGmType(OrderType t) { return t == OrderType::Limit ? 1 : 2; }
 std::string fromGm(const std::string& gm) {
     if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";
     if (gm.compare(0, 5, "SZSE.") == 0) return gm.substr(5) + ".SZ";

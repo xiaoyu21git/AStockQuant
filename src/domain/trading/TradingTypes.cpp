@@ -1,9 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────
-// TradingTypes.cpp — definitions for factory methods and non-inline
-// getters/setters declared in TradingTypes.h
+// TradingTypes.cpp — OrderRequest + Order high-performance impl
 // ─────────────────────────────────────────────────────────────────────
 #include "TradingTypes.h"
 #include "foundation/Utils/Timestamp.h"
+
+#include <chrono>
+#include <sstream>
 
 namespace domain::trading {
 
@@ -13,53 +15,308 @@ namespace domain::trading {
 // (fully defined in header — nothing needed here)
 
 // ══════════════════════════════════════════════════════════
-// OrderRequest
+// OrderRequest — getter/setter
 // ══════════════════════════════════════════════════════════
-OrderRequest OrderRequest::create(StrategyId strategyId, SymbolCode symbol,
-                                   OrderSide side, OrderType type,
-                                   double price, std::int64_t quantity) {
-    OrderRequest r;
-    r.m_strategyId = std::move(strategyId);
-    r.m_symbol = std::move(symbol);
-    r.m_side = side;
-    r.m_orderType = type;
-    r.m_price = price;
-    r.m_quantity = quantity;
-    return r;
+
+const std::string& OrderRequest::clOrdId()    const noexcept { return m_clOrdId; }
+void OrderRequest::setClOrdId(std::string v)            { m_clOrdId = std::move(v); }
+
+const std::string& OrderRequest::accountId()  const noexcept { return m_accountId; }
+void OrderRequest::setAccountId(std::string v)          { m_accountId = std::move(v); }
+
+const std::string& OrderRequest::symbol()     const noexcept { return m_symbol; }
+void OrderRequest::setSymbol(std::string v)             { m_symbol = std::move(v); }
+
+const std::string& OrderRequest::exchange()   const noexcept { return m_exchange; }
+void OrderRequest::setExchange(std::string v)           { m_exchange = std::move(v); }
+
+const std::string& OrderRequest::strategyId() const noexcept { return m_strategyId; }
+void OrderRequest::setStrategyId(std::string v)         { m_strategyId = std::move(v); }
+
+OrderSide   OrderRequest::side()      const noexcept { return m_side; }
+void OrderRequest::setSide(OrderSide v)       noexcept { m_side = v; }
+
+OrderType   OrderRequest::orderType() const noexcept { return m_orderType; }
+void OrderRequest::setOrderType(OrderType v)  noexcept { m_orderType = v; }
+
+double OrderRequest::price()    const noexcept { return m_price; }
+void OrderRequest::setPrice(double v)  noexcept { m_price = v; }
+
+double OrderRequest::quantity() const noexcept { return m_quantity; }
+void OrderRequest::setQuantity(double v) noexcept { m_quantity = v; }
+
+PositionEffect OrderRequest::positionEffect() const noexcept { return m_positionEffect; }
+void OrderRequest::setPositionEffect(PositionEffect v) noexcept { m_positionEffect = v; }
+
+TimeInForce OrderRequest::timeInForce() const noexcept { return m_timeInForce; }
+void OrderRequest::setTimeInForce(TimeInForce v) noexcept { m_timeInForce = v; }
+
+const std::string& OrderRequest::expireTime() const noexcept { return m_expireTime; }
+void OrderRequest::setExpireTime(std::string v) { m_expireTime = std::move(v); }
+
+const std::string& OrderRequest::currency() const noexcept { return m_currency; }
+void OrderRequest::setCurrency(std::string v)   { m_currency = std::move(v); }
+
+double OrderRequest::displayQty() const noexcept { return m_displayQty; }
+void OrderRequest::setDisplayQty(double v) noexcept { m_displayQty = v; }
+
+double OrderRequest::minQty() const noexcept { return m_minQty; }
+void OrderRequest::setMinQty(double v) noexcept { m_minQty = v; }
+
+// ── 扩展槽 (O(4) 线性扫描, 无堆分配) ──
+const std::array<ExtensionSlot, 4>& OrderRequest::extensions() const noexcept {
+    return m_extensions;
 }
 
-StrategyId OrderRequest::strategyId() const { return m_strategyId; }
-void OrderRequest::setStrategyId(StrategyId value) { m_strategyId = std::move(value); }
-SymbolCode OrderRequest::symbol() const { return m_symbol; }
-void OrderRequest::setSymbol(SymbolCode value) { m_symbol = std::move(value); }
-OrderSide OrderRequest::side() const { return m_side; }
-void OrderRequest::setSide(OrderSide value) { m_side = value; }
-OrderType OrderRequest::orderType() const { return m_orderType; }
-void OrderRequest::setOrderType(OrderType value) { m_orderType = value; }
-double OrderRequest::price() const { return m_price; }
-void OrderRequest::setPrice(double value) { m_price = value; }
-std::int64_t OrderRequest::quantity() const { return m_quantity; }
-void OrderRequest::setQuantity(std::int64_t value) { m_quantity = value; }
-CorrelationId OrderRequest::correlationId() const { return m_correlationId; }
-void OrderRequest::setCorrelationId(CorrelationId value) { m_correlationId = std::move(value); }
+ExtensionSlot* OrderRequest::findExtension(uint64_t key) noexcept {
+    for (auto& slot : m_extensions) {
+        if (slot.key == key) return &slot;
+    }
+    return nullptr;
+}
 
-bool OrderRequest::hasMetadata(const std::string& key) const {
-    return m_metadata && m_metadata->count(key) > 0;
+const ExtensionSlot* OrderRequest::findExtension(uint64_t key) const noexcept {
+    for (const auto& slot : m_extensions) {
+        if (slot.key == key) return &slot;
+    }
+    return nullptr;
 }
-std::string OrderRequest::metadataValue(const std::string& key, const std::string& defaultValue) const {
-    if (!m_metadata) return defaultValue;
-    auto it = m_metadata->find(key);
-    return it != m_metadata->end() ? it->second : defaultValue;
+
+void OrderRequest::setExtension(uint64_t key, double v) noexcept {
+    for (auto& slot : m_extensions) {
+        if (slot.key == 0 || slot.key == key) {
+            slot.key = key; slot.value = v; return;
+        }
+    }
 }
-void OrderRequest::setMetadata(const std::string& key, std::string value) {
-    if (!m_metadata) m_metadata = std::make_unique<std::unordered_map<std::string, std::string>>();
-    (*m_metadata)[key] = std::move(value);
+
+void OrderRequest::setExtension(uint64_t key, std::int64_t v) noexcept {
+    for (auto& slot : m_extensions) {
+        if (slot.key == 0 || slot.key == key) {
+            slot.key = key; slot.value = v; return;
+        }
+    }
 }
-const std::unordered_map<std::string, std::string>* OrderRequest::metadata() const {
-    return m_metadata.get();
+
+void OrderRequest::setExtension(uint64_t key, uint64_t v) noexcept {
+    for (auto& slot : m_extensions) {
+        if (slot.key == 0 || slot.key == key) {
+            slot.key = key; slot.value = v; return;
+        }
+    }
 }
-std::size_t OrderRequest::metadataCount() const {
-    return m_metadata ? m_metadata->size() : 0;
+
+// ══════════════════════════════════════════════════════════
+// OrderRequest — 核心方法
+// ══════════════════════════════════════════════════════════
+
+bool OrderRequest::isValid() const noexcept {
+    return !m_symbol.empty() && m_quantity > 0;
+}
+
+std::string OrderRequest::toCanonicalString() const {
+    std::ostringstream oss;
+    oss << m_symbol << '|' << static_cast<int>(m_side) << '|'
+        << static_cast<int>(m_orderType) << '|' << m_price << '|'
+        << m_quantity << '|' << (m_currency.empty() ? "CNY" : m_currency);
+    return oss.str();
+}
+
+bool OrderRequest::checkPriceSemantics(const OrderRequest& req,
+                                        std::string& errDetail) noexcept {
+    if (req.m_orderType == OrderType::Market || req.m_orderType == OrderType::Stop) {
+        if (req.m_price != 0.0) {
+            errDetail = "Market/Stop order must have price=0";
+            return false;
+        }
+    } else {
+        if (req.m_price <= 0.0) {
+            errDetail = "Limit/StopLimit order must have price>0";
+            return false;
+        }
+    }
+    return true;
+}
+
+bool OrderRequest::checkQuantityPrecision(const OrderRequest& req,
+                                           std::string& errDetail) noexcept {
+    if (req.m_quantity <= 0) {
+        errDetail = "quantity must be > 0";
+        return false;
+    }
+    // 精度检查预留 — 若接入 TickSize/LotSize 配置表则在此查表
+    (void)req;
+    return true;
+}
+
+std::pair<bool, std::string> OrderRequest::validate(const OrderRequest& req) {
+    if (req.m_symbol.empty())
+        return {false, "symbol is empty"};
+    if (req.m_quantity <= 0)
+        return {false, "quantity must be > 0"};
+
+    std::string err;
+    if (!checkPriceSemantics(req, err)) return {false, err};
+    if (!checkQuantityPrecision(req, err)) return {false, err};
+
+    if (req.m_timeInForce == TimeInForce::GTD && req.m_expireTime.empty())
+        return {false, "GTD order requires expireTime"};
+    if (!req.m_clOrdId.empty() && req.m_clOrdId.size() < 8)
+        return {false, "cl_ord_id too short (min 8 chars)"};
+
+    return {true, ""};
+}
+
+size_t OrderRequest::validateBatch(const OrderRequest* reqs, size_t count,
+                                    std::string* outErrors) {
+    size_t fails = 0;
+    for (size_t i = 0; i < count; ++i) {
+        auto [ok, err] = validate(reqs[i]);
+        if (!ok) {
+            if (outErrors) outErrors[i] = std::move(err);
+            ++fails;
+        }
+    }
+    return fails;
+}
+
+// ══════════════════════════════════════════════════════════
+// OrderRequest::Builder
+// ══════════════════════════════════════════════════════════
+
+std::pair<OrderRequest, std::string> OrderRequest::Builder::build() const {
+    auto req = m_req;
+    if (req.clOrdId().empty()) {
+        auto now = std::chrono::system_clock::now().time_since_epoch().count();
+        std::ostringstream oss;
+        oss << std::hex << now;
+        req.setClOrdId(oss.str());
+    }
+    auto [ok, err] = OrderRequest::validate(req);
+    if (!ok) return {OrderRequest{}, err};
+    return {std::move(req), ""};
+}
+
+// ══════════════════════════════════════════════════════════
+// Order — 无锁状态机 + 编译期位图转换表
+// ══════════════════════════════════════════════════════════
+
+// compile-time transition bitmap: 8 states × 8 targets = 64 bits
+constexpr bool Order::canTransition(uint8_t from, uint8_t to) noexcept {
+    // clang-format off
+    constexpr uint64_t T = 0
+        | (1ULL << (0*8 + 1))                     // Pending(0)       → New(1)
+        | (1ULL << (0*8 + 6))                     // Pending(0)       → Rejected(6)
+        | (1ULL << (1*8 + 2)) | (1ULL << (1*8 + 3)) // New(1)         → Part(2), Filled(3)
+        | (1ULL << (1*8 + 4)) | (1ULL << (1*8 + 6)) // New(1)         → PendingCancel(4), Rejected(6)
+        | (1ULL << (1*8 + 7))                     // New(1)           → Expired(7)
+        | (1ULL << (2*8 + 2)) | (1ULL << (2*8 + 3)) // Part(2)        → Part(2), Filled(3)
+        | (1ULL << (2*8 + 4)) | (1ULL << (2*8 + 6)) // Part(2)        → PendingCancel(4), Rejected(6)
+        | (1ULL << (2*8 + 7))                     // Part(2)          → Expired(7)
+        | (1ULL << (4*8 + 5)) | (1ULL << (4*8 + 2)) // PendingCancel   → Cancelled(5), Part(2)
+        | (1ULL << (4*8 + 3)) | (1ULL << (4*8 + 6)) // PendingCancel   → Filled(3), Rejected(6)
+        ;
+    // clang-format on
+    return (T >> (from * 8 + to)) & 1ULL;
+}
+
+Order::Order(std::string orderId, std::string clOrdId, const OrderRequest& origin)
+    : m_orderId(std::move(orderId))
+    , m_clOrdId(std::move(clOrdId))
+    , m_originRequest(origin)
+    , m_createTime(foundation::utils::Timestamp::now())
+    , m_lastUpdateTime(m_createTime)
+{
+    m_status.store(static_cast<uint8_t>(OrderStatusValue::Pending),
+                   std::memory_order_release);
+}
+
+const std::string& Order::orderId()  const noexcept { return m_orderId; }
+const std::string& Order::clOrdId()  const noexcept { return m_clOrdId; }
+const OrderRequest& Order::originRequest() const noexcept { return m_originRequest; }
+const std::string& Order::symbol()   const noexcept { return m_originRequest.symbol(); }
+OrderSide Order::side()              const noexcept { return m_originRequest.side(); }
+double Order::price()                const noexcept { return m_originRequest.price(); }
+double Order::quantity()             const noexcept { return m_originRequest.quantity(); }
+
+OrderStatusValue Order::status()  const noexcept {
+    return static_cast<OrderStatusValue>(m_status.load(std::memory_order_acquire));
+}
+double Order::cumQty()    const noexcept { return m_cumQty; }
+double Order::leavesQty() const noexcept { return m_originRequest.quantity() - m_cumQty; }
+double Order::avgPx()     const noexcept { return m_avgPx; }
+double Order::fee()       const noexcept { return m_fee; }
+bool   Order::isFrozen()  const noexcept { return m_frozen; }
+
+foundation::utils::Timestamp Order::createTime()     const noexcept { return m_createTime; }
+foundation::utils::Timestamp Order::lastUpdateTime() const noexcept { return m_lastUpdateTime; }
+
+bool Order::isTerminal() const noexcept {
+    auto s = m_status.load(std::memory_order_acquire);
+    return s >= static_cast<uint8_t>(OrderStatusValue::Filled);
+}
+
+void Order::transitionTo(OrderStatusValue target) noexcept {
+    m_status.store(static_cast<uint8_t>(target), std::memory_order_release);
+    m_lastUpdateTime = foundation::utils::Timestamp::now();
+}
+
+// ── applyFill: 纯算术, 零锁, noexcept ──
+
+bool Order::applyFill(double fillQty, double fillPx, double tradeFee) noexcept {
+    if (m_frozen) return false;
+    if (fillQty <= 0.0 || fillPx <= 0.0) return false;
+
+    auto cur = m_status.load(std::memory_order_acquire);
+    if (cur >= static_cast<uint8_t>(OrderStatusValue::Filled)) return false;
+
+    double newCum = m_cumQty + fillQty;
+    if (newCum > m_originRequest.quantity() + 1e-12) return false;
+
+    double totalVal = m_cumQty * m_avgPx + fillQty * fillPx;
+    m_cumQty = newCum;
+    m_avgPx  = (newCum > 0) ? (totalVal / newCum) : 0.0;
+    m_fee   += tradeFee;
+
+    double remaining = m_originRequest.quantity() - m_cumQty;
+    transitionTo((remaining < 1e-12)
+        ? OrderStatusValue::Filled
+        : OrderStatusValue::PartiallyFilled);
+    return true;
+}
+
+// ── tryCancel: CAS 无锁 ──
+
+bool Order::tryCancel() noexcept {
+    if (m_frozen) return false;
+    uint8_t cur = m_status.load(std::memory_order_acquire);
+    uint8_t n = static_cast<uint8_t>(OrderStatusValue::New);
+    uint8_t p = static_cast<uint8_t>(OrderStatusValue::PartiallyFilled);
+    if (cur != n && cur != p) return false;
+
+    uint8_t target = static_cast<uint8_t>(OrderStatusValue::PendingCancel);
+    return m_status.compare_exchange_strong(cur, target,
+                                            std::memory_order_acq_rel,
+                                            std::memory_order_acquire);
+}
+
+void Order::confirmCancelled() noexcept {
+    if (!m_frozen) transitionTo(OrderStatusValue::Cancelled);
+}
+
+void Order::confirmRejected(const std::string& /*reason*/) noexcept {
+    if (!m_frozen) transitionTo(OrderStatusValue::Rejected);
+}
+
+void Order::markExpired() noexcept {
+    if (m_frozen) return;
+    auto cur = m_status.load(std::memory_order_acquire);
+    if (canTransition(cur, static_cast<uint8_t>(OrderStatusValue::Expired)))
+        transitionTo(OrderStatusValue::Expired);
+}
+
+void Order::freeze() noexcept {
+    m_frozen = true;
 }
 
 // ══════════════════════════════════════════════════════════
