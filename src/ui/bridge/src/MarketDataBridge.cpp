@@ -3,6 +3,7 @@
 #include "../../../domain/trading/include/MarketDataUtils.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "foundation/market/AStockSymbol.h"
 
 #include <QDateTime>
 #include <QDate>
@@ -31,8 +32,19 @@ void MarketDataBridge::initializeAsync() {
 
 void MarketDataBridge::updateSnapshot(const QString& symbol) {
     if (symbol.isEmpty()) return;
-    auto q = engine::GmSessionEngine::instance().fetchQuote(symbol.toStdString());
-    if (!q || !q->valid) return;
+    // 纯数字码补后缀: "000001" → "000001.SZ"
+    std::string sym = symbol.toStdString();
+    if (sym.find('.') == std::string::npos && sym.size() == 6) {
+        auto symObj = foundation::market::AStockSymbol::fromCode(sym);
+        if (symObj.isValid()) sym = symObj.fullSymbol();
+    }
+    auto q = engine::GmSessionEngine::instance().fetchQuote(sym);
+    if (!q || !q->valid) {
+        INTERNAL_WARN_STREAM << "[MktBridge] updateSnapshot FAILED for " << symbol.toStdString();
+        return;
+    }
+    INTERNAL_INFO_STREAM << "[MktBridge] updateSnapshot OK " << symbol.toStdString()
+                         << " price=" << q->price << " source=" << (q->preClose == q->price ? "preClose" : "tick");
 
     QVariantMap snap;
     snap["symbol"]     = symbol;
@@ -67,6 +79,7 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
     snap["depthSnapshot"] = QVariantMap{{"bids", bids}, {"asks", asks}};
 
     m_marketSnapshots[symbol] = snap;
+    m_marketSnapshots = QVariantMap(m_marketSnapshots);  // 构造新对象, 强制打破隐式共享
     emit marketSnapshotsChanged();
 }
 

@@ -88,6 +88,18 @@ public:
     [[nodiscard]] const std::string& clientOrderId() const noexcept { return m_clientOrderId; }
     void setClientOrderId(std::string v) { m_clientOrderId = std::move(v); }
 
+    [[nodiscard]] const std::string& clOrdId()   const noexcept { return m_clOrdId; }
+    void setClOrdId(std::string v)                    { m_clOrdId = std::move(v); }
+
+    [[nodiscard]] const std::string& accountId() const noexcept { return m_accountId; }
+    void setAccountId(std::string v)                   { m_accountId = std::move(v); }
+
+    [[nodiscard]] const std::string& currency()  const noexcept { return m_currency; }
+    void setCurrency(std::string v)                    { m_currency = std::move(v); }
+
+    [[nodiscard]] const std::string& exchange()  const noexcept { return m_exchange; }
+    void setExchange(std::string v)                    { m_exchange = std::move(v); }
+
     // Execution batch metadata
     [[nodiscard]] const std::string& batchId() const noexcept { return m_batchId; }
     void setBatchId(std::string v) { m_batchId = std::move(v); }
@@ -154,6 +166,10 @@ private:
     ActionKind m_actionKind{ActionKind::Normal};
     bool m_isBoardLotMode{true};
     std::string m_clientOrderId;
+    std::string m_clOrdId;
+    std::string m_accountId;
+    std::string m_currency;
+    std::string m_exchange;
 
     std::string m_brokerOrderId;
     OrderStatusValue m_status{OrderStatusValue::Pending};

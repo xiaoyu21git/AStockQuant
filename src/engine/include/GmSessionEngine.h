@@ -129,6 +129,7 @@ public:
     std::unique_ptr<void, StrategyDeleter> m_strategy;
     std::mutex m_tickMutex;
     std::unordered_map<std::string, int> m_tickRefCount;
+    std::unordered_map<std::string, GmQuote>  m_quoteCache;     // tick 实时缓存
 
 private:
     GmSessionEngine() = default;

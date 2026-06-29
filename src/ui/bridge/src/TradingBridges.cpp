@@ -13,6 +13,9 @@
 
 #include "../../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
+#include "foundation/market/AStockSymbol.h"
+
+#include <sstream>
 #include "../../../domain/strategy/include/RiskManager.h"
 #include "foundation/log/logging.hpp"
 
@@ -25,6 +28,22 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+
+#include <atomic>
+#include <chrono>
+
+namespace {
+
+std::string generateClOrdId() {
+    static std::atomic<uint64_t> s_counter{0};
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    uint64_t seq = s_counter.fetch_add(1, std::memory_order_relaxed);
+    std::ostringstream oss;
+    oss << std::hex << now << "_" << seq;
+    return oss.str();
+}
+
+} // anonymous namespace
 
 namespace bridge {
 
@@ -336,13 +355,37 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
         auto account   = accEng.account();
         auto positions = accEng.positions();
 
+        // 市价单 vs 限价单
+        bool isMarket = (orderMap.value("orderType").toString().toUpper() == "MARKET");
+
+        // 市价单: 必须用当前行情价, 不允许价格为空
+        if (isMarket) {
+            auto q = engine::GmSessionEngine::instance().fetchQuote(order.symbol());
+            if (!q || !q->valid || q->price <= 0) {
+                setLastError(QStringLiteral("市价单无法获取当前行情价"));
+                return {};
+            }
+            order.setPrice(q->price);
+        }
+
         engine::OrderRequest engineReq;
+        engineReq.setClOrdId(generateClOrdId());                     // 幂等ID
+        engineReq.setAccountId(account.accountId);                   // 真实账户
         engineReq.setSymbol(order.symbol());
         engineReq.setPrice(order.price());
         engineReq.setQuantity(order.quantity());
         engineReq.setSide((order.side() == domain::strategy::OrderDirection::Buy)
                           ? engine::OrderSide::Buy : engine::OrderSide::Sell);
-        engineReq.setOrderType(engine::OrderType::Limit);
+        engineReq.setOrderType(isMarket ? engine::OrderType::Market
+                                        : engine::OrderType::Limit);
+        // A股: 买入=开仓, 卖出=平仓 (不允许做空)
+        bool isBuy = (engineReq.side() == engine::OrderSide::Buy);
+        engineReq.setPositionEffect(isBuy ? domain::trading::PositionEffect::Open
+                                          : domain::trading::PositionEffect::Close);
+        engineReq.setCurrency("CNY");
+        auto symObj = foundation::market::AStockSymbol::fromString(order.symbol());
+        if (symObj.isValid())
+            engineReq.setExchange(symObj.suffix().substr(1));
 
         auto riskResult = domain::strategy::RiskManager::instance()
             .checkManualOrder(engineReq, account, positions, order.price());
@@ -367,6 +410,21 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
             return out;
         }
     }
+
+    // 补齐 TradeOrder 字段 — submitOrder() 内部重建 engineReq 时需要
+    order.setClOrdId(generateClOrdId());
+    order.setAccountId(engine::AccountEngine::instance().account().accountId);
+    order.setCurrency("CNY");
+    auto symObj2 = foundation::market::AStockSymbol::fromString(order.symbol());
+    if (symObj2.isValid())
+        order.setExchange(symObj2.suffix().substr(1));
+    // 价格兜底: 若 QML 未传 price, 用 lastPrice 或 tick 最新价
+    if (order.price() <= 0 && orderMap.contains("lastPrice"))
+        order.setPrice(orderMap.value("lastPrice").toDouble());
+    // A股: 买入=开仓, 卖出=平仓
+    bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
+    order.setPositionEffect(isBuy ? domain::strategy::PositionEffect::Open
+                                  : domain::strategy::PositionEffect::Close);
 
     auto result = domain::trading::TradeExecutionEngine::instance().submitOrder(order);
 

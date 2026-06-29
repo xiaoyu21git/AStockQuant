@@ -12,7 +12,7 @@ Rectangle {
     border.width: 1
     implicitHeight: compactMode ? 620 : 980
 
-    property var marketSnapshot: ({})
+    property var marketSnapshot: (Bridge.MarketDataBridge.marketSnapshots[currentSymbol] || {})
     property var depthSnapshot: ({})
     property real availableCapital: 500000
     property var pendingOrders: []
@@ -357,6 +357,7 @@ Rectangle {
         root.syncEquityReferenceState(currentMode)
     }
     onCurrentSymbolChanged: {
+        Bridge.MarketDataBridge.resolveInstrument(currentSymbol)
         publishModeContextAsync()
         root.syncEquityReferenceState(currentMode)
     }

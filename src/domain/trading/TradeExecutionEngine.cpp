@@ -247,10 +247,29 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     engineReq.setOrderType(riskContext.isAutoStrategySignal()
                            ? engine::OrderType::Market
                            : engine::OrderType::Limit);
+    // A股规则: 买入=Open, 卖出=Close; 若已显式设置则尊重原值
+    {
+        auto pe = order.positionEffect();
+        if (pe == strategy::PositionEffect::Unspecified) {
+            pe = (order.side() == strategy::OrderDirection::Buy)
+                 ? strategy::PositionEffect::Open
+                 : strategy::PositionEffect::Close;
+        }
+        engineReq.setPositionEffect(
+            static_cast<PositionEffect>(static_cast<int>(pe)));
+    }
+    engineReq.setClOrdId(order.clOrdId());
+    engineReq.setAccountId(order.accountId());
+    engineReq.setCurrency(order.currency());
+    engineReq.setExchange(order.exchange());
+
+    INTERNAL_INFO_STREAM << "[TradeExecEng] submitOrder symbol=" << order.symbol()
+                         << " side=" << (order.side() == strategy::OrderDirection::Buy ? "Buy" : "Sell")
+                         << " price=" << order.price() << " qty=" << order.quantity()
+                         << " orderType=" << (riskContext.isAutoStrategySignal() ? "Market" : "Limit")
+                         << " posEffect=" << static_cast<int>(engineReq.positionEffect());
 
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
-
-    // ── 仅网关成功受理后才触发回调 — 避免虚假 "已报" 状态 ──
     if (result.accepted) {
         TradeOrder accepted = order;
         accepted.setStatus(OrderStatusValue::New);
@@ -452,6 +471,12 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         order.setPrice(req.price());
         order.setSignalStrength(
             req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
+        order.setClOrdId(req.clOrdId());
+        order.setAccountId(req.accountId());
+        order.setCurrency(req.currency());
+        order.setExchange(req.exchange());
+        order.setPositionEffect(
+            static_cast<strategy::PositionEffect>(req.positionEffect()));
 
         if (m_onOrderGenerated) m_onOrderGenerated(order);
 

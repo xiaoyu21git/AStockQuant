@@ -132,6 +132,20 @@ public:
             evt.set("tradingDay", td.tradingDay);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         }
+
+        // 缓存最新 tick 行情 (供 fetchQuote 快速读取)
+        {
+            GmQuote cached;
+            cached.symbol = td.symbol; cached.valid = true;
+            cached.price = td.price; cached.open = td.open;
+            cached.high = td.high; cached.low = td.low;
+            cached.volume = td.cumVolume;
+            for (size_t i = 0; i < td.bidPrices.size() && i < td.askPrices.size(); ++i)
+                cached.bids.push_back({td.bidPrices[i], td.bidVolumes[i]});
+            for (size_t i = 0; i < td.askPrices.size() && i < td.askVolumes.size(); ++i)
+                cached.asks.push_back({td.askPrices[i], td.askVolumes[i]});
+            e.m_quoteCache[td.symbol] = std::move(cached);
+        }
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[GmSdk] on_tick exception: " << e.what();
         } catch (...) {
@@ -339,22 +353,25 @@ void GmSessionEngine::unsubscribeTick(const std::string& symbol) {
 // ═══════════════════════════════════════════════════════════════════
 
 std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
-    std::string gm = toGmSymbol(symbol); if (gm.empty()) return std::nullopt;
-    auto* arr = ::current(gm.c_str(), false);
-    if (!arr || arr->status() || !arr->count()) {
-        if (arr) arr->release();
-        arr = ::last_tick(gm.c_str(), false);
+    // 交易时段: 优先取 tick 实时缓存
+    {
+        std::lock_guard<std::mutex> lock(m_tickMutex);
+        auto it = m_quoteCache.find(symbol);
+        if (it != m_quoteCache.end()) {
+            GmQuote q = it->second;
+            q.preClose = fetchPreClose(symbol);
+            return q;
+        }
     }
-    if (!arr || arr->status() || !arr->count()) { if (arr) arr->release(); return std::nullopt; }
-    auto& t = arr->at(0);
-    GmQuote q; q.symbol = symbol; q.valid = true;
-    q.price = t.price; q.open = t.open; q.high = t.high; q.low = t.low;
-    q.preClose = fetchPreClose(symbol); q.volume = t.cum_volume;
-    for (int i = 0; i < 5; ++i) {
-        if (t.quotes[i].bid_price > 0) q.bids.push_back({static_cast<double>(t.quotes[i].bid_price), static_cast<double>(t.quotes[i].bid_volume)});
-        if (t.quotes[i].ask_price > 0) q.asks.push_back({static_cast<double>(t.quotes[i].ask_price), static_cast<double>(t.quotes[i].ask_volume)});
+    // 非交易时段: 取最近收盘快照
+    double pc = fetchPreClose(symbol);
+    if (pc > 0) {
+        GmQuote q;
+        q.symbol = symbol; q.valid = true;
+        q.price = pc; q.preClose = pc;
+        return q;
     }
-    arr->release(); return q;
+    return std::nullopt;
 }
 
 double GmSessionEngine::fetchPreClose(const std::string& symbol) {
@@ -362,12 +379,19 @@ double GmSessionEngine::fetchPreClose(const std::string& symbol) {
     if (m_cacheDate != today) { m_preCloseCache.clear(); m_cacheDate = today; }
     auto it = m_preCloseCache.find(symbol); if (it != m_preCloseCache.end()) return it->second;
     std::string gm = toGmSymbol(symbol); if (gm.empty()) return 0;
-    char s[32], e[32]; time_t y = now - 86400;
-    strftime(s, sizeof(s), "%Y-%m-%d", localtime(&y)); strftime(e, sizeof(e), "%Y-%m-%d", localtime(&now));
-    auto* bars = ::history_bars(gm.c_str(), "1d", s, e, 0, nullptr, true, nullptr);
-    double pc = (bars && !bars->status() && bars->count()) ? bars->at(0).close : 0;
-    if (bars) bars->release();
-    return m_preCloseCache[symbol] = pc;
+
+    // 回看最多 10 天, 覆盖周末和长假 (周一需要看上周五)
+    for (int daysBack = 1; daysBack <= 10; ++daysBack) {
+        time_t t = now - daysBack * 86400;
+        char s[32], e[32];
+        strftime(s, sizeof(s), "%Y-%m-%d", localtime(&t));
+        strftime(e, sizeof(e), "%Y-%m-%d", localtime(&t));
+        auto* bars = ::history_bars(gm.c_str(), "1d", s, e, 0, nullptr, true, nullptr);
+        double pc = (bars && !bars->status() && bars->count()) ? bars->at(0).close : 0;
+        if (bars) bars->release();
+        if (pc > 0) return m_preCloseCache[symbol] = pc;
+    }
+    return 0;
 }
 
 // ═══════════════════════════════════════════════════════════════════

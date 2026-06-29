@@ -12,8 +12,9 @@ namespace engine {
 // ═══════════════════════════════════════════════════════════════════
 
 namespace {
-int toGmSide(OrderSide s)       { return s == OrderSide::Buy ? 1 : 2; }
-int toGmOrderType(OrderType t)   { return t == OrderType::Limit ? 1 : 2; }
+int toGmSide(OrderSide s)                 { return s == OrderSide::Buy ? 1 : 2; }
+int toGmOrderType(OrderType t)             { return t == OrderType::Limit ? 1 : 2; }
+int toGmPositionEffect(domain::trading::PositionEffect pe) { return static_cast<int>(pe) + 1; }
 std::string toGm(const std::string& internal) {
     auto dot = internal.find('.');
     if (dot == std::string::npos) return "";
@@ -106,7 +107,7 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     ::OrderRequest gmReq{};
     std::strncpy(gmReq.symbol, gmSym.c_str(), sizeof(gmReq.symbol) - 1);
     gmReq.side            = toGmSide(req.side());
-    gmReq.position_effect = static_cast<int>(req.positionEffect());
+    gmReq.position_effect = toGmPositionEffect(req.positionEffect());
     gmReq.order_type      = toGmOrderType(req.orderType());
     gmReq.price           = req.price();
     gmReq.volume          = static_cast<long long>(req.quantity());
