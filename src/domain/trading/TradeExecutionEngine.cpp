@@ -204,35 +204,43 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     // Stage 1: validation
     auto vr = validateOrder(order);
     if (!vr.valid()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] validateOrder FAILED: " << vr.message()
+                             << " code=" << static_cast<int>(vr.code());
         return SubmitResult::rejected(vr.message(), vr.code());
     }
 
     // Stage 2: scheduling conflict checks
     auto conflict = m_impl->checkExecutionPause(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] checkExecutionPause blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkManualCheckpoint(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] manualCheckpoint blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkPartialFillAdvance(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] partialFillAdvance blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkPendingOrderConflict(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] pendingOrderConflict blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
 
     // Stage 3: risk evaluation
     auto riskResult = strategy::RiskEvaluator::evaluateOrder(riskContext);
     if (!riskResult.approved()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] risk rejected: " << riskResult.description();
         return SubmitResult::riskRejected(riskResult.code(), riskResult.description());
     }
 
     // Stage 4: submit via TradeEngine
     if (!engine::TradeEngine::instance().initialized()) {
+        INTERNAL_ERROR_STREAM << "[TradeExec] TradeEngine NOT initialized";
         return SubmitResult::rejected("TradeEngine not initialized",
                                        OrderValidationCode::MissingRequiredFields);
     }
