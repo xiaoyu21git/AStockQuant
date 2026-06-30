@@ -270,6 +270,11 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     riskCfg.takeProfitPercent = params.takeProfitPercent;
     domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
 
+    // 日频/盘中分类: 仅 HighFrequency 走 drainQueue 持续评估,
+    // 其余全部日频 → 盘中只巡检, 盘后触发一次 evaluateEndOfDay
+    engine->m_isDailyFrequency = (params.behaviorKind
+        != ::domain::strategies::StrategyBehaviorKind::HighFrequency);
+
     return engine;
 
     } catch (const std::exception& e) {
@@ -533,11 +538,35 @@ void StrategyEngine::startLiveLoop()
     }
     m_loopRunning.store(true, std::memory_order_release);
 
-    INTERNAL_INFO_STREAM << "[启动] 实盘循环开始";
+    if (m_isDailyFrequency) {
+        // ── 日频: 只启动风控巡检 + 注册日终回调 ──
+        INTERNAL_INFO_STREAM << "[启动] 日频策略 — 启动风控巡检 + 注册 EOD 回调";
 
-    m_dedicatedExecutor->post([this]() {
-        drainQueue();
-    });
+        // 注册日终回调 (幂等, 只在首次调用时注册)
+        if (!m_eodCallbackRegistered) {
+            domain::market::MarketDataService::instance()
+                .registerEndOfDayCallback([this](const std::string& closedTradingDay) {
+                // 在 tick 线程中触发, post 到引擎线程执行
+                if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire)) {
+                    m_dedicatedExecutor->post([this, closedTradingDay]() {
+                        evaluateEndOfDay(closedTradingDay);
+                    });
+                }
+            });
+            m_eodCallbackRegistered = true;
+        }
+
+        m_dedicatedExecutor->post([this]() {
+            riskPatrolLoop();
+        });
+    } else {
+        // ── 分钟频/高频: 启动完整 drainQueue ──
+        INTERNAL_INFO_STREAM << "[启动] 盘中策略 — 启动 drainQueue 事件循环";
+
+        m_dedicatedExecutor->post([this]() {
+            drainQueue();
+        });
+    }
 }
 
 void StrategyEngine::stopLiveLoop()
@@ -695,6 +724,156 @@ void StrategyEngine::drainQueue()
     if (dropped > 0) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] drainQueue stopped: " << static_cast<unsigned long long>(dropped) << " ticks dropped during session";
     }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// riskPatrolLoop — 日频策略盘中线程: 仅做风控巡检
+// ═════════════════════════════════════════════════════════════════════════
+
+void StrategyEngine::riskPatrolLoop()
+{
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 风控巡检循环启动 (日频)";
+
+    while (m_loopRunning.load(std::memory_order_acquire)) {
+        // 每 1 秒巡检一次 (止损/止盈不需要高频轮询)
+        {
+            std::unique_lock<std::mutex> lock(m_queueMutex);
+            m_queueCv.wait_for(lock, std::chrono::seconds(1), [this]() {
+                return !m_loopRunning.load(std::memory_order_acquire);
+            });
+        }
+        if (!m_loopRunning.load(std::memory_order_acquire)) break;
+
+        try {
+            auto stopOrders = RiskManager::instance().patrolPositions();
+            if (!stopOrders.empty() && m_orderListener) {
+                for (auto& o : stopOrders) {
+                    o.setClOrdId(generateClOrdId());
+                }
+                INTERNAL_INFO_STREAM << "[StrategyEngine] 风控触发 "
+                                     << stopOrders.size() << " 笔止损/止盈";
+                m_orderListener->onOrders(stopOrders);
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_WARN_STREAM << "[StrategyEngine] patrolPosition 异常: "
+                                 << e.what();
+        }
+
+        m_lastProcessedAt.store(
+            std::chrono::steady_clock::now().time_since_epoch().count(),
+            std::memory_order_release);
+    }
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 风控巡检循环结束";
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// evaluateEndOfDay — 日频策略盘后评估: 当日 Bar 已封口, 跑一次完整策略
+// ═════════════════════════════════════════════════════════════════════════
+
+void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
+{
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估触发, tradingDay="
+                         << closedTradingDay << " (日频)";
+
+    if (m_isBacktestMode.load(std::memory_order_acquire)) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 回测模式, 跳过日终评估";
+        return;
+    }
+    if (!m_orderListener) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] 无订单监听器, 日终评估跳过";
+        return;
+    }
+
+    // ── 从 MarketDataService 取所有已订阅标的的完整日 Bar ──
+    auto symbols = domain::market::MarketDataService::instance().symbols();
+    if (symbols.empty()) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无订阅标的, 跳过";
+        return;
+    }
+
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size()
+                         << " 只标的";
+
+    int ordersGenerated = 0;
+    for (const auto& sym : symbols) {
+        auto& d = domain::market::MarketDataService::instance().liveData(sym);
+        if (!d.valid()) continue;
+        double price = d.dailyBar().close();
+        if (price <= 0) continue;
+
+        auto aSym = foundation::market::AStockSymbol::fromString(sym);
+        if (!aSym.isValid()) continue;
+
+        MarketDataPoint mdp(
+            domain::strategy::InstrumentId{aSym.instrumentId()},
+            price,
+            d.dailyBar().volume(),
+            0);
+
+        try {
+            auto orders = step(mdp);
+            if (orders.has_value()) {
+                auto& accEng = engine::AccountEngine::instance();
+                auto account   = accEng.account();
+                auto positions = accEng.positions();
+
+                if (account.totalAsset <= 0) {
+                    INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, "
+                                        << "跳过 " << sym;
+                    continue;
+                }
+
+                for (auto& order : *orders) {
+                    if (!order.isValid()) continue;
+                    order.setClOrdId(generateClOrdId());
+                    order.setAccountId(account.accountId);
+                    order.setCurrency("CNY");
+
+                    auto symObj = foundation::market::AStockSymbol::fromCode(order.symbol());
+                    if (!symObj.isValid() || symObj.suffix().empty()) {
+                        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD skip invalid symbol: "
+                                            << order.symbol();
+                        continue;
+                    }
+                    order.setSymbol(symObj.fullSymbol());
+                    order.setExchange(symObj.suffix().substr(1));
+
+                    auto& ld = domain::market::MarketDataService::instance()
+                        .liveData(order.symbol());
+                    double tickPrice = ld.valid() ? ld.dailyBar().close() : mdp.lastPrice();
+
+                    double signalScore = order.extensionAs<double>(
+                        domain::trading::ExtKey::kSignalScore, 0.5);
+                    RiskResult riskResult = RiskManager::instance().checkAutoSignal(
+                        order, account, positions, tickPrice, signalScore);
+                    if (riskResult.approved()) {
+                        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 信号下单: "
+                                            << order.symbol() << " "
+                                            << (order.side()==engine::OrderSide::Buy?"买":"卖")
+                                            << " qty=" << order.quantity()
+                                            << " price=" << order.price();
+                        std::vector<OrderRequest> approved{order};
+                        m_orderListener->onOrders(approved);
+                        ordersGenerated++;
+                    } else {
+                        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 信号被风控拒绝: "
+                                            << order.symbol() << " reason="
+                                            << riskResult.description();
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_WARN_STREAM << "[StrategyEngine] EOD step 异常: " << sym
+                                 << " " << e.what();
+        }
+    }
+
+    m_lastProcessedAt.store(
+        std::chrono::steady_clock::now().time_since_epoch().count(),
+        std::memory_order_release);
+
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成, 生成 "
+                         << ordersGenerated << " 笔信号";
 }
 
 StrategyEngine::Builder::Builder() = default;

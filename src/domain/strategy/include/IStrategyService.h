@@ -502,7 +502,9 @@ public:
 
     // ─── 实盘异步专有接口 ───
 
-    /// @brief 启动专属后台线程（ThreadPoolExecutor(1,1)），进入 drainQueue 事件循环。
+    /// @brief 启动专属后台线程。
+    /// 日频策略: 只启 riskPatrolLoop (止损巡检) + 注册 EOD 回调
+    /// 分钟频/高频: 启 drainQueue (持续评估+下单+巡检)
     void startLiveLoop();
 
     /// @brief 安全停止后台线程并等待完成。
@@ -510,6 +512,13 @@ public:
 
     /// @brief 查询实盘循环是否正在运行
     [[nodiscard]] bool isLiveLoopRunning() const noexcept;
+
+    /// @brief 是否为日频策略 (fromDb 时根据 behaviorKind 自动设置)
+    [[nodiscard]] bool isDailyFrequency() const noexcept { return m_isDailyFrequency; }
+
+    /// @brief 日终评估: 当日 Bar 已封口，跑一次完整策略评估并生成次日开盘信号
+    /// 由 MarketDataService 的 EOD 回调触发，在专用线程中执行
+    void evaluateEndOfDay(const std::string& closedTradingDay);
 
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
@@ -552,8 +561,11 @@ private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
 
-    /// @brief 后台线程主函数：阻塞等待行情 → step() → 通知订单。
+    /// @brief 后台线程主函数（分钟频/高频）：阻塞等待行情 → step() → 通知订单。
     void drainQueue();
+
+    /// @brief 后台线程主函数（日频）：仅做止损巡检，不跑策略评估。
+    void riskPatrolLoop();
 
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
@@ -569,6 +581,8 @@ private:
     static constexpr size_t kMaxQueueSize = 5000;
     std::atomic<bool> m_loopRunning{false};
     std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位，防御 drainQueue 误触发监听器
+    bool m_isDailyFrequency{false};             ///< 日频策略 → 只巡检+日终评估, 不启动 drainQueue
+    bool m_eodCallbackRegistered{false};        ///< 已注册 MarketDataService EOD 回调
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
