@@ -179,7 +179,6 @@ static QVariantList loadDailyBars(const std::string& gmSym, int lookback) {
 static QVariantList loadTimeShare(const std::string& gmSym) {
     auto now = std::chrono::system_clock::now();
     auto t_now  = std::chrono::system_clock::to_time_t(now);
-    // 今日 00:00 → now
     std::time_t t_today = t_now;
     std::tm local;
     localtime_s(&local, &t_today);
@@ -189,24 +188,31 @@ static QVariantList loadTimeShare(const std::string& gmSym) {
     std::strftime(s, sizeof(s), "%Y-%m-%d", &local);
     std::strftime(e, sizeof(e), "%Y-%m-%d %H:%M:%S", std::localtime(&t_now));
 
-    auto* bars = ::history_bars(gmSym.c_str(), "60", s, e, 0, nullptr, true, nullptr);
+    // 尝试多种 bar size 格式 (gmsdk 不同版本格式不同)
+    static const char* kBarSizes[] = {"60s", "60", "1m", nullptr};
     QVariantList list;
-    if (!bars || bars->status() || !bars->count()) {
+    for (int i = 0; kBarSizes[i]; ++i) {
+        auto* bars = ::history_bars(gmSym.c_str(), kBarSizes[i], s, e, 0, nullptr, true, nullptr);
+        if (bars && bars->status() == 0 && bars->count() > 0) {
+            INTERNAL_INFO_STREAM << "[StockDataLoader] loadTimeShare barSize=" << kBarSizes[i]
+                                 << " count=" << bars->count();
+            for (size_t j = 0; j < bars->count(); ++j) {
+                auto& b = bars->at(j);
+                QVariantMap item;
+                item["timestamp"] = QVariant::fromValue<qint64>(static_cast<qint64>(b.bob * 1000.0));
+                item["open"]   = static_cast<double>(b.open);
+                item["high"]   = static_cast<double>(b.high);
+                item["low"]    = static_cast<double>(b.low);
+                item["close"]  = static_cast<double>(b.close);
+                item["volume"] = b.volume;
+                list.append(item);
+            }
+            bars->release();
+            return list;
+        }
         if (bars) bars->release();
-        return list;
     }
-    for (size_t i = 0; i < bars->count(); ++i) {
-        auto& b = bars->at(i);
-        QVariantMap item;
-        item["timestamp"] = QVariant::fromValue<qint64>(static_cast<qint64>(b.bob * 1000.0));
-        item["open"]   = static_cast<double>(b.open);
-        item["high"]   = static_cast<double>(b.high);
-        item["low"]    = static_cast<double>(b.low);
-        item["close"]  = static_cast<double>(b.close);
-        item["volume"] = b.volume;
-        list.append(item);
-    }
-    bars->release();
+    INTERNAL_WARN_STREAM << "[StockDataLoader] loadTimeShare empty for " << gmSym;
     return list;
 }
 
