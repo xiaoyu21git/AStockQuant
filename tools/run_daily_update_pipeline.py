@@ -139,7 +139,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-minute-backfill",
         action="store_true",
-        help="历史模式时同时回填分钟线历史",
+        help="回填分钟线历史",
+    )
+    parser.add_argument(
+        "--minute-backfill-start",
+        default="",
+        help="分钟线回填起始日期 YYYY-MM-DD",
+    )
+    parser.add_argument(
+        "--minute-backfill-end",
+        default="",
+        help="分钟线回填结束日期 YYYY-MM-DD",
     )
     parser.add_argument(
         "--weekly-monthly-backfill",
@@ -172,7 +182,7 @@ def prompt_yes_no(prompt: str, default: bool) -> bool:
 def prompt_menu_choice() -> str:
     choices = {
         "1": "最新行情 (日线+派生+分钟线+周月线+校验)",
-        "2": "历史补缺 (回填日线历史缺口)",
+        "2": "历史补缺 (分钟线+周月线全量回填)",
     }
     print("\n可执行方案:")
     for key, label in choices.items():
@@ -188,16 +198,24 @@ def prompt_menu_choice() -> str:
 
 def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | None:
     print("数据更新交互模式")
-    print("  最新行情: 日线 → 派生字段 → 分钟线 → 周月线 → 校验")
-    print("  历史补缺: 日线历史缺口 → 派生字段历史缺口")
+    print("  最新行情: 日线 → 派生字段 → 分钟线(当日) → 周月线(当前周期) → 校验")
+    print("  历史补缺: 分钟线全量回填 + 周月线全量重建(日线已完整,不需要补)")
 
     choice = prompt_menu_choice()
     if choice == "1":
         args.include_history_gaps = False
     elif choice == "2":
-        args.include_history_gaps = True
+        args.include_history_gaps = False
         args.with_minute_backfill = True
         args.weekly_monthly_backfill = True
+        args.skip_derived_backfill = True
+        args.skip_valuation_backfill = True
+        args.skip_caps_backfill = True
+        args.skip_turnover_backfill = True
+
+        # 历史回填需要起止日期
+        args.minute_backfill_start = prompt_text("分钟线回填起始日期", "2026-01-01")
+        args.minute_backfill_end = prompt_text("分钟线回填结束日期", dt.date.today().isoformat())
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
@@ -400,11 +418,14 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
     ]
 
 
-def build_minute_update_command(args: argparse.Namespace, target_date: dt.date, backfill_start: dt.date | None = None) -> list[str]:
+def build_minute_update_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
     cmd = [sys.executable, "tools/update_minute_data.py", "--target-date", target_date.isoformat()]
-    if args.with_minute_backfill and backfill_start:
-        cmd.extend(["--backfill", "--start", backfill_start.isoformat()])
     return cmd
+
+def build_minute_backfill_command(args: argparse.Namespace) -> list[str]:
+    start = args.minute_backfill_start or "2026-01-01"
+    end = args.minute_backfill_end or dt.date.today().isoformat()
+    return [sys.executable, "tools/update_minute_data.py", "--backfill", "--start", start, "--target-date", end]
 
 def build_weekly_monthly_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
     cmd = [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
@@ -650,15 +671,16 @@ def main() -> int:
                 if not args.continue_on_step_failure:
                     pipeline_failed = True
 
-        if args.with_minute_backfill:
-            if not execute_step(
-                "minute bars backfill (history)",
-                build_minute_update_command(args, target_date, backfill_start=history_start_date),
-                required=False,
-                continue_on_failure=True,
-                results=step_results,
-            ):
-                pass
+    # ── 分钟线/周月线历史回填 (独立于日线历史缺口) ──
+    if args.with_minute_backfill:
+        if not execute_step(
+            "minute bars backfill (history)",
+            build_minute_backfill_command(args),
+            required=False,
+            continue_on_failure=True,
+            results=step_results,
+        ):
+            pass
 
     # ↓ 以下步骤不受前面失败影响，始终执行 ↓
 
@@ -672,7 +694,7 @@ def main() -> int:
         pass
 
     if not execute_step(
-        "minute bars update",
+        "minute bars latest",
         build_minute_update_command(args, target_date),
         required=False,
         continue_on_failure=True,
