@@ -75,10 +75,6 @@ ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
     close=EXCLUDED.close, volume=EXCLUDED.volume, turnover=EXCLUDED.turnover
 """
 
-def is_trade_day(cur, d):
-    cur.execute("SELECT 1 FROM ref.trade_calendar WHERE trade_date=%s", (d,))
-    return cur.fetchone() is not None
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--target-date", default="")
@@ -89,8 +85,6 @@ def main():
 
     conn = psycopg2.connect(**PG_CONFIG)
     cur = conn.cursor()
-    if not is_trade_day(cur, target):
-        print(f"[wl/ml] {target} 非交易日"); conn.close(); return
 
     if a.backfill:
         cur.execute(W_FULL, (target,)); wc = cur.rowcount

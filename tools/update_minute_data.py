@@ -31,9 +31,13 @@ def fetch(symbol, date):
     for _, r in df.iterrows():
         try:
             ts = pd.Timestamp(r["时间"]).to_pydatetime()
-            bars.append({"trade_ts": ts, "open": float(r["开盘"] or 0), "high": float(r["最高"] or 0),
-                         "low": float(r["最低"] or 0), "close": float(r["收盘"] or 0),
-                         "volume": int(r["成交量"] or 0), "amount": float(r["成交额"] or 0)})
+            o = float(r.get("开盘", 0) or 0)
+            h = float(r.get("最高", 0) or 0)
+            l = float(r.get("最低", 0) or 0)
+            c = float(r.get("收盘", 0) or 0)
+            if o == 0: o = c  # AKShare 1分钟线开盘可能为0, 用收盘代替
+            bars.append({"trade_ts": ts, "open": o, "high": h, "low": l, "close": c,
+                         "volume": int(r.get("成交量", 0) or 0), "amount": float(r.get("成交额", 0) or 0)})
         except Exception:
             continue
     return bars
@@ -56,6 +60,13 @@ def main():
         cur.execute("SELECT trade_date FROM ref.trade_calendar WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date",
                     (dt.date.fromisoformat(a.start), target))
         dates = [r[0] for r in cur.fetchall()]
+        if not dates:
+            # fallback: 生成全部日期, 跳过周末
+            d = dt.date.fromisoformat(a.start)
+            while d <= target:
+                if d.weekday() < 5:
+                    dates.append(d)
+                d += dt.timedelta(days=1)
         tag = f"回填 {a.start}→{target} {len(dates)}天"
     else:
         dates = [target]
