@@ -68,6 +68,15 @@ Rectangle {
             if (h > priceMax) priceMax = h; if (l < priceMin) priceMin = l
             if (v > volMax) volMax = v
         }
+        // 确保昨收线在可见范围内 (分时图昨日收盘可能远离今日价格区间)
+        if (preClose > 0) {
+            if (preClose > priceMax) priceMax = preClose
+            if (preClose < priceMin) priceMin = preClose
+        }
+        if (latestPrice > 0) {
+            if (latestPrice > priceMax) priceMax = latestPrice
+            if (latestPrice < priceMin) priceMin = latestPrice
+        }
         var pad = (priceMax - priceMin) * 0.08
         if (pad <= 0) pad = 0.5
         priceMin = Math.max(0, priceMin - pad); priceMax += pad
