@@ -146,39 +146,98 @@ Rectangle {
             var volBot = H - 2
             var volH   = volBot - divY - 1
 
-            // 网格 + Y轴
-            ctx.strokeStyle = gridColor; ctx.lineWidth = 0.5
-            ctx.fillStyle = textDim; ctx.font = "9px sans-serif"; ctx.textAlign = "right"
-            for (var g = 0; g < 5; g++) {
-                var gy = chartTop + mainH * g / 4
-                ctx.beginPath(); ctx.moveTo(plotX, gy); ctx.lineTo(W, gy); ctx.stroke()
-                ctx.fillText((priceMax - priceRange * g / 4).toFixed(2), W-4, gy+3)
-            }
-            // 昨收线
-            if (preClose > 0) {
-                var preY = chartTop + mainH * (1 - (preClose - priceMin) / priceRange)
-                ctx.strokeStyle = "#666688"; ctx.setLineDash([4,4])
-                ctx.beginPath(); ctx.moveTo(plotX, preY); ctx.lineTo(W, preY); ctx.stroke(); ctx.setLineDash([])
-            }
-
             var isTimeShare = (chartPeriod === 0)
 
+            if (!isTimeShare) {
+                // 网格 + Y轴 (仅K线模式; 分时图内部自行绘制)
+                ctx.strokeStyle = gridColor; ctx.lineWidth = 0.5
+                ctx.fillStyle = textDim; ctx.font = "9px sans-serif"; ctx.textAlign = "right"
+                for (var g = 0; g < 5; g++) {
+                    var gy = chartTop + mainH * g / 4
+                    ctx.beginPath(); ctx.moveTo(plotX, gy); ctx.lineTo(W, gy); ctx.stroke()
+                    ctx.fillText((priceMax - priceRange * g / 4).toFixed(2), W-4, gy+3)
+                }
+                // 昨收线
+                if (preClose > 0) {
+                    var preY = chartTop + mainH * (1 - (preClose - priceMin) / priceRange)
+                    ctx.strokeStyle = "#666688"; ctx.setLineDash([4,4])
+                    ctx.beginPath(); ctx.moveTo(plotX, preY); ctx.lineTo(W, preY); ctx.stroke(); ctx.setLineDash([])
+                }
+            }
+
             if (isTimeShare) {
-                // ════════════════════════════════════
-                // 分时图: 折线 + 渐变填充 + 均价线
-                // ════════════════════════════════════
+                // ════════════════════════════════════════════════════
+                // 分时图: 交易时间X轴 + 精确竖线/横线 + 折线 + 均价
+                // ════════════════════════════════════════════════════
+
+                // X轴映射: 时间戳 → 交易分钟 (9:30=0, 11:30=120, 13:00=120, 15:00=240)
+                function tradingMinute(ts) {
+                    var d = new Date(ts)
+                    var m = d.getHours() * 60 + d.getMinutes()
+                    if (m < 570) return 0; if (m >= 900) return 240
+                    if (m < 690)  return m - 570
+                    if (m < 780)  return 120
+                    return 120 + (m - 780)
+                }
+                function timeX(ts) { return plotX + tradingMinute(ts) / 240 * plotW }
+
+                // ── 竖线网格 (每半小时) ──
+                var timeGrid = [
+                    {min:0,  label:"09:30", bold:true},
+                    {min:30, label:"10:00", bold:false},
+                    {min:60, label:"10:30", bold:false},
+                    {min:90, label:"11:00", bold:false},
+                    {min:120,label:"11:30/13:00", bold:true},
+                    {min:150,label:"13:30", bold:false},
+                    {min:180,label:"14:00", bold:false},
+                    {min:210,label:"14:30", bold:false},
+                    {min:240,label:"15:00", bold:true}
+                ]
+                for (var ti = 0; ti < timeGrid.length; ti++) {
+                    var tg = timeGrid[ti]
+                    var tx = plotX + tg.min / 240 * plotW
+                    ctx.strokeStyle = tg.bold ? "#404860" : gridColor
+                    ctx.lineWidth = tg.bold ? 1.0 : 0.4
+                    ctx.setLineDash([])
+                    ctx.beginPath(); ctx.moveTo(tx, chartTop); ctx.lineTo(tx, chartTop + mainH); ctx.stroke()
+                    // 时间标签
+                    ctx.fillStyle = textDim; ctx.font = "9px sans-serif"; ctx.textAlign = "center"
+                    ctx.fillText(tg.label, tx, volBot - 2)
+                }
+
+                // ── 横线网格 (5条价格线) ──
+                ctx.strokeStyle = gridColor; ctx.lineWidth = 0.5; ctx.setLineDash([])
+                ctx.fillStyle = textDim; ctx.font = "9px sans-serif"; ctx.textAlign = "right"
+                for (var g = 0; g < 5; g++) {
+                    var gy = chartTop + mainH * g / 4
+                    ctx.beginPath(); ctx.moveTo(plotX, gy); ctx.lineTo(plotX + plotW, gy); ctx.stroke()
+                    ctx.fillText((priceMax - priceRange * g / 4).toFixed(2), plotX + plotW, gy + 3)
+                }
+
+                // ── 昨收线 ──
+                if (preClose > 0) {
+                    var preY = chartTop + mainH * (1 - (preClose - priceMin) / priceRange)
+                    ctx.strokeStyle = "#888899"; ctx.lineWidth = 0.8
+                    ctx.setLineDash([3, 5])
+                    ctx.beginPath(); ctx.moveTo(plotX, preY); ctx.lineTo(plotX + plotW, preY); ctx.stroke()
+                    ctx.setLineDash([])
+                    ctx.fillText("昨收 " + preClose.toFixed(2), plotX + plotW, preY + 3)
+                }
+
+                // ── 数据点: 按交易时间映射X坐标 ──
                 var pts = []
-                var sumClose = 0
+                var sumClose = 0, cntClose = 0
                 for (var j = 0; j < n; j++) {
                     var cc = candleModel.data(candleModel.index(j, 4), 0x0105)
+                    var ts = candleModel.data(candleModel.index(j, 0), 0x0101)
                     var cy = chartTop + mainH * (1 - (cc - priceMin) / priceRange)
-                    var lx = plotX + j * candleGap + candleGap/2
+                    var lx = timeX(ts)
                     pts.push({x: lx, y: cy})
-                    sumClose += cc
+                    sumClose += cc; cntClose++
                 }
-                var avgPrice = n > 0 ? sumClose / n : preClose
+                var avgPrice = cntClose > 0 ? sumClose / cntClose : preClose
 
-                // 渐变填充 (价格线下方到 chartBottom)
+                // ── 渐变填充 ──
                 if (pts.length > 1) {
                     ctx.beginPath()
                     ctx.moveTo(pts[0].x, pts[0].y)
@@ -190,27 +249,30 @@ Rectangle {
                     ctx.closePath()
                     var grad = ctx.createLinearGradient(0, chartTop, 0, chartBot)
                     var abovePre = latestPrice >= preClose
-                    grad.addColorStop(0, abovePre ? "rgba(239,68,68,0.25)" : "rgba(16,185,129,0.25)")
+                    grad.addColorStop(0, abovePre ? "rgba(239,68,68,0.28)" : "rgba(16,185,129,0.28)")
                     grad.addColorStop(1, "rgba(0,0,0,0.01)")
                     ctx.fillStyle = grad
                     ctx.fill()
                 }
 
-                // 价格折线
+                // ── 价格折线 ──
                 ctx.strokeStyle = (latestPrice >= preClose) ? "#ef5350" : "#26a69a"
-                ctx.lineWidth = 1.2
+                ctx.lineWidth = 1.3
+                ctx.setLineDash([])
                 ctx.beginPath()
                 for (var k = 0; k < pts.length; k++)
                     k === 0 ? ctx.moveTo(pts[k].x, pts[k].y) : ctx.lineTo(pts[k].x, pts[k].y)
                 ctx.stroke()
 
-                // 均价线 (黄色虚线)
+                // ── 均价线 (黄色虚线) ──
                 if (avgPrice > 0) {
                     var avgY = chartTop + mainH * (1 - (avgPrice - priceMin) / priceRange)
-                    ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 0.8
-                    ctx.setLineDash([3, 4])
+                    ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 0.9
+                    ctx.setLineDash([4, 4])
                     ctx.beginPath(); ctx.moveTo(plotX, avgY); ctx.lineTo(plotX + plotW, avgY); ctx.stroke()
                     ctx.setLineDash([])
+                    ctx.fillStyle = "#f59e0b"; ctx.textAlign = "left"
+                    ctx.fillText("均价 " + avgPrice.toFixed(2), plotX + 4, avgY - 2)
                 }
             } else {
                 // ════════════════════════════════════
@@ -275,17 +337,23 @@ Rectangle {
 
             // 成交量
             if (volMax > 0) {
-                ctx.fillStyle = textDim; ctx.textAlign = "center"
-                var step = Math.max(1, Math.floor(n/4))
-                for (var k = 0; k < n; k += step) {
-                    var ts = candleModel.data(candleModel.index(k,0),0x0101)
-                    var ds = new Date(ts).toLocaleString(Qt.locale(), isTimeShare?"hh:mm":"MM-dd")
-                    ctx.fillText(ds, plotX+k*candleGap+candleGap/2, volBot-2)
+                if (!isTimeShare) {
+                    // K线: 时间标签在成交量区
+                    ctx.fillStyle = textDim; ctx.textAlign = "center"
+                    var step = Math.max(1, Math.floor(n/4))
+                    for (var k = 0; k < n; k += step) {
+                        var ts = candleModel.data(candleModel.index(k,0),0x0101)
+                        var ds = new Date(ts).toLocaleString(Qt.locale(), "MM-dd")
+                        ctx.fillText(ds, plotX+k*candleGap+candleGap/2, volBot-2)
+                    }
                 }
                 for (var m = 0; m < n; m++) {
                     var vo=candleModel.data(candleModel.index(m,1),0x0102), vc=candleModel.data(candleModel.index(m,4),0x0105)
                     var vv=candleModel.data(candleModel.index(m,5),0x0106)
-                    var bh = (vv/volMax)*(volH-14), vx=plotX+m*candleGap+candleGap/2-candleW/2
+                    var bh = (vv/volMax)*(volH-14)
+                    var vx = isTimeShare
+                        ? timeX(candleModel.data(candleModel.index(m,0),0x0101)) - candleW/2
+                        : plotX + m * candleGap + candleGap/2 - candleW/2
                     ctx.fillStyle = (vc>=vo)?upColor:downColor
                     ctx.fillRect(vx, volBot-bh-12, candleW, Math.max(1,bh))
                 }
