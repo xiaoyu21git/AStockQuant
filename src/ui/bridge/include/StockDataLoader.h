@@ -1,13 +1,13 @@
 // StockDataLoader.h — K线数据加载器
-// 桥接 GmSessionEngine tick 数据 → CandleDataModel
+// v2: 实时同步改为增量更新 (appendCandle + updateLastCandle)
 #pragma once
 
 #include <QObject>
 #include <QString>
+#include <QTimer>
 #include "CandleDataModel.h"
-#include "foundation/Utils/Uuid.h"
 
-namespace engine { class EventBus; }
+namespace domain::market { class LiveData; }
 
 namespace bridge {
 
@@ -37,27 +37,34 @@ public:
     Q_INVOKABLE void loadHistory(const QString& code, int period);
     Q_INVOKABLE void loadFromDB(const QString& code, int period);
 
-    // 实时行情回调 (由 GmSessionEngine::on_tick 或 EventBus 触发)
-    void onTick(const QString& symbol, double price, double volume, qint64 timestamp);
-
 signals:
     void symbolChanged();
     void periodChanged();
     void dataReady();
     void tickReceived(const QString& symbol, double price, double volume);
 
+private slots:
+    void syncLiveData();
+
 private:
-    void subscribeToEventBus();
+    static qint64 periodMs(int period);
+
+    /// @brief 重置增量同步状态 (周期切换/标的变化时调用)
+    void resetSyncState();
 
     CandleDataModel* m_model = nullptr;
     QString m_symbol;
     int m_period = Daily;
-    CandleItem m_currentCandle;
-    bool m_hasCurrentCandle = false;
-    foundation::utils::Uuid m_tickSub;
+    QTimer m_timer;
 
-    static qint64 periodStartMs(qint64 ts, int period);
-    static qint64 periodMs(int period);
+    // ── 增量同步状态 ──
+    bool   m_isFirstSync = true;
+    int    m_modelCount = 0;
+    qint64 m_lastBucketKey = -1;  // 最近一个聚合桶的时间键
+    double m_lastClose = 0.0;
+    double m_lastVolume = 0.0;
+    double m_lastHigh = 0.0;
+    double m_lastLow = 0.0;
 };
 
 } // namespace bridge

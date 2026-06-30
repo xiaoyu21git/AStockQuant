@@ -1,4 +1,4 @@
-// CandlestickChartWidget.qml
+// CandlestickChartWidget.qml — K线图 Widget 包装器 v2
 import QtQuick 2.15
 import AStock.Bridge 1.0 as Bridge
 import "../../Trading"
@@ -9,16 +9,11 @@ CandlestickChart {
     candleModel: Bridge.CandleDataModel
     dataLoader: Bridge.StockDataLoader
 
-    // ════════════════════════════════════════════════════════════
-    // symbol 由 C++ MarketDataBridge.primarySymbol 驱动
-    // OrderFormWidget / ensureWatchSymbol → primarySymbol 变更
-    // → stockCode 绑定自动更新 → onStockCodeChanged → loadFromDB
-    // ════════════════════════════════════════════════════════════
+    // ── symbol 由 C++ MarketDataBridge.primarySymbol 驱动 ──
     readonly property string exchangeSymbol: Bridge.MarketDataBridge
         && Bridge.MarketDataBridge.primarySymbol
         ? Bridge.MarketDataBridge.primarySymbol : "000001.SZ"
 
-    // 纯数字代码提取: "000001.SZ" → "000001"
     readonly property string pureCode: {
         var sym = exchangeSymbol
         var dot = sym.indexOf(".")
@@ -27,14 +22,30 @@ CandlestickChart {
 
     stockCode: pureCode
 
+    // ── 分时 VWAP 均价线: 从 MarketDataBridge 的 snapshot 中取 avgLine ──
+    readonly property var activeSnapshot: Bridge.MarketDataBridge
+        && Bridge.MarketDataBridge.marketSnapshots
+        ? (function() {
+            var snaps = Bridge.MarketDataBridge.marketSnapshots
+            for (var i = 0; i < snaps.length; i++) {
+                var s = snaps[i]
+                if (s && s.symbol && s.symbol.toUpperCase().indexOf(pureCode.toUpperCase()) >= 0) {
+                    return s
+                }
+            }
+            return null
+          })()
+        : null
+
+    avgLinePrice: activeSnapshot && activeSnapshot.avgLine ? activeSnapshot.avgLine : 0.0
+
+    // ── 分时图 tick 触发重绘 ──
     Connections {
         target: Bridge.StockDataLoader
         enabled: Bridge.StockDataLoader !== null
         function onTickReceived(symbol, price, volume) {
-            // 分时图需要每次 tick 都重绘 (价格线延伸);
-            // K线模式下 onLastPriceChanged 已经触发了重绘
             if (root.chartPeriod === 0)
-                root.requestRepaint()
+                root.requestAllPaint()
         }
     }
 

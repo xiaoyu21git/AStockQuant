@@ -30,6 +30,7 @@
     SymbolSearchModel.cpp
     CandleDataModel.cpp
     StockDataLoader.cpp
+    CrosshairManager.cpp
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})

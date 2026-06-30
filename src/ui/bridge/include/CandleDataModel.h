@@ -1,10 +1,13 @@
 // CandleDataModel.h — K线数据模型 (QAbstractTableModel)
 // 供 QtCharts CandlestickSeries 直接绑定, 零拷贝
+// v2: 扩展 Role 暴露 MA/MACD/KDJ/RSI 指标, 保证行同步原子性
 #pragma once
 
 #include <QAbstractTableModel>
 #include <QDateTime>
 #include <vector>
+
+namespace domain::market { class BarSeries; }
 
 namespace bridge {
 
@@ -25,8 +28,39 @@ class CandleDataModel : public QAbstractTableModel {
     Q_PROPERTY(double preClose READ preClose WRITE setPreClose NOTIFY preCloseChanged)
 
 public:
+    // ── 基础列 ──
     enum Column { TimestampCol = 0, OpenCol, HighCol, LowCol, CloseCol, VolumeCol, ColumnCount };
-    enum Role { TimestampRole = Qt::UserRole + 1, OpenRole, HighRole, LowRole, CloseRole, VolumeRole };
+
+    // ── 基础 Role (Qt::UserRole + 1 ~ +6) ──
+    enum Role {
+        TimestampRole = Qt::UserRole + 1,
+        OpenRole,
+        HighRole,
+        LowRole,
+        CloseRole,
+        VolumeRole,
+
+        // ── 指标 Role (Qt::UserRole + 100 起始, 避开基础 Role) ──
+        Ma5Role  = Qt::UserRole + 100,
+        Ma10Role,
+        Ma20Role,
+        Ma60Role,
+        Ema5Role,
+        Ema10Role,
+        Ema20Role,
+        Ema60Role,
+        MaVol5Role,
+        MaVol10Role,
+        MacdDifRole,
+        MacdDeaRole,
+        MacdHistRole,
+        KdjKRole,
+        KdjDRole,
+        KdjJRole,
+        Rsi6Role,
+        Rsi14Role,
+        VwapRole
+    };
 
     explicit CandleDataModel(QObject* parent = nullptr);
 
@@ -47,6 +81,10 @@ public:
 
     const CandleItem* candleAt(int row) const;  // 供 StockDataLoader 内部使用
 
+    /// @brief 绑定数据源 BarSeries, 供 data() 查询指标时使用
+    void setDataSource(const domain::market::BarSeries* series);
+    const domain::market::BarSeries* dataSource() const { return m_series; }
+
 signals:
     void countChanged();
     void lastPriceChanged();
@@ -56,6 +94,7 @@ signals:
 private:
     std::vector<CandleItem> m_data;
     double m_preClose = 0.0;
+    const domain::market::BarSeries* m_series = nullptr;
 };
 
 } // namespace bridge

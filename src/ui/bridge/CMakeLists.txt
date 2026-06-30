@@ -41,6 +41,7 @@ set(BRIDGE_HEADERS
     include/RuleTemplateDetailHelper.h
     include/CandleDataModel.h
     include/StockDataLoader.h
+    include/CrosshairManager.h
 )
 
 add_library(bridge STATIC
@@ -93,6 +94,7 @@ target_include_directories(bridge
     PUBLIC
         include
         ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+        ${CMAKE_SOURCE_DIR}/src/domain/market/include
     PRIVATE
         src
         ${CMAKE_SOURCE_DIR}/src/domain/cleaning/include

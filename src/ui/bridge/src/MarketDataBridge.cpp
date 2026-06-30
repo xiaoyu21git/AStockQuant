@@ -1,4 +1,6 @@
 #include "MarketDataBridge.h"
+#include "../../../domain/market/include/MarketDataService.h"
+#include "../../../domain/market/include/LiveData.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../../domain/trading/include/MarketDataUtils.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
@@ -7,6 +9,7 @@
 
 #include <QDateTime>
 #include <QDate>
+#include <cmath>
 #include "foundation/log/logging.hpp"
 
 namespace bridge {
@@ -32,55 +35,67 @@ void MarketDataBridge::initializeAsync() {
 
 void MarketDataBridge::updateSnapshot(const QString& symbol) {
     if (symbol.isEmpty()) return;
-    // 纯数字码补后缀: "000001" → "000001.SZ"
     std::string sym = symbol.toStdString();
     if (sym.find('.') == std::string::npos && sym.size() == 6) {
         auto symObj = foundation::market::AStockSymbol::fromCode(sym);
         if (symObj.isValid()) sym = symObj.fullSymbol();
     }
-    auto q = engine::GmSessionEngine::instance().fetchQuote(sym);
-    if (!q || !q->valid) {
-        INTERNAL_WARN_STREAM << "[MktBridge] updateSnapshot FAILED for " << symbol.toStdString();
+
+    auto& d = domain::market::MarketDataService::instance().liveData(sym);
+    if (!d.valid() || d.dailyBar().close() <= 0.0) {
+        INTERNAL_WARN_STREAM << "[MktBridge] updateSnapshot no data for " << sym;
         return;
     }
-    INTERNAL_INFO_STREAM << "[MktBridge] updateSnapshot OK " << symbol.toStdString()
-                         << " price=" << q->price << " source=" << (q->preClose == q->price ? "preClose" : "tick");
+    const auto& bar = d.dailyBar();
+    const auto& depth = d.depth();
+    double pc = d.preClose();
 
     QVariantMap snap;
-    snap["symbol"]     = symbol;
-    snap["price"]      = q->price;
-    snap["open"]       = q->open;
-    snap["high"]       = q->high;
-    snap["low"]        = q->low;
-    snap["volume"]     = q->volume;
+    snap["symbol"]     = QString::fromStdString(sym);
+    snap["price"]      = bar.close();
+    snap["open"]       = bar.open();
+    snap["high"]       = bar.high();
+    snap["low"]        = bar.low();
+    snap["volume"]     = bar.volume();
+    snap["amount"]     = bar.amount();
+    snap["avgLine"]    = d.avgLine();
     snap["source"]     = QStringLiteral("实时行情");
     snap["updatedAt"]  = QDateTime::currentDateTime().toString(Qt::ISODate);
-    snap["preClose"]      = q->preClose;
-    snap["changePct"]      = q->changePct();
-    snap["changePercent"]  = QVariant::fromValue(q->changePct());
-    snap["limitUp"]        = q->isLimitUp();
-    snap["limitDown"]      = q->isLimitDown();
-    snap["limitPct"]       = q->limitPct();
+    snap["preClose"]      = pc;
+    double changePct = (pc > 0.0) ? (bar.close() - pc) / pc * 100.0 : 0.0;
+    snap["changePct"]      = changePct;
+    snap["changePercent"]  = QVariant::fromValue(changePct);
+    double limitPct = d.limitUp() > 0.0 && pc > 0.0 ? (d.limitUp() / pc - 1.0) * 100.0 : 10.0;
+    bool isLimitUp   = d.limitUp()   > 0.0 && bar.close() >= d.limitUp();
+    bool isLimitDown = d.limitDown() > 0.0 && bar.close() <= d.limitDown();
+    snap["limitUp"]        = isLimitUp;
+    snap["limitDown"]      = isLimitDown;
+    snap["limitPct"]       = limitPct;
 
-    if (q->isLimitUp() && !q->bids.empty()) {
-        snap["sealedVolume"] = q->bids[0].volume;
-        snap["sealedAmount"] = q->bids[0].volume * q->bids[0].price;
-    } else if (q->isLimitDown() && !q->asks.empty()) {
-        snap["sealedVolume"] = q->asks[0].volume;
-        snap["sealedAmount"] = q->asks[0].volume * q->asks[0].price;
+    // 封单量
+    if (isLimitUp && depth.levelCount() > 0) {
+        snap["sealedVolume"] = depth.bidVolume(0);
+        snap["sealedAmount"] = depth.bidVolume(0) * depth.bidPrice(0);
+    } else if (isLimitDown && depth.levelCount() > 0) {
+        snap["sealedVolume"] = depth.askVolume(0);
+        snap["sealedAmount"] = depth.askVolume(0) * depth.askPrice(0);
     } else {
         snap["sealedVolume"] = 0.0;
         snap["sealedAmount"] = 0.0;
     }
 
     QVariantList bids, asks;
-    for (auto& b : q->bids) bids.append(QVariantMap{{"price", b.price}, {"volume", static_cast<qint64>(b.volume)}});
-    for (auto& a : q->asks) asks.append(QVariantMap{{"price", a.price}, {"volume", static_cast<qint64>(a.volume)}});
+    for (int i = 0; i < depth.levelCount(); ++i)
+        bids.append(QVariantMap{{"price", depth.bidPrice(i)}, {"volume", static_cast<qint64>(depth.bidVolume(i))}});
+    for (int i = 0; i < depth.levelCount(); ++i)
+        asks.append(QVariantMap{{"price", depth.askPrice(i)}, {"volume", static_cast<qint64>(depth.askVolume(i))}});
     snap["depthSnapshot"] = QVariantMap{{"bids", bids}, {"asks", asks}};
 
     m_marketSnapshots[symbol] = snap;
-    m_marketSnapshots = QVariantMap(m_marketSnapshots);  // 构造新对象, 强制打破隐式共享
+    m_marketSnapshots = QVariantMap(m_marketSnapshots);
     emit marketSnapshotsChanged();
+    INTERNAL_INFO_STREAM << "[MktBridge] updateSnapshot OK " << sym
+                         << " price=" << bar.close() << " chg=" << changePct << "%";
 }
 
 void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
@@ -101,7 +116,6 @@ void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
         INTERNAL_INFO_STREAM << "[MktBridge] primarySymbol changed to " << resolved.toStdString();
     }
     updateSnapshot(resolved);
-    engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
 }
 
 void MarketDataBridge::activateDefaultWatchlist() {
@@ -127,7 +141,6 @@ QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
     auto* self = const_cast<MarketDataBridge*>(this);
     self->updateSnapshot(resolved);
     self->m_trackedSymbols.insert(resolved);
-    engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
 
     it = m_marketSnapshots.find(resolved);
     if (it != m_marketSnapshots.end()) return it->toMap();
@@ -183,7 +196,6 @@ QString MarketDataBridge::getNextTradingDay(const QString& d) {
 
 void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
     for (const auto& s : symbols) {
-        // 补交易所后缀
         QString resolved = s;
         std::string sym = s.toStdString();
         if (sym.find('.') == std::string::npos && sym.size() == 6) {
@@ -191,7 +203,6 @@ void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
             if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
         }
         m_trackedSymbols.insert(resolved);
-        engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
     }
 }
 

@@ -12,6 +12,7 @@
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
 #include "CandleDataModel.h"
 #include "StockDataLoader.h"
+#include "CrosshairManager.h"
 #include "MarketDataBridge.h"
 #include "StrategyBridge.h"
 #include "FactorService.h"
@@ -87,6 +88,14 @@ namespace wang{
             auto* loader = new bridge::StockDataLoader();
             loader->setModel(sharedModel);
             return loader;
+         }
+      );
+
+      // CrosshairManager — 十字光标状态 (单例)
+      qmlRegisterSingletonType<bridge::CrosshairManager>(
+         url, 1, 0, "CrosshairManager",
+         [](QQmlEngine*, QJSEngine*) -> QObject* {
+            return &bridge::CrosshairManager::instance();
          }
       );
 
