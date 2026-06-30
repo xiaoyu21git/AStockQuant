@@ -213,7 +213,34 @@ Rectangle {
                     ctx.setLineDash([])
                 }
             } else {
+                // ════════════════════════════════════
                 // 蜡烛图
+                // ════════════════════════════════════
+
+                // 预提取收盘价 (均线用)
+                var closes = []
+                for (var ci = 0; ci < n; ci++)
+                    closes.push(candleModel.data(candleModel.index(ci, 4), 0x0105))
+
+                // 计算 SMA
+                function calcSMA(period) {
+                    var sma = []
+                    var sum = 0
+                    for (var si = 0; si < n; si++) {
+                        sum += closes[si]
+                        if (si >= period) sum -= closes[si - period]
+                        if (si >= period - 1) sma.push({i: si, v: sum / period})
+                    }
+                    return sma
+                }
+                var maLines = [
+                    {period: 5,  color: "#f4f4f4", width: 0.8, data: calcSMA(5)},
+                    {period: 10, color: "#f59e0b", width: 0.8, data: calcSMA(10)},
+                    {period: 20, color: "#c084fc", width: 0.8, data: calcSMA(20)},
+                    {period: 60, color: "#22d3ee", width: 0.8, data: calcSMA(60)}
+                ]
+
+                // 蜡烛
                 for (var i = 0; i < n; i++) {
                     var o=candleModel.data(candleModel.index(i,1),0x0102), hi=candleModel.data(candleModel.index(i,2),0x0103)
                     var lo=candleModel.data(candleModel.index(i,3),0x0104), c=candleModel.data(candleModel.index(i,4),0x0105)
@@ -225,6 +252,20 @@ Rectangle {
                     ctx.beginPath(); ctx.moveTo(cx,yH); ctx.lineTo(cx,yL); ctx.stroke()
                     var bh=Math.abs(yC-yO), by=Math.min(yO,yC)
                     ctx.fillRect(cx-candleW/2,by,candleW,Math.max(1,bh))
+                }
+
+                // 均线 (画在蜡烛上层)
+                for (var ml = 0; ml < maLines.length; ml++) {
+                    var ma = maLines[ml]
+                    if (ma.data.length < 2) continue
+                    ctx.strokeStyle = ma.color; ctx.lineWidth = ma.width
+                    ctx.beginPath()
+                    for (var mi = 0; mi < ma.data.length; mi++) {
+                        var mx = plotX + ma.data[mi].i * candleGap + candleGap/2
+                        var my = chartTop + mainH * (1 - (ma.data[mi].v - priceMin) / priceRange)
+                        mi === 0 ? ctx.moveTo(mx, my) : ctx.lineTo(mx, my)
+                    }
+                    ctx.stroke()
                 }
             }
 
