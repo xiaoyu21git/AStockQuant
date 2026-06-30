@@ -626,6 +626,10 @@ void StrategyEngine::drainQueue()
                     order.setCurrency("CNY");                        // A股人民币
                     auto symObj = foundation::market::AStockSymbol::fromCode(
                         order.symbol());
+                    if (!symObj.isValid() || symObj.suffix().empty()) {
+                        INTERNAL_WARN_STREAM << "[DrainQueue] skip invalid symbol: " << order.symbol();
+                        continue;
+                    }
                     order.setSymbol(symObj.fullSymbol());            // → "600000.SH"
                     order.setExchange(symObj.suffix().substr(1));    // ".SH" → "SH"
 
