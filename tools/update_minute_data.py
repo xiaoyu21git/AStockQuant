@@ -1,7 +1,9 @@
 """
 update_minute_data.py — AKShare 1分钟线 → mkt.minute_bar。
-只拉1分钟，5/15/30/60通过SQL GROUP BY聚合。
-用法: python tools/update_minute_data.py [--target-date YYYY-MM-DD] [--backfill --start YYYY-MM-DD]
+--latest: 只拉当日 (日常跑, 默认)
+--backfill: 拉历史区间 (首次/补缺)
+用法: python tools/update_minute_data.py --target-date YYYY-MM-DD
+      python tools/update_minute_data.py --backfill --start YYYY-MM-DD [--target-date YYYY-MM-DD]
 """
 
 import sys, argparse, datetime as dt, time
@@ -18,7 +20,6 @@ ON CONFLICT(symbol_id,trade_ts) DO UPDATE SET
 """
 
 def fetch(symbol, date):
-    """symbol: 纯数字如'000001', date: dt.date"""
     try:
         df = ak.stock_zh_a_hist_min_em(symbol=symbol, period="1",
             start_date=date.strftime("%Y-%m-%d"), end_date=date.strftime("%Y-%m-%d"), adjust="")
@@ -55,11 +56,12 @@ def main():
         cur.execute("SELECT trade_date FROM ref.trade_calendar WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date",
                     (dt.date.fromisoformat(a.start), target))
         dates = [r[0] for r in cur.fetchall()]
-        print(f"[minute] 回填 {a.start}→{target} {len(dates)}天")
+        tag = f"回填 {a.start}→{target} {len(dates)}天"
     else:
         dates = [target]
-        print(f"[minute] {target}")
+        tag = f"当日 {target}"
 
+    print(f"[minute] {tag} {len(sid_map)}只标的")
     total = 0
     for di, d in enumerate(dates):
         day_total = 0
@@ -72,9 +74,9 @@ def main():
             time.sleep(a.sleep)
         total += day_total
         conn.commit()
-        if len(dates) > 1:
-            print(f"  [{di+1}/{len(dates)}] {d}: {day_total}")
-    print(f"[minute] 完成 {total} 条")
+        if len(dates) > 1 and (di+1) % 10 == 0:
+            print(f"  [{di+1}/{len(dates)}] {d}: {day_total} 累计{total}")
+    print(f"[minute] 完成 {total}条")
     conn.close()
 
 if __name__ == "__main__":
