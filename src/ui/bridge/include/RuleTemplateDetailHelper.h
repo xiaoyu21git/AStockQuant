@@ -74,3 +74,6 @@ private:
     bool m_valid = false;
     QString m_errorMessage;
 };
+
+// Header-only QObject: 必须手动 include MOC 输出, 否则 Q_INVOKABLE 元数据不链接
+#include "moc_RuleTemplateDetailHelper.cpp"

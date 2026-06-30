@@ -198,7 +198,10 @@ namespace wang{
        qmlRegisterType<SymbolSearchModel>(
           url, 1, 0, "SymbolSearchModel");
 
-       qmlRegisterType<RuleTemplateDetailHelper>(
-          url, 1, 0, "RuleTemplateDetailHelper");
+       qmlRegisterSingletonType<RuleTemplateDetailHelper>(
+          url, 1, 0, "RuleTemplateDetailHelper",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new RuleTemplateDetailHelper();
+          });
    }
 }
