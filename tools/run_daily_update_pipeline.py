@@ -161,11 +161,8 @@ def prompt_yes_no(prompt: str, default: bool) -> bool:
 
 def prompt_menu_choice() -> str:
     choices = {
-        "1": "最新行情更新 (日线+派生字段+周月线+分钟线+校验)",
-        "2": "最新行情 + 历史缺口回填",
-        "3": "仅历史缺口回填",
-        "4": "最新行情 + 财务数据",
-        "5": "最新行情 + 历史缺口 + 财务数据",
+        "1": "最新行情 (日线+派生+分钟线+周月线+校验)",
+        "2": "历史补缺 (回填日线历史缺口)",
     }
     print("\n可执行方案:")
     for key, label in choices.items():
@@ -176,31 +173,19 @@ def prompt_menu_choice() -> str:
         if choice in choices:
             print(f"已选择: {choices[choice]}")
             return choice
-        print("无效选择，请输入 1-5")
+        print("无效选择，请输入 1-2")
 
 
 def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | None:
     print("数据更新交互模式")
-    print("最新行情: 日线更新 → 派生字段 → 估值/市值/换手率 → 分钟线 → 周月线聚合 → 校验")
-    print("历史补缺: 回填日线历史缺口 → 派生字段历史缺口")
+    print("  最新行情: 日线 → 派生字段 → 分钟线 → 周月线 → 校验")
+    print("  历史补缺: 日线历史缺口 → 派生字段历史缺口")
 
     choice = prompt_menu_choice()
     if choice == "1":
         args.include_history_gaps = False
     elif choice == "2":
         args.include_history_gaps = True
-    elif choice == "3":
-        args.include_history_gaps = True
-        args.skip_derived_backfill = True
-        args.skip_valuation_backfill = True
-        args.skip_caps_backfill = True
-        args.skip_turnover_backfill = True
-    elif choice == "4":
-        args.include_history_gaps = False
-        args.with_financial = True
-    elif choice == "5":
-        args.include_history_gaps = True
-        args.with_financial = True
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
