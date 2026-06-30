@@ -165,23 +165,23 @@ Rectangle {
                 }
             }
 
+            // X轴映射: 时间戳 → 交易分钟 (9:30=0, 11:30=120, 13:00=120, 15:00=240)
+            function tradingMinute(ts) {
+                var d = new Date(ts)
+                var m = d.getHours() * 60 + d.getMinutes()
+                if (m < 570) return 0; if (m >= 900) return 240
+                if (m < 690)  return m - 570
+                if (m < 780)  return 120
+                return 120 + (m - 780)
+            }
+            function timeX(ts) { return plotX + tradingMinute(ts) / 240 * plotW }
+
             if (isTimeShare) {
                 // ════════════════════════════════════════════════════
                 // 分时图: 交易时间X轴 + 精确竖线/横线 + 折线 + 均价
                 // ════════════════════════════════════════════════════
 
-                // X轴映射: 时间戳 → 交易分钟 (9:30=0, 11:30=120, 13:00=120, 15:00=240)
-                function tradingMinute(ts) {
-                    var d = new Date(ts)
-                    var m = d.getHours() * 60 + d.getMinutes()
-                    if (m < 570) return 0; if (m >= 900) return 240
-                    if (m < 690)  return m - 570
-                    if (m < 780)  return 120
-                    return 120 + (m - 780)
-                }
-                function timeX(ts) { return plotX + tradingMinute(ts) / 240 * plotW }
-
-                // ── 竖线网格 (每半小时) ──
+                // ── 竖线网格 (每半小时)(tradingMinute/timeX已在顶部定义) ──
                 var timeGrid = [
                     {min:0,  label:"09:30", bold:true},
                     {min:30, label:"10:00", bold:false},

@@ -505,6 +505,8 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         risk.setAutoStrategySignal(true);
         risk.setPositionSnapshotReady(true);
         risk.setTradingSessionOpen(true);
+        // 应用风控配置 (否则 maxPositionPercent=0 会拦截所有买单)
+        strategy::RiskEvaluator::applyConfig(risk, domain::strategy::RiskManager::instance().riskConfig());
 
         auto result = submitOrder(order, risk);
         if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
