@@ -213,9 +213,10 @@ def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | 
         args.skip_caps_backfill = True
         args.skip_turnover_backfill = True
 
-        # 历史回填需要起止日期
-        args.minute_backfill_start = prompt_text("分钟线回填起始日期", "2026-01-01")
-        args.minute_backfill_end = prompt_text("分钟线回填结束日期", dt.date.today().isoformat())
+        # 历史回填 (留空自动从最早缺数据的日期开始)
+        start = prompt_text("分钟线回填起始日期 (留空自动)", "")
+        if start:
+            args.minute_backfill_start = start
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
@@ -423,9 +424,12 @@ def build_minute_update_command(args: argparse.Namespace, target_date: dt.date) 
     return cmd
 
 def build_minute_backfill_command(args: argparse.Namespace) -> list[str]:
-    start = args.minute_backfill_start or "2026-01-01"
-    end = args.minute_backfill_end or dt.date.today().isoformat()
-    return [sys.executable, "tools/update_minute_data.py", "--backfill", "--start", start, "--target-date", end]
+    cmd = [sys.executable, "tools/update_minute_data.py", "--backfill"]
+    if args.minute_backfill_start:
+        cmd.extend(["--start", args.minute_backfill_start])
+    if args.minute_backfill_end:
+        cmd.extend(["--target-date", args.minute_backfill_end])
+    return cmd
 
 def build_weekly_monthly_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
     cmd = [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]

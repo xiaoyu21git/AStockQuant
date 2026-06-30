@@ -56,18 +56,22 @@ def main():
     cur.execute("SELECT id, symbol FROM ref.symbol_info WHERE status='ACTIVE' ORDER BY id")
     sid_map = {r[0]: r[1] for r in cur.fetchall()}
 
-    if a.backfill and a.start:
-        cur.execute("SELECT trade_date FROM ref.trade_calendar WHERE trade_date BETWEEN %s AND %s ORDER BY trade_date",
-                    (dt.date.fromisoformat(a.start), target))
-        dates = [r[0] for r in cur.fetchall()]
-        if not dates:
-            # fallback: 生成全部日期, 跳过周末
-            d = dt.date.fromisoformat(a.start)
-            while d <= target:
-                if d.weekday() < 5:
-                    dates.append(d)
-                d += dt.timedelta(days=1)
-        tag = f"回填 {a.start}→{target} {len(dates)}天"
+    if a.backfill:
+        if a.start:
+            start_date = dt.date.fromisoformat(a.start)
+        else:
+            # 自动从最早有日线但缺分钟线的日期开始
+            cur.execute("SELECT MIN(d.trade_date) FROM mkt.daily_bar d WHERE NOT EXISTS (SELECT 1 FROM mkt.minute_bar m WHERE m.symbol_id=d.symbol_id AND m.trade_ts::date=d.trade_date)")
+            row = cur.fetchone()
+            start_date = row[0] if row and row[0] else target
+        # 生成日期列表 (跳过周末)
+        dates = []
+        d = start_date
+        while d <= target:
+            if d.weekday() < 5:
+                dates.append(d)
+            d += dt.timedelta(days=1)
+        tag = f"回填 {start_date}→{target} {len(dates)}天"
     else:
         dates = [target]
         tag = f"当日 {target}"
