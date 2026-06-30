@@ -1,4 +1,5 @@
 #include "../include/IStrategyService.h"
+#include "foundation/log/logging.hpp"
 
 #include <algorithm>
 #include <cmath>
