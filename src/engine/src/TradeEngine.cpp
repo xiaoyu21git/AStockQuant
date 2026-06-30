@@ -116,12 +116,22 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     gmReq.order_business  = static_cast<int>(req.extensionAs<int64_t>(
                                 domain::trading::ExtKey::kOrderBusiness, 0));
 
+    INTERNAL_INFO_STREAM << "[TradeEngine] place_order: gmSym=" << gmSym
+                         << " side=" << gmReq.side
+                         << " posEffect=" << gmReq.position_effect
+                         << " orderType=" << gmReq.order_type
+                         << " price=" << gmReq.price
+                         << " vol=" << gmReq.volume
+                         << " account=" << req.accountId();
+
     Order gm = s->place_order(gmReq, req.accountId().c_str());
     if (gm.cl_ord_id[0]) {
         r.brokerOrderId = gm.cl_ord_id; r.accepted = true;
+        INTERNAL_INFO_STREAM << "[TradeEngine] place_order OK clOrdId=" << gm.cl_ord_id;
     } else {
         auto err = s->get_last_error_detail();
         r.message = (err && err[0]) ? err : "place_order rejected";
+        INTERNAL_ERROR_STREAM << "[TradeEngine] place_order FAILED: " << r.message;
     }
     return r;
 }
