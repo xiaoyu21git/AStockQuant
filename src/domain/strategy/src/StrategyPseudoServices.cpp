@@ -254,10 +254,15 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
     if (quantity < 100) quantity = 100;
     quantity = quantity / 100 * 100;
 
-    // 填充统一定单类型
-    char codeBuf[16];
-    std::snprintf(codeBuf, sizeof(codeBuf), "%06u", signal.instrumentId().value);
-    outputOrder.setSymbol(codeBuf);                  // "600000" (drainQueue补.SH后缀)
+    // 填充统一定单类型 — 优先使用 signal 携带的真实代码, 回退到 InstrumentId 格式化
+    const std::string& realCode = signal.symbolCode();
+    if (!realCode.empty()) {
+        outputOrder.setSymbol(realCode);              // 真实6位代码 (如 "600000")
+    } else {
+        char codeBuf[16];
+        std::snprintf(codeBuf, sizeof(codeBuf), "%06u", signal.instrumentId().value);
+        outputOrder.setSymbol(codeBuf);               // 回退: InstrumentId 格式化 (回测/兼容)
+    }
     outputOrder.setStrategyId(std::to_string(signal.strategyInstanceId()));
     outputOrder.setSide((signal.side() == RuntimeOrderSide::Buy)
                         ? OrderSide::Buy : OrderSide::Sell);

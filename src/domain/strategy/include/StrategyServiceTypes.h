@@ -318,6 +318,7 @@ private:
     RuntimeOrderSide side_{RuntimeOrderSide::Buy};
     double score_{0.0};
     double targetWeight_{0.0};
+    std::string symbolCode_{};
 
 public:
     StrategySignal() = default;
@@ -325,12 +326,14 @@ public:
                    InstrumentId instrumentId,
                    RuntimeOrderSide side,
                    double score,
-                   double targetWeight)
+                   double targetWeight,
+                   std::string symbolCode = {})
         : strategyInstanceId_(strategyInstanceId)
         , instrumentId_(instrumentId)
         , side_(side)
         , score_(score)
         , targetWeight_(targetWeight)
+        , symbolCode_(std::move(symbolCode))
     {
     }
 
@@ -358,6 +361,13 @@ public:
     {
         return targetWeight_;
     }
+
+    [[nodiscard]] const std::string& symbolCode() const noexcept
+    {
+        return symbolCode_;
+    }
+
+    void setSymbolCode(std::string code) { symbolCode_ = std::move(code); }
 
     [[nodiscard]] bool isValid() const noexcept
     {

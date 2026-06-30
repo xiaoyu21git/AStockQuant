@@ -9,6 +9,7 @@
 #include "StrategyServiceTypes.h"
 #include "../../strategies/include/StrategyDefinitionTypes.h"
 #include "../../factor/include/factor_compute/IMarketDataView.h"
+#include "../../factor/include/factor_compute/CachedMarketDataView.h"
 
 #include <ta_libc.h>
 #include <algorithm>
@@ -72,11 +73,18 @@ public:
             SignalResult sig = evaluateSymbol(closePrices, instruments[c].value,
                                                context, m_commonCfg);
             if (sig.valid) {
+                std::string realSymbol;
+                if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(view)) {
+                    const auto& syms = cv->symbolStrings();
+                    if (c < static_cast<int>(syms.size()))
+                        realSymbol = syms[static_cast<size_t>(c)];
+                }
                 allSignals.emplace_back(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},
                     sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
-                    sig.score, sig.weight);
+                    sig.score, sig.weight,
+                    realSymbol);
             }
         }
 
