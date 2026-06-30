@@ -147,6 +147,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         INTERNAL_WARN_STREAM << "[fromDb] ABORT: factor strategy but factorSvc is null";
         return nullptr;
     }
+    if (!isFactorType && factorSvc) {
+        INTERNAL_INFO_STREAM << "[fromDb] non-factor strategy, discarding factorSvc";
+        factorSvc.reset();
+    }
 
     // ── 创建引擎 (Builder 直接注入 IRuntimeFactorService，Engine 接管所有权) ──
     auto engineBuilder = StrategyEngine::builder();

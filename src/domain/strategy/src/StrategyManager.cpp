@@ -154,7 +154,6 @@ StrategyEngine* StrategyManager::getOrCreateEngine(const std::string& strategyId
 
     // 创建因子服务（如果 FactorInstanceManager 已注入）
     std::unique_ptr<IRuntimeFactorService> factorSvc = createFactorService();
-
     return createEngine(strategyId, std::move(factorSvc));
 }
 
