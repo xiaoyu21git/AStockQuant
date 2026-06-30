@@ -534,17 +534,19 @@ def main() -> int:
     )
 
     pipeline_failed = False
+    skip_daily = args.with_minute_backfill and not args.include_history_gaps
 
-    if not execute_step(
-        "daily latest supplement",
-        update_cmd_builder(args),
-        required=True,
-        continue_on_failure=args.continue_on_step_failure,
-        results=step_results,
-    ):
-        pipeline_failed = True
+    if not skip_daily:
+        if not execute_step(
+            "daily latest supplement",
+            update_cmd_builder(args),
+            required=True,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            pipeline_failed = True
 
-    if not pipeline_failed:
+    if not skip_daily and not pipeline_failed:
         if not args.skip_derived_backfill:
             if not execute_step(
                 "derived fields backfill (latest)",
