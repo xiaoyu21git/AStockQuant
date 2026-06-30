@@ -454,7 +454,14 @@ StrategyServiceFlowResult StrategyEngine::stop()
 
 std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPoint& marketDataPoint)
 {
-    return collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
+    try {
+        return collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[StrategyEngine] step() exception: " << e.what()
+                             << " instId=" << marketDataPoint.instrumentId().value
+                             << " price=" << marketDataPoint.lastPrice();
+        throw;
+    }
 }
 
 std::optional<std::vector<OrderRequest>> StrategyEngine::stepBatch(
