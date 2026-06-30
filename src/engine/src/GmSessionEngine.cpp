@@ -120,6 +120,16 @@ public:
             if (q.ask_price > 0) { td.askPrices.push_back(q.ask_price); td.askVolumes.push_back(q.ask_volume); }
         }
 
+        // ── 🔍 每 5 个 tick 打印一次 (确认 gmsdk 在推送数据) ──
+        {
+            static int tickCnt = 0;
+            if (++tickCnt % 5 == 0) {
+                INTERNAL_INFO_STREAM << "[GmSdk] 🟢 on_tick #" << tickCnt
+                    << " sym=" << td.symbol << " price=" << td.price
+                    << " vol=" << td.lastVolume;
+            }
+        }
+
         auto* bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.market.tick", Event_Core::EventSource::MARKET_DATA);
@@ -131,6 +141,11 @@ public:
             evt.set("volume", td.lastVolume > 0 ? td.lastVolume : td.cumVolume);
             evt.set("tradingDay", td.tradingDay);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+        } else {
+            static int noBusCnt = 0;
+            if (++noBusCnt % 20 == 0) {
+                INTERNAL_WARN_STREAM << "[GmSdk] 🔴 on_tick EventBus not running, tick dropped";
+            }
         }
 
         // 缓存最新 tick 行情 (供 fetchQuote 快速读取)
@@ -329,9 +344,15 @@ bool GmSessionEngine::initialized() const { return m_impl && m_impl->initialized
 void GmSessionEngine::subscribeTick(const std::string& symbol) {
     if (symbol.empty()) return;
     std::lock_guard<std::mutex> lock(m_tickMutex);
-    if (++m_tickRefCount[symbol] == 1) {
+    auto& ref = m_tickRefCount[symbol];
+    if (++ref == 1) {
         auto* s = static_cast<SessionStrategy*>(m_strategy.get());
-        if (s) s->subscribe(toGmSymbol(symbol).c_str(), "tick", false);
+        std::string gmSym = toGmSymbol(symbol);
+        INTERNAL_INFO_STREAM << "[GmSession] subscribeTick: " << symbol << " → " << gmSym
+                             << " strategy=" << (s ? "ok" : "NULL");
+        if (s) s->subscribe(gmSym.c_str(), "tick", false);
+    } else {
+        INTERNAL_INFO_STREAM << "[GmSession] subscribeTick: " << symbol << " refCount=" << ref;
     }
 }
 

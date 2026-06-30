@@ -10,6 +10,8 @@
 #include "FactorDebugController.h" // 新增：因子调试控制器
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
+#include "CandleDataModel.h"
+#include "StockDataLoader.h"
 #include "MarketDataBridge.h"
 #include "StrategyBridge.h"
 #include "FactorService.h"
@@ -66,6 +68,25 @@ namespace wang{
             // 同步初始化：只读缓存元数据索引，不加载数据文件，不会阻塞 UI
             controller->initialize();
             return controller;
+         }
+      );
+
+      // 两者共享同一个 CandleDataModel 实例
+      auto* sharedModel = new bridge::CandleDataModel();
+
+      qmlRegisterSingletonType<bridge::CandleDataModel>(
+         url, 1, 0, "CandleDataModel",
+         [sharedModel](QQmlEngine*, QJSEngine*) -> QObject* {
+            return sharedModel;
+         }
+      );
+
+      qmlRegisterSingletonType<bridge::StockDataLoader>(
+         url, 1, 0, "StockDataLoader",
+         [sharedModel](QQmlEngine*, QJSEngine*) -> QObject* {
+            auto* loader = new bridge::StockDataLoader();
+            loader->setModel(sharedModel);
+            return loader;
          }
       );
 

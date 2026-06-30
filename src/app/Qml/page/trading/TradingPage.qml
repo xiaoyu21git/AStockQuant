@@ -40,7 +40,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 active: true
-                source: "../../components/DynamicWorkspace/widgets/KLineChartWidget.qml"
+                source: "../../components/DynamicWorkspace/widgets/CandlestickChartWidget.qml"
             }
 
             // 右侧面板: 五档 + 下单

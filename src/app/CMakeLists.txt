@@ -138,7 +138,6 @@ qt_add_qml_module(astockquantapp
         Qml/page/dashboard/MainContent.qml
         Qml/page/dashboard/MarketGrid.qml
         Qml/page/dashboard/PositionsPanel.qml
-        Qml/page/dashboard/QtCandlestickChart.qml
         Qml/page/dashboard/StatusSummaryCard.qml
         Qml/page/dashboard/StrategiesPanel.qml
         Qml/page/dashboard/OrderBook.qml
@@ -181,8 +180,9 @@ qt_add_qml_module(astockquantapp
         Qml/components/Trading/TradingChartWorkspace.qml
         Qml/components/Trading/TradingFormPanel.qml
         Qml/components/Trading/DepthMarketPanel.qml
-        Qml/components/Trading/CompactChart.qml
-        Qml/components/Trading/KLineChart.qml
+        Qml/components/Trading/CandlestickChart.qml
+        Qml/components/Trading/CrosshairIndicator.qml
+        Qml/components/Trading/CandleTooltip.qml
         Qml/components/Trading/OrderFormSection.qml
         Qml/components/Trading/OrderActionBar.qml
         Qml/components/Trading/RuntimeRuleObserverPanel.qml
@@ -285,10 +285,9 @@ qt_add_qml_module(astockquantapp
         Qml/components/DynamicWorkspace/WidgetFrame.qml
         Qml/components/DynamicWorkspace/WidgetPalette.qml
         Qml/components/DynamicWorkspace/widgets/AccountCardWidget.qml
-        Qml/components/DynamicWorkspace/widgets/ChartWorkspaceWidget.qml
+        Qml/components/DynamicWorkspace/widgets/CandlestickChartWidget.qml
         Qml/components/DynamicWorkspace/widgets/DepthPanelWidget.qml
         Qml/components/DynamicWorkspace/widgets/ExecutionLogWidget.qml
-        Qml/components/DynamicWorkspace/widgets/KLineChartWidget.qml
         Qml/components/DynamicWorkspace/widgets/OrderFormWidget.qml
         Qml/components/DynamicWorkspace/widgets/OrderListWidget.qml
         Qml/components/DynamicWorkspace/widgets/PositionListWidget.qml

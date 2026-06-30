@@ -85,9 +85,23 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
 
 void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     if (symbol.isEmpty()) return;
-    m_trackedSymbols.insert(symbol);
-    updateSnapshot(symbol);
-    engine::GmSessionEngine::instance().subscribeTick(symbol.toStdString());
+
+    // 补交易所后缀: "000001" → "000001.SZ" (GmSessionEngine 需要全格式)
+    QString resolved = symbol;
+    std::string sym = symbol.toStdString();
+    if (sym.find('.') == std::string::npos && sym.size() == 6) {
+        auto symObj = foundation::market::AStockSymbol::fromCode(sym);
+        if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
+    }
+
+    m_trackedSymbols.insert(resolved);
+    if (m_primarySymbol != resolved) {
+        m_primarySymbol = resolved;
+        emit primarySymbolChanged();
+        INTERNAL_INFO_STREAM << "[MktBridge] primarySymbol changed to " << resolved.toStdString();
+    }
+    updateSnapshot(resolved);
+    engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
 }
 
 void MarketDataBridge::activateDefaultWatchlist() {
@@ -99,15 +113,23 @@ void MarketDataBridge::activateDefaultWatchlist() {
 }
 
 QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
-    auto it = m_marketSnapshots.find(symbol);
+    // 补交易所后缀
+    QString resolved = symbol;
+    std::string sym = symbol.toStdString();
+    if (sym.find('.') == std::string::npos && sym.size() == 6) {
+        auto symObj = foundation::market::AStockSymbol::fromCode(sym);
+        if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
+    }
+
+    auto it = m_marketSnapshots.find(resolved);
     if (it != m_marketSnapshots.end()) return it->toMap();
 
     auto* self = const_cast<MarketDataBridge*>(this);
-    self->updateSnapshot(symbol);
-    self->m_trackedSymbols.insert(symbol);
-    engine::GmSessionEngine::instance().subscribeTick(symbol.toStdString());
+    self->updateSnapshot(resolved);
+    self->m_trackedSymbols.insert(resolved);
+    engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
 
-    it = m_marketSnapshots.find(symbol);
+    it = m_marketSnapshots.find(resolved);
     if (it != m_marketSnapshots.end()) return it->toMap();
 
     QVariantMap empty;
@@ -161,8 +183,15 @@ QString MarketDataBridge::getNextTradingDay(const QString& d) {
 
 void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
     for (const auto& s : symbols) {
-        m_trackedSymbols.insert(s);
-        engine::GmSessionEngine::instance().subscribeTick(s.toStdString());
+        // 补交易所后缀
+        QString resolved = s;
+        std::string sym = s.toStdString();
+        if (sym.find('.') == std::string::npos && sym.size() == 6) {
+            auto symObj = foundation::market::AStockSymbol::fromCode(sym);
+            if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
+        }
+        m_trackedSymbols.insert(resolved);
+        engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
     }
 }
 

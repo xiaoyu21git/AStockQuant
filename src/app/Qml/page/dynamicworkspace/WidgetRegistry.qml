@@ -16,9 +16,9 @@ QtObject {
         },
         "kline_chart": {
             label: "K线图表", icon: "📈",
-            description: "日/周/月K线 + 信号标注 + 十字光标",
+            description: "日/周/月K线 + 信号标注 + 十字光标 (重构中)",
             defaultColSpan: 8, defaultRowSpan: 3,
-            source: "../../components/DynamicWorkspace/widgets/KLineChartWidget.qml"
+            source: "../../components/DynamicWorkspace/widgets/CandlestickChartWidget.qml"
         },
 
         // ====================================================================
@@ -62,9 +62,9 @@ QtObject {
         },
         "chart_workspace": {
             label: "图表工作区", icon: "📉",
-            description: "K线 + 盘口联动 + 持仓信息条 (宽度自适应)",
+            description: "K线 + 盘口联动 + 持仓信息条 (重构中)",
             defaultColSpan: 12, defaultRowSpan: 3,
-            source: "../../components/DynamicWorkspace/widgets/ChartWorkspaceWidget.qml"
+            source: "../../components/DynamicWorkspace/widgets/CandlestickChartWidget.qml"
         },
 
         // ====================================================================

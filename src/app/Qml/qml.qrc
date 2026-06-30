@@ -158,7 +158,7 @@
         <file>page/dashboard/MarketGrid.qml</file>
         <file>page/dashboard/OrderBook.qml</file>
         <file>page/dashboard/PositionsPanel.qml</file>
-        <file>page/dashboard/QtCandlestickChart.qml</file>
+
         <file>page/dashboard/StatusSummaryCard.qml</file>
         <file>page/dashboard/StrategiesPanel.qml</file>
         <file>page/trading/TradingPage.qml</file>
@@ -175,8 +175,10 @@
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
-        <file>components/Trading/CompactChart.qml</file>
-        <file>components/Trading/KLineChart.qml</file>
+        <file>components/Trading/CandlestickChart.qml</file>
+        <file>components/Trading/CrosshairIndicator.qml</file>
+        <file>components/Trading/CandleTooltip.qml</file>
+
         <file>components/Trading/OrderFormSection.qml</file>
         <file>components/Trading/OrderActionBar.qml</file>
         <file>config/views/risk_backtest_params.json</file>

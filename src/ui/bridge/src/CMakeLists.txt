@@ -28,6 +28,8 @@
     StrategyPerformanceModel.cpp
     StockNameResolver.cpp
     SymbolSearchModel.cpp
+    CandleDataModel.cpp
+    StockDataLoader.cpp
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})

@@ -39,6 +39,8 @@ set(BRIDGE_HEADERS
     include/StrategyPerformanceModel.h
     include/SymbolSearchModel.h
     include/RuleTemplateDetailHelper.h
+    include/CandleDataModel.h
+    include/StockDataLoader.h
 )
 
 add_library(bridge STATIC

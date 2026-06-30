@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import Qt.labs.settings 1.0
+import AStock.Bridge 1.0 as Bridge
 import "." as WR
 import "../../components/DynamicWorkspace" as Workspace
 import "../../components" as AppComponents
