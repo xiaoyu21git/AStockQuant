@@ -1,4 +1,5 @@
 #include "TradeExecutionEngine.h"
+#include "../strategy/include/RiskManager.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/Event/EventBus.hpp"
 #include "../../engine/include/Event/EventFormat.hpp"
