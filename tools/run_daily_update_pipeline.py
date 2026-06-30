@@ -161,10 +161,9 @@ def prompt_yes_no(prompt: str, default: bool) -> bool:
 
 def prompt_menu_choice() -> str:
     choices = {
-        "1": "仅对齐最新行情",
-        "2": "最新行情 + 历史缺口",
-        "3": "最新行情 + 财务数据",
-        "4": "最新行情 + 历史缺口 + 财务数据",
+        "1": "最新行情更新 (日线+派生字段+周月线+分钟线+校验)",
+        "2": "最新行情 + 历史缺口回填",
+        "3": "仅历史缺口回填",
     }
     print("\n可执行方案:")
     for key, label in choices.items():
@@ -175,16 +174,25 @@ def prompt_menu_choice() -> str:
         if choice in choices:
             print(f"已选择: {choices[choice]}")
             return choice
-        print("无效选择，请输入 1-4")
+        print("无效选择，请输入 1-3")
 
 
 def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | None:
     print("数据更新交互模式")
-    print("说明: 默认保留现有派生字段、估值、市值与换手率回填；高级参数仍可通过命令行传入。")
+    print("最新行情: 日线更新 → 派生字段 → 估值/市值/换手率 → 周月线聚合 → 校验")
+    print("历史补缺: 回填日线历史缺口 → 派生字段历史缺口")
 
     choice = prompt_menu_choice()
-    args.include_history_gaps = choice in {"2", "4"}
-    args.with_financial = choice in {"3", "4"}
+    if choice == "1":
+        args.include_history_gaps = False
+    elif choice == "2":
+        args.include_history_gaps = True
+    elif choice == "3":
+        args.include_history_gaps = True
+        args.skip_derived_backfill = True
+        args.skip_valuation_backfill = True
+        args.skip_caps_backfill = True
+        args.skip_turnover_backfill = True
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
@@ -386,6 +394,9 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
         "5",
     ]
 
+
+def build_minute_update_command(target_date: dt.date) -> list[str]:
+    return [sys.executable, "tools/update_minute_data.py", "--target-date", target_date.isoformat()]
 
 def build_weekly_monthly_command(target_date: dt.date) -> list[str]:
     return [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
@@ -633,6 +644,15 @@ def main() -> int:
     if not execute_step(
         "auto-fix lagging daily (akshare)",
         [sys.executable, "tools/verify_daily_update.py", "--sample-limit", str(args.sample_limit), "--auto-fix"],
+        required=False,
+        continue_on_failure=True,
+        results=step_results,
+    ):
+        pass
+
+    if not execute_step(
+        "minute bars update",
+        build_minute_update_command(target_date),
         required=False,
         continue_on_failure=True,
         results=step_results,
