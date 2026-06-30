@@ -73,10 +73,15 @@ def main():
         tag = f"当日 {target}"
 
     print(f"[minute] {tag} {len(sid_map)}只标的")
-    total = 0
+    total = skipped = 0
     for di, d in enumerate(dates):
         day_total = 0
         for sid, sym in sid_map.items():
+            # 逐只检查是否需要拉取
+            cur.execute("SELECT 1 FROM mkt.minute_bar WHERE symbol_id=%s AND trade_ts::date=%s LIMIT 1", (sid, d))
+            if cur.fetchone():
+                skipped += 1
+                continue
             bars = fetch(sym.zfill(6), d)
             if bars:
                 for b in bars: b["symbol_id"] = sid
@@ -86,8 +91,8 @@ def main():
         total += day_total
         conn.commit()
         if len(dates) > 1 and (di+1) % 10 == 0:
-            print(f"  [{di+1}/{len(dates)}] {d}: {day_total} 累计{total}")
-    print(f"[minute] 完成 {total}条")
+            print(f"  [{di+1}/{len(dates)}] {d}: +{day_total} 累计{total} 跳过{skipped}")
+    print(f"[minute] 完成 +{total}条 跳过{skipped}只")
     conn.close()
 
 if __name__ == "__main__":
