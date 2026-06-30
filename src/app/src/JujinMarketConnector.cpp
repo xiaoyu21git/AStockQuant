@@ -1,6 +1,5 @@
 ﻿#include "JujinMarketConnector.h"
 #include "../../engine/include/GmSessionEngine.h"
-#include "../../domain/strategy/include/MarketDataAdapter.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
@@ -271,48 +270,6 @@ bool JujinMarketConnector::start()
     engine::OrderManager::instance().initialize(s);
     INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 初始化成功";
 
-    // ── 订阅 GmSessionEngine 发布的行情事件 → 推送到策略引擎 ──
-    // GmStrategySession::on_tick() 发布 "trading.market.tick"
-    // 字段: symbol, price(double), volume(double, 瞬时成交量), tradingDay(int64, YYYYMMDD)
-    m_tradingTickSubscription = eventBus->subscribe("trading.market.tick",
-        [this](const engine::EventFormat& event) {
-            auto sym   = event.get<std::string>("symbol");
-            auto price = event.get<double>("price");
-            auto vol   = event.get<double>("volume");
-            auto date  = event.get<std::int64_t>("tradingDay");
-            if (sym.has_value() && price.has_value()) {
-                static int totalTicks = 0;
-                static auto lastReport = std::chrono::steady_clock::now();
-                totalTicks++;
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
-                if (elapsed >= 60) {
-                    INTERNAL_INFO_STREAM << "[行情] tick: " << totalTicks << "/" << elapsed
-                                         << "s ≈ " << (totalTicks / (elapsed > 0 ? elapsed : 1)) << "/s";
-                    totalTicks = 0;
-                    lastReport = now;
-                }
-                domain::strategy::MarketDataAdapter().pushTick(
-                    *sym, *price, vol.value_or(0.0),
-                    date.has_value() ? static_cast<std::int32_t>(*date) : 0);
-            }
-        });
-
-    // GmStrategySession::on_bar() 发布 "trading.market.bar"
-    // 字段: symbol, close(double), volume(double, bar成交量), tradingDay(int64, YYYYMMDD)
-    m_tradingBarSubscription = eventBus->subscribe("trading.market.bar",
-        [this](const engine::EventFormat& event) {
-            auto sym   = event.get<std::string>("symbol");
-            auto price = event.get<double>("close");
-            auto vol   = event.get<double>("volume");
-            auto date  = event.get<std::int64_t>("tradingDay");
-            if (sym.has_value() && price.has_value()) {
-                domain::strategy::MarketDataAdapter().pushTick(
-                    *sym, *price, vol.value_or(0.0),
-                    date.has_value() ? static_cast<std::int32_t>(*date) : 0);
-            }
-        });
-
     m_started = true;
     m_lastError.clear();
 
@@ -353,17 +310,6 @@ void JujinMarketConnector::stop()
     if (m_initialOrderSyncThread.joinable()) {
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for initial order sync thread";
         m_initialOrderSyncThread.join();
-    }
-
-    if (engine::EventBus* bus = engine::get_engine_event_bus()) {
-        if (m_tradingTickSubscription) {
-            bus->unsubscribe(m_tradingTickSubscription);
-            m_tradingTickSubscription = foundation::utils::Uuid();
-        }
-        if (m_tradingBarSubscription) {
-            bus->unsubscribe(m_tradingBarSubscription);
-            m_tradingBarSubscription = foundation::utils::Uuid();
-        }
     }
 
     engine::GmSessionEngine::instance().shutdown();

@@ -1,5 +1,9 @@
-// RiskManager.cpp — 风控纯函数实现 (零外部调用)
+// RiskManager.cpp — 风控实现 (被动+主动巡检)
 #include "../include/RiskManager.h"
+#include "../../market/include/MarketDataService.h"
+#include "../../market/include/LiveData.h"
+#include "../../../engine/include/AccountEngine.h"
+#include "foundation/log/logging.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -161,6 +165,65 @@ RiskResult RiskManager::checkAutoSignal(const engine::OrderRequest& req,
     }
 
     return RiskResult::accept();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 主动巡检 — 止损止盈退出
+// ═══════════════════════════════════════════════════════════════════
+
+engine::OrderRequest RiskManager::buildStopOrder(const engine::Position& pos,
+                                                  double currentPrice,
+                                                  const std::string& reason) const {
+    engine::OrderRequest order;
+    order.setSymbol(pos.symbol);
+    order.setSide(engine::OrderSide::Sell);
+    order.setQuantity(pos.availableQty);
+    order.setPrice(currentPrice);
+    order.setOrderType(domain::trading::OrderType::Limit);
+    order.setExtension(domain::trading::ExtKey::kSignalScore, 0.8);
+    return order;
+}
+
+std::vector<engine::OrderRequest> RiskManager::patrolPositions() {
+    std::vector<engine::OrderRequest> orders;
+    if (m_config.stopLossPercent <= 0 && m_config.takeProfitPercent <= 0)
+        return orders;
+
+    auto& accEng = engine::AccountEngine::instance();
+    auto positions = accEng.positions();
+    if (positions.empty()) return orders;
+
+    for (const auto& pos : positions) {
+        if (pos.availableQty <= 0 || pos.costPrice <= 0) continue;
+
+        auto& d = domain::market::MarketDataService::instance().liveData(pos.symbol);
+        if (!d.valid()) continue;
+        double price = d.dailyBar().close();
+        if (price <= 0) continue;
+
+        double pnlPct = (price - pos.costPrice) / pos.costPrice * 100.0;
+
+        // 止损
+        if (m_config.stopLossPercent > 0 && pnlPct < 0
+            && std::abs(pnlPct) >= m_config.stopLossPercent) {
+            INTERNAL_WARN_STREAM << "[RiskManager] 止损触发: " << pos.symbol
+                                 << " 成本=" << pos.costPrice << " 现价=" << price
+                                 << " 浮亏=" << static_cast<int>(std::abs(pnlPct)) << "%";
+            orders.push_back(buildStopOrder(pos, price, "止损"));
+            continue;
+        }
+
+        // 止盈
+        if (m_config.takeProfitPercent > 0 && pnlPct > 0
+            && pnlPct >= m_config.takeProfitPercent) {
+            INTERNAL_INFO_STREAM << "[RiskManager] 止盈触发: " << pos.symbol
+                                 << " 成本=" << pos.costPrice << " 现价=" << price
+                                 << " 浮盈=" << static_cast<int>(pnlPct) << "%";
+            orders.push_back(buildStopOrder(pos, price, "止盈"));
+        }
+    }
+
+    return orders;
 }
 
 } // namespace domain::strategy

@@ -20,6 +20,7 @@
 #include "../include/RiskManager.h"
 #include "../../../engine/include/AccountEngine.h"
 #include "../../../engine/include/GmSessionEngine.h"
+#include "MarketDataService.h"
 
 #include "foundation/json/json_facade.h"
 #include "foundation/market/AStockSymbol.h"
@@ -521,23 +522,6 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::collectOrders(
 
 // ─── 实盘异步实现 ───
 
-void StrategyEngine::enqueueMarketData(const MarketDataPoint& marketDataPoint)
-{
-    if (!m_loopRunning.load(std::memory_order_acquire)) {
-        return;
-    }
-    {
-        std::lock_guard<std::mutex> lock(m_queueMutex);
-        // 队列上限保护 — 丢弃最旧数据避免 OOM
-        if (m_mdpQueue.size() >= kMaxQueueSize) {
-            m_mdpQueue.pop();
-            m_droppedTicks.fetch_add(1, std::memory_order_relaxed);
-        }
-        m_mdpQueue.push(marketDataPoint);
-    }
-    m_queueCv.notify_one();
-}
-
 void StrategyEngine::startLiveLoop()
 {
     if (m_loopRunning.load(std::memory_order_acquire)) {
@@ -582,19 +566,43 @@ void StrategyEngine::setOrderListener(IOrderListener* listener)
 void StrategyEngine::drainQueue()
 {
     while (m_loopRunning.load(std::memory_order_acquire)) {
-        MarketDataPoint mdp;
+        // ── 收集本轮需要评估的 MarketDataPoint ──
+        std::vector<MarketDataPoint> batch;
+
         {
             std::unique_lock<std::mutex> lock(m_queueMutex);
-            m_queueCv.wait(lock, [this]() {
+            // 500ms 超时 → 从 LiveData 生成 MDP
+            m_queueCv.wait_for(lock, std::chrono::milliseconds(500), [this]() {
                 return !m_mdpQueue.empty() || !m_loopRunning.load(std::memory_order_acquire);
             });
-            if (!m_loopRunning.load(std::memory_order_acquire)) {
-                return;
+            if (!m_loopRunning.load(std::memory_order_acquire)) return;
+
+            // 处理积压的队列数据（回测等场景）
+            while (!m_mdpQueue.empty()) {
+                batch.push_back(m_mdpQueue.front());
+                m_mdpQueue.pop();
             }
-            mdp = m_mdpQueue.front();
-            m_mdpQueue.pop();
         }
 
+        // 队列为空 → 从 LiveData 构造当日实时行情
+        if (batch.empty()) {
+            auto symbols = domain::market::MarketDataService::instance().symbols();
+            for (const auto& sym : symbols) {
+                auto& d = domain::market::MarketDataService::instance().liveData(sym);
+                if (!d.valid()) continue;
+                double price = d.dailyBar().close();
+                if (price <= 0) continue;
+                auto aSym = foundation::market::AStockSymbol::fromString(sym);
+                if (!aSym.isValid()) continue;
+                batch.emplace_back(
+                    domain::strategy::InstrumentId{aSym.instrumentId()},
+                    price,
+                    d.dailyBar().volume(),
+                    0);
+            }
+        }
+
+        for (const auto& mdp : batch) {
         try {
             auto orders = step(mdp);
             if (orders.has_value() && m_orderListener
@@ -610,13 +618,6 @@ void StrategyEngine::drainQueue()
                                           << "skipping risk checks for this tick";
                     continue;  // 跳过本 tick, 不跳过整个循环
                 }
-                double tickPrice = mdp.lastPrice();
-                if (tickPrice <= 0) {
-                    INTERNAL_WARN_STREAM << "[StrategyEngine] tick price=" << tickPrice
-                                         << " for " << mdp.instrumentId().value
-                                         << ", using 0 (risk amount will be 0)";
-                }
-
                 for (auto& order : *orders) {
                     if (!order.isValid()) continue;
 
@@ -633,7 +634,16 @@ void StrategyEngine::drainQueue()
                     order.setSymbol(symObj.fullSymbol());            // → "600000.SH"
                     order.setExchange(symObj.suffix().substr(1));    // ".SH" → "SH"
 
-                    // 市价单: 用 tick 最新价填充 (仅当价格有效时)
+                    // 实时价从 LiveData 读取（不再依赖 tick 参数）
+                    auto& d = domain::market::MarketDataService::instance()
+                        .liveData(order.symbol());
+                    double tickPrice = d.valid() ? d.dailyBar().close() : mdp.lastPrice();
+                    if (tickPrice <= 0) {
+                        INTERNAL_WARN_STREAM << "[StrategyEngine] live price=0 for "
+                                             << order.symbol();
+                    }
+
+                    // 市价单: 用最新价填充
                     if (order.orderType() == OrderType::Market && tickPrice > 0) {
                         order.setPrice(tickPrice);
                     }
@@ -663,6 +673,16 @@ void StrategyEngine::drainQueue()
         } catch (const std::exception& e) {
             INTERNAL_WARN_STREAM << "[StrategyEngine] tick processing failed: "
                                  << e.what() << " — skipping";
+        }
+        } // for each MDP in batch
+
+        // ── 主动巡检：止损止盈退出 ──
+        auto stopOrders = RiskManager::instance().patrolPositions();
+        if (!stopOrders.empty() && m_orderListener) {
+            for (auto& o : stopOrders) {
+                o.setClOrdId(generateClOrdId());
+            }
+            m_orderListener->onOrders(stopOrders);
         }
 
         // 心跳 — 记录最后处理时间

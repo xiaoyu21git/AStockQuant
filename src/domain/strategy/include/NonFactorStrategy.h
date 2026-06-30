@@ -8,6 +8,7 @@
 #include "IStrategyService.h"
 #include "StrategyServiceTypes.h"
 #include "../../strategies/include/StrategyDefinitionTypes.h"
+#include "MarketDataService.h"
 #include "../../factor/include/factor_compute/IMarketDataView.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 
@@ -70,20 +71,28 @@ public:
                 closePrices[i] = static_cast<double>(
                     closeMat.data[(lastRow - lookback + 1 + i) * rowStride + c]);
 
+            // 注入当日实时收盘价（替代 DB 视图中的最后一行）
+            std::string fullSymbol;
+            if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(view)) {
+                const auto& syms = cv->symbolStrings();
+                if (c < static_cast<int>(syms.size())) fullSymbol = syms[static_cast<size_t>(c)];
+            }
+            if (!fullSymbol.empty()) {
+                auto& d = domain::market::MarketDataService::instance().liveData(fullSymbol);
+                if (d.valid()) {
+                    double liveC = d.dailyBar().close();
+                    if (liveC > 0) closePrices.push_back(liveC);
+                }
+            }
+
             SignalResult sig = evaluateSymbol(closePrices, instruments[c].value,
                                                context, m_commonCfg);
             if (sig.valid) {
-                std::string realSymbol;
-                if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(view)) {
-                    const auto& syms = cv->symbolStrings();
-                    if (c < static_cast<int>(syms.size())) {
-                        realSymbol = syms[static_cast<size_t>(c)];
-                        // 去掉交易所后缀: "300097.SZ" → "300097"
-                        auto dot = realSymbol.find('.');
-                        if (dot != std::string::npos)
-                            realSymbol = realSymbol.substr(0, dot);
-                    }
-                }
+                // 去掉交易所后缀用于输出: "300097.SZ" → "300097"
+                std::string realSymbol = fullSymbol;
+                auto dot = realSymbol.find('.');
+                if (dot != std::string::npos)
+                    realSymbol = realSymbol.substr(0, dot);
                 allSignals.emplace_back(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},

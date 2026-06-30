@@ -36,8 +36,6 @@ private:
     std::atomic<bool> m_stopRequested{false};
     std::string m_lastError;
     std::thread m_initialOrderSyncThread;
-    foundation::utils::Uuid m_tradingTickSubscription;
-    foundation::utils::Uuid m_tradingBarSubscription;
 
     // 标的代码 → 中文名映射
     mutable std::mutex m_symbolNameMutex;

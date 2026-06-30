@@ -91,16 +91,6 @@ std::vector<OrderRequest> StrategyManager::stepAll(const MarketDataPoint& mdp) {
     return orders;
 }
 
-void StrategyManager::pushMarketData(const MarketDataPoint& mdp)
-{
-    const std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto& [id, engine] : m_engines) {
-        if (engine) {
-            engine->enqueueMarketData(mdp);
-        }
-    }
-}
-
 void StrategyManager::setOrderListener(IOrderListener* listener)
 {
     const std::lock_guard<std::mutex> lock(m_mutex);

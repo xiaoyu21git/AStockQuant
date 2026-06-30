@@ -27,6 +27,9 @@ struct GmTickData {
     double price = 0, open = 0, high = 0, low = 0;
     double cumVolume = 0, cumAmount = 0, lastVolume = 0;
     int64_t tradingDay = 0;
+    int64_t createdAt = 0;  // epoch seconds (tick->created_at)
+    int  tradeType  = 0;    // 交易类型 (GM SDK tick->trade_type)
+    bool isAuction  = false; // 是否为集合竞价期间 (9:15-9:25)
     std::vector<double> bidPrices, bidVolumes, askPrices, askVolumes;
 };
 

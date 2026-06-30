@@ -502,9 +502,6 @@ public:
 
     // ─── 实盘异步专有接口 ───
 
-    /// @brief 向后台线程推送一条实时行情数据，唤醒后台自循环线程。
-    void enqueueMarketData(const MarketDataPoint& marketDataPoint);
-
     /// @brief 启动专属后台线程（ThreadPoolExecutor(1,1)），进入 drainQueue 事件循环。
     void startLiveLoop();
 

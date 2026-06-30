@@ -25,6 +25,7 @@ target_include_directories(domain_strategy_runtime
         ${CMAKE_SOURCE_DIR}/src/domain/factor/include
         ${CMAKE_SOURCE_DIR}/src/domain/trading
         ${CMAKE_SOURCE_DIR}/src/domain/trading/include
+        ${CMAKE_SOURCE_DIR}/src/domain/market/include
 )
 
 target_link_libraries(domain_strategy_runtime
@@ -33,6 +34,7 @@ target_link_libraries(domain_strategy_runtime
     PRIVATE
         factor
         domain_strategies
+        astock_market
 )
 
 if (MSVC)

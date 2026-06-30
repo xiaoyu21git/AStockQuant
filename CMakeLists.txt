@@ -129,17 +129,33 @@ set(ARROW_IPC ON CACHE BOOL "" FORCE)
 set(ARROW_USE_BOOST ON CACHE BOOL "" FORCE)
 set(ARROW_UTF8PROC_USE_SHARED OFF CACHE BOOL "" FORCE)
 
-# ==================== 本地第三方库路径（供 Arrow find_package 使用，避免网络下载） ====================
+# ==================== 本地预编译第三方库（禁止网络下载） ====================
+# 使用相对路径 ${CMAKE_SOURCE_DIR}/../lib/ 指向 G:/C++/lib/
+# 在 Arrow find_package 之前预建 IMPORTED 目标，Arrow 的 Find 模块看到已有目标直接跳过
+
 # re2（Google 正则引擎）
-set(re2_ROOT "G:/C++/lib/re2-2022-06-01" CACHE PATH "re2 local source root" FORCE)
-set(RE2_LIB "${CMAKE_BINARY_DIR}/thirdparty/re2/Release/re2.lib" CACHE FILEPATH "re2 static library" FORCE)
-set(RE2_INCLUDE_DIR "G:/C++/lib/re2-2022-06-01" CACHE PATH "re2 include directory" FORCE)
+set(re2Alt_FOUND TRUE CACHE BOOL "re2 found (local prebuilt)" FORCE)
+if(NOT TARGET re2::re2)
+    add_library(re2::re2 STATIC IMPORTED)
+    set_target_properties(re2::re2 PROPERTIES
+        IMPORTED_LOCATION_DEBUG      "${CMAKE_SOURCE_DIR}/../lib/re2-2022-06-01/lib/Debug/re2.lib"
+        IMPORTED_LOCATION_RELEASE    "${CMAKE_SOURCE_DIR}/../lib/re2-2022-06-01/lib/Release/re2.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/../lib/re2-2022-06-01"
+    )
+endif()
 set(re2_SOURCE "SYSTEM" CACHE STRING "Use local re2" FORCE)
 
 # utf8proc（UTF-8 规范化）
-set(utf8proc_ROOT "G:/C++/lib/utf8proc-2.7.0" CACHE PATH "utf8proc local source root" FORCE)
-set(utf8proc_LIB "${CMAKE_BINARY_DIR}/thirdparty/utf8proc/Release/utf8proc_static.lib" CACHE FILEPATH "utf8proc static library" FORCE)
-set(utf8proc_INCLUDE_DIR "G:/C++/lib/utf8proc-2.7.0" CACHE PATH "utf8proc include directory" FORCE)
+set(utf8proc_FOUND TRUE CACHE BOOL "utf8proc found (local prebuilt)" FORCE)
+if(NOT TARGET utf8proc::utf8proc)
+    add_library(utf8proc::utf8proc STATIC IMPORTED)
+    set_target_properties(utf8proc::utf8proc PROPERTIES
+        IMPORTED_LOCATION_DEBUG      "${CMAKE_SOURCE_DIR}/../lib/utf8proc-2.7.0/lib/Debug/utf8proc_static.lib"
+        IMPORTED_LOCATION_RELEASE    "${CMAKE_SOURCE_DIR}/../lib/utf8proc-2.7.0/lib/Release/utf8proc_static.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/../lib/utf8proc-2.7.0"
+        INTERFACE_COMPILE_DEFINITIONS "UTF8PROC_STATIC"
+    )
+endif()
 set(utf8proc_SOURCE "SYSTEM" CACHE STRING "Use local utf8proc" FORCE)
 
 set(ARROW_LOCAL_SOURCE_DIR_HINTS
@@ -190,52 +206,14 @@ if(NOT boost_POPULATED)
     FetchContent_Populate(boost)
 endif()
 
-set(_astock_arrow_saved_build_type "${CMAKE_BUILD_TYPE}")
-if(MSVC)
-    # Arrow's third-party ExternalProject logic keys off CMAKE_BUILD_TYPE.
-    # Keep the FetchContent configure pass on Debug so re2 and friends match the
-    # current Debug build, then restore the parent value immediately after.
-    set(CMAKE_BUILD_TYPE Debug)
-endif()
-
-# Arrow 完全使用本地源码，不进行网络下载
+# Arrow 完全使用本地源码，不进行网络下载。
+# re2/utf8proc 已在上面通过 IMPORTED 目标提供，Arrow 的 find_package 直接跳过。
 FetchContent_Declare(arrow SOURCE_DIR "${FETCHCONTENT_SOURCE_DIR_ARROW}")
 FetchContent_GetProperties(arrow)
 if(NOT arrow_POPULATED)
     FetchContent_Populate(arrow)
     add_subdirectory(${arrow_SOURCE_DIR}/cpp ${arrow_BINARY_DIR})
 endif()
-
-if(MSVC)
-    # Arrow's VS project generation hard-codes vendored RE2/utf8proc to the
-    # *_ep-install/lib path. Sync that install location from the matching
-    # config-specific build outputs before arrow_shared links so Debug never
-    # picks up a previously installed Release library.
-    if(TARGET arrow_shared AND TARGET re2_ep AND TARGET utf8proc_ep)
-        add_custom_target(astock_arrow_sync_vendored_libs
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${arrow_BINARY_DIR}/re2_ep-prefix/src/re2_ep-build/$<CONFIG>/re2.lib"
-                "${arrow_BINARY_DIR}/re2_ep-install/lib/re2.lib"
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                "${arrow_BINARY_DIR}/utf8proc_ep-prefix/src/utf8proc_ep-build/$<CONFIG>/utf8proc_static.lib"
-                "${arrow_BINARY_DIR}/utf8proc_ep-install/lib/utf8proc_static.lib"
-            DEPENDS re2_ep utf8proc_ep
-            BYPRODUCTS
-                "${arrow_BINARY_DIR}/re2_ep-install/lib/re2.lib"
-                "${arrow_BINARY_DIR}/utf8proc_ep-install/lib/utf8proc_static.lib"
-            VERBATIM
-        )
-        add_dependencies(arrow_shared astock_arrow_sync_vendored_libs)
-        if(TARGET arrow_bundled_dependencies_merge)
-            add_dependencies(arrow_bundled_dependencies_merge astock_arrow_sync_vendored_libs)
-        endif()
-    endif()
-endif()
-
-if(MSVC)
-    set(CMAKE_BUILD_TYPE "${_astock_arrow_saved_build_type}")
-endif()
-unset(_astock_arrow_saved_build_type)
 
 set(EIGEN_LOCAL_SOURCE_DIR_HINTS
     "G:/C++/lib/eigen-3.4.0"

@@ -32,11 +32,8 @@ endif()
 # 添加源码
 add_library(astock_market STATIC
     src/AdjustableMarketDataView.cpp
-    # Old core/providers removed — depend on deleted DataTypes.h/IDataProvider.h/MarketData.h
-    # src/core/DataTypes.cpp
-    # src/core/DataProviderFactory.cpp
-    # src/providers/SimProvider.cpp
-    # src/providers/DatabaseProvider.cpp
+    src/LiveData.cpp
+    src/MarketDataService.cpp
 )
 
 target_link_libraries(astock_market

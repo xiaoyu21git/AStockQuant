@@ -4,6 +4,7 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 #include "foundation/config/ConfigManager.hpp"
+#include "../../domain/market/include/MarketDataService.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 #include <cstdio>
@@ -111,8 +112,13 @@ public:
         td.cumVolume  = tick->cum_volume;
         td.cumAmount  = tick->cum_amount;
         td.lastVolume = static_cast<double>(tick->last_volume);
+        td.tradeType  = tick->trade_type;
         auto tt = static_cast<time_t>(tick->created_at);
+        td.createdAt  = static_cast<std::int64_t>(tt);
         struct tm local; localtime_s(&local, &tt);
+        // 集合竞价: 9:15-9:25 开盘竞价 + 14:57-15:00 收盘竞价
+        td.isAuction  = (local.tm_hour == 9 && local.tm_min >= 15 && local.tm_min < 25)
+                     || (local.tm_hour == 14 && local.tm_min >= 57);
         td.tradingDay = (local.tm_year + 1900) * 10000LL + (local.tm_mon + 1) * 100LL + local.tm_mday;
         for (int i = 0; i < 5; ++i) {
             auto& q = tick->quotes[i];
@@ -161,6 +167,8 @@ public:
                 cached.asks.push_back({td.askPrices[i], td.askVolumes[i]});
             e.m_quoteCache[td.symbol] = std::move(cached);
         }
+
+        domain::market::MarketDataService::instance().onTick(td);
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[GmSdk] on_tick exception: " << e.what();
         } catch (...) {
