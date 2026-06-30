@@ -28,6 +28,7 @@
     StrategyPerformanceModel.cpp
     StockNameResolver.cpp
     SymbolSearchModel.cpp
+    RuleTemplateDetailHelper.cpp
     CandleDataModel.cpp
     StockDataLoader.cpp
     CrosshairManager.cpp
