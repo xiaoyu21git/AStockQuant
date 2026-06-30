@@ -1,8 +1,8 @@
 """
 update_weekly_monthly.py — 日线聚合周线/月线。
---latest: 只更新当前周/月 (日常跑)
---backfill: 全量重建 (首次/补历史)
-用法: python tools/update_weekly_monthly.py [--target-date YYYY-MM-DD] [--latest|--backfill]
+最新: 只更新当前周期。历史: 分析缺口并回填。
+用法: python tools/update_weekly_monthly.py
+      python tools/update_weekly_monthly.py --backfill
 """
 
 import sys, argparse, datetime as dt
@@ -11,7 +11,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import psycopg2
 from tools.db_config import PG_CONFIG
 
-# ── SQL: 当前周期(只查本周/本月日线) ──
 W_LATEST = """
 INSERT INTO mkt.weekly_bar (symbol_id, trade_date, open, high, low, close, volume, turnover)
 SELECT d.symbol_id, MAX(d.trade_date),
@@ -44,7 +43,6 @@ ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
     close=EXCLUDED.close, volume=EXCLUDED.volume, turnover=EXCLUDED.turnover
 """
 
-# ── SQL: 全量重建 ──
 W_FULL = """
 INSERT INTO mkt.weekly_bar (symbol_id, trade_date, open, high, low, close, volume, turnover)
 SELECT d.symbol_id, MAX(d.trade_date),
@@ -78,8 +76,7 @@ ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--target-date", default="")
-    p.add_argument("--latest", action="store_true", default=True, help="只更新当前周/月 (默认)")
-    p.add_argument("--backfill", action="store_true", help="全量重建历史")
+    p.add_argument("--backfill", action="store_true")
     a = p.parse_args()
     target = dt.date.fromisoformat(a.target_date) if a.target_date else dt.date.today()
 
@@ -87,15 +84,24 @@ def main():
     cur = conn.cursor()
 
     if a.backfill:
+        # 分析缺口
+        cur.execute("SELECT COUNT(*) FROM mkt.daily_bar")
+        daily_rows = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM mkt.weekly_bar")
+        w_rows = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM mkt.monthly_bar")
+        m_rows = cur.fetchone()[0]
+        print(f"[wl/ml] 日线{daily_rows}行 周线{w_rows}行 月线{m_rows}行")
         cur.execute(W_FULL, (target,)); wc = cur.rowcount
         cur.execute(M_FULL, (target,)); mc = cur.rowcount
-        conn.commit(); conn.close()
-        print(f"[wl/ml] 全量回填 周线{ wc} 月线{ mc}")
+        print(f"[wl/ml] 周线+{wc-w_rows} 月线+{mc-m_rows}")
     else:
         cur.execute(W_LATEST, (target, target)); wc = cur.rowcount
         cur.execute(M_LATEST, (target, target)); mc = cur.rowcount
-        conn.commit(); conn.close()
-        print(f"[wl/ml] {target} 周线{ wc} 月线{ mc}")
+        print(f"[wl/ml] {target} 周线{wc} 月线{mc}")
+
+    conn.commit()
+    conn.close()
 
 if __name__ == "__main__":
     main()

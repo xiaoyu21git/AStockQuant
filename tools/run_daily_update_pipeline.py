@@ -139,17 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-minute-backfill",
         action="store_true",
-        help="回填分钟线历史",
-    )
-    parser.add_argument(
-        "--minute-backfill-start",
-        default="",
-        help="分钟线回填起始日期 YYYY-MM-DD",
-    )
-    parser.add_argument(
-        "--minute-backfill-end",
-        default="",
-        help="分钟线回填结束日期 YYYY-MM-DD",
+        help="分钟线自动缺口分析并回填",
     )
     parser.add_argument(
         "--weekly-monthly-backfill",
@@ -212,11 +202,6 @@ def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | 
         args.skip_valuation_backfill = True
         args.skip_caps_backfill = True
         args.skip_turnover_backfill = True
-
-        # 历史回填 (留空自动从最早缺数据的日期开始)
-        start = prompt_text("分钟线回填起始日期 (留空自动)", "")
-        if start:
-            args.minute_backfill_start = start
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
@@ -423,13 +408,8 @@ def build_minute_update_command(args: argparse.Namespace, target_date: dt.date) 
     cmd = [sys.executable, "tools/update_minute_data.py", "--target-date", target_date.isoformat()]
     return cmd
 
-def build_minute_backfill_command(args: argparse.Namespace) -> list[str]:
-    cmd = [sys.executable, "tools/update_minute_data.py", "--backfill"]
-    if args.minute_backfill_start:
-        cmd.extend(["--start", args.minute_backfill_start])
-    if args.minute_backfill_end:
-        cmd.extend(["--target-date", args.minute_backfill_end])
-    return cmd
+def build_minute_backfill_command() -> list[str]:
+    return [sys.executable, "tools/update_minute_data.py", "--backfill"]
 
 def build_weekly_monthly_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
     cmd = [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
@@ -678,8 +658,8 @@ def main() -> int:
     # ── 分钟线/周月线历史回填 (独立于日线历史缺口) ──
     if args.with_minute_backfill:
         if not execute_step(
-            "minute bars backfill (history)",
-            build_minute_backfill_command(args),
+            "minute bars backfill (auto-gap)",
+            build_minute_backfill_command(),
             required=False,
             continue_on_failure=True,
             results=step_results,
