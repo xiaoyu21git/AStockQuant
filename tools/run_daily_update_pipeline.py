@@ -136,6 +136,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="仅运行 Baostock 单线程全量更新 (跳过所有回填步骤)",
     )
+    parser.add_argument(
+        "--with-minute-backfill",
+        action="store_true",
+        help="历史模式时同时回填分钟线历史",
+    )
+    parser.add_argument(
+        "--weekly-monthly-backfill",
+        action="store_true",
+        help="历史模式时周月线全量重建(否则只聚合当前周期)",
+    )
     return parser.parse_args()
 
 
@@ -186,6 +196,8 @@ def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | 
         args.include_history_gaps = False
     elif choice == "2":
         args.include_history_gaps = True
+        args.with_minute_backfill = True
+        args.weekly_monthly_backfill = True
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
@@ -388,11 +400,17 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
     ]
 
 
-def build_minute_update_command(target_date: dt.date) -> list[str]:
-    return [sys.executable, "tools/update_minute_data.py", "--target-date", target_date.isoformat()]
+def build_minute_update_command(args: argparse.Namespace, target_date: dt.date, backfill_start: dt.date | None = None) -> list[str]:
+    cmd = [sys.executable, "tools/update_minute_data.py", "--target-date", target_date.isoformat()]
+    if args.with_minute_backfill and backfill_start:
+        cmd.extend(["--backfill", "--start", backfill_start.isoformat()])
+    return cmd
 
-def build_weekly_monthly_command(target_date: dt.date) -> list[str]:
-    return [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
+def build_weekly_monthly_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
+    cmd = [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
+    if args.weekly_monthly_backfill:
+        cmd.append("--backfill")
+    return cmd
 
 def build_financial_backfill_command(args: argparse.Namespace) -> list[str]:
     command = [sys.executable, "tools/import_financial_from_jq.py"]
@@ -632,6 +650,16 @@ def main() -> int:
                 if not args.continue_on_step_failure:
                     pipeline_failed = True
 
+        if args.with_minute_backfill:
+            if not execute_step(
+                "minute bars backfill (history)",
+                build_minute_update_command(args, target_date, backfill_start=history_start_date),
+                required=False,
+                continue_on_failure=True,
+                results=step_results,
+            ):
+                pass
+
     # ↓ 以下步骤不受前面失败影响，始终执行 ↓
 
     if not execute_step(
@@ -645,7 +673,7 @@ def main() -> int:
 
     if not execute_step(
         "minute bars update",
-        build_minute_update_command(target_date),
+        build_minute_update_command(args, target_date),
         required=False,
         continue_on_failure=True,
         results=step_results,
@@ -654,7 +682,7 @@ def main() -> int:
 
     if not execute_step(
         "weekly/monthly aggregate",
-        build_weekly_monthly_command(target_date),
+        build_weekly_monthly_command(args, target_date),
         required=False,
         continue_on_failure=True,
         results=step_results,
