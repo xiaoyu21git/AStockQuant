@@ -91,12 +91,10 @@ namespace wang{
          }
       );
 
-      // CrosshairManager — 十字光标状态 (单例)
-      qmlRegisterSingletonType<bridge::CrosshairManager>(
+      // CrosshairManager — 十字光标状态 (单例, 引擎不接管生命周期)
+      qmlRegisterSingletonInstance<bridge::CrosshairManager>(
          url, 1, 0, "CrosshairManager",
-         [](QQmlEngine*, QJSEngine*) -> QObject* {
-            return &bridge::CrosshairManager::instance();
-         }
+         &bridge::CrosshairManager::instance()
       );
 
       qmlRegisterSingletonType<bridge::MarketDataBridge>(
