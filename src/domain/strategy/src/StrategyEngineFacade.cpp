@@ -647,6 +647,11 @@ void StrategyEngine::drainQueue()
                     }
 
                     // 通过风控 → 原样传递
+                    INTERNAL_INFO_STREAM << "[DrainQueue] →onOrders symbol=" << order.symbol()
+                                         << " side=" << (order.side() == OrderSide::Buy ? "B" : "S")
+                                         << " qty=" << order.quantity()
+                                         << " price=" << order.price()
+                                         << " account=" << order.accountId();
                     std::vector<OrderRequest> approved{order};
                     m_orderListener->onOrders(approved);
                 }

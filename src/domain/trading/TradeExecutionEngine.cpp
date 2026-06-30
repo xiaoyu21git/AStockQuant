@@ -458,8 +458,13 @@ void TradeExecutionEngine::setOnOrderGenerated(OrderGeneratedHandler h) { m_onOr
 void TradeExecutionEngine::setOnOrderSubmitResult(OrderSubmitResultHandler h) { m_onOrderSubmitResult = std::move(h); }
 
 void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& orders) {
+    INTERNAL_INFO_STREAM << "[TradeExec] onOrders received " << orders.size() << " orders from strategy";
     for (const auto& req : orders) {
-        if (!req.isValid()) continue;
+        if (!req.isValid()) { INTERNAL_WARN_STREAM << "[TradeExec] onOrders skip invalid"; continue; }
+        INTERNAL_INFO_STREAM << "[TradeExec] onOrders order: symbol=" << req.symbol()
+                             << " side=" << (req.side() == OrderSide::Buy ? "B" : "S")
+                             << " qty=" << req.quantity() << " price=" << req.price()
+                             << " clOrdId=" << req.clOrdId();
 
         TradeOrder order;
         order.setSymbol(req.symbol());
