@@ -30,6 +30,7 @@ Exchange AStockSymbol::inferExchange(const std::string& code) {
     if (prefix3 >= 0   && prefix3 <= 3)   return Exchange::SZSE; // 000~003, 300~301
     if (prefix3 >= 300 && prefix3 <= 301) return Exchange::SZSE; // 创业板
     if (prefix3 >= 800 && prefix3 <= 899) return Exchange::BSE;  // 北交所
+    if (prefix3 == 399) return Exchange::SZSE;                   // 深证指数
 
     return Exchange::Unknown;
 }

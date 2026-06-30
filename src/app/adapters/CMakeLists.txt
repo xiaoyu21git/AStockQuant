@@ -8,6 +8,7 @@ add_library(app_adapters STATIC
 target_include_directories(app_adapters
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../domain/trading
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../ui/bridge/include
         ${CMAKE_SOURCE_DIR}/thirdparty/gmsdk
