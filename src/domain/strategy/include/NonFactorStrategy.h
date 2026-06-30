@@ -76,8 +76,13 @@ public:
                 std::string realSymbol;
                 if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(view)) {
                     const auto& syms = cv->symbolStrings();
-                    if (c < static_cast<int>(syms.size()))
+                    if (c < static_cast<int>(syms.size())) {
                         realSymbol = syms[static_cast<size_t>(c)];
+                        // 去掉交易所后缀: "300097.SZ" → "300097"
+                        auto dot = realSymbol.find('.');
+                        if (dot != std::string::npos)
+                            realSymbol = realSymbol.substr(0, dot);
+                    }
                 }
                 allSignals.emplace_back(
                     context.strategyInstanceId(),
