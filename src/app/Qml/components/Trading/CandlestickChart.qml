@@ -155,15 +155,54 @@ Rectangle {
             var isTimeShare = (chartPeriod === 0)
 
             if (isTimeShare) {
-                // 分时图: 收盘价连线 + 成交量柱
-                ctx.strokeStyle = "#ffd700"; ctx.lineWidth = 1.5; ctx.beginPath()
+                // ════════════════════════════════════
+                // 分时图: 折线 + 渐变填充 + 均价线
+                // ════════════════════════════════════
+                var pts = []
+                var sumClose = 0
                 for (var j = 0; j < n; j++) {
                     var cc = candleModel.data(candleModel.index(j, 4), 0x0105)
                     var cy = chartTop + mainH * (1 - (cc - priceMin) / priceRange)
                     var lx = plotX + j * candleGap + candleGap/2
-                    j === 0 ? ctx.moveTo(lx, cy) : ctx.lineTo(lx, cy)
+                    pts.push({x: lx, y: cy})
+                    sumClose += cc
                 }
+                var avgPrice = n > 0 ? sumClose / n : preClose
+
+                // 渐变填充 (价格线下方到 chartBottom)
+                if (pts.length > 1) {
+                    ctx.beginPath()
+                    ctx.moveTo(pts[0].x, pts[0].y)
+                    for (var p = 1; p < pts.length; p++) ctx.lineTo(pts[p].x, pts[p].y)
+                    var lastX = pts[pts.length-1].x
+                    var chartBot = chartTop + mainH
+                    ctx.lineTo(lastX, chartBot)
+                    ctx.lineTo(pts[0].x, chartBot)
+                    ctx.closePath()
+                    var grad = ctx.createLinearGradient(0, chartTop, 0, chartBot)
+                    var abovePre = latestPrice >= preClose
+                    grad.addColorStop(0, abovePre ? "rgba(239,68,68,0.25)" : "rgba(16,185,129,0.25)")
+                    grad.addColorStop(1, "rgba(0,0,0,0.01)")
+                    ctx.fillStyle = grad
+                    ctx.fill()
+                }
+
+                // 价格折线
+                ctx.strokeStyle = (latestPrice >= preClose) ? "#ef5350" : "#26a69a"
+                ctx.lineWidth = 1.2
+                ctx.beginPath()
+                for (var k = 0; k < pts.length; k++)
+                    k === 0 ? ctx.moveTo(pts[k].x, pts[k].y) : ctx.lineTo(pts[k].x, pts[k].y)
                 ctx.stroke()
+
+                // 均价线 (黄色虚线)
+                if (avgPrice > 0) {
+                    var avgY = chartTop + mainH * (1 - (avgPrice - priceMin) / priceRange)
+                    ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 0.8
+                    ctx.setLineDash([3, 4])
+                    ctx.beginPath(); ctx.moveTo(plotX, avgY); ctx.lineTo(plotX + plotW, avgY); ctx.stroke()
+                    ctx.setLineDash([])
+                }
             } else {
                 // 蜡烛图
                 for (var i = 0; i < n; i++) {
