@@ -261,30 +261,46 @@ void StockDataLoader::loadFromDB(const QString& code, int period) {
         }
     } else if (period >= Min1 && period <= Min120) {
         // 分钟蜡烛图: 1/5/15/30/60/120 分钟
-        const char* minuteBars[] = {"", "60", "300", "900", "1800", "3600", "7200"};
+        // bar size 秒数: 1m=60, 5m=300, 15m=900, 30m=1800, 60m=3600, 120m=7200
+        const int barSecs[] = {0, 60, 300, 900, 1800, 3600, 7200};
         auto now = std::chrono::system_clock::now();
         auto t_now = std::chrono::system_clock::to_time_t(now);
-        int lookbackSeconds = (period <= Min30) ? 3600 * 4 : 3600 * 8;  // 4h or 8h
+        int lookbackSeconds = (period <= Min30) ? 3600 * 4 : 3600 * 8;
         auto start = now - std::chrono::seconds(lookbackSeconds);
         auto t_start = std::chrono::system_clock::to_time_t(start);
         char s[32], e[32];
         std::strftime(s, sizeof(s), "%Y-%m-%d %H:%M:%S", std::localtime(&t_start));
         std::strftime(e, sizeof(e), "%Y-%m-%d %H:%M:%S", std::localtime(&t_now));
-        auto* bars = ::history_bars(gmSym.c_str(), minuteBars[period], s, e, 0, nullptr, true, nullptr);
-        if (bars && !bars->status() && bars->count()) {
-            for (size_t i = 0; i < bars->count(); ++i) {
-                auto& b = bars->at(i);
-                QVariantMap item;
-                item["timestamp"] = QVariant::fromValue<qint64>(static_cast<qint64>(b.bob * 1000.0));
-                item["open"]=static_cast<double>(b.open); item["high"]=static_cast<double>(b.high);
-                item["low"]=static_cast<double>(b.low);   item["close"]=static_cast<double>(b.close);
-                item["volume"]=b.volume;
-                result.append(item);
+
+        // 尝试多种 bar size 格式
+        int secs = barSecs[period];
+        char sz1[16], sz2[16], sz3[16];
+        std::snprintf(sz1, sizeof(sz1), "%d", secs);         // "60"
+        std::snprintf(sz2, sizeof(sz2), "%ds", secs);        // "60s"
+        std::snprintf(sz3, sizeof(sz3), "%dm", secs / 60);   // "1m"
+        const char* formats[] = {sz2, sz1, sz3, nullptr};     // 优先 "60s"
+
+        for (int fi = 0; formats[fi]; ++fi) {
+            auto* bars = ::history_bars(gmSym.c_str(), formats[fi], s, e, 0, nullptr, true, nullptr);
+            if (bars && bars->status() == 0 && bars->count() > 0) {
+                INTERNAL_INFO_STREAM << "[StockDataLoader] minute bars barSize=" << formats[fi]
+                                     << " count=" << bars->count() << " period=" << period;
+                for (size_t i = 0; i < bars->count(); ++i) {
+                    auto& b = bars->at(i);
+                    QVariantMap item;
+                    item["timestamp"] = QVariant::fromValue<qint64>(static_cast<qint64>(b.bob * 1000.0));
+                    item["open"]=static_cast<double>(b.open); item["high"]=static_cast<double>(b.high);
+                    item["low"]=static_cast<double>(b.low);   item["close"]=static_cast<double>(b.close);
+                    item["volume"]=b.volume;
+                    result.append(item);
+                }
+                bars->release();
+                break;
             }
-            bars->release();
-        } else {
             if (bars) bars->release();
-            // fallback: preClose 水平线
+        }
+        if (result.isEmpty()) {
+            INTERNAL_WARN_STREAM << "[StockDataLoader] minute bars empty for " << gmSym << " period=" << period;
             auto daily = loadDailyBars(gmSym, 5);
             double pc = daily.isEmpty() ? 0.0 : daily.last().toMap()["close"].toDouble();
             if (pc > 0) {
