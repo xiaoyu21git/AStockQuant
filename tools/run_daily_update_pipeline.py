@@ -506,6 +506,8 @@ def main() -> int:
         f"continue_on_step_failure={args.continue_on_step_failure}"
     )
 
+    pipeline_failed = False
+
     if not execute_step(
         "daily latest supplement",
         update_cmd_builder(args),
@@ -513,49 +515,54 @@ def main() -> int:
         continue_on_failure=args.continue_on_step_failure,
         results=step_results,
     ):
-        return finalize(step_results[-1]["exit_code"])
+        pipeline_failed = True
 
-    if not args.skip_derived_backfill:
-        if not execute_step(
-            "derived fields backfill (latest)",
-            build_derived_backfill_command(latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+    if not pipeline_failed:
+        if not args.skip_derived_backfill:
+            if not execute_step(
+                "derived fields backfill (latest)",
+                build_derived_backfill_command(latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if not args.skip_valuation_backfill:
-        if not execute_step(
-            "valuation backfill (latest)",
-            build_valuation_backfill_command(args, latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+        if not pipeline_failed and not args.skip_valuation_backfill:
+            if not execute_step(
+                "valuation backfill (latest)",
+                build_valuation_backfill_command(args, latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if not args.skip_caps_backfill:
-        if not execute_step(
-            "market cap fallback backfill (latest)",
-            build_caps_backfill_command(latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+        if not pipeline_failed and not args.skip_caps_backfill:
+            if not execute_step(
+                "market cap fallback backfill (latest)",
+                build_caps_backfill_command(latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if not args.skip_turnover_backfill:
-        if not execute_step(
-            "turnover rate backfill (latest)",
-            build_turnover_backfill_command(latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+        if not pipeline_failed and not args.skip_turnover_backfill:
+            if not execute_step(
+                "turnover rate backfill (latest)",
+                build_turnover_backfill_command(latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if args.with_financial:
+    if not pipeline_failed and args.with_financial:
         if not execute_step(
             "financial backfill",
             build_financial_backfill_command(args),
@@ -563,9 +570,10 @@ def main() -> int:
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,
         ):
-            return finalize(step_results[-1]["exit_code"])
+            if not args.continue_on_step_failure:
+                pipeline_failed = True
 
-    if args.include_history_gaps and history_start_date <= history_end_date:
+    if not pipeline_failed and args.include_history_gaps and history_start_date <= history_end_date:
         if not execute_step(
             "daily history gap supplement",
             build_baostock_update_command(args, start_date=history_start_date),
@@ -573,9 +581,10 @@ def main() -> int:
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,
         ):
-            return finalize(step_results[-1]["exit_code"])
+            if not args.continue_on_step_failure:
+                pipeline_failed = True
 
-        if not args.skip_derived_backfill:
+        if not pipeline_failed and not args.skip_derived_backfill:
             if not execute_step(
                 "derived fields backfill (history)",
                 build_derived_backfill_command(history_start_date, history_end_date),
@@ -583,9 +592,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-        if not args.skip_valuation_backfill:
+        if not pipeline_failed and not args.skip_valuation_backfill:
             if not execute_step(
                 "valuation backfill (history)",
                 build_valuation_backfill_command(args, history_start_date, history_end_date),
@@ -593,9 +603,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-        if not args.skip_caps_backfill:
+        if not pipeline_failed and not args.skip_caps_backfill:
             if not execute_step(
                 "market cap fallback backfill (history)",
                 build_caps_backfill_command(history_start_date, history_end_date),
@@ -603,9 +614,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-        if not args.skip_turnover_backfill:
+        if not pipeline_failed and not args.skip_turnover_backfill:
             if not execute_step(
                 "turnover rate backfill (history)",
                 build_turnover_backfill_command(history_start_date, history_end_date),
@@ -613,7 +625,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
+
+    # ↓ 以下步骤不受前面失败影响，始终执行 ↓
 
     if not execute_step(
         "auto-fix lagging daily (akshare)",
