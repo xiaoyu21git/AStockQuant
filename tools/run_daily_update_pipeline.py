@@ -387,6 +387,9 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
     ]
 
 
+def build_weekly_monthly_command(target_date: dt.date) -> list[str]:
+    return [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
+
 def build_financial_backfill_command(args: argparse.Namespace) -> list[str]:
     command = [sys.executable, "tools/import_financial_from_jq.py"]
     command.extend(["--limit", str(args.financial_limit)])
@@ -615,6 +618,15 @@ def main() -> int:
     if not execute_step(
         "auto-fix lagging daily (akshare)",
         [sys.executable, "tools/verify_daily_update.py", "--sample-limit", str(args.sample_limit), "--auto-fix"],
+        required=False,
+        continue_on_failure=True,
+        results=step_results,
+    ):
+        pass
+
+    if not execute_step(
+        "weekly/monthly aggregate",
+        build_weekly_monthly_command(target_date),
         required=False,
         continue_on_failure=True,
         results=step_results,
