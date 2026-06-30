@@ -302,18 +302,44 @@ Rectangle {
                     {period: 60, color: "#22d3ee", width: 0.8, data: calcSMA(60)}
                 ]
 
-                // 蜡烛
+                // 蜡烛 + 跳空缺口
+                // prev 存前一根K线的 OHLC 实际价格(非像素坐标)
+                var prevO = null, prevC = null, prevH = null, prevL = null, prevCxPx = null
                 for (var i = 0; i < n; i++) {
                     var o=candleModel.data(candleModel.index(i,1),0x0102), hi=candleModel.data(candleModel.index(i,2),0x0103)
                     var lo=candleModel.data(candleModel.index(i,3),0x0104), c=candleModel.data(candleModel.index(i,4),0x0105)
                     var cx=plotX+i*candleGap+candleGap/2
                     var yO=chartTop+mainH*(1-(o-priceMin)/priceRange), yC=chartTop+mainH*(1-(c-priceMin)/priceRange)
                     var yH=chartTop+mainH*(1-(hi-priceMin)/priceRange), yL=chartTop+mainH*(1-(lo-priceMin)/priceRange)
+
+                    // 跳空缺口: 当前最低 > 前根最高 (向上跳空) 或 当前最高 < 前根最低 (向下跳空)
+                    if (prevH !== null) {
+                        var gapUp = (lo > prevH)    // 向上跳空
+                        var gapDn = (hi < prevL)    // 向下跳空
+                        if (gapUp || gapDn) {
+                            // 缺口区域: 前根收盘到当前开盘之间
+                            var gpTop = chartTop + mainH * (1 - (gapUp ? Math.min(lo, o) : Math.max(hi, o) - priceMin) / priceRange)
+                            var gpBot = chartTop + mainH * (1 - (gapUp ? Math.max(prevH, prevC) : Math.min(prevL, prevC) - priceMin) / priceRange)
+                            if (gpTop > gpBot) { var t = gpTop; gpTop = gpBot; gpBot = t }
+                            var gapLeft = prevCxPx + candleW * 0.3
+                            var gapRight = cx - candleW * 0.3
+                            if (gapRight > gapLeft && gpBot > gpTop) {
+                                ctx.fillStyle = gapUp ? upColor : downColor
+                                ctx.globalAlpha = 0.30
+                                ctx.fillRect(gapLeft, gpTop, gapRight - gapLeft, gpBot - gpTop)
+                                ctx.globalAlpha = 1.0
+                            }
+                        }
+                    }
+
+                    // 蜡烛
                     var col=(c>=o)?upColor:downColor
                     ctx.strokeStyle=col; ctx.fillStyle=col; ctx.lineWidth=1
                     ctx.beginPath(); ctx.moveTo(cx,yH); ctx.lineTo(cx,yL); ctx.stroke()
                     var bh=Math.abs(yC-yO), by=Math.min(yO,yC)
                     ctx.fillRect(cx-candleW/2,by,candleW,Math.max(1,bh))
+
+                    prevO = o; prevC = c; prevH = hi; prevL = lo; prevCxPx = cx
                 }
 
                 // 均线 (画在蜡烛上层)
