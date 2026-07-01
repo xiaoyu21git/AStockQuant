@@ -325,10 +325,14 @@ QVariantList StrategyParamConfigHelper::getDefaultStrategyTags(int idx) const { 
 
 QVariantMap StrategyParamConfigHelper::resetFormData() const {
     QVariantMap d;
-    d["strategyTypeIndex"]=0; d["strategyName"]=""; d["strategyDescription"]="";
-    d["assetTypeIndex"]=0; d["timeFrameIndex"]=5; d["riskLevelIndex"]=1;
-    d["optimizationMethod"]="genetic"; d["tags"]=QVariantList();
-    d["parameters"]=QVariantMap(); d["parametersValid"]=false;
+    d["selectedStrategyTypeIndex"]=0;
+    d["strategyName"]="";
+    d["strategyDescription"]="";
+    d["strategyTags"]=QVariantList();
+    d["optimizationMethod"]="genetic";
+    d["enableAdvancedOptions"]=false;
+    d["strategyParameters"]=QVariantMap();
+    d["parametersValid"]=false;
     return d;
 }
 
