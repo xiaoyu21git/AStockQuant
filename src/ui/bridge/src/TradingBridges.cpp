@@ -62,7 +62,10 @@ bool TradeExecutionBridge::isLiveBridgeReady() {
     return liveBridgeReady();
 }
 QVariantList TradeExecutionBridge::recentRuleHits() const { return {}; }
-QVariantList TradeExecutionBridge::recentOrders() const { return m_recentOrders; }
+QVariantList TradeExecutionBridge::recentOrders() const {
+    const_cast<TradeExecutionBridge*>(this)->ensureInitialized();
+    return m_recentOrders;
+}
 QString TradeExecutionBridge::lastErrorMessage() const { return m_lastErrorMessage; }
 
 void TradeExecutionBridge::ensureInitialized() {
