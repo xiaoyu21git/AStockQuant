@@ -276,7 +276,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: compactOrderBookHeight
+            Layout.fillHeight: true
             Layout.alignment: Qt.AlignTop
             spacing: compactPanelGap
 
