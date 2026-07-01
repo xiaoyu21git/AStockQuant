@@ -16,6 +16,9 @@ int main(int argc, char* argv[])
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 #endif
+    QCoreApplication::setOrganizationName("AStock");
+    QCoreApplication::setOrganizationDomain("astock.com");
+    QCoreApplication::setApplicationName("AStockQuantEngine");
     QApplication app(argc, argv);
     app.setWindowIcon(QIcon(QStringLiteral(":/resources/icons/app.ico")));
 
