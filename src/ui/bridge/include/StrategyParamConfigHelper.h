@@ -57,6 +57,16 @@ public:
     // ── 规则模板 ──
     Q_INVOKABLE QVariantMap getRuleComposerStageDefinitions() const;
     Q_INVOKABLE QString resolveRuleTemplateFileName(const QString& name) const;
+    Q_INVOKABLE QVariantMap buildDefaultBaseRuleBindings(int idx) const;
+    Q_INVOKABLE QVariantMap buildDefaultMarketRuleBindings(int idx) const;
+    Q_INVOKABLE QVariantMap buildDefaultRuleComposerSkeleton(int idx) const;
+    Q_INVOKABLE QVariantMap validateRuleComposerConfiguration(const QVariantMap& state) const;
+    Q_INVOKABLE QVariantMap resetFormData() const;
+
+    // ── 旧名兼容 ──
+    Q_INVOKABLE QString getRiskLevelName(int idx) const;
+    Q_INVOKABLE QString getDefaultStrategyDescription(int idx) const;
+    Q_INVOKABLE QVariantList getDefaultStrategyTags(int idx) const;
 
 private:
     static QVariantMap makeEnum(std::initializer_list<std::pair<const char*, int>> vals);

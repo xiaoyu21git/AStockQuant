@@ -318,4 +318,36 @@ QString StrategyParamConfigHelper::resolveRuleTemplateFileName(const QString& na
     return QStringLiteral("custom");
 }
 
+// ── 缺失方法兼容 ──
+QString StrategyParamConfigHelper::getRiskLevelName(int idx) const { return getRiskLevelNameFromIndex(idx); }
+QString StrategyParamConfigHelper::getDefaultStrategyDescription(int idx) const { return getDefaultStrategyDescriptionFromIndex(idx); }
+QVariantList StrategyParamConfigHelper::getDefaultStrategyTags(int idx) const { return getDefaultStrategyTagsFromIndex(idx); }
+
+QVariantMap StrategyParamConfigHelper::resetFormData() const {
+    QVariantMap d;
+    d["strategyTypeIndex"]=0; d["strategyName"]=""; d["strategyDescription"]="";
+    d["assetTypeIndex"]=0; d["timeFrameIndex"]=5; d["riskLevelIndex"]=1;
+    d["optimizationMethod"]="genetic"; d["tags"]=QVariantList();
+    d["parameters"]=QVariantMap(); d["parametersValid"]=false;
+    return d;
+}
+
+QVariantMap StrategyParamConfigHelper::validateRuleComposerConfiguration(const QVariantMap&) const {
+    QVariantMap r;
+    r["valid"]=true; r["errors"]=QVariantList(); r["warnings"]=QVariantList();
+    return r;
+}
+
+QVariantMap StrategyParamConfigHelper::buildDefaultBaseRuleBindings(int) const {
+    return QVariantMap();
+}
+
+QVariantMap StrategyParamConfigHelper::buildDefaultMarketRuleBindings(int) const {
+    return QVariantMap();
+}
+
+QVariantMap StrategyParamConfigHelper::buildDefaultRuleComposerSkeleton(int) const {
+    return QVariantMap();
+}
+
 #include "moc_StrategyParamConfigHelper.cpp"
