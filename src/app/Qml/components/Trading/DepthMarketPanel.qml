@@ -497,8 +497,7 @@ Rectangle {
             }
 
             Rectangle {
-                visible: root.l2PanelVisible
-                Layout.preferredWidth: root.l2PanelVisible ? compactTradePanelWidth : 0
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.alignment: Qt.AlignTop
                 radius: 22
@@ -540,11 +539,13 @@ Rectangle {
                     }
 
                     ListView {
+                        id: tickListView
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
                         spacing: compactMode ? 3 : 6
                         model: root.tickRows
+                        onCountChanged: { if(count>0) positionViewAtEnd() }
 
                         delegate: Rectangle {
                             property var tickData: modelData
