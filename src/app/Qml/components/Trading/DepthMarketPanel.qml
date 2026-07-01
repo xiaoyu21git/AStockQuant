@@ -7,6 +7,8 @@ Rectangle {
     id: root
     signal depthLevelsChanged(int levels)
 
+    onDepthLevelsChanged: function(levels) { selectedDepthLevels = levels }
+
     radius: 28
     color: Const.depthPanelBg
     border.color: Const.depthPanelBorder
@@ -65,7 +67,7 @@ Rectangle {
     readonly property int compactDepthLotWidth: _s(compactMode ? 28 : 44)
     readonly property int compactDepthShareWidth: _s(compactMode ? 38 : 56)
     readonly property int compactDepthAmountWidth: _s(compactMode ? 48 : 68)
-    readonly property bool l2PanelVisible: !!(depthSnapshot && depthSnapshot.live && tickRows && tickRows.length > 0)
+    readonly property bool l2PanelVisible: !!(tickRows && tickRows.length > 0)
     readonly property string shareCountLabel: activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell"
         ? "股数"
         : (activeMode === "options" ? "张数" : "数量")
