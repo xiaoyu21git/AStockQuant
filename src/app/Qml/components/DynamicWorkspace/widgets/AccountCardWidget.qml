@@ -80,7 +80,7 @@ Item {
         id: listHeader
         Rectangle {
             property var columns: []
-            readonly property var widths: []
+            property var widths: []
             width:parent?parent.width:100; height:22; color:"#1e293b"; radius:4
             Row {
                 anchors.fill:parent; anchors.margins:4; spacing:2
