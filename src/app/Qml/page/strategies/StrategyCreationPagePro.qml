@@ -37,7 +37,7 @@ Page {
     property bool enableAdvancedOptions: false
     
     // C++服务引用
-    property var strategyService: null
+    property var strategyService: Bridge.StrategyBridge
     property var factorService: Bridge.FactorService
     
     // ============ 主布局 ============
