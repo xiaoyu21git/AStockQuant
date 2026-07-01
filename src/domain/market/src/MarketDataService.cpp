@@ -1,11 +1,7 @@
 #include "MarketDataService.h"
 #include "../../../engine/include/GmSessionEngine.h"
-#include "foundation/log/logging.hpp"
 
-#include <atomic>
-#include <ctime>
 #include <sstream>
-#include <thread>
 
 namespace domain::market {
 
@@ -188,102 +184,6 @@ MarketDataService::tickStalledSymbols(double thresholdSec) const
         }
     }
     return stalled;
-}
-
-bool MarketDataService::isInContinuousAuction()
-{
-    auto now = std::time(nullptr);
-    std::tm local;
-#ifdef _WIN32
-    localtime_s(&local, &now);
-#else
-    localtime_r(&now, &local);
-#endif
-    int hm = local.tm_hour * 100 + local.tm_min;
-    int wd = local.tm_wday; // 0=Sun
-    if (wd == 0 || wd == 6) return false;
-    return (hm >= 930 && hm < 1130) || (hm >= 1300 && hm < 1500);
-}
-
-void MarketDataService::recoverTodayFromHistory(
-    const std::vector<std::string>& symbols, int workers)
-{
-    if (!isInContinuousAuction()) {
-        INTERNAL_INFO_STREAM << "[Recovery] 非交易时段，跳过分钟线恢复";
-        return;
-    }
-    if (symbols.empty()) return;
-
-    // 计算今日 09:30 epoch
-    auto now = std::time(nullptr);
-    std::tm local;
-#ifdef _WIN32
-    localtime_s(&local, &now);
-#else
-    localtime_r(&now, &local);
-#endif
-    local.tm_hour = 9; local.tm_min = 30; local.tm_sec = 0;
-    int64_t startEpoch = static_cast<int64_t>(std::mktime(&local));
-    int64_t endEpoch   = static_cast<int64_t>(now);
-
-    // 过滤已有数据的标的
-    std::vector<std::string> needRecovery;
-    {
-        const std::lock_guard<std::mutex> lock(mutex_);
-        for (const auto& sym : symbols) {
-            auto it = data_.find(sym);
-            if (it == data_.end() || !it->second.valid()
-                || it->second.dailyBar().close() <= 0) {
-                needRecovery.push_back(sym);
-            }
-        }
-    }
-
-    if (needRecovery.empty()) {
-        INTERNAL_INFO_STREAM << "[Recovery] 所有标的数据已就绪，跳过恢复";
-        return;
-    }
-
-    INTERNAL_INFO_STREAM << "[Recovery] 开始恢复 " << needRecovery.size()
-                         << " 只标 (跳过 " << (symbols.size() - needRecovery.size())
-                         << " 只已有数据)";
-
-    std::atomic<size_t> done{0};
-    std::atomic<size_t> totalBars{0};
-    auto& engine = engine::GmSessionEngine::instance();
-
-    auto worker = [&](size_t start, size_t end) {
-        for (size_t i = start; i < end; ++i) {
-            const auto& sym = needRecovery[i];
-            auto bars = engine.fetchMinuteHistory(sym, startEpoch, endEpoch);
-            if (bars.empty()) continue;
-
-            totalBars += bars.size();
-            for (auto& td : bars) {
-                onTick(td);
-                // 避免锁竞争：每 100 条 tick 短暂让出
-            }
-            ++done;
-            if (done % 200 == 0) {
-                INTERNAL_INFO_STREAM << "[Recovery] 进度 " << done.load()
-                                     << "/" << needRecovery.size();
-            }
-        }
-    };
-
-    size_t n = needRecovery.size();
-    size_t chunk = (n + workers - 1) / workers;
-    std::vector<std::thread> threads;
-    for (int w = 0; w < workers; ++w) {
-        size_t start = w * chunk;
-        size_t end   = std::min(start + chunk, n);
-        if (start >= n) break;
-        threads.emplace_back(worker, start, end);
-    }
-    for (auto& t : threads) t.join();
-
-    INTERNAL_INFO_STREAM << "[Recovery] 完成: " << done.load() << " 只标, "
-                         << totalBars.load() << " 根分钟线回放完毕";
 }
 
 } // namespace domain::market

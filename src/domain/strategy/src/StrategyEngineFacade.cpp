@@ -556,29 +556,6 @@ void StrategyEngine::startLiveLoop()
             m_eodCallbackRegistered = true;
         }
 
-        // ── 盘后补 EOD：风险巡检启动前同步执行（不能 post，riskPatrolLoop 会占线程）──
-        {
-            auto now = std::time(nullptr);
-            std::tm local;
-#ifdef _WIN32
-            localtime_s(&local, &now);
-#else
-            localtime_r(&now, &local);
-#endif
-            bool afterClose = (local.tm_hour > 15)
-                           || (local.tm_hour == 15 && local.tm_min >= 5);
-            bool noTickData = (domain::market::MarketDataService::instance()
-                               .totalTickCount() == 0);
-
-            if (afterClose && noTickData) {
-                int64_t today = (local.tm_year + 1900) * 10000LL
-                              + (local.tm_mon + 1) * 100 + local.tm_mday;
-                INTERNAL_INFO_STREAM << "[StrategyEngine] 盘后启动+无tick数据，"
-                                     << "同步执行日终评估 tradingDay=" << today;
-                evaluateEndOfDay(std::to_string(today));
-            }
-        }
-
         m_dedicatedExecutor->post([this]() {
             riskPatrolLoop();
         });
@@ -867,46 +844,21 @@ void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
         return;
     }
 
-    // ── 取标的列表：优先内存，回退到 gmsdk ──
+    // ── 从 MarketDataService 取所有已订阅标的的完整日 Bar ──
     auto symbols = domain::market::MarketDataService::instance().symbols();
-
-    // 重启场景：symbols 为空时从全局标的列表取（策略池内标的）
     if (symbols.empty()) {
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估: 内存无标的数据，尝试从掘金补齐";
-        // 取策略持仓标的 + 常用基准标的
-        symbols = {"000001.SZ", "000300.SH", "000905.SH", "399006.SZ"};
-    }
-    if (symbols.empty()) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无标的, 跳过";
+        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无订阅标的, 跳过";
         return;
     }
 
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size()
                          << " 只标的";
 
-    int64_t tradingDayVal = 0;
-    try { tradingDayVal = std::stoll(closedTradingDay); } catch (...) {}
-
     int ordersGenerated = 0;
     for (const auto& sym : symbols) {
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
-        double price = d.valid() ? d.dailyBar().close() : 0;
-        double volume = d.valid() ? d.dailyBar().volume() : 0;
-
-        // gmsdk 补齐缺失的日 Bar
-        if (price <= 0 && tradingDayVal > 0) {
-            auto bar = engine::GmSessionEngine::instance()
-                .fetchDailyBar(sym, tradingDayVal);
-            if (bar.has_value() && bar->price > 0) {
-                domain::market::MarketDataService::instance().onTick(*bar);
-                price  = bar->price;
-                volume = bar->cumVolume;
-                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD gmsdk补齐 "
-                                    << sym << " O=" << bar->open
-                                    << " C=" << bar->price;
-            }
-        }
-
+        if (!d.valid()) continue;
+        double price = d.dailyBar().close();
         if (price <= 0) continue;
 
         auto aSym = foundation::market::AStockSymbol::fromString(sym);
@@ -915,7 +867,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
         MarketDataPoint mdp(
             domain::strategy::InstrumentId{aSym.instrumentId()},
             price,
-            volume,
+            d.dailyBar().volume(),
             0);
 
         try {

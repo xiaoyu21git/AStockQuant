@@ -74,18 +74,6 @@ public:
     /// @brief 全局 tick 总数
     [[nodiscard]] std::uint64_t totalTickCount() const noexcept { return m_totalTicks; }
 
-    // ── 盘中恢复 ──
-
-    /// @brief 盘中重启后回补分钟线数据
-    /// @param symbols 需要恢复的标的列表（全市场）
-    /// @param workers 并发线程数
-    /// 仅在交易时段 (09:30-15:00) 执行，跳过已有今日数据的标的
-    void recoverTodayFromHistory(const std::vector<std::string>& symbols,
-                                  int workers = 8);
-
-    /// @brief 是否在 A 股连续竞价时段 (09:30-11:30, 13:00-15:00)
-    [[nodiscard]] static bool isInContinuousAuction();
-
 private:
     MarketDataService() = default;
 
