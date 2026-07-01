@@ -29,6 +29,7 @@
     StockNameResolver.cpp
     SymbolSearchModel.cpp
     RuleTemplateDetailHelper.cpp
+    RuleTemplateSuggestionService.cpp
     CandleDataModel.cpp
     StockDataLoader.cpp
     CrosshairManager.cpp
