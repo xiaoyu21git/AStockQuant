@@ -11,7 +11,7 @@ Rectangle {
     color: Const.depthPanelBg
     border.color: Const.depthPanelBorder
     border.width: 1
-    implicitHeight: compactMode ? 720 : 760
+    implicitHeight: compactMode ? 640 : 680
 
     property var marketSnapshot: ({})
     property var depthSnapshot: ({ bids: [], asks: [], totalBid: 0, totalAsk: 0 })
@@ -335,100 +335,6 @@ Rectangle {
                         text: root.sealedInfo()
                         color: Const.tradingStatusDefault; font.pixelSize: compactMode ? 9 : 11
                         visible: root.sealedInfo() !== ""
-                    }
-                }
-            }
-        }
-
-        GridLayout {
-            Layout.fillWidth: true
-            columns: 3
-            columnSpacing: compactMode ? 6 : 10
-            rowSpacing: compactMode ? 6 : 10
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: compactStatCardHeight
-                radius: 16
-                color: Const.tradingHeaderBg
-                border.color: Const.tradingFormAreaBorder
-                border.width: 1
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.leftMargin: compactMode ? 12 : 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: compactMode ? 4 : 6
-
-                    Text {
-                        text: "总委买"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Text {
-                        text: formatVolume(depthSnapshot.totalBid)
-                        color: Const.tradingBrightText
-                        font.pixelSize: compactMode ? 13 : 16
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: compactStatCardHeight
-                radius: 16
-                color: Const.tradingHeaderBg
-                border.color: Const.tradingFormAreaBorder
-                border.width: 1
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.leftMargin: compactMode ? 12 : 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: compactMode ? 4 : 6
-
-                    Text {
-                        text: "总委卖"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Text {
-                        text: formatVolume(depthSnapshot.totalAsk)
-                        color: Const.tradingBrightText
-                        font.pixelSize: compactMode ? 13 : 16
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: compactStatCardHeight
-                radius: 16
-                color: Const.tradingHeaderBg
-                border.color: Const.tradingFormAreaBorder
-                border.width: 1
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.leftMargin: compactMode ? 12 : 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: compactMode ? 4 : 6
-
-                    Text {
-                        text: "逐笔数"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Text {
-                        text: String(root.tickRows.length)
-                        color: Const.tradingBrightText
-                        font.pixelSize: compactMode ? 13 : 16
-                        font.weight: Font.DemiBold
                     }
                 }
             }
