@@ -78,7 +78,7 @@ Item {
     function flt(pred) { var r=[]; for(var i=0;i<orders.length;i++){if(pred(orders[i]))r.push(orders[i])} return r }
     readonly property var buyOrders: flt(function(o){return String(o.side||"").toUpperCase()==="BUY"})
     readonly property var sellOrders: flt(function(o){return String(o.side||"").toUpperCase()==="SELL"})
-    readonly property var cancelOrders: flt(function(o){var s=String(o.status||"").toUpperCase();return s==="CANCELLED"||s==="REJECTED"})
+    readonly property var cancelOrders: flt(function(o){var s=String(o.status||o.rawStatus||"").toUpperCase();return s.indexOf("CANCEL")>=0||s.indexOf("REJECT")>=0||s.indexOf("EXPIRED")>=0||s.indexOf("FAIL")>=0})
 
     property int currentTab: 0
 
