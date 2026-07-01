@@ -9,28 +9,15 @@ Item {
     clip: true
 
     // ── C++ 推送数据 ──
-    property var snap: Bridge.PositionAccountBridge && Bridge.PositionAccountBridge.accountSnapshot
+    // 直接绑定 — C++ NOTIFY 信号自动触发 QML 重求值，不能用在 Connections 里重新赋值(会断绑定)
+    readonly property var snap: (Bridge.PositionAccountBridge && Bridge.PositionAccountBridge.accountSnapshot)
         ? Bridge.PositionAccountBridge.accountSnapshot : ({})
-    property var positions: Bridge.PositionAccountBridge && Bridge.PositionAccountBridge.positions
+    readonly property var positions: (Bridge.PositionAccountBridge && Bridge.PositionAccountBridge.positions)
         ? Bridge.PositionAccountBridge.positions : []
-    property var orders: Bridge.TradeExecutionBridge && Bridge.TradeExecutionBridge.recentOrders
+    readonly property var orders: (Bridge.TradeExecutionBridge && Bridge.TradeExecutionBridge.recentOrders)
         ? Bridge.TradeExecutionBridge.recentOrders : []
-    property var mktSnap: Bridge.MarketDataBridge && Bridge.MarketDataBridge.marketSnapshots
+    readonly property var mktSnap: (Bridge.MarketDataBridge && Bridge.MarketDataBridge.marketSnapshots)
         ? Bridge.MarketDataBridge.marketSnapshots : ({})
-
-    Connections {
-        target: Bridge.PositionAccountBridge
-        function onAccountSnapshotChanged() { snap = Bridge.PositionAccountBridge.accountSnapshot || ({}) }
-        function onPositionsChanged() { positions = Bridge.PositionAccountBridge.positions || [] }
-    }
-    Connections {
-        target: Bridge.TradeExecutionBridge
-        function onRecentOrdersChanged() { orders = Bridge.TradeExecutionBridge.recentOrders || [] }
-    }
-    Connections {
-        target: Bridge.MarketDataBridge
-        function onMarketSnapshotsChanged() { mktSnap = Bridge.MarketDataBridge.marketSnapshots || ({}) }
-    }
 
     // 合并行情数据
     function orderChg(order) {
