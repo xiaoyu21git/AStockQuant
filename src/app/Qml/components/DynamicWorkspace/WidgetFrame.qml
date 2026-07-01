@@ -78,6 +78,7 @@ Rectangle {
 
                 // 设置按钮
                 Rectangle {
+                    z: 1
                     width: 24
                     height: 24
                     radius: 4
@@ -101,6 +102,7 @@ Rectangle {
 
                 // 关闭按钮
                 Rectangle {
+                    z: 1
                     width: 24
                     height: 24
                     radius: 4
