@@ -32,9 +32,15 @@ QtObject {
         },
         "account_card": {
             label: "账户概览", icon: "💰",
-            description: "总资产/市值/可用/盈亏 + 自适应卡片网格",
+            description: "净值卡片 + 可用/市值/冻结/盈亏指标网格",
             defaultColSpan: 6, defaultRowSpan: 1,
             source: "../../components/DynamicWorkspace/widgets/AccountCardWidget.qml"
+        },
+        "quote_card": {
+            label: "报价卡片", icon: "🏷️",
+            description: "当前价+涨跌幅+日内区间OHLC+成交量+涨跌停",
+            defaultColSpan: 4, defaultRowSpan: 1,
+            source: "../../components/DynamicWorkspace/widgets/QuoteCardWidget.qml"
         },
         "position_list": {
             label: "持仓列表", icon: "📋",
