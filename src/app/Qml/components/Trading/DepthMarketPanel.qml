@@ -27,7 +27,7 @@ Rectangle {
     readonly property int compactHeaderFont: _s(compactMode ? 15 : 20)
     readonly property int compactSectionTitleFont: _s(compactMode ? 12 : 15)
     readonly property int compactStatCardHeight: _s(compactMode ? 48 : 64)
-    readonly property int compactBookRowHeight: _s(compactMode ? 28 : 34)
+    readonly property int compactBookRowHeight: compactMode ? 26 : 30
     readonly property int compactTradeRowHeight: _s(compactMode ? 26 : 34)
     readonly property int compactMidPriceHeight: _s(compactMode ? 26 : 34)
     readonly property int compactOrderBookHeight: _s(compactMode ? 310 : 420)
@@ -376,7 +376,7 @@ Rectangle {
                         delegate: Item {
                             property var rowData: modelData
                             width: ListView.view.width
-                            height: rowData.kind === "divider" ? (compactMode ? 8 : 12) : compactBookRowHeight
+                            height: rowData.kind === "divider" ? 6 : Math.max(22, (ListView.view.height - 6) / Math.max(ListView.view.count - 1, 1))
 
                             Rectangle {
                                 anchors.fill: parent
