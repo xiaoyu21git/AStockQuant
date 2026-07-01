@@ -361,6 +361,7 @@ Rectangle {
                     }
 
                     ListView {
+                        id: depthListView
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
@@ -368,6 +369,7 @@ Rectangle {
                         boundsBehavior: Flickable.StopAtBounds
                         model: root.depthTableRows
                         interactive: true
+                        onHeightChanged: console.warn("[DepthList] height="+height+" count="+count+" rowH="+Math.max(22,(height-6)/Math.max(count-1,1)))
 
                         ScrollBar.vertical: ScrollBar {
                             policy: ScrollBar.AlwaysOff
