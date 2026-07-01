@@ -718,6 +718,32 @@ void StrategyEngine::drainQueue()
         m_lastProcessedAt.store(
             std::chrono::steady_clock::now().time_since_epoch().count(),
             std::memory_order_release);
+
+        // ── Tick 断点巡检（每 30 秒一次）──
+        static int healthCheckCounter = 0;
+        if (++healthCheckCounter >= 60) {
+            healthCheckCounter = 0;
+            auto& mds = domain::market::MarketDataService::instance();
+            double globalSilence = mds.secondsSinceLastTick();
+            if (globalSilence < 0.0) {
+                INTERNAL_WARN_STREAM << "[TickHealth] 从未收到任何 tick，"
+                                     << "请检查 subscribeTick 是否已调用";
+            } else if (globalSilence > 10.0) {
+                INTERNAL_WARN_STREAM << "[TickHealth] 全局无 tick 已达 "
+                                     << static_cast<int>(globalSilence) << " 秒";
+            }
+            auto stalled = mds.tickStalledSymbols(15.0);
+            if (!stalled.empty()) {
+                std::ostringstream oss;
+                oss << "[TickHealth] " << stalled.size() << " 个标停滞超过15秒:";
+                for (size_t i = 0; i < std::min(stalled.size(), size_t(5)); ++i) {
+                    oss << " " << stalled[i].first << "("
+                        << static_cast<int>(stalled[i].second) << "s)";
+                }
+                if (stalled.size() > 5) oss << " ...+" << (stalled.size() - 5);
+                INTERNAL_WARN_STREAM << oss.str();
+            }
+        }
     }
     // 循环退出时报告丢 tick 统计
     auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
@@ -762,6 +788,32 @@ void StrategyEngine::riskPatrolLoop()
         m_lastProcessedAt.store(
             std::chrono::steady_clock::now().time_since_epoch().count(),
             std::memory_order_release);
+
+        // ── Tick 断点巡检（每 30 秒一次）──
+        static int healthCheckCounter = 0;
+        if (++healthCheckCounter >= 30) {
+            healthCheckCounter = 0;
+            auto& mds = domain::market::MarketDataService::instance();
+            double globalSilence = mds.secondsSinceLastTick();
+            if (globalSilence < 0.0) {
+                INTERNAL_WARN_STREAM << "[TickHealth] 从未收到任何 tick，"
+                                     << "请检查 subscribeTick 是否已调用";
+            } else if (globalSilence > 10.0) {
+                INTERNAL_WARN_STREAM << "[TickHealth] 全局无 tick 已达 "
+                                     << static_cast<int>(globalSilence) << " 秒";
+            }
+            auto stalled = mds.tickStalledSymbols(15.0);
+            if (!stalled.empty()) {
+                std::ostringstream oss;
+                oss << "[TickHealth] " << stalled.size() << " 个标停滞超过15秒:";
+                for (size_t i = 0; i < std::min(stalled.size(), size_t(5)); ++i) {
+                    oss << " " << stalled[i].first << "("
+                        << static_cast<int>(stalled[i].second) << "s)";
+                }
+                if (stalled.size() > 5) oss << " ...+" << (stalled.size() - 5);
+                INTERNAL_WARN_STREAM << oss.str();
+            }
+        }
     }
     INTERNAL_INFO_STREAM << "[StrategyEngine] 风控巡检循环结束";
 }

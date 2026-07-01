@@ -111,6 +111,12 @@ void MarketDataService::onTick(const engine::GmTickData& td)
         }
 
         daily.setAmount(d.period(1).amountSum(d.period(1).count()));
+
+        // ── Tick 断点检测: 记录时间戳 ──
+        auto now = Clock::now();
+        m_lastGlobalTickTime = now;
+        m_lastTickTimeBySymbol[td.symbol] = now;
+        ++m_totalTicks;
     }
     // ── 锁释放后再调回调 ──
 
@@ -155,6 +161,29 @@ std::vector<std::string> MarketDataService::symbols() const
     out.reserve(data_.size());
     for (const auto& [sym, _] : data_) out.push_back(sym);
     return out;
+}
+
+double MarketDataService::secondsSinceLastTick() const noexcept
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    if (m_totalTicks == 0) return -1.0;
+    auto now = Clock::now();
+    return std::chrono::duration<double>(now - m_lastGlobalTickTime).count();
+}
+
+std::vector<std::pair<std::string, double>>
+MarketDataService::tickStalledSymbols(double thresholdSec) const
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::pair<std::string, double>> stalled;
+    auto now = Clock::now();
+    for (const auto& [sym, lastTime] : m_lastTickTimeBySymbol) {
+        double elapsed = std::chrono::duration<double>(now - lastTime).count();
+        if (elapsed > thresholdSec) {
+            stalled.emplace_back(sym, elapsed);
+        }
+    }
+    return stalled;
 }
 
 } // namespace domain::market

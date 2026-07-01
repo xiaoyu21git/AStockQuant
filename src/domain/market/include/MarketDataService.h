@@ -13,6 +13,8 @@ namespace engine { struct GmTickData; }
 
 #include "LiveData.h"
 
+#include <chrono>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -56,6 +58,18 @@ public:
     /// @brief 已追踪的标的列表
     [[nodiscard]] std::vector<std::string> symbols() const;
 
+    // ── Tick 断点检测 ──
+
+    /// @brief 距全局最后一次 tick 的秒数（-1 表示从未收到 tick）
+    [[nodiscard]] double secondsSinceLastTick() const noexcept;
+
+    /// @brief 返回停滞超过 thresholdSec 秒的标的及停滞秒数
+    [[nodiscard]] std::vector<std::pair<std::string, double>>
+    tickStalledSymbols(double thresholdSec = 5.0) const;
+
+    /// @brief 全局 tick 总数
+    [[nodiscard]] std::uint64_t totalTickCount() const noexcept { return m_totalTicks; }
+
 private:
     MarketDataService() = default;
 
@@ -68,6 +82,12 @@ private:
 
     std::int64_t m_activeTradingDay = 0;
     std::vector<EndOfDayCallback> m_eodCallbacks;
+
+    // Tick 断点检测
+    using Clock = std::chrono::steady_clock;
+    Clock::time_point m_lastGlobalTickTime{};
+    mutable std::unordered_map<std::string, Clock::time_point> m_lastTickTimeBySymbol;
+    std::uint64_t m_totalTicks = 0;
 };
 
 } // namespace domain::market
