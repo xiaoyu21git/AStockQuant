@@ -399,6 +399,8 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
         time_t now = time(nullptr);
         char todayStr[16]; strftime(todayStr, sizeof(todayStr), "%Y-%m-%d", localtime(&now));
         auto* bars = ::history_bars(gm.c_str(), "1d", todayStr, todayStr, 0, nullptr, true, nullptr);
+        INTERNAL_INFO_STREAM << "[GmSession] history_bars 1d " << gm
+            << " status=" << (bars?bars->status():-1) << " count=" << (bars?bars->count():0);
         if (bars && !bars->status() && bars->count() > 0) {
             auto& b = bars->at(0);
             if (b.close > 0) {
@@ -413,8 +415,16 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                 // 用 last_tick 补五档深度
                 auto* lt = ::last_tick(gm.c_str(), false);
                 INTERNAL_INFO_STREAM << "[GmSession] last_tick for " << gm
-                    << " status=" << (lt?lt->status():-1) << " count=" << (lt?lt->count():0);
+                    << " status=" << (lt?lt->status():-1) << " count=" << (lt?lt->count():0)
+                    << " bar_price=" << b.close << " bar_vol=" << b.volume;
                 if (lt && !lt->status() && lt->count() > 0) {
+                    auto& t = lt->at(0);
+                    INTERNAL_INFO_STREAM << "[GmSession] last_tick quotes:"
+                        << " b0_p=" << t.quotes[0].bid_price << " b0_v=" << t.quotes[0].bid_volume
+                        << " a0_p=" << t.quotes[0].ask_price << " a0_v=" << t.quotes[0].ask_volume;
+                } else {
+                    INTERNAL_INFO_STREAM << "[GmSession] last_tick returned empty/error";
+                }
                     auto& t = lt->at(0);
                     for (int i = 0; i < 5; ++i) {
                         auto& qt = t.quotes[i];
