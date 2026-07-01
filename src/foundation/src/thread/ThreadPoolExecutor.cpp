@@ -284,9 +284,9 @@ void ThreadPoolExecutor::shutdown(bool wait_for_completion) {
             }
         }
         workers_.clear();
+        terminated_.store(true);
     }
-
-    terminated_.store(true);
+    // wait_for_completion=false 时 worker 线程自己退出后标记 terminated_
 }
 
 void ThreadPoolExecutor::shutdownNow() {

@@ -586,8 +586,7 @@ void StrategyEngine::stopLiveLoop()
     m_queueCv.notify_one();
 
     if (m_dedicatedExecutor) {
-        m_dedicatedExecutor->shutdown(false);
-        m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
+        m_dedicatedExecutor->shutdown(true);
     }
 }
 
