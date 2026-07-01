@@ -119,9 +119,9 @@ Item {
             }
         }
 
-        // ── 列表内容 (撑满剩余空间) ──
+        // ── 列表内容 (与卡片等高) ──
         Rectangle {
-            Layout.fillWidth: true; Layout.fillHeight: true
+            Layout.fillWidth: true; Layout.preferredHeight: 82
             radius: 8; color: "#0f172a"; border.width: 1; border.color: "#1e293b"
 
             // 持仓
