@@ -1,4 +1,5 @@
 import QtQuick 2.15
+import AStock.Bridge 1.0 as Bridge
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 // Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper

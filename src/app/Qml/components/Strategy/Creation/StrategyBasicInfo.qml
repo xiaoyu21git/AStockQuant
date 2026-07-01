@@ -1,4 +1,5 @@
 // StrategyBasicInfo.qml
+import AStock.Bridge 1.0 as Bridge
 // 策略基本信息组件 - 用于策略创建向导步骤1右侧部分
 
 import QtQuick 2.15

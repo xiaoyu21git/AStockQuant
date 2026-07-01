@@ -1,4 +1,5 @@
 // StrategyTypeSelector.qml
+import AStock.Bridge 1.0 as Bridge
 // 策略类型选择组件 - 用于策略创建向导步骤1
 
 import QtQuick 2.15
