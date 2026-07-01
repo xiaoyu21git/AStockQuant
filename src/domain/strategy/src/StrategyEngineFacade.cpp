@@ -544,7 +544,7 @@ void StrategyEngine::startLiveLoop()
 
         // 注册日终回调 (幂等, 只在首次调用时注册)
         if (!m_eodCallbackRegistered) {
-            domain::market::MarketDataService::instance()
+            m_eodCallbackToken = domain::market::MarketDataService::instance()
                 .registerEndOfDayCallback([this](const std::string& closedTradingDay) {
                 // 在 tick 线程中触发, post 到引擎线程执行
                 if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire)) {
@@ -574,6 +574,14 @@ void StrategyEngine::stopLiveLoop()
     if (!m_loopRunning.load(std::memory_order_acquire)) {
         return;
     }
+
+    // 先注销 EOD 回调，防止引擎销毁后 MarketDataService 回调访问野指针
+    if (m_eodCallbackRegistered) {
+        domain::market::MarketDataService::instance()
+            .unregisterEndOfDayCallback(m_eodCallbackToken);
+        m_eodCallbackRegistered = false;
+    }
+
     m_loopRunning.store(false, std::memory_order_release);
     m_queueCv.notify_one();
 

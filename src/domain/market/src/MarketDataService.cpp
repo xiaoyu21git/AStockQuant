@@ -11,32 +11,29 @@ MarketDataService& MarketDataService::instance()
     return s_instance;
 }
 
-void MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
+std::uint64_t MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
 {
     const std::lock_guard<std::mutex> lock(mutex_);
-    m_eodCallbacks.push_back(std::move(cb));
+    std::uint64_t token = m_eodCallbackNextToken++;
+    m_eodCallbacks[token] = std::move(cb);
+    return token;
+}
+
+void MarketDataService::unregisterEndOfDayCallback(std::uint64_t token)
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    m_eodCallbacks.erase(token);
 }
 
 void MarketDataService::fireEndOfDayCallbacks(std::int64_t closedTradingDay)
 {
-    // 注意: 调用方已持有 mutex_
     if (m_eodCallbacks.empty()) return;
 
-    std::string dayStr;
-    {
-        // tradingDay 是 YYYYMMDD 格式的整数, 转为字符串
-        // 例: 20260701
-        dayStr = std::to_string(closedTradingDay);
-    }
+    std::string dayStr = std::to_string(closedTradingDay);
 
     // 复制回调列表，避免回调内部注册/注销导致迭代器失效
     auto callbacks = m_eodCallbacks;
-    // 释放锁再调回调（回调内部可能调 liveData 等需要锁的接口）
-    // 但是 fireEndOfDayCallbacks 是在 onTick 的 lock 内被调用的...
-    // 先 unlock 再调: 这里需要特殊处理
-    // 实际上我们在 onTick 内部持有锁时调用, 回调不能调需要锁的 liveData
-    // 所以改为: 先把回调列表拷出来, 释放锁, 再调用
-    for (auto& cb : callbacks) {
+    for (auto& [token, cb] : callbacks) {
         cb(dayStr);
     }
 }
@@ -125,7 +122,10 @@ void MarketDataService::onTick(const engine::GmTickData& td)
         std::vector<EndOfDayCallback> callbacks;
         {
             const std::lock_guard<std::mutex> lock(mutex_);
-            callbacks = m_eodCallbacks;
+            callbacks.reserve(m_eodCallbacks.size());
+            for (const auto& [token, cb] : m_eodCallbacks) {
+                callbacks.push_back(cb);
+            }
         }
         std::string dayStr = std::to_string(prevTradingDay);
         for (auto& cb : callbacks) {

@@ -583,6 +583,7 @@ private:
     std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位，防御 drainQueue 误触发监听器
     bool m_isDailyFrequency{false};             ///< 日频策略 → 只巡检+日终评估, 不启动 drainQueue
     bool m_eodCallbackRegistered{false};        ///< 已注册 MarketDataService EOD 回调
+    std::uint64_t m_eodCallbackToken{0};         ///< EOD 回调 token，停止时注销用
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
