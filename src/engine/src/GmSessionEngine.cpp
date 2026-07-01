@@ -392,8 +392,30 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
             return q;
         }
     }
-    // 非交易时段: 取最近收盘快照
+    // 非交易时段: 优先取今日日线, 回退到前收
     double pc = fetchPreClose(symbol);
+    std::string gm = toGmSymbol(symbol);
+    if (!gm.empty()) {
+        time_t now = time(nullptr);
+        char todayStr[16]; strftime(todayStr, sizeof(todayStr), "%Y-%m-%d", localtime(&now));
+        auto* bars = ::history_bars(gm.c_str(), "1d", todayStr, todayStr, 0, nullptr, true, nullptr);
+        if (bars && !bars->status() && bars->count() > 0) {
+            auto& b = bars->at(0);
+            if (b.close > 0) {
+                GmQuote q;
+                q.symbol = symbol; q.valid = true;
+                q.price   = b.close;
+                q.open    = b.open;
+                q.high    = b.high;
+                q.low     = b.low;
+                q.volume  = static_cast<double>(b.volume);
+                q.preClose = pc;
+                bars->release();
+                return q;
+            }
+        }
+        if (bars) bars->release();
+    }
     if (pc > 0) {
         GmQuote q;
         q.symbol = symbol; q.valid = true;
