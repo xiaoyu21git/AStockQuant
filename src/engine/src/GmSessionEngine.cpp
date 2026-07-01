@@ -392,14 +392,13 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
             return q;
         }
     }
-    // 非交易时段: 优先取今日日线, 再用 last_tick 补深度
+    // 非交易时段: 用 history_bars_n 取最近日线 + last_tick 补深度
     double pc = fetchPreClose(symbol);
     std::string gm = toGmSymbol(symbol);
     if (!gm.empty()) {
-        time_t now = time(nullptr);
-        char todayStr[16]; strftime(todayStr, sizeof(todayStr), "%Y-%m-%d", localtime(&now));
-        auto* bars = ::history_bars(gm.c_str(), "1d", todayStr, todayStr, 0, nullptr, true, nullptr);
-        INTERNAL_INFO_STREAM << "[GmSession] history_bars 1d " << gm
+        // 取最近1根日线 (含昨日收盘)
+        auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, nullptr, 0, nullptr, true, nullptr);
+        INTERNAL_INFO_STREAM << "[GmSession] history_bars_n 1d " << gm
             << " status=" << (bars?bars->status():-1) << " count=" << (bars?bars->count():0);
         if (bars && !bars->status() && bars->count() > 0) {
             auto& b = bars->at(0);
@@ -412,14 +411,13 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                 q.low     = b.low;
                 q.volume  = static_cast<double>(b.volume);
                 q.preClose = pc;
-                // 用 last_tick 补五档深度
-                auto* lt = ::last_tick(gm.c_str(), false);
-                INTERNAL_INFO_STREAM << "[GmSession] last_tick for " << gm
-                    << " status=" << (lt?lt->status():-1) << " count=" << (lt?lt->count():0)
-                    << " bar_price=" << b.close << " bar_vol=" << b.volume;
+                // 取最近1笔 tick 补五档深度
+                auto* lt = ::history_ticks_n(gm.c_str(), 1, nullptr, 0, nullptr, true, nullptr);
+                INTERNAL_INFO_STREAM << "[GmSession] history_ticks_n " << gm
+                    << " status=" << (lt?lt->status():-1) << " count=" << (lt?lt->count():0);
                 if (lt && !lt->status() && lt->count() > 0) {
                     auto& t = lt->at(0);
-                    INTERNAL_INFO_STREAM << "[GmSession] last_tick quotes:"
+                    INTERNAL_INFO_STREAM << "[GmSession] tick quotes:"
                         << " b0_p=" << t.quotes[0].bid_price << " b0_v=" << t.quotes[0].bid_volume
                         << " a0_p=" << t.quotes[0].ask_price << " a0_v=" << t.quotes[0].ask_volume;
                     for (int i = 0; i < 5; ++i) {
@@ -428,7 +426,7 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                         if (qt.ask_price > 0) { q.asks.push_back({qt.ask_price, static_cast<double>(qt.ask_volume)}); }
                     }
                 } else {
-                    INTERNAL_INFO_STREAM << "[GmSession] last_tick returned empty/error";
+                    INTERNAL_INFO_STREAM << "[GmSession] history_ticks_n returned empty/error";
                 }
                 if (lt) lt->release();
                 bars->release();
