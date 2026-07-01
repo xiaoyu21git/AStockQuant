@@ -269,7 +269,8 @@ bool ThreadPoolExecutor::isInExecutorThread() const {
 }
 
 void ThreadPoolExecutor::shutdown(bool wait_for_completion) {
-    {
+     {
+       {
         std::lock_guard<std::mutex> lock(queueMutex_);
         if (shutdown_) return;
         shutdown_ = true;
@@ -284,9 +285,20 @@ void ThreadPoolExecutor::shutdown(bool wait_for_completion) {
             }
         }
         workers_.clear();
+        terminated_ = true;
+    }
+    }
+
+    queueCondition_.notify_all();
+
+    if (wait_for_completion) {
+        for (auto& worker : workers_) {
+            if (worker && worker->thread.joinable()) {
+                worker->thread.join();
+            }
+        }
         terminated_.store(true);
     }
-    // wait_for_completion=false 时 worker 线程自己退出后标记 terminated_
 }
 
 void ThreadPoolExecutor::shutdownNow() {
