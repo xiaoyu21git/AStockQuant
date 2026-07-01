@@ -411,9 +411,6 @@ Rectangle {
                                 Text { text:root.formatLotCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
                                 Text { text:root.formatShareCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
                                 Text { text:root.formatAmount(rowData.price,rowData.volume); color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                    horizontalAlignment: Text.AlignRight
-                                    elide: Text.ElideRight
-                                }
                             }
                         }
                     }
