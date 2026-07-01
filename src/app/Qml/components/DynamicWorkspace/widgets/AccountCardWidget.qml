@@ -184,7 +184,7 @@ Item {
                 Loader {
                     Layout.fillWidth: true; Layout.preferredHeight: 20
                     sourceComponent: listHeader
-                    onLoaded: { item.columns=["标的","市值","盈亏","持仓/可用","成本/现价"]; item.widths=[3,2,1,1,2] }
+                    onLoaded: { item.columns=["标的","市值","盈亏","持仓/可用","成本/现价"]; item.widths=[2,2,1,1,2] }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
@@ -197,11 +197,11 @@ Item {
                         readonly property double avail:Number(modelData.availableQuantity||qty)
                         readonly property double cost:Number(modelData.costBasis||modelData.avgPrice||0)
                         Row { anchors.fill:parent; spacing:2
-                            Text { text:root.stockName(modelData.symbol); color:"#f1f5f9"; font.pixelSize:10; width:parent.width*3/9; elide:Text.ElideRight }
-                            Text { text:cny(mv); color:"#cbd5e1"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
-                            Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; width:parent.width/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
-                            Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; width:parent.width/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
-                            Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:shortCode(modelData.symbol)+(modelData.name?"("+modelData.name+")":""); color:"#f1f5f9"; font.pixelSize:10; width:parent.width*2/8; elide:Text.ElideRight }
+                            Text { text:cny(mv); color:"#cbd5e1"; font.pixelSize:10; width:parent.width*2/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; width:parent.width/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; width:parent.width/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; width:parent.width*2/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                         }
                     }
                 }
