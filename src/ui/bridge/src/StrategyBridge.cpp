@@ -520,9 +520,10 @@ bool StrategyBridge::update(const QVariantMap& payload)
     }
     PersistedStrategyData strategy = *existing;
     applyReq(request, strategy);
-    const bool ok = m_repo->update(strategyId, strategy);
-    if (!ok) {
-        setErr(QStringLiteral("update repository update failed"));
+    // save() 用 ON CONFLICT DO UPDATE，比单独 UPDATE 更健壮
+    const QString savedId = m_repo->save(strategy);
+    if (savedId.trimmed().isEmpty()) {
+        setErr(QStringLiteral("update repository save failed"));
         emit operationFailed(kRepositoryErrorCode, m_err);
         return false;
     }
