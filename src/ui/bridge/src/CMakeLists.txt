@@ -28,11 +28,10 @@
     StrategyPerformanceModel.cpp
     StockNameResolver.cpp
     SymbolSearchModel.cpp
-    RuleTemplateDetailHelper.cpp
-    RuleTemplateSuggestionService.cpp
-    StrategyParamConfigHelper.cpp
     CandleDataModel.cpp
     StockDataLoader.cpp
+    RuleTemplateDetailHelper.cpp
+    RuleTemplateSuggestionService.cpp
     CrosshairManager.cpp
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")

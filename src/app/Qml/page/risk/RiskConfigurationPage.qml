@@ -5,7 +5,7 @@ import ConsoleUi 1.0 as ConsoleUiComponents
 import AStock.Bridge 1.0 as Bridge
 import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
-// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
+import "../../utils/StrategyCreationUtils.js" as StrategyCreationUtils
 
 Item {
     id: riskConfigPage

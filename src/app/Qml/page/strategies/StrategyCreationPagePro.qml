@@ -6,9 +6,9 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import Qt5Compat.GraphicalEffects
-import AStock.Bridge 1.0 as Bridge
+import AStock.Bridge 1.0 as Bridge  // 导入C++桥接模块
+import "../../utils/StrategyCreationUtils.js" as Utils
 import "../../components/Strategy/Creation" as StrategyComponents
-// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
 
 Page {
     id: root
@@ -26,7 +26,7 @@ Page {
     
     // 数据容器
     property int selectedStrategyTypeIndex: 0
-    readonly property int selectedStrategyBehaviorKind: Bridge.StrategyParamConfigHelper.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     property string strategyName: ""
     property string strategyDescription: ""
     property string optimizationMethod: "genetic"
@@ -85,8 +85,8 @@ Page {
                             
                             onStrategyTypeIndexChanged: function(strategyTypeIndex) {
                                 root.selectedStrategyTypeIndex = strategyTypeIndex
-                                if (Bridge.StrategyParamConfigHelper.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
-                                        !== Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Invalid) {
+                                if (Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
+                                        !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
                                     strategyBasicInfo.applyStrategyTypeDefaults(root.selectedStrategyTypeIndex, false)
                                 }
                             }
@@ -335,27 +335,27 @@ Page {
                                         }
 
                                         Text {
-                                            text: "类型: " + Bridge.StrategyParamConfigHelper.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
+                                            text: "类型: " + Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "资产类型: " + Bridge.StrategyParamConfigHelper.getAssetTypeNameFromIndex(strategyBasicInfo.getAssetTypeIndex())
+                                            text: "资产类型: " + Utils.StrategyCreationUtils.getAssetTypeNameFromIndex(strategyBasicInfo.getAssetTypeIndex())
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "时间周期: " + Bridge.StrategyParamConfigHelper.getTimeFrameNameFromIndex(strategyBasicInfo.getTimeFrameIndex())
+                                            text: "时间周期: " + Utils.StrategyCreationUtils.getTimeFrameNameFromIndex(strategyBasicInfo.getTimeFrameIndex())
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "风险等级: " + Bridge.StrategyParamConfigHelper.getRiskLevelNameFromIndex(strategyBasicInfo.getRiskLevelIndex())
+                                            text: "风险等级: " + Utils.StrategyCreationUtils.getRiskLevelNameFromIndex(strategyBasicInfo.getRiskLevelIndex())
                                             font.pixelSize: 13
-                                            color: Bridge.StrategyParamConfigHelper.getRiskLevelColorFromIndex(strategyBasicInfo.getRiskLevelIndex())
+                                            color: Utils.StrategyCreationUtils.getRiskLevelColorFromIndex(strategyBasicInfo.getRiskLevelIndex())
                                         }
 
                                         Text {
@@ -700,7 +700,7 @@ Page {
                     id: cancelButton
                     Layout.preferredWidth: 100
                     Layout.preferredHeight: 40
-                    text: Bridge.StrategyParamConfigHelper.tr('common.cancel')
+                    text: Utils.StrategyCreationUtils.tr('common.cancel')
                     onClicked: {
                         root.backClicked()
                     }
@@ -751,8 +751,8 @@ Page {
                         
                         Text {
                             text: stepIndicator.currentStepValid ? 
-                                  Bridge.StrategyParamConfigHelper.tr('strategyCreation.validationPassed') : 
-                                  Bridge.StrategyParamConfigHelper.tr('strategyCreation.validationRequired')
+                                  Utils.StrategyCreationUtils.tr('strategyCreation.validationPassed') : 
+                                  Utils.StrategyCreationUtils.tr('strategyCreation.validationRequired')
                             font.pixelSize: 13
                             color: stepIndicator.currentStepValid ? "#10b981" : "#ef4444"
                         }
@@ -766,7 +766,7 @@ Page {
                     id: prevButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: Bridge.StrategyParamConfigHelper.tr('common.previous')
+                    text: Utils.StrategyCreationUtils.tr('common.previous')
                     visible: stepIndicator.currentStep > 1
                     enabled: stepIndicator.currentStep > 1
                     onClicked: {
@@ -797,7 +797,7 @@ Page {
                     id: createButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: root.isEditMode ? "保存修改" : Bridge.StrategyParamConfigHelper.tr('strategyCreation.create')
+                    text: root.isEditMode ? "保存修改" : Utils.StrategyCreationUtils.tr('strategyCreation.create')
                     visible: stepIndicator.currentStep === 3
                     enabled: stepIndicator.currentStepValid
                     onClicked: {
@@ -826,7 +826,7 @@ Page {
                     id: nextButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: Bridge.StrategyParamConfigHelper.tr('common.next')
+                    text: Utils.StrategyCreationUtils.tr('common.next')
                     visible: stepIndicator.currentStep < 3
                     enabled: stepIndicator.currentStepValid
                     onClicked: {
@@ -902,13 +902,13 @@ Page {
     function mapBackendTypeToFrontendIndex(strategy) {
         var explicitTypeIndex = Number(strategy && strategy.strategyTypeIndex)
         if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
-            var normalizedTypeIndex = Bridge.StrategyParamConfigHelper.normalizeStrategyTypeIndex(explicitTypeIndex)
-            if (normalizedTypeIndex !== Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Invalid) {
+            var normalizedTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(explicitTypeIndex)
+            if (normalizedTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
                 return normalizedTypeIndex
             }
         }
 
-        return Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Invalid
+        return Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid
     }
 
     function loadStrategyForEdit(strategy) {
@@ -931,7 +931,7 @@ Page {
         }
 
         var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainStrategy)
-        if (frontendTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Invalid) {
+        if (frontendTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
             showErrorDialog("策略缺少合法 strategyTypeIndex，无法继续编辑。")
             return
         }
@@ -1044,7 +1044,7 @@ Page {
             parametersValid: step2Content && step2Content.isValid ? step2Content.isValid() : parametersValid
         }
 
-        var strategyData = Bridge.StrategyParamConfigHelper.buildCompleteStrategyData(context)
+        var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
         if (strategyData.assetTypeIndex <= 0) {
             showErrorDialog("当前资产类型不在策略合同支持范围内，请改用股票、期货、期权或 ETF。")
             return
@@ -1061,7 +1061,7 @@ Page {
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
 
         isCreating = true
-        creationStatus = Bridge.StrategyParamConfigHelper.tr("strategyCreation.strategyCreatedSuccess")
+        creationStatus = Utils.StrategyCreationUtils.tr("strategyCreation.strategyCreatedSuccess")
 
         if (!strategyService) {
             console.error("StrategyService 未初始化，无法创建策略")
@@ -1142,7 +1142,7 @@ Page {
         strategyTypeSelector.reset()
         strategyBasicInfo.reset()
         
-        var resetData = Bridge.StrategyParamConfigHelper.resetFormData()
+        var resetData = Utils.StrategyCreationUtils.resetFormData()
         
         // 应用重置数据
         selectedStrategyTypeIndex = Number(resetData.selectedStrategyTypeIndex)

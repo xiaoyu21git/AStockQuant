@@ -29,7 +29,6 @@
 #include "SymbolSearchModel.h"
 #include "RuleTemplateDetailHelper.h"
 #include "RuleTemplateSuggestionService.h"
-#include "StrategyParamConfigHelper.h"
 
 namespace wang{
 
@@ -200,11 +199,8 @@ namespace wang{
        qmlRegisterType<SymbolSearchModel>(
           url, 1, 0, "SymbolSearchModel");
 
-       qmlRegisterSingletonType<RuleTemplateDetailHelper>(
-          url, 1, 0, "RuleTemplateDetailHelper",
-          [](QQmlEngine*, QJSEngine*) -> QObject* {
-             return new RuleTemplateDetailHelper();
-          });
+       qmlRegisterType<RuleTemplateDetailHelper>(
+          url, 1, 0, "RuleTemplateDetailHelper");
 
        qmlRegisterSingletonType<RuleTemplateSuggestionService>(
           url, 1, 0, "RuleTemplateSuggestionService",
@@ -212,10 +208,5 @@ namespace wang{
              return new RuleTemplateSuggestionService();
           });
 
-       qmlRegisterSingletonType<StrategyParamConfigHelper>(
-          url, 1, 0, "StrategyParamConfigHelper",
-          [](QQmlEngine*, QJSEngine*) -> QObject* {
-             return new StrategyParamConfigHelper();
-          });
    }
 }

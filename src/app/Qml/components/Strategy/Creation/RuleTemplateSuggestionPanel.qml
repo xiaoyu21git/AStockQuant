@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
-// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
+import "../../../utils/StrategyCreationUtils.js" as Utils
 import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
 import "../../Base" as BaseComponents
 
@@ -194,11 +194,11 @@ Rectangle {
     }
 
     function resolvedStrategyLabel() {
-        var normalizedStrategyTypeIndex = Bridge.StrategyParamConfigHelper.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
-        if (normalizedStrategyTypeIndex !== Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Invalid) {
-            return Bridge.StrategyParamConfigHelper.getStrategyTypeNameFromIndex(normalizedStrategyTypeIndex) || "当前策略"
+        var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
+        if (normalizedStrategyTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+            return Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(normalizedStrategyTypeIndex) || "当前策略"
         }
-        return Bridge.StrategyParamConfigHelper.strategyBehaviorKindLabel(currentStrategyBehaviorKind)
+        return Utils.StrategyCreationUtils.strategyBehaviorKindLabel(currentStrategyBehaviorKind)
     }
 
     function resolveCurrentStrategyBehaviorKind() {
@@ -219,7 +219,7 @@ Rectangle {
             return Math.floor(explicitKind)
         }
 
-        return Bridge.StrategyParamConfigHelper.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+        return Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     }
 
     function suggestionPhaseForStage(stageId) {
@@ -658,29 +658,29 @@ Rectangle {
         }
 
         var behaviorKind = currentStrategyBehaviorKind
-        var strategyTypeIndex = Bridge.StrategyParamConfigHelper.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.TrendFollowing
-                && strategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.TrendBreakout) {
+        var strategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.TrendFollowing
+                && strategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TrendBreakout) {
             return "趋势突破策略建议绑定突破确认类入场模板，并搭配趋势衰减退出与市场风控模板。"
         }
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.TrendFollowing) {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.TrendFollowing) {
             return "趋势策略建议至少分别绑定一条入场/观察信号和一条持仓管理/退出模板；市场/风控模板按需补充。"
         }
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.MeanReversion) {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.MeanReversion) {
             return "均值回归策略更适合绑定回归入场与失败退出模板，市场风控通常只做过滤。"
         }
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.Momentum) {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.Momentum) {
             return "动量策略通常需要入场信号和趋势衰减退出，市场风控用于过滤退潮时段。"
         }
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.Arbitrage
-                || behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.MultiFactor
-                || behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.MachineLearning) {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.Arbitrage
+                || behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.MultiFactor
+                || behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.MachineLearning) {
             return "组合与模型类策略通常优先补持仓管理和市场风控模板，入场确认更多依赖评分与池内排序。"
         }
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.EventDriven) {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.EventDriven) {
             return "事件驱动策略建议优先绑定事件确认入场和事件失效退出模板，再补市场风控。"
         }
-        if (behaviorKind === Bridge.StrategyParamConfigHelper.StrategyBehaviorKind.HighFrequency) {
+        if (behaviorKind === Utils.StrategyCreationUtils.StrategyBehaviorKind.HighFrequency) {
             return "高频策略建议优先绑定微结构入场与执行约束模板，市场风控更多负责交易时段和流动性限制。"
         }
         return "可以同时为不同阶段绑定模板；同一阶段再次应用会替换该阶段当前模板。"

@@ -40,7 +40,6 @@ set(BRIDGE_HEADERS
     include/SymbolSearchModel.h
     include/RuleTemplateDetailHelper.h
     include/RuleTemplateSuggestionService.h
-    include/StrategyParamConfigHelper.h
     include/CandleDataModel.h
     include/StockDataLoader.h
     include/CrosshairManager.h

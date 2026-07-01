@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import AStock.Bridge 1.0 as Bridge
-// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
+import "../../utils/StrategyCreationUtils.js" as Utils
 
 Rectangle {
     id: root
@@ -510,7 +510,7 @@ Rectangle {
         var payload = source || ({})
         return "执行周期: " + String(payload.executionTimeframe || payload.execution_timeframe || "--")
             + "\n策略类型: " + String(payload.selectedStrategyType || "--")
-            + "\n行为类型: " + Bridge.StrategyParamConfigHelper.strategyBehaviorKindLabel(payload.strategyBehaviorKind !== undefined ? payload.strategyBehaviorKind : payload.strategy_behavior_kind)
+            + "\n行为类型: " + Utils.StrategyCreationUtils.strategyBehaviorKindLabel(payload.strategyBehaviorKind !== undefined ? payload.strategyBehaviorKind : payload.strategy_behavior_kind)
     }
 
     function hasConfiguredDefaults() {
@@ -633,7 +633,7 @@ Rectangle {
     function formatFieldValue(fieldSpec, value) {
         switch (fieldSpec.format) {
         case "strategyBehaviorKind":
-            return Bridge.StrategyParamConfigHelper.strategyBehaviorKindLabel(value)
+            return Utils.StrategyCreationUtils.strategyBehaviorKindLabel(value)
         case "percent":
             return formatPercent(value, 2)
         case "percent3":

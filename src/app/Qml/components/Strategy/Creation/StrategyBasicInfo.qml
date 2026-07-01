@@ -1,11 +1,10 @@
 // StrategyBasicInfo.qml
-import AStock.Bridge 1.0 as Bridge
 // 策略基本信息组件 - 用于策略创建向导步骤1右侧部分
 
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
+import "../../../utils/StrategyCreationUtils.js" as Utils
 
 Rectangle {
     id: root
@@ -25,26 +24,26 @@ Rectangle {
     property bool descriptionRecentlyUpdated: false
     property bool tagsRecentlyUpdated: false
     readonly property var assetTypeIndexOptions: [
-        Bridge.StrategyParamConfigHelper.AssetTypeIndex.Stock,
-        Bridge.StrategyParamConfigHelper.AssetTypeIndex.Futures,
-        Bridge.StrategyParamConfigHelper.AssetTypeIndex.Options,
-        Bridge.StrategyParamConfigHelper.AssetTypeIndex.Etf,
-        Bridge.StrategyParamConfigHelper.AssetTypeIndex.Index,
-        Bridge.StrategyParamConfigHelper.AssetTypeIndex.MultiAsset
+        Utils.StrategyCreationUtils.AssetTypeIndex.Stock,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Futures,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Options,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Etf,
+        Utils.StrategyCreationUtils.AssetTypeIndex.Index,
+        Utils.StrategyCreationUtils.AssetTypeIndex.MultiAsset
     ]
     readonly property var timeFrameIndexOptions: [
-        Bridge.StrategyParamConfigHelper.TimeFrameIndex.OneMinute,
-        Bridge.StrategyParamConfigHelper.TimeFrameIndex.FiveMinutes,
-        Bridge.StrategyParamConfigHelper.TimeFrameIndex.FifteenMinutes,
-        Bridge.StrategyParamConfigHelper.TimeFrameIndex.OneHour,
-        Bridge.StrategyParamConfigHelper.TimeFrameIndex.Daily,
-        Bridge.StrategyParamConfigHelper.TimeFrameIndex.Weekly
+        Utils.StrategyCreationUtils.TimeFrameIndex.OneMinute,
+        Utils.StrategyCreationUtils.TimeFrameIndex.FiveMinutes,
+        Utils.StrategyCreationUtils.TimeFrameIndex.FifteenMinutes,
+        Utils.StrategyCreationUtils.TimeFrameIndex.OneHour,
+        Utils.StrategyCreationUtils.TimeFrameIndex.Daily,
+        Utils.StrategyCreationUtils.TimeFrameIndex.Weekly
     ]
     readonly property var riskLevelIndexOptions: [
-        Bridge.StrategyParamConfigHelper.RiskLevelIndex.Low,
-        Bridge.StrategyParamConfigHelper.RiskLevelIndex.Medium,
-        Bridge.StrategyParamConfigHelper.RiskLevelIndex.High,
-        Bridge.StrategyParamConfigHelper.RiskLevelIndex.Aggressive
+        Utils.StrategyCreationUtils.RiskLevelIndex.Low,
+        Utils.StrategyCreationUtils.RiskLevelIndex.Medium,
+        Utils.StrategyCreationUtils.RiskLevelIndex.High,
+        Utils.StrategyCreationUtils.RiskLevelIndex.Aggressive
     ]
 
     // 信号
@@ -84,7 +83,7 @@ Rectangle {
             spacing: 12
 
             Text {
-                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.strategyBasicInfo')
+                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyBasicInfo')
                 font.pixelSize: 16
                 font.weight: Font.Medium
                 color: "#f1f5f9"
@@ -123,7 +122,7 @@ Rectangle {
                             spacing: 5
 
                             Text {
-                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.strategyName')
+                                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyName')
                                 font.pixelSize: 14
                                 font.weight: Font.Medium
                                 color: "#f1f5f9"
@@ -132,7 +131,7 @@ Rectangle {
                             TextField {
                                 id: strategyNameField
                                 Layout.fillWidth: true
-                                placeholderText: Bridge.StrategyParamConfigHelper.tr('strategyCreation.strategyNamePlaceholder')
+                                placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.strategyNamePlaceholder')
                                 text: ""
 
                                 property bool hasError: false
@@ -179,7 +178,7 @@ Rectangle {
 
                             Text {
                                 visible: strategyNameField.hasError && strategyNameField.text.trim() === ""
-                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.strategyNameError')
+                                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyNameError')
                                 font.pixelSize: 12
                                 color: "#ef4444"
                                 Layout.fillWidth: true
@@ -196,7 +195,7 @@ Rectangle {
                                 spacing: 8
 
                                 Text {
-                                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.strategyDescription')
+                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyDescription')
                                     font.pixelSize: 14
                                     font.weight: Font.Medium
                                     color: "#f1f5f9"
@@ -228,7 +227,7 @@ Rectangle {
                                 id: strategyDescField
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 92
-                                placeholderText: Bridge.StrategyParamConfigHelper.tr('strategyCreation.strategyDescriptionPlaceholder')
+                                placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.strategyDescriptionPlaceholder')
                                 text: ""
                                 wrapMode: Text.WordWrap
 
@@ -287,7 +286,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.assetType')
+                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.assetType')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -295,7 +294,7 @@ Rectangle {
                                 ComboBox {
                                     id: assetTypeCombo
                                     Layout.fillWidth: true
-                                    model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.assetTypes')
+                                    model: Utils.StrategyCreationUtils.tr('strategyCreation.assetTypes')
                                     currentIndex: 0
 
                                     background: Rectangle {
@@ -321,7 +320,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.timeFrame')
+                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.timeFrame')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -329,7 +328,7 @@ Rectangle {
                                 ComboBox {
                                     id: timeFrameCombo
                                     Layout.fillWidth: true
-                                    model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.timeFrames')
+                                    model: Utils.StrategyCreationUtils.tr('strategyCreation.timeFrames')
                                     currentIndex: 4
 
                                     background: Rectangle {
@@ -355,7 +354,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.riskLevel')
+                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.riskLevel')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -364,10 +363,10 @@ Rectangle {
                                     id: riskLevelCombo
                                     Layout.fillWidth: true
                                     model: [
-                                        Bridge.StrategyParamConfigHelper.getRiskLevelName("low"),
-                                        Bridge.StrategyParamConfigHelper.getRiskLevelName("medium"),
-                                        Bridge.StrategyParamConfigHelper.getRiskLevelName("high"),
-                                        Bridge.StrategyParamConfigHelper.getRiskLevelName("aggressive")
+                                        Utils.StrategyCreationUtils.getRiskLevelName("low"),
+                                        Utils.StrategyCreationUtils.getRiskLevelName("medium"),
+                                        Utils.StrategyCreationUtils.getRiskLevelName("high"),
+                                        Utils.StrategyCreationUtils.getRiskLevelName("aggressive")
                                     ]
                                     currentIndex: 1
 
@@ -394,7 +393,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.optimizationMethod')
+                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethod')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -402,7 +401,7 @@ Rectangle {
                                 ComboBox {
                                     id: optimizationCombo
                                     Layout.fillWidth: true
-                                    model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.optimizationMethods')
+                                    model: Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethods')
                                     currentIndex: 0
 
                                     background: Rectangle {
@@ -445,7 +444,7 @@ Rectangle {
                             spacing: 8
 
                             Text {
-                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.tags')
+                                text: Utils.StrategyCreationUtils.tr('strategyCreation.tags')
                                 font.pixelSize: 14
                                 font.weight: Font.Medium
                                 color: "#f1f5f9"
@@ -476,7 +475,7 @@ Rectangle {
                         TextField {
                             id: tagsField
                             Layout.fillWidth: true
-                            placeholderText: Bridge.StrategyParamConfigHelper.tr('strategyCreation.tagsPlaceholder')
+                            placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.tagsPlaceholder')
                             onEditingFinished: {
                                 var tags = tagsField.text.split(',').map(function(tag) {
                                     return tag.trim();
@@ -649,7 +648,7 @@ Rectangle {
 
         return mergeTags(
             getTagsList(),
-            [termName, Bridge.StrategyParamConfigHelper.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)]
+            [termName, Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)]
                 .concat(recommendedActions)
                 .concat(matchedAliases)
         )
@@ -691,8 +690,8 @@ Rectangle {
     }
 
     function applyStrategyTypeDefaults(strategyTypeIndex, forceOverwrite) {
-        var defaultDescription = Bridge.StrategyParamConfigHelper.getDefaultStrategyDescription(strategyTypeIndex)
-        var defaultTags = Bridge.StrategyParamConfigHelper.getDefaultStrategyTags(strategyTypeIndex)
+        var defaultDescription = Utils.StrategyCreationUtils.getDefaultStrategyDescription(strategyTypeIndex)
+        var defaultTags = Utils.StrategyCreationUtils.getDefaultStrategyTags(strategyTypeIndex)
         var defaultTagsText = defaultTags.join(', ')
 
         if (forceOverwrite || strategyDescField.text.trim() === "" || strategyDescField.text === lastAutoDescription) {
@@ -722,20 +721,20 @@ Rectangle {
     }
 
     function getAssetTypeIndex() {
-        return assetTypeIndexOptions[assetTypeCombo.currentIndex] || Bridge.StrategyParamConfigHelper.AssetTypeIndex.Invalid
+        return assetTypeIndexOptions[assetTypeCombo.currentIndex] || Utils.StrategyCreationUtils.AssetTypeIndex.Invalid
     }
     
     function getTimeFrameIndex() {
-        return timeFrameIndexOptions[timeFrameCombo.currentIndex] || Bridge.StrategyParamConfigHelper.TimeFrameIndex.Invalid
+        return timeFrameIndexOptions[timeFrameCombo.currentIndex] || Utils.StrategyCreationUtils.TimeFrameIndex.Invalid
     }
     
     function getRiskLevelIndex() {
-        return riskLevelIndexOptions[riskLevelCombo.currentIndex] || Bridge.StrategyParamConfigHelper.RiskLevelIndex.Invalid
+        return riskLevelIndexOptions[riskLevelCombo.currentIndex] || Utils.StrategyCreationUtils.RiskLevelIndex.Invalid
     }
     
     // 获取优化方法值
     function getOptimizationMethodValue() {
-        var values = Bridge.StrategyParamConfigHelper.tr('strategyCreation.optimizationMethodValues')
+        var values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
         return values[optimizationCombo.currentIndex] || "genetic"
     }
     
@@ -758,7 +757,7 @@ Rectangle {
 
         riskLevelCombo.currentIndex = Math.max(0, riskLevelIndexOptions.indexOf(Number(strategyData.riskLevelIndex)))
 
-        var values = Bridge.StrategyParamConfigHelper.tr('strategyCreation.optimizationMethodValues')
+        var values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
         optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || "genetic"))
 
         var tags = strategyData.tags || []
