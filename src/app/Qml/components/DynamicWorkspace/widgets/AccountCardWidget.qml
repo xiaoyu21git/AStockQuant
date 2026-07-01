@@ -146,10 +146,13 @@ Item {
                 delegate: Rectangle {
                     required property var modelData; required property int index; property bool sel:root.currentTab===index
                     Layout.fillWidth:true; height:28; radius:6
-                    gradient:sel?Gradient{GradientStop{position:0;color:"#2563eb"}GradientStop{position:1;color:"#1d4ed8"}}:null
-                    color:sel?"transparent":"#1e293b"
-                    border.width:sel?1:1; border.color:sel?"#3b82f6":"#334155"
-                    Rectangle { anchors.bottom:parent.bottom; width:parent.width; height:sel?3:0; color:"#60a5fa"; radius:2; visible:sel }
+                    color:sel?"#1d4ed8":"#1e293b"
+                    border.width:1; border.color:sel?"#3b82f6":"#334155"
+                    Rectangle {
+                        anchors.bottom:parent.bottom; width:parent.width; height:sel?3:0
+                        gradient: Gradient { GradientStop{position:0;color:"#2563eb"} GradientStop{position:1;color:"#1d4ed8"} }
+                        visible:sel; radius:2
+                    }
                     Text { anchors.centerIn:parent; text:modelData; color:sel?"#f1f5f9":"#94a3b8"; font.pixelSize:11; font.weight:sel?Font.DemiBold:Font.Normal }
                     MouseArea { anchors.fill:parent; cursorShape:Qt.PointingHandCursor; onClicked:root.currentTab=index }
                 }
