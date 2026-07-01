@@ -422,15 +422,13 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                     INTERNAL_INFO_STREAM << "[GmSession] last_tick quotes:"
                         << " b0_p=" << t.quotes[0].bid_price << " b0_v=" << t.quotes[0].bid_volume
                         << " a0_p=" << t.quotes[0].ask_price << " a0_v=" << t.quotes[0].ask_volume;
-                } else {
-                    INTERNAL_INFO_STREAM << "[GmSession] last_tick returned empty/error";
-                }
-                    auto& t = lt->at(0);
                     for (int i = 0; i < 5; ++i) {
                         auto& qt = t.quotes[i];
                         if (qt.bid_price > 0) { q.bids.push_back({qt.bid_price, static_cast<double>(qt.bid_volume)}); }
                         if (qt.ask_price > 0) { q.asks.push_back({qt.ask_price, static_cast<double>(qt.ask_volume)}); }
                     }
+                } else {
+                    INTERNAL_INFO_STREAM << "[GmSession] last_tick returned empty/error";
                 }
                 if (lt) lt->release();
                 bars->release();
