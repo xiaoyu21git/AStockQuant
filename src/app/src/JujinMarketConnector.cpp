@@ -351,6 +351,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
 
     m_initialOrderSyncThread = std::thread([this, rawEventBus, requestToken, requestAccountId,
                                             configuredRuntimeId, configuredBoundIds]() {
+        try {
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] initial unfinished-order sync started asynchronously";
 
         // 1. Write Python script to temp file
@@ -507,6 +508,11 @@ print(json.dumps(result, ensure_ascii=True))
         }
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] sync done published=" << publishedCount
                              << " filtered=" << filteredCount;
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] sync exception: " << e.what();
+        } catch (...) {
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] sync unknown exception";
+        }
     });
 }
 
