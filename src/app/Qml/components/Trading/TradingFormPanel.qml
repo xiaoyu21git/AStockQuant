@@ -13,6 +13,19 @@ Rectangle {
     implicitHeight: compactMode ? 620 : 980
 
     property var marketSnapshot: (Bridge.MarketDataBridge.marketSnapshots[currentSymbol] || {})
+
+    // 持仓列表点击 → primarySymbol 变更 → 自动填入下单控件
+    Connections {
+        target: Bridge.MarketDataBridge
+        function onPrimarySymbolChanged() {
+            var sym = Bridge.MarketDataBridge.primarySymbol || ""
+            if (sym) {
+                var code = String(sym).replace(".SZ","").replace(".SH","").replace(".BJ","")
+                stockCode = code
+                root.resolveInstrument(sym)
+            }
+        }
+    }
     property var depthSnapshot: ({})
     property real availableCapital: 500000
     property var pendingOrders: []
