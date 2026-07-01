@@ -22,6 +22,8 @@ Trading.DepthMarketPanel {
         if (!bridge || !bridge.marketSnapshots) return
         var snaps = bridge.marketSnapshots
         snap = snaps[currentSymbol] || ({})
+        var ds = snap.depthSnapshot || ({})
+        console.warn("[DepthWidget] refresh sym=" + currentSymbol + " price=" + (snap.price||0) + " depthBids=" + (Array.isArray(ds.bids)?ds.bids.length:0) + " depthAsks=" + (Array.isArray(ds.asks)?ds.asks.length:0) + " snapKeys=" + Object.keys(snap).join(","))
     }
 
     Component.onCompleted: refresh()

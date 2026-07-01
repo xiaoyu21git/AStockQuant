@@ -79,7 +79,9 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
             m_marketSnapshots[symbol] = snap;
             m_marketSnapshots = QVariantMap(m_marketSnapshots);
             emit marketSnapshotsChanged();
-            INTERNAL_INFO_STREAM << "[MktBridge] updateSnapshot via gmsdk " << sym << " price=" << q->price;
+            INTERNAL_INFO_STREAM << "[MktBridge] updateSnapshot via gmsdk " << sym << " price=" << q->price
+                << " bids=" << bids.size() << " asks=" << asks.size()
+                << " this=" << static_cast<void*>(this);
             return;
         }
         INTERNAL_WARN_STREAM << "[MktBridge] updateSnapshot no data for " << sym;
