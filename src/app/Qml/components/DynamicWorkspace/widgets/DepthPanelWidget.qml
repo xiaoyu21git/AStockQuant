@@ -5,7 +5,7 @@ import "../../Trading" as Trading
 Trading.DepthMarketPanel {
     id: panel
     property var widgetConfig: ({})
-    scaleFactor: Math.min(1.0, Math.max(0.4, height / 400))
+    scaleFactor: 1.0
     compactMode: true
 
     // symbol 由 C++ primarySymbol 驱动
@@ -22,8 +22,6 @@ Trading.DepthMarketPanel {
         if (!bridge || !bridge.marketSnapshots) return
         var snaps = bridge.marketSnapshots
         snap = snaps[currentSymbol] || ({})
-        var ds = snap.depthSnapshot || ({})
-        console.warn("[DepthWidget] refresh sym=" + currentSymbol + " price=" + (snap.price||0) + " depthBids=" + (Array.isArray(ds.bids)?ds.bids.length:0) + " depthAsks=" + (Array.isArray(ds.asks)?ds.asks.length:0) + " snapKeys=" + Object.keys(snap).join(","))
     }
 
     Component.onCompleted: refresh()
