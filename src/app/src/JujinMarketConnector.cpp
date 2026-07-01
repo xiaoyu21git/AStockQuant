@@ -456,10 +456,19 @@ print(json.dumps(result, ensure_ascii=True))
             auto order = doc.at(i);
             if (!order.isObject()) continue;
 
-            std::string orderId    = order.has("order_id") ? trim(order.get("order_id").asString()) : "";
-            std::string bizId      = order.has("business_strategy_id") ? trim(order.get("business_strategy_id").asString()) : "";
-            std::string rtId       = order.has("runtime_strategy_id") ? trim(order.get("runtime_strategy_id").asString()) : "";
-            std::string sym        = order.has("symbol") ? trim(order.get("symbol").asString()) : "";
+            auto safeStr = [](const auto& obj, const char* key) -> std::string {
+                if (!obj.has(key)) return "";
+                auto v = obj.get(key);
+                if (v.isString()) return trim(v.asString());
+                if (v.isInt()) return std::to_string(v.asInt());
+                if (v.isDouble()) return std::to_string(v.asDouble());
+                if (v.isBool()) return v.asBool() ? "true" : "false";
+                return "";
+            };
+            std::string orderId    = safeStr(order, "order_id");
+            std::string bizId      = safeStr(order, "business_strategy_id");
+            std::string rtId       = safeStr(order, "runtime_strategy_id");
+            std::string sym        = safeStr(order, "symbol");
             if (orderId.empty() || sym.empty()) continue;
 
             // Strategy filter
@@ -478,23 +487,34 @@ print(json.dumps(result, ensure_ascii=True))
             if (!bizId.empty()) { event.set("business_strategy_id", bizId); event.metadata["business_strategy_id"] = bizId; }
             if (!rtId.empty())  { event.set("runtime_strategy_id", rtId); event.metadata["runtime_strategy_id"] = rtId; }
 
-            std::string rawSide = order.has("side") ? trim(order.get("side").asString()) : "1";
+            auto safeDbl = [](const auto& obj, const char* key) -> double {
+                if (!obj.has(key)) return 0.0;
+                auto v = obj.get(key);
+                if (v.isDouble()) return v.asDouble();
+                if (v.isInt()) return static_cast<double>(v.asInt());
+                if (v.isString()) { try { return std::stod(v.asString()); } catch(...) {} }
+                return 0.0;
+            };
+            std::string rawSide = safeStr(order, "side");
+            if (rawSide.empty()) rawSide = "1";
             event.set("side", normalizeOrderSide(rawSide));
-            double price = order.has("price") ? order.get("price").asDouble() : 0.0;
+            double price = safeDbl(order, "price");
             event.set("price", price);
-            int64_t qty = order.has("quantity") ? static_cast<int64_t>(order.get("quantity").asDouble()) : 0;
+            int64_t qty = static_cast<int64_t>(safeDbl(order, "quantity"));
             event.set("quantity", qty);
-            int64_t fqty = order.has("filled_quantity") ? static_cast<int64_t>(order.get("filled_quantity").asDouble()) : 0;
+            int64_t fqty = static_cast<int64_t>(safeDbl(order, "filled_quantity"));
             event.set("filled_quantity", fqty);
-            double fnotional = order.has("filled_notional") ? order.get("filled_notional").asDouble() : 0.0;
+            double fnotional = safeDbl(order, "filled_notional");
             event.set("filled_notional", fnotional);
-            std::string rawStatus = order.has("status") ? trim(order.get("status").asString()) : "";
+            std::string rawStatus = safeStr(order, "status");
             event.set("status", normalizeOrderStatus(rawStatus));
-            std::string msg = order.has("message") ? trim(order.get("message").asString()) : "";
+            std::string msg = safeStr(order, "message");
             event.set("message", msg);
 
-            if (order.has("created_at")) { std::string v = trim(order.get("created_at").asString()); event.set("created_at", v); event.metadata["created_at"] = v; }
-            if (order.has("updated_at")) { std::string v = trim(order.get("updated_at").asString()); event.set("updated_at", v); event.metadata["updated_at"] = v; }
+            std::string vCreated = safeStr(order, "created_at");
+            if (!vCreated.empty()) { event.set("created_at", vCreated); event.metadata["created_at"] = vCreated; }
+            std::string vUpdated = safeStr(order, "updated_at");
+            if (!vUpdated.empty()) { event.set("updated_at", vUpdated); event.metadata["updated_at"] = vUpdated; }
 
             event.metadata["order_id"] = orderId;
             event.metadata["symbol"] = sym;
