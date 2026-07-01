@@ -38,11 +38,16 @@ Item {
             mktSnap = Bridge.MarketDataBridge.marketSnapshots || ({})
     }
 
-    function stockName(sym) {
-        var s=String(sym||""); var snap=mktSnap[s]||({}); var n=snap.name||""
-        return n?s+"("+n+")":s.replace(".SZ","").replace(".SH","").replace(".BJ","")
+    function displayName(sym) {
+        var s=String(sym||""); var code=s.replace(".SZ","").replace(".SH","").replace(".BJ","")
+        var snap=mktSnap[s]||({}); var n=snap.name||""
+        return n?n+"("+code+")":code
     }
     function shortCode(sym) { return String(sym||"").replace(".SZ","").replace(".SH","").replace(".BJ","") }
+    function watchSymbol(sym) {
+        if(Bridge.MarketDataBridge&&typeof Bridge.MarketDataBridge.ensureWatchSymbol==="function")
+            Bridge.MarketDataBridge.ensureWatchSymbol(String(sym||""))
+    }
 
     // 合并行情数据
     function orderChg(order) {
@@ -197,12 +202,13 @@ Item {
                         readonly property double avail:Number(modelData.availableQuantity||qty)
                         readonly property double cost:Number(modelData.costBasis||modelData.avgPrice||0)
                         Row { anchors.fill:parent; spacing:2
-                            Text { text:shortCode(modelData.symbol)+(modelData.name?"("+modelData.name+")":""); color:"#f1f5f9"; font.pixelSize:10; width:parent.width*2/8; elide:Text.ElideRight }
+                            Text { text:modelData.name?modelData.name+"("+shortCode(modelData.symbol)+")":shortCode(modelData.symbol); color:"#f1f5f9"; font.pixelSize:10; width:parent.width*2/8; elide:Text.ElideRight }
                             Text { text:cny(mv); color:"#cbd5e1"; font.pixelSize:10; width:parent.width*2/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                             Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; width:parent.width/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                             Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; width:parent.width/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                             Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; width:parent.width*2/8; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                         }
+                        MouseArea { anchors.fill:parent; cursorShape:Qt.PointingHandCursor; onClicked:root.watchSymbol(modelData.symbol) }
                     }
                 }
             }
