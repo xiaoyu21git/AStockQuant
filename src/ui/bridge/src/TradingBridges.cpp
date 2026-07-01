@@ -747,6 +747,7 @@ void PositionAccountBridge::refresh() {
 }
 
 QVariantMap PositionAccountBridge::accountSnapshot() const {
+    const_cast<PositionAccountBridge*>(this)->initialize();
     QVariantMap map;
     if (!m_initialized) return map;
     auto acc = engine::AccountEngine::instance().account();
@@ -760,6 +761,7 @@ QVariantMap PositionAccountBridge::accountSnapshot() const {
 }
 
 QVariantList PositionAccountBridge::positions() const {
+    const_cast<PositionAccountBridge*>(this)->initialize();
     QVariantList list;
     if (!m_initialized) return list;
     for (auto& p : engine::AccountEngine::instance().positions()) {
