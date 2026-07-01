@@ -22,7 +22,7 @@ Rectangle {
             if (sym) {
                 var code = String(sym).replace(".SZ","").replace(".SH","").replace(".BJ","")
                 stockCode = code
-                root.resolveInstrument(sym)
+                Bridge.MarketDataBridge.resolveInstrument(sym)
             }
         }
     }
