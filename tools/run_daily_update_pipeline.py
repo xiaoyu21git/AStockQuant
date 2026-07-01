@@ -405,11 +405,11 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
 
 
 def build_minute_update_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
-    cmd = [sys.executable, "tools/update_minute_data.py", "--target-date", target_date.isoformat()]
-    return cmd
+    return [sys.executable, "tools/import_minute_from_juejin.py",
+            "--start", target_date.isoformat(), "--end", target_date.isoformat()]
 
 def build_minute_backfill_command() -> list[str]:
-    return [sys.executable, "tools/update_minute_data.py", "--backfill"]
+    return [sys.executable, "tools/import_minute_from_juejin.py", "--backfill"]
 
 def build_weekly_monthly_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
     cmd = [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
