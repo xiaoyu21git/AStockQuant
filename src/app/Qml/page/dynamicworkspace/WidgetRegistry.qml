@@ -27,7 +27,7 @@ QtObject {
         "depth_panel": {
             label: "五档盘口", icon: "📊",
             description: "实时买卖盘口 + L2逐笔成交 + 汇总统计 (3级密度)",
-            defaultColSpan: 4, defaultRowSpan: 3,
+            defaultColSpan: 6, defaultRowSpan: 4,
             source: "../../components/DynamicWorkspace/widgets/DepthPanelWidget.qml"
         },
         "account_card": {
