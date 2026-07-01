@@ -56,6 +56,24 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
             snap["preClose"]  = q->preClose;
             snap["changePct"] = q->changePct();
             snap["changePercent"] = QVariant::fromValue(q->changePct());
+
+            // 五档深度
+            QVariantMap depthSnap;
+            QVariantList bids, asks;
+            double totalBid = 0, totalAsk = 0;
+            for (const auto& lv : q->bids) {
+                QVariantMap m; m["price"] = lv.price; m["volume"] = lv.volume;
+                bids.append(m); totalBid += lv.volume;
+            }
+            for (const auto& lv : q->asks) {
+                QVariantMap m; m["price"] = lv.price; m["volume"] = lv.volume;
+                asks.append(m); totalAsk += lv.volume;
+            }
+            depthSnap["bids"] = bids; depthSnap["asks"] = asks;
+            depthSnap["totalBid"] = totalBid; depthSnap["totalAsk"] = totalAsk;
+            depthSnap["live"] = false;
+            snap["depthSnapshot"] = depthSnap;
+
             snap["source"]    = QStringLiteral("gmsdk快照");
             snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
             m_marketSnapshots[symbol] = snap;

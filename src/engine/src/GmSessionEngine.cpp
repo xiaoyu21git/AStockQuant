@@ -392,7 +392,7 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
             return q;
         }
     }
-    // 非交易时段: 优先取今日日线, 回退到前收
+    // 非交易时段: 优先取今日日线, 再用 last_tick 补深度
     double pc = fetchPreClose(symbol);
     std::string gm = toGmSymbol(symbol);
     if (!gm.empty()) {
@@ -410,6 +410,17 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                 q.low     = b.low;
                 q.volume  = static_cast<double>(b.volume);
                 q.preClose = pc;
+                // 用 last_tick 补五档深度
+                auto* lt = ::last_tick(gm.c_str(), false);
+                if (lt && !lt->status() && lt->count() > 0) {
+                    auto& t = lt->at(0);
+                    for (int i = 0; i < 5; ++i) {
+                        auto& qt = t.quotes[i];
+                        if (qt.bid_price > 0) { q.bids.push_back({qt.bid_price, static_cast<double>(qt.bid_volume)}); }
+                        if (qt.ask_price > 0) { q.asks.push_back({qt.ask_price, static_cast<double>(qt.ask_volume)}); }
+                    }
+                }
+                if (lt) lt->release();
                 bars->release();
                 return q;
             }
