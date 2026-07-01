@@ -43,6 +43,27 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
 
     auto& d = domain::market::MarketDataService::instance().liveData(sym);
     if (!d.valid() || d.dailyBar().close() <= 0.0) {
+        // 内存无数据 → gmsdk fetchQuote 回退
+        auto q = engine::GmSessionEngine::instance().fetchQuote(sym);
+        if (q.has_value() && q->valid && q->price > 0) {
+            QVariantMap snap;
+            snap["symbol"]    = QString::fromStdString(sym);
+            snap["price"]     = q->price;
+            snap["open"]      = q->open;
+            snap["high"]      = q->high;
+            snap["low"]       = q->low;
+            snap["volume"]    = q->volume;
+            snap["preClose"]  = q->preClose;
+            snap["changePct"] = q->changePct();
+            snap["changePercent"] = QVariant::fromValue(q->changePct());
+            snap["source"]    = QStringLiteral("gmsdk快照");
+            snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+            m_marketSnapshots[symbol] = snap;
+            m_marketSnapshots = QVariantMap(m_marketSnapshots);
+            emit marketSnapshotsChanged();
+            INTERNAL_INFO_STREAM << "[MktBridge] updateSnapshot via gmsdk " << sym << " price=" << q->price;
+            return;
+        }
         INTERNAL_WARN_STREAM << "[MktBridge] updateSnapshot no data for " << sym;
         return;
     }
