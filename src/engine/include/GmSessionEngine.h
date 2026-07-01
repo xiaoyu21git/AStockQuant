@@ -113,6 +113,20 @@ public:
     std::optional<GmQuote> fetchQuote(const std::string& symbol);
     double fetchPreClose(const std::string& symbol);
 
+    // ── 历史数据拉取（供 TickRecoveryService 使用）──
+    /// @brief 拉取单标分钟K线（60s），转为 GmTickData 列表供回放
+    /// @param symbol  内部格式（如 "000001.SZ"）
+    /// @param startEpoch 开始时间（epoch秒）
+    /// @param endEpoch   结束时间（epoch秒）
+    std::vector<GmTickData> fetchMinuteHistory(const std::string& symbol,
+                                                int64_t startEpoch,
+                                                int64_t endEpoch);
+    /// @brief 拉取单标日 Bar（1d），转为 GmTickData
+    /// @param symbol 内部格式
+    /// @param tradingDay YYYYMMDD 格式
+    std::optional<GmTickData> fetchDailyBar(const std::string& symbol,
+                                             int64_t tradingDay);
+
     // ── 底层 Strategy 指针 ──
     void* strategy() const;
 
