@@ -13,8 +13,6 @@ namespace engine { struct GmTickData; }
 
 #include "LiveData.h"
 
-#include <chrono>
-#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -43,12 +41,8 @@ public:
     void onTick(const engine::GmTickData& td);
 
     /// @brief 注册日终回调（日频策略评估入口）
-    /// 返回唯一 token，用于注销
     /// 回调在 onTick() 上下文中同步调用，必须轻量（不应阻塞线程）
-    [[nodiscard]] std::uint64_t registerEndOfDayCallback(EndOfDayCallback cb);
-
-    /// @brief 注销日终回调（策略停止时必须调用，防止 use-after-free）
-    void unregisterEndOfDayCallback(std::uint64_t token);
+    void registerEndOfDayCallback(EndOfDayCallback cb);
 
     /// @brief 获取当前追踪的交易日（0 表示尚未收到任何 tick）
     [[nodiscard]] std::int64_t activeTradingDay() const noexcept { return m_activeTradingDay; }
@@ -62,18 +56,6 @@ public:
     /// @brief 已追踪的标的列表
     [[nodiscard]] std::vector<std::string> symbols() const;
 
-    // ── Tick 断点检测 ──
-
-    /// @brief 距全局最后一次 tick 的秒数（-1 表示从未收到 tick）
-    [[nodiscard]] double secondsSinceLastTick() const noexcept;
-
-    /// @brief 返回停滞超过 thresholdSec 秒的标的及停滞秒数
-    [[nodiscard]] std::vector<std::pair<std::string, double>>
-    tickStalledSymbols(double thresholdSec = 5.0) const;
-
-    /// @brief 全局 tick 总数
-    [[nodiscard]] std::uint64_t totalTickCount() const noexcept { return m_totalTicks; }
-
 private:
     MarketDataService() = default;
 
@@ -85,14 +67,7 @@ private:
     mutable std::unordered_map<std::string, LiveData> data_;
 
     std::int64_t m_activeTradingDay = 0;
-    std::uint64_t m_eodCallbackNextToken = 1;
-    std::unordered_map<std::uint64_t, EndOfDayCallback> m_eodCallbacks;
-
-    // Tick 断点检测
-    using Clock = std::chrono::steady_clock;
-    Clock::time_point m_lastGlobalTickTime{};
-    mutable std::unordered_map<std::string, Clock::time_point> m_lastTickTimeBySymbol;
-    std::uint64_t m_totalTicks = 0;
+    std::vector<EndOfDayCallback> m_eodCallbacks;
 };
 
 } // namespace domain::market

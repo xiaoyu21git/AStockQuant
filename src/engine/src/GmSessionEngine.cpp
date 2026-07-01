@@ -427,6 +427,9 @@ double GmSessionEngine::fetchPreClose(const std::string& symbol) {
 // 下单
 // ═══════════════════════════════════════════════════════════════════
 
+
+// ═══════════════════════════════════════════════════════════════════
+
 void* GmSessionEngine::strategy() const { return m_strategy.get(); }
 
 

@@ -11,29 +11,32 @@ MarketDataService& MarketDataService::instance()
     return s_instance;
 }
 
-std::uint64_t MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
+void MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
 {
     const std::lock_guard<std::mutex> lock(mutex_);
-    std::uint64_t token = m_eodCallbackNextToken++;
-    m_eodCallbacks[token] = std::move(cb);
-    return token;
-}
-
-void MarketDataService::unregisterEndOfDayCallback(std::uint64_t token)
-{
-    const std::lock_guard<std::mutex> lock(mutex_);
-    m_eodCallbacks.erase(token);
+    m_eodCallbacks.push_back(std::move(cb));
 }
 
 void MarketDataService::fireEndOfDayCallbacks(std::int64_t closedTradingDay)
 {
+    // 注意: 调用方已持有 mutex_
     if (m_eodCallbacks.empty()) return;
 
-    std::string dayStr = std::to_string(closedTradingDay);
+    std::string dayStr;
+    {
+        // tradingDay 是 YYYYMMDD 格式的整数, 转为字符串
+        // 例: 20260701
+        dayStr = std::to_string(closedTradingDay);
+    }
 
     // 复制回调列表，避免回调内部注册/注销导致迭代器失效
     auto callbacks = m_eodCallbacks;
-    for (auto& [token, cb] : callbacks) {
+    // 释放锁再调回调（回调内部可能调 liveData 等需要锁的接口）
+    // 但是 fireEndOfDayCallbacks 是在 onTick 的 lock 内被调用的...
+    // 先 unlock 再调: 这里需要特殊处理
+    // 实际上我们在 onTick 内部持有锁时调用, 回调不能调需要锁的 liveData
+    // 所以改为: 先把回调列表拷出来, 释放锁, 再调用
+    for (auto& cb : callbacks) {
         cb(dayStr);
     }
 }
@@ -108,12 +111,6 @@ void MarketDataService::onTick(const engine::GmTickData& td)
         }
 
         daily.setAmount(d.period(1).amountSum(d.period(1).count()));
-
-        // ── Tick 断点检测: 记录时间戳 ──
-        auto now = Clock::now();
-        m_lastGlobalTickTime = now;
-        m_lastTickTimeBySymbol[td.symbol] = now;
-        ++m_totalTicks;
     }
     // ── 锁释放后再调回调 ──
 
@@ -122,10 +119,7 @@ void MarketDataService::onTick(const engine::GmTickData& td)
         std::vector<EndOfDayCallback> callbacks;
         {
             const std::lock_guard<std::mutex> lock(mutex_);
-            callbacks.reserve(m_eodCallbacks.size());
-            for (const auto& [token, cb] : m_eodCallbacks) {
-                callbacks.push_back(cb);
-            }
+            callbacks = m_eodCallbacks;
         }
         std::string dayStr = std::to_string(prevTradingDay);
         for (auto& cb : callbacks) {
@@ -161,29 +155,6 @@ std::vector<std::string> MarketDataService::symbols() const
     out.reserve(data_.size());
     for (const auto& [sym, _] : data_) out.push_back(sym);
     return out;
-}
-
-double MarketDataService::secondsSinceLastTick() const noexcept
-{
-    const std::lock_guard<std::mutex> lock(mutex_);
-    if (m_totalTicks == 0) return -1.0;
-    auto now = Clock::now();
-    return std::chrono::duration<double>(now - m_lastGlobalTickTime).count();
-}
-
-std::vector<std::pair<std::string, double>>
-MarketDataService::tickStalledSymbols(double thresholdSec) const
-{
-    const std::lock_guard<std::mutex> lock(mutex_);
-    std::vector<std::pair<std::string, double>> stalled;
-    auto now = Clock::now();
-    for (const auto& [sym, lastTime] : m_lastTickTimeBySymbol) {
-        double elapsed = std::chrono::duration<double>(now - lastTime).count();
-        if (elapsed > thresholdSec) {
-            stalled.emplace_back(sym, elapsed);
-        }
-    }
-    return stalled;
 }
 
 } // namespace domain::market

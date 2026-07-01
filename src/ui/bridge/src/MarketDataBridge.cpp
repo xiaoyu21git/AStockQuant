@@ -110,10 +110,6 @@ void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     }
 
     m_trackedSymbols.insert(resolved);
-
-    // 订阅实时 tick — 否则 GmSessionEngine 不会向 MarketDataService 推送该标的行情
-    engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
-
     if (m_primarySymbol != resolved) {
         m_primarySymbol = resolved;
         emit primarySymbolChanged();

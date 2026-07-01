@@ -630,9 +630,6 @@ function normalizePercentageToRatio(value) {
 
 function normalizeStrategyParameters(strategyTypeIndex, rawParameters) {
     var source = rawParameters || ({})
-    // 深拷贝剥离 QML property var 造成的 QVariant 包装，
-    // 确保嵌套的 rule_profile/rule_composer_state 到 C++ 侧能正确识别为 QVariantMap
-    try { source = JSON.parse(JSON.stringify(source)) } catch (e) {}
     var normalized = ({})
     var normalizedStrategyTypeIndex = normalizeStrategyTypeIndex(strategyTypeIndex)
 

@@ -276,8 +276,10 @@ void ThreadPoolExecutor::shutdown(bool wait_for_completion) {
         shutdown_ = true;
     }
 
+    // ⭐ 必须：叫醒所有 worker
     queueCondition_.notify_all();
 
+    // ⭐ 必须：等待线程真正退出
     if (wait_for_completion) {
         for (auto& worker : workers_) {
             if (worker && worker->thread.joinable()) {

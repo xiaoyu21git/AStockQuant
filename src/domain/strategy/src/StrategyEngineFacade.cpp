@@ -544,7 +544,7 @@ void StrategyEngine::startLiveLoop()
 
         // 注册日终回调 (幂等, 只在首次调用时注册)
         if (!m_eodCallbackRegistered) {
-            m_eodCallbackToken = domain::market::MarketDataService::instance()
+            domain::market::MarketDataService::instance()
                 .registerEndOfDayCallback([this](const std::string& closedTradingDay) {
                 // 在 tick 线程中触发, post 到引擎线程执行
                 if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire)) {
@@ -574,14 +574,6 @@ void StrategyEngine::stopLiveLoop()
     if (!m_loopRunning.load(std::memory_order_acquire)) {
         return;
     }
-
-    // 先注销 EOD 回调，防止引擎销毁后 MarketDataService 回调访问野指针
-    if (m_eodCallbackRegistered) {
-        domain::market::MarketDataService::instance()
-            .unregisterEndOfDayCallback(m_eodCallbackToken);
-        m_eodCallbackRegistered = false;
-    }
-
     m_loopRunning.store(false, std::memory_order_release);
     m_queueCv.notify_one();
 
@@ -726,32 +718,6 @@ void StrategyEngine::drainQueue()
         m_lastProcessedAt.store(
             std::chrono::steady_clock::now().time_since_epoch().count(),
             std::memory_order_release);
-
-        // ── Tick 断点巡检（每 30 秒一次）──
-        static int healthCheckCounter = 0;
-        if (++healthCheckCounter >= 60) {
-            healthCheckCounter = 0;
-            auto& mds = domain::market::MarketDataService::instance();
-            double globalSilence = mds.secondsSinceLastTick();
-            if (globalSilence < 0.0) {
-                INTERNAL_WARN_STREAM << "[TickHealth] 从未收到任何 tick，"
-                                     << "请检查 subscribeTick 是否已调用";
-            } else if (globalSilence > 10.0) {
-                INTERNAL_WARN_STREAM << "[TickHealth] 全局无 tick 已达 "
-                                     << static_cast<int>(globalSilence) << " 秒";
-            }
-            auto stalled = mds.tickStalledSymbols(15.0);
-            if (!stalled.empty()) {
-                std::ostringstream oss;
-                oss << "[TickHealth] " << stalled.size() << " 个标停滞超过15秒:";
-                for (size_t i = 0; i < std::min(stalled.size(), size_t(5)); ++i) {
-                    oss << " " << stalled[i].first << "("
-                        << static_cast<int>(stalled[i].second) << "s)";
-                }
-                if (stalled.size() > 5) oss << " ...+" << (stalled.size() - 5);
-                INTERNAL_WARN_STREAM << oss.str();
-            }
-        }
     }
     // 循环退出时报告丢 tick 统计
     auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
@@ -796,32 +762,6 @@ void StrategyEngine::riskPatrolLoop()
         m_lastProcessedAt.store(
             std::chrono::steady_clock::now().time_since_epoch().count(),
             std::memory_order_release);
-
-        // ── Tick 断点巡检（每 30 秒一次）──
-        static int healthCheckCounter = 0;
-        if (++healthCheckCounter >= 30) {
-            healthCheckCounter = 0;
-            auto& mds = domain::market::MarketDataService::instance();
-            double globalSilence = mds.secondsSinceLastTick();
-            if (globalSilence < 0.0) {
-                INTERNAL_WARN_STREAM << "[TickHealth] 从未收到任何 tick，"
-                                     << "请检查 subscribeTick 是否已调用";
-            } else if (globalSilence > 10.0) {
-                INTERNAL_WARN_STREAM << "[TickHealth] 全局无 tick 已达 "
-                                     << static_cast<int>(globalSilence) << " 秒";
-            }
-            auto stalled = mds.tickStalledSymbols(15.0);
-            if (!stalled.empty()) {
-                std::ostringstream oss;
-                oss << "[TickHealth] " << stalled.size() << " 个标停滞超过15秒:";
-                for (size_t i = 0; i < std::min(stalled.size(), size_t(5)); ++i) {
-                    oss << " " << stalled[i].first << "("
-                        << static_cast<int>(stalled[i].second) << "s)";
-                }
-                if (stalled.size() > 5) oss << " ...+" << (stalled.size() - 5);
-                INTERNAL_WARN_STREAM << oss.str();
-            }
-        }
     }
     INTERNAL_INFO_STREAM << "[StrategyEngine] 风控巡检循环结束";
 }

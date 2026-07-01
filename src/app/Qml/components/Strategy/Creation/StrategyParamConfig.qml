@@ -76,28 +76,7 @@ Rectangle {
         ruleComposerSuggestionMaxWidth)
     readonly property bool hasPersonalizedParameterConfigs: (root.personalizedParameterConfigs || []).length > 0
     property var factorOverlay: ({ enabled: false, targetPositionCount: 10, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
-    property var pendingSelectedFactorIds: []
-
-    Loader {
-        id: factorSelectorDialogLoader
-        active: false
-        source: "../../FactorWorkbench/Backtest/FactorSelectorDialog.qml"
-
-        onLoaded: {
-            item.factorService = root.factorService
-            item.factorViewModel = root.factorService && root.factorService.getViewModel
-                ? root.factorService.getViewModel() : null
-            item.requireSupportValidation = false
-            item.selectedFactorIds = root.pendingSelectedFactorIds
-            item.open()
-        }
-
-        Connections {
-            target: factorSelectorDialogLoader.item
-            function onFactorsSelected(factorIds) { root.applySelectedFactors(factorIds) }
-            function onDialogClosed() { factorSelectorDialogLoader.active = false }
-        }
-    }
+    property var factorSelectorDialog: null
     
     function factorOverlayCardWidth(containerWidth) {
         var widthBudget = Math.max(0, Number(containerWidth) || 0)
@@ -1921,10 +1900,39 @@ Rectangle {
             factorService.initialize()
         }
 
-        root.pendingSelectedFactorIds = (root.factorOverlay.allocations || [])
-            .map(function(item) { return item.factor_id || "" })
-        factorSelectorDialogLoader.active = true
-        console.log("[StrategyParamConfig] factorSelectorDialog loader activated")
+        if (factorSelectorDialog) {
+            factorSelectorDialog.destroy()
+            factorSelectorDialog = null
+        }
+
+        var component = Qt.createComponent("../../FactorWorkbench/Backtest/FactorSelectorDialog.qml")
+        console.log("[StrategyParamConfig] FactorSelectorDialog component status:", component.status, component.errorString())
+        if (component.status !== Component.Ready) {
+            console.warn("[StrategyParamConfig] 加载因子选择对话框失败:", component.errorString())
+            return
+        }
+
+        factorSelectorDialog = component.createObject(root, {
+            factorService: factorService,
+            factorViewModel: factorService.getViewModel ? factorService.getViewModel() : null,
+            requireSupportValidation: false,
+            selectedFactorIds: (root.factorOverlay.allocations || []).map(function(item) { return item.factor_id || "" })
+        })
+        console.log("[StrategyParamConfig] factorSelectorDialog created:", !!factorSelectorDialog)
+        if (!factorSelectorDialog) {
+            console.warn("[StrategyParamConfig] factorSelectorDialog creation returned null")
+            return
+        }
+
+        factorSelectorDialog.factorsSelected.connect(root.applySelectedFactors)
+        factorSelectorDialog.dialogClosed.connect(function() {
+            if (factorSelectorDialog) {
+                factorSelectorDialog.destroy()
+                factorSelectorDialog = null
+            }
+        })
+        factorSelectorDialog.open()
+        console.log("[StrategyParamConfig] factorSelectorDialog opened")
     }
 
     function rebalanceFactorOverlayWeights() {
