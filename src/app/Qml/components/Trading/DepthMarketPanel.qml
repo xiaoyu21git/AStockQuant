@@ -354,40 +354,11 @@ Rectangle {
                             anchors.margins: compactMode ? 5 : 8
                             spacing: compactMode ? 4 : 8
 
-                            Text {
-                                text: "档"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthSideWidth
-                            }
-                            Text {
-                                text: "价格"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthPriceWidth
-                                horizontalAlignment: Text.AlignRight
-                            }
-                            Text {
-                                text: "手数"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthLotWidth
-                                horizontalAlignment: Text.AlignRight
-                            }
-                            Text {
-                                text: root.shareCountLabel
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthShareWidth
-                                horizontalAlignment: Text.AlignRight
-                            }
-                            Text {
-                                text: "金额"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignRight
-                            }
+                            Text { text:"档"; color:Const.depthLabelText; font.pixelSize:compactMetaFont; Layout.fillWidth:true }
+                            Text { text:"价格"; color:Const.depthLabelText; font.pixelSize:compactMetaFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                            Text { text:"手数"; color:Const.depthLabelText; font.pixelSize:compactMetaFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                            Text { text:root.shareCountLabel; color:Const.depthLabelText; font.pixelSize:compactMetaFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                            Text { text:"金额"; color:Const.depthLabelText; font.pixelSize:compactMetaFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
                         }
                     }
 
@@ -435,37 +406,11 @@ Rectangle {
                                 spacing: compactMode ? 4 : 8
                                 visible: rowData.kind === "depth"
 
-                                Text {
-                                    text: rowData.side + rowData.level
-                                    color: rowData.isBid ? Const.depthBidText : Const.depthAskText
-                                    font.pixelSize: compactBookTagFont
-                                    font.weight: Font.DemiBold
-                                    Layout.preferredWidth: compactDepthSideWidth
-                                }
-                                Text {
-                                    text: root.formatPrice(rowData.price)
-                                    color: Const.tradingBrightText
-                                    font.pixelSize: compactBookPriceFont
-                                    Layout.preferredWidth: compactDepthPriceWidth
-                                    horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    text: root.formatLotCount(rowData.volume)
-                                    color: Const.depthInfoText
-                                    font.pixelSize: compactBookVolumeFont
-                                    Layout.preferredWidth: compactDepthLotWidth
-                                    horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    text: root.formatShareCount(rowData.volume)
-                                    color: Const.depthInfoText
-                                    font.pixelSize: compactBookVolumeFont
-                                    Layout.preferredWidth: compactDepthShareWidth
-                                    horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    text: root.formatAmount(rowData.price, rowData.volume)
-                                    color: rowData.isBid ? Const.depthBidVolumeText : Const.depthAskVolumeText
+                                Text { text:rowData.side+rowData.level; color:rowData.isBid?Const.depthBidText:Const.depthAskText; font.pixelSize:compactBookTagFont; font.weight:Font.DemiBold; Layout.fillWidth:true }
+                                Text { text:root.formatPrice(rowData.price); color:Const.tradingBrightText; font.pixelSize:compactBookPriceFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                                Text { text:root.formatLotCount(rowData.volume); color:Const.depthInfoText; font.pixelSize:compactBookVolumeFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                                Text { text:root.formatShareCount(rowData.volume); color:Const.depthInfoText; font.pixelSize:compactBookVolumeFont; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                                Text { text:root.formatAmount(rowData.price,rowData.volume); color:rowData.isBid?Const.depthBidVolumeText:Const.depthAskVolumeText
                                     font.pixelSize: compactBookVolumeFont
                                     Layout.fillWidth: true
                                     horizontalAlignment: Text.AlignRight
