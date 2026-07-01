@@ -556,11 +556,7 @@ void StrategyEngine::startLiveLoop()
             m_eodCallbackRegistered = true;
         }
 
-        m_dedicatedExecutor->post([this]() {
-            riskPatrolLoop();
-        });
-
-        // ── 自动补执行 EOD：盘后首次启动时 minte_bar 无数据 → 触发日终评估 ──
+        // ── 盘后补 EOD：风险巡检启动前同步执行（不能 post，riskPatrolLoop 会占线程）──
         {
             auto now = std::time(nullptr);
             std::tm local;
@@ -578,12 +574,14 @@ void StrategyEngine::startLiveLoop()
                 int64_t today = (local.tm_year + 1900) * 10000LL
                               + (local.tm_mon + 1) * 100 + local.tm_mday;
                 INTERNAL_INFO_STREAM << "[StrategyEngine] 盘后启动+无tick数据，"
-                                     << "自动触发日终评估 tradingDay=" << today;
-                m_dedicatedExecutor->post([this, today]() {
-                    evaluateEndOfDay(std::to_string(today));
-                });
+                                     << "同步执行日终评估 tradingDay=" << today;
+                evaluateEndOfDay(std::to_string(today));
             }
         }
+
+        m_dedicatedExecutor->post([this]() {
+            riskPatrolLoop();
+        });
     } else {
         // ── 分钟频/高频: 启动完整 drainQueue ──
         INTERNAL_INFO_STREAM << "[启动] 盘中策略 — 启动 drainQueue 事件循环";
