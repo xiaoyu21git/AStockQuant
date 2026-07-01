@@ -369,7 +369,7 @@ Rectangle {
                         boundsBehavior: Flickable.StopAtBounds
                         model: root.depthTableRows
                         interactive: true
-                        onHeightChanged: console.warn("[DepthList] height="+height+" count="+count+" rowH="+Math.max(22,(height-6)/Math.max(count-1,1)))
+                        onHeightChanged: { /* height adapts dynamically */ }
 
                         ScrollBar.vertical: ScrollBar {
                             policy: ScrollBar.AlwaysOff
@@ -378,7 +378,7 @@ Rectangle {
                         delegate: Item {
                             property var rowData: modelData
                             width: ListView.view.width
-                            height: rowData.kind === "divider" ? 6 : Math.max(22, (ListView.view.height - 6) / Math.max(ListView.view.count - 1, 1))
+                            height: rowData.kind === "divider" ? 6 : (ListView.view.count > 1 ? Math.max(22, (ListView.view.height - 6) / (ListView.view.count - 1)) : 30)
 
                             Rectangle {
                                 anchors.fill: parent
