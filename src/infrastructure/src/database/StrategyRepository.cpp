@@ -36,6 +36,7 @@ QVariantMap PersistedStrategyData::toVariantMap() const {
     m["strategyId"] = fromS(strategyId);
     m["strategyName"] = fromS(metadata.name);
     m["strategyCode"] = fromS(strategyCode);
+    m["strategyTypeIndex"] = strategyTypeIndex;
     m["behaviorKind"] = static_cast<int>(metadata.behaviorKind);
     m["description"] = fromS(metadata.description);
     m["version"] = fromS(version);
@@ -79,6 +80,7 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
     d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
         metaJson.value("behaviorKind").toInt());
     d.metadata.enabled = metaJson.value("enabled").toBool();
+    d.strategyTypeIndex = metaJson.value("strategyTypeIndex").toInt();
     d.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{};
     d.parameters = fromJson(row.getString("parameters"));
     d.performanceMetrics = fromJson(row.getString("performance_metrics"));
@@ -119,6 +121,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
             d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
                 metaJson.value("behaviorKind").toInt());
             d.metadata.enabled = metaJson.value("enabled").toBool();
+            d.strategyTypeIndex = metaJson.value("strategyTypeIndex").toInt();
             v.push_back(d);
         }
         return v;
@@ -140,8 +143,16 @@ std::vector<PersistedStrategyData> StrategyRepository::findDraftStrategies() { r
 QString StrategyRepository::save(const PersistedStrategyData& d) {
     auto db = sdb();
     if (!db) return {};
-    auto id = d.strategyId.empty() ? "s_" + std::to_string(std::time(nullptr)) : d.strategyId;
+    auto id = d.strategyId.empty() ? foundation::utils::Uuid::generate_v4().to_string() : d.strategyId;
     QString sid = fromS(id);
+
+    QVariantMap metaJson;
+    metaJson["name"] = fromS(d.metadata.name);
+    metaJson["description"] = fromS(d.metadata.description);
+    metaJson["behaviorKind"] = static_cast<int>(d.metadata.behaviorKind);
+    metaJson["enabled"] = d.metadata.enabled;
+    metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
+
     db->executeUpdate(
         "INSERT INTO strategy(strategy_id,strategy_code,metadata_json,strategy_identity_json,"
         "version,author,language,status,parameters,performance_metrics,runtime_json) "
@@ -151,7 +162,7 @@ QString StrategyRepository::save(const PersistedStrategyData& d) {
         "author=EXCLUDED.author,language=EXCLUDED.language,status=EXCLUDED.status,"
         "parameters=EXCLUDED.parameters,performance_metrics=EXCLUDED.performance_metrics,"
         "runtime_json=EXCLUDED.runtime_json,updated_at=NOW()",
-        {SqlParam{id},SqlParam{d.strategyCode},SqlParam{"{}"},
+        {SqlParam{id},SqlParam{d.strategyCode},SqlParam{toJson(metaJson)},
          SqlParam{"{}"},SqlParam{d.version},SqlParam{d.author},
          SqlParam{std::to_string(static_cast<int>(d.language))},SqlParam{std::to_string(0)},
          SqlParam{toJson(d.parameters)},SqlParam{toJson(d.performanceMetrics)},SqlParam{"{}"}});
@@ -165,11 +176,19 @@ QString StrategyRepository::saveStrategyInternal(const PersistedStrategyData& d,
 bool StrategyRepository::update(const QString& id, const PersistedStrategyData& d) {
     auto db = sdb();
     if (!db) return false;
+
+    QVariantMap metaJson;
+    metaJson["name"] = fromS(d.metadata.name);
+    metaJson["description"] = fromS(d.metadata.description);
+    metaJson["behaviorKind"] = static_cast<int>(d.metadata.behaviorKind);
+    metaJson["enabled"] = d.metadata.enabled;
+    metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
+
     return db->executeUpdate(
         "UPDATE strategy SET strategy_code=?,metadata_json=?,strategy_identity_json=?,"
         "version=?,author=?,language=?,status=?,parameters=?,performance_metrics=?,"
         "runtime_json=?,updated_at=NOW() WHERE strategy_id=?",
-        {SqlParam{d.strategyCode},SqlParam{"{}"},SqlParam{"{}"},
+        {SqlParam{d.strategyCode},SqlParam{toJson(metaJson)},SqlParam{"{}"},
          SqlParam{d.version},SqlParam{d.author},SqlParam{std::to_string(static_cast<int>(d.language))},
          SqlParam{std::to_string(0)},SqlParam{toJson(d.parameters)},SqlParam{toJson(d.performanceMetrics)},
          SqlParam{"{}"},SqlParam{toS(id)}}) > 0;

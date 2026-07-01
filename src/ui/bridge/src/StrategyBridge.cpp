@@ -280,6 +280,7 @@ void StrategyBridge::applyReq(const BridgeUpsertRequest& request,
     if (request.strategyType().valid) {
         const int typeIndex = static_cast<int>(request.strategyType().value);
         if (!isTypeIdxValid(typeIndex)) std::abort();
+        target.strategyTypeIndex = typeIndex;
         target.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{
             static_cast<domain::backtest::StrategyStoredType>(typeIndex),
             domain::backtest::ResolvedStrategyBehavior{

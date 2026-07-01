@@ -908,6 +908,12 @@ Page {
             }
         }
 
+        // strategyTypeIndex 缺失时从 behaviorKind 回退
+        var explicitBehaviorKind = Number(strategy && (strategy.strategyBehaviorKind || strategy.behaviorKind))
+        if (isFinite(explicitBehaviorKind) && explicitBehaviorKind >= 0) {
+            return Utils.StrategyCreationUtils.strategyTypeIndexFromBehaviorKind(explicitBehaviorKind)
+        }
+
         return Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid
     }
 
@@ -942,8 +948,17 @@ Page {
             return
         }
         if (parameters.rule_template_bindings !== undefined && parameters.rule_template_bindings !== null) {
-            showErrorDialog("检测到旧字段 rule_template_bindings，当前编辑流程仅支持 rule_composer_state。")
-            return
+            // 迁移旧格式 → 新格式：清理旧字段，构建 rule_profile / rule_composer_state 默认结构
+            delete parameters.rule_template_bindings
+            delete parameters.commonConfig
+            delete parameters.strategySpec
+            delete parameters.advanced_options
+            delete parameters.factorOverlaySnapshot
+
+            var migratedProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(frontendTypeIndex)
+            var migratedStages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(migratedProfile)
+            parameters.rule_profile = { version: 1, strategyProfile: migratedProfile }
+            parameters.rule_composer_state = { version: 1, stages: migratedStages }
         }
 
         var editableParameters = ({})
@@ -1040,7 +1055,7 @@ Page {
             riskLevelIndex: strategyBasicInfo.getRiskLevelIndex(),
             optimizationMethod: strategyBasicInfo.getOptimizationMethodValue(),
             enableAdvancedOptions: enableAdvancedOptions,
-            strategyParameters: strategyParameters,
+            strategyParameters: toPlainJsValue(strategyParameters),
             parametersValid: step2Content && step2Content.isValid ? step2Content.isValid() : parametersValid
         }
 
@@ -1101,13 +1116,9 @@ Page {
             console.log(isEditMode ? "策略更新成功，ID:" : "策略创建成功，ID:", strategyId)
             showSuccessDialog(strategyId)
         } else {
-            var bridgeErr = strategyService && strategyService.errMsg ? String(strategyService.errMsg) : ""
+            var bridgeErr = strategyService && strategyService.errMsg ? String(strategyService.errMsg) : "(无错误信息)"
+            showErrorDialog(bridgeErr)
             console.error(isEditMode ? "策略更新失败" : "策略创建失败", bridgeErr)
-            if (bridgeErr && bridgeErr.length > 0) {
-                showErrorDialog((isEditMode ? "策略更新失败: " : "策略创建失败: ") + bridgeErr)
-            } else {
-                showErrorDialog(isEditMode ? "策略更新失败，请检查参数" : "策略创建失败，请检查参数")
-            }
         }
 
         isCreating = false
@@ -1271,8 +1282,8 @@ Page {
         standardButtons: Dialog.Ok
         modal: true
         
-        width: 450
-        height: 200
+        width: 550
+        height: 280
         
         property string errorMessage: ""
         
@@ -1306,8 +1317,8 @@ Page {
             Text {
                 Layout.fillWidth: true
                 text: errorDialog.errorMessage || "未知错误"
-                font.pixelSize: 13
-                color: "#f1f5f9"
+                font.pixelSize: 14
+                color: "#fbbf24"
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
             }

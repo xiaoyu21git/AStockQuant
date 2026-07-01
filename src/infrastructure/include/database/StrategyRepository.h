@@ -41,6 +41,7 @@ struct PersistedStrategyData {
     std::string strategyCode;
     domain::strategies::StrategyMetadata metadata;
     domain::backtest::ResolvedStrategyIdentity strategyIdentity;
+    int strategyTypeIndex{0};
     std::string version;
     std::string author;
     StrategyLanguageCode language{StrategyLanguageCode::Python};
