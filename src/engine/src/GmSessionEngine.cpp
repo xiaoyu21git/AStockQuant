@@ -412,6 +412,8 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                 q.preClose = pc;
                 // 用 last_tick 补五档深度
                 auto* lt = ::last_tick(gm.c_str(), false);
+                INTERNAL_INFO_STREAM << "[GmSession] last_tick for " << gm
+                    << " status=" << (lt?lt->status():-1) << " count=" << (lt?lt->count():0);
                 if (lt && !lt->status() && lt->count() > 0) {
                     auto& t = lt->at(0);
                     for (int i = 0; i < 5; ++i) {

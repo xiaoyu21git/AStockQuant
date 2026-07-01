@@ -149,12 +149,12 @@ void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     }
 
     m_trackedSymbols.insert(resolved);
+    updateSnapshot(resolved);
     if (m_primarySymbol != resolved) {
         m_primarySymbol = resolved;
         emit primarySymbolChanged();
         INTERNAL_INFO_STREAM << "[MktBridge] primarySymbol changed to " << resolved.toStdString();
     }
-    updateSnapshot(resolved);
 }
 
 void MarketDataBridge::activateDefaultWatchlist() {
