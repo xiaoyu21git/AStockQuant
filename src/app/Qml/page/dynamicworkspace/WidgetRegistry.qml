@@ -32,8 +32,8 @@ QtObject {
         },
         "account_card": {
             label: "账户概览", icon: "💰",
-            description: "净值卡片 + 可用/市值/冻结/盈亏指标网格",
-            defaultColSpan: 6, defaultRowSpan: 1,
+            description: "总资产/总盈亏/总持仓/总市值 + 持仓买入卖出撤单Tab",
+            defaultColSpan: 12, defaultRowSpan: 2,
             source: "../../components/DynamicWorkspace/widgets/AccountCardWidget.qml"
         },
         "quote_card": {
