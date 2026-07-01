@@ -15,6 +15,8 @@ Item {
         ? Bridge.PositionAccountBridge.positions : []
     property var orders: Bridge.TradeExecutionBridge && Bridge.TradeExecutionBridge.recentOrders
         ? Bridge.TradeExecutionBridge.recentOrders : []
+    property var mktSnap: Bridge.MarketDataBridge && Bridge.MarketDataBridge.marketSnapshots
+        ? Bridge.MarketDataBridge.marketSnapshots : ({})
 
     Connections {
         target: Bridge.PositionAccountBridge
@@ -24,6 +26,32 @@ Item {
     Connections {
         target: Bridge.TradeExecutionBridge
         function onRecentOrdersChanged() { orders = Bridge.TradeExecutionBridge.recentOrders || [] }
+    }
+    Connections {
+        target: Bridge.MarketDataBridge
+        function onMarketSnapshotsChanged() { mktSnap = Bridge.MarketDataBridge.marketSnapshots || ({}) }
+    }
+
+    // 合并行情数据
+    function orderChg(order) {
+        var sym=String(order.symbol||""); var snap=mktSnap[sym]||({})
+        var cur=Number(snap.price||0); var cost=Number(order.price||0)
+        if(cost<=0||cur<=0) return "—"
+        var side=String(order.side||"").toUpperCase()
+        return side==="BUY"?((cur-cost)/cost*100).toFixed(2)+"%" : ((cost-cur)/cost*100).toFixed(2)+"%"
+    }
+    function orderPnl(order) {
+        var sym=String(order.symbol||""); var snap=mktSnap[sym]||({})
+        var cur=Number(snap.price||0); var cost=Number(order.price||0); var q=Number(order.quantity||0)
+        if(cost<=0||cur<=0||q<=0) return "—"
+        var side=String(order.side||"").toUpperCase()
+        return side==="BUY"? scny((cur-cost)*q) : scny((cost-cur)*q)
+    }
+    function chgColor(order) {
+        var sym=String(order.symbol||""); var snap=mktSnap[sym]||({})
+        var cur=Number(snap.price||0); var cost=Number(order.price||0)
+        if(cost<=0||cur<=0) return "#94a3b8"
+        return cur>=cost ? rise : fall
     }
 
     readonly property color rise: "#ef4444"; readonly property color fall: "#10b981"
@@ -65,15 +93,18 @@ Item {
         id: listHeader
         Rectangle {
             property var columns: []
+            readonly property var widths: []
             width:parent?parent.width:100; height:22; color:"#1e293b"; radius:4
-            RowLayout {
+            Row {
                 anchors.fill:parent; anchors.margins:4; spacing:2
                 Repeater {
                     model: columns
                     delegate: Text {
-                        required property var modelData
+                        required property var modelData; required property int index
+                        readonly property var w: widths.length>index ? widths[index] : 1
                         text:modelData; color:"#64748b"; font.pixelSize:10
-                        Layout.fillWidth:true; horizontalAlignment:Text.AlignRight
+                        width:parent.width*w/(widths.reduce(function(s,x){return s+x},0)||1)
+                        horizontalAlignment:Text.AlignRight; elide:Text.ElideRight
                     }
                 }
             }
@@ -108,16 +139,18 @@ Item {
             }
         }
 
-        // ── Tab 栏 ──
-        RowLayout { Layout.fillWidth:true; spacing:2
+        // ── Tab 栏 (立体效果) ──
+        RowLayout { Layout.fillWidth:true; spacing:1
             Repeater {
                 model: ["持仓","买入","卖出","撤单"]
                 delegate: Rectangle {
-                    required property var modelData; required property int index
-                    Layout.fillWidth:true; height:26; radius:6
-                    color:root.currentTab===index?"#1e40af":"#1e293b"
-                    border.width:root.currentTab===index?1:0; border.color:"#3b82f6"
-                    Text { anchors.centerIn:parent; text:modelData; color:root.currentTab===index?"#f1f5f9":"#94a3b8"; font.pixelSize:11; font.weight:root.currentTab===index?Font.DemiBold:Font.Normal }
+                    required property var modelData; required property int index; property bool sel:root.currentTab===index
+                    Layout.fillWidth:true; height:28; radius:6
+                    gradient:sel?Gradient{GradientStop{position:0;color:"#2563eb"}GradientStop{position:1;color:"#1d4ed8"}}:null
+                    color:sel?"transparent":"#1e293b"
+                    border.width:sel?1:1; border.color:sel?"#3b82f6":"#334155"
+                    Rectangle { anchors.bottom:parent.bottom; width:parent.width; height:sel?3:0; color:"#60a5fa"; radius:2; visible:sel }
+                    Text { anchors.centerIn:parent; text:modelData; color:sel?"#f1f5f9":"#94a3b8"; font.pixelSize:11; font.weight:sel?Font.DemiBold:Font.Normal }
                     MouseArea { anchors.fill:parent; cursorShape:Qt.PointingHandCursor; onClicked:root.currentTab=index }
                 }
             }
@@ -136,7 +169,7 @@ Item {
                 Loader {
                     Layout.fillWidth: true; Layout.preferredHeight: 20
                     sourceComponent: listHeader
-                    onLoaded: { item.columns = ["市值","盈亏","持仓/可用","成本/现价"] }
+                    onLoaded: { item.columns=["市值","盈亏","持仓/可用","成本/现价"]; item.widths=[2,2,2,3] }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
@@ -148,11 +181,11 @@ Item {
                         readonly property double qty:Number(modelData.quantity||0)
                         readonly property double avail:Number(modelData.availableQuantity||qty)
                         readonly property double cost:Number(modelData.costBasis||modelData.avgPrice||0)
-                        RowLayout { anchors.fill:parent; spacing:2
-                            Text { text:cny(mv); color:"#cbd5e1"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                        Row { anchors.fill:parent; spacing:2
+                            Text { text:cny(mv); color:"#cbd5e1"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; width:parent.width*3/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                         }
                     }
                 }
@@ -166,7 +199,7 @@ Item {
                 Loader {
                     Layout.fillWidth: true; Layout.preferredHeight: 20
                     sourceComponent: listHeader
-                    onLoaded: { item.columns = ["标的","涨幅","数量","盈亏","成本"] }
+                    onLoaded: { item.columns=["标的","涨幅","数量","盈亏","成本"]; item.widths=[2,1,1,1,1] }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
@@ -174,12 +207,12 @@ Item {
                     delegate: Rectangle {
                         required property var modelData; width:parent?parent.width:100; height:22; color:"transparent"
                         readonly property double p:Number(modelData.price||0); readonly property double q:Number(modelData.quantity||0)
-                        RowLayout { anchors.fill:parent; spacing:2
-                            Text { text:String(modelData.symbol||"").replace(".SZ","").replace(".SH",""); color:"#ef4444"; font.pixelSize:10; Layout.fillWidth:true }
-                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:String(q); color:"#cbd5e1"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:cny(p); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                        Row { anchors.fill:parent; spacing:2
+                            Text { text:String(modelData.symbol||"").replace(".SZ","").replace(".SH",""); color:"#ef4444"; font.pixelSize:10; width:parent.width*2/6; elide:Text.ElideRight }
+                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
+                            Text { text:String(q); color:"#cbd5e1"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
+                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
+                            Text { text:cny(p); color:"#94a3b8"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
                         }
                     }
                 }
@@ -193,7 +226,7 @@ Item {
                 Loader {
                     Layout.fillWidth: true; Layout.preferredHeight: 20
                     sourceComponent: listHeader
-                    onLoaded: { item.columns = ["标的","涨幅","数量","盈亏","成本"] }
+                    onLoaded: { item.columns=["标的","涨幅","数量","盈亏","成本"]; item.widths=[2,1,1,1,1] }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
@@ -201,12 +234,12 @@ Item {
                     delegate: Rectangle {
                         required property var modelData; width:parent?parent.width:100; height:22; color:"transparent"
                         readonly property double p:Number(modelData.price||0); readonly property double q:Number(modelData.quantity||0)
-                        RowLayout { anchors.fill:parent; spacing:2
-                            Text { text:String(modelData.symbol||"").replace(".SZ","").replace(".SH",""); color:"#10b981"; font.pixelSize:10; Layout.fillWidth:true }
-                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:String(q); color:"#cbd5e1"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:cny(p); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                        Row { anchors.fill:parent; spacing:2
+                            Text { text:String(modelData.symbol||"").replace(".SZ","").replace(".SH",""); color:"#10b981"; font.pixelSize:10; width:parent.width*2/6 }
+                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
+                            Text { text:String(q); color:"#cbd5e1"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
+                            Text { text:"—"; color:"#94a3b8"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
+                            Text { text:cny(p); color:"#94a3b8"; font.pixelSize:10; width:parent.width/6; horizontalAlignment:Text.AlignRight }
                         }
                     }
                 }
@@ -220,7 +253,7 @@ Item {
                 Loader {
                     Layout.fillWidth: true; Layout.preferredHeight: 20
                     sourceComponent: listHeader
-                    onLoaded: { item.columns = ["委托时间","委托价/均价","委托量/成交","状态"] }
+                    onLoaded: { item.columns=["委托时间","委托价/均价","委托量/成交","状态"]; item.widths=[3,2,2,1] }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
@@ -228,11 +261,11 @@ Item {
                     delegate: Rectangle {
                         required property var modelData; width:parent?parent.width:100; height:22; color:"transparent"
                         readonly property double p:Number(modelData.price||0); readonly property double q:Number(modelData.quantity||0)
-                        RowLayout { anchors.fill:parent; spacing:2
-                            Text { text:String(modelData.updatedAt||modelData.createdAt||"—"); color:"#64748b"; font.pixelSize:10; Layout.fillWidth:true }
-                            Text { text:cny(p)+"/—"; color:"#64748b"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:String(q)+"/—"; color:"#64748b"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
-                            Text { text:String(modelData.status||"—"); color:"#ef4444"; font.pixelSize:10; Layout.fillWidth:true; horizontalAlignment:Text.AlignRight }
+                        Row { anchors.fill:parent; spacing:2
+                            Text { text:String(modelData.updatedAt||modelData.createdAt||"—"); color:"#64748b"; font.pixelSize:10; width:parent.width*3/8; elide:Text.ElideRight }
+                            Text { text:cny(p)+"/—"; color:"#64748b"; font.pixelSize:10; width:parent.width*2/8; horizontalAlignment:Text.AlignRight }
+                            Text { text:String(q)+"/—"; color:"#64748b"; font.pixelSize:10; width:parent.width*2/8; horizontalAlignment:Text.AlignRight }
+                            Text { text:String(modelData.status||"—"); color:"#ef4444"; font.pixelSize:10; width:parent.width/8; horizontalAlignment:Text.AlignRight }
                         }
                     }
                 }
