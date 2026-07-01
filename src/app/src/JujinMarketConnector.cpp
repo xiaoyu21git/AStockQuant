@@ -1,5 +1,6 @@
 ﻿#include "JujinMarketConnector.h"
 #include "../../engine/include/GmSessionEngine.h"
+#include "../../../thirdparty/gmsdk/strategy.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
@@ -344,131 +345,37 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
         m_initialOrderSyncThread.join();
 
     auto* rawEventBus = eventBus;
-    const std::string requestToken = token;
-    const std::string requestAccountId = accountId;
     const std::string configuredRuntimeId = trim(runtimeStrategyId);
     const std::unordered_set<std::string> configuredBoundIds = boundStrategyIds;
 
-    m_initialOrderSyncThread = std::thread([this, rawEventBus, requestToken, requestAccountId,
+    m_initialOrderSyncThread = std::thread([this, rawEventBus,
                                             configuredRuntimeId, configuredBoundIds]() {
         try {
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] initial unfinished-order sync started asynchronously";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] initial unfinished-order sync started (C++ gmsdk)";
 
-        // 1. Write Python script to temp file
-#ifdef _WIN32
-        std::string tmpPath = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".")
-                              + "\\astock_jujin_sync_" + std::to_string(std::rand()) + ".py";
-#else
-        std::string tmpPath = "/tmp/astock_jujin_sync_" + std::to_string(std::rand()) + ".py";
-#endif
-        std::ofstream scriptFile(tmpPath, std::ios::out | std::ios::trunc);
-        if (!scriptFile.is_open()) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] failed to create temp python script file";
+        auto& engine = engine::GmSessionEngine::instance();
+        auto* s = static_cast<::Strategy*>(engine.strategy());
+        if (!s) {
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] gmsdk strategy not initialized";
             return;
         }
 
-        const char* kPyScript = R"py(
-import json, sys
-import gm.api as gm
-token = sys.argv[1]
-account_id = sys.argv[2]
-gm.set_token(token)
-if account_id:
-    gm.set_account_id(account_id)
-orders = gm.get_unfinished_orders() or []
-
-def pick(obj, *keys):
-    for key in keys:
-        value = obj.get(key) if isinstance(obj, dict) else None
-        if value is not None and value != '':
-            return value
-    return None
-
-result = []
-for order in orders:
-    item = order if isinstance(order, dict) else {}
-    result.append({
-        'order_id': pick(item, 'cl_ord_id', 'order_id', 'orderId'),
-        'business_strategy_id': pick(item, 'business_strategy_id'),
-        'runtime_strategy_id': pick(item, 'runtime_strategy_id'),
-        'symbol': pick(item, 'symbol'),
-        'side': pick(item, 'side', 'position_side'),
-        'price': pick(item, 'price'),
-        'quantity': pick(item, 'volume', 'quantity'),
-        'filled_quantity': pick(item, 'filled_volume', 'filledQuantity'),
-        'filled_notional': pick(item, 'filled_amount', 'filledNotional'),
-        'status': pick(item, 'status'),
-        'message': pick(item, 'ord_rej_reason_detail', 'status_msg', 'message'),
-        'created_at': str(pick(item, 'created_at', 'createdAt') or ''),
-        'updated_at': str(pick(item, 'updated_at', 'updatedAt') or '')
-    })
-print(json.dumps(result, ensure_ascii=True))
-)py";
-
-        scriptFile << kPyScript;
-        scriptFile.close();
-
-        // 2. Execute Python
-        std::string cmd = "python \"" + tmpPath + "\" \"" + requestToken + "\" \"" + requestAccountId + "\"";
-#ifdef _WIN32
-        FILE* pipe = _popen(cmd.c_str(), "r");
-#else
-        FILE* pipe = popen(cmd.c_str(), "r");
-#endif
-        if (!pipe) {
-            std::remove(tmpPath.c_str());
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] python process start failed";
-            return;
-        }
-
-        std::string output;
-        char buf[4096];
-        while (fgets(buf, sizeof(buf), pipe)) output += buf;
-        int ret = 
-#ifdef _WIN32
-            _pclose(pipe);
-#else
-            pclose(pipe);
-#endif
-        std::remove(tmpPath.c_str());
-
-        if (m_stopRequested.load()) return;
-        if (ret != 0) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] python exited code=" << ret
-                                  << " output=" << output.substr(0, 256);
-            return;
-        }
-
-        // 3. Parse JSON
-        auto doc = foundation::json::JsonFacade::parse(output);
-        if (!doc.isArray()) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] invalid JSON array";
-            return;
-        }
-        if (doc.size() == 0) {
-            INTERNAL_INFO_STREAM << "[JujinMarketConnector] no orders found";
+        auto* arr = s->get_unfinished_orders(nullptr);
+        if (!arr || arr->status() != 0) {
+            if (arr) arr->release();
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] get_unfinished_orders failed";
             return;
         }
 
         std::size_t publishedCount = 0, filteredCount = 0;
-        for (std::size_t i = 0; i < doc.size() && !m_stopRequested.load()
+        for (size_t i = 0; i < arr->count() && !m_stopRequested.load()
              && rawEventBus && rawEventBus->is_running(); ++i) {
-            auto order = doc.at(i);
-            if (!order.isObject()) continue;
+            auto& o = arr->at(i);
 
-            auto safeStr = [](const auto& obj, const char* key) -> std::string {
-                if (!obj.has(key)) return "";
-                auto v = obj.get(key);
-                if (v.isString()) return trim(v.asString());
-                if (v.isInt()) return std::to_string(v.asInt());
-                if (v.isDouble()) return std::to_string(v.asDouble());
-                if (v.isBool()) return v.asBool() ? "true" : "false";
-                return "";
-            };
-            std::string orderId    = safeStr(order, "order_id");
-            std::string bizId      = safeStr(order, "business_strategy_id");
-            std::string rtId       = safeStr(order, "runtime_strategy_id");
-            std::string sym        = safeStr(order, "symbol");
+            std::string orderId = o.cl_ord_id ? o.cl_ord_id : "";
+            std::string sym     = engine.fromGmSymbol(o.symbol);
+            std::string bizId   = o.strategy_id ? o.strategy_id : "";
+            std::string rtId;   // gmsdk Order 无 runtime_strategy_id，预留
             if (orderId.empty() || sym.empty()) continue;
 
             // Strategy filter
@@ -485,47 +392,26 @@ print(json.dumps(result, ensure_ascii=True))
             event.set("order_id", orderId);
             event.set("symbol", sym);
             if (!bizId.empty()) { event.set("business_strategy_id", bizId); event.metadata["business_strategy_id"] = bizId; }
-            if (!rtId.empty())  { event.set("runtime_strategy_id", rtId); event.metadata["runtime_strategy_id"] = rtId; }
 
-            auto safeDbl = [](const auto& obj, const char* key) -> double {
-                if (!obj.has(key)) return 0.0;
-                auto v = obj.get(key);
-                if (v.isDouble()) return v.asDouble();
-                if (v.isInt()) return static_cast<double>(v.asInt());
-                if (v.isString()) { try { return std::stod(v.asString()); } catch(...) {} }
-                return 0.0;
-            };
-            std::string rawSide = safeStr(order, "side");
-            if (rawSide.empty()) rawSide = "1";
-            event.set("side", normalizeOrderSide(rawSide));
-            double price = safeDbl(order, "price");
-            event.set("price", price);
-            int64_t qty = static_cast<int64_t>(safeDbl(order, "quantity"));
-            event.set("quantity", qty);
-            int64_t fqty = static_cast<int64_t>(safeDbl(order, "filled_quantity"));
-            event.set("filled_quantity", fqty);
-            double fnotional = safeDbl(order, "filled_notional");
-            event.set("filled_notional", fnotional);
-            std::string rawStatus = safeStr(order, "status");
-            event.set("status", normalizeOrderStatus(rawStatus));
-            std::string msg = safeStr(order, "message");
-            event.set("message", msg);
-
-            std::string vCreated = safeStr(order, "created_at");
-            if (!vCreated.empty()) { event.set("created_at", vCreated); event.metadata["created_at"] = vCreated; }
-            std::string vUpdated = safeStr(order, "updated_at");
-            if (!vUpdated.empty()) { event.set("updated_at", vUpdated); event.metadata["updated_at"] = vUpdated; }
+            event.set("side", std::to_string(o.side));
+            event.set("price", static_cast<double>(o.price));
+            event.set("quantity", static_cast<int64_t>(o.volume));
+            event.set("filled_quantity", static_cast<int64_t>(o.filled_volume));
+            event.set("filled_notional", static_cast<double>(o.filled_vwap));
+            event.set("status", std::to_string(o.status));
+            event.set("message", o.ord_rej_reason_detail ? o.ord_rej_reason_detail : "");
 
             event.metadata["order_id"] = orderId;
-            event.metadata["symbol"] = sym;
-            event.metadata["side"] = normalizeOrderSide(rawSide);
-            event.metadata["status"] = normalizeOrderStatus(rawStatus);
-            event.metadata["source"] = "snapshot.async";
+            event.metadata["symbol"]   = sym;
+            event.metadata["side"]     = std::to_string(o.side);
+            event.metadata["status"]   = std::to_string(o.status);
+            event.metadata["source"]   = "snapshot.async";
             event.metadata["event_contract"] = "canonical";
 
             rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
             ++publishedCount;
         }
+        arr->release();
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] sync done published=" << publishedCount
                              << " filtered=" << filteredCount;
         } catch (const std::exception& e) {
