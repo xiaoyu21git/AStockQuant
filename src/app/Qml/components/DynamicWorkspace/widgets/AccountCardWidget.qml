@@ -25,28 +25,14 @@ Item {
     readonly property double unrealizedPnl: Number(snap.unrealizedPnl || 0)
     readonly property int positionCount: Array.isArray(positions) ? positions.length : 0
 
-    // ── 空状态 ──
-    Rectangle {
-        anchors.fill: parent
-        anchors.margins: 4
-        radius: 12
-        color: "#1a2235"
-        visible: totalAsset <= 0
-
-        Text {
-            anchors.centerIn: parent
-            text: "等待账户数据..."
-            color: "#64748b"
-            font.pixelSize: 14
-        }
-    }
+    // ── 占位 (Bridge 未初始化时显示零值) ──
+    readonly property bool hasData: Object.keys(snap).length > 0
 
     // ── 主内容 ──
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 4
         spacing: cs(6)
-        visible: totalAsset > 0
 
         // 净值主卡片
         Rectangle {
