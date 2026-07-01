@@ -38,6 +38,12 @@ Item {
             mktSnap = Bridge.MarketDataBridge.marketSnapshots || ({})
     }
 
+    function stockName(sym) {
+        var s=String(sym||""); var snap=mktSnap[s]||({}); var n=snap.name||""
+        return n?s+"("+n+")":s.replace(".SZ","").replace(".SH","").replace(".BJ","")
+    }
+    function shortCode(sym) { return String(sym||"").replace(".SZ","").replace(".SH","").replace(".BJ","") }
+
     // 合并行情数据
     function orderChg(order) {
         var sym=String(order.symbol||""); var snap=mktSnap[sym]||({})
@@ -178,7 +184,7 @@ Item {
                 Loader {
                     Layout.fillWidth: true; Layout.preferredHeight: 20
                     sourceComponent: listHeader
-                    onLoaded: { item.columns=["市值","盈亏","持仓/可用","成本/现价"]; item.widths=[2,2,2,3] }
+                    onLoaded: { item.columns=["标的","市值","盈亏","持仓/可用","成本/现价"]; item.widths=[3,2,1,1,2] }
                 }
                 ListView {
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 2
@@ -191,10 +197,11 @@ Item {
                         readonly property double avail:Number(modelData.availableQuantity||qty)
                         readonly property double cost:Number(modelData.costBasis||modelData.avgPrice||0)
                         Row { anchors.fill:parent; spacing:2
+                            Text { text:root.stockName(modelData.symbol); color:"#f1f5f9"; font.pixelSize:10; width:parent.width*3/9; elide:Text.ElideRight }
                             Text { text:cny(mv); color:"#cbd5e1"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
-                            Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
-                            Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
-                            Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; width:parent.width*3/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:scny(pnl); color:pc(pnl); font.pixelSize:10; width:parent.width/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:String(qty)+"/"+String(avail); color:"#94a3b8"; font.pixelSize:10; width:parent.width/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
+                            Text { text:cny(cost)+"/"+cny(Number(modelData.lastPrice||0)); color:"#94a3b8"; font.pixelSize:10; width:parent.width*2/9; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
                         }
                     }
                 }
