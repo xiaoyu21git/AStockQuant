@@ -61,217 +61,212 @@ Item {
         { title:"总市值", value:cny(marketValue), detail:"占比 "+(totalAsset>0?(marketValue/totalAsset*100).toFixed(0):"0")+"%", icon:"qrc:/resources/icons/100.svg", accent:"#0ea5a4", abg:"#14b8a620", ab:"#14b8a655", ind:"市", vc:"#f1f5f9", dc:"#94a3b8" }
     ]
 
-    ScrollView {
+    ColumnLayout {
         anchors.fill: parent
-        clip: true
-        contentWidth: availableWidth
+        anchors.margins: 4
+        spacing: 4
 
-        ColumnLayout {
-            width: parent.width
-            spacing: 6
+        // ── 总览卡片行 ──
+        GridLayout {
+            Layout.fillWidth: true
+            columns: Math.max(1, Math.floor(width / 180))
+            columnSpacing: 4
+            rowSpacing: 4
 
-            // ── 总览卡片行 ──
-            GridLayout {
-                Layout.fillWidth: true
-                columns: Math.max(1, Math.floor(width / 180))
-                columnSpacing: 6
-                rowSpacing: 6
+            Repeater {
+                model: root.summaryCards
+                delegate: Dash.StatusSummaryCard {
+                    required property var modelData
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: Math.max(70, height * 0.35)
+                    cardData: ({
+                        title: modelData.title,
+                        value: modelData.value,
+                        detail: modelData.detail,
+                        iconSource: modelData.icon,
+                        accentColor: modelData.accent,
+                        accentBackground: modelData.abg,
+                        accentBorder: modelData.ab,
+                        indicatorText: modelData.ind,
+                        valueColor: modelData.vc,
+                        detailColor: modelData.dc
+                    })
+                    fallbackAccentColor: "#3b82f6"
+                }
+            }
+        }
 
-                Repeater {
-                    model: root.summaryCards
-                    delegate: Dash.StatusSummaryCard {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 90
-                        cardData: ({
-                            title: modelData.title,
-                            value: modelData.value,
-                            detail: modelData.detail,
-                            iconSource: modelData.icon,
-                            accentColor: modelData.accent,
-                            accentBackground: modelData.abg,
-                            accentBorder: modelData.ab,
-                            indicatorText: modelData.ind,
-                            valueColor: modelData.vc,
-                            detailColor: modelData.dc
-                        })
-                        fallbackAccentColor: "#3b82f6"
+        // ── 持仓比例标签 (同花顺风格) ──
+        Flow {
+            Layout.fillWidth: true
+            spacing: 4
+            visible: posCount > 0 && marketValue > 0
+
+            Repeater {
+                model: { var a=[]; for(var i=0;i<Math.min(positions.length,12);i++)a.push(positions[i]); return a }
+                delegate: Rectangle {
+                    required property var modelData
+                    readonly property double pct: marketValue > 0 ? (Number(modelData.marketValue||0) / marketValue * 100) : 0
+                    width: tagText.width + 12
+                    height: 20
+                    radius: 4
+                    color: "#1e293b"
+                    border.width: 1
+                    border.color: pct > 10 ? "#3b82f6" : "#334155"
+
+                    Text {
+                        id: tagText
+                        anchors.centerIn: parent
+                        text: String(modelData.symbol||"").replace(".SZ","").replace(".SH","") + " " + pct.toFixed(1) + "%"
+                        color: pct > 10 ? "#93c5fd" : "#94a3b8"
+                        font.pixelSize: 10
                     }
                 }
             }
+        }
 
-            // ── 持仓比例标签 (同花顺风格) ──
-            Flow {
-                Layout.fillWidth: true
-                spacing: 4
-                visible: posCount > 0 && marketValue > 0
+        // ── Tab 栏 ──
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 2
 
-                Repeater {
-                    model: { var a=[]; for(var i=0;i<Math.min(positions.length,12);i++)a.push(positions[i]); return a }
-                    delegate: Rectangle {
-                        required property var modelData
-                        readonly property double pct: marketValue > 0 ? (Number(modelData.marketValue||0) / marketValue * 100) : 0
-                        width: tagText.width + 12
-                        height: 20
-                        radius: 4
-                        color: "#1e293b"
-                        border.width: 1
-                        border.color: pct > 10 ? "#3b82f6" : "#334155"
+            Repeater {
+                model: root.tabs
+                delegate: Rectangle {
+                    required property var modelData
+                    required property int index
+                    Layout.fillWidth: true
+                    height: 28
+                    radius: 6
+                    color: root.currentTab === index ? "#1e40af" : "#1e293b"
+                    border.width: root.currentTab === index ? 1 : 0
+                    border.color: "#3b82f6"
 
-                        Text {
-                            id: tagText
-                            anchors.centerIn: parent
-                            text: String(modelData.symbol||"").replace(".SZ","").replace(".SH","") + " " + pct.toFixed(1) + "%"
-                            color: pct > 10 ? "#93c5fd" : "#94a3b8"
-                            font.pixelSize: 10
-                        }
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData
+                        color: root.currentTab === index ? "#f1f5f9" : "#94a3b8"
+                        font.pixelSize: 11
+                        font.weight: root.currentTab === index ? Font.DemiBold : Font.Normal
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.currentTab = index
                     }
                 }
             }
+        }
 
-            // ── Tab 栏 ──
-            RowLayout {
-                Layout.fillWidth: true
+        // ── 列表内容区 (撑满剩余空间) ──
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            radius: 8
+            color: "#0f172a"
+            border.width: 1
+            border.color: "#1e293b"
+
+            // 持仓列表
+            ListView {
+                anchors.fill: parent
+                anchors.margins: 4
+                visible: root.currentTab === 0
+                model: { var a=[]; for(var i=0;i<Math.min(root.positions.length,20);i++)a.push(root.positions[i]); return a }
+                clip: true
                 spacing: 2
 
-                Repeater {
-                    model: root.tabs
-                    delegate: Rectangle {
-                        required property var modelData
-                        required property int index
-                        Layout.fillWidth: true
-                        height: 28
-                        radius: 6
-                        color: root.currentTab === index ? "#1e40af" : "#1e293b"
-                        border.width: root.currentTab === index ? 1 : 0
-                        border.color: "#3b82f6"
+                delegate: Rectangle {
+                    required property var modelData
+                    width: parent ? parent.width : 100
+                    height: 24
+                    color: "transparent"
+                    readonly property double pnl: Number(modelData.unrealizedPnl||0)
+                    readonly property double mv: Number(modelData.marketValue||0)
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: modelData
-                            color: root.currentTab === index ? "#f1f5f9" : "#94a3b8"
-                            font.pixelSize: 11
-                            font.weight: root.currentTab === index ? Font.DemiBold : Font.Normal
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.currentTab = index
-                        }
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 4
+                        Text { text: String(modelData.symbol||"").replace(".SZ","").replace(".SH",""); color:"#f1f5f9"; font.pixelSize:11; Layout.preferredWidth:50 }
+                        Text { text: String(modelData.quantity||0); color:"#94a3b8"; font.pixelSize:10; Layout.preferredWidth:40 }
+                        Text { text: cny(mv); color:"#cbd5e1"; font.pixelSize:10; Layout.fillWidth:true; elide:Text.ElideRight }
+                        Text { text: signedCny(pnl); color: pnlColor(pnl); font.pixelSize:11; Layout.preferredWidth:70; horizontalAlignment:Text.AlignRight }
                     }
                 }
             }
 
-            // ── 列表内容区 ──
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 150
-                radius: 8
-                color: "#0f172a"
-                border.width: 1
-                border.color: "#1e293b"
+            // 买入列表
+            ListView {
+                anchors.fill: parent
+                anchors.margins: 4
+                visible: root.currentTab === 1
+                model: { var a=[]; for(var i=0;i<Math.min(root.buyOrders.length,20);i++)a.push(root.buyOrders[i]); return a }
+                clip: true
+                spacing: 2
 
-                // 持仓列表
-                ListView {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    visible: root.currentTab === 0
-                    model: { var a=[]; for(var i=0;i<Math.min(root.positions.length,20);i++)a.push(root.positions[i]); return a }
-                    clip: true
-                    spacing: 2
-
-                    delegate: Rectangle {
-                        required property var modelData
-                        width: parent ? parent.width : 100
-                        height: 24
-                        color: "transparent"
-                        readonly property double pnl: Number(modelData.unrealizedPnl||0)
-                        readonly property double mv: Number(modelData.marketValue||0)
-
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 4
-                            Text { text: String(modelData.symbol||"").replace(".SZ","").replace(".SH",""); color:"#f1f5f9"; font.pixelSize:11; Layout.preferredWidth:50 }
-                            Text { text: String(modelData.quantity||0); color:"#94a3b8"; font.pixelSize:10; Layout.preferredWidth:40 }
-                            Text { text: cny(mv); color:"#cbd5e1"; font.pixelSize:10; Layout.fillWidth:true; elide:Text.ElideRight }
-                            Text { text: signedCny(pnl); color: pnlColor(pnl); font.pixelSize:11; Layout.preferredWidth:70; horizontalAlignment:Text.AlignRight }
-                        }
+                delegate: Rectangle {
+                    required property var modelData
+                    width: parent ? parent.width : 100
+                    height: 24
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 4
+                        Text { text: String(modelData.symbol||""); color:"#ef4444"; font.pixelSize:11; Layout.preferredWidth:50 }
+                        Text { text: cny(modelData.price||0); color:"#f1f5f9"; font.pixelSize:11; Layout.preferredWidth:60 }
+                        Text { text: String(modelData.quantity||0); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; elide:Text.ElideRight }
+                        Text { text: String(modelData.status||""); color:"#f59e0b"; font.pixelSize:10; Layout.preferredWidth:50 }
                     }
                 }
+            }
 
-                // 买入列表
-                ListView {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    visible: root.currentTab === 1
-                    model: { var a=[]; for(var i=0;i<Math.min(root.buyOrders.length,20);i++)a.push(root.buyOrders[i]); return a }
-                    clip: true
-                    spacing: 2
+            // 卖出列表
+            ListView {
+                anchors.fill: parent
+                anchors.margins: 4
+                visible: root.currentTab === 2
+                model: { var a=[]; for(var i=0;i<Math.min(root.sellOrders.length,20);i++)a.push(root.sellOrders[i]); return a }
+                clip: true
+                spacing: 2
 
-                    delegate: Rectangle {
-                        required property var modelData
-                        width: parent ? parent.width : 100
-                        height: 24
-                        color: "transparent"
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 4
-                            Text { text: String(modelData.symbol||""); color:"#ef4444"; font.pixelSize:11; Layout.preferredWidth:50 }
-                            Text { text: cny(modelData.price||0); color:"#f1f5f9"; font.pixelSize:11; Layout.preferredWidth:60 }
-                            Text { text: String(modelData.quantity||0); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; elide:Text.ElideRight }
-                            Text { text: String(modelData.status||""); color:"#f59e0b"; font.pixelSize:10; Layout.preferredWidth:50 }
-                        }
+                delegate: Rectangle {
+                    required property var modelData
+                    width: parent ? parent.width : 100
+                    height: 24
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 4
+                        Text { text: String(modelData.symbol||""); color:"#10b981"; font.pixelSize:11; Layout.preferredWidth:50 }
+                        Text { text: cny(modelData.price||0); color:"#f1f5f9"; font.pixelSize:11; Layout.preferredWidth:60 }
+                        Text { text: String(modelData.quantity||0); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; elide:Text.ElideRight }
+                        Text { text: String(modelData.status||""); color:"#f59e0b"; font.pixelSize:10; Layout.preferredWidth:50 }
                     }
                 }
+            }
 
-                // 卖出列表
-                ListView {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    visible: root.currentTab === 2
-                    model: { var a=[]; for(var i=0;i<Math.min(root.sellOrders.length,20);i++)a.push(root.sellOrders[i]); return a }
-                    clip: true
-                    spacing: 2
+            // 撤单列表
+            ListView {
+                anchors.fill: parent
+                anchors.margins: 4
+                visible: root.currentTab === 3
+                model: { var a=[]; for(var i=0;i<Math.min(root.cancelOrders.length,20);i++)a.push(root.cancelOrders[i]); return a }
+                clip: true
+                spacing: 2
 
-                    delegate: Rectangle {
-                        required property var modelData
-                        width: parent ? parent.width : 100
-                        height: 24
-                        color: "transparent"
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 4
-                            Text { text: String(modelData.symbol||""); color:"#10b981"; font.pixelSize:11; Layout.preferredWidth:50 }
-                            Text { text: cny(modelData.price||0); color:"#f1f5f9"; font.pixelSize:11; Layout.preferredWidth:60 }
-                            Text { text: String(modelData.quantity||0); color:"#94a3b8"; font.pixelSize:10; Layout.fillWidth:true; elide:Text.ElideRight }
-                            Text { text: String(modelData.status||""); color:"#f59e0b"; font.pixelSize:10; Layout.preferredWidth:50 }
-                        }
-                    }
-                }
-
-                // 撤单列表
-                ListView {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    visible: root.currentTab === 3
-                    model: { var a=[]; for(var i=0;i<Math.min(root.cancelOrders.length,20);i++)a.push(root.cancelOrders[i]); return a }
-                    clip: true
-                    spacing: 2
-
-                    delegate: Rectangle {
-                        required property var modelData
-                        width: parent ? parent.width : 100
-                        height: 24
-                        color: "transparent"
-                        RowLayout {
-                            anchors.fill: parent
-                            spacing: 4
-                            Text { text: String(modelData.symbol||""); color:"#94a3b8"; font.pixelSize:11; Layout.preferredWidth:50 }
-                            Text { text: String(modelData.side||""); color:"#64748b"; font.pixelSize:10; Layout.preferredWidth:30 }
-                            Text { text: cny(modelData.price||0); color:"#64748b"; font.pixelSize:11; Layout.fillWidth:true }
-                            Text { text: String(modelData.status||""); color:"#ef4444"; font.pixelSize:10; Layout.preferredWidth:50 }
-                        }
+                delegate: Rectangle {
+                    required property var modelData
+                    width: parent ? parent.width : 100
+                    height: 24
+                    color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent
+                        spacing: 4
+                        Text { text: String(modelData.symbol||""); color:"#94a3b8"; font.pixelSize:11; Layout.preferredWidth:50 }
+                        Text { text: String(modelData.side||""); color:"#64748b"; font.pixelSize:10; Layout.preferredWidth:30 }
+                        Text { text: cny(modelData.price||0); color:"#64748b"; font.pixelSize:11; Layout.fillWidth:true }
+                        Text { text: String(modelData.status||""); color:"#ef4444"; font.pixelSize:10; Layout.preferredWidth:50 }
                     }
                 }
             }
