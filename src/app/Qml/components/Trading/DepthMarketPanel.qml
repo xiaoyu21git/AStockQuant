@@ -487,7 +487,7 @@ Rectangle {
                         delegate: Rectangle {
                             property var tickData: modelData
                             width: ListView.view.width
-                            height: compactTradeRowHeight
+                            height: tickListView.count > 0 ? Math.max(22, tickListView.height / tickListView.count) : 30
                             radius: compactMode ? 10 : 12
                             color: Const.tradingHeaderBg
                             border.color: tickData.direction === "buy" ? Const.depthTickBuyBorder : Const.depthTickSellBorder
