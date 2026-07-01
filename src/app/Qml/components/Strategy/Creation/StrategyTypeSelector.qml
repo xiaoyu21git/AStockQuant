@@ -4,7 +4,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../../utils/StrategyCreationUtils.js" as Utils
+// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
 
 Rectangle {
     id: root
@@ -12,20 +12,20 @@ Rectangle {
     // ============ 属性 ============
     
     property int selectedStrategyTypeIndex: 0
-    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: Bridge.StrategyParamConfigHelper.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     readonly property int compactSelectorColumns: width >= 280 ? 2 : 1
     readonly property int strategyCardHeight: compactSelectorColumns > 1 ? 44 : 50
     readonly property var strategyTypeIndices: [
-        Utils.StrategyCreationUtils.StrategyTypeIndex.TrendFollowing,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.TrendBreakout,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.MeanReversion,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.Momentum,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.Arbitrage,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearning,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.HighFrequency,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.EventDriven,
-        Utils.StrategyCreationUtils.StrategyTypeIndex.Custom
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.TrendFollowing,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.TrendBreakout,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.MeanReversion,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Momentum,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Arbitrage,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.MachineLearning,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.MultiFactor,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.HighFrequency,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.EventDriven,
+        Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Custom
     ]
     
     // 信号
@@ -48,7 +48,7 @@ Rectangle {
             spacing: 12
             
             Text {
-                text: Utils.StrategyCreationUtils.tr('strategyCreation.selectStrategyType')
+                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.selectStrategyType')
                 font.pixelSize: 16
                 font.weight: Font.Medium
                 color: "#f1f5f9"
@@ -105,7 +105,7 @@ Rectangle {
                                     
                                     Text {
                                         anchors.centerIn: parent
-                                        text: Utils.StrategyCreationUtils.getStrategyIconFromIndex(cardRoot.strategyTypeIndex)
+                                        text: Bridge.StrategyParamConfigHelper.getStrategyIconFromIndex(cardRoot.strategyTypeIndex)
                                         font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 14
                                         color: isSelected ? "white" : "#cbd5e1"
                                     }
@@ -118,7 +118,7 @@ Rectangle {
                                     spacing: root.compactSelectorColumns > 1 ? 0 : 2
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(cardRoot.strategyTypeIndex)
+                                        text: Bridge.StrategyParamConfigHelper.getStrategyTypeNameFromIndex(cardRoot.strategyTypeIndex)
                                         font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 13
                                         font.weight: isSelected ? Font.DemiBold : Font.Medium
                                         color: isSelected ? "white" : "#f1f5f9"
@@ -127,7 +127,7 @@ Rectangle {
                                     }
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.getBriefDescriptionFromIndex(cardRoot.strategyTypeIndex)
+                                        text: Bridge.StrategyParamConfigHelper.getBriefDescriptionFromIndex(cardRoot.strategyTypeIndex)
                                         font.pixelSize: 10
                                         color: isSelected ? "#dbeafe" : "#94a3b8"
                                         elide: Text.ElideRight
@@ -196,7 +196,7 @@ Rectangle {
                     
                     Text {
                         id: strategyTypeDesc
-                        text: Utils.StrategyCreationUtils.getStrategyTypeDescriptionFromIndex(root.selectedStrategyTypeIndex)
+                        text: Bridge.StrategyParamConfigHelper.getStrategyTypeDescriptionFromIndex(root.selectedStrategyTypeIndex)
                         font.pixelSize: 12
                         color: "#94a3b8"
                         wrapMode: Text.WordWrap
@@ -212,7 +212,7 @@ Rectangle {
     
     // 重置选择
     function reset() {
-        root.selectedStrategyTypeIndex = Utils.StrategyCreationUtils.StrategyTypeIndex.TrendFollowing
+        root.selectedStrategyTypeIndex = Bridge.StrategyParamConfigHelper.StrategyTypeIndex.TrendFollowing
     }
 
     function toggleStrategyType(strategyTypeIndex) {
@@ -221,7 +221,7 @@ Rectangle {
     }
 
     function setSelectedStrategyTypeIndex(strategyTypeIndex, emitSignal) {
-        root.selectedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
+        root.selectedStrategyTypeIndex = Bridge.StrategyParamConfigHelper.normalizeStrategyTypeIndex(strategyTypeIndex)
         if (emitSignal === undefined || emitSignal) {
             root.strategyTypeIndexChanged(root.selectedStrategyTypeIndex)
         }

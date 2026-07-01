@@ -29,6 +29,7 @@
 #include "SymbolSearchModel.h"
 #include "RuleTemplateDetailHelper.h"
 #include "RuleTemplateSuggestionService.h"
+#include "StrategyParamConfigHelper.h"
 
 namespace wang{
 
@@ -209,6 +210,12 @@ namespace wang{
           url, 1, 0, "RuleTemplateSuggestionService",
           [](QQmlEngine*, QJSEngine*) -> QObject* {
              return new RuleTemplateSuggestionService();
+          });
+
+       qmlRegisterSingletonType<StrategyParamConfigHelper>(
+          url, 1, 0, "StrategyParamConfigHelper",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new StrategyParamConfigHelper();
           });
    }
 }

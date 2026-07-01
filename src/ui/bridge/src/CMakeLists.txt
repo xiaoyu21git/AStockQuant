@@ -30,6 +30,7 @@
     SymbolSearchModel.cpp
     RuleTemplateDetailHelper.cpp
     RuleTemplateSuggestionService.cpp
+    StrategyParamConfigHelper.cpp
     CandleDataModel.cpp
     StockDataLoader.cpp
     CrosshairManager.cpp

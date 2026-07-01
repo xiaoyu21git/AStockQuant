@@ -5,8 +5,8 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
-import "../../../utils/StrategyCreationUtils.js" as Utils
 import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
+// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
 import "../../FactorWorkbench/Creation/components" as PluginComponents
 
 Rectangle {
@@ -43,7 +43,7 @@ Rectangle {
         typeof root.computeCurrentRuleComposerGroupQuickImportEntries === "function"
             ? (root.computeCurrentRuleComposerGroupQuickImportEntries() || [])
             : [])
-    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: Bridge.StrategyParamConfigHelper.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
     readonly property bool ruleComposerConfigValid: (root.ruleComposerValidation.errorCount || 0) === 0
     readonly property bool useNarrowRulePanels: width >= 1180
     readonly property bool useWideParamGrid: width >= 1200
@@ -135,14 +135,14 @@ Rectangle {
                 spacing: 4
                 
                 Text {
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Title')
+                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.step2Title')
                     font.pixelSize: 16
                     font.weight: Font.DemiBold
                     color: "#f1f5f9"
                 }
                 
                 Text {
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Description')
+                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.step2Description')
                     font.pixelSize: 12
                     color: "#94a3b8"
                     wrapMode: Text.WordWrap
@@ -154,8 +154,8 @@ Rectangle {
 
                     Repeater {
                         model: [
-                            Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters'),
-                            Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                            Bridge.StrategyParamConfigHelper.tr('strategyCreation.commonParameters'),
+                            Bridge.StrategyParamConfigHelper.tr('strategyCreation.personalizedParameters')
                         ]
 
                         delegate: Rectangle {
@@ -201,7 +201,7 @@ Rectangle {
                         spacing: 8
 
                         Text {
-                            text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConfigPanel')
+                            text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterConfigPanel')
                             font.pixelSize: 14
                             font.weight: Font.Medium
                             color: "#f1f5f9"
@@ -212,7 +212,7 @@ Rectangle {
                             spacing: 8
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.configuredParameters') + ": " +
                                       root.totalConfiguredParameterCount()
                                 font.pixelSize: 11
                                 color: "#94a3b8"
@@ -222,8 +222,8 @@ Rectangle {
 
                             Text {
                                 text: root.parametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterValidationPassed') :
+                                      Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 11
                                 font.weight: Font.Medium
                                 color: root.parametersValid ? "#10b981" : "#ef4444"
@@ -248,7 +248,7 @@ Rectangle {
                         spacing: 6
 
                         Text {
-                            text: Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
+                            text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.commonParameters')
                             font.pixelSize: 12
                             font.weight: Font.Medium
                             color: "#dbeafe"
@@ -259,7 +259,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.configuredParameters') + ": " +
                                       (commonDynamicGenerator && commonDynamicGenerator.configsList ? commonDynamicGenerator.configsList.length : 0)
                                 font.pixelSize: 10
                                 color: "#93c5fd"
@@ -269,8 +269,8 @@ Rectangle {
 
                             Text {
                                 text: root.commonParametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterValidationPassed') :
+                                      Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                                 color: root.commonParametersValid ? "#10b981" : "#ef4444"
@@ -319,7 +319,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.personalizedParameters')
                                 font.pixelSize: 12
                                 font.weight: Font.Medium
                                 color: "#e2e8f0"
@@ -350,7 +350,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.configuredParameters') + ": " +
                                       (personalizedDynamicGenerator && personalizedDynamicGenerator.configsList ? personalizedDynamicGenerator.configsList.length : 0)
                                 font.pixelSize: 10
                                 color: "#94a3b8"
@@ -360,8 +360,8 @@ Rectangle {
 
                             Text {
                                 text: root.personalizedParametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterValidationPassed') :
+                                      Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                                 color: root.personalizedParametersValid ? "#10b981" : "#ef4444"
@@ -1094,7 +1094,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRange')
+                                        text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterOptimizationRange')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1102,7 +1102,7 @@ Rectangle {
                                     ComboBox {
                                         id: parameterOptimizationRangeCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRangeOptions')
+                                        model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterOptimizationRangeOptions')
                                         currentIndex: 1
                                         
                                         background: Rectangle {
@@ -1129,7 +1129,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysis')
+                                        text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.sensitivityAnalysis')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1137,7 +1137,7 @@ Rectangle {
                                     ComboBox {
                                         id: sensitivityAnalysisCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysisOptions')
+                                        model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.sensitivityAnalysisOptions')
                                         currentIndex: 1
                                         
                                         background: Rectangle {
@@ -1164,7 +1164,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraints')
+                                        text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterConstraints')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1172,7 +1172,7 @@ Rectangle {
                                     ComboBox {
                                         id: parameterConstraintsCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraintOptions')
+                                        model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterConstraintOptions')
                                         currentIndex: 0
                                         
                                         background: Rectangle {
@@ -1199,7 +1199,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethod')
+                                        text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterInitializationMethod')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1207,7 +1207,7 @@ Rectangle {
                                     ComboBox {
                                         id: parameterInitializationMethodCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethods')
+                                        model: Bridge.StrategyParamConfigHelper.tr('strategyCreation.parameterInitializationMethods')
                                         currentIndex: 0
                                         
                                         background: Rectangle {
@@ -1235,7 +1235,7 @@ Rectangle {
                                 spacing: 6
                                 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScript')
+                                    text: Bridge.StrategyParamConfigHelper.tr('strategyCreation.customParameterScript')
                                     font.pixelSize: 12
                                     color: "#cbd5e1"
                                 }
@@ -1244,7 +1244,7 @@ Rectangle {
                                     id: customParameterScriptTextArea
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 70
-                                    placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScriptPlaceholder')
+                                    placeholderText: Bridge.StrategyParamConfigHelper.tr('strategyCreation.customParameterScriptPlaceholder')
                                     wrapMode: Text.WordWrap
                                     
                                     background: Rectangle {
@@ -1693,7 +1693,7 @@ Rectangle {
     
     // 加载参数配置
     function loadParamConfigs() {
-        var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyTypeIndex)
+        var paramConfigs = Bridge.StrategyParamConfigHelper.buildParamConfigs(root.selectedStrategyTypeIndex)
         var separatedConfigs = splitParameterConfigs(paramConfigs)
         root.commonParameterConfigs = separatedConfigs.common
         root.personalizedParameterConfigs = separatedConfigs.personalized
@@ -1713,8 +1713,8 @@ Rectangle {
         var source = Array.isArray(paramConfigs) ? paramConfigs : []
         var common = []
         var personalized = []
-        var commonCategory = Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
-        var personalizedCategory = Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+        var commonCategory = Bridge.StrategyParamConfigHelper.tr('strategyCreation.commonParameters')
+        var personalizedCategory = Bridge.StrategyParamConfigHelper.tr('strategyCreation.personalizedParameters')
 
         for (var index = 0; index < source.length; ++index) {
             var config = source[index]
@@ -2159,7 +2159,7 @@ Rectangle {
         }
 
         try {
-            var builtProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            var builtProfile = Bridge.StrategyParamConfigHelper.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
             return isPlainObject(builtProfile) ? builtProfile : ({})
         } catch (error) {
             console.warn("buildDefaultStrategyProfile failed:", error)
@@ -2169,7 +2169,7 @@ Rectangle {
 
     function safeBuildDefaultRuleComposerSkeleton(profile, bindings) {
         try {
-            var stages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, bindings || [])
+            var stages = Bridge.StrategyParamConfigHelper.buildDefaultRuleComposerSkeleton(profile, bindings || [])
             return Array.isArray(stages) ? stages : []
         } catch (error) {
             return []
@@ -2178,7 +2178,7 @@ Rectangle {
 
     function safeBuildDefaultMarketRuleBindings(profile) {
         try {
-            var entries = Utils.StrategyCreationUtils.buildDefaultMarketRuleBindings(profile)
+            var entries = Bridge.StrategyParamConfigHelper.buildDefaultMarketRuleBindings(profile)
             return Array.isArray(entries) ? entries : []
         } catch (error) {
             return []
@@ -2187,7 +2187,7 @@ Rectangle {
 
     function safeBuildDefaultBaseRuleBindings(profile) {
         try {
-            var entries = Utils.StrategyCreationUtils.buildDefaultBaseRuleBindings(profile)
+            var entries = Bridge.StrategyParamConfigHelper.buildDefaultBaseRuleBindings(profile)
             return Array.isArray(entries) ? entries : []
         } catch (error) {
             return []
@@ -2626,7 +2626,7 @@ Rectangle {
         if (directFileName) {
             return directFileName
         }
-        return Utils.StrategyCreationUtils.resolveRuleTemplateFileName(
+        return Bridge.StrategyParamConfigHelper.resolveRuleTemplateFileName(
             ruleLike && (ruleLike.templateId || "")
         )
     }
@@ -2804,7 +2804,7 @@ Rectangle {
     }
 
     function refreshRuleComposerValidation() {
-        root.ruleComposerValidation = Utils.StrategyCreationUtils.validateRuleComposerConfiguration(
+        root.ruleComposerValidation = Bridge.StrategyParamConfigHelper.validateRuleComposerConfiguration(
             root.strategyProfile,
             root.ruleComposerStages)
         return root.ruleComposerValidation
@@ -3480,7 +3480,7 @@ Rectangle {
             throw new Error("编辑参数缺少 rule_composer_state，当前仅支持新字段合同")
         }
         var mappedValues = importedFactorContextPayload(sourceParams)
-        var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
+        var normalizedStrategyTypeIndex = Bridge.StrategyParamConfigHelper.normalizeStrategyTypeIndex(strategyTypeIndex)
         var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
         var persistedComposerState = normalizeStructuredValue(sourceParams.rule_composer_state) || ({})
         if (!Array.isArray(persistedComposerState.stages) || persistedComposerState.stages.length === 0) {
@@ -3517,57 +3517,57 @@ Rectangle {
         assignIfPresent("weightScheme", ["weightScheme"], Number)
         assignIfPresent("rebalanceFrequency", ["rebalanceFrequency"], Number)
 
-        if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.DoubleMovingAverage) {
+        if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.DoubleMovingAverage) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
             assignIfPresent("slowPeriod", ["slowPeriod"], Number)
             assignIfPresent("priceField", ["priceField"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TurtleBreakout) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.TurtleBreakout) {
             assignIfPresent("channelPeriod", ["channelPeriod"], Number)
             assignIfPresent("breakoutMultiplier", ["breakoutMultiplier"], Number)
             assignIfPresent("atrPeriod", ["atrPeriod"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.BollingerBandMeanReversion) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.BollingerBandMeanReversion) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("standardDeviationMultiplier", ["standardDeviationMultiplier"], Number)
             assignIfPresent("entryThreshold", ["entryThreshold"], Number)
             assignIfPresent("exitThreshold", ["exitThreshold"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RsiMeanReversion) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.RsiMeanReversion) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactorSelection || normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.MultiFactorSelection || normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.MultiFactor) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.EarningsSurprise) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.EarningsSurprise) {
             assignIfPresent("surpriseThreshold", ["surpriseThreshold"], Number)
             assignIfPresent("holdDays", ["holdDays"], Number)
             assignIfPresent("eventSources", ["eventSources"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.StatisticalPairTrading) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.StatisticalPairTrading) {
             assignIfPresent("tradingPair", ["tradingPair"])
             assignIfPresent("hedgeRatio", ["hedgeRatio"], Number)
             assignIfPresent("lookback", ["lookback"], Number)
             assignIfPresent("entryZScore", ["entryZScore"], Number)
             assignIfPresent("exitZScore", ["exitZScore"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RiskParityAllocation) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.RiskParityAllocation) {
             assignIfPresent("assets", ["assets"])
             assignIfPresent("volatilityLookback", ["volatilityLookback"], Number)
             assignIfPresent("targetVolatility", ["targetVolatility"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearningSelection) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.MachineLearningSelection) {
             assignIfPresent("modelId", ["modelId"], Number)
             assignIfPresent("featureIds", ["featureIds"])
             assignIfPresent("topN", ["topN"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.OrderFlowImbalance) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.OrderFlowImbalance) {
             assignIfPresent("depthLevels", ["depthLevels"], Number)
             assignIfPresent("imbalanceThreshold", ["imbalanceThreshold"], Number)
             assignIfPresent("maxHoldSeconds", ["maxHoldSeconds"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.VolatilitySpread) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.VolatilitySpread) {
             assignIfPresent("underlying", ["underlying"])
             assignIfPresent("optionChainFilter", ["optionChainFilter"])
             assignIfPresent("historicalVolatilityWindow", ["historicalVolatilityWindow"], Number)
             assignIfPresent("entrySpreadUpper", ["entrySpreadUpper"], Number)
             assignIfPresent("entrySpreadLower", ["entrySpreadLower"], Number)
             assignIfPresent("deltaNeutral", ["deltaNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Custom) {
+        } else if (normalizedStrategyTypeIndex === Bridge.StrategyParamConfigHelper.StrategyTypeIndex.Custom) {
             assignIfPresent("customCode", ["customCode"])
         }
 
@@ -3671,7 +3671,7 @@ Rectangle {
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
         root.forbidDefaultRuleBuildInEdit = false
-        root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        root.strategyProfile = Bridge.StrategyParamConfigHelper.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         root.factorOverlay = defaultFactorOverlay()
         rebuildRuleComposerState(false)
         root.strategyParameters = decorateParameters({})
@@ -3696,7 +3696,7 @@ Rectangle {
         paramComponents.registerAllComponents()
 
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            root.strategyProfile = Bridge.StrategyParamConfigHelper.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         if (!Array.isArray(root.ruleComposerStages) || root.ruleComposerStages.length === 0) {

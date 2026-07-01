@@ -1,7 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../../utils/StrategyCreationUtils.js" as Utils
+// Utils 已迁移至 C++ Bridge.StrategyParamConfigHelper
 
 Rectangle {
     id: root
@@ -110,7 +110,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
+                    text: Bridge.StrategyParamConfigHelper.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
                     font.pixelSize: 13
                     font.weight: Font.Medium
                     color: "#dbeafe"
