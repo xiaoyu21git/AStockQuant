@@ -354,11 +354,11 @@ Rectangle {
                             anchors.margins: compactMode ? 5 : 8
                             spacing: compactMode ? 4 : 8
 
-                            Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:root.shareCountLabel; color:"#94a3b8"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
+                            Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.10; horizontalAlignment:Text.AlignHCenter }
+                            Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter }
+                            Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.15; horizontalAlignment:Text.AlignHCenter }
+                            Text { text:root.shareCountLabel; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter }
+                            Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.35; horizontalAlignment:Text.AlignHCenter }
                         }
                     }
 
@@ -406,11 +406,11 @@ Rectangle {
                                 spacing: compactMode ? 4 : 8
                                 visible: rowData.kind === "depth"
 
-                                Text { text:rowData.side+rowData.level; color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?12:14; font.weight:Font.DemiBold; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                                Text { text:root.formatPrice(rowData.price); color:"#f1f5f9"; font.pixelSize:compactMode?12:14; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                Text { text:root.formatLotCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                                Text { text:root.formatShareCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter }
-                                Text { text:root.formatAmount(rowData.price,rowData.volume); color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?11:13; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                Text { text:rowData.side+rowData.level; color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?12:14; font.weight:Font.DemiBold; width:parent.width*0.10; horizontalAlignment:Text.AlignHCenter }
+                                Text { text:root.formatPrice(rowData.price); color:"#f1f5f9"; font.pixelSize:compactMode?12:14; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                Text { text:root.formatLotCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; width:parent.width*0.15; horizontalAlignment:Text.AlignHCenter }
+                                Text { text:root.formatShareCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter }
+                                Text { text:root.formatAmount(rowData.price,rowData.volume); color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?11:13; width:parent.width*0.35; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                             }
                         }
                     }
