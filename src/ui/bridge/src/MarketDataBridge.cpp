@@ -795,15 +795,16 @@ void MarketDataBridge::fetchSectorHeat() {
         m_sectorHeatData = result; emit sectorHeatDataChanged(); return;
     }
 
+    struct StockInfo { std::string sym; double chg; };
     struct SecData {
         std::string name;
-        double chg = 0.0, netIn = 0.0, netInRate = 0.0, turnover = 0.0;
-        std::string lead; double leadChg = 0.0;
+        double chg = 0.0, netIn = 0.0, netInRate = 0.0;
+        std::vector<StockInfo> leads;
         int stockCnt = 0;
     };
-    std::map<std::string, SecData> secMap;  // industryName → data
+    std::map<std::string, SecData> secMap;
     std::vector<std::string> allSyms;
-    std::vector<std::string> symIndustry;    // parallel to allSyms
+    std::vector<std::string> symIndustry;
 
     int catCount = std::min(cats->count(), 25);
     for (size_t ci = 0; ci < static_cast<size_t>(catCount); ++ci) {
@@ -813,52 +814,42 @@ void MarketDataBridge::fetchSectorHeat() {
 
         auto* stocks = ::stk_get_industry_constituents(indCode.c_str(), nullptr);
         if (!stocks || stocks->status() || stocks->count() <= 0) {
-            if (stocks) stocks->release();
-            continue;
+            if (stocks) stocks->release(); continue;
         }
         int pick = std::min(stocks->count(), 5);
         for (int si = 0; si < pick; ++si) {
             std::string sym(stocks->at(si).symbol);
-            allSyms.push_back(sym);
-            symIndustry.push_back(indName);
+            allSyms.push_back(sym); symIndustry.push_back(indName);
         }
         stocks->release();
     }
     cats->release();
     if (allSyms.empty()) { m_sectorHeatData = result; emit sectorHeatDataChanged(); return; }
 
-    // 2. 批量拉日线 (涨跌幅)
     std::string symList;
-    for (size_t i = 0; i < allSyms.size(); ++i) {
-        if (i > 0) symList += ","; symList += allSyms[i];
-    }
+    for (size_t i = 0; i < allSyms.size(); ++i) { if (i>0) symList+=","; symList+=allSyms[i]; }
     auto* bars = ::history_bars_n(symList.c_str(), "1d", 1, todayStr, 0, nullptr, true, nullptr);
     if (bars && !bars->status() && bars->count() > 0) {
         for (size_t i = 0; i < bars->count() && i < allSyms.size(); ++i) {
             auto& b = bars->at(i);
             if (b.close <= 0 || b.pre_close <= 0) continue;
             double chg = (b.close - b.pre_close) / b.pre_close * 100.0;
-            std::string ind = symIndustry[i];
-            auto& sd = secMap[ind];
+            auto& sd = secMap[symIndustry[i]];
             sd.chg += chg; sd.stockCnt++;
-            if (std::abs(chg) > std::abs(sd.leadChg)) { sd.leadChg = chg; sd.lead = allSyms[i]; }
+            sd.leads.push_back({allSyms[i], chg});
         }
         bars->release();
     } else { if (bars) bars->release(); }
 
-    // 3. 批量拉资金流向
     auto* mf = ::stk_get_money_flow(symList.c_str(), nullptr);
     if (mf && !mf->status() && mf->count() > 0) {
         for (size_t i = 0; i < mf->count(); ++i) {
             auto& r = mf->at(i);
-            std::string sym(r.symbol);
-            // 找到该 symbol 对应的行业
             for (size_t j = 0; j < allSyms.size(); ++j) {
-                if (allSyms[j] == sym) {
+                if (allSyms[j] == std::string(r.symbol)) {
                     auto& sd = secMap[symIndustry[j]];
                     sd.netIn += r.main_net_in;
                     sd.netInRate += r.main_net_in_rate;
-                    sd.turnover += 0; // money flow 不含换手率
                     break;
                 }
             }
@@ -866,37 +857,23 @@ void MarketDataBridge::fetchSectorHeat() {
         mf->release();
     } else { if (mf) mf->release(); }
 
-    // 4. 汇总并赋信号
-    struct ResultItem { std::string name; double chg, netIn, netInRate, turnover; std::string lead; double leadChg; int signal; };
+    struct ResultItem { std::string name; double chg, netIn, netInRate; int signal; QVariantList leads; };
     std::vector<ResultItem> items;
     for (auto& [name, sd] : secMap) {
         if (sd.stockCnt <= 0) continue;
         double avgChg = sd.chg / sd.stockCnt;
-        int signal; // 0=真机会 1=诱多 2=抄底 3=真跌
-        if (avgChg > 0 && sd.netIn > 0)      signal = 0;
-        else if (avgChg > 0 && sd.netIn < 0) signal = 1;
-        else if (avgChg < 0 && sd.netIn > 0) signal = 2;
-        else                                 signal = 3;
-        items.push_back({name, avgChg, sd.netIn, sd.stockCnt > 0 ? sd.netInRate / sd.stockCnt : 0,
-                         sd.turnover, sd.lead, sd.leadChg, signal});
+        int signal; if (avgChg>0&&sd.netIn>0) signal=0; else if (avgChg>0&&sd.netIn<0) signal=1; else if (avgChg<0&&sd.netIn>0) signal=2; else signal=3;
+        std::sort(sd.leads.begin(), sd.leads.end(), [](auto& a, auto& b){ return std::abs(a.chg) > std::abs(b.chg); });
+        QVariantList leadsList;
+        for (auto& l : sd.leads) { QVariantMap lm; lm["sym"]=QString::fromStdString(l.sym); lm["c"]=l.chg; leadsList.append(lm); }
+        items.push_back({name, avgChg, sd.netIn, sd.stockCnt>0?sd.netInRate/sd.stockCnt:0, signal, leadsList});
     }
-
-    // 排序: 信号优先级 0→1→2→3, 同信号按涨跌幅绝对值
-    std::sort(items.begin(), items.end(), [](const ResultItem& a, const ResultItem& b) {
-        if (a.signal != b.signal) return a.signal < b.signal;
-        return std::abs(a.chg) > std::abs(b.chg);
-    });
+    std::sort(items.begin(), items.end(), [](auto& a, auto& b){ if(a.signal!=b.signal) return a.signal<b.signal; return std::abs(a.chg)>std::abs(b.chg); });
 
     for (auto& it : items) {
         QVariantMap m;
-        m["name"]     = QString::fromStdString(it.name);
-        m["chg"]      = it.chg;
-        m["netIn"]    = it.netIn;
-        m["netInRate"]= it.netInRate;
-        m["turnover"] = it.turnover;
-        m["lead"]     = QString::fromStdString(it.lead);
-        m["leadChg"]  = it.leadChg;
-        m["signal"]   = it.signal;
+        m["name"]=QString::fromStdString(it.name); m["chg"]=it.chg; m["netIn"]=it.netIn; m["netInRate"]=it.netInRate;
+        m["signal"]=it.signal; m["leads"]=it.leads;
         result.append(m);
     }
 

@@ -457,34 +457,13 @@ Item {
             focus = gainers.slice(0, 3)
         }
 
-        // \u677f\u5757\u6570\u636e: \u4ece C++ sectorHeatData \u8f6c\u6362
-        var sectorStocks = []
-        var rawSectors = marketDataService ? (marketDataService.sectorHeatData || []) : []
-        for (var si = 0; si < rawSectors.length; si++) {
-            var s = rawSectors[si]
-            var signalLabel = (s.signal === 0) ? "\u771f\u673a\u4f1a" : ((s.signal === 1) ? "\u8bf1\u591a" : ((s.signal === 2) ? "\u6284\u5e95" : "\u8d70\u5f31"))
-            var netInfo = (s.netIn||0) >= 0 ? "+" : ""
-            var netVal = Math.abs(s.netIn||0)
-            var netStr = netInfo + (netVal >= 1e8 ? (netVal/1e8).toFixed(1)+"\u4ebf" : (netVal >= 1e4 ? (netVal/1e4).toFixed(0)+"\u4e07" : netVal.toFixed(0)))
-            sectorStocks.push({
-                symbol: s.name || "",
-                name: signalLabel + " " + (s.lead||"") + " " + (s.leadChg||0 > 0 ? "+" : "") + (s.leadChg||0).toFixed(1) + "%",
-                price: s.chg || 0,
-                change: s.chg || 0,
-                color: (s.signal === 0) ? "#22c55e" : ((s.signal === 1) ? "#ef4444" : ((s.signal === 2) ? "#f59e0b" : "#888")),
-                updatedAt: "\u4e3b\u529b\u51c0\u6d41\u5165 " + netStr + "  \u51c0\u6d41\u5165\u7387 " + (s.netInRate||0).toFixed(1) + "%"
-            })
-        }
-        if (sectorStocks.length === 0) {
-            // \u672a\u62c9\u53d6\u65f6\u89e6\u53d1\u62c9\u53d6
-            if (marketDataService && typeof marketDataService.fetchSectorHeat === "function")
-                Qt.callLater(function() { marketDataService.fetchSectorHeat() })
-        }
+        // \u89e6\u53d1\u677f\u5757\u6570\u636e\u62c9\u53d6 (MarketGrid \u81ea\u7ed1\u5b9a\u4f1a\u8bfb\u53d6 sectorHeatData)
+        if (marketDataService && typeof marketDataService.fetchSectorHeat === "function")
+            Qt.callLater(function() { marketDataService.fetchSectorHeat() })
 
         return [
             { title: liveText("leadersGain"), icon: "\u6da8", stocks: gainers },
             { title: liveText("leadersLoss"), icon: "\u8dcc", stocks: losers },
-            { title: "", stocks: sectorStocks },
             { title: liveText("watchlistFocus"), icon: "\u7126", stocks: focus }
         ]
     }
