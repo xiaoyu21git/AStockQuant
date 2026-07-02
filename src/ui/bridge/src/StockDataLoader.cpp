@@ -182,14 +182,15 @@ void StockDataLoader::loadFromDB(const QString& code, int period) {
         if (!m_timer.isActive()) m_timer.start();
         // 加载历史分钟K线
         const char* freq = "60s";
+        int lookbackDays = 5;
         if (period == Min5) freq = "300s";
         else if (period == Min15) freq = "900s";
         else if (period == Min30) freq = "1800s";
         else if (period == Min60) freq = "3600s";
         else if (period == Min120) freq = "7200s";
-        else if (period == TimeShare) freq = "60s";
+        else if (period == TimeShare) { freq = "60s"; lookbackDays = 1; }
         auto now2 = std::chrono::system_clock::now();
-        auto start2 = now2 - std::chrono::hours(24 * 5);
+        auto start2 = now2 - std::chrono::hours(24 * lookbackDays);
         auto t_now2  = std::chrono::system_clock::to_time_t(now2);
         auto t_start2 = std::chrono::system_clock::to_time_t(start2);
         char s2[32], e2[32];
