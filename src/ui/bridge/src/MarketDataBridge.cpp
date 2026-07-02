@@ -73,6 +73,7 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
             depthSnap["totalBid"] = totalBid; depthSnap["totalAsk"] = totalAsk;
             depthSnap["live"] = false;
             snap["depthSnapshot"] = depthSnap;
+            snap["avgLine"]   = q->price;  // 盘后快照用收盘价作为均线参考
 
             snap["source"]    = QStringLiteral("gmsdk快照");
             snap["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
