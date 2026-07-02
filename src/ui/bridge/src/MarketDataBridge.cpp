@@ -836,7 +836,7 @@ void MarketDataBridge::fetchSectorHeat() {
         if (i > 0) symList += ",";
         symList += allSymbols[i];
     }
-    auto* bars = ::history_bars_n(symList.c_str(), "1d", 2, endDate, 0, nullptr, true, nullptr);
+    auto* bars = ::history_bars_n(symList.c_str(), "1d", 1, endDate, 0, nullptr, true, nullptr);
     if (!bars || bars->status() || bars->count() <= 0) {
         INTERNAL_WARN_STREAM << "[MktBridge] history_bars_n batch failed";
         if (bars) bars->release();
@@ -845,18 +845,14 @@ void MarketDataBridge::fetchSectorHeat() {
         return;
     }
 
-    // 3. 按行业汇总涨跌幅, 找领涨股
+    // 3. 按行业汇总涨跌幅 (Bar.pre_close 已含前收), 找领涨股
     std::map<std::string, double> sumChg, countChg, bestLeadChg;
     std::map<std::string, std::string> bestLeadName;
     for (size_t i = 0; i < bars->count() && i < allSymbols.size(); ++i) {
         auto& b = bars->at(i);
-        if (b.close <= 0) continue;
+        if (b.close <= 0 || b.pre_close <= 0) continue;
         std::string ind = industryNames[i];
-        // 需要前收: 查该 symbol 单独拉2根 (简化: 用 open 替代)
-        // 批量 history_bars_n 返回每个 symbol 的 n 根bar, 但 DataArray 是平铺的
-        // 简化: 用 (close - open) / open 近似日内涨跌
-        double chg = 0.0;
-        if (b.open > 0) chg = (b.close - b.open) / b.open * 100.0;
+        double chg = (b.close - b.pre_close) / b.pre_close * 100.0;
         sumChg[ind] += chg;
         countChg[ind] += 1.0;
         if (std::abs(chg) > std::abs(bestLeadChg[ind])) {
