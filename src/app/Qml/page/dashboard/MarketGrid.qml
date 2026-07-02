@@ -12,7 +12,7 @@ Item {
     Component.onCompleted: {
         if (marketSections.length === 0) {
             marketSections = [
-                { title: "🔥 热门板块", icon: "🔥", stocks: [
+                { title: "", stocks: [
                     { symbol:"半导体", name:"领涨:中芯国际 +5.1%", price:3.52, change:3.52, color:"#22c55e", updatedAt:"主力净流入 +2.1亿  净流入率 1.5%" },
                     { symbol:"新能源车", name:"领涨:比亚迪 +3.2%", price:2.15, change:2.15, color:"#22c55e", updatedAt:"主力净流入 +1.8亿  净流入率 1.2%" },
                     { symbol:"光伏", name:"领涨:隆基绿能 +2.8%", price:1.93, change:1.93, color:"#22c55e", updatedAt:"主力净流入 +1.5亿  净流入率 0.9%" },
