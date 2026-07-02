@@ -3,6 +3,8 @@
 // 指标从 CandleDataModel role 读取 (C++预计算), 十字光标通过 CrosshairManager 联动
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import Qt.labs.settings 1.0
 import AStock.Bridge 1.0 as Bridge
 
 Rectangle {
@@ -18,14 +20,19 @@ Rectangle {
     property double latestPrice: 0.0
     property double avgLinePrice: 0.0  // 分时VWAP均价 (从MarketDataBridge读取)
 
-    readonly property color upColor:    "#ef5350"
-    readonly property color downColor:  "#26a69a"
-    readonly property color frameBg:    "#1a1a2e"
-    readonly property color panelBg:    "#222244"
-    readonly property color gridColor:  "#3a3a5a"
-    readonly property color borderColor:"#444466"
-    readonly property color textDim:    "#8888aa"
-    readonly property color textBright: "#d0d0e0"
+    property color upColor:    "#ef5350"
+    property color downColor:  "#26a69a"
+    property color frameBg:    "#1a1a2e"
+    property color panelBg:    "#222244"
+    property color gridColor:  "#3a3a5a"
+    property color borderColor:"#444466"
+    property color textDim:    "#8888aa"
+    property color textBright: "#d0d0e0"
+    property color tsLineColor: "#f0f0f0"
+    property color ma5Color:    "#f4f4f4"
+    property color ma10Color:   "#f59e0b"
+    property color ma20Color:   "#c084fc"
+    property color ma60Color:   "#22d3ee"
 
     readonly property var periodLabels: ["分时","1分","5分","15分","30分","60分","120分","日线","周线","月线"]
 
@@ -131,6 +138,7 @@ Rectangle {
     Rectangle {
         id: toolbar; height: 30; color: panelBg
         anchors { top: parent.top; left: parent.left; right: parent.right }
+
         Row {
             anchors.centerIn: parent; spacing: 2
             Repeater {
@@ -142,6 +150,19 @@ Rectangle {
                            font.pixelSize: 10 }
                     MouseArea { anchors.fill: parent; onClicked: chartPeriod = index }
                 }
+            }
+        }
+
+        // 颜色设置按钮
+        Rectangle {
+            anchors { right: parent.right; rightMargin: 6; verticalCenter: parent.verticalCenter }
+            width: 24; height: 24; radius: 4
+            color: colorBtnMa.containsMouse ? Qt.rgba(1,1,1,0.1) : "transparent"
+            Text { anchors.centerIn: parent; text: "🎨"; font.pixelSize: 12 }
+            MouseArea {
+                id: colorBtnMa; anchors.fill: parent; hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: colorSettingsPopup.open()
             }
         }
     }
@@ -318,7 +339,7 @@ Rectangle {
                 grad.addColorStop(0,above?"rgba(239,68,68,0.28)":"rgba(16,185,129,0.28)")
                 grad.addColorStop(1,"rgba(0,0,0,0.01)");ctx.fillStyle=grad;ctx.fill()}
             // 价格折线
-            ctx.strokeStyle="#f0f0f0";ctx.lineWidth=1.5;ctx.setLineDash([])
+            ctx.strokeStyle=tsLineColor;ctx.lineWidth=1.5;ctx.setLineDash([])
             ctx.beginPath();for(var k=0;k<pts.length;k++)k===0?ctx.moveTo(pts[k].x,pts[k].y):ctx.lineTo(pts[k].x,pts[k].y);ctx.stroke()
             // 均价线 (VWAP — 从 MarketDataBridge 或 LiveData 读取)
             // 累计VWAP曲线
@@ -366,10 +387,10 @@ Rectangle {
             }
 
             // ── MA 线 (从 C++ role 读取) ──
-            drawMaLine(ctx, 5,  "#f4f4f4", 0.8, roMa5,  chartTop, mainH)
-            drawMaLine(ctx, 10, "#f59e0b", 0.8, roMa10, chartTop, mainH)
-            drawMaLine(ctx, 20, "#c084fc", 0.8, roMa20, chartTop, mainH)
-            drawMaLine(ctx, 60, "#22d3ee", 0.8, roMa60, chartTop, mainH)
+            drawMaLine(ctx, 5,  ma5Color,  0.8, roMa5,  chartTop, mainH)
+            drawMaLine(ctx, 10, ma10Color, 0.8, roMa10, chartTop, mainH)
+            drawMaLine(ctx, 20, ma20Color, 0.8, roMa20, chartTop, mainH)
+            drawMaLine(ctx, 60, ma60Color, 0.8, roMa60, chartTop, mainH)
         }
 
         // ── 十字光标竖直/水平线 ──
@@ -518,4 +539,126 @@ Rectangle {
     // 十字光标 Tooltip
     // ══════════════════════════════════════════════
     CandleTooltip { id: tooltip; z: 200 }
+
+    // ══════════════════════════════════════════════
+    // 颜色持久化
+    // ══════════════════════════════════════════════
+    Settings {
+        id: colorSettings
+        category: "ChartColors"
+        property alias upColor: root.upColor
+        property alias downColor: root.downColor
+        property alias frameBg: root.frameBg
+        property alias panelBg: root.panelBg
+        property alias gridColor: root.gridColor
+        property alias borderColor: root.borderColor
+        property alias tsLineColor: root.tsLineColor
+        property alias ma5Color: root.ma5Color
+        property alias ma10Color: root.ma10Color
+        property alias ma20Color: root.ma20Color
+        property alias ma60Color: root.ma60Color
+    }
+
+    // ══════════════════════════════════════════════
+    // 颜色选择弹窗
+    // ══════════════════════════════════════════════
+    Popup {
+        id: colorSettingsPopup
+        modal: true; closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: 420; height: 480
+        x: (parent.width - width) / 2; y: (parent.height - height) / 2
+        padding: 16
+
+        background: Rectangle { color: "#1a1a2e"; border.color: "#444466"; border.width: 1; radius: 10 }
+
+        ColumnLayout {
+            anchors.fill: parent; spacing: 10
+
+            Text { text: "K线图颜色设置"; color: "#d0d0e0"; font.pixelSize: 16; font.weight: Font.DemiBold }
+
+            ListView {
+                id: colorList; Layout.fillWidth: true; Layout.fillHeight: true
+                clip: true; spacing: 6
+                model: [
+                    { label:"背景",       prop:"frameBg" },
+                    { label:"面板",       prop:"panelBg" },
+                    { label:"网格线",     prop:"gridColor" },
+                    { label:"边框",       prop:"borderColor" },
+                    { label:"涨(阳线)",   prop:"upColor" },
+                    { label:"跌(阴线)",   prop:"downColor" },
+                    { label:"分时线",     prop:"tsLineColor" },
+                    { label:"MA5均线",    prop:"ma5Color" },
+                    { label:"MA10均线",   prop:"ma10Color" },
+                    { label:"MA20均线",   prop:"ma20Color" },
+                    { label:"MA60均线",   prop:"ma60Color" }
+                ]
+
+                delegate: Rectangle {
+                    width: colorList.width; height: 36; radius: 6
+                    color: "#222244"
+                    RowLayout {
+                        anchors.fill: parent; anchors.margins: 8; spacing: 10
+                        Rectangle {
+                            width: 22; height: 22; radius: 4
+                            color: root[modelData.prop] !== undefined ? root[modelData.prop] : "#888"
+                            border.color: "#555"; border.width: 1
+                        }
+                        Text { text: modelData.label; color: "#ccc"; font.pixelSize: 13; Layout.fillWidth: true }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                colorPicker.currentProp = modelData.prop
+                                colorPicker.currentKey  = modelData.key
+                                colorPicker.open()
+                            }
+                        }
+                    }
+                }
+            }
+            Text { text: "点击颜色块修改 · 自动保存"; color: "#666"; font.pixelSize: 10; Layout.alignment: Qt.AlignHCenter }
+        }
+    }
+
+    // 色板选择
+    Popup {
+        id: colorPicker
+        property string currentProp: ""
+        modal: true; closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: 280; height: 260
+        x: (parent.width - width) / 2; y: (parent.height - height) / 2
+        padding: 12
+
+        background: Rectangle { color: "#1a1a2e"; border.color: "#444466"; border.width: 1; radius: 8 }
+
+        GridLayout {
+            anchors.fill: parent
+            columns: 8; columnSpacing: 4; rowSpacing: 4
+
+            Repeater {
+                model: [
+                    "#ffffff","#e0e0e0","#c0c0c0","#a0a0a0","#808080","#606060","#404040","#202020",
+                    "#ff4444","#ef5350","#e53935","#c62828","#b71c1c","#ff8a80","#ff5252","#d32f2f",
+                    "#4caf50","#66bb6a","#43a047","#2e7d32","#1b5e20","#26a69a","#00bfa5","#00897b",
+                    "#42a5f5","#1e88e5","#1976d2","#1565c0","#0d47a1","#22d3ee","#00bcd4","#0097a7",
+                    "#ff9800","#f59e0b","#fb8c00","#ef6c00","#e65100","#ffc107","#ffb300","#ff8f00",
+                    "#9c27b0","#8e24aa","#7b1fa2","#6a1b9a","#4a148c","#c084fc","#ab47bc","#ce93d8",
+                    "#1a1a2e","#222244","#2a2a4a","#3a3a5a","#444466","#161b22","#0d1117","#21262d"
+                ]
+                Rectangle {
+                    width: 28; height: 28; radius: 3
+                    color: modelData
+                    border.color: root[colorPicker.currentProp] === modelData ? "#fff" : "#444"
+                    border.width: root[colorPicker.currentProp] === modelData ? 2 : 1
+                    MouseArea {
+                        anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            root[colorPicker.currentProp] = modelData
+                            colorPicker.close()
+                            requestAllPaint()
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
