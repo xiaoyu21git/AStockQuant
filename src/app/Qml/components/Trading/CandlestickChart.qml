@@ -306,7 +306,8 @@ Rectangle {
             // 数据点
             var pts=[]; for(var j=0;j<n;j++){var cc=candleModel.data(candleModel.index(j,4),0x0105)
                 var ts=candleModel.data(candleModel.index(j,0),0x0101)
-                var cy=yPrice(cc,chartTop,mainH),lx=timeX(ts);pts.push({x:lx,y:cy})}
+                var vol=candleModel.data(candleModel.index(j,5),0x0106)
+                var cy=yPrice(cc,chartTop,mainH),lx=timeX(ts);pts.push({x:lx,y:cy,price:cc,vol:vol})}
             // 渐变填充
             if(pts.length>1){ctx.beginPath();ctx.moveTo(pts[0].x,pts[0].y)
                 for(var p=1;p<pts.length;p++)ctx.lineTo(pts[p].x,pts[p].y)
@@ -319,9 +320,14 @@ Rectangle {
             ctx.strokeStyle=(latestPrice>=preClose)?"#ef5350":"#26a69a";ctx.lineWidth=1.3;ctx.setLineDash([])
             ctx.beginPath();for(var k=0;k<pts.length;k++)k===0?ctx.moveTo(pts[k].x,pts[k].y):ctx.lineTo(pts[k].x,pts[k].y);ctx.stroke()
             // 均价线 (VWAP — 从 MarketDataBridge 或 LiveData 读取)
-            if(avgLinePrice>0){var ay=yPrice(avgLinePrice,chartTop,mainH);ctx.strokeStyle="#f59e0b";ctx.lineWidth=1.2
-                ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(px,ay);ctx.lineTo(px+pw,ay);ctx.stroke()
-                ctx.fillStyle="#f59e0b";ctx.textAlign="left";ctx.fillText("均价 "+avgLinePrice.toFixed(2),px+4,ay-2)}
+            // 累计VWAP曲线
+            if(avgLinePrice>0&&pts.length>0){ctx.strokeStyle="#f59e0b";ctx.lineWidth=1.2;ctx.setLineDash([])
+                ctx.beginPath();var cumV=0,cumVV=0;for(var k=0;k<pts.length;k++){
+                    var vol=pts[k].vol||0;if(vol>0){cumV+=pts[k].price*vol;cumVV+=vol}
+                    var vwap=cumVV>0?cumV/cumVV:pts[k].price;var vy=yPrice(vwap,chartTop,mainH)
+                    k===0?ctx.moveTo(pts[k].x,vy):ctx.lineTo(pts[k].x,vy)};ctx.stroke()
+                var ly=yPrice(avgLinePrice,chartTop,mainH);ctx.fillStyle="#f59e0b";ctx.textAlign="left"
+                ctx.fillText("均价 "+avgLinePrice.toFixed(2),px+4,ly-2)}
         } else {
             // ── K线模式 ──
             // 网格 + Y轴
