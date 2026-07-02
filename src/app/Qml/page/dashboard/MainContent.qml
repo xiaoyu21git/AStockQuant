@@ -457,9 +457,28 @@ Item {
             focus = gainers.slice(0, 3)
         }
 
+        // \u677f\u5757\u6570\u636e: \u4ece C++ sectorHeatData \u8f6c\u6362
+        var sectorStocks = []
+        var rawSectors = marketDataService ? (marketDataService.sectorHeatData || []) : []
+        for (var si = 0; si < rawSectors.length; si++) {
+            var s = rawSectors[si]
+            sectorStocks.push({
+                symbol: s.name || "", name: s.lead || "",
+                price: s.chg || 0, change: s.chg || 0,
+                color: (s.signal === 0) ? "#22c55e" : ((s.signal === 1) ? "#ef4444" : ((s.signal === 2) ? "#f59e0b" : "#888")),
+                updatedAt: (s.netInRate||0).toFixed(1) + "% " + (s.netIn||0 > 0 ? "+" : "") + (Math.abs(s.netIn||0) >= 1e8 ? (s.netIn/1e8).toFixed(1)+"\u4ebf" : (Math.abs(s.netIn||0) >= 1e4 ? (s.netIn/1e4).toFixed(0)+"\u4e07" : s.netIn.toFixed(0)))
+            })
+        }
+        if (sectorStocks.length === 0) {
+            // \u672a\u62c9\u53d6\u65f6\u89e6\u53d1\u62c9\u53d6
+            if (marketDataService && typeof marketDataService.fetchSectorHeat === "function")
+                Qt.callLater(function() { marketDataService.fetchSectorHeat() })
+        }
+
         return [
             { title: liveText("leadersGain"), icon: "\u6da8", stocks: gainers },
             { title: liveText("leadersLoss"), icon: "\u8dcc", stocks: losers },
+            { title: "\u70ed\u95e8\u677f\u5757", icon: "\ud83d\udd25", stocks: sectorStocks },
             { title: liveText("watchlistFocus"), icon: "\u7126", stocks: focus }
         ]
     }
