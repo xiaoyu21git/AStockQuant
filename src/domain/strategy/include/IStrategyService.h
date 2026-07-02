@@ -4,6 +4,7 @@
 #include "StrategyServiceTypes.h"
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
+#include "DailyEodScheduler.h"
 #include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
@@ -517,9 +518,11 @@ public:
     /// @brief 是否为日频策略 (fromDb 时根据 behaviorKind 自动设置)
     [[nodiscard]] bool isDailyFrequency() const noexcept { return m_isDailyFrequency; }
 
-    /// @brief 日终评估: 当日 Bar 已封口，跑一次完整策略评估并生成次日开盘信号
-    /// 由 MarketDataService 的 EOD 回调触发，在专用线程中执行
-    void evaluateEndOfDay(const std::string& closedTradingDay);
+    /// @brief 日终评估: 跑一次完整策略评估并生成订单
+    /// @param tradingDay 评估目标交易日
+    /// @param isCompensation true=补单(历史收盘价), false=实时(当日 tick 价)
+    /// 由 DailyEodScheduler 触发，在专用线程中执行
+    void evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
 
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
@@ -582,7 +585,7 @@ private:
     std::atomic<bool> m_loopRunning{false};
     std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位，防御 drainQueue 误触发监听器
     bool m_isDailyFrequency{false};             ///< 日频策略 → 只巡检+日终评估, 不启动 drainQueue
-    bool m_eodCallbackRegistered{false};        ///< 已注册 MarketDataService EOD 回调
+    std::unique_ptr<DailyEodScheduler> m_dailyScheduler;  ///< 日频调度器 (EOD + 补单)
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};

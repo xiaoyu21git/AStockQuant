@@ -9,6 +9,7 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyPythonRuleService.cpp
     src/StrategyServer.cpp
     src/StrategyEngineFacade.cpp
+    src/DailyEodScheduler.cpp
     src/StrategyManager.cpp
     src/RiskEvaluator.cpp
     src/RiskManager.cpp

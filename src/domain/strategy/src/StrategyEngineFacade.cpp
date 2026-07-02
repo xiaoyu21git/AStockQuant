@@ -20,6 +20,8 @@
 #include "../include/RiskManager.h"
 #include "../../../engine/include/AccountEngine.h"
 #include "../../../engine/include/GmSessionEngine.h"
+#include "../../../thirdparty/gmsdk/gmapi.h"
+#include <cstdio>
 #include "MarketDataService.h"
 
 #include "foundation/json/json_facade.h"
@@ -546,19 +548,24 @@ void StrategyEngine::startLiveLoop()
     m_loopRunning.store(true, std::memory_order_release);
 
     if (m_isDailyFrequency) {
-        // ── 日频: 注册日终回调（风控巡检由 JMC 全局线程处理）──
-        INTERNAL_INFO_STREAM << "[启动] 日频策略 — 注册 EOD 回调";
+        // ── 日频: DailyEodScheduler 管理 EOD 回调 + 补单 ──
+        INTERNAL_INFO_STREAM << "[启动] 日频策略 — 创建 DailyEodScheduler";
 
-        if (!m_eodCallbackRegistered) {
-            domain::market::MarketDataService::instance()
-                .registerEndOfDayCallback([this](const std::string& closedTradingDay) {
-                if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire)) {
-                    m_dedicatedExecutor->post([this, closedTradingDay]() {
-                        evaluateEndOfDay(closedTradingDay);
-                    });
-                }
-            });
-            m_eodCallbackRegistered = true;
+        if (!m_dailyScheduler) {
+            // 持久化路径: 策略数据目录下 strategy_<id>_last_eval.txt
+            std::string persistPath = "strategy_" + m_strategyId + "_last_eval.txt";
+            m_dailyScheduler = std::make_unique<DailyEodScheduler>(
+                [this](std::function<void()> fn) {
+                    if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire))
+                        m_dedicatedExecutor->post(std::move(fn));
+                },
+                persistPath
+            );
+            m_dailyScheduler->setEvalCallback(
+                [this](const std::string& tradingDay, bool isCompensation) {
+                    evaluateEndOfDay(tradingDay, isCompensation);
+                });
+            m_dailyScheduler->start();
         }
     } else {
         // ── 分钟频/高频: 启动完整 drainQueue ──
@@ -713,10 +720,10 @@ void StrategyEngine::drainQueue()
 // evaluateEndOfDay — 日频策略盘后评估: 当日 Bar 已封口, 跑一次完整策略
 // ═════════════════════════════════════════════════════════════════════════
 
-void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
+void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isCompensation)
 {
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估触发, tradingDay="
-                         << closedTradingDay << " (日频)";
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 tradingDay=" << tradingDay
+                         << " isCompensation=" << isCompensation;
 
     if (m_isBacktestMode.load(std::memory_order_acquire)) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] 回测模式, 跳过日终评估";
@@ -727,21 +734,48 @@ void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
         return;
     }
 
-    // ── 从 MarketDataService 取所有已订阅标的的完整日 Bar ──
+    // ── 从 MarketDataService 取所有已订阅标的 ──
     auto symbols = domain::market::MarketDataService::instance().symbols();
     if (symbols.empty()) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无订阅标的, 跳过";
         return;
     }
 
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size()
-                         << " 只标的";
+    // 补单: tradingDay 转 "YYYY-MM-DD" 供 history_bars_n 用
+    std::string endDateStr;
+    if (isCompensation) {
+        auto dayInt = std::stoll(tradingDay);
+        int y = static_cast<int>(dayInt / 10000);
+        int m = static_cast<int>((dayInt % 10000) / 100);
+        int d = static_cast<int>(dayInt % 100);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+        endDateStr = buf;
+    }
+
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size() << " 只标的";
 
     int ordersGenerated = 0;
     for (const auto& sym : symbols) {
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
         if (!d.valid()) continue;
-        double price = d.dailyBar().close();
+
+        double price = 0;
+        if (isCompensation) {
+            // 补单: 用 history_bars_n 拉取历史日线收盘价
+            std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
+            if (gm.empty()) continue;
+            auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, endDateStr.c_str(),
+                                           0, nullptr, true, nullptr);
+            if (!bars || bars->status() || bars->count() <= 0) {
+                if (bars) bars->release();
+                continue;
+            }
+            price = bars->at(0).close;
+            bars->release();
+        } else {
+            price = d.dailyBar().close();  // 实时: 当日 tick 最新价
+        }
         if (price <= 0) continue;
 
         auto aSym = foundation::market::AStockSymbol::fromString(sym);

@@ -1,6 +1,7 @@
 #include "MarketDataService.h"
 #include "../../../engine/include/GmSessionEngine.h"
 
+#include <ctime>
 #include <sstream>
 
 namespace domain::market {
@@ -17,25 +18,17 @@ void MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
     m_eodCallbacks.push_back(std::move(cb));
 }
 
-void MarketDataService::fireEndOfDayCallbacks(std::int64_t closedTradingDay)
+void MarketDataService::fireCallbacksForDay(std::int64_t day)
 {
-    // 注意: 调用方已持有 mutex_
-    if (m_eodCallbacks.empty()) return;
-
-    std::string dayStr;
+    if (day <= 0) return;
+    // 拷贝回调列表（持有锁），释放锁后调用
+    std::vector<EndOfDayCallback> callbacks;
     {
-        // tradingDay 是 YYYYMMDD 格式的整数, 转为字符串
-        // 例: 20260701
-        dayStr = std::to_string(closedTradingDay);
+        const std::lock_guard<std::mutex> lock(mutex_);
+        if (m_eodCallbacks.empty()) return;
+        callbacks = m_eodCallbacks;
     }
-
-    // 复制回调列表，避免回调内部注册/注销导致迭代器失效
-    auto callbacks = m_eodCallbacks;
-    // 释放锁再调回调（回调内部可能调 liveData 等需要锁的接口）
-    // 但是 fireEndOfDayCallbacks 是在 onTick 的 lock 内被调用的...
-    // 先 unlock 再调: 这里需要特殊处理
-    // 实际上我们在 onTick 内部持有锁时调用, 回调不能调需要锁的 liveData
-    // 所以改为: 先把回调列表拷出来, 释放锁, 再调用
+    std::string dayStr = std::to_string(day);
     for (auto& cb : callbacks) {
         cb(dayStr);
     }
@@ -116,19 +109,32 @@ void MarketDataService::onTick(const engine::GmTickData& td)
 
         daily.setAmount(d.period(1).amountSum(d.period(1).count()));
     }
-    // ── 锁释放后再调回调 ──
+    // ── 锁释放后 → 预收盘触发 + 日切触发 ──
+    // 计算 tick 本地时间
+    {
+        auto tt = static_cast<time_t>(td.createdAt);
+        struct tm local;
+#if defined(_WIN32) || defined(_WIN64)
+        localtime_s(&local, &tt);
+#else
+        localtime_r(&tt, &local);
+#endif
+        int minutes = local.tm_hour * 60 + local.tm_min;
 
-    if (dayChanged && prevTradingDay > 0) {
-        // 拷贝回调列表并调用（无需持有锁）
-        std::vector<EndOfDayCallback> callbacks;
-        {
-            const std::lock_guard<std::mutex> lock(mutex_);
-            callbacks = m_eodCallbacks;
+        // ── 预收盘触发: 14:50-15:00, 当前交易日 ──
+        if (minutes >= 890 && minutes < 900
+            && m_activeTradingDay > 0
+            && m_activeTradingDay != m_lastEvalTradingDay) {
+            m_lastEvalTradingDay = m_activeTradingDay;
+            fireCallbacksForDay(m_activeTradingDay);
         }
-        std::string dayStr = std::to_string(prevTradingDay);
-        for (auto& cb : callbacks) {
-            cb(dayStr);
-        }
+    }
+
+    // ── 日切触发: 跳过已在预收盘评估过的交易日 ──
+    if (dayChanged && prevTradingDay > 0
+        && prevTradingDay != m_lastEvalTradingDay) {
+        m_lastEvalTradingDay = prevTradingDay;
+        fireCallbacksForDay(prevTradingDay);
     }
 }
 

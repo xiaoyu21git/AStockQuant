@@ -59,14 +59,14 @@ public:
 private:
     MarketDataService() = default;
 
-    /// @brief 遍历所有标的，将当日 dailyBar 做快照封存（供日终评估）
-    /// 在 tradingDay 切换时，所有 LiveData 的 dailyBar 就是最终形态
-    void fireEndOfDayCallbacks(std::int64_t closedTradingDay);
+    /// @brief 触发所有 EOD 回调 (供 onTick 内预收盘/日切复用)
+    void fireCallbacksForDay(std::int64_t day);
 
     mutable std::mutex mutex_;
     mutable std::unordered_map<std::string, LiveData> data_;
 
     std::int64_t m_activeTradingDay = 0;
+    std::int64_t m_lastEvalTradingDay = 0;  // 已触发 EOD 的交易日, 防重复
     std::vector<EndOfDayCallback> m_eodCallbacks;
 };
 
