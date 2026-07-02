@@ -347,6 +347,56 @@ CREATE TABLE IF NOT EXISTS `daily_position` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='每日持仓与权益表';
 
 -- ============================================
+-- 实盘交易持久化表
+-- ============================================
+
+-- 实盘订单流水表
+CREATE TABLE IF NOT EXISTS `live_order` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `cl_ord_id` VARCHAR(64) NOT NULL COMMENT '客户端订单ID',
+    `strategy_id` VARCHAR(64) NOT NULL COMMENT '策略ID',
+    `symbol` VARCHAR(16) NOT NULL COMMENT '标的代码',
+    `side` ENUM('BUY','SELL') NOT NULL COMMENT '买卖方向',
+    `order_type` ENUM('LIMIT','MARKET') NOT NULL DEFAULT 'LIMIT',
+    `price` DECIMAL(12,4) NOT NULL COMMENT '委托价格',
+    `quantity` INT NOT NULL COMMENT '委托数量(股)',
+    `signal_score` DECIMAL(6,4) DEFAULT 0.0 COMMENT '信号强度',
+    `position_effect` ENUM('OPEN','CLOSE') NOT NULL DEFAULT 'OPEN' COMMENT '开平仓',
+    `trading_day` INT NOT NULL COMMENT '交易日 YYYYMMDD',
+    `status` ENUM('PENDING','PARTIAL_FILLED','FILLED','CANCELLED','REJECTED') NOT NULL DEFAULT 'PENDING',
+    `broker_order_id` VARCHAR(64) DEFAULT NULL COMMENT '券商订单ID',
+    `message` VARCHAR(500) DEFAULT NULL COMMENT '状态消息/拒绝原因',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_cl_ord_id` (`cl_ord_id`),
+    KEY `idx_strategy_day` (`strategy_id`, `trading_day`),
+    KEY `idx_symbol_day` (`symbol`, `trading_day`),
+    KEY `idx_status` (`status`),
+    KEY `idx_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘订单流水表';
+
+-- 实盘成交记录表
+CREATE TABLE IF NOT EXISTS `live_fill` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `cl_ord_id` VARCHAR(64) NOT NULL COMMENT '客户端订单ID',
+    `broker_order_id` VARCHAR(64) DEFAULT NULL COMMENT '券商订单ID',
+    `exec_id` VARCHAR(64) DEFAULT NULL COMMENT '交易所成交编号',
+    `symbol` VARCHAR(16) NOT NULL COMMENT '标的代码',
+    `fill_price` DECIMAL(12,4) NOT NULL COMMENT '成交价格',
+    `fill_qty` INT NOT NULL COMMENT '成交数量(股)',
+    `fill_amount` DECIMAL(15,4) NOT NULL COMMENT '成交金额',
+    `commission` DECIMAL(10,4) DEFAULT 0.0 COMMENT '手续费',
+    `trading_day` INT NOT NULL COMMENT '交易日 YYYYMMDD',
+    `fill_time` DATETIME NOT NULL COMMENT '成交时间',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_cl_ord_id` (`cl_ord_id`),
+    KEY `idx_trading_day` (`trading_day`),
+    KEY `idx_fill_time` (`fill_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘成交记录表';
+
+-- ============================================
 -- 5. 实时监控与系统管理表
 -- ============================================
 

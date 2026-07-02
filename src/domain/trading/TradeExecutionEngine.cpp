@@ -5,6 +5,8 @@
 #include "../../engine/include/Event/EventBus.hpp"
 #include "../../engine/include/Event/EventFormat.hpp"
 #include "../../engine/include/GlobalEventBusRegistry.h"
+#include "../market/include/MarketDataService.h"
+#include "../../../infrastructure/include/database/OrderRecorder.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/Utils/Uuid.h"
 
@@ -280,6 +282,35 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
                          << " posEffect=" << static_cast<int>(engineReq.positionEffect());
 
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
+
+    // ── 持久化: 订单写入 live_order 表 ──
+    {
+        using Rec = astock::infrastructure::database::OrderRecorder;
+        int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
+        auto side = (order.side() == strategy::OrderDirection::Buy)
+            ? astock::infrastructure::database::RecSide::Buy
+            : astock::infrastructure::database::RecSide::Sell;
+        auto otype = riskContext.isAutoStrategySignal()
+            ? astock::infrastructure::database::RecOrdType::Market
+            : astock::infrastructure::database::RecOrdType::Limit;
+        auto pe = (static_cast<int>(engineReq.positionEffect()) == 0)
+            ? astock::infrastructure::database::RecPosEff::Open
+            : astock::infrastructure::database::RecPosEff::Close;
+        Rec::instance().insertOrder(
+            order.clOrdId(), order.strategyId(), order.symbol(),
+            side, otype,
+            order.price(), static_cast<int>(order.quantity()),
+            order.signalStrength(), pe,
+            td > 0 ? td : 0);
+        if (result.accepted) {
+            Rec::instance().updateOrderStatus(order.clOrdId(),
+                astock::infrastructure::database::RecOrdStatus::Pending, result.brokerOrderId, "");
+        } else {
+            Rec::instance().updateOrderStatus(order.clOrdId(),
+                astock::infrastructure::database::RecOrdStatus::Rejected, "", result.message);
+        }
+    }
+
     if (result.accepted) {
         TradeOrder accepted = order;
         accepted.setStatus(OrderStatusValue::New);
@@ -432,6 +463,20 @@ TradeExecutionEngine::TradeExecutionEngine()
                         if (status) {
                             OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
                             o.setStatus(st);
+                            // ── 持久化: 更新订单状态 ──
+                            {
+                                using RS = astock::infrastructure::database::RecOrdStatus;
+                                RS recSt = RS::Pending;
+                                switch (st) {
+                                    case OrderStatusValue::PartiallyFilled: recSt = RS::PartiallyFilled; break;
+                                    case OrderStatusValue::Filled:          recSt = RS::Filled; break;
+                                    case OrderStatusValue::Cancelled:       recSt = RS::Cancelled; break;
+                                    case OrderStatusValue::Rejected:        recSt = RS::Rejected; break;
+                                    default: break;
+                                }
+                                astock::infrastructure::database::OrderRecorder::instance()
+                                    .updateOrderStatus(o.clOrdId(), recSt, o.brokerOrderId(), "");
+                            }
                             INTERNAL_INFO_STREAM << "[TradeExecEng] order.updated id=" << *id
                                                  << " evtStatus=" << *status
                                                  << " newSt=" << static_cast<int>(st)
@@ -456,6 +501,36 @@ TradeExecutionEngine::TradeExecutionEngine()
                 fill.setFillId(FillId(e.get<std::string>("exec_id").value_or("")));
                 fill.setPrice(e.get<double>("price").value_or(0.0));
                 fill.setQuantity(e.get<std::int64_t>("quantity").value_or(0));
+
+                // ── 持久化: 写入 live_fill 表 ──
+                {
+                    auto execId    = e.get<std::string>("exec_id").value_or("");
+                    auto brokerId  = e.get<std::string>("broker_order_id").value_or("");
+                    auto symbol    = e.get<std::string>("symbol").value_or("");
+                    auto fillPrice = e.get<double>("price").value_or(0.0);
+                    auto fillQty   = e.get<std::int64_t>("quantity").value_or(0);
+                    auto commission = e.get<double>("commission").value_or(0.0);
+                    double fillAmount = fillPrice * static_cast<double>(fillQty);
+                    int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
+                    auto fillTime   = e.get<std::string>("fill_time").value_or("");
+
+                    // 通过 broker_order_id 找到 cl_ord_id
+                    std::string clOrdId;
+                    {
+                        std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+                        for (auto& o : m_impl->m_recentOrders) {
+                            if (o.brokerOrderId() == brokerId) {
+                                clOrdId = o.clOrdId();
+                                break;
+                            }
+                        }
+                    }
+                    astock::infrastructure::database::OrderRecorder::instance().insertFill(
+                        clOrdId, brokerId, execId, symbol,
+                        fillPrice, static_cast<int>(fillQty), fillAmount,
+                        commission, td > 0 ? td : 0, fillTime);
+                }
+
                 if (m_impl->m_tradeFillCallback)
                     m_impl->m_tradeFillCallback(fill);
             });
