@@ -462,11 +462,17 @@ Item {
         var rawSectors = marketDataService ? (marketDataService.sectorHeatData || []) : []
         for (var si = 0; si < rawSectors.length; si++) {
             var s = rawSectors[si]
+            var signalLabel = (s.signal === 0) ? "\u771f\u673a\u4f1a" : ((s.signal === 1) ? "\u8bf1\u591a" : ((s.signal === 2) ? "\u6284\u5e95" : "\u8d70\u5f31"))
+            var netInfo = (s.netIn||0) >= 0 ? "+" : ""
+            var netVal = Math.abs(s.netIn||0)
+            var netStr = netInfo + (netVal >= 1e8 ? (netVal/1e8).toFixed(1)+"\u4ebf" : (netVal >= 1e4 ? (netVal/1e4).toFixed(0)+"\u4e07" : netVal.toFixed(0)))
             sectorStocks.push({
-                symbol: s.name || "", name: s.lead || "",
-                price: s.chg || 0, change: s.chg || 0,
+                symbol: s.name || "",
+                name: signalLabel + " " + (s.lead||"") + " " + (s.leadChg||0 > 0 ? "+" : "") + (s.leadChg||0).toFixed(1) + "%",
+                price: s.chg || 0,
+                change: s.chg || 0,
                 color: (s.signal === 0) ? "#22c55e" : ((s.signal === 1) ? "#ef4444" : ((s.signal === 2) ? "#f59e0b" : "#888")),
-                updatedAt: (s.netInRate||0).toFixed(1) + "% " + (s.netIn||0 > 0 ? "+" : "") + (Math.abs(s.netIn||0) >= 1e8 ? (s.netIn/1e8).toFixed(1)+"\u4ebf" : (Math.abs(s.netIn||0) >= 1e4 ? (s.netIn/1e4).toFixed(0)+"\u4e07" : s.netIn.toFixed(0)))
+                updatedAt: "\u4e3b\u529b\u51c0\u6d41\u5165 " + netStr + "  \u51c0\u6d41\u5165\u7387 " + (s.netInRate||0).toFixed(1) + "%"
             })
         }
         if (sectorStocks.length === 0) {
