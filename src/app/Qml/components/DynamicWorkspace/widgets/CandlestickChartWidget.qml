@@ -23,21 +23,11 @@ CandlestickChart {
     stockCode: pureCode
 
     // ── 分时 VWAP 均价线: 从 MarketDataBridge 的 snapshot 中取 avgLine ──
-    readonly property var activeSnapshot: Bridge.MarketDataBridge
-        && Bridge.MarketDataBridge.marketSnapshots
-        ? (function() {
-            var snaps = Bridge.MarketDataBridge.marketSnapshots
-            for (var i = 0; i < snaps.length; i++) {
-                var s = snaps[i]
-                if (s && s.symbol && s.symbol.toUpperCase().indexOf(pureCode.toUpperCase()) >= 0) {
-                    return s
-                }
-            }
-            return null
-          })()
-        : null
-
-    avgLinePrice: activeSnapshot && activeSnapshot.avgLine ? activeSnapshot.avgLine : 0.0
+    avgLinePrice: {
+        var snaps = Bridge.MarketDataBridge ? Bridge.MarketDataBridge.marketSnapshots : ({})
+        var s = snaps[exchangeSymbol] || ({})
+        return s.avgLine || 0.0
+    }
 
     // ── 分时图 tick 触发重绘 ──
     Connections {
