@@ -11,13 +11,14 @@ Item {
     // 动态工作区自绑定: 当外部未提供数据时, 从 Bridge 自动拉取
     Component.onCompleted: {
         if (marketSections.length === 0 && Bridge.MarketDataBridge) {
-            if (typeof Bridge.MarketDataBridge.fetchSectorHeat === "function")
+            updateSectorSection()
+            if (marketSections.length === 0 && typeof Bridge.MarketDataBridge.fetchSectorHeat === "function")
                 Bridge.MarketDataBridge.fetchSectorHeat()
         }
     }
     Connections {
         target: Bridge.MarketDataBridge
-        enabled: Bridge.MarketDataBridge !== null && marketGrid.marketSections.length === 0
+        enabled: Bridge.MarketDataBridge !== null
         function onSectorHeatDataChanged() { marketGrid.updateSectorSection() }
     }
 
