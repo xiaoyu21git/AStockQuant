@@ -54,81 +54,11 @@ Rectangle {
             Layout.preferredHeight: 36
             color: Qt.rgba(0, 0, 0, 0.25)
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 12
-                anchors.rightMargin: 8
-                spacing: 8
-
-                // 拖拽手柄图标
-                Text {
-                    text: "⋮⋮"
-                    color: "#64748B"
-                    font.pixelSize: 14
-                }
-
-                Text {
-                    text: root.title
-                    color: "#F1F5F9"
-                    font.pixelSize: 13
-                    font.weight: Font.Medium
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                }
-
-                // 设置按钮
-                Rectangle {
-                    z: 1
-                    width: 24
-                    height: 24
-                    radius: 4
-                    color: settingsMa.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent"
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "⚙"
-                        color: "#94A3B8"
-                        font.pixelSize: 12
-                    }
-
-                    MouseArea {
-                        id: settingsMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.configRequest(root.instanceId)
-                    }
-                }
-
-                // 关闭按钮
-                Rectangle {
-                    z: 1
-                    width: 24
-                    height: 24
-                    radius: 4
-                    color: closeMa.containsMouse ? Qt.rgba(0.94, 0.27, 0.27, 0.2) : "transparent"
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "✕"
-                        color: closeMa.containsMouse ? "#EF4444" : "#94A3B8"
-                        font.pixelSize: 14
-                    }
-
-                    MouseArea {
-                        id: closeMa
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.closeRequest(root.instanceId)
-                    }
-                }
-            }
-
-            // --- 拖拽手势（覆盖整个标题栏） ---
+            // 拖拽手势 — 必须声明在 RowLayout 前面，否则会吃掉按钮的点击
             MouseArea {
                 id: dragMa
                 anchors.fill: parent
+                z: 0
                 cursorShape: root.dragActive ? Qt.ClosedHandCursor : Qt.OpenHandCursor
                 preventStealing: true
 
@@ -165,6 +95,66 @@ Rectangle {
                     if (root.dragActive) {
                         root.dragActive = false
                         root.dragEnded(root.instanceId)
+                    }
+                }
+            }
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 8
+                spacing: 8
+                z: 1
+
+                // 拖拽手柄图标
+                Text {
+                    text: "⋮⋮"
+                    color: "#64748B"
+                    font.pixelSize: 14
+                }
+
+                Text {
+                    text: root.title
+                    color: "#F1F5F9"
+                    font.pixelSize: 13
+                    font.weight: Font.Medium
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+
+                // 设置按钮
+                Rectangle {
+                    width: 24; height: 24; radius: 4
+                    color: settingsMa.containsMouse ? Qt.rgba(1, 1, 1, 0.1) : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "⚙"; color: "#94A3B8"; font.pixelSize: 12
+                    }
+                    MouseArea {
+                        id: settingsMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.configRequest(root.instanceId)
+                    }
+                }
+
+                // 关闭按钮
+                Rectangle {
+                    width: 24; height: 24; radius: 4
+                    color: closeMa.containsMouse ? Qt.rgba(0.94, 0.27, 0.27, 0.2) : "transparent"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "✕"
+                        color: closeMa.containsMouse ? "#EF4444" : "#94A3B8"
+                        font.pixelSize: 14
+                    }
+                    MouseArea {
+                        id: closeMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.closeRequest(root.instanceId)
                     }
                 }
             }
@@ -274,7 +264,8 @@ Rectangle {
                 pxPerUnit = Math.max(30, root.width / 12)
             }
             onPositionChanged: function(mouse) {
-                var d = Math.round(mouse.x / pxPerUnit)
+                var raw = mouse.x / pxPerUnit
+                var d = raw > 0 ? Math.floor(raw + 0.5) : Math.ceil(raw - 0.5)
                 var nv = Math.max(1, Math.min(12, origCS + d))
                 if (nv !== root.gridColSpan)
                     root.resizeRequest(root.instanceId, nv, root.gridRowSpan)
@@ -300,10 +291,11 @@ Rectangle {
             property real pxPerUnit: 0
             onPressed: function(mouse) {
                 origRS = root.gridRowSpan
-                pxPerUnit = Math.max(40, root.height / 8)
+                pxPerUnit = Math.max(30, root.height / Math.max(1, root.gridRowSpan) / 2)
             }
             onPositionChanged: function(mouse) {
-                var d = Math.round(mouse.y / pxPerUnit)
+                var raw = mouse.y / pxPerUnit
+                var d = raw > 0 ? Math.floor(raw + 0.5) : Math.ceil(raw - 0.5)
                 var nv = Math.max(1, origRS + d)
                 if (nv !== root.gridRowSpan)
                     root.resizeRequest(root.instanceId, root.gridColSpan, nv)
@@ -343,11 +335,12 @@ Rectangle {
             onPressed: function(mouse) {
                 origCS = root.gridColSpan; origRS = root.gridRowSpan
                 pxPerUnitX = Math.max(30, root.width / 12)
-                pxPerUnitY = Math.max(40, root.height / 8)
+                pxPerUnitY = Math.max(30, root.height / Math.max(1, root.gridRowSpan) / 2)
             }
             onPositionChanged: function(mouse) {
-                var dc = Math.round(mouse.x / pxPerUnitX)
-                var dr = Math.round(mouse.y / pxPerUnitY)
+                var rx = mouse.x / pxPerUnitX, ry = mouse.y / pxPerUnitY
+                var dc = rx > 0 ? Math.floor(rx + 0.5) : Math.ceil(rx - 0.5)
+                var dr = ry > 0 ? Math.floor(ry + 0.5) : Math.ceil(ry - 0.5)
                 var nc = Math.max(1, Math.min(12, origCS + dc))
                 var nr = Math.max(1, origRS + dr)
                 if (nc !== root.gridColSpan || nr !== root.gridRowSpan)
