@@ -414,6 +414,13 @@ Rectangle {
                             }
                         }
 
+                        // 中间分隔线
+                        Rectangle {
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 2
+                            color: "#334155"
+                        }
+
                         // 右: 买盘 (Bid)
                         Rectangle {
                             Layout.fillWidth: true
