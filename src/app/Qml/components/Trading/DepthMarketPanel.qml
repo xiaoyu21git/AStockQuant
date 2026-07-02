@@ -360,56 +360,105 @@ Rectangle {
                         }
                     }
 
-                    ListView {
-                        id: depthListView
+                    // ── 左卖右买 双列布局 ──
+                    RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        clip: true
-                        spacing: compactMode ? 2 : 4
-                        boundsBehavior: Flickable.StopAtBounds
-                        model: root.depthTableRows
-                        interactive: true
-                        onHeightChanged: { /* height adapts dynamically */ }
+                        spacing: compactMode ? 4 : 8
 
-                        ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AlwaysOff
+                        // 左: 卖盘 (Ask)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            radius: compactMode ? 9 : 12
+                            color: Const.depthAskRowBg
+                            border.color: Const.depthAskRowBorder
+                            border.width: 1
+                            clip: true
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 2
+                                spacing: 0
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "卖盘"
+                                    color: "#10b981"
+                                    font.pixelSize: compactMode ? 10 : 12
+                                    font.weight: Font.DemiBold
+                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.preferredHeight: compactMode ? 18 : 22
+                                }
+
+                                ListView {
+                                    id: askListView
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: compactMode ? 1 : 2
+                                    model: { var a=[]; var asks=depthSnapshot&&depthSnapshot.asks?depthSnapshot.asks:[]; for(var i=Math.min(asks.length,requestedDepthLevels)-1;i>=0;i--) a.push(asks[i]); return a }
+                                    delegate: Rectangle {
+                                        required property var modelData; required property int index
+                                        width: askListView.width; height: Math.max(22, askListView.height / Math.max(askListView.count, 1))
+                                        color: "transparent"
+                                        RowLayout {
+                                            anchors.fill: parent; anchors.margins: 2; spacing: 2
+                                            Text { text:"卖"+(index+1); color:"#10b981"; font.pixelSize:compactMode?10:12; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?10:12; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?9:11; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#10b981"; font.pixelSize:compactMode?9:11; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        delegate: Item {
-                            property var rowData: modelData
-                            width: ListView.view.width
-                            height: rowData.kind === "divider" ? 6 : (ListView.view.count > 1 ? Math.max(22, (ListView.view.height - 6) / (ListView.view.count - 1)) : 30)
+                        // 右: 买盘 (Bid)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            radius: compactMode ? 9 : 12
+                            color: Const.depthBidRowBg
+                            border.color: Const.depthBidRowBorder
+                            border.width: 1
+                            clip: true
 
-                            Rectangle {
+                            ColumnLayout {
                                 anchors.fill: parent
-                                visible: rowData.kind === "depth"
-                                radius: compactMode ? 9 : 12
-                                color: rowData.isBid ? Const.depthBidRowBg : Const.depthAskRowBg
-                                border.color: rowData.isBid ? Const.depthBidRowBorder : Const.depthAskRowBorder
-                                border.width: 1
-                            }
+                                anchors.margins: 2
+                                spacing: 0
 
-                            Rectangle {
-                                visible: rowData.kind === "divider"
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.leftMargin: compactMode ? 2 : 6
-                                anchors.rightMargin: compactMode ? 2 : 6
-                                height: 1
-                                color: Const.depthAggregateBar
-                            }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "买盘"
+                                    color: "#ef4444"
+                                    font.pixelSize: compactMode ? 10 : 12
+                                    font.weight: Font.DemiBold
+                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.preferredHeight: compactMode ? 18 : 22
+                                }
 
-                            Row {
-                                anchors.fill: parent
-                                anchors.margins: compactMode ? 5 : 8
-                                visible: rowData.kind === "depth"
-
-                                Text { text:rowData.side+rowData.level; color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?12:14; font.weight:Font.DemiBold; width:parent.width*0.10; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                Text { text:root.formatPrice(rowData.price); color:"#f1f5f9"; font.pixelSize:compactMode?12:14; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                Text { text:root.formatLotCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; width:parent.width*0.15; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                Text { text:root.formatShareCount(rowData.volume); color:"#cbd5e1"; font.pixelSize:compactMode?11:13; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                Text { text:root.formatAmount(rowData.price,rowData.volume); color:rowData.isBid?"#ef4444":"#10b981"; font.pixelSize:compactMode?11:13; width:parent.width*0.35; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                ListView {
+                                    id: bidListView
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: compactMode ? 1 : 2
+                                    model: { var a=[]; var bids=depthSnapshot&&depthSnapshot.bids?depthSnapshot.bids:[]; for(var i=0;i<Math.min(bids.length,requestedDepthLevels);i++) a.push(bids[i]); return a }
+                                    delegate: Rectangle {
+                                        required property var modelData; required property int index
+                                        width: bidListView.width; height: Math.max(22, bidListView.height / Math.max(bidListView.count, 1))
+                                        color: "transparent"
+                                        RowLayout {
+                                            anchors.fill: parent; anchors.margins: 2; spacing: 2
+                                            Text { text:"买"+(index+1); color:"#ef4444"; font.pixelSize:compactMode?10:12; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?10:12; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?9:11; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#ef4444"; font.pixelSize:compactMode?9:11; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
