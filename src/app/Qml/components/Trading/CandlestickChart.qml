@@ -7,7 +7,7 @@ import AStock.Bridge 1.0 as Bridge
 
 Rectangle {
     id: root
-    color: "#e0e0e0"
+    color: "#1a1a2e"
 
     property string stockCode:  "000001"
     property string stockName:  ""
@@ -20,12 +20,12 @@ Rectangle {
 
     readonly property color upColor:    "#ef5350"
     readonly property color downColor:  "#26a69a"
-    readonly property color frameBg:    "#d8d8d8"
-    readonly property color panelBg:    "#e8e8e8"
-    readonly property color gridColor:  "#b0b0b0"
-    readonly property color borderColor:"#aaaaaa"
-    readonly property color textDim:    "#555555"
-    readonly property color textBright: "#111111"
+    readonly property color frameBg:    "#1a1a2e"
+    readonly property color panelBg:    "#222244"
+    readonly property color gridColor:  "#3a3a5a"
+    readonly property color borderColor:"#444466"
+    readonly property color textDim:    "#8888aa"
+    readonly property color textBright: "#d0d0e0"
 
     readonly property var periodLabels: ["分时","1分","5分","15分","30分","60分","120分","日线","周线","月线"]
 
@@ -206,11 +206,16 @@ Rectangle {
 
         // ── 十字光标覆盖层 MouseArea ──
         MouseArea {
-            z: 10; anchors.fill: parent; hoverEnabled: true
+            z: 10; anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            cursorShape: Qt.CrossCursor
+
             onPositionChanged: function(m) {
                 if (!candleModel || candleModel.count===0){ hideCrosshair(); return }
-                var n = candleModel.count, lm=4, rm=58
+                var n = candleModel.count, lm=6, rm=60
                 var plotW = parent.width - lm - rm
+                if (plotW <= 0 || n <= 0) { hideCrosshair(); return }
                 var cg = plotW / n
                 var idx = Math.floor((m.x - lm) / cg)
                 if (idx<0||idx>=n){ hideCrosshair(); return }
@@ -313,7 +318,7 @@ Rectangle {
                 grad.addColorStop(0,above?"rgba(239,68,68,0.28)":"rgba(16,185,129,0.28)")
                 grad.addColorStop(1,"rgba(0,0,0,0.01)");ctx.fillStyle=grad;ctx.fill()}
             // 价格折线
-            ctx.strokeStyle="#ffffff";ctx.lineWidth=1.5;ctx.setLineDash([])
+            ctx.strokeStyle="#f0f0f0";ctx.lineWidth=1.5;ctx.setLineDash([])
             ctx.beginPath();for(var k=0;k<pts.length;k++)k===0?ctx.moveTo(pts[k].x,pts[k].y):ctx.lineTo(pts[k].x,pts[k].y);ctx.stroke()
             // 均价线 (VWAP — 从 MarketDataBridge 或 LiveData 读取)
             // 累计VWAP曲线
