@@ -22,6 +22,7 @@ Rectangle {
     signal dragMoved(string instanceId, real globalX, real globalY)
     signal dragEnded(string instanceId)
     signal resizeRequest(string instanceId, int colSpan, int rowSpan)
+    signal resizeActive(bool active)
 
     // ============ 状态 ============
     property bool hovered: false
@@ -259,10 +260,14 @@ Rectangle {
             cursorShape: Qt.SplitHCursor
             property int origCS: 0
             property real pxPerUnit: 0
+            preventStealing: true
             onPressed: function(mouse) {
+                root.resizeActive(true)
                 origCS = root.gridColSpan
                 pxPerUnit = Math.max(30, root.width / 12)
             }
+            onReleased: root.resizeActive(false)
+            onCanceled: root.resizeActive(false)
             onPositionChanged: function(mouse) {
                 var raw = mouse.x / pxPerUnit
                 var d = raw > 0 ? Math.floor(raw + 0.5) : Math.ceil(raw - 0.5)
@@ -289,10 +294,14 @@ Rectangle {
             cursorShape: Qt.SplitVCursor
             property int origRS: 0
             property real pxPerUnit: 0
+            preventStealing: true
             onPressed: function(mouse) {
+                root.resizeActive(true)
                 origRS = root.gridRowSpan
                 pxPerUnit = Math.max(30, root.height / Math.max(1, root.gridRowSpan) / 2)
             }
+            onReleased: root.resizeActive(false)
+            onCanceled: root.resizeActive(false)
             onPositionChanged: function(mouse) {
                 var raw = mouse.y / pxPerUnit
                 var d = raw > 0 ? Math.floor(raw + 0.5) : Math.ceil(raw - 0.5)
@@ -332,11 +341,15 @@ Rectangle {
             property int origRS: 0
             property real pxPerUnitX: 0
             property real pxPerUnitY: 0
+            preventStealing: true
             onPressed: function(mouse) {
+                root.resizeActive(true)
                 origCS = root.gridColSpan; origRS = root.gridRowSpan
                 pxPerUnitX = Math.max(30, root.width / 12)
                 pxPerUnitY = Math.max(30, root.height / Math.max(1, root.gridRowSpan) / 2)
             }
+            onReleased: root.resizeActive(false)
+            onCanceled: root.resizeActive(false)
             onPositionChanged: function(mouse) {
                 var rx = mouse.x / pxPerUnitX, ry = mouse.y / pxPerUnitY
                 var dc = rx > 0 ? Math.floor(rx + 0.5) : Math.ceil(rx - 0.5)

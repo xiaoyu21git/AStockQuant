@@ -194,6 +194,7 @@ Item {
                     onDragMoved: root.onFrameDragMoved(instanceId, globalX, globalY)
                     onDragEnded: root.onFrameDragEnded(instanceId)
                     onResizeRequest: root.widgetResizeRequest(instanceId, colSpan, rowSpan)
+                    onResizeActive: flick.interactive = !active
                 }
                 // delegate 创建完成后触发重排 (防抖: 多个 delegate 合批为一次)
                 onItemAdded: {
