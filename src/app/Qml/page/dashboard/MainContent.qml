@@ -484,7 +484,7 @@ Item {
         return [
             { title: liveText("leadersGain"), icon: "\u6da8", stocks: gainers },
             { title: liveText("leadersLoss"), icon: "\u8dcc", stocks: losers },
-            { title: "\u70ed\u95e8\u677f\u5757", icon: "\ud83d\udd25", stocks: sectorStocks },
+            { title: "", stocks: sectorStocks },
             { title: liveText("watchlistFocus"), icon: "\u7126", stocks: focus }
         ]
     }
