@@ -1,6 +1,6 @@
 -- Patch: ensure factor_params exists for FactorRepository strict schema checks
--- Usage:
---   mysql -u <user> -p astock_quant < tools/patch_factor_params_table.sql
+-- NOTE (2026-07): MySQL→PG 迁移已完成, 请使用 psql 执行:
+--   psql -U astock -d astock_quant -f tools/patch_factor_params_table.sql
 
 USE `astock_quant`;
 

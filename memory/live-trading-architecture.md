@@ -1,6 +1,7 @@
 ---
 name: live-trading-architecture
 description: 策略实盘交易订单系统完整架构（行情→策略引擎→订单执行）
+note: 文中 MySQL 引用已于 2026-07 迁移到 PostgreSQL
 metadata:
   type: project
 ---

@@ -1,5 +1,7 @@
 # MySQL 到 PostgreSQL 迁移执行清单（2026-04-20）
 
+> **✅ 已完成 (2026-07)**: 清单中所有待办项已完成。MySQL 已退役，PostgreSQL 为当前主库。本文档保留作为历史参考。
+
 ## 1. 迁移目标
 
 当前 MySQL 仍是现网业务库，PostgreSQL 18 已安装但尚未建业务表。本清单用于把现有 MySQL 业务数据迁移到 PostgreSQL，并在迁移完成后将 PostgreSQL 作为唯一主库。
