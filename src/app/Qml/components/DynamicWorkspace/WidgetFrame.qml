@@ -250,7 +250,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.topMargin: 36
-        width: 8
+        width: 12
         color: "transparent"
         z: 20
 
@@ -280,7 +280,7 @@ Rectangle {
         anchors.right: parent.right
         anchors.leftMargin: 8
         anchors.rightMargin: 8
-        height: 8
+        height: 14
         color: "transparent"
         z: 20
 
