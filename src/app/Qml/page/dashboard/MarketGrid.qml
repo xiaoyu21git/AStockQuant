@@ -1,11 +1,44 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import AStock.Bridge 1.0 as Bridge
 
 Item {
     id: marketGrid
 
     property var marketData: []
     property var marketSections: []
+
+    // 动态工作区自绑定: 当外部未提供数据时, 从 Bridge 自动拉取
+    Component.onCompleted: {
+        if (marketSections.length === 0 && Bridge.MarketDataBridge) {
+            if (typeof Bridge.MarketDataBridge.fetchSectorHeat === "function")
+                Bridge.MarketDataBridge.fetchSectorHeat()
+        }
+    }
+    Connections {
+        target: Bridge.MarketDataBridge
+        enabled: Bridge.MarketDataBridge !== null && marketGrid.marketSections.length === 0
+        function onSectorHeatDataChanged() { marketGrid.updateSectorSection() }
+    }
+
+    function updateSectorSection() {
+        var raw = Bridge.MarketDataBridge ? Bridge.MarketDataBridge.sectorHeatData : []
+        if (raw.length === 0) return
+        var stocks = []
+        for (var i = 0; i < raw.length; i++) {
+            var s = raw[i]
+            var sig = (s.signal===0) ? "真机会" : (s.signal===1 ? "诱多" : (s.signal===2 ? "抄底" : "走弱"))
+            stocks.push({
+                symbol: s.name, name: sig + " " + (s.lead||""),
+                price: s.chg, change: s.chg,
+                color: (s.signal===0) ? "#22c55e" : (s.signal===1 ? "#ef4444" : (s.signal===2 ? "#f59e0b" : "#888")),
+                updatedAt: (s.netIn||0>=0?"+":"") + (Math.abs(s.netIn||0)>=1e8?(Math.abs(s.netIn)/1e8).toFixed(1)+"亿":Math.abs(s.netIn||0)>=1e4?(Math.abs(s.netIn)/1e4).toFixed(0)+"万":Math.abs(s.netIn||0).toFixed(0)) + " 净流入率" + (s.netInRate||0).toFixed(1)+"%"
+            })
+        }
+        var secs = marketSections.slice()
+        secs.push({ title: "热门板块", icon: "🔥", stocks: stocks })
+        marketSections = secs
+    }
 
     function sectionStock(stockReference) {
         if (typeof stockReference === "number") {
