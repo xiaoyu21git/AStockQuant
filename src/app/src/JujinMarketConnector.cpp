@@ -442,9 +442,19 @@ void JujinMarketConnector::riskPatrolLoop()
             auto& accEng = engine::AccountEngine::instance();
             builder.setAccountId(accEng.account().accountId);
             auto stopOrders = domain::strategy::RiskManager::instance().patrolPositions(builder);
+            auto& tradeEng = engine::TradeEngine::instance();
             for (const auto& o : stopOrders) {
                 INTERNAL_WARN_STREAM << "[JMC] 止损/止盈触发: " << o.symbol()
                                      << " price=" << o.price() << " qty=" << o.quantity();
+                if (tradeEng.initialized()) {
+                    auto result = tradeEng.submitOrder(o);
+                    INTERNAL_INFO_STREAM << "[JMC] 止损/止盈提交: " << o.symbol()
+                                         << " accepted=" << result.accepted
+                                         << " msg=" << result.message;
+                } else {
+                    INTERNAL_ERROR_STREAM << "[JMC] TradeEngine 未初始化, 止损/止盈订单未提交: "
+                                          << o.symbol();
+                }
             }
         } catch (const std::exception& e) {
             INTERNAL_WARN_STREAM << "[JMC] 巡检异常: " << e.what();
