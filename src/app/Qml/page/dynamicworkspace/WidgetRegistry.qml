@@ -59,6 +59,12 @@ QtObject {
             defaultColSpan: 6, defaultRowSpan: 2,
             source: "../../components/DynamicWorkspace/widgets/ExecutionLogWidget.qml"
         },
+        "sector_heat": {
+            label: "热门板块",
+            description: "行业板块涨跌排名 + 领涨股",
+            defaultColSpan: 4, defaultRowSpan: 3,
+            source: "../../components/DynamicWorkspace/widgets/SectorHeatWidget.qml"
+        },
 
         // 兼容别名 (旧持久化数据迁移)
         "positions": {
@@ -96,7 +102,7 @@ QtObject {
             "order_form", "kline_chart",
             "depth_panel", "account_card", "quote_card",
             "position_list", "order_list",
-            "strategy_monitor", "execution_log"
+            "strategy_monitor", "execution_log", "sector_heat"
         ]
         var result = []
         for (var i = 0; i < mainTypes.length; i++) {
