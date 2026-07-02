@@ -773,7 +773,7 @@ void MarketDataBridge::syncLiveData() {
 void MarketDataBridge::fetchSectorHeat() {
     QVariantList result;
 
-    char endDate[32];
+    char todayStr[32];
     {
         auto now = std::chrono::system_clock::now();
         auto tt = std::chrono::system_clock::to_time_t(now);
@@ -783,111 +783,127 @@ void MarketDataBridge::fetchSectorHeat() {
 #else
         localtime_r(&tt, &local);
 #endif
-        snprintf(endDate, sizeof(endDate), "%04d-%02d-%02d",
+        snprintf(todayStr, sizeof(todayStr), "%04d-%02d-%02d",
                  local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
     }
 
-    // 1. 获取申万一级行业列表
+    // 1. 获取申万一级行业 → 成分股
     auto* cats = ::stk_get_industry_category("sw", 1);
     if (!cats || cats->status() || cats->count() <= 0) {
         INTERNAL_WARN_STREAM << "[MktBridge] stk_get_industry_category failed";
         if (cats) cats->release();
-        m_sectorHeatData = result;
-        emit sectorHeatDataChanged();
-        return;
+        m_sectorHeatData = result; emit sectorHeatDataChanged(); return;
     }
 
-    struct Item { std::string name; double chg; std::string lead; double leadChg; };
-    std::vector<Item> items;
-    std::vector<std::string> allSymbols;
-    std::vector<std::string> industryNames;  // parallel to allSymbols
+    struct SecData {
+        std::string name;
+        double chg = 0.0, netIn = 0.0, netInRate = 0.0, turnover = 0.0;
+        std::string lead; double leadChg = 0.0;
+        int stockCnt = 0;
+    };
+    std::map<std::string, SecData> secMap;  // industryName → data
+    std::vector<std::string> allSyms;
+    std::vector<std::string> symIndustry;    // parallel to allSyms
 
     int catCount = std::min(cats->count(), 25);
     for (size_t ci = 0; ci < static_cast<size_t>(catCount); ++ci) {
         auto& cat = cats->at(ci);
-        std::string indCode(cat.industry_code);
-        std::string indName(cat.industry_name);
+        std::string indCode(cat.industry_code), indName(cat.industry_name);
+        secMap[indName] = SecData{indName};
 
         auto* stocks = ::stk_get_industry_constituents(indCode.c_str(), nullptr);
         if (!stocks || stocks->status() || stocks->count() <= 0) {
             if (stocks) stocks->release();
             continue;
         }
-        int pick = std::min(stocks->count(), 4);
+        int pick = std::min(stocks->count(), 5);
         for (int si = 0; si < pick; ++si) {
-            auto& stk = stocks->at(si);
-            std::string sym = std::string(stk.symbol);
-            allSymbols.push_back(sym);
-            industryNames.push_back(indName);
+            std::string sym(stocks->at(si).symbol);
+            allSyms.push_back(sym);
+            symIndustry.push_back(indName);
         }
         stocks->release();
     }
     cats->release();
+    if (allSyms.empty()) { m_sectorHeatData = result; emit sectorHeatDataChanged(); return; }
 
-    if (allSymbols.empty()) {
-        m_sectorHeatData = result;
-        emit sectorHeatDataChanged();
-        return;
-    }
-
-    // 2. 批量拉取日线 (逗号分隔)
+    // 2. 批量拉日线 (涨跌幅)
     std::string symList;
-    for (size_t i = 0; i < allSymbols.size(); ++i) {
-        if (i > 0) symList += ",";
-        symList += allSymbols[i];
+    for (size_t i = 0; i < allSyms.size(); ++i) {
+        if (i > 0) symList += ","; symList += allSyms[i];
     }
-    auto* bars = ::history_bars_n(symList.c_str(), "1d", 1, endDate, 0, nullptr, true, nullptr);
-    if (!bars || bars->status() || bars->count() <= 0) {
-        INTERNAL_WARN_STREAM << "[MktBridge] history_bars_n batch failed";
-        if (bars) bars->release();
-        m_sectorHeatData = result;
-        emit sectorHeatDataChanged();
-        return;
-    }
-
-    // 3. 按行业汇总涨跌幅 (Bar.pre_close 已含前收), 找领涨股
-    std::map<std::string, double> sumChg, countChg, bestLeadChg;
-    std::map<std::string, std::string> bestLeadName;
-    for (size_t i = 0; i < bars->count() && i < allSymbols.size(); ++i) {
-        auto& b = bars->at(i);
-        if (b.close <= 0 || b.pre_close <= 0) continue;
-        std::string ind = industryNames[i];
-        double chg = (b.close - b.pre_close) / b.pre_close * 100.0;
-        sumChg[ind] += chg;
-        countChg[ind] += 1.0;
-        if (std::abs(chg) > std::abs(bestLeadChg[ind])) {
-            bestLeadChg[ind] = chg;
-            bestLeadName[ind] = allSymbols[i];
+    auto* bars = ::history_bars_n(symList.c_str(), "1d", 1, todayStr, 0, nullptr, true, nullptr);
+    if (bars && !bars->status() && bars->count() > 0) {
+        for (size_t i = 0; i < bars->count() && i < allSyms.size(); ++i) {
+            auto& b = bars->at(i);
+            if (b.close <= 0 || b.pre_close <= 0) continue;
+            double chg = (b.close - b.pre_close) / b.pre_close * 100.0;
+            std::string ind = symIndustry[i];
+            auto& sd = secMap[ind];
+            sd.chg += chg; sd.stockCnt++;
+            if (std::abs(chg) > std::abs(sd.leadChg)) { sd.leadChg = chg; sd.lead = allSyms[i]; }
         }
-    }
-    bars->release();
+        bars->release();
+    } else { if (bars) bars->release(); }
 
-    for (auto& [ind, sum] : sumChg) {
-        double avg = countChg[ind] > 0 ? sum / countChg[ind] : 0.0;
-        Item it;
-        it.name = ind;
-        it.chg = avg;
-        it.lead = bestLeadName[ind];
-        it.leadChg = bestLeadChg[ind];
-        items.push_back(it);
+    // 3. 批量拉资金流向
+    auto* mf = ::stk_get_money_flow(symList.c_str(), nullptr);
+    if (mf && !mf->status() && mf->count() > 0) {
+        for (size_t i = 0; i < mf->count(); ++i) {
+            auto& r = mf->at(i);
+            std::string sym(r.symbol);
+            // 找到该 symbol 对应的行业
+            for (size_t j = 0; j < allSyms.size(); ++j) {
+                if (allSyms[j] == sym) {
+                    auto& sd = secMap[symIndustry[j]];
+                    sd.netIn += r.main_net_in;
+                    sd.netInRate += r.main_net_in_rate;
+                    sd.turnover += 0; // money flow 不含换手率
+                    break;
+                }
+            }
+        }
+        mf->release();
+    } else { if (mf) mf->release(); }
+
+    // 4. 汇总并赋信号
+    struct ResultItem { std::string name; double chg, netIn, netInRate, turnover; std::string lead; double leadChg; int signal; };
+    std::vector<ResultItem> items;
+    for (auto& [name, sd] : secMap) {
+        if (sd.stockCnt <= 0) continue;
+        double avgChg = sd.chg / sd.stockCnt;
+        int signal; // 0=真机会 1=诱多 2=抄底 3=真跌
+        if (avgChg > 0 && sd.netIn > 0)      signal = 0;
+        else if (avgChg > 0 && sd.netIn < 0) signal = 1;
+        else if (avgChg < 0 && sd.netIn > 0) signal = 2;
+        else                                 signal = 3;
+        items.push_back({name, avgChg, sd.netIn, sd.stockCnt > 0 ? sd.netInRate / sd.stockCnt : 0,
+                         sd.turnover, sd.lead, sd.leadChg, signal});
     }
 
-    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
+    // 排序: 信号优先级 0→1→2→3, 同信号按涨跌幅绝对值
+    std::sort(items.begin(), items.end(), [](const ResultItem& a, const ResultItem& b) {
+        if (a.signal != b.signal) return a.signal < b.signal;
         return std::abs(a.chg) > std::abs(b.chg);
     });
 
     for (auto& it : items) {
         QVariantMap m;
-        m["name"] = QString::fromStdString(it.name);
-        m["chg"]  = it.chg;
-        m["lead"] = QString::fromStdString(it.lead);
-        m["leadChg"] = it.leadChg;
+        m["name"]     = QString::fromStdString(it.name);
+        m["chg"]      = it.chg;
+        m["netIn"]    = it.netIn;
+        m["netInRate"]= it.netInRate;
+        m["turnover"] = it.turnover;
+        m["lead"]     = QString::fromStdString(it.lead);
+        m["leadChg"]  = it.leadChg;
+        m["signal"]   = it.signal;
         result.append(m);
     }
 
     m_sectorHeatData = result;
     emit sectorHeatDataChanged();
-    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done items=" << result.size();
+    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done sectors=" << result.size()
+                         << " stocks=" << allSyms.size();
 }
 
 } // namespace bridge
