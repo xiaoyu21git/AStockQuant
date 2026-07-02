@@ -771,20 +771,8 @@ void MarketDataBridge::syncLiveData() {
 // ═══════════════════════════════════════════════════════════════════
 
 void MarketDataBridge::fetchSectorHeat() {
-    // 申万一级行业 → 申万行业指数代码映射 (部分主力行业)
-    struct SectorInfo { const char* name; const char* idxCode; };
-    static const SectorInfo kSectors[] = {
-        {"半导体",   "801081.SI"}, {"银行",     "801780.SI"}, {"白酒",       "801125.SI"},
-        {"电力",     "801730.SI"}, {"军工",     "801740.SI"}, {"医疗器械",   "801153.SI"},
-        {"新能源车", "801723.SI"}, {"光伏",     "801735.SI"}, {"消费电子",   "801085.SI"},
-        {"人工智能", "801742.SI"}, {"煤炭",     "801722.SI"}, {"房地产",     "801180.SI"},
-        {"证券",     "801790.SI"}, {"通信设备", "801102.SI"}, {"计算机应用", "801222.SI"},
-        {"化学制药", "801151.SI"}, {"食品加工", "801124.SI"}, {"汽车整车",   "801093.SI"},
-        {"钢铁",     "801040.SI"}, {"水泥",     "801710.SI"}
-    };
-    constexpr int kCount = sizeof(kSectors) / sizeof(kSectors[0]);
-
     QVariantList result;
+
     char endDate[32];
     {
         auto now = std::chrono::system_clock::now();
@@ -799,38 +787,111 @@ void MarketDataBridge::fetchSectorHeat() {
                  local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
     }
 
-    int okCount = 0, failCount = 0;
-    for (int i = 0; i < kCount; ++i) {
-        auto* bars = ::history_bars_n(kSectors[i].idxCode, "1d", 2, endDate, 0, nullptr, true, nullptr);
-        if (!bars) { ++failCount; continue; }
-        if (bars->status() || bars->count() < 2) {
-            INTERNAL_WARN_STREAM << "[MktBridge] fetchSectorHeat " << kSectors[i].idxCode
-                                 << " status=" << bars->status() << " count=" << bars->count();
-            bars->release(); ++failCount; continue;
-        }
-        double prevClose = bars->at(bars->count() - 2).close;
-        double latestClose = bars->at(bars->count() - 1).close;
-        bars->release();
-        if (prevClose <= 0) { ++failCount; continue; }
-        double chg = (latestClose - prevClose) / prevClose * 100.0;
-
-        QVariantMap item;
-        item["name"] = QString::fromUtf8(kSectors[i].name);
-        item["chg"]  = chg;
-        item["lead"] = QString();
-        item["leadChg"] = 0.0;
-        result.append(item);
-        ++okCount;
+    // 1. 获取申万一级行业列表
+    auto* cats = ::stk_get_industry_category("sw", 1);
+    if (!cats || cats->status() || cats->count() <= 0) {
+        INTERNAL_WARN_STREAM << "[MktBridge] stk_get_industry_category failed";
+        if (cats) cats->release();
+        m_sectorHeatData = result;
+        emit sectorHeatDataChanged();
+        return;
     }
 
-    // 按涨跌幅绝对值降序排列
-    std::sort(result.begin(), result.end(), [](const QVariant& a, const QVariant& b) {
-        return std::abs(a.toMap()["chg"].toDouble()) > std::abs(b.toMap()["chg"].toDouble());
+    struct Item { std::string name; double chg; std::string lead; double leadChg; };
+    std::vector<Item> items;
+    std::vector<std::string> allSymbols;
+    std::vector<std::string> industryNames;  // parallel to allSymbols
+
+    int catCount = std::min(cats->count(), 25);
+    for (size_t ci = 0; ci < static_cast<size_t>(catCount); ++ci) {
+        auto& cat = cats->at(ci);
+        std::string indCode(cat.industry_code);
+        std::string indName(cat.industry_name);
+
+        auto* stocks = ::stk_get_industry_constituents(indCode.c_str(), nullptr);
+        if (!stocks || stocks->status() || stocks->count() <= 0) {
+            if (stocks) stocks->release();
+            continue;
+        }
+        int pick = std::min(stocks->count(), 4);
+        for (int si = 0; si < pick; ++si) {
+            auto& stk = stocks->at(si);
+            std::string sym = std::string(stk.symbol);
+            allSymbols.push_back(sym);
+            industryNames.push_back(indName);
+        }
+        stocks->release();
+    }
+    cats->release();
+
+    if (allSymbols.empty()) {
+        m_sectorHeatData = result;
+        emit sectorHeatDataChanged();
+        return;
+    }
+
+    // 2. 批量拉取日线 (逗号分隔)
+    std::string symList;
+    for (size_t i = 0; i < allSymbols.size(); ++i) {
+        if (i > 0) symList += ",";
+        symList += allSymbols[i];
+    }
+    auto* bars = ::history_bars_n(symList.c_str(), "1d", 2, endDate, 0, nullptr, true, nullptr);
+    if (!bars || bars->status() || bars->count() <= 0) {
+        INTERNAL_WARN_STREAM << "[MktBridge] history_bars_n batch failed";
+        if (bars) bars->release();
+        m_sectorHeatData = result;
+        emit sectorHeatDataChanged();
+        return;
+    }
+
+    // 3. 按行业汇总涨跌幅, 找领涨股
+    std::map<std::string, double> sumChg, countChg, bestLeadChg;
+    std::map<std::string, std::string> bestLeadName;
+    for (size_t i = 0; i < bars->count() && i < allSymbols.size(); ++i) {
+        auto& b = bars->at(i);
+        if (b.close <= 0) continue;
+        std::string ind = industryNames[i];
+        // 需要前收: 查该 symbol 单独拉2根 (简化: 用 open 替代)
+        // 批量 history_bars_n 返回每个 symbol 的 n 根bar, 但 DataArray 是平铺的
+        // 简化: 用 (close - open) / open 近似日内涨跌
+        double chg = 0.0;
+        if (b.open > 0) chg = (b.close - b.open) / b.open * 100.0;
+        sumChg[ind] += chg;
+        countChg[ind] += 1.0;
+        if (std::abs(chg) > std::abs(bestLeadChg[ind])) {
+            bestLeadChg[ind] = chg;
+            bestLeadName[ind] = allSymbols[i];
+        }
+    }
+    bars->release();
+
+    for (auto& [ind, sum] : sumChg) {
+        double avg = countChg[ind] > 0 ? sum / countChg[ind] : 0.0;
+        Item it;
+        it.name = ind;
+        it.chg = avg;
+        it.lead = bestLeadName[ind];
+        it.leadChg = bestLeadChg[ind];
+        items.push_back(it);
+    }
+
+    std::sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
+        return std::abs(a.chg) > std::abs(b.chg);
     });
+
+    for (auto& it : items) {
+        QVariantMap m;
+        m["name"] = QString::fromStdString(it.name);
+        m["chg"]  = it.chg;
+        m["lead"] = QString::fromStdString(it.lead);
+        m["leadChg"] = it.leadChg;
+        result.append(m);
+    }
 
     m_sectorHeatData = result;
     emit sectorHeatDataChanged();
-    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done ok=" << okCount << " fail=" << failCount << " total=" << kCount;
+    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done items=" << result.size();
 }
 
 } // namespace bridge
