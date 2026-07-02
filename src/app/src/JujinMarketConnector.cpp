@@ -4,6 +4,9 @@
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
+#include "../../domain/trading/include/OrderBuilder.h"
+#include "../../domain/strategy/include/RiskManager.h"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -300,6 +303,11 @@ bool JujinMarketConnector::start()
         }
     }
     publishExistingOrders(eventBus, token, accountId, "", boundIds);
+
+    m_patrolExecutor = std::make_shared<foundation::thread::ThreadPoolExecutor>(
+        1, 1, std::chrono::seconds(60), "JmcRiskPatrol");
+    m_patrolExecutor->post([this]() { riskPatrolLoop(); });
+
     INTERNAL_INFO_STREAM << "[JujinMarketConnector] start completed";
     return true;
 }
@@ -307,6 +315,8 @@ bool JujinMarketConnector::start()
 void JujinMarketConnector::stop()
 {
     m_stopRequested.store(true);
+    if (m_patrolExecutor)
+        m_patrolExecutor->shutdown();
 
     if (m_initialOrderSyncThread.joinable()) {
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for initial order sync thread";
@@ -422,6 +432,25 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
     });
 }
 
-
+void JujinMarketConnector::riskPatrolLoop()
+{
+    INTERNAL_INFO_STREAM << "[JMC] 全局风控巡检启动";
+    domain::trading::OrderBuilder builder;
+    while (!m_stopRequested.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        try {
+            auto& accEng = engine::AccountEngine::instance();
+            builder.setAccountId(accEng.account().accountId);
+            auto stopOrders = domain::strategy::RiskManager::instance().patrolPositions(builder);
+            for (const auto& o : stopOrders) {
+                INTERNAL_WARN_STREAM << "[JMC] 止损/止盈触发: " << o.symbol()
+                                     << " price=" << o.price() << " qty=" << o.quantity();
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_WARN_STREAM << "[JMC] 巡检异常: " << e.what();
+        }
+    }
+    INTERNAL_INFO_STREAM << "[JMC] 全局风控巡检结束";
+}
 
 

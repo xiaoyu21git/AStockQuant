@@ -1,6 +1,7 @@
 #include "TradeExecutionEngine.h"
 #include "../strategy/include/RiskManager.h"
 #include "../../engine/include/TradeEngine.h"
+#include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/Event/EventBus.hpp"
 #include "../../engine/include/Event/EventFormat.hpp"
 #include "../../engine/include/GlobalEventBusRegistry.h"
@@ -253,7 +254,7 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     engineReq.setQuantity(order.quantity());
     engineReq.setSide(order.side() == strategy::OrderDirection::Buy
                       ? engine::OrderSide::Buy : engine::OrderSide::Sell);
-    engineReq.setOrderType(riskContext.isAutoStrategySignal()
+    engineReq.setOrderType(order.orderType() == OrderType::Market
                            ? engine::OrderType::Market
                            : engine::OrderType::Limit);
     // A股规则: 买入=Open, 卖出=Close; 若已显式设置则尊重原值
@@ -485,6 +486,7 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         order.setPrice(req.price());
         order.setSignalStrength(
             req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
+        order.setOrderType(req.orderType());
         order.setClOrdId(req.clOrdId());
         order.setAccountId(req.accountId());
         order.setCurrency(req.currency());
@@ -506,6 +508,16 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         risk.setAutoStrategySignal(true);
         risk.setPositionSnapshotReady(true);
         risk.setTradingSessionOpen(true);
+        // 卖出单：从 AccountEngine 获取可卖量
+        if (!risk.isBuyOrder()) {
+            auto& accEng = engine::AccountEngine::instance();
+            for (const auto& pos : accEng.positions()) {
+                if (pos.symbol == order.symbol()) {
+                    risk.setCloseableQuantity(pos.availableQty);
+                    break;
+                }
+            }
+        }
         // 应用风控配置 (否则 maxPositionPercent=0 会拦截所有买单)
         strategy::RiskEvaluator::applyConfig(risk, domain::strategy::RiskManager::instance().riskConfig());
 

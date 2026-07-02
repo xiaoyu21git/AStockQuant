@@ -56,6 +56,10 @@ void MarketDataService::onTick(const engine::GmTickData& td)
             && td.tradingDay != m_activeTradingDay) {
             prevTradingDay = m_activeTradingDay;
             dayChanged = true;
+            // 新交易日：清空所有标的旧分时 K 线，随后的代码用当前 tick 绘制首根 Bar
+            for (auto& [sym, ld] : data_) {
+                ld.period(1).clear();
+            }
         }
         if (td.tradingDay > 0) {
             m_activeTradingDay = td.tradingDay;

@@ -76,6 +76,7 @@ struct TradeFill {
 struct AccountInfo {
     std::string accountId;
     double totalAsset = 0, availableCash = 0, marketValue = 0, frozenCash = 0;
+    double unrealizedPnl = 0, realizedPnl = 0;
 };
 
 struct Position {

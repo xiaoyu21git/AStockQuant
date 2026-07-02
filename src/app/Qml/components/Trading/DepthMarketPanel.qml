@@ -335,31 +335,6 @@ Rectangle {
                         }
                     }
 
-                    Text {
-                        Layout.fillWidth: true
-                        text: "显示 " + root.visibleDepthLevels + " / " + root.requestedDepthLevels + " 档"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: compactDepthHeaderHeight
-                        radius: compactMode ? 10 : 12
-                        color: Const.depthInactiveLevelBg
-
-                        Row {
-                            anchors.fill: parent
-                            anchors.margins: compactMode ? 5 : 8
-
-                            Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.10; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.15; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:root.shareCountLabel; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.20; horizontalAlignment:Text.AlignHCenter }
-                            Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?11:13; width:parent.width*0.35; horizontalAlignment:Text.AlignHCenter }
-                        }
-                    }
-
                     // ── 左卖右买 双列布局 ──
                     RowLayout {
                         Layout.fillWidth: true
@@ -391,23 +366,32 @@ Rectangle {
                                     Layout.preferredHeight: compactMode ? 18 : 22
                                 }
 
+                                // 卖盘表头
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 0; height: compactMode?16:20
+                                    Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.28; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.22; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.32; horizontalAlignment:Text.AlignHCenter }
+                                }
+
                                 ListView {
                                     id: askListView
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     clip: true
-                                    spacing: compactMode ? 1 : 2
+                                    spacing: 0
                                     model: { var a=[]; var asks=depthSnapshot&&depthSnapshot.asks?depthSnapshot.asks:[]; for(var i=Math.min(asks.length,requestedDepthLevels)-1;i>=0;i--) a.push(asks[i]); return a }
                                     delegate: Rectangle {
                                         required property var modelData; required property int index
                                         width: askListView.width; height: Math.max(14, askListView.height / Math.max(askListView.count, 1))
                                         color: "transparent"
                                         RowLayout {
-                                            anchors.fill: parent; anchors.margins: 2; spacing: 2
+                                            anchors.fill: parent; anchors.margins: 2; spacing: 0
                                             Text { text:"卖"+(index+1); color:"#10b981"; font.pixelSize:compactMode?9:10; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
                                             Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                                             Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#10b981"; font.pixelSize:compactMode?8:9; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#10b981"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.32; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                                         }
                                     }
                                 }
@@ -446,23 +430,32 @@ Rectangle {
                                     Layout.preferredHeight: compactMode ? 18 : 22
                                 }
 
+                                // 买盘表头
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 0; height: compactMode?16:20
+                                    Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.32; horizontalAlignment:Text.AlignHCenter }
+                                }
+
                                 ListView {
                                     id: bidListView
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     clip: true
-                                    spacing: compactMode ? 1 : 2
+                                    spacing: 0
                                     model: { var a=[]; var bids=depthSnapshot&&depthSnapshot.bids?depthSnapshot.bids:[]; for(var i=0;i<Math.min(bids.length,requestedDepthLevels);i++) a.push(bids[i]); return a }
                                     delegate: Rectangle {
                                         required property var modelData; required property int index
                                         width: bidListView.width; height: Math.max(14, bidListView.height / Math.max(bidListView.count, 1))
                                         color: "transparent"
                                         RowLayout {
-                                            anchors.fill: parent; anchors.margins: 2; spacing: 2
+                                            anchors.fill: parent; anchors.margins: 2; spacing: 0
                                             Text { text:"买"+(index+1); color:"#ef4444"; font.pixelSize:compactMode?9:10; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
                                             Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                                             Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#ef4444"; font.pixelSize:compactMode?8:9; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#ef4444"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.32; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                                         }
                                     }
                                 }

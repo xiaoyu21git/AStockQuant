@@ -168,23 +168,10 @@ RiskResult RiskManager::checkAutoSignal(const engine::OrderRequest& req,
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 主动巡检 — 止损止盈退出
+// 主动巡检 — 止损止盈退出（委托 OrderBuilder 构建订单）
 // ═══════════════════════════════════════════════════════════════════
 
-engine::OrderRequest RiskManager::buildStopOrder(const engine::Position& pos,
-                                                  double currentPrice,
-                                                  const std::string& reason) const {
-    engine::OrderRequest order;
-    order.setSymbol(pos.symbol);
-    order.setSide(engine::OrderSide::Sell);
-    order.setQuantity(pos.availableQty);
-    order.setPrice(currentPrice);
-    order.setOrderType(domain::trading::OrderType::Limit);
-    order.setExtension(domain::trading::ExtKey::kSignalScore, 0.8);
-    return order;
-}
-
-std::vector<engine::OrderRequest> RiskManager::patrolPositions() {
+std::vector<engine::OrderRequest> RiskManager::patrolPositions(domain::trading::OrderBuilder& builder) {
     std::vector<engine::OrderRequest> orders;
     if (m_config.stopLossPercent <= 0 && m_config.takeProfitPercent <= 0)
         return orders;
@@ -209,7 +196,7 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions() {
             INTERNAL_WARN_STREAM << "[RiskManager] 止损触发: " << pos.symbol
                                  << " 成本=" << pos.costPrice << " 现价=" << price
                                  << " 浮亏=" << static_cast<int>(std::abs(pnlPct)) << "%";
-            orders.push_back(buildStopOrder(pos, price, "止损"));
+            orders.push_back(builder.buildStopOrder(pos.symbol, price, pos.availableQty));
             continue;
         }
 
@@ -219,7 +206,7 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions() {
             INTERNAL_INFO_STREAM << "[RiskManager] 止盈触发: " << pos.symbol
                                  << " 成本=" << pos.costPrice << " 现价=" << price
                                  << " 浮盈=" << static_cast<int>(pnlPct) << "%";
-            orders.push_back(buildStopOrder(pos, price, "止盈"));
+            orders.push_back(builder.buildStopOrder(pos.symbol, price, pos.availableQty));
         }
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -10,6 +11,7 @@
 #include "foundation/Utils/Uuid.h"
 #include "JujinTypes.h"
 
+namespace foundation::thread { class IExecutor; }
 namespace engine {
 class EventBus;
 struct EventFormat;
@@ -31,11 +33,13 @@ private:
                                const std::string& accountId,
                                const std::string& runtimeStrategyId,
                                const std::unordered_set<std::string>& boundStrategyIds);
+    void riskPatrolLoop();
 
     bool m_started = false;
     std::atomic<bool> m_stopRequested{false};
     std::string m_lastError;
     std::thread m_initialOrderSyncThread;
+    std::shared_ptr<foundation::thread::IExecutor> m_patrolExecutor;
 
     // 标的代码 → 中文名映射
     mutable std::mutex m_symbolNameMutex;

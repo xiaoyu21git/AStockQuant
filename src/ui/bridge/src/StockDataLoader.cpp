@@ -182,13 +182,13 @@ void StockDataLoader::loadFromDB(const QString& code, int period) {
         if (!m_timer.isActive()) m_timer.start();
         // 加载历史分钟K线
         const char* freq = "60s";
-        int lookbackDays = 5;
+        int lookbackDays = 0;
         if (period == Min5) freq = "300s";
         else if (period == Min15) freq = "900s";
         else if (period == Min30) freq = "1800s";
         else if (period == Min60) freq = "3600s";
         else if (period == Min120) freq = "7200s";
-        else if (period == TimeShare) { freq = "60s"; lookbackDays = 1; }
+        else if (period == TimeShare) freq = "60s";
         auto now2 = std::chrono::system_clock::now();
         auto start2 = now2 - std::chrono::hours(24 * lookbackDays);
         auto t_now2  = std::chrono::system_clock::to_time_t(now2);
@@ -211,8 +211,38 @@ void StockDataLoader::loadFromDB(const QString& code, int period) {
             }
         }
         if (minBars) minBars->release();
-        // 如果没历史数据，至少加一个前收占位
-        if (result.isEmpty()) {
+        // 分时/分钟线当天无数据 → 回退加载最近一个交易日的数据
+        if (result.isEmpty() && (period == TimeShare || (period >= Min1 && period <= Min120))) {
+            auto now3 = std::chrono::system_clock::now();
+            auto start3 = now3 - std::chrono::hours(24 * 5);
+            auto t_now3  = std::chrono::system_clock::to_time_t(now3);
+            auto t_start3 = std::chrono::system_clock::to_time_t(start3);
+            char s3[32], e3[32];
+            std::strftime(s3, sizeof(s3), "%Y-%m-%d %H:%M:%S", std::localtime(&t_start3));
+            std::strftime(e3, sizeof(e3), "%Y-%m-%d %H:%M:%S", std::localtime(&t_now3));
+            auto* fallback = ::history_bars(gmSym.c_str(), "60s", s3, e3, 0, nullptr, true, nullptr);
+            if (fallback && !fallback->status() && fallback->count() > 0) {
+                // 只取最后一天的数据
+                qint64 lastDay = 0;
+                std::vector<QVariantMap> dayBars;
+                for (size_t i = 0; i < fallback->count(); ++i) {
+                    auto& b = fallback->at(i);
+                    qint64 ts = static_cast<qint64>(b.bob * 1000.0);
+                    qint64 day = ts / (24 * 3600 * 1000);
+                    if (lastDay == 0) lastDay = day;
+                    if (day != lastDay) { dayBars.clear(); lastDay = day; }
+                    QVariantMap item;
+                    item["timestamp"] = QVariant::fromValue<qint64>(ts);
+                    item["open"]=b.open; item["high"]=b.high; item["low"]=b.low;
+                    item["close"]=b.close; item["volume"]=b.volume;
+                    dayBars.push_back(item);
+                }
+                for (auto& m : dayBars) result.append(m);
+            }
+            if (fallback) fallback->release();
+        }
+        // 日线及以上无历史数据 → 前收占位
+        if (result.isEmpty() && !(period == TimeShare || (period >= Min1 && period <= Min120))) {
             auto daily = loadDailyBars(gmSym, 5);
             double pc = daily.isEmpty() ? 0.0 : daily.last().toMap()["close"].toDouble();
             if (pc > 0) {
@@ -330,6 +360,15 @@ void StockDataLoader::syncLiveData()
     int bucketCount = static_cast<int>(buckets.size());
     const auto& lastBucket = buckets.back();
     bool lastIsCurrent = (lastBucket.bucketStart + bucketMs > latestTime);
+
+    // ── 交易日切换检测：两日数据间隔 > 4 小时 → 清空重载 ──
+    if (!m_isFirstSync && m_modelCount > 0 && m_lastBucketKey > 0
+        && (buckets.front().bucketStart - m_lastBucketKey) > 4 * 3600 * 1000) {
+        m_model->clear();
+        m_isFirstSync = true;
+        m_modelCount = 0;
+        m_lastBucketKey = -1;
+    }
 
     // ── 首次同步: 全量加载 ──
     if (m_isFirstSync) {

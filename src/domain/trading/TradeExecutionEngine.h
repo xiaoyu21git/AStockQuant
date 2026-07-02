@@ -76,6 +76,9 @@ public:
     [[nodiscard]] double signalStrength() const noexcept { return m_signalStrength; }
     void setSignalStrength(double v) noexcept { m_signalStrength = v; }
 
+    [[nodiscard]] OrderType orderType() const noexcept { return m_orderType; }
+    void setOrderType(OrderType v) noexcept { m_orderType = v; }
+
     [[nodiscard]] double cashAmount() const noexcept { return m_cashAmount; }
     void setCashAmount(double v) noexcept { m_cashAmount = v; }
 
@@ -162,6 +165,7 @@ private:
     double m_price{0.0};
     std::int64_t m_quantity{0};
     double m_signalStrength{1.0};
+    OrderType m_orderType{OrderType::Limit};
     double m_cashAmount{0.0};
     ActionKind m_actionKind{ActionKind::Normal};
     bool m_isBoardLotMode{true};

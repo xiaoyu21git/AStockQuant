@@ -92,14 +92,14 @@ Item {
         id: statCard
         Rectangle {
             property string label: ""; property string value: ""; property string detail: ""
-            property color accent: "#3b82f6"
+            property color accent: "#3b82f6"; property color valueColor: "#f1f5f9"
             Layout.fillWidth: true; Layout.preferredHeight: 72; radius: 10
             color: "#121828"; border.width: 1; border.color: "#2d3748"
             Rectangle { width:parent.width; height:3; color:accent; radius:1.5 }
             ColumnLayout {
                 anchors.fill:parent; anchors.margins:12; spacing:2
                 Text { text:label; color:"#94a3b8"; font.pixelSize:11; Layout.alignment:Qt.AlignHCenter }
-                Text { text:value; color:"#f1f5f9"; font.pixelSize:18; font.weight:Font.DemiBold; Layout.alignment:Qt.AlignHCenter }
+                Text { text:value; color:valueColor; font.pixelSize:18; font.weight:Font.DemiBold; Layout.alignment:Qt.AlignHCenter }
                 Text { text:detail; color:"#94a3b8"; font.pixelSize:10; Layout.alignment:Qt.AlignHCenter; elide:Text.ElideRight }
             }
         }
@@ -142,7 +142,7 @@ Item {
             Loader {
                 Layout.fillWidth: true; Layout.preferredHeight: 72
                 sourceComponent: statCard
-                onLoaded: { item.label="总盈亏"; item.value=scny(totalPnl); item.detail="浮动 "+scny(snap.unrealizedPnl||0); item.accent=pc(totalPnl) }
+                onLoaded: { item.label="总盈亏"; item.value=scny(totalPnl); item.detail="浮动 "+scny(snap.unrealizedPnl||0)+"  "+(totalAsset>0?(totalPnl/totalAsset*100).toFixed(2):"0.00")+"%"; item.accent=pc(totalPnl); item.valueColor=pc(totalPnl) }
             }
             Loader {
                 Layout.fillWidth: true; Layout.preferredHeight: 72

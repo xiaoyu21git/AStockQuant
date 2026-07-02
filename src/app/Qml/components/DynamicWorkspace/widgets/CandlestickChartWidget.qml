@@ -42,10 +42,16 @@ CandlestickChart {
     }
 
     onStockCodeChanged: {
+        if (Bridge.MarketDataBridge && typeof Bridge.MarketDataBridge.ensureWatchSymbol === "function")
+            Bridge.MarketDataBridge.ensureWatchSymbol(root.stockCode)
+        if (candleModel && typeof candleModel.clear === "function")
+            candleModel.clear()
         if (root.dataLoader && root.stockCode)
             root.dataLoader.loadFromDB(root.stockCode, root.chartPeriod)
     }
     onChartPeriodChanged: {
+        if (candleModel && typeof candleModel.clear === "function")
+            candleModel.clear()
         if (root.dataLoader && root.stockCode)
             root.dataLoader.loadFromDB(root.stockCode, root.chartPeriod)
     }

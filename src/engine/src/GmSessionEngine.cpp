@@ -73,11 +73,14 @@ public:
             evt.set("total_asset", cash.nav);
             evt.set("market_value", cash.market_value);
             evt.set("frozen", cash.frozen);
+            evt.set("unrealized_pnl", cash.fpnl);
+            evt.set("realized_pnl", cash.pnl);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         }
         if (arr) arr->release();
         auto* posArr = get_position(nullptr);
         if (posArr && posArr->status() == 0 && posArr->count() > 0) {
+            std::string tickSymbols;
             for (size_t i = 0; i < posArr->count(); ++i) {
                 auto& p = posArr->at(i);
                 EventFormat evt("trading.position.updated", Event_Core::EventSource::MARKET_DATA);
@@ -89,7 +92,12 @@ public:
                 evt.set("market_value", p.market_value);
                 evt.set("unrealized_pnl", p.fpnl);
                 bus->publish(evt, static_cast<int>(EventPriority::HIGH));
+                // 拼接收 tick 的标列表
+                if (!tickSymbols.empty()) tickSymbols += ",";
+                tickSymbols += p.symbol;
             }
+            if (!tickSymbols.empty())
+                subscribe(tickSymbols.c_str(), "tick");
         }
         if (posArr) posArr->release();
         } catch (const std::exception& e) {
@@ -248,6 +256,7 @@ public:
         a.accountId = cash->account_id; a.totalAsset = cash->nav;
         a.availableCash = cash->available; a.marketValue = cash->market_value;
         a.frozenCash = cash->frozen;
+        a.unrealizedPnl = cash->fpnl; a.realizedPnl = cash->pnl;
 
         auto* bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
@@ -257,6 +266,8 @@ public:
             evt.set("total_asset", a.totalAsset);
             evt.set("market_value", a.marketValue);
             evt.set("frozen", a.frozenCash);
+            evt.set("unrealized_pnl", a.unrealizedPnl);
+            evt.set("realized_pnl", a.realizedPnl);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         }
     }
@@ -368,8 +379,12 @@ void GmSessionEngine::unsubscribeTick(const std::string& symbol) {
     if (symbol.empty()) return;
     std::lock_guard<std::mutex> lock(m_tickMutex);
     auto it = m_tickRefCount.find(symbol);
-    if (it != m_tickRefCount.end() && --it->second <= 0)
+    if (it != m_tickRefCount.end() && --it->second <= 0) {
+        auto* s = static_cast<SessionStrategy*>(m_strategy.get());
+        std::string gmSym = toGmSymbol(symbol);
+        if (s) s->unsubscribe(gmSym.c_str(), "tick");
         m_tickRefCount.erase(it);
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════

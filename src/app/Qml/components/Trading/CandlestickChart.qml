@@ -299,10 +299,6 @@ Rectangle {
             ctx.fillStyle=textDim; ctx.font="9px sans-serif"; ctx.textAlign="right"
             for (var g=0;g<5;g++){var gy=chartTop+mainH*g/4;ctx.beginPath();ctx.moveTo(px,gy);ctx.lineTo(px+pw,gy);ctx.stroke()
                 ctx.fillText((priceMax-range*g/4).toFixed(2),px+pw,gy+3)}
-            // 昨收线
-            if(preClose>0){var py=yPrice(preClose,chartTop,mainH);ctx.strokeStyle="#888899";ctx.lineWidth=0.8
-                ctx.setLineDash([3,5]);ctx.beginPath();ctx.moveTo(px,py);ctx.lineTo(px+pw,py);ctx.stroke();ctx.setLineDash([])
-                ctx.fillText("昨收 "+preClose.toFixed(2),px+pw,py+3)}
             // 数据点
             var pts=[]; for(var j=0;j<n;j++){var cc=candleModel.data(candleModel.index(j,4),0x0105)
                 var ts=candleModel.data(candleModel.index(j,0),0x0101)

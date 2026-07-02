@@ -353,42 +353,22 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     emit orderRequestPublished(orderMap);
 
     // ── 手动单账户风控 ──
+    engine::OrderRequest engineReq;
     {
         auto& accEng = engine::AccountEngine::instance();
         auto account   = accEng.account();
         auto positions = accEng.positions();
 
-        // 市价单 vs 限价单
-        bool isMarket = (orderMap.value("orderType").toString().toUpper() == "MARKET");
-
-        // 市价单: 必须用当前行情价, 不允许价格为空
-        if (isMarket) {
-            auto q = engine::GmSessionEngine::instance().fetchQuote(order.symbol());
-            if (!q || !q->valid || q->price <= 0) {
-                setLastError(QStringLiteral("市价单无法获取当前行情价"));
-                return {};
-            }
-            order.setPrice(q->price);
-        }
-
-        engine::OrderRequest engineReq;
-        engineReq.setClOrdId(generateClOrdId());                     // 幂等ID
-        engineReq.setAccountId(account.accountId);                   // 真实账户
-        engineReq.setSymbol(order.symbol());
-        engineReq.setPrice(order.price());
-        engineReq.setQuantity(order.quantity());
-        engineReq.setSide((order.side() == domain::strategy::OrderDirection::Buy)
-                          ? engine::OrderSide::Buy : engine::OrderSide::Sell);
-        engineReq.setOrderType(isMarket ? engine::OrderType::Market
-                                        : engine::OrderType::Limit);
-        // A股: 买入=开仓, 卖出=平仓 (不允许做空)
-        bool isBuy = (engineReq.side() == engine::OrderSide::Buy);
-        engineReq.setPositionEffect(isBuy ? domain::trading::PositionEffect::Open
-                                          : domain::trading::PositionEffect::Close);
-        engineReq.setCurrency("CNY");
-        auto symObj = foundation::market::AStockSymbol::fromString(order.symbol());
-        if (symObj.isValid())
-            engineReq.setExchange(symObj.suffix().substr(1));
+        domain::trading::OrderBuilder manualBuilder;
+        manualBuilder.setStrategyId(strategyId.toStdString());
+        manualBuilder.setAccountId(account.accountId);
+        bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
+        auto pe = isBuy ? domain::trading::PositionEffect::Open
+                        : domain::trading::PositionEffect::Close;
+        engineReq = manualBuilder.buildManualOrder(
+            order.symbol(),
+            isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
+            order.price(), order.quantity(), pe);
 
         auto riskResult = domain::strategy::RiskManager::instance()
             .checkManualOrder(engineReq, account, positions, order.price());
@@ -414,20 +394,12 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
         }
     }
 
-    // 补齐 TradeOrder 字段 — submitOrder() 内部重建 engineReq 时需要
-    order.setClOrdId(generateClOrdId());
-    order.setAccountId(engine::AccountEngine::instance().account().accountId);
-    order.setCurrency("CNY");
-    auto symObj2 = foundation::market::AStockSymbol::fromString(order.symbol());
-    if (symObj2.isValid())
-        order.setExchange(symObj2.suffix().substr(1));
-    // 价格兜底: 若 QML 未传 price, 用 lastPrice 或 tick 最新价
-    if (order.price() <= 0 && orderMap.contains("lastPrice"))
-        order.setPrice(orderMap.value("lastPrice").toDouble());
-    // A股: 买入=开仓, 卖出=平仓
-    bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
-    order.setPositionEffect(isBuy ? domain::strategy::PositionEffect::Open
-                                  : domain::strategy::PositionEffect::Close);
+    // TradeOrder 字段对齐 OrderBuilder 输出
+    order.setClOrdId(engineReq.clOrdId());
+    order.setAccountId(engineReq.accountId());
+    order.setCurrency(engineReq.currency());
+    order.setExchange(engineReq.exchange());
+    order.setPositionEffect(static_cast<domain::strategy::PositionEffect>(engineReq.positionEffect()));
 
     auto result = domain::trading::TradeExecutionEngine::instance().submitOrder(order);
 
@@ -757,8 +729,14 @@ QVariantMap PositionAccountBridge::accountSnapshot() const {
     map["totalAsset"]    = acc.totalAsset;
     map["marketValue"]   = acc.marketValue;
     map["availableCash"] = acc.availableCash;
-    map["realizedPnl"]   = 0.0;
-    map["unrealizedPnl"] = 0.0;
+    map["realizedPnl"]   = acc.realizedPnl;
+    // 浮动盈亏优先用 gmsdk 推送值，否则汇总各持仓
+    double unrealized = acc.unrealizedPnl;
+    if (unrealized == 0.0) {
+        for (const auto& p : engine::AccountEngine::instance().positions())
+            unrealized += p.unrealizedPnl;
+    }
+    map["unrealizedPnl"] = unrealized;
     map["accountId"]     = QString::fromStdString(acc.accountId);
     return map;
 }
@@ -906,8 +884,8 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
     snapshot["totalAsset"] = acc.totalAsset;
     snapshot["marketValue"] = acc.marketValue;
     snapshot["availableCash"] = acc.availableCash;
-    snapshot["realizedPnl"] = 0.0;
-    snapshot["unrealizedPnl"] = 0.0;
+    snapshot["realizedPnl"] = acc.realizedPnl;
+    snapshot["unrealizedPnl"] = acc.unrealizedPnl;
     snapshot["status"] = "ok";
 
     auto positions = engine::AccountEngine::instance().positions();

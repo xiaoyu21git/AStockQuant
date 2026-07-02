@@ -165,6 +165,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         .build();
     INTERNAL_INFO_STREAM << "[fromDb] engine built: " << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
+    engine->setStrategyId(strategyId);
+    engine->m_orderBuilder.setStrategyId(strategyId);
 
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
@@ -294,9 +296,14 @@ StrategyEngine::Builder StrategyEngine::builder()
 std::unique_ptr<StrategyEngine> StrategyEngine::fromParams(const StrategyCreationParams& params)
 {
     // Builder 模式构建引擎 — 因子服务由调用方通过 fromDb(with factorSvc) 注入
-    return builder()
+    auto engine = builder()
         .maxStrategies(params.maxPositions)
         .build();
+    if (engine) {
+        engine->setStrategyId(params.strategyId);
+        engine->m_orderBuilder.setStrategyId(params.strategyId);
+    }
+    return engine;
 }
 
 void StrategyEngine::setContextHistoricalView(const void* view)
@@ -539,14 +546,12 @@ void StrategyEngine::startLiveLoop()
     m_loopRunning.store(true, std::memory_order_release);
 
     if (m_isDailyFrequency) {
-        // ── 日频: 只启动风控巡检 + 注册日终回调 ──
-        INTERNAL_INFO_STREAM << "[启动] 日频策略 — 启动风控巡检 + 注册 EOD 回调";
+        // ── 日频: 注册日终回调（风控巡检由 JMC 全局线程处理）──
+        INTERNAL_INFO_STREAM << "[启动] 日频策略 — 注册 EOD 回调";
 
-        // 注册日终回调 (幂等, 只在首次调用时注册)
         if (!m_eodCallbackRegistered) {
             domain::market::MarketDataService::instance()
                 .registerEndOfDayCallback([this](const std::string& closedTradingDay) {
-                // 在 tick 线程中触发, post 到引擎线程执行
                 if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire)) {
                     m_dedicatedExecutor->post([this, closedTradingDay]() {
                         evaluateEndOfDay(closedTradingDay);
@@ -555,10 +560,6 @@ void StrategyEngine::startLiveLoop()
             });
             m_eodCallbackRegistered = true;
         }
-
-        m_dedicatedExecutor->post([this]() {
-            riskPatrolLoop();
-        });
     } else {
         // ── 分钟频/高频: 启动完整 drainQueue ──
         INTERNAL_INFO_STREAM << "[启动] 盘中策略 — 启动 drainQueue 事件循环";
@@ -640,6 +641,7 @@ void StrategyEngine::drainQueue()
                 auto& accEng = engine::AccountEngine::instance();
                 auto account   = accEng.account();
                 auto positions = accEng.positions();
+                m_orderBuilder.setAccountId(account.accountId);
 
                 // 防御: 账户未初始化或 tick 价格异常时跳过本批次
                 if (account.totalAsset <= 0) {
@@ -650,20 +652,16 @@ void StrategyEngine::drainQueue()
                 for (auto& order : *orders) {
                     if (!order.isValid()) continue;
 
-                    // 补齐下单必填字段 (此处保证到达 TradeEngine 时完整)
-                    order.setClOrdId(generateClOrdId());             // 幂等ID
-                    order.setAccountId(account.accountId);           // 真实账户ID
-                    order.setCurrency("CNY");                        // A股人民币
-                    auto symObj = foundation::market::AStockSymbol::fromCode(
-                        order.symbol());
-                    if (!symObj.isValid() || symObj.suffix().empty()) {
-                        INTERNAL_WARN_STREAM << "[DrainQueue] skip invalid symbol: " << order.symbol();
-                        continue;
-                    }
-                    order.setSymbol(symObj.fullSymbol());            // → "600000.SH"
-                    order.setExchange(symObj.suffix().substr(1));    // ".SH" → "SH"
+                    // 读取原始信号字段
+                    double signalScore = order.extensionAs<double>(
+                        domain::trading::ExtKey::kSignalScore, 0.5);
+                    // OrderBuilder 统一重建完整订单
+                    order = m_orderBuilder.buildSignalOrder(
+                        order.symbol(), order.side(),
+                        0,  // price=0, 市价单后面用 LiveData 填
+                        static_cast<int64_t>(order.quantity()), signalScore);
 
-                    // 实时价从 LiveData 读取（不再依赖 tick 参数）
+                    // 实时价从 LiveData 读取，市价单填充
                     auto& d = domain::market::MarketDataService::instance()
                         .liveData(order.symbol());
                     double tickPrice = d.valid() ? d.dailyBar().close() : mdp.lastPrice();
@@ -671,15 +669,10 @@ void StrategyEngine::drainQueue()
                         INTERNAL_WARN_STREAM << "[StrategyEngine] live price=0 for "
                                              << order.symbol();
                     }
-
-                    // 市价单: 用最新价填充
-                    if (order.orderType() == OrderType::Market && tickPrice > 0) {
+                    if (order.orderType() == OrderType::Market && tickPrice > 0)
                         order.setPrice(tickPrice);
-                    }
 
-                    // 风控 — 信号强度从扩展槽读取
-                    double signalScore = order.extensionAs<double>(
-                        domain::trading::ExtKey::kSignalScore, 0.5);
+                    // 风控
                     auto riskResult = RiskManager::instance()
                         .checkAutoSignal(order, account, positions,
                                          tickPrice, signalScore);
@@ -689,7 +682,6 @@ void StrategyEngine::drainQueue()
                         continue;
                     }
 
-                    // 通过风控 → 原样传递
                     INTERNAL_INFO_STREAM << "[DrainQueue] →onOrders symbol=" << order.symbol()
                                          << " side=" << (order.side() == OrderSide::Buy ? "B" : "S")
                                          << " qty=" << order.quantity()
@@ -705,16 +697,7 @@ void StrategyEngine::drainQueue()
         }
         } // for each MDP in batch
 
-        // ── 主动巡检：止损止盈退出 ──
-        auto stopOrders = RiskManager::instance().patrolPositions();
-        if (!stopOrders.empty() && m_orderListener) {
-            for (auto& o : stopOrders) {
-                o.setClOrdId(generateClOrdId());
-            }
-            m_orderListener->onOrders(stopOrders);
-        }
-
-        // 心跳 — 记录最后处理时间
+        // 心跳 — 记录最后处理时间（风控巡检由 JMC 全局线程处理）
         m_lastProcessedAt.store(
             std::chrono::steady_clock::now().time_since_epoch().count(),
             std::memory_order_release);
@@ -724,46 +707,6 @@ void StrategyEngine::drainQueue()
     if (dropped > 0) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] drainQueue stopped: " << static_cast<unsigned long long>(dropped) << " ticks dropped during session";
     }
-}
-
-// ═════════════════════════════════════════════════════════════════════════
-// riskPatrolLoop — 日频策略盘中线程: 仅做风控巡检
-// ═════════════════════════════════════════════════════════════════════════
-
-void StrategyEngine::riskPatrolLoop()
-{
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 风控巡检循环启动 (日频)";
-
-    while (m_loopRunning.load(std::memory_order_acquire)) {
-        // 每 1 秒巡检一次 (止损/止盈不需要高频轮询)
-        {
-            std::unique_lock<std::mutex> lock(m_queueMutex);
-            m_queueCv.wait_for(lock, std::chrono::seconds(1), [this]() {
-                return !m_loopRunning.load(std::memory_order_acquire);
-            });
-        }
-        if (!m_loopRunning.load(std::memory_order_acquire)) break;
-
-        try {
-            auto stopOrders = RiskManager::instance().patrolPositions();
-            if (!stopOrders.empty() && m_orderListener) {
-                for (auto& o : stopOrders) {
-                    o.setClOrdId(generateClOrdId());
-                }
-                INTERNAL_INFO_STREAM << "[StrategyEngine] 风控触发 "
-                                     << stopOrders.size() << " 笔止损/止盈";
-                m_orderListener->onOrders(stopOrders);
-            }
-        } catch (const std::exception& e) {
-            INTERNAL_WARN_STREAM << "[StrategyEngine] patrolPosition 异常: "
-                                 << e.what();
-        }
-
-        m_lastProcessedAt.store(
-            std::chrono::steady_clock::now().time_since_epoch().count(),
-            std::memory_order_release);
-    }
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 风控巡检循环结束";
 }
 
 // ═════════════════════════════════════════════════════════════════════════
@@ -816,6 +759,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
                 auto& accEng = engine::AccountEngine::instance();
                 auto account   = accEng.account();
                 auto positions = accEng.positions();
+                m_orderBuilder.setAccountId(account.accountId);
 
                 if (account.totalAsset <= 0) {
                     INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, "
@@ -825,25 +769,20 @@ void StrategyEngine::evaluateEndOfDay(const std::string& closedTradingDay)
 
                 for (auto& order : *orders) {
                     if (!order.isValid()) continue;
-                    order.setClOrdId(generateClOrdId());
-                    order.setAccountId(account.accountId);
-                    order.setCurrency("CNY");
 
-                    auto symObj = foundation::market::AStockSymbol::fromCode(order.symbol());
-                    if (!symObj.isValid() || symObj.suffix().empty()) {
-                        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD skip invalid symbol: "
-                                            << order.symbol();
-                        continue;
-                    }
-                    order.setSymbol(symObj.fullSymbol());
-                    order.setExchange(symObj.suffix().substr(1));
+                    double signalScore = order.extensionAs<double>(
+                        domain::trading::ExtKey::kSignalScore, 0.5);
+                    order = m_orderBuilder.buildSignalOrder(
+                        order.symbol(), order.side(),
+                        0,  // price=0
+                        static_cast<int64_t>(order.quantity()), signalScore);
 
                     auto& ld = domain::market::MarketDataService::instance()
                         .liveData(order.symbol());
                     double tickPrice = ld.valid() ? ld.dailyBar().close() : mdp.lastPrice();
+                    if (order.orderType() == OrderType::Market && tickPrice > 0)
+                        order.setPrice(tickPrice);
 
-                    double signalScore = order.extensionAs<double>(
-                        domain::trading::ExtKey::kSignalScore, 0.5);
                     RiskResult riskResult = RiskManager::instance().checkAutoSignal(
                         order, account, positions, tickPrice, signalScore);
                     if (riskResult.approved()) {

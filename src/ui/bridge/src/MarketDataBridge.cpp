@@ -244,10 +244,13 @@ void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
             if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
         }
         m_trackedSymbols.insert(resolved);
+        engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
     }
 }
 
 void MarketDataBridge::unsubscribeRealtime() {
+    for (const auto& s : m_trackedSymbols)
+        engine::GmSessionEngine::instance().unsubscribeTick(s.toStdString());
     m_trackedSymbols.clear();
 }
 

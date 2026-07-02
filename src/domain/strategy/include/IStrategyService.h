@@ -4,6 +4,7 @@
 #include "StrategyServiceTypes.h"
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
+#include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
 #include <condition_variable>
@@ -537,6 +538,8 @@ public:
 
     /// @brief 设置交易账户（风控需要）
     void setAccountId(std::string id) { m_accountId = std::move(id); }
+    /// @brief 设置策略ID（止损单必填）
+    void setStrategyId(std::string id) { m_strategyId = std::move(id); }
 
     /// @brief 距上次处理 tick 的毫秒数（>5000 可能卡死）
     [[nodiscard]] std::int64_t lastProcessedMsAgo() const noexcept {
@@ -564,9 +567,6 @@ private:
     /// @brief 后台线程主函数（分钟频/高频）：阻塞等待行情 → step() → 通知订单。
     void drainQueue();
 
-    /// @brief 后台线程主函数（日频）：仅做止损巡检，不跑策略评估。
-    void riskPatrolLoop();
-
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
@@ -587,6 +587,8 @@ private:
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
     std::string m_accountId;
+    std::string m_strategyId;
+    domain::trading::OrderBuilder m_orderBuilder;
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
 };
