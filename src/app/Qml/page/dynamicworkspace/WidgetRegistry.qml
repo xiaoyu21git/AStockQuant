@@ -63,7 +63,7 @@ QtObject {
             label: "热门板块",
             description: "行业板块涨跌排名 + 领涨股 + 资金流向",
             defaultColSpan: 6, defaultRowSpan: 3,
-            source: "qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml"
+            source: "../../page/dashboard/MarketGrid.qml"
         },
 
         // 兼容别名 (旧持久化数据迁移)
@@ -102,7 +102,7 @@ QtObject {
             "order_form", "kline_chart",
             "depth_panel", "account_card", "quote_card",
             "position_list", "order_list",
-            "strategy_monitor", "execution_log"
+            "strategy_monitor", "execution_log", "sector_heat"
         ]
         var result = []
         for (var i = 0; i < mainTypes.length; i++) {
