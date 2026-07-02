@@ -97,33 +97,22 @@ int OrderRecorder::updateOrderStatus(const std::string& clOrdId, RecOrdStatus st
     return db->executeUpdate(sql, params);
 }
 
-int OrderRecorder::insertFill(const std::string& clOrdId, const std::string& brokerOrderId,
-                               const std::string& execId, const std::string& symbol,
-                               double fillPrice, int fillQty, double fillAmount,
-                               double commission, int tradingDay, const std::string& fillTime) {
+int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string& execId,
+                                    double fillPrice, int fillQty, double fillAmount,
+                                    double commission, const std::string& fillTime) {
     auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-    if (!db || !db->isOpen()) {
-        INTERNAL_WARN_STREAM << "[OrderRecorder] DB 不可用, 成交记录丢失: " << clOrdId;
-        return 0;
-    }
+    if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =
-        "INSERT INTO live_fill "
-        "(cl_ord_id, broker_order_id, exec_id, symbol, fill_price, fill_qty, "
-        "fill_amount, commission, trading_day, fill_time) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        "UPDATE live_order SET status='FILLED', exec_id=?, fill_price=?, fill_qty=?, "
+        "fill_amount=?, commission=?, fill_time=? WHERE cl_ord_id=?";
     std::vector<SqlParam> params = {
-        SqlParam{clOrdId}, SqlParam{brokerOrderId}, SqlParam{execId},
-        SqlParam{symbol},
+        SqlParam{execId},
         SqlParam{fillPrice}, SqlParam{static_cast<std::int32_t>(fillQty)},
         SqlParam{fillAmount}, SqlParam{commission},
-        SqlParam{static_cast<std::int32_t>(tradingDay)}, SqlParam{fillTime}
+        SqlParam{fillTime}, SqlParam{clOrdId}
     };
-    int ret = db->executeUpdate(sql, params);
-    if (ret <= 0) {
-        INTERNAL_WARN_STREAM << "[OrderRecorder] insertFill 失败: " << clOrdId;
-    }
-    return ret;
+    return db->executeUpdate(sql, params);
 }
 
 } // namespace astock::infrastructure::database

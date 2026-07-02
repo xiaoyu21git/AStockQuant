@@ -230,21 +230,38 @@ public:
         if (!rpt) return;
         auto& e = GmSessionEngine::instance();
         TradeFill f;
-        f.fillId = rpt->exec_id; f.brokerOrderId = rpt->cl_ord_id;
+        f.fillId = rpt->exec_id;
+        f.brokerOrderId = rpt->order_id;  // 券商订单ID
         f.symbol = e.fromGmSymbol(rpt->symbol);
         f.price = static_cast<double>(rpt->price);
         f.quantity = static_cast<int64_t>(rpt->volume);
         f.commission = static_cast<double>(rpt->commission);
 
+        // fill_time: epoch seconds → "YYYY-MM-DD HH:MM:SS"
+        char timeBuf[32] = {};
+        auto tt = static_cast<time_t>(rpt->created_at);
+        struct tm local;
+#if defined(_WIN32) || defined(_WIN64)
+        localtime_s(&local, &tt);
+#else
+        localtime_r(&tt, &local);
+#endif
+        snprintf(timeBuf, sizeof(timeBuf), "%04d-%02d-%02d %02d:%02d:%02d",
+                 local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
+                 local.tm_hour, local.tm_min, local.tm_sec);
+
         auto* bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.execution.report", Event_Core::EventSource::MARKET_DATA);
-            evt.set("exec_id", f.fillId);
+            evt.set("cl_ord_id", std::string(rpt->cl_ord_id));
             evt.set("broker_order_id", f.brokerOrderId);
+            evt.set("exec_id", f.fillId);
             evt.set("symbol", f.symbol);
             evt.set("price", f.price);
             evt.set("quantity", static_cast<int64_t>(f.quantity));
+            evt.set("amount", static_cast<double>(rpt->amount));
             evt.set("commission", f.commission);
+            evt.set("fill_time", std::string(timeBuf));
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         }
     }

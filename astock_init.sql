@@ -350,7 +350,7 @@ CREATE TABLE IF NOT EXISTS `daily_position` (
 -- 实盘交易持久化表
 -- ============================================
 
--- 实盘订单流水表
+-- 实盘订单表 (订单+成交合为一张, 一行一条订单, 成交后更新)
 CREATE TABLE IF NOT EXISTS `live_order` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `cl_ord_id` VARCHAR(64) NOT NULL COMMENT '客户端订单ID',
@@ -363,9 +363,16 @@ CREATE TABLE IF NOT EXISTS `live_order` (
     `signal_score` DECIMAL(6,4) DEFAULT 0.0 COMMENT '信号强度',
     `position_effect` ENUM('OPEN','CLOSE') NOT NULL DEFAULT 'OPEN' COMMENT '开平仓',
     `trading_day` INT NOT NULL COMMENT '交易日 YYYYMMDD',
-    `status` ENUM('PENDING','PARTIAL_FILLED','FILLED','CANCELLED','REJECTED') NOT NULL DEFAULT 'PENDING',
+    `status` ENUM('PENDING','PARTIAL_FILLED','FILLED','CANCELLED','REJECTED') NOT NULL DEFAULT 'PENDING' COMMENT '订单状态',
     `broker_order_id` VARCHAR(64) DEFAULT NULL COMMENT '券商订单ID',
     `message` VARCHAR(500) DEFAULT NULL COMMENT '状态消息/拒绝原因',
+    -- 成交字段 (收到成交回报后更新)
+    `exec_id` VARCHAR(64) DEFAULT NULL COMMENT '交易所成交编号',
+    `fill_price` DECIMAL(12,4) DEFAULT NULL COMMENT '成交价格',
+    `fill_qty` INT DEFAULT NULL COMMENT '成交数量(股)',
+    `fill_amount` DECIMAL(15,4) DEFAULT NULL COMMENT '成交金额',
+    `commission` DECIMAL(10,4) DEFAULT NULL COMMENT '手续费',
+    `fill_time` DATETIME DEFAULT NULL COMMENT '成交时间',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
@@ -374,27 +381,7 @@ CREATE TABLE IF NOT EXISTS `live_order` (
     KEY `idx_symbol_day` (`symbol`, `trading_day`),
     KEY `idx_status` (`status`),
     KEY `idx_created_at` (`created_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘订单流水表';
-
--- 实盘成交记录表
-CREATE TABLE IF NOT EXISTS `live_fill` (
-    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    `cl_ord_id` VARCHAR(64) NOT NULL COMMENT '客户端订单ID',
-    `broker_order_id` VARCHAR(64) DEFAULT NULL COMMENT '券商订单ID',
-    `exec_id` VARCHAR(64) DEFAULT NULL COMMENT '交易所成交编号',
-    `symbol` VARCHAR(16) NOT NULL COMMENT '标的代码',
-    `fill_price` DECIMAL(12,4) NOT NULL COMMENT '成交价格',
-    `fill_qty` INT NOT NULL COMMENT '成交数量(股)',
-    `fill_amount` DECIMAL(15,4) NOT NULL COMMENT '成交金额',
-    `commission` DECIMAL(10,4) DEFAULT 0.0 COMMENT '手续费',
-    `trading_day` INT NOT NULL COMMENT '交易日 YYYYMMDD',
-    `fill_time` DATETIME NOT NULL COMMENT '成交时间',
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`id`),
-    KEY `idx_cl_ord_id` (`cl_ord_id`),
-    KEY `idx_trading_day` (`trading_day`),
-    KEY `idx_fill_time` (`fill_time`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘成交记录表';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘订单表(含成交)';
 
 -- ============================================
 -- 5. 实时监控与系统管理表

@@ -502,33 +502,21 @@ TradeExecutionEngine::TradeExecutionEngine()
                 fill.setPrice(e.get<double>("price").value_or(0.0));
                 fill.setQuantity(e.get<std::int64_t>("quantity").value_or(0));
 
-                // ── 持久化: 写入 live_fill 表 ──
+                // ── 持久化: 更新 live_order 成交字段 ──
                 {
-                    auto execId    = e.get<std::string>("exec_id").value_or("");
-                    auto brokerId  = e.get<std::string>("broker_order_id").value_or("");
-                    auto symbol    = e.get<std::string>("symbol").value_or("");
-                    auto fillPrice = e.get<double>("price").value_or(0.0);
-                    auto fillQty   = e.get<std::int64_t>("quantity").value_or(0);
+                    auto clOrdId    = e.get<std::string>("cl_ord_id").value_or("");
+                    auto execId     = e.get<std::string>("exec_id").value_or("");
+                    auto fillPrice  = e.get<double>("price").value_or(0.0);
+                    auto fillQty    = e.get<std::int64_t>("quantity").value_or(0);
+                    auto fillAmount = e.get<double>("amount").value_or(fillPrice * static_cast<double>(fillQty));
                     auto commission = e.get<double>("commission").value_or(0.0);
-                    double fillAmount = fillPrice * static_cast<double>(fillQty);
-                    int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
                     auto fillTime   = e.get<std::string>("fill_time").value_or("");
-
-                    // 通过 broker_order_id 找到 cl_ord_id
-                    std::string clOrdId;
-                    {
-                        std::lock_guard<std::mutex> lock(m_impl->m_mutex);
-                        for (auto& o : m_impl->m_recentOrders) {
-                            if (o.brokerOrderId() == brokerId) {
-                                clOrdId = o.clOrdId();
-                                break;
-                            }
-                        }
+                    if (!clOrdId.empty()) {
+                        astock::infrastructure::database::OrderRecorder::instance().updateOrderFill(
+                            clOrdId, execId,
+                            fillPrice, static_cast<int>(fillQty), fillAmount,
+                            commission, fillTime);
                     }
-                    astock::infrastructure::database::OrderRecorder::instance().insertFill(
-                        clOrdId, brokerId, execId, symbol,
-                        fillPrice, static_cast<int>(fillQty), fillAmount,
-                        commission, td > 0 ? td : 0, fillTime);
                 }
 
                 if (m_impl->m_tradeFillCallback)

@@ -28,10 +28,9 @@ public:
                           const std::string& brokerOrderId = "",
                           const std::string& message = "");
 
-    int insertFill(const std::string& clOrdId, const std::string& brokerOrderId,
-                   const std::string& execId, const std::string& symbol,
-                   double fillPrice, int fillQty, double fillAmount,
-                   double commission, int tradingDay, const std::string& fillTime);
+    int updateOrderFill(const std::string& clOrdId, const std::string& execId,
+                        double fillPrice, int fillQty, double fillAmount,
+                        double commission, const std::string& fillTime);
 
 private:
     OrderRecorder() = default;
