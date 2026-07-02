@@ -27,6 +27,7 @@ class MarketDataBridge : public QObject {
     Q_PROPERTY(bridge::CandleDataModel* model READ model CONSTANT)
     Q_PROPERTY(QString symbol READ symbol WRITE setSymbol NOTIFY symbolChanged)
     Q_PROPERTY(int period READ period WRITE setPeriod NOTIFY periodChanged)
+    Q_PROPERTY(QVariantList sectorHeatData READ sectorHeatData NOTIFY sectorHeatDataChanged)
 
 public:
     // ── 周期枚举 (来自 StockDataLoader) ──
@@ -70,6 +71,10 @@ public:
     Q_INVOKABLE void loadHistory(const QString& code, int period);
     Q_INVOKABLE void loadFromDB(const QString& code, int period);
 
+    // ── 板块数据 ──
+    Q_INVOKABLE void fetchSectorHeat();
+    QVariantList sectorHeatData() const { return m_sectorHeatData; }
+
     // ── Domain 工具方法 ──
     Q_INVOKABLE int priceDigitsForMode(const QString& mode) const;
     Q_INVOKABLE double boardLimitRatio(const QString& symbol) const;
@@ -90,6 +95,7 @@ signals:
     void periodChanged();
     void dataReady();
     void tickReceived(const QString& symbol, double price, double volume);
+    void sectorHeatDataChanged();
 
 private:
     // ── tick 事件处理 ──
@@ -129,6 +135,8 @@ private:
     // 快照防抖
     double m_lastSnapPrice = 0.0;
     int    m_lastSnapDepthHash = 0;
+
+    QVariantList m_sectorHeatData;
 };
 
 } // namespace bridge

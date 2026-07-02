@@ -766,4 +766,67 @@ void MarketDataBridge::syncLiveData() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 热门板块数据
+// ═══════════════════════════════════════════════════════════════════
+
+void MarketDataBridge::fetchSectorHeat() {
+    // 申万一级行业 → 申万行业指数代码映射 (部分主力行业)
+    struct SectorInfo { const char* name; const char* idxCode; };
+    static const SectorInfo kSectors[] = {
+        {"半导体",   "801081.SI"}, {"银行",     "801780.SI"}, {"白酒",       "801125.SI"},
+        {"电力",     "801730.SI"}, {"军工",     "801740.SI"}, {"医疗器械",   "801153.SI"},
+        {"新能源车", "801723.SI"}, {"光伏",     "801735.SI"}, {"消费电子",   "801085.SI"},
+        {"人工智能", "801742.SI"}, {"煤炭",     "801722.SI"}, {"房地产",     "801180.SI"},
+        {"证券",     "801790.SI"}, {"通信设备", "801102.SI"}, {"计算机应用", "801222.SI"},
+        {"化学制药", "801151.SI"}, {"食品加工", "801124.SI"}, {"汽车整车",   "801093.SI"},
+        {"钢铁",     "801040.SI"}, {"水泥",     "801710.SI"}
+    };
+    constexpr int kCount = sizeof(kSectors) / sizeof(kSectors[0]);
+
+    QVariantList result;
+    char endDate[32];
+    {
+        auto now = std::chrono::system_clock::now();
+        auto tt = std::chrono::system_clock::to_time_t(now);
+        struct tm local;
+#if defined(_WIN32) || defined(_WIN64)
+        localtime_s(&local, &tt);
+#else
+        localtime_r(&tt, &local);
+#endif
+        snprintf(endDate, sizeof(endDate), "%04d-%02d-%02d",
+                 local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
+    }
+
+    for (int i = 0; i < kCount; ++i) {
+        auto* bars = ::history_bars_n(kSectors[i].idxCode, "1d", 2, endDate, 0, nullptr, true, nullptr);
+        if (!bars || bars->status() || bars->count() < 2) {
+            if (bars) bars->release();
+            continue;
+        }
+        double prevClose = bars->at(bars->count() - 2).close;
+        double latestClose = bars->at(bars->count() - 1).close;
+        bars->release();
+        if (prevClose <= 0) continue;
+        double chg = (latestClose - prevClose) / prevClose * 100.0;
+
+        QVariantMap item;
+        item["name"] = QString::fromUtf8(kSectors[i].name);
+        item["chg"]  = chg;
+        item["lead"] = QString();
+        item["leadChg"] = 0.0;
+        result.append(item);
+    }
+
+    // 按涨跌幅绝对值降序排列
+    std::sort(result.begin(), result.end(), [](const QVariant& a, const QVariant& b) {
+        return std::abs(a.toMap()["chg"].toDouble()) > std::abs(b.toMap()["chg"].toDouble());
+    });
+
+    m_sectorHeatData = result;
+    emit sectorHeatDataChanged();
+    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done, items=" << result.size();
+}
+
 } // namespace bridge
