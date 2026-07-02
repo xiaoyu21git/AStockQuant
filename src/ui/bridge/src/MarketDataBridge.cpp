@@ -799,16 +799,19 @@ void MarketDataBridge::fetchSectorHeat() {
                  local.tm_year + 1900, local.tm_mon + 1, local.tm_mday);
     }
 
+    int okCount = 0, failCount = 0;
     for (int i = 0; i < kCount; ++i) {
         auto* bars = ::history_bars_n(kSectors[i].idxCode, "1d", 2, endDate, 0, nullptr, true, nullptr);
-        if (!bars || bars->status() || bars->count() < 2) {
-            if (bars) bars->release();
-            continue;
+        if (!bars) { ++failCount; continue; }
+        if (bars->status() || bars->count() < 2) {
+            INTERNAL_WARN_STREAM << "[MktBridge] fetchSectorHeat " << kSectors[i].idxCode
+                                 << " status=" << bars->status() << " count=" << bars->count();
+            bars->release(); ++failCount; continue;
         }
         double prevClose = bars->at(bars->count() - 2).close;
         double latestClose = bars->at(bars->count() - 1).close;
         bars->release();
-        if (prevClose <= 0) continue;
+        if (prevClose <= 0) { ++failCount; continue; }
         double chg = (latestClose - prevClose) / prevClose * 100.0;
 
         QVariantMap item;
@@ -817,6 +820,7 @@ void MarketDataBridge::fetchSectorHeat() {
         item["lead"] = QString();
         item["leadChg"] = 0.0;
         result.append(item);
+        ++okCount;
     }
 
     // 按涨跌幅绝对值降序排列
@@ -826,7 +830,7 @@ void MarketDataBridge::fetchSectorHeat() {
 
     m_sectorHeatData = result;
     emit sectorHeatDataChanged();
-    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done, items=" << result.size();
+    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done ok=" << okCount << " fail=" << failCount << " total=" << kCount;
 }
 
 } // namespace bridge
