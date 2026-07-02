@@ -115,4 +115,28 @@ int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string
     return db->executeUpdate(sql, params);
 }
 
+int OrderRecorder::insertAccountSnapshot(int tradingDay, double totalAsset, double availableCash,
+                                          double marketValue, double frozenCash,
+                                          double realizedPnl, double unrealizedPnl) {
+    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) return 0;
+    using astock::database::SqlParam;
+    std::string sql =
+        "INSERT INTO live_account_daily "
+        "(trading_day, total_asset, available_cash, market_value, frozen_cash, "
+        "realized_pnl, unrealized_pnl) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "ON DUPLICATE KEY UPDATE "
+        "total_asset=VALUES(total_asset), available_cash=VALUES(available_cash), "
+        "market_value=VALUES(market_value), frozen_cash=VALUES(frozen_cash), "
+        "realized_pnl=VALUES(realized_pnl), unrealized_pnl=VALUES(unrealized_pnl)";
+    std::vector<SqlParam> params = {
+        SqlParam{static_cast<std::int32_t>(tradingDay)},
+        SqlParam{totalAsset}, SqlParam{availableCash},
+        SqlParam{marketValue}, SqlParam{frozenCash},
+        SqlParam{realizedPnl}, SqlParam{unrealizedPnl}
+    };
+    return db->executeUpdate(sql, params);
+}
+
 } // namespace astock::infrastructure::database

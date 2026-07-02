@@ -32,6 +32,10 @@ public:
                         double fillPrice, int fillQty, double fillAmount,
                         double commission, const std::string& fillTime);
 
+    int insertAccountSnapshot(int tradingDay, double totalAsset, double availableCash,
+                              double marketValue, double frozenCash,
+                              double realizedPnl, double unrealizedPnl);
+
 private:
     OrderRecorder() = default;
 

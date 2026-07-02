@@ -8,6 +8,7 @@
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "../../../infrastructure/include/database/DatabaseConfig.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
+#include "../../../infrastructure/include/database/OrderRecorder.h"
 #include "../../backtest/include/BacktestRequest.h"
 #include "../../backtest/include/BacktestFillSimulator.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
@@ -847,6 +848,17 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
 
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成, 生成 "
                          << ordersGenerated << " 笔信号";
+
+    // ── 每日账户快照 ──
+    {
+        auto acc = engine::AccountEngine::instance().account();
+        int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
+        if (td > 0 && acc.totalAsset > 0) {
+            astock::infrastructure::database::OrderRecorder::instance().insertAccountSnapshot(
+                td, acc.totalAsset, acc.availableCash, acc.marketValue, acc.frozenCash,
+                acc.realizedPnl, acc.unrealizedPnl);
+        }
+    }
 }
 
 StrategyEngine::Builder::Builder() = default;

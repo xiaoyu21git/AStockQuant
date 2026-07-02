@@ -383,6 +383,21 @@ CREATE TABLE IF NOT EXISTS `live_order` (
     KEY `idx_created_at` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘订单表(含成交)';
 
+-- 实盘每日账户快照表
+CREATE TABLE IF NOT EXISTS `live_account_daily` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `trading_day` INT NOT NULL COMMENT '交易日 YYYYMMDD',
+    `total_asset` DECIMAL(15,4) NOT NULL COMMENT '总资产',
+    `available_cash` DECIMAL(15,4) NOT NULL COMMENT '可用资金',
+    `market_value` DECIMAL(15,4) NOT NULL COMMENT '持仓市值',
+    `frozen_cash` DECIMAL(15,4) DEFAULT 0.0 COMMENT '冻结资金',
+    `realized_pnl` DECIMAL(15,4) DEFAULT 0.0 COMMENT '已实现盈亏',
+    `unrealized_pnl` DECIMAL(15,4) DEFAULT 0.0 COMMENT '未实现盈亏',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_trading_day` (`trading_day`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='实盘每日账户快照';
+
 -- ============================================
 -- 5. 实时监控与系统管理表
 -- ============================================
