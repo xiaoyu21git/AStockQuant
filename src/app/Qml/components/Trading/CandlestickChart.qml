@@ -319,8 +319,8 @@ Rectangle {
             ctx.strokeStyle=(latestPrice>=preClose)?"#ef5350":"#26a69a";ctx.lineWidth=1.3;ctx.setLineDash([])
             ctx.beginPath();for(var k=0;k<pts.length;k++)k===0?ctx.moveTo(pts[k].x,pts[k].y):ctx.lineTo(pts[k].x,pts[k].y);ctx.stroke()
             // 均价线 (VWAP — 从 MarketDataBridge 或 LiveData 读取)
-            if(avgLinePrice>0){var ay=yPrice(avgLinePrice,chartTop,mainH);ctx.strokeStyle="#f59e0b";ctx.lineWidth=0.9
-                ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(px,ay);ctx.lineTo(px+pw,ay);ctx.stroke();ctx.setLineDash([])
+            if(avgLinePrice>0){var ay=yPrice(avgLinePrice,chartTop,mainH);ctx.strokeStyle="#f59e0b";ctx.lineWidth=1.2
+                ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(px,ay);ctx.lineTo(px+pw,ay);ctx.stroke()
                 ctx.fillStyle="#f59e0b";ctx.textAlign="left";ctx.fillText("均价 "+avgLinePrice.toFixed(2),px+4,ay-2)}
         } else {
             // ── K线模式 ──
