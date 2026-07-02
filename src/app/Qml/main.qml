@@ -8,9 +8,9 @@ ApplicationWindow {
     width: 1440
     height: 900
     visible: true
-    // 去掉标题
+    visibility: Window.Maximized
     title: "量化交易系统"
-    flags: Qt.Window | Qt.FramelessWindowHint
+    flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinimizeButtonHint
     color: "#0F172A"
     
     // 属性定义
