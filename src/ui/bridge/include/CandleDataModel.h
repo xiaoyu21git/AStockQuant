@@ -26,6 +26,7 @@ class CandleDataModel : public QAbstractTableModel {
     Q_PROPERTY(double lastPrice READ lastPrice NOTIFY lastPriceChanged)
     Q_PROPERTY(double lastVolume READ lastVolume NOTIFY lastVolumeChanged)
     Q_PROPERTY(double preClose READ preClose WRITE setPreClose NOTIFY preCloseChanged)
+    Q_PROPERTY(double avgLine READ avgLine NOTIFY avgLineChanged)
 
 public:
     // ── 基础列 ──
@@ -78,6 +79,8 @@ public:
     double lastVolume() const;
     double preClose()   const { return m_preClose; }
     void   setPreClose(double v);
+    double avgLine()    const { return m_avgLine; }
+    void   setAvgLine(double v) { if (m_avgLine != v) { m_avgLine = v; emit avgLineChanged(); } }
 
     const CandleItem* candleAt(int row) const;  // 供 StockDataLoader 内部使用
 
@@ -90,10 +93,12 @@ signals:
     void lastPriceChanged();
     void lastVolumeChanged();
     void preCloseChanged();
+    void avgLineChanged();
 
 private:
     std::vector<CandleItem> m_data;
     double m_preClose = 0.0;
+    double m_avgLine = 0.0;
     const domain::market::BarSeries* m_series = nullptr;
 };
 

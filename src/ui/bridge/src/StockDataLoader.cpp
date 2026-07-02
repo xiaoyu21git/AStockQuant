@@ -238,6 +238,16 @@ void StockDataLoader::loadFromDB(const QString& code, int period) {
 
     m_model->setCandles(result);
     m_model->setPreClose(result.isEmpty() ? 0.0 : result.last().toMap()["close"].toDouble());
+    // 分钟线计算VWAP均价
+    if (period == TimeShare || (period >= Min1 && period <= Min120)) {
+        double tv = 0.0, tvol = 0.0;
+        for (const auto& r : result) {
+            auto m = r.toMap();
+            double v = m["volume"].toDouble();
+            if (v > 0) { tv += m["close"].toDouble() * v; tvol += v; }
+        }
+        m_model->setAvgLine(tvol > 0 ? tv / tvol : 0.0);
+    }
     m_modelCount = result.size();
     m_isFirstSync = false;
     emit dataReady();

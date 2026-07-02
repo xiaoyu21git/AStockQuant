@@ -24,20 +24,11 @@ CandlestickChart {
 
     // ── 分时 VWAP 均价线: 从 MarketDataBridge 的 snapshot 中取 avgLine ──
     avgLinePrice: {
-        // 实时行情有 avgLine 直接用，否则从分钟线计算 VWAP
+        // 实时行情 avgLine 优先，否则用 C++ 模型计算的 VWAP
         var snaps = Bridge.MarketDataBridge ? Bridge.MarketDataBridge.marketSnapshots : ({})
         var s = snaps[exchangeSymbol] || ({})
         if (s.avgLine > 0) return s.avgLine
-        if (!candleModel || candleModel.count === 0) return 0.0
-        var tv = 0.0, tvol = 0.0
-        for (var i = 0; i < candleModel.count; i++) {
-            var c = candleModel.get(i)
-            var v = Number(c.volume || 0)
-            if (v <= 0) continue
-            tv += Number(c.close || 0) * v
-            tvol += v
-        }
-        return tvol > 0 ? tv / tvol : 0.0
+        return (candleModel && candleModel.avgLine) ? candleModel.avgLine : 0.0
     }
 
     // ── 分时图 tick 触发重绘 ──
