@@ -180,13 +180,46 @@ void StockDataLoader::loadFromDB(const QString& code, int period) {
 
     if (period == TimeShare || (period >= Min1 && period <= Min120)) {
         if (!m_timer.isActive()) m_timer.start();
-        auto daily = loadDailyBars(gmSym, 5);
-        double pc = daily.isEmpty() ? 0.0 : daily.last().toMap()["close"].toDouble();
-        if (pc > 0) {
-            QVariantMap m;
-            m["timestamp"] = QVariant::fromValue<qint64>(QDateTime::currentDateTime().toMSecsSinceEpoch());
-            m["open"]=pc; m["high"]=pc; m["low"]=pc; m["close"]=pc; m["volume"]=0;
-            result.append(m);
+        // 加载历史分钟K线
+        const char* freq = "60s";
+        if (period == Min5) freq = "300s";
+        else if (period == Min15) freq = "900s";
+        else if (period == Min30) freq = "1800s";
+        else if (period == Min60) freq = "3600s";
+        else if (period == Min120) freq = "7200s";
+        else if (period == TimeShare) freq = "60s";
+        auto now2 = std::chrono::system_clock::now();
+        auto start2 = now2 - std::chrono::hours(24 * 5);
+        auto t_now2  = std::chrono::system_clock::to_time_t(now2);
+        auto t_start2 = std::chrono::system_clock::to_time_t(start2);
+        char s2[32], e2[32];
+        std::strftime(s2, sizeof(s2), "%Y-%m-%d %H:%M:%S", std::localtime(&t_start2));
+        std::strftime(e2, sizeof(e2), "%Y-%m-%d %H:%M:%S", std::localtime(&t_now2));
+        auto* minBars = ::history_bars(gmSym.c_str(), freq, s2, e2, 0, nullptr, true, nullptr);
+        if (minBars && !minBars->status() && minBars->count() > 0) {
+            for (size_t i = 0; i < minBars->count(); ++i) {
+                auto& b = minBars->at(i);
+                QVariantMap item;
+                item["timestamp"] = QVariant::fromValue<qint64>(static_cast<qint64>(b.bob * 1000.0));
+                item["open"]   = b.open;
+                item["high"]   = b.high;
+                item["low"]    = b.low;
+                item["close"]  = b.close;
+                item["volume"] = b.volume;
+                result.append(item);
+            }
+        }
+        if (minBars) minBars->release();
+        // 如果没历史数据，至少加一个前收占位
+        if (result.isEmpty()) {
+            auto daily = loadDailyBars(gmSym, 5);
+            double pc = daily.isEmpty() ? 0.0 : daily.last().toMap()["close"].toDouble();
+            if (pc > 0) {
+                QVariantMap m;
+                m["timestamp"] = QVariant::fromValue<qint64>(QDateTime::currentDateTime().toMSecsSinceEpoch());
+                m["open"]=pc; m["high"]=pc; m["low"]=pc; m["close"]=pc; m["volume"]=0;
+                result.append(m);
+            }
         }
     } else {
         m_timer.stop();
