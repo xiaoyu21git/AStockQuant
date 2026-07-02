@@ -63,7 +63,7 @@ QtObject {
             label: "热门板块",
             description: "行业板块涨跌排名 + 领涨股 + 资金流向",
             defaultColSpan: 6, defaultRowSpan: 3,
-            source: "../../page/dashboard/MarketGrid.qml"
+            source: "qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml"
         },
 
         // 兼容别名 (旧持久化数据迁移)
