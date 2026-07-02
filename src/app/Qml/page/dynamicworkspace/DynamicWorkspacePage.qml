@@ -57,7 +57,10 @@ Item {
         { typeName: "execution_log",    colSpan: 6, rowSpan: 2 },
         // Row 5: 持仓列表 + 委托列表 (240px)
         { typeName: "position_list",    colSpan: 6, rowSpan: 2 },
-        { typeName: "order_list",       colSpan: 6, rowSpan: 2 }
+        { typeName: "order_list",       colSpan: 6, rowSpan: 2 },
+        // Row 6: 热门板块 + 报价 (240px)
+        { typeName: "sector_heat",      colSpan: 6, rowSpan: 2 },
+        { typeName: "quote_card",       colSpan: 6, rowSpan: 2 }
     ]
 
     function loadDefaultLayout() {
