@@ -41,7 +41,6 @@ set(BRIDGE_HEADERS
     include/RuleTemplateDetailHelper.h
     include/RuleTemplateSuggestionService.h
     include/CandleDataModel.h
-    include/StockDataLoader.h
     include/CrosshairManager.h
 )
 

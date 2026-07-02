@@ -11,7 +11,6 @@
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
 #include "CandleDataModel.h"
-#include "StockDataLoader.h"
 #include "CrosshairManager.h"
 #include "MarketDataBridge.h"
 #include "StrategyBridge.h"
@@ -73,7 +72,7 @@ namespace wang{
          }
       );
 
-      // 两者共享同一个 CandleDataModel 实例
+      // 共享 CandleDataModel 实例
       auto* sharedModel = new bridge::CandleDataModel();
 
       qmlRegisterSingletonType<bridge::CandleDataModel>(
@@ -83,30 +82,21 @@ namespace wang{
          }
       );
 
-      qmlRegisterSingletonType<bridge::StockDataLoader>(
-         url, 1, 0, "StockDataLoader",
-         [sharedModel](QQmlEngine*, QJSEngine*) -> QObject* {
-            auto* loader = new bridge::StockDataLoader();
-            loader->setModel(sharedModel);
-            return loader;
-         }
-      );
+      // 统一的行情桥接层 — 同时注册到两个 QML 名字, 兼容现有 QML 代码
+      auto* marketBridge = new bridge::MarketDataBridge();
+      marketBridge->setModel(sharedModel);
+      marketBridge->initializeAsync();
+
+      qmlRegisterSingletonInstance<bridge::MarketDataBridge>(
+         url, 1, 0, "MarketDataBridge", marketBridge);
+
+      qmlRegisterSingletonInstance<bridge::MarketDataBridge>(
+         url, 1, 0, "StockDataLoader", marketBridge);
 
       // CrosshairManager — 十字光标状态 (单例, 引擎不接管生命周期)
       qmlRegisterSingletonInstance<bridge::CrosshairManager>(
          url, 1, 0, "CrosshairManager",
          &bridge::CrosshairManager::instance()
-      );
-
-      qmlRegisterSingletonType<bridge::MarketDataBridge>(
-         url, 1, 0, "MarketDataBridge",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            auto* bridge = new bridge::MarketDataBridge();
-            bridge->initializeAsync();
-            return bridge;
-         }
       );
 
        qmlRegisterSingletonType<StrategyBridge>(
