@@ -7,7 +7,7 @@ import AStock.Bridge 1.0 as Bridge
 
 Rectangle {
     id: root
-    color: "#0d1117"
+    color: "#e0e0e0"
 
     property string stockCode:  "000001"
     property string stockName:  ""
@@ -20,12 +20,12 @@ Rectangle {
 
     readonly property color upColor:    "#ef5350"
     readonly property color downColor:  "#26a69a"
-    readonly property color frameBg:    "#0d1117"
-    readonly property color panelBg:    "#161b22"
-    readonly property color gridColor:  "#21262d"
-    readonly property color borderColor:"#30363d"
-    readonly property color textDim:    "#8b949e"
-    readonly property color textBright: "#e6edf3"
+    readonly property color frameBg:    "#d8d8d8"
+    readonly property color panelBg:    "#e8e8e8"
+    readonly property color gridColor:  "#b0b0b0"
+    readonly property color borderColor:"#aaaaaa"
+    readonly property color textDim:    "#555555"
+    readonly property color textBright: "#111111"
 
     readonly property var periodLabels: ["分时","1分","5分","15分","30分","60分","120分","日线","周线","月线"]
 
@@ -206,7 +206,7 @@ Rectangle {
 
         // ── 十字光标覆盖层 MouseArea ──
         MouseArea {
-            anchors.fill: parent; hoverEnabled: true
+            z: 10; anchors.fill: parent; hoverEnabled: true
             onPositionChanged: function(m) {
                 if (!candleModel || candleModel.count===0){ hideCrosshair(); return }
                 var n = candleModel.count, lm=4, rm=58
@@ -289,13 +289,13 @@ Rectangle {
                             {min:210,l:"14:30",b:false},{min:240,l:"15:00",b:true}]
             for (var ti=0; ti<timeGrid.length; ti++) {
                 var tg=timeGrid[ti], tx=leftMargin+tg.min/240*pw
-                ctx.strokeStyle=tg.b?"#404860":gridColor; ctx.lineWidth=tg.b?1.0:0.4
+                ctx.strokeStyle=tg.b?"#888888":gridColor; ctx.lineWidth=tg.b?1.2:0.6
                 ctx.beginPath(); ctx.moveTo(tx,chartTop); ctx.lineTo(tx,chartTop+mainH); ctx.stroke()
                 ctx.fillStyle=textDim; ctx.font="9px sans-serif"; ctx.textAlign="center"
                 ctx.fillText(tg.l, tx, H-2)
             }
             // 横线网格
-            ctx.strokeStyle=gridColor; ctx.lineWidth=0.5
+            ctx.strokeStyle=gridColor; ctx.lineWidth=0.7
             ctx.fillStyle=textDim; ctx.font="9px sans-serif"; ctx.textAlign="right"
             for (var g=0;g<5;g++){var gy=chartTop+mainH*g/4;ctx.beginPath();ctx.moveTo(px,gy);ctx.lineTo(px+pw,gy);ctx.stroke()
                 ctx.fillText((priceMax-range*g/4).toFixed(2),px+pw,gy+3)}
@@ -313,7 +313,7 @@ Rectangle {
                 grad.addColorStop(0,above?"rgba(239,68,68,0.28)":"rgba(16,185,129,0.28)")
                 grad.addColorStop(1,"rgba(0,0,0,0.01)");ctx.fillStyle=grad;ctx.fill()}
             // 价格折线
-            ctx.strokeStyle=(latestPrice>=preClose)?"#ef5350":"#26a69a";ctx.lineWidth=1.3;ctx.setLineDash([])
+            ctx.strokeStyle="#ffffff";ctx.lineWidth=1.5;ctx.setLineDash([])
             ctx.beginPath();for(var k=0;k<pts.length;k++)k===0?ctx.moveTo(pts[k].x,pts[k].y):ctx.lineTo(pts[k].x,pts[k].y);ctx.stroke()
             // 均价线 (VWAP — 从 MarketDataBridge 或 LiveData 读取)
             // 累计VWAP曲线
