@@ -49,10 +49,16 @@ CandlestickChart {
         }
     }
 
+    onStockCodeChanged: {
+        if (root.dataLoader && root.stockCode)
+            root.dataLoader.loadFromDB(root.stockCode, root.chartPeriod)
+    }
+    onChartPeriodChanged: {
+        if (root.dataLoader && root.stockCode)
+            root.dataLoader.loadFromDB(root.stockCode, root.chartPeriod)
+    }
+
     Component.onCompleted: {
-        console.log("[CandlestickChartWidget] created, stockCode=" + root.stockCode
-                    + " period=" + root.chartPeriod + " modelCount="
-                    + (root.candleModel ? root.candleModel.count : "null"))
         if (root.dataLoader && root.stockCode)
             root.dataLoader.loadFromDB(root.stockCode, root.chartPeriod)
     }
