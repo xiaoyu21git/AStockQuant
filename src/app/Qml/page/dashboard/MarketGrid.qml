@@ -8,266 +8,84 @@ Item {
     property var marketData: []
     property var marketSections: []
 
-    // 动态工作区自绑定: 当外部未提供数据时, 用静态示例展示布局
-    Component.onCompleted: {
-        if (marketSections.length === 0) {
-            marketSections = [
-                { title: "", stocks: [
-                    { symbol:"半导体", name:"领涨:中芯国际 +5.1%", price:3.52, change:3.52, color:"#22c55e", updatedAt:"主力净流入 +2.1亿  净流入率 1.5%" },
-                    { symbol:"新能源车", name:"领涨:比亚迪 +3.2%", price:2.15, change:2.15, color:"#22c55e", updatedAt:"主力净流入 +1.8亿  净流入率 1.2%" },
-                    { symbol:"光伏", name:"领涨:隆基绿能 +2.8%", price:1.93, change:1.93, color:"#22c55e", updatedAt:"主力净流入 +1.5亿  净流入率 0.9%" },
-                    { symbol:"白酒", name:"领跌:贵州茅台 -0.5%", price:-0.35, change:-0.35, color:"#ef4444", updatedAt:"主力净流出 -0.8亿  净流入率 -0.6%" },
-                    { symbol:"军工", name:"领涨:中航沈飞 +1.9%", price:1.28, change:1.28, color:"#22c55e", updatedAt:"主力净流入 +0.9亿  净流入率 0.7%" }
-                ]}
-            ]
-        }
-    }
-
-    function updateSectorSection() {
-        var raw = Bridge.MarketDataBridge ? Bridge.MarketDataBridge.sectorHeatData : []
-        if (raw.length === 0) return
-        var stocks = []
-        for (var i = 0; i < raw.length; i++) {
-            var s = raw[i]
-            var sig = (s.signal===0) ? "真机会" : (s.signal===1 ? "诱多" : (s.signal===2 ? "抄底" : "走弱"))
-            stocks.push({
-                symbol: s.name, name: sig + " " + (s.lead||""),
-                price: s.chg, change: s.chg,
-                color: (s.signal===0) ? "#22c55e" : (s.signal===1 ? "#ef4444" : (s.signal===2 ? "#f59e0b" : "#888")),
-                updatedAt: (s.netIn||0>=0?"+":"") + (Math.abs(s.netIn||0)>=1e8?(Math.abs(s.netIn)/1e8).toFixed(1)+"亿":Math.abs(s.netIn||0)>=1e4?(Math.abs(s.netIn)/1e4).toFixed(0)+"万":Math.abs(s.netIn||0).toFixed(0)) + " 净流入率" + (s.netInRate||0).toFixed(1)+"%"
-            })
-        }
-        var secs = marketSections.slice()
-        secs.push({ title: "热门板块", icon: "🔥", stocks: stocks })
-        marketSections = secs
-    }
-
-    function sectionStock(stockReference) {
-        if (typeof stockReference === "number") {
-            return marketGrid.marketData[stockReference] || ({})
-        }
-        return stockReference || ({})
-    }
-
-    function instrumentLabel(stockData) {
-        var symbolText = String((stockData || {}).symbol || "--")
-        var nameText = String((stockData || {}).name || "")
-        return nameText.length > 0 ? (symbolText + " " + nameText) : symbolText
-    }
+    // ── 静态示例数据 ──
+    readonly property var _sectors: [
+        { name:"半导体",   chg:3.52, net:"+2.1亿", color:"#22c55e", sig:"🟢",
+          leads: [{sym:"中芯国际",c:5.1},{sym:"北方华创",c:4.2},{sym:"韦尔股份",c:2.8}] },
+        { name:"新能源车", chg:2.15, net:"+1.8亿", color:"#22c55e", sig:"🟢",
+          leads: [{sym:"比亚迪",c:3.2},{sym:"宁德时代",c:2.1},{sym:"长城汽车",c:1.5}] },
+        { name:"光伏",     chg:1.93, net:"+1.5亿", color:"#22c55e", sig:"🟢",
+          leads: [{sym:"隆基绿能",c:2.8},{sym:"通威股份",c:1.9},{sym:"阳光电源",c:1.3}] },
+        { name:"白酒",     chg:-0.35,net:"-0.8亿", color:"#ef4444", sig:"🔴",
+          leads: [{sym:"贵州茅台",c:-0.5},{sym:"五粮液",c:-0.3},{sym:"泸州老窖",c:-0.2}] },
+        { name:"军工",     chg:1.28, net:"+0.9亿", color:"#22c55e", sig:"🟢",
+          leads: [{sym:"中航沈飞",c:1.9},{sym:"航发动力",c:1.2},{sym:"中航西飞",c:0.8}] },
+        { name:"人工智能", chg:2.87, net:"+1.2亿", color:"#22c55e", sig:"🟢",
+          leads: [{sym:"科大讯飞",c:4.3},{sym:"海康威视",c:2.1},{sym:"浪潮信息",c:1.9}] }
+    ]
+    property int selectedIdx: 0
 
     Rectangle {
-        anchors.fill: parent
-        radius: 16
-        color: "#121828"
-        border.color: "#2d3748"
-        border.width: 1
-        clip: true
+        anchors.fill: parent; radius: 16; color: "#121828"
+        border.color: "#2d3748"; border.width: 1; clip: true
 
         ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 20
-            spacing: 10
+            anchors.fill: parent; anchors.margins: 16; spacing: 8
 
-            Item {
-                Layout.fillWidth: true
-                height: 30
-
-                RowLayout {
-                    anchors.fill: parent
-
-                    Text {
-                        text: "热门板块"
-                        color: "#f1f5f9"
-                        font.pixelSize: 16
-                        font.weight: Font.Medium
-                    }
-
+            // ── 标题栏 ──
+            Item { Layout.fillWidth: true; height: 28
+                RowLayout { anchors.fill: parent
+                    Text { text:"热门板块"; color:"#f1f5f9"; font.pixelSize:15; font.weight:Font.DemiBold }
                     Item { Layout.fillWidth: true }
-
-                    Item {
-                        width: 24
-                        height: 24
-
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 6
-                            color: "#3b82f620"
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "🔄"
-                                font.pixelSize: 12
-                                color: "#3b82f6"
-                            }
-                        }
-                    }
+                    Text { text:"🔄"; font.pixelSize:13; color:"#3b82f6" }
                 }
             }
 
-            Item {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+            // ── 主体: 左列表 + 右明细 ──
+            RowLayout {
+                Layout.fillWidth: true; Layout.fillHeight: true; spacing: 10
 
-                RowLayout {
-                    anchors.fill: parent
-                    spacing: 12
+                // 左: 板块列表
+                Rectangle {
+                    Layout.preferredWidth: parent.width * 0.35; Layout.fillHeight: true
+                    radius: 10; color: "#1a2235"
+                    ListView {
+                        id: leftList; anchors.fill: parent; anchors.margins: 6
+                        clip: true; model: _sectors
+                        delegate: Rectangle {
+                            width: leftList.width; height: 36; radius: 6
+                            color: index === selectedIdx ? "#1e3a5f" : "transparent"
+                            RowLayout {
+                                anchors.fill: parent; anchors.margins: 6; spacing: 4
+                                Text { text: modelData.sig; font.pixelSize: 11 }
+                                Text { text: modelData.name; color: "#d0d0e0"; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+                                Text { text: (modelData.chg>0?"+":"")+modelData.chg.toFixed(2)+"%"
+                                       color: modelData.color; font.pixelSize: 11; font.weight: Font.DemiBold }
+                            }
+                            MouseArea { anchors.fill: parent; onClicked: selectedIdx = index }
+                        }
+                    }
+                }
 
-                    Repeater {
-                        model: marketGrid.marketSections
+                // 右: 领涨股
+                Rectangle {
+                    Layout.fillWidth: true; Layout.fillHeight: true
+                    radius: 10; color: "#1a2235"
+                    ColumnLayout {
+                        anchors.fill: parent; anchors.margins: 10; spacing: 6
+                        Text { text: _sectors[selectedIdx].name + " 领涨股"; color: "#94a3b8"; font.pixelSize: 13; font.weight: Font.Medium }
+                        Text { text: "主力 " + _sectors[selectedIdx].net; color: "#64748b"; font.pixelSize: 11 }
 
-                        Item {
-                            id: sectionCard
-                            required property var modelData
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-
-                            readonly property var sectionData: sectionCard.modelData || ({ title: "", icon: "", stocks: [] })
-
+                        Repeater {
+                            model: _sectors[selectedIdx].leads
                             Rectangle {
-                                anchors.fill: parent
-                                radius: 12
-                                color: "#1a2235"
-
-                                ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 10
-
-                                    Item {
-                                        Layout.fillWidth: true
-                                        height: 30
-
-                                        RowLayout {
-                                            anchors.fill: parent
-
-                                            Text {
-                                                text: sectionCard.sectionData.title
-                                                color: "#94a3b8"
-                                                font.pixelSize: 13
-                                                font.weight: Font.Medium
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-
-                                            Item { Layout.fillWidth: true }
-
-                                            Item {
-                                                width: 28
-                                                height: 28
-
-                                                Rectangle {
-                                                    anchors.fill: parent
-                                                    radius: 6
-                                                    color: "#3b82f620"
-
-                                                    Text {
-                                                        anchors.centerIn: parent
-                                                        text: sectionCard.sectionData.icon
-                                                        font.pixelSize: 13
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    ColumnLayout {
-                                        spacing: 6
-                                        Layout.fillWidth: true
-                                        Layout.fillHeight: true
-
-                                        Repeater {
-                                            model: (sectionCard.sectionData.stocks || []).map(function(stockReference) {
-                                                var stockData = marketGrid.sectionStock(stockReference)
-                                                return {
-                                                    stockData: stockData,
-                                                    instrumentLabel: marketGrid.instrumentLabel(stockData)
-                                                }
-                                            })
-
-                                            Item {
-                                                id: stockRow
-                                                required property var modelData
-                                                Layout.fillWidth: true
-                                                Layout.preferredHeight: 44
-                                                readonly property var stockData: stockRow.modelData.stockData || ({})
-
-                                                Rectangle {
-                                                    anchors.fill: parent
-                                                    radius: 8
-                                                    color: "#121828"
-
-                                                    RowLayout {
-                                                        anchors.fill: parent
-                                                        anchors.margins: 12
-                                                        spacing: 12
-
-                                                        Item {
-                                                            width: 28
-                                                            height: 28
-
-                                                            Rectangle {
-                                                                anchors.fill: parent
-                                                                radius: 7
-                                                                color: (stockRow.stockData.color || "#3b82f6") + "20"
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: String(stockRow.stockData.symbol || "").slice(0, 2)
-                                                                    color: stockRow.stockData.color || "#3b82f6"
-                                                                    font.pixelSize: 11
-                                                                    font.weight: Font.Medium
-                                                                }
-                                                            }
-                                                        }
-
-                                                        ColumnLayout {
-                                                            spacing: 2
-                                                            Layout.fillWidth: true
-
-                                                            Text {
-                                                                text: stockRow.modelData.instrumentLabel || "--"
-                                                                color: "#f1f5f9"
-                                                                font.pixelSize: 12
-                                                                font.weight: Font.Medium
-                                                                elide: Text.ElideRight
-                                                                Layout.fillWidth: true
-                                                            }
-
-                                                            Text {
-                                                                text: stockRow.stockData.updatedAt || "待同步"
-                                                                color: "#64748b"
-                                                                font.pixelSize: 10
-                                                                elide: Text.ElideRight
-                                                                Layout.fillWidth: true
-                                                            }
-                                                        }
-
-                                                        Item { Layout.fillWidth: true }
-
-                                                        ColumnLayout {
-                                                            spacing: 2
-                                                            Layout.alignment: Qt.AlignRight
-
-                                                            Text {
-                                                                text: "¥" + Number(stockRow.stockData.price || 0).toFixed(2)
-                                                                color: "#f1f5f9"
-                                                                font.pixelSize: 13
-                                                                font.weight: Font.Medium
-                                                            }
-
-                                                            Text {
-                                                                text: (Number(stockRow.stockData.change || 0) > 0 ? "+" : "") +
-                                                                      Number(stockRow.stockData.change || 0).toFixed(2) + "%"
-                                                                color: Number(stockRow.stockData.change || 0) > 0 ? "#ef4444" : "#10b981"
-                                                                font.pixelSize: 11
-                                                                font.weight: Font.Medium
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                Layout.fillWidth: true; height: 38; radius: 6; color: "#121828"
+                                RowLayout {
+                                    anchors.fill: parent; anchors.margins: 10; spacing: 8
+                                    Text { text: (index+1); color: "#666"; font.pixelSize: 11; font.weight: Font.Bold }
+                                    Text { text: modelData.sym; color: "#f1f5f9"; font.pixelSize: 12; Layout.fillWidth: true }
+                                    Text { text: (modelData.c>0?"+":"")+modelData.c.toFixed(1)+"%"
+                                           color: modelData.c>=0?"#ef4444":"#10b981"; font.pixelSize: 12; font.weight: Font.DemiBold }
                                 }
                             }
                         }
