@@ -400,14 +400,14 @@ Rectangle {
                                     model: { var a=[]; var asks=depthSnapshot&&depthSnapshot.asks?depthSnapshot.asks:[]; for(var i=Math.min(asks.length,requestedDepthLevels)-1;i>=0;i--) a.push(asks[i]); return a }
                                     delegate: Rectangle {
                                         required property var modelData; required property int index
-                                        width: askListView.width; height: Math.max(22, askListView.height / Math.max(askListView.count, 1))
+                                        width: askListView.width; height: Math.max(14, askListView.height / Math.max(askListView.count, 1))
                                         color: "transparent"
                                         RowLayout {
                                             anchors.fill: parent; anchors.margins: 2; spacing: 2
-                                            Text { text:"卖"+(index+1); color:"#10b981"; font.pixelSize:compactMode?10:12; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
-                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?10:12; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?9:11; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#10b981"; font.pixelSize:compactMode?9:11; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:"卖"+(index+1); color:"#10b981"; font.pixelSize:compactMode?9:10; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#10b981"; font.pixelSize:compactMode?8:9; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                                         }
                                     }
                                 }
@@ -448,14 +448,14 @@ Rectangle {
                                     model: { var a=[]; var bids=depthSnapshot&&depthSnapshot.bids?depthSnapshot.bids:[]; for(var i=0;i<Math.min(bids.length,requestedDepthLevels);i++) a.push(bids[i]); return a }
                                     delegate: Rectangle {
                                         required property var modelData; required property int index
-                                        width: bidListView.width; height: Math.max(22, bidListView.height / Math.max(bidListView.count, 1))
+                                        width: bidListView.width; height: Math.max(14, bidListView.height / Math.max(bidListView.count, 1))
                                         color: "transparent"
                                         RowLayout {
                                             anchors.fill: parent; anchors.margins: 2; spacing: 2
-                                            Text { text:"买"+(index+1); color:"#ef4444"; font.pixelSize:compactMode?10:12; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
-                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?10:12; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?9:11; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
-                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#ef4444"; font.pixelSize:compactMode?9:11; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:"买"+(index+1); color:"#ef4444"; font.pixelSize:compactMode?9:10; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#ef4444"; font.pixelSize:compactMode?8:9; Layout.fillWidth:true; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
                                         }
                                     }
                                 }
@@ -538,7 +538,7 @@ Rectangle {
                         delegate: Rectangle {
                             property var tickData: modelData
                             width: ListView.view.width
-                            height: tickListView.count > 0 ? Math.max(22, tickListView.height / tickListView.count) : 30
+                            height: tickListView.count > 0 ? Math.max(14, tickListView.height / tickListView.count) : 30
                             radius: compactMode ? 10 : 12
                             color: Const.tradingHeaderBg
                             border.color: tickData.direction === "buy" ? Const.depthTickBuyBorder : Const.depthTickSellBorder
