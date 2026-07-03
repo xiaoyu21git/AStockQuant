@@ -188,8 +188,7 @@ private:
         
         Worker& operator=(Worker&& other) noexcept {
             if (this != &other) {
-                //stop();
-                // 移动资源
+                stop();
                 thread = std::move(other.thread);
                 running.store(other.running.load());
                 idle.store(other.idle.load());
@@ -198,12 +197,12 @@ private:
             return *this;
         }
         void stop() {
-        if (thread.joinable()) {
-            thread.detach();  // 或 thread.join() 如果可能的话
+            if (thread.joinable()) {
+                thread.join();
+            }
         }
-    }
         ~Worker() {
-           
+            stop();
         }
     };
     
