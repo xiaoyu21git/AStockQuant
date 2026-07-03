@@ -95,10 +95,17 @@ void PostMarketSyncService::syncAll(int tradingDay) {
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 开始同步 today=" << tradingDay;
 
+    // 盘中不允许同步
+    int mins = getCurrentLocalMinutes();
+    if (mins >= 565 && mins < 900) { // 9:25-15:00
+        INTERNAL_WARN_STREAM << "[PostMktSync] 盘中禁止同步, 请15:00后操作";
+        return;
+    }
+
     // 预加载 symbol->id 映射
     auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) { INTERNAL_ERROR_STREAM << "[PostMktSync] DB不可用"; return; }
-    auto res = db->executeQuery("SELECT symbol_id, symbol FROM ref.symbol_info WHERE status='ACTIVE'");
+    auto res = db->executeQuery("SELECT id, symbol FROM ref.symbol_info WHERE status='ACTIVE'");
     std::unordered_map<std::string,int> symToId;
     std::vector<std::string> symbols;
     for (auto& row : res.getRows()) {
