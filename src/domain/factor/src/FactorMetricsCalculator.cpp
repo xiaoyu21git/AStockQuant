@@ -803,7 +803,7 @@ double FactorBacktestMetricsCalculator::calculateProfitFactor(const std::vector<
     }
 
     if (grossLossAbs <= 1e-12) {
-        return grossProfit > 0.0 ? std::numeric_limits<double>::infinity() : 0.0;
+        return grossProfit > 0.0 ? 999.0 : 0.0; // 无亏损→极大值替代 Infinity
     }
 
     return grossProfit / grossLossAbs;

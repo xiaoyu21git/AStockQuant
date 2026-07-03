@@ -374,17 +374,9 @@ void FactorBacktestOrchestrator::run(
         if (arrowView && numDates > 0 && numInsts > 0) {
             priceView = arrowView->close();
         } else {
-            INTERNAL_WARN_STREAM << "[FactorBacktestOrchestrator] No real price data, using default";
-            static constexpr float kDefaultPrice = 1.0f;
-            static std::vector<factor::compute::signal_value_t> s_defaultPrices;
-            const size_t needed = static_cast<size_t>(std::max(1, numDates))
-                                * static_cast<size_t>(std::max(1, numInsts));
-            if (s_defaultPrices.size() < needed)
-                s_defaultPrices.assign(needed, kDefaultPrice);
-            priceView.data       = s_defaultPrices.data();
-            priceView.rowCount    = std::max(1, numDates);
-            priceView.columnCount = std::max(1, numInsts);
-            priceView.rowStride   = std::max(1, numInsts);
+            INTERNAL_ERROR_STREAM << "[FactorBacktestOrchestrator] No real price data, aborting";
+            if (onProgress) onProgress(-1.0, "price data unavailable");
+            return;
         }
 
         // 转换为 unordered_map 格式
