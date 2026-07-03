@@ -287,6 +287,17 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     {
         using Rec = astock::infrastructure::database::OrderRecorder;
         int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
+        if (td <= 0) {
+            auto now = std::chrono::system_clock::now();
+            auto tt = std::chrono::system_clock::to_time_t(now);
+            struct tm local;
+#if defined(_WIN32) || defined(_WIN64)
+            localtime_s(&local, &tt);
+#else
+            localtime_r(&tt, &local);
+#endif
+            td = (local.tm_year + 1900) * 10000 + (local.tm_mon + 1) * 100 + local.tm_mday;
+        }
         auto side = (order.side() == strategy::OrderDirection::Buy)
             ? astock::infrastructure::database::RecSide::Buy
             : astock::infrastructure::database::RecSide::Sell;

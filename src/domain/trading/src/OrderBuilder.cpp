@@ -68,7 +68,7 @@ OrderRequest OrderBuilder::buildManualOrder(const std::string& symbol, OrderSide
     OrderRequest::Builder b;
     b.symbol(symbol).side(side).price(price)
      .quantity(static_cast<double>(quantity))
-     .orderType(OrderType::Limit).positionEffect(pe);
+     .orderType(price > 0 ? OrderType::Limit : OrderType::Market).positionEffect(pe);
     fillCommon(b, symbol);
     auto [req, err] = b.build();
     if (!err.empty())
