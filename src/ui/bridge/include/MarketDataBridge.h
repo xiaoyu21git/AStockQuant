@@ -76,7 +76,7 @@ public:
     QVariantList sectorHeatData() const { return m_sectorHeatData; }
 
     // ── 盘后数据同步 ──
-    Q_INVOKABLE bool forceSyncToday();
+    Q_INVOKABLE QString forceSyncToday();
 
     // ── Domain 工具方法 ──
     Q_INVOKABLE int priceDigitsForMode(const QString& mode) const;
