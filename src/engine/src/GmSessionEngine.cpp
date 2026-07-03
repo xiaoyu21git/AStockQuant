@@ -134,13 +134,13 @@ public:
             if (q.ask_price > 0) { td.askPrices.push_back(q.ask_price); td.askVolumes.push_back(q.ask_volume); }
         }
 
-        // ── 🔍 每 5 个 tick 打印一次 (确认 gmsdk 在推送数据) ──
+        // ── 🔍 仅首次打印 (确认 gmsdk 推送) ──
         {
             static int tickCnt = 0;
-            if (++tickCnt % 5 == 0) {
-                INTERNAL_INFO_STREAM << "[GmSdk] 🟢 on_tick #" << tickCnt
+            if (++tickCnt == 1) {
+                INTERNAL_INFO_STREAM << "[GmSdk] 🟢 on_tick #1"
                     << " sym=" << td.symbol << " price=" << td.price
-                    << " vol=" << td.lastVolume;
+                    << " vol=" << td.lastVolume << " (后续 tick 不打印)";
             }
         }
 
