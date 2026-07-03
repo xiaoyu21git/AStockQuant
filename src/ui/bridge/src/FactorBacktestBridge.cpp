@@ -18,6 +18,9 @@
 
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "../../domain/factor/include/FactorBacktestOrchestrator.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/ISqlDatabase.h"
+#include "foundation/Utils/Uuid.h"
 #include "../../domain/factor/include/BacktestRunConfig.h"
 #include "BacktestScheduler.h"
 #include "FactorService.h"
@@ -658,6 +661,41 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     m_backtestResult = result;
                     emit backtestResultChanged();
                     emit backtestCompleted(result);
+
+                    // ── 持久化到 alpha.factor_backtest_runs / daily ──
+                    {
+                        auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+                        auto db = pool.getConnection();
+                        if (db && db->isOpen()) {
+                            using P = astock::database::SqlParam;
+                            std::string runId = foundation::utils::Uuid::generate().to_string_no_dashes();
+                            std::string fid = config.factorIds.empty() ? "unknown" : config.factorIds.front();
+                            std::string cfgJson = QJsonDocument(QJsonObject::fromVariantMap(cfgMap)).toJson(QJsonDocument::Compact).toStdString();
+                            std::string summaryJson = QJsonDocument(QJsonObject::fromVariantMap(metrics)).toJson(QJsonDocument::Compact).toStdString();
+                            std::string groupsJsonStr = QJsonDocument(QJsonArray::fromVariantList(groupsList)).toJson(QJsonDocument::Compact).toStdString();
+
+                            db->executeUpdate(
+                                "INSERT INTO alpha.factor_backtest_runs(id,factor_id,config_json,summary_json,groups_json) VALUES($1,$2,$3,$4,$5)",
+                                {P{runId}, P{fid}, P{cfgJson}, P{summaryJson}, P{groupsJsonStr}});
+
+                            // daily series from returnSeries
+                            QJsonArray retArr = rootObj.value("returnSeries").toArray();
+                            QJsonArray rawArr = retArr.size()>0 ? retArr[0].toObject().value("data").toArray() : QJsonArray();
+                            for (int di = 0; di < rawArr.size(); ++di) {
+                                QJsonArray dayData = rawArr[di].toArray();
+                                if (dayData.size() < 2) continue;
+                                std::string dateStr = dayData[0].toString().toStdString();
+                                QJsonArray groupReturns;
+                                for (int gi = 1; gi < dayData.size(); ++gi)
+                                    groupReturns.append(dayData[gi].toDouble());
+                                std::string grJson = QJsonDocument(groupReturns).toJson(QJsonDocument::Compact).toStdString();
+                                db->executeUpdate(
+                                    "INSERT INTO alpha.factor_backtest_daily(run_id,trade_date,group_returns_json) VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO NOTHING",
+                                    {P{runId}, P{dateStr}, P{grJson}});
+                            }
+                        }
+                    }
+
                     emit backtestProgress(100.0, m_statusText);
                 }, Qt::QueuedConnection);
             }

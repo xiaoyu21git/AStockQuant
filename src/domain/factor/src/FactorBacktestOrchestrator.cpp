@@ -316,6 +316,8 @@ void FactorBacktestOrchestrator::run(
                 icir.icPositiveRatio = (icir.icMean > 0) ? 1.0 : 0.0;
                 icir.icStd = 0.0;
             }
+            // FIX(v0.12.0): 上段为单次池化 Spearman, IR=icMean 不正确
+            // 逐日 IC 用 factor::icir::aggregate() 见 FactorIcUtils.h:70
         }
 
         if (onProgress) onProgress(60.0, "factors computed (chunked)");

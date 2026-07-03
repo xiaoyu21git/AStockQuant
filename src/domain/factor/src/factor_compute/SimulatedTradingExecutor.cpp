@@ -99,6 +99,8 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                     auto colIt = idToCol.find(id);
                     if (colIt != idToCol.end()) {
                         const int32_t col = colIt->second;
+                        if (col < 0 || col >= priceView.columnCount || di >= priceView.rowCount || sellDayIdx >= priceView.rowCount)
+                            continue;
                         const double bp = priceView.data[static_cast<int32_t>(di) * rowStride + col];
                         const double sp = priceView.data[static_cast<int32_t>(sellDayIdx) * rowStride + col];
                         if (std::isfinite(bp) && bp > 1e-9) {

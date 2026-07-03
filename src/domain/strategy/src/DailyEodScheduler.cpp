@@ -94,13 +94,9 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
     auto today = getCurrentTradingDay();
     bool isCompensation = (evalDay < today);
 
-    // 二次校验时间窗口
+    // start() 路径需要窗口校验, onEodTrigger(MarketDataService已校验)跳过
     if (isCompensation && !isCompensationWindow()) {
-        INTERNAL_WARN_STREAM << "[DailyEod] 补偿评估但不在补单窗口, 跳过";
-        return;
-    }
-    if (!isCompensation && !isPreCloseWindow()) {
-        INTERNAL_WARN_STREAM << "[DailyEod] 实时评估但不在预收盘窗口, 跳过";
+        INTERNAL_WARN_STREAM << "[DailyEod] 补单窗口校验失败, 跳过";
         return;
     }
 
