@@ -61,7 +61,7 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
     }
     using astock::database::SqlParam;
     std::string sql =
-        "INSERT INTO live_order "
+        "INSERT INTO data.live_order "
         "(cl_ord_id, strategy_id, symbol, side, order_type, price, quantity, "
         "signal_score, position_effect, trading_day, status) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')";
@@ -86,7 +86,7 @@ int OrderRecorder::updateOrderStatus(const std::string& clOrdId, RecOrdStatus st
     if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =
-        "UPDATE live_order SET status=?, broker_order_id=IF(?<>'',?,broker_order_id), "
+        "UPDATE data.live_order SET status=?, broker_order_id=IF(?<>'',?,broker_order_id), "
         "message=IF(?<>'',?,message) WHERE cl_ord_id=?";
     std::vector<SqlParam> params = {
         SqlParam{std::string(toStr(status))},
@@ -104,7 +104,7 @@ int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string
     if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =
-        "UPDATE live_order SET status='FILLED', exec_id=?, fill_price=?, fill_qty=?, "
+        "UPDATE data.live_order SET status='FILLED', exec_id=?, fill_price=?, fill_qty=?, "
         "fill_amount=?, commission=?, fill_time=? WHERE cl_ord_id=?";
     std::vector<SqlParam> params = {
         SqlParam{execId},
@@ -122,14 +122,14 @@ int OrderRecorder::insertAccountSnapshot(int tradingDay, double totalAsset, doub
     if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =
-        "INSERT INTO live_account_daily "
+        "INSERT INTO data.live_account_daily "
         "(trading_day, total_asset, available_cash, market_value, frozen_cash, "
         "realized_pnl, unrealized_pnl) "
         "VALUES (?, ?, ?, ?, ?, ?, ?) "
-        "ON DUPLICATE KEY UPDATE "
-        "total_asset=VALUES(total_asset), available_cash=VALUES(available_cash), "
-        "market_value=VALUES(market_value), frozen_cash=VALUES(frozen_cash), "
-        "realized_pnl=VALUES(realized_pnl), unrealized_pnl=VALUES(unrealized_pnl)";
+        "ON CONFLICT (trading_day) DO UPDATE SET "
+        "total_asset=EXCLUDED.total_asset, available_cash=EXCLUDED.available_cash, "
+        "market_value=EXCLUDED.market_value, frozen_cash=EXCLUDED.frozen_cash, "
+        "realized_pnl=EXCLUDED.realized_pnl, unrealized_pnl=EXCLUDED.unrealized_pnl";
     std::vector<SqlParam> params = {
         SqlParam{static_cast<std::int32_t>(tradingDay)},
         SqlParam{totalAsset}, SqlParam{availableCash},
