@@ -71,6 +71,8 @@ void DailyEodScheduler::stop() {
 // ═══════════════════════════════════════════════════════════════════
 
 void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
+    // 已停止, 不投递 (executor 可能已销毁)
+    if (!m_eodRegistered) return;
     // gmsdk 线程回调 — 仅投递到策略线程
     m_post([this, tradingDay]() {
         doEvaluate(tradingDay);
