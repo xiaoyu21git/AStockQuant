@@ -129,10 +129,18 @@ std::string DailyEodScheduler::getPreviousTradingDay(const std::string& date) {
         ret = ::get_previous_trading_date("SHSE", date.c_str(), out);
     }
     if (ret != 0 || out[0] == '\0') {
-        INTERNAL_WARN_STREAM << "[DailyEod] get_previous_trading_date 失败 date=" << date;
-        return "";
+        INTERNAL_WARN_STREAM << "[DailyEod] gmsdk get_previous_trading_date 失败, 本地回退 date=" << date;
+        // 本地回退: 减1天, 跳过周末
+        int y = std::stoi(date.substr(0,4)), m = std::stoi(date.substr(4,2)), d = std::stoi(date.substr(6,2));
+        struct tm t = {}; t.tm_year=y-1900; t.tm_mon=m-1; t.tm_mday=d;
+        time_t epoch = mktime(&t);
+        do { epoch -= 86400; struct tm prev; localtime_s(&prev, &epoch);
+             if (prev.tm_wday != 0 && prev.tm_wday != 6) { // 非周六日
+                 char buf[16]; snprintf(buf,sizeof(buf),"%04d%02d%02d",prev.tm_year+1900,prev.tm_mon+1,prev.tm_mday);
+                 return std::string(buf);
+             }
+        } while (true);
     }
-    // gmsdk returns YYYYMMDD
     return std::string(out);
 }
 

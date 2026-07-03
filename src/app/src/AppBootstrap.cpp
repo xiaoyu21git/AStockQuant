@@ -24,6 +24,7 @@
 
 #include "../../domain/strategy/include/RiskEvaluator.h"
 #include "../../domain/strategy/include/RiskManager.h"
+#include "../../domain/strategy/include/StrategyManager.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"
@@ -189,6 +190,9 @@ void AppBootstrap::start()
 void AppBootstrap::shutdown()
 {
     INTERNAL_INFO_STREAM << "[AppBootstrap] Shutting down...";
+
+    // 先停所有策略引擎 (线程安全退出)
+    domain::strategy::StrategyManager::instance().stopAll();
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
     shutdownOptionalConnectors();

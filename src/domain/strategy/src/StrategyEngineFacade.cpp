@@ -586,6 +586,11 @@ void StrategyEngine::stopLiveLoop()
     m_loopRunning.store(false, std::memory_order_release);
     m_queueCv.notify_one();
 
+    // 先停调度器, 防止回调在 executor 关闭后投递任务
+    if (m_dailyScheduler) {
+        m_dailyScheduler->stop();
+    }
+
     if (m_dedicatedExecutor) {
         m_dedicatedExecutor->shutdown(false);
         m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
