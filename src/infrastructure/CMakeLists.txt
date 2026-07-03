@@ -57,6 +57,7 @@ add_library(infrastructure STATIC
     src/database/NativePgDatabase.cpp
     src/database/NativeMySQLConnectionPool.cpp
     src/database/OrderRecorder.cpp
+    src/database/PostMarketSyncService.cpp
     src/database/StrategyRepository.cpp
     src/database/MarketDataRepository.cpp
     src/database/MarketDataService.cpp

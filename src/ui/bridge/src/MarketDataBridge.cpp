@@ -8,6 +8,7 @@
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "../../engine/include/GlobalEventBusRegistry.h"
+#include "../../../infrastructure/include/database/PostMarketSyncService.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 #include "foundation/market/AStockSymbol.h"
 
@@ -881,6 +882,11 @@ void MarketDataBridge::fetchSectorHeat() {
     emit sectorHeatDataChanged();
     INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done sectors=" << result.size()
                          << " stocks=" << allSyms.size();
+}
+
+bool MarketDataBridge::forceSyncToday() {
+    static astock::infrastructure::database::PostMarketSyncService s;
+    return s.forceSyncToday();
 }
 
 } // namespace bridge
