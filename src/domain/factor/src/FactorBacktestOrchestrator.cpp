@@ -7,6 +7,7 @@
 #include "FactorInstanceManager.h"
 #include "CompositeFactorConfig.h"
 #include "FactorMetricsCalculator.h"
+#include "FactorIcUtils.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
@@ -136,7 +137,7 @@ void FactorBacktestOrchestrator::run(
         chunkColumns.push_back(f);
 
     factor::compute::BacktestReporterInput reporterInput;
-    std::vector<std::pair<double, double>> icPairs; // {factorValue, forwardReturn}
+    std::map<std::string, std::vector<std::pair<double, double>>> icByDate; // date→{(fv, fwdRet)}
 
     // ══════════════════════════════════════════════════════════════════════
     // 分块回测主循环
@@ -260,7 +261,7 @@ void FactorBacktestOrchestrator::run(
                         && priceFwd > 1e-9 && std::isfinite(priceFwd)) {
                         double fwdRet = (priceFwd / priceNow) - 1.0;
                         if (std::isfinite(fwdRet) && std::abs(fwdRet) < 0.5) {
-                            icPairs.emplace_back(fv, fwdRet);
+                            icByDate[dateNow].emplace_back(fv, fwdRet);
                         }
                     }
                 }
@@ -271,6 +272,38 @@ void FactorBacktestOrchestrator::run(
 
         // ── 从累积的 IC 对计算 Rank IC ──
         ::factor::ICIRResult icir;
+        // ── 逐日 Rank IC ──
+        std::vector<double> icSeries;
+        for (const auto& [date, pairs] : icByDate) {
+            if (pairs.size() < 2) continue;
+            std::vector<double> fv, ret;
+            fv.reserve(pairs.size()); ret.reserve(pairs.size());
+            for (const auto& [f, r] : pairs) { fv.push_back(f); ret.push_back(r); }
+            auto spearman = [](std::vector<double>& x, std::vector<double>& y) -> double {
+                size_t n = x.size();
+                std::vector<size_t> idx(n);
+                for (size_t i=0;i<n;++i) idx[i]=i;
+                std::sort(idx.begin(),idx.end(),[&](size_t a,size_t b){return x[a]<x[b];});
+                std::vector<double> rx(n); for(size_t i=0;i<n;++i) rx[idx[i]]=static_cast<double>(i+1);
+                std::sort(idx.begin(),idx.end(),[&](size_t a,size_t b){return y[a]<y[b];});
+                std::vector<double> ry(n); for(size_t i=0;i<n;++i) ry[idx[i]]=static_cast<double>(i+1);
+                double sx=0,sy=0,sx2=0,sy2=0,sxy=0,N=static_cast<double>(n);
+                for(size_t i=0;i<n;++i){sx+=rx[i];sy+=ry[i];sx2+=rx[i]*rx[i];sy2+=ry[i]*ry[i];sxy+=rx[i]*ry[i];}
+                double num=N*sxy-sx*sy,den=std::sqrt((N*sx2-sx*sx)*(N*sy2-sy*sy));
+                return den>1e-12 ? num/den : 0.0;
+            };
+            icSeries.push_back(spearman(fv, ret));
+        }
+        icir.icSeries = icSeries;
+        icir.icMean   = factor::icir::calculateMean(icSeries);
+        icir.icStd    = factor::icir::calculateStdDev(icSeries, icir.icMean);
+        icir.ir       = icir.icStd > 0.0 ? icir.icMean / icir.icStd : 0.0;
+        if (!icSeries.empty()) {
+            auto pos = std::count_if(icSeries.begin(), icSeries.end(), [](double v){return v>0.0;});
+            icir.icPositiveRatio = static_cast<double>(pos) / icSeries.size();
+        }
+        // ── 旧池化 Spearman 已移除 ──
+#if 0
         if (icPairs.size() >= 30) {
             // 按日期分组（每30+对对应一个日期）
             std::vector<double> datesIC;
@@ -316,11 +349,9 @@ void FactorBacktestOrchestrator::run(
                 icir.icPositiveRatio = (icir.icMean > 0) ? 1.0 : 0.0;
                 icir.icStd = 0.0;
             }
-            // FIX(v0.12.0): 上段为单次池化 Spearman, IR=icMean 不正确
-            // 逐日 IC 用 factor::icir::aggregate() 见 FactorIcUtils.h:70
-        }
+#endif
 
-        if (onProgress) onProgress(60.0, "factors computed (chunked)");
+        if (onProgress) onProgress(60.0, "factors computed (per-date IC)");
 
         // ── 模拟成交 ──
         factor::compute::SimulatedTradingResult tradingResult;
