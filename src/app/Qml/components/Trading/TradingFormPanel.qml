@@ -14,7 +14,7 @@ Rectangle {
 
     property var marketSnapshot: (Bridge.MarketDataBridge.marketSnapshots[currentSymbol] || {})
 
-    // 持仓列表点击 → primarySymbol 变更 → 自动填入下单控件
+    // 持仓列表点击 → primarySymbol 变更 → 自动填入下单控件+价格
     Connections {
         target: Bridge.MarketDataBridge
         function onPrimarySymbolChanged() {
@@ -23,6 +23,22 @@ Rectangle {
                 var code = String(sym).replace(".SZ","").replace(".SH","").replace(".BJ","")
                 stockCode = code
                 Bridge.MarketDataBridge.resolveInstrument(sym)
+                Qt.callLater(function() {
+                    var snap = Bridge.MarketDataBridge.marketSnapshots[sym] || {}
+                    if (snap.price > 0) {
+                        stockPrice = snap.price.toFixed(2)
+                        lastAutoStockPrice = snap.price.toFixed(2)
+                    }
+                })
+            }
+        }
+        function onMarketSnapshotsChanged() {
+            var sym = Bridge.MarketDataBridge.primarySymbol || ""
+            if (!sym) return
+            var snap = Bridge.MarketDataBridge.marketSnapshots[sym] || {}
+            if (snap.price > 0 && stockPrice === "") {
+                stockPrice = snap.price.toFixed(2)
+                lastAutoStockPrice = snap.price.toFixed(2)
             }
         }
     }
