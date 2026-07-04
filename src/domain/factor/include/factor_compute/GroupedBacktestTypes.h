@@ -16,6 +16,7 @@ struct SimulatedTradingParams final {
     double riskFreeRate{0.02};
     double initialCapital{1000000.0};
     double maxFwdRetAbsLimit{0.5};
+    std::string adjustPriceType{"pre"}; // "pre"=前复权 "post"=后复权
     std::function<void(double)> onProgress; // 进度回调 (0.0-1.0)
 };
 

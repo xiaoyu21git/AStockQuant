@@ -446,7 +446,6 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
 
             std::vector<MetricContribution> contributions;
             contributions.reserve(metrics.size());
-            INTERNAL_WARN_STREAM << "[VF] date=" << runtime.effectiveDate << " metrics=" << metrics.size();
 
             for (const ValuationMetric metric : metrics) {
                 const double weight = valuationMetricWeight(params_, metric);
@@ -461,11 +460,9 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                     const std::string field = valuationMetricField(metric);
                     bool hasF = !field.empty() && context.historicalView->hasField(field);
                     if (!hasF) {
-                        INTERNAL_WARN_STREAM << "[VF] SKIP " << field << " hasField=false";
                         continue;
                     }
                     auto contrib = computeStandardContribution(context, runtime, metric, weight);
-                    INTERNAL_WARN_STREAM << "[VF] " << field << " samples=" << contrib.rawSampleCount << " scores=" << contrib.scores.size();
                     contributions.push_back(std::move(contrib));
                 }
             }
@@ -499,8 +496,6 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 result.values[symbol] = weightedScore / weightIt->second;
             }
 
-            INTERNAL_WARN_STREAM << "[VF] merge done values=" << result.values.size()
-                << " contribs=" << contributions.size();
             if (result.values.empty()) {
                 const std::string emptyReason = totalRawSampleCount == 0
                     ? "当前价值因子没有可用的指标样本"

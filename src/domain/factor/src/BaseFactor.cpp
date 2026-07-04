@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <numeric>
 
@@ -406,26 +407,21 @@ CalculationResult BaseFactor::executeWithCommonParams(
         : NeutralizationStatus::Disabled;
 
     rawCalculator(runtime, result);
-    INTERNAL_WARN_STREAM << "[BP] after raw values=" << result.values.size();
 
     if (result.dataStatus.isValid() && !result.values.empty()) {
         applyCommonNeutralization(context, params, runtime, result, runtime.neutralizationMode);
-        INTERNAL_WARN_STREAM << "[BP] after neutral values=" << result.values.size();
     }
 
     if (result.dataStatus.isValid() && !result.values.empty()) {
         preStandardizationProcessor(runtime, result);
-        INTERNAL_WARN_STREAM << "[BP] after preStd values=" << result.values.size();
     }
 
     if (result.dataStatus.isValid() && !result.values.empty()) {
         applyCommonStandardization(result.values, runtime.standardization);
-        INTERNAL_WARN_STREAM << "[BP] after std values=" << result.values.size();
     }
 
     appendCommonMetadata(result, params, runtime);
     metadataAppender(runtime, result);
-    INTERNAL_WARN_STREAM << "[BP] before return values=" << result.values.size();
     return result;
 }
 
@@ -722,15 +718,37 @@ std::unordered_map<std::string, std::vector<double>> BaseFactor::latestFinancial
     const std::string effectiveDate = date.empty() ? context.date : date;
     const auto symbols = effectiveSymbols(context);
     const int effectiveLimit = (limit > 0) ? limit : 1;
-    for (const auto& symbol : symbols) {
-        const auto series = context.historicalView->getSeries(symbol, effectiveDate, effectiveDate, field);
-        std::vector<double>& values = result[symbol];
-        values.reserve(series.size());
-        for (const auto& dp : series) {
-            values.push_back(dp.value);
+
+    // 用 getCrossSection（带 dbFallback）横切多个日期拼成序列
+    int y, m, d;
+    if (effectiveDate.size() != 10 || sscanf(effectiveDate.c_str(), "%d-%d-%d", &y, &m, &d) != 3) {
+        // 日期格式不对 → 回退到单日 getCrossSection
+        auto cs = context.historicalView->getCrossSection(effectiveDate, field, symbols);
+        for (const auto& [sym, val] : cs) {
+            if (std::isfinite(val)) result[sym].push_back(val);
         }
-        if (effectiveLimit > 0 && static_cast<int>(values.size()) > effectiveLimit) {
-            values.erase(values.begin(), values.end() - effectiveLimit);
+        return result;
+    }
+
+    for (int i = 0; i < effectiveLimit; ++i) {
+        // 从 effectiveDate 开始，每次往回推一个季度
+        int qy = y, qm = m - i * 3;
+        while (qm <= 0) { qm += 12; --qy; }
+        char qBuf[16];
+        snprintf(qBuf, sizeof(qBuf), "%04d-%02d-%02d", qy, qm, d > 28 ? 28 : d);
+        auto cs = context.historicalView->getCrossSection(std::string(qBuf), field, symbols);
+        for (const auto& [sym, val] : cs) {
+            if (std::isfinite(val)) {
+                auto& vec = result[sym];
+                if (vec.empty() || std::abs(vec.back() - val) > 1e-12)
+                    vec.push_back(val);
+            }
+        }
+        if (!result.empty()) {
+            bool allDone = true;
+            for (const auto& [_, vec] : result)
+                if (static_cast<int>(vec.size()) < effectiveLimit) { allDone = false; break; }
+            if (allDone) break;
         }
     }
     return result;

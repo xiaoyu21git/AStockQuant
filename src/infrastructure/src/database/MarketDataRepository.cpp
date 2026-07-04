@@ -354,6 +354,42 @@ MarketDataRepository::queryDailyBarJoined(
     return rows;
 }
 
+// ═══ queryFinancialFieldCrossSection ═══
+
+std::vector<FieldRow> MarketDataRepository::queryFinancialFieldCrossSection(
+    const std::string& field,
+    const std::string& date,
+    const std::vector<std::string>& symbols)
+{
+    std::vector<FieldRow> rows;
+    if (symbols.empty()) return rows;
+
+    std::ostringstream sql;
+    sql << "SELECT si.symbol, fi.report_date AS trade_date, fi." << field << " AS field_value"
+        << " FROM fund.financial_indicator_daily fi"
+        << " JOIN ref.symbol_info si ON fi.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
+        << " AND fi.report_date <= " << safeStr(date)
+        << " ORDER BY si.symbol, fi.report_date DESC";
+
+    auto result = db_->executeQuery(sql.str());
+    // 每组(symbol)取 report_date 最近的一条（已按 DESC 排序，取第一条）
+    std::string lastSym;
+    for (std::size_t i = 0; i < result.rowCount(); ++i) {
+        const auto& row = result.getRow(i);
+        std::string sym = row.getString("symbol");
+        if (sym == lastSym) continue; // 跳过同一 symbol 的更早 report_date
+        lastSym = sym;
+        FieldRow fr;
+        fr.symbol    = sym;
+        fr.tradeDate = row.getString("trade_date");
+        fr.fieldName = field;
+        fr.value     = row.getDouble("field_value");
+        rows.push_back(fr);
+    }
+    return rows;
+}
+
 // ═══ queryIndexCodeMap ═══
 
 std::map<std::string, std::string>

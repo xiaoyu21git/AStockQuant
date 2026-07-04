@@ -48,8 +48,14 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
-    /// 因子字段横截面查询
+    /// 因子字段横截面查询 (mkt.daily_bar)
     std::vector<FieldRow> queryFieldCrossSection(
+        const std::string& field,
+        const std::string& date,
+        const std::vector<std::string>& symbols = {});
+
+    /// 财务字段横截面查询 (fund.financial_indicator_daily, 按 report_date ≤ trade_date 取最近一期)
+    std::vector<FieldRow> queryFinancialFieldCrossSection(
         const std::string& field,
         const std::string& date,
         const std::vector<std::string>& symbols = {});

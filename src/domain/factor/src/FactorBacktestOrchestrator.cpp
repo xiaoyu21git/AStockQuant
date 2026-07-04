@@ -13,10 +13,12 @@
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
+#include "../../../domain/cleaning/include/DataSourceRegistry.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace Factor::backtest {
@@ -127,7 +129,7 @@ void FactorBacktestOrchestrator::run(
             neededExtraFields.end());
     }
 
-    // ── 首块 DB 回看 ──
+    // ── 首块 DB 回看：回看期缓存无数据时必须查库，按字段类型路由 ──
     if (maxLookback > 0 && m_dataService) {
         factor::compute::BacktestDataService::DbFallbackFn dbFn =
             [](const std::string& date, const std::string& field,
@@ -137,9 +139,18 @@ void FactorBacktestOrchestrator::run(
             if (!db || !db->isOpen()) return {};
             astock::infrastructure::database::MarketDataRepository repo(db);
             std::unordered_map<std::string, double> result;
-            auto rows = repo.queryFieldCrossSection(field, date, symbols);
-            for (const auto& r : rows)
-                result[r.symbol] = r.value;
+            static const std::unordered_set<std::string> finFields(
+                cleaning::financial_columns::names().begin(),
+                cleaning::financial_columns::names().end());
+            if (finFields.count(field)) {
+                auto rows = repo.queryFinancialFieldCrossSection(field, date, symbols);
+                for (const auto& r : rows)
+                    result[r.symbol] = r.value;
+            } else {
+                auto rows = repo.queryFieldCrossSection(field, date, symbols);
+                for (const auto& r : rows)
+                    result[r.symbol] = r.value;
+            }
             return result;
         };
         m_dataService->setDbFallback(std::move(dbFn));
@@ -430,6 +441,7 @@ void FactorBacktestOrchestrator::run(
         params.slippageRate    = config.slippageRate;
         params.riskFreeRate    = config.riskFreeRate;
         params.initialCapital  = config.initialCapital;
+        params.adjustPriceType = config.adjustPriceType;
         params.onProgress      = [&](double pct) {
             if (onProgress) onProgress(60.0 + pct * 15.0, "simulating trades");
         };
@@ -460,12 +472,18 @@ void FactorBacktestOrchestrator::run(
 
         // 确保 close 全量加载（交易模拟需要随机访问）
         if (arrowView) {
-            arrowView->ensureColumns({"close"});
+            arrowView->ensureColumns({"close", "pre_adjust_factor", "post_adjust_factor"});
         }
 
         factor::compute::NumericConstMatrixView priceView{};
+        factor::compute::NumericConstMatrixView preAdjustView{};
+        factor::compute::NumericConstMatrixView postAdjustView{};
         if (arrowView && numDates > 0 && numInsts > 0) {
             priceView = arrowView->close();
+            if (auto preAdj = arrowView->getField("pre_adjust_factor"))
+                preAdjustView = preAdj.value();
+            if (auto postAdj = arrowView->getField("post_adjust_factor"))
+                postAdjustView = postAdj.value();
         } else {
             INTERNAL_ERROR_STREAM << "[FactorBacktestOrchestrator] No real price data, aborting";
             if (onProgress) onProgress(-1.0, "price data unavailable");
@@ -482,6 +500,7 @@ void FactorBacktestOrchestrator::run(
         }
 
         tradingResult = m_executor->execute(fvByDate, sortedDates, priceView,
+                                             preAdjustView, postAdjustView,
                                              instrumentIds, instrumentIdToSymbol);
 
         if (onProgress) onProgress(80.0, "trading simulated");
@@ -527,14 +546,58 @@ void FactorBacktestOrchestrator::run(
             btResult.icirResult  = icir;
             btResult.groupResult = groupRes;
 
+            // ── 基准收益序列（若配置了 benchmarkSymbol 则从 Arrow 加载）──
+            std::vector<double> benchmarkDailyReturns;
+            ::factor::FactorBacktestMetricsCalculator::BenchmarkComparisonSummary benchmarkSummary;
+            if (!config.benchmarkSymbol.empty() && arrowView) {
+                auto benchSyms = arrowView->symbolStrings();
+                auto benchDates = arrowView->dates();
+                auto benchClose = arrowView->getField("close");
+                if (benchClose.has_value() && !benchSyms.empty()) {
+                    // 查找基准标的在 symbols 中的索引
+                    int32_t benchCol = -1;
+                    for (size_t si = 0; si < benchSyms.size(); ++si) {
+                        if (benchSyms[si] == config.benchmarkSymbol) { benchCol = static_cast<int32_t>(si); break; }
+                    }
+                    if (benchCol >= 0 && benchClose->isValid()) {
+                        const auto& bcv = benchClose.value();
+                        const int32_t bStride = bcv.rowStride >= bcv.columnCount ? bcv.rowStride : bcv.columnCount;
+                        // 对齐到策略交易日的基准日收益
+                        std::string prevDate;
+                        double prevClose = 0.0;
+                        for (size_t di = 0; di < benchDates.size(); ++di) {
+                            double closePx = bcv.data[static_cast<int32_t>(di) * bStride + benchCol];
+                            if (std::isfinite(closePx) && closePx > 1e-9) {
+                                std::string dateStr = std::to_string(benchDates[di].value);
+                                // 格式化为 YYYY-MM-DD
+                                int dv = benchDates[di].value;
+                                char dbuf[16]; snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d",
+                                    dv / 10000, (dv / 100) % 100, dv % 100);
+                                if (!prevDate.empty() && prevClose > 1e-9) {
+                                    benchmarkDailyReturns.push_back(closePx / prevClose - 1.0);
+                                }
+                                prevDate = dbuf;
+                                prevClose = closePx;
+                            }
+                        }
+                        if (!benchmarkDailyReturns.empty() && !tradingResult.costAdjustedLongShortReturns.empty()) {
+                            benchmarkSummary = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
+                                tradingResult.costAdjustedLongShortReturns, benchmarkDailyReturns);
+                        }
+                    }
+                }
+            }
+
             ::factor::FactorBacktestMetricsCalculator::Inputs inputs{
                 btConfig, btResult.icirResult, btResult.groupResult,
                 tradingResult.rawLongShortReturns,
                 tradingResult.costAdjustedLongShortReturns,
                 tradingResult.riskAdjustedLongShortReturns,
                 tradingResult.periodTurnovers,
-                {},
-                {}
+                {},    // longShortDates
+                {},    // groupReturnSeriesByGroup
+                nullptr, nullptr, 0.0,
+                benchmarkSummary.hasValidAlignment ? &benchmarkSummary : nullptr
             };
             ::factor::FactorBacktestMetricsCalculator::populateResultMetrics(btResult, inputs);
 
@@ -618,6 +681,13 @@ void FactorBacktestOrchestrator::run(
             ex.set("conditionalVaR",   J::createDouble(btResult.conditionalVaR));
             ex.set("finalEquity",      J::createDouble(tradingResult.finalEquity));
             ex.set("validSampleCount", J::createDouble(static_cast<double>(tradingResult.validSampleCount)));
+            if (benchmarkSummary.hasValidAlignment) {
+                ex.set("benchmarkAnnualReturn", J::createDouble(benchmarkSummary.benchmarkAnnualReturn));
+                ex.set("excessAnnualReturn",   J::createDouble(benchmarkSummary.excessAnnualReturn));
+                ex.set("trackingError",        J::createDouble(benchmarkSummary.trackingError));
+                ex.set("informationRatio",     J::createDouble(benchmarkSummary.informationRatio));
+                ex.set("beta",                 J::createDouble(benchmarkSummary.beta));
+            }
             metrics.set("execution", ex);
 
             // ── 三条收益序列 ──

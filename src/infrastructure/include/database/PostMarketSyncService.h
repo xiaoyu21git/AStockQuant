@@ -51,6 +51,7 @@ private:
 
     std::unique_ptr<std::thread> m_scheduler;
     std::atomic<bool> m_running{false};
+    std::atomic<int> m_lastSyncDay{0};  // 上次已同步的 tradingDay，避免重复同步
     std::mutex m_mutex;
     bool m_started = false;
 };

@@ -61,6 +61,7 @@ public:
 
 
     void on_init() override {
+        m_impl->sessionReady.store(true);
         try {
         auto* bus = get_engine_event_bus();
         if (!bus || !bus->is_running()) return;
@@ -366,6 +367,7 @@ bool GmSessionEngine::initialize(const std::string& token, const std::string& ac
 
 void GmSessionEngine::shutdown() {
     if (!m_impl || !m_impl->initialized.load()) return;
+    m_impl->sessionReady.store(false);
     m_impl->initialized.store(false);
     if (m_impl->strategyThread.joinable()) m_impl->strategyThread.detach();
     m_strategy.reset(); m_impl.reset();
@@ -414,6 +416,7 @@ void GmSessionEngine::unsubscribeTick(const std::string& symbol) {
 // ═══════════════════════════════════════════════════════════════════
 
 std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
+    if (!m_impl || !m_impl->sessionReady.load()) return std::nullopt;
     // 交易时段: 优先取 tick 实时缓存
     {
         std::lock_guard<std::mutex> lock(m_tickMutex);

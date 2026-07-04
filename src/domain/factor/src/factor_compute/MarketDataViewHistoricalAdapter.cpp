@@ -165,8 +165,14 @@ std::unordered_map<std::string, double> CachedMarketDataViewHistoricalAdapter::g
         }
     }
 
-    // Cache miss → DB fallback
-    if (!result.empty()) return result;
+    // Cache miss / 全 NaN → DB fallback
+    if (!result.empty()) {
+        bool hasFinite = false;
+        for (const auto& [_, v] : result) {
+            if (std::isfinite(v)) { hasFinite = true; break; }
+        }
+        if (hasFinite) return result;
+    }
     if (dbFallback_) {
         result = dbFallback_(date, field, symbols);
     }

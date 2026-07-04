@@ -32,10 +32,16 @@ void PostMarketSyncService::start() {
 }
 
 bool PostMarketSyncService::forceSyncToday() {
-    if (m_running.load()) return false;
     int today = getCurrentTradingDay();
     if (!isTradingDay(today)) { INTERNAL_WARN_STREAM << "[PostMktSync] 非交易日, 跳过"; return false; }
-    std::thread([this, today]() { syncAll(today); }).detach();
+    if (m_lastSyncDay.load() == today) {
+        INTERNAL_WARN_STREAM << "[PostMktSync] today=" << today << " 已同步过，跳过";
+        return false;
+    }
+    std::thread([this, today]() {
+        syncAll(today);
+        m_lastSyncDay.store(today);
+    }).detach();
     return true;
 }
 
@@ -63,8 +69,14 @@ void PostMarketSyncService::schedulerLoop() {
         }
         int mins = getCurrentLocalMinutes();
         if (mins >= 901) {
-            // 已过15:01, 立即触发
+            // 已过15:01 — 检查是否今天已经同步过
+            if (m_lastSyncDay.load() == today) {
+                INTERNAL_INFO_STREAM << "[PostMktSync] today=" << today << " 已同步过，跳过";
+                std::this_thread::sleep_for(std::chrono::hours(1));
+                continue;
+            }
             syncAll(today);
+            m_lastSyncDay.store(today);
             // 同步完成后睡到下一个交易日
             std::this_thread::sleep_for(std::chrono::hours(8));
         } else {
@@ -378,16 +390,18 @@ int PostMarketSyncService::getCurrentTradingDay() {
 
 bool PostMarketSyncService::isTradingDay(int date) {
     auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-    if (!db || !db->isOpen()) return true; // 兜底: 假设是交易日
-    auto r = db->executeQuery(
-        "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1",
-        {astock::database::SqlParam{date}});
-    if (r.rowCount() > 0) return r.getRow(0).getInt("is_trading_day") == 1;
-    // 周四五六日 → 可能是交易日, 简单跳过周末
+    if (db && db->isOpen()) {
+        auto r = db->executeQuery(
+            "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1",
+            {astock::database::SqlParam{date}});
+        if (r.rowCount() > 0) return r.getRow(0).getInt("is_trading_day") == 1;
+    }
+    // DB 不可用或查不到时，用 tm_wday 兜底：跳过周六日
     struct tm t = {};
     t.tm_year = date / 10000 - 1900;
     t.tm_mon = (date % 10000) / 100 - 1;
     t.tm_mday = date % 100;
+    t.tm_isdst = -1;
     mktime(&t);
     return t.tm_wday != 0 && t.tm_wday != 6;
 }

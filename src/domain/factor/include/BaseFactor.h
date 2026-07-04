@@ -241,7 +241,7 @@ public:
 
     // 中性化所需字段（所有因子通用，子类继承时天然包含）
     static std::vector<std::string> neutralizationFields() {
-        return {field_names::INDUSTRY_CODE, field_names::MARKET_CAP};
+        return {"industry_code", "market_cap"};
     }
     
     // 检查数据可用性

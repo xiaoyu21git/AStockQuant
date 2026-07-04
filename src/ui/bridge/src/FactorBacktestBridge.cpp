@@ -518,11 +518,11 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     coreMetrics.append(mk("rankIcir",   "ICIR", "IC 信息比率",
                         icMap.value("ir").toDouble(), "number", true, "core"));
                     coreMetrics.append(mk("icWinRate",  "IC 胜率", "IC>0 的期数占比",
-                        icMap.value("winRate").toDouble(), "percent", false, "core"));
+                        icMap.value("winRate").toDouble(), "percent2", false, "core"));
                     coreMetrics.append(mk("monotonicity","单调性", "分组收益单调变化程度",
                         fmMap.value("monotonicityScore").toDouble(), "number", false, "core"));
                     coreMetrics.append(mk("longShortSharpe","多空夏普", "多空组合风险调整收益",
-                        fmMap.value("longShortSharpe").toDouble(), "ratio", true, "core"));
+                        fmMap.value("longShortSharpe").toDouble(), "number", true, "core"));
 
                     // ══ 扩展指标：辅助判断因子质量 ══
                     QVariantList optionalMetrics;
@@ -533,15 +533,15 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     optionalMetrics.append(mk("icTStat", "IC T 统计", "IC 显著性 T 统计量",
                         icMap.value("tStat").toDouble(), "number", false, "optional"));
                     optionalMetrics.append(mk("icHalfLife","IC 半衰期", "IC 自相关衰减至一半的天数",
-                        icMap.value("halfLife").toDouble(), "number", false, "optional"));
+                        icMap.value("halfLife").toDouble(), "integer", false, "optional"));
                     optionalMetrics.append(mk("longShortRet","多空年化", "多空组合年化收益",
-                        fmMap.value("longShortAnnualReturn").toDouble(), "percent", false, "optional"));
+                        fmMap.value("longShortAnnualReturn").toDouble(), "percent2", false, "optional"));
                     optionalMetrics.append(mk("costAdjSharpe","成本夏普", "扣除交易成本后的多空夏普",
-                        fmMap.value("costAdjustedSharpe").toDouble(), "ratio", false, "optional"));
+                        fmMap.value("costAdjustedSharpe").toDouble(), "number", false, "optional"));
                     optionalMetrics.append(mk("monthlyWinRate","月度胜率", "月度正收益占比",
-                        fmMap.value("monthlyWinRate").toDouble(), "percent", false, "optional"));
+                        fmMap.value("monthlyWinRate").toDouble(), "percent2", false, "optional"));
                     optionalMetrics.append(mk("annualTurnover","年化换手", "因子持仓的年化换手率",
-                        fmMap.value("annualTurnover").toDouble(), "percent", false, "optional"));
+                        fmMap.value("annualTurnover").toDouble(), "number2", false, "optional"));
                     optionalMetrics.append(mk("alpha","Alpha", "因子超额收益",
                         fmMap.value("alpha").toDouble(), "number", false, "optional"));
 
@@ -591,11 +591,19 @@ void FactorBacktestBridge::startBacktestWithFactors(
 
                     // 评级检查项
                     QVariantList ratingChecks;
-                    auto addCheck = [&](const QString& label, bool passed) {
+                    auto addCheck = [&](const QString& label, bool passed,
+                                        const QString& actual, const QString& threshold) {
                         QVariantMap c;
-                        c["label"]  = label;
-                        c["passed"] = passed;
+                        c["label"]         = label;
+                        c["passed"]        = passed;
+                        c["actualText"]    = actual;
+                        c["thresholdText"] = threshold;
                         ratingChecks.append(c);
+                    };
+                    auto fmtVal = [](double v, const QString& fmt) {
+                        if (!std::isfinite(v)) return QStringLiteral("--");
+                        if (fmt == "percent") return QString::number(v * 100.0, 'f', 1) + "%";
+                        return QString::number(v, 'f', 3);
                     };
                     bool hasGroups = groupsArr.size() >= 2;
                     bool monotonic = true;
@@ -606,13 +614,22 @@ void FactorBacktestBridge::startBacktestWithFactors(
                                 { monotonic = false; break; }
                         }
                     }
-                    addCheck(QStringLiteral("分组单调性"), monotonic);
-                    addCheck(QStringLiteral("夏普比率 > 0"), tradingMap.value("sharpe").toDouble() > 0.0);
-                    addCheck(QStringLiteral("IC 均值 > 0"), icMap.value("value").toDouble() > 0.0);
-                    addCheck(QStringLiteral("IC 胜率 > 50%"), icMap.value("winRate").toDouble() > 0.5);
+                    double sharpeVal = tradingMap.value("sharpe").toDouble();
+                    double icVal     = icMap.value("value").toDouble();
+                    double wrVal     = icMap.value("winRate").toDouble();
+                    addCheck(QStringLiteral("分组单调性"), monotonic,
+                        monotonic ? QStringLiteral("单调递减") : QStringLiteral("不单调"),
+                        QStringLiteral("G1 ≥ G2 ≥ ... ≥ GN"));
+                    addCheck(QStringLiteral("夏普比率 > 0"), sharpeVal > 0.0,
+                        fmtVal(sharpeVal, "number"), QStringLiteral("> 0"));
+                    addCheck(QStringLiteral("IC 均值 > 0"), icVal > 0.0,
+                        fmtVal(icVal, "number"), QStringLiteral("> 0"));
+                    addCheck(QStringLiteral("IC 胜率 > 50%"), wrVal > 0.5,
+                        fmtVal(wrVal, "percent"), QStringLiteral("> 50%"));
 
                     // 组装完整 factorQuality
                     QVariantMap fq;
+                    fq["numGroups"]         = fmMap.value("numGroups").toDouble();
                     fq["coreRating"]        = rating;
                     fq["coreRatingLabel"]   = ratingLabel;
                     fq["coreRatingTitle"]   = QStringLiteral("因子质量评级");
@@ -675,8 +692,9 @@ void FactorBacktestBridge::startBacktestWithFactors(
                         for (const auto& fid : config.factorIds)
                             allFactorIds.append(QString::fromStdString(fid));
                         cfgMap["factorIds"] = allFactorIds;
-                        cfgMap["factorId"] = QString::fromStdString(config.factorIds.front());
-                        result["factorId"] = cfgMap["factorId"];
+                        cfgMap["factorId"]  = QString::fromStdString(config.factorIds.front());
+                        result["factorId"]   = cfgMap["factorId"];
+                        result["activeAnalysisFactorId"] = cfgMap["factorId"];
                     }
                     cfgMap["benchmarkSymbol"] = QString::fromStdString(config.benchmarkSymbol);
                     cfgMap["initialCapital"]  = config.initialCapital;

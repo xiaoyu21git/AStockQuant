@@ -192,12 +192,14 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             auto dbFin = astock::database::NativeMySQLConnectionPool::instance().getConnection();
             if (dbFin && dbFin->isOpen()) {
                 astock::infrastructure::database::MarketDataRepository finRepo(std::move(dbFin));
-                std::string sd = startDate.toStdString(), ed = endDate.toStdString();
+                std::string ed = endDate.toStdString();
+                // 财务数据需覆盖缓存起始之前的报告期，确保首个交易日能对齐最近财报
+                std::string finSd = "2014-01-01"; // 数据库最早 report_date=2014-12-31
                 // 分批查询避免单次结果集过大
                 for (size_t fs = 0; fs < allSymbolsVec.size(); fs += symbolChunkSize) {
                     size_t fe = (std::min)(fs + symbolChunkSize, allSymbolsVec.size());
                     std::vector<std::string> fchunk(allSymbolsVec.begin() + fs, allSymbolsVec.begin() + fe);
-                    auto frows = finRepo.queryFinancialData(fchunk, sd, ed);
+                    auto frows = finRepo.queryFinancialData(fchunk, finSd, ed);
                     for (const auto& row : frows) {
                         const auto& vals = row.getValues();
                         auto symIt = vals.find("symbol");

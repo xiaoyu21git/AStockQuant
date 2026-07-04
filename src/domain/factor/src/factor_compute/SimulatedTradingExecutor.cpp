@@ -17,6 +17,8 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     const FactorValuesByDate& factorValues,
     const std::vector<std::string>& sortedDates,
     NumericConstMatrixView priceView,
+    NumericConstMatrixView preAdjustView,
+    NumericConstMatrixView postAdjustView,
     const std::vector<InstrumentId>& instrumentIds,
     const std::unordered_map<uint32_t, std::string>& instrumentIdToSymbol) const
 {
@@ -29,6 +31,9 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     const double costPerTrade = commissionRate + slippageRate;
     const double maxFwdRetAbs = params_.maxFwdRetAbsLimit;
     const double riskFreeRate = params_.riskFreeRate;
+    const bool usePreAdjust = params_.adjustPriceType == "pre";
+    const bool haveAdjust = (usePreAdjust && preAdjustView.isValid())
+                         || (!usePreAdjust && postAdjustView.isValid());
 
     if (sortedDates.size() < static_cast<size_t>(forwardDays + 1) || nGroups <= 0) {
         return result;
@@ -106,8 +111,21 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                         const int32_t col = colIt->second;
                         if (col < 0 || col >= priceView.columnCount || di >= priceView.rowCount || sellDayIdx >= priceView.rowCount)
                             continue;
-                        const double bp = priceView.data[static_cast<int32_t>(di) * rowStride + col];
-                        const double sp = priceView.data[static_cast<int32_t>(sellDayIdx) * rowStride + col];
+                        double bp = priceView.data[static_cast<int32_t>(di) * rowStride + col];
+                        double sp = priceView.data[static_cast<int32_t>(sellDayIdx) * rowStride + col];
+                        // 应用复权因子：前复权=bp*preFactor, 后复权=bp*postFactor
+                        if (haveAdjust) {
+                            const auto& adjView = usePreAdjust ? preAdjustView : postAdjustView;
+                            if (adjView.isValid() && adjView.rowCount > 0 && col < adjView.columnCount) {
+                                const int32_t adjStride = adjView.rowStride >= adjView.columnCount ? adjView.rowStride : adjView.columnCount;
+                                const double buyAdj  = adjView.data[static_cast<int32_t>(di) * adjStride + col];
+                                const double sellAdj = adjView.data[static_cast<int32_t>(sellDayIdx) * adjStride + col];
+                                if (std::isfinite(buyAdj) && buyAdj > 1e-9)
+                                    bp *= buyAdj;
+                                if (std::isfinite(sellAdj) && sellAdj > 1e-9)
+                                    sp *= sellAdj;
+                            }
+                        }
                         if (std::isfinite(bp) && bp > 1e-9) {
                             buyPrice[sym] = bp;
                         }

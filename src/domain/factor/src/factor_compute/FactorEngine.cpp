@@ -171,7 +171,6 @@ std::unordered_map<std::string, double> FactorEngine::computeOneDay(
     if (dbFallback) historicalView->setDbFallback(dbFallback);
     factor::CalculationContext ctx(dateStr, symbols, historicalView);
     auto cr = factor.calculate(ctx);
-    INTERNAL_WARN_STREAM << "[FE] calculate returned values=" << cr.values.size() << " isValid=" << cr.dataStatus.isValid();
     int nanCount = 0, infCount = 0, finiteCount = 0;
     double firstFinite = 0.0;
     for (const auto& [sym, val] : cr.values) {
@@ -188,7 +187,7 @@ std::unordered_map<std::string, double> FactorEngine::computeOneDay(
     if (cr.values.empty()) {
         std::string firstSym = symbols.empty() ? "(none)" : symbols[0];
         INTERNAL_WARN_STREAM << "[FE] 因子计算空: date=" << dateStr << " sym=" << firstSym
-                             << " nan=" << nanCount << " factor=" << factor.getName();
+                             << " nan=" << nanCount;
     }
     return result;
 }

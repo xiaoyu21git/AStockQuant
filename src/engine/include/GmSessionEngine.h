@@ -124,6 +124,7 @@ public:
     // Impl — public，SessionStrategy 通过它访问回调
     struct Impl {
         std::atomic<bool> initialized{false};
+        std::atomic<bool> sessionReady{false};  // on_init() 后置 true
         std::thread       strategyThread;
     };
     struct StrategyDeleter { void operator()(void*); };
