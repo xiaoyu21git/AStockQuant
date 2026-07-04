@@ -29,6 +29,7 @@ public:
 
     [[nodiscard]] virtual const std::vector<DateKey>& dates() const = 0;
     [[nodiscard]] virtual const std::vector<InstrumentId>& instruments() const = 0;
+    [[nodiscard]] virtual const std::vector<std::string>& symbolStrings() const = 0;
 
     /// @brief 获取时间子集的视图（零拷贝）
     /// @param dateRange 时间范围

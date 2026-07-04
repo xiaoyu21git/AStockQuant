@@ -1,11 +1,11 @@
 #include "factor_compute/FactorEngine.h"
 #include "factor_compute/SignalCache.h"
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
+#include "factor_compute/CachedMarketDataView.h"
 #include "FactorInstanceManager.h"
 #include "BaseFactor.h"
 #include "HistoricalView.h"
 #include "foundation/json/json_facade.h"
-#include "factor_compute/CachedMarketDataView.h"
 #include "foundation/log/logging.hpp"
 #include <algorithm>
 #include <cmath>
@@ -34,10 +34,6 @@ void BacktestDataService::buildViewForFields(const std::vector<std::string>& ext
 void BacktestDataService::buildViewForFields(const std::vector<std::string>&,
                                               const std::function<void(double)>& onProgress)
 {
-    if (m_marketView) {
-        if (onProgress) onProgress(100.0);
-        return;
-    }
     if (onProgress) onProgress(100.0);
 }
 
@@ -130,6 +126,9 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
     }
 
     CachedMarketDataViewHistoricalAdapter adapter(*view);
+    if (m_dataSvc && m_dataSvc->dbFallback()) {
+        adapter.setDbFallback(m_dataSvc->dbFallback());
+    }
     auto symbols = adapter.getAvailableSymbols("");
     INTERNAL_INFO_STREAM << "[FE] compute: symbols=" << symbols.size();
 
@@ -140,7 +139,8 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
         char dateBuf[16];
         std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
         std::string dateStr(dateBuf);
-        auto raw = computeOneDay(*factor, dateStr, symbols, *view);
+        auto raw = computeOneDay(*factor, dateStr, symbols, *view,
+            m_dataSvc ? m_dataSvc->dbFallback() : CachedMarketDataViewHistoricalAdapter::DbFallbackFn{});
         if (!raw.empty()) {
             std::map<std::string, double> dateValues;
             for (auto& [sym, val] : raw) {
@@ -163,12 +163,15 @@ std::unordered_map<std::string, double> FactorEngine::computeOneDay(
     factor::BaseFactor& factor,
     const std::string& dateStr,
     const std::vector<std::string>& symbols,
-    const IMarketDataView& view)
+    const IMarketDataView& view,
+    const CachedMarketDataViewHistoricalAdapter::DbFallbackFn& dbFallback)
 {
     std::unordered_map<std::string, double> result;
     auto historicalView = std::make_shared<CachedMarketDataViewHistoricalAdapter>(view);
+    if (dbFallback) historicalView->setDbFallback(dbFallback);
     factor::CalculationContext ctx(dateStr, symbols, historicalView);
     auto cr = factor.calculate(ctx);
+    INTERNAL_WARN_STREAM << "[FE] calculate returned values=" << cr.values.size() << " isValid=" << cr.dataStatus.isValid();
     int nanCount = 0, infCount = 0, finiteCount = 0;
     double firstFinite = 0.0;
     for (const auto& [sym, val] : cr.values) {
@@ -185,7 +188,7 @@ std::unordered_map<std::string, double> FactorEngine::computeOneDay(
     if (cr.values.empty()) {
         std::string firstSym = symbols.empty() ? "(none)" : symbols[0];
         INTERNAL_WARN_STREAM << "[FE] 因子计算空: date=" << dateStr << " sym=" << firstSym
-                             << " nan=" << nanCount;
+                             << " nan=" << nanCount << " factor=" << factor.getName();
     }
     return result;
 }

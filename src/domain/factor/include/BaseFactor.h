@@ -235,6 +235,14 @@ public:
     
     // 边界规则
     virtual BoundaryRules getBoundaryRules() const = 0;
+
+    // 历史回看天数（chunk 预热用）
+    virtual int getLookbackDays() const = 0;
+
+    // 中性化所需字段（所有因子通用，子类继承时天然包含）
+    static std::vector<std::string> neutralizationFields() {
+        return {field_names::INDUSTRY_CODE, field_names::MARKET_CAP};
+    }
     
     // 检查数据可用性
     virtual DataStatus checkDataAvailability(const std::string& date) const;

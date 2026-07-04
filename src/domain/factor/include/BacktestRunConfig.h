@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "../../types/DomainDate.h"
 #include "CompositeFactorConfig.h"
 
 namespace Factor::backtest {
@@ -28,8 +29,8 @@ struct BacktestRunConfig {
     // ── 缓存配置 (从 QML 缓存页面选择) ──
     DataSourceMode dataSourceMode = DataSourceMode::Cache;
     int selectedDatasetId = 0;
-    int32_t cacheStartDate = 0;    // YYYYMMDD 格式, 如 20240101
-    int32_t cacheEndDate = 0;
+    domain::DomainDate cacheStartDate;
+    domain::DomainDate cacheEndDate;
 
     // ── 因子配置 ──
     FactorMode factorMode = FactorMode::Single;

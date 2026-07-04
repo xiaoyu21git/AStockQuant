@@ -1,6 +1,8 @@
 #include "FactorBacktestOrchestrator.h"
 #include "factor_compute/FactorEngine.h"
 #include "factor_compute/ArrowMarketDataView.h"
+#include "../../../infrastructure/include/database/MarketDataRepository.h"
+#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "BacktestScheduler.h"
 #include "BaseFactor.h"
@@ -90,6 +92,7 @@ void FactorBacktestOrchestrator::run(
     // ── 收集因子需要的额外字段 ──
     // 优先使用预检阶段预注入的字段，避免重复 createInstance + getDataRequirements
     std::vector<std::string> neededExtraFields;
+    int maxLookback = 0;
     if (config.hasPreResolvedFields) {
         neededExtraFields = config.preResolvedExtraFields;
     } else {
@@ -100,6 +103,8 @@ void FactorBacktestOrchestrator::run(
                     neededExtraFields.push_back(f);
                 for (const auto& f : factor->getDataRequirements().optionalFields)
                     neededExtraFields.push_back(f);
+                int lb = factor->getLookbackDays();
+                if (lb > maxLookback) maxLookback = lb;
             }
         };
         if (isComposite) {
@@ -122,19 +127,57 @@ void FactorBacktestOrchestrator::run(
             neededExtraFields.end());
     }
 
+    // ── 首块 DB 回看 ──
+    if (maxLookback > 0 && m_dataService) {
+        factor::compute::BacktestDataService::DbFallbackFn dbFn =
+            [](const std::string& date, const std::string& field,
+               const std::vector<std::string>& symbols)
+            -> std::unordered_map<std::string, double> {
+            auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            if (!db || !db->isOpen()) return {};
+            astock::infrastructure::database::MarketDataRepository repo(db);
+            std::unordered_map<std::string, double> result;
+            auto rows = repo.queryFieldCrossSection(field, date, symbols);
+            for (const auto& r : rows)
+                result[r.symbol] = r.value;
+            return result;
+        };
+        m_dataService->setDbFallback(std::move(dbFn));
+    }
+
     if (onProgress) onProgress(5.0, "data indexed");
+
+    // ── 按 config 日期范围过滤 ──
+    const auto& arrowDates = arrowView->dates();
+    std::vector<factor::compute::DateKey> filteredDatesStorage;
+    const std::vector<factor::compute::DateKey>* effectiveDatesPtr = &arrowDates;
+    if (config.cacheStartDate.isValid() || config.cacheEndDate.isValid()) {
+        for (const auto& d : arrowDates) {
+            if (config.cacheStartDate.isValid() && d.value < config.cacheStartDate.value) continue;
+            if (config.cacheEndDate.isValid() && d.value > config.cacheEndDate.value) continue;
+            filteredDatesStorage.push_back(d);
+        }
+        if (filteredDatesStorage.empty()) {
+            emitError("no trading dates within specified date range");
+            return;
+        }
+        effectiveDatesPtr = &filteredDatesStorage;
+    }
+    const auto& allDates = *effectiveDatesPtr;
 
     // ── 分块大小：每块约 60 个交易日 ──
     constexpr int kChunkDates = 60;
-    const auto& allDates = arrowView->dates();
     const size_t totalDates = allDates.size();
     const size_t totalChunks = (totalDates + kChunkDates - 1) / kChunkDates;
     const int fwdDays = std::max(1, config.forwardDays);
 
-    // 分块加载列名：核心 5 列 + 因子字段
+    // 分块加载列名：核心 5 列 + 因子字段 + 基类中性化字段
     std::vector<std::string> chunkColumns = {"open", "high", "low", "close", "volume"};
     for (const auto& f : neededExtraFields)
         chunkColumns.push_back(f);
+    for (const auto& f : factor::BaseFactor::neutralizationFields())
+        if (std::find(chunkColumns.begin(), chunkColumns.end(), f) == chunkColumns.end())
+            chunkColumns.push_back(f);
 
     factor::compute::BacktestReporterInput reporterInput;
     std::map<std::string, std::vector<std::pair<double, double>>> icByDate; // date→{(fv, fwdRet)}
@@ -148,10 +191,13 @@ void FactorBacktestOrchestrator::run(
             onProgress(pct, "chunk " + std::to_string(ci + 1) + "/" + std::to_string(totalChunks));
         }
 
-        size_t start = ci * kChunkDates;
-        size_t end = std::min(start + kChunkDates + static_cast<size_t>(fwdDays), totalDates);
+        // 块计算窗口 + 历史回看预热（首块无历史）
+        size_t chunkStart = ci * kChunkDates;
+        size_t warmup = (ci == 0) ? 0 : static_cast<size_t>(maxLookback);
+        size_t loadStart = (chunkStart > warmup) ? (chunkStart - warmup) : 0;
+        size_t loadEnd = std::min(chunkStart + kChunkDates + static_cast<size_t>(fwdDays), totalDates);
         std::vector<factor::compute::DateKey> chunkDates(
-            allDates.begin() + start, allDates.begin() + end);
+            allDates.begin() + loadStart, allDates.begin() + loadEnd);
 
             // 从 Arrow 文件直接加载该块数据（不经过全量缓存）
             auto chunkView = arrowView->makeChunkView(chunkDates, chunkColumns);
@@ -210,6 +256,8 @@ void FactorBacktestOrchestrator::run(
                 }
             } else {
                 // ── 单/多因子：逐因子计算 ──
+                // 多因子时记录每个 (date,symbol) 的累计值和计数，最后取均值
+                std::map<std::string, std::map<std::string, int>> factorValueCounts;
                 for (const auto& factorId : factorIdList) {
                     factor::compute::FactorCacheKey cacheKey;
                     cacheKey.factorName = factorId;
@@ -217,7 +265,21 @@ void FactorBacktestOrchestrator::run(
 
                     for (const auto& [date, symbolValues] : factorResult.factorValues) {
                         for (const auto& [symbol, value] : symbolValues) {
-                            reporterInput.factorValuesByDate[date][symbol] = value;
+                            if (!std::isfinite(value)) continue;
+                            reporterInput.factorValuesByDate[date][symbol] += value;
+                            factorValueCounts[date][symbol]++;
+                        }
+                    }
+                }
+                // 多因子均值归一化
+                if (factorIdList.size() > 1) {
+                    for (auto& [date, symMap] : reporterInput.factorValuesByDate) {
+                        auto countIt = factorValueCounts.find(date);
+                        if (countIt == factorValueCounts.end()) continue;
+                        for (auto& [symbol, val] : symMap) {
+                            auto symCountIt = countIt->second.find(symbol);
+                            if (symCountIt != countIt->second.end() && symCountIt->second > 1)
+                                val /= static_cast<double>(symCountIt->second);
                         }
                     }
                 }
@@ -467,9 +529,9 @@ void FactorBacktestOrchestrator::run(
 
             ::factor::FactorBacktestMetricsCalculator::Inputs inputs{
                 btConfig, btResult.icirResult, btResult.groupResult,
-                tradingResult.strategyDailyReturns,
-                tradingResult.strategyDailyReturns,
-                tradingResult.strategyDailyReturns,
+                tradingResult.rawLongShortReturns,
+                tradingResult.costAdjustedLongShortReturns,
+                tradingResult.riskAdjustedLongShortReturns,
                 tradingResult.periodTurnovers,
                 {},
                 {}
@@ -558,10 +620,38 @@ void FactorBacktestOrchestrator::run(
             ex.set("validSampleCount", J::createDouble(static_cast<double>(tradingResult.validSampleCount)));
             metrics.set("execution", ex);
 
-            auto retSeries = J::createArray();
-            for (double r : tradingResult.strategyDailyReturns)
-                retSeries.push_back(J::createDouble(r));
+            // ── 三条收益序列 ──
+            auto rawRetSeries = J::createArray();
+            for (double r : tradingResult.rawLongShortReturns)
+                rawRetSeries.push_back(J::createDouble(r));
+
+            auto costAdjRetSeries = J::createArray();
+            for (double r : tradingResult.costAdjustedLongShortReturns)
+                costAdjRetSeries.push_back(J::createDouble(r));
+
+            auto riskAdjRetSeries = J::createArray();
+            for (double r : tradingResult.riskAdjustedLongShortReturns)
+                riskAdjRetSeries.push_back(J::createDouble(r));
+
+            auto retSeries = J::createObject();
+            retSeries.set("raw",          rawRetSeries);
+            retSeries.set("costAdjusted", costAdjRetSeries);
+            retSeries.set("riskAdjusted", riskAdjRetSeries);
             metrics.set("returnSeries", retSeries);
+
+            // ── 分组收益序列 ──
+            auto groupRetSeries = J::createArray();
+            for (size_t gi = 0; gi < tradingResult.groupDailyReturns.size(); ++gi) {
+                auto gArray = J::createArray();
+                for (double r : tradingResult.groupDailyReturns[gi])
+                    gArray.push_back(J::createDouble(r));
+                auto gObj = J::createObject();
+                gObj.set("groupIndex", J::createDouble(static_cast<double>(gi)));
+                gObj.set("groupName",  J::createString("G" + std::to_string(gi + 1)));
+                gObj.set("data", gArray);
+                groupRetSeries.push_back(gObj);
+            }
+            metrics.set("groupReturnSeries", groupRetSeries);
 
             root.set("metrics", metrics);
             onComplete(root.toString());

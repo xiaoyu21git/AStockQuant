@@ -7,14 +7,15 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "../../types/DomainDate.h"
 
 namespace factor {
 
 // ── 回测配置 ──
 struct BacktestConfig {
     std::string instanceId;
-    std::string startDate;
-    std::string endDate;
+    domain::DomainDate startDate;
+    domain::DomainDate endDate;
     int forwardDays   = 30;
     int rebalanceDays = 1;
     int numGroups     = 10;

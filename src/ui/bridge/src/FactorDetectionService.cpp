@@ -546,7 +546,7 @@ QString FactorDetectionService::buildDefinitionFingerprint(const factor::FactorI
 
 QString FactorDetectionService::legacyCacheFilePath() const
 {
-    const QString relativePath = QStringLiteral("factor_support_pass_cache.json");
+    const QString relativePath = QStringLiteral("support_cache.json");
     const QString targetPath = QDir(bridge::storage::cacheDir()).filePath(relativePath);
     bridge::storage::migrateLegacyFileIfNeeded(targetPath, bridge::storage::legacyLocationsForRelativePath(relativePath));
     bridge::storage::ensureDirectoryExists(QFileInfo(targetPath).dir().absolutePath());
@@ -687,7 +687,18 @@ QVariantMap FactorDetectionService::detectPendingFactors(
                 fieldDiagnostics = collectFieldDiagnostics(request.cacheSnapshot);
                 availableTradeDateCount = request.cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt();
                 if (availableTradeDateCount <= 0) {
-                    availableTradeDateCount = dataSetInfo.value("rowCount", 0).toInt() > 0 ? 1 : 0;
+                    // 从数据集日期范围估算交易日数（年化 252 天比例）
+                    const QString dsStart = dataSetInfo.value("startDate").toString();
+                    const QString dsEnd   = dataSetInfo.value("endDate").toString();
+                    if (!dsStart.isEmpty() && !dsEnd.isEmpty()) {
+                        QDate s = QDate::fromString(dsStart, "yyyy-MM-dd");
+                        QDate e = QDate::fromString(dsEnd, "yyyy-MM-dd");
+                        if (s.isValid() && e.isValid() && e > s) {
+                            availableTradeDateCount = static_cast<int>(s.daysTo(e) * 252 / 365);
+                        }
+                    }
+                    if (availableTradeDateCount <= 0)
+                        availableTradeDateCount = dataSetInfo.value("rowCount", 0).toInt() > 0 ? 1 : 0;
                 }
             }
         }
@@ -824,23 +835,8 @@ QVariantMap FactorDetectionService::detectSingleFactor(
         ? (std::max)(1, overrides.requiredWarmupTradingDaysOverrideForTests.value(resolvedInstanceId))
         : (std::max)(1, factorInstance->getBoundaryRules().minDataPoints);
 
-    // ── P2: DataAvailabilityChecker SQL 级字段验证汇入预检 ──
-    // 在 metadata 的 availableFields/unusableFields 之上，
-    // 追加数据库实际查询结果，消除"元数据存在但实际无有效值"的分裂
-    std::unordered_set<std::string> mergedUnusableFields = sharedContext.unusableFieldSet;
-    if (runtimeContext.dataChecker && runtimeContext.database) {
-        auto dataStatus = runtimeContext.dataChecker->checkFactorData(
-            info.config,
-            resolvedInstanceId.toStdString(),
-            request.startDate.toStdString(),
-            request.endDate.toStdString());
-        for (const auto& missingField : dataStatus.missingFields) {
-            mergedUnusableFields.insert(missingField);
-        }
-        for (const auto& invalidField : dataStatus.invalidFields) {
-            mergedUnusableFields.insert(invalidField);
-        }
-    }
+    // 字段可用性完全由缓存 Arrow 文件的 schema 决定，无需 SQL 回查数据库
+    const auto& mergedUnusableFields = sharedContext.unusableFieldSet;
 
     factor::check::FactorCheckInput input;
     input.useCacheMode = sharedContext.useCacheMode;

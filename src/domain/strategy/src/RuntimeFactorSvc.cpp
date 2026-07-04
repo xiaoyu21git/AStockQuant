@@ -34,9 +34,8 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
     m_liveMarketView = view;
     // 重建符号解析：tick 侧 InstrumentId 用股票代码段(000001→1, 600000→600000)
     // 解析后直接映射到 view 中的股票代码字符串，不再走顺序 ID
-    auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(view);
-    if (cachedView && !cachedView->symbolStrings().empty()) {
-        const auto& symbols = cachedView->symbolStrings();
+    if (view && !view->symbolStrings().empty()) {
+        const auto& symbols = view->symbolStrings();
         auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
         for (size_t i = 0; i < symbols.size(); ++i) {
             const std::string& sym = symbols[i];
@@ -65,10 +64,9 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
     if (svc) {
         auto batch = svc->loadBatch(0);
         if (batch.marketView && !batch.marketView->instruments().empty()) {
-            // 尝试从 CachedMarketDataView 获取真实股票代码
-            auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(batch.marketView);
-            if (cachedView && !cachedView->symbolStrings().empty()) {
-                const auto& symbols = cachedView->symbolStrings();
+            // 从 IMarketDataView 接口获取股票代码
+            if (batch.marketView && !batch.marketView->symbolStrings().empty()) {
+                const auto& symbols = batch.marketView->symbolStrings();
                 auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
                 for (size_t i = 0; i < symbols.size(); ++i) {
                     const std::string& sym = symbols[i];

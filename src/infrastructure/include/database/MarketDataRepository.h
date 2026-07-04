@@ -144,6 +144,84 @@ public:
     std::vector<astock::database::SqlQueryResultRow> querySymbolInfo(
         const std::vector<std::string>& symbols);
 
+    /// 单标的分页K线详情（含 symbol_info 元数据列，用于 QML 详情面板）
+    std::vector<astock::database::SqlQueryResultRow> queryKlineDetail(
+        const std::string& symbol,
+        const std::string& startDate,
+        const std::string& endDate,
+        int limit,
+        int offset);
+
+    /// 单标的分页财务详情（用于 QML 详情面板）
+    std::vector<astock::database::SqlQueryResultRow> queryFinancialDetail(
+        const std::string& symbol,
+        const std::string& startDate,
+        const std::string& endDate,
+        int limit,
+        int offset);
+
+    /// 新闻舆情查询（按标的+日期范围）
+    std::vector<astock::database::SqlQueryResultRow> queryNewsSentiment(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 全市场新闻舆情
+    std::vector<astock::database::SqlQueryResultRow> queryAllMarketNewsSentiment(
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 政策数据查询（按标的+日期范围）
+    std::vector<astock::database::SqlQueryResultRow> queryPolicyData(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 全市场政策数据
+    std::vector<astock::database::SqlQueryResultRow> queryAllMarketPolicyData(
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 另类数据查询（按标的+日期范围）
+    std::vector<astock::database::SqlQueryResultRow> queryAlternativeData(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 全市场另类数据
+    std::vector<astock::database::SqlQueryResultRow> queryAllMarketAlternativeData(
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 清洗后日线（VIEW: data.cleaned_daily_bar）
+    std::vector<astock::database::SqlQueryResultRow> queryCleanedDailyBar(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 分钟线查询（按标的+时间范围）
+    std::vector<astock::database::SqlQueryResultRow> queryMinuteBar(
+        const std::vector<std::string>& symbols,
+        const std::string& startTime,
+        const std::string& endTime);
+
+    /// 全市场分钟线
+    std::vector<astock::database::SqlQueryResultRow> queryAllMarketMinuteBar(
+        const std::string& startTime,
+        const std::string& endTime);
+
+    /// 获取所有活跃标的列表
+    std::vector<std::string> queryActiveSymbols();
+
+    /// 获取标的在日期范围内的覆盖信息（symbol, start_dt, end_dt, cnt）
+    /// @param joinColumn ref.symbol_info 的 JOIN 列名（daily_bar 用 "id", financial_indicator 用 "symbol_id"）
+    std::vector<astock::database::SqlQueryResultRow> querySymbolCoverage(
+        const std::string& tableName,
+        const std::string& dateColumn,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::string& joinColumn = "id");
+
 private:
     static DailyBarRow rowToBar(const astock::database::SqlQueryResultRow& row);
     std::string buildExtraColumnsSql(const std::vector<std::string>& extraFields) const;

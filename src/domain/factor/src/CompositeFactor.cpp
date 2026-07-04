@@ -515,6 +515,14 @@ BoundaryRules CompositeFactor::getBoundaryRules() const
     return mergeBoundaryRules(resolveChildrenOrThrow());
 }
 
+int CompositeFactor::getLookbackDays() const
+{
+    int m = 0;
+    for (const auto& c : resolveChildrenOrThrow())
+        if (c.factor) m = std::max(m, c.factor->getLookbackDays());
+    return m > 0 ? m : 252;
+}
+
 void CompositeFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);

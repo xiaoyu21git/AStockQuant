@@ -16,7 +16,7 @@ QString StockNameResolver::name(const QString& symbol)
         auto db = pool.getConnection();
         if (!db || !db->isOpen()) return;
         auto rs = db->executeQuery(
-            "SELECT symbol, name FROM symbol_info WHERE asset_class='STOCK'");
+            "SELECT symbol, name FROM ref.symbol_info WHERE asset_class='STOCK'");
         for (int i = 0; i < static_cast<int>(rs.rowCount()); ++i) {
             const auto& row = rs.getRow(i);
             s_cache[QString::fromStdString(row.getString("symbol"))] =

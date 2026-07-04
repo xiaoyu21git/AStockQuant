@@ -56,7 +56,7 @@ public:
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
 
     /// 真实股票代码 (InstrumentId → "000001.SZ" 等)
-    [[nodiscard]] const std::vector<std::string>& symbolStrings() const;
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const override;
 
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override;

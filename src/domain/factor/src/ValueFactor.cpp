@@ -1,4 +1,5 @@
 #include "domain/factor/include/ValueFactor.h"
+#include "foundation/log/logging.hpp"
 
 //#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
@@ -445,6 +446,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
 
             std::vector<MetricContribution> contributions;
             contributions.reserve(metrics.size());
+            INTERNAL_WARN_STREAM << "[VF] date=" << runtime.effectiveDate << " metrics=" << metrics.size();
 
             for (const ValuationMetric metric : metrics) {
                 const double weight = valuationMetricWeight(params_, metric);
@@ -452,19 +454,18 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
 
                 if (metric == ValuationMetric::CFP) {
                     if (!context.historicalView->hasField("market_cap") || !context.historicalView->hasField("operating_cash_flow")) {
-                        result.dataStatus = CalculationResult::createError(
-                            "dataset missing market_cap or operating_cash_flow for CFP").dataStatus;
-                        return;
+                        continue; // 缺少 CFP 字段时跳过此指标，不影响其他指标
                     }
                     contributions.push_back(computeCFPContribution(context, runtime, weight));
                 } else {
                     const std::string field = valuationMetricField(metric);
-                    if (field.empty() || !context.historicalView->hasField(field)) {
-                        result.dataStatus = CalculationResult::createError(
-                            "dataset missing field: " + (field.empty() ? valuationMetricToJsonString(metric) : field)).dataStatus;
-                        return;
+                    bool hasF = !field.empty() && context.historicalView->hasField(field);
+                    if (!hasF) {
+                        INTERNAL_WARN_STREAM << "[VF] SKIP " << field << " hasField=false";
+                        continue;
                     }
                     auto contrib = computeStandardContribution(context, runtime, metric, weight);
+                    INTERNAL_WARN_STREAM << "[VF] " << field << " samples=" << contrib.rawSampleCount << " scores=" << contrib.scores.size();
                     contributions.push_back(std::move(contrib));
                 }
             }
@@ -498,6 +499,8 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 result.values[symbol] = weightedScore / weightIt->second;
             }
 
+            INTERNAL_WARN_STREAM << "[VF] merge done values=" << result.values.size()
+                << " contribs=" << contributions.size();
             if (result.values.empty()) {
                 const std::string emptyReason = totalRawSampleCount == 0
                     ? "当前价值因子没有可用的指标样本"

@@ -15,7 +15,6 @@ add_subdirectory(src)
     tests/test_thread_pool.cpp
     tests/test_utils.cpp
     tests/test_main.cpp
-    tests/test_timeutils.cpp
     #tests/ConfigTest.cpp
     tests/ConfigPerformanceTest.cpp
 

@@ -228,31 +228,31 @@ KLineBatch DatabaseProvider::get_history_klines_batch(
 
     std::ostringstream sql;
     if (is_daily_period(period)) {
-        sql << "SELECT s.symbol_id, UNIX_TIMESTAMP(d.trade_date) AS ts, d.open, d.high, d.low, d.close, d.volume, d.turnover "
-            << "FROM daily_bar d "
-            << "INNER JOIN symbol_info s ON s.symbol = d.symbol "
+        sql << "SELECT s.symbol_id, EXTRACT(EPOCH FROM d.trade_date) AS ts, d.open, d.high, d.low, d.close, d.volume, d.turnover "
+            << "FROM mkt.daily_bar d "
+            << "INNER JOIN ref.symbol_info s ON d.symbol_id = s.id "
             << "WHERE s.symbol_id IN (" << inClause.str() << ") ";
 
         if (start_time > 0) {
-            sql << "AND d.trade_date >= DATE(FROM_UNIXTIME(" << start_time << ")) ";
+            sql << "AND d.trade_date >= to_timestamp(" << start_time << ")::date ";
         }
         if (end_time > 0) {
-            sql << "AND d.trade_date <= DATE(FROM_UNIXTIME(" << end_time << ")) ";
+            sql << "AND d.trade_date <= to_timestamp(" << end_time << ")::date ";
         }
 
         sql << "ORDER BY s.symbol_id ASC, d.trade_date ASC";
     } else {
         const std::string timeframe = period_to_timeframe(period);
-        sql << "SELECT symbol_id, UNIX_TIMESTAMP(bar_time) AS ts, open, high, low, close, volume, turnover "
+        sql << "SELECT symbol_id, EXTRACT(EPOCH FROM bar_time) AS ts, open, high, low, close, volume, turnover "
             << "FROM minute_bar "
             << "WHERE symbol_id IN (" << inClause.str() << ") "
             << "AND timeframe = '" << timeframe << "' ";
 
         if (start_time > 0) {
-            sql << "AND bar_time >= FROM_UNIXTIME(" << start_time << ") ";
+            sql << "AND bar_time >= to_timestamp(" << start_time << ") ";
         }
         if (end_time > 0) {
-            sql << "AND bar_time <= FROM_UNIXTIME(" << end_time << ") ";
+            sql << "AND bar_time <= to_timestamp(" << end_time << ") ";
         }
 
         sql << "ORDER BY symbol_id ASC, bar_time ASC";

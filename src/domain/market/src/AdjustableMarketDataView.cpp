@@ -67,6 +67,7 @@ AdjustableMarketDataView::getField(const std::string& fieldName) const {
 
 const std::vector<factor::compute::DateKey>& AdjustableMarketDataView::dates() const { return source_.dates(); }
 const std::vector<factor::compute::InstrumentId>& AdjustableMarketDataView::instruments() const { return source_.instruments(); }
+const std::vector<std::string>& AdjustableMarketDataView::symbolStrings() const { return source_.symbolStrings(); }
 
 std::unique_ptr<factor::compute::IMarketDataView>
 AdjustableMarketDataView::slice(factor::compute::DateRange dateRange) const {

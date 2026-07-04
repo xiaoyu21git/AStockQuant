@@ -117,6 +117,7 @@ public:
 
     [[nodiscard]] const std::vector<DateKey>& dates() const override { return dates_; }
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override { return instruments_; }
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const override { return symbols_; }
 
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override {
@@ -370,7 +371,6 @@ public:
             }
             view->setColumn(colName, std::move(cd));
         }
-
         return view;
     }
 

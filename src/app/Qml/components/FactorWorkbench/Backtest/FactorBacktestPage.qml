@@ -5162,19 +5162,20 @@ Item {
         var supportMapLoading = factorBacktestController
                 ? factorBacktestController.supportMapRequestInFlight
                 : false
-        
+
         // 创建对话框组件
         var component = Qt.createComponent("FactorSelectorDialog.qml")
         if (component.status === Component.Ready) {
+            // 每次打开对话框都强制刷新检测，避免使用旧缓存
             var dialogParent = Qt.application.activeWindow ? Qt.application.activeWindow : root
             factorSelectorDialog = component.createObject(root, {
                 factorService: factorService,
                 factorViewModel: factorService ? factorService.getViewModel() : null,
                 selectedFactorIds: backtestEntryMode === 1 ? compositeChildIds().slice() : selectedFactorIds.slice(),
                 dataSourceMode: selectedDataSourceMode,
-                supportMapRequested: hasCachedSupportMap || supportMapLoading,
-                supportMapLoading: supportMapLoading,
-                factorSupportMap: hasCachedSupportMap ? shallowCopyMap(cachedSupportMap) : ({}),
+                supportMapRequested: false,
+                supportMapLoading: false,
+                factorSupportMap: ({}),
                 supportMapRefreshCallback: function() { runSupportMapRefresh(true) }
             })
             if (factorSelectorDialog && dialogParent) {

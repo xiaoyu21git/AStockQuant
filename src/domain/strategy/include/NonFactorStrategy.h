@@ -73,8 +73,8 @@ public:
 
             // 注入当日实时收盘价（替代 DB 视图中的最后一行）
             std::string fullSymbol;
-            if (auto* cv = dynamic_cast<const factor::compute::CachedMarketDataView*>(view)) {
-                const auto& syms = cv->symbolStrings();
+            if (view && !view->symbolStrings().empty()) {
+                const auto& syms = view->symbolStrings();
                 if (c < static_cast<int>(syms.size())) fullSymbol = syms[static_cast<size_t>(c)];
             }
             if (!fullSymbol.empty()) {

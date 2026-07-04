@@ -206,21 +206,19 @@ inline QString persistentDatasetRootDir()
 
 inline QString persistentDatasetFactorSupportPassCacheFilePath(int datasetId)
 {
-    if (datasetId <= 0) {
-        return {};
-    }
-
-    const QString targetPath = QDir(persistentDatasetRootDir()).filePath(
-        QStringLiteral("dataset_%1_factor_support_pass_cache.json").arg(datasetId));
-    ensureDirectoryExists(QFileInfo(targetPath).dir().absolutePath());
-    return targetPath;
+    if (datasetId <= 0) return {};
+    const QString dir = QDir(persistentDatasetRootDir()).filePath(
+        QStringLiteral("dataset_%1").arg(datasetId));
+    ensureDirectoryExists(dir);
+    return QDir(dir).filePath(QStringLiteral("support_cache.json"));
 }
 
 inline QString persistentDataSetBinFilePath(int datasetId)
 {
     if (datasetId <= 0) return {};
-    return QDir(persistentDatasetRootDir()).filePath(
-        QStringLiteral("dataset_%1_data.bin").arg(datasetId));
+    const QString dir = QDir(persistentDatasetRootDir()).filePath(
+        QStringLiteral("dataset_%1/raw").arg(datasetId));
+    return QDir(dir).filePath(QStringLiteral("data.bin"));
 }
 
 inline QString riskConfigurationFilePath()

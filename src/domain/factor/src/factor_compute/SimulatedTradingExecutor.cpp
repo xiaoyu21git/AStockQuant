@@ -49,6 +49,11 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     std::vector<int32_t> groupPeriodCount(nGroups, 0);
     std::vector<double> strategyDailyReturns;
 
+    // 三条收益序列：原始 / 成本调整 / 风险调整
+    std::vector<double> rawLongShortReturns;
+    std::vector<double> costAdjustedLongShortReturns;
+    std::vector<std::vector<double>> groupDailyReturns(nGroups); // 每组每日收益
+
     // 换手追踪：记录上期各组股票集合
     std::vector<std::unordered_set<std::string>> prevGroupStocks(nGroups);
     double totalTurnover = 0.0;
@@ -115,7 +120,8 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
             }
         }
 
-        std::vector<double> dayGroupReturns(nGroups, 0.0);
+        std::vector<double> dayGroupReturns(nGroups, 0.0);       // 扣费后
+        std::vector<double> dayGroupRawReturns(nGroups, 0.0);   // 扣费前
         std::vector<std::unordered_set<std::string>> curGroupStocks(nGroups);
         int32_t validGroups = 0;
 
@@ -141,14 +147,15 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
             }
 
             if (cnt > 0) {
-                // 扣除手续费+滑点（每组一次换仓）
-                double avgRet = sumRet / cnt;
-                avgRet -= costPerTrade;  // 交易成本
-                groupAccumReturns[g] += avgRet;
+                double avgRet = sumRet / cnt;               // 原始收益（扣费前）
+                double retAfterCost = avgRet - costPerTrade; // 扣除手续费+滑点
+                groupAccumReturns[g] += retAfterCost;
                 groupValidDays[g]++;
                 groupTotalStocks[g] += cnt;
                 groupPeriodCount[g]++;
-                dayGroupReturns[g] = avgRet;
+                dayGroupRawReturns[g] = avgRet;
+                dayGroupReturns[g] = retAfterCost;
+                groupDailyReturns[g].push_back(retAfterCost);
                 ++validGroups;
             }
         }
@@ -163,12 +170,13 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                     for (const auto& sym : curGroupStocks[g]) {
                         if (prevGroupStocks[g].count(sym)) ++stayed;
                     }
-                    int32_t left = static_cast<int32_t>(prevGroupStocks[g].size()) - stayed;
-                    int32_t entered = static_cast<int32_t>(curGroupStocks[g].size()) - stayed;
-                    int32_t total = static_cast<int32_t>(curGroupStocks[g].size());
-                    if (total > 0) {
-                        periodTurnover += static_cast<double>(entered + left) / (2.0 * total);
-                    }
+                    int32_t prevSz = static_cast<int32_t>(prevGroupStocks[g].size());
+                    int32_t curSz = static_cast<int32_t>(curGroupStocks[g].size());
+                    int32_t left = prevSz - stayed;
+                    int32_t entered = curSz - stayed;
+                    double leftRate = prevSz > 0 ? static_cast<double>(left) / prevSz : 0.0;
+                    double enteredRate = curSz > 0 ? static_cast<double>(entered) / curSz : 0.0;
+                    periodTurnover += (leftRate + enteredRate) / 2.0;
                 }
                 totalTurnover += periodTurnover / nGroups;
                 result.periodTurnovers.push_back(periodTurnover / nGroups);
@@ -176,14 +184,20 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
             ++turnoverPeriods;
             prevGroupStocks = std::move(curGroupStocks);
 
-            double dailyStrategyRet = 0.0;
+            double dailyRawRet = 0.0;
+            double dailyCostAdjRet = 0.0;
             for (int32_t g = 0; g < nGroups; ++g) {
-                dailyStrategyRet += dayGroupReturns[g];
+                dailyRawRet     += dayGroupRawReturns[g];
+                dailyCostAdjRet += dayGroupReturns[g];
             }
-            dailyStrategyRet /= validGroups;
+            dailyRawRet     /= validGroups;
+            dailyCostAdjRet /= validGroups;
 
-            strategyDailyReturns.push_back(dailyStrategyRet);
-            equity *= (1.0 + dailyStrategyRet);
+            rawLongShortReturns.push_back(dailyRawRet);
+            costAdjustedLongShortReturns.push_back(dailyCostAdjRet);
+
+            strategyDailyReturns.push_back(dailyCostAdjRet);
+            equity *= (1.0 + dailyCostAdjRet);
             if (equity > maxEquity) maxEquity = equity;
             double dd = (maxEquity > 1e-9) ? (maxEquity - equity) / maxEquity : 0.0;
             if (dd > result.maxDrawdown) result.maxDrawdown = dd;
@@ -260,6 +274,19 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     }
 
     result.strategyDailyReturns = std::move(strategyDailyReturns);
+    result.rawLongShortReturns = std::move(rawLongShortReturns);
+    result.costAdjustedLongShortReturns = std::move(costAdjustedLongShortReturns);
+    result.groupDailyReturns = std::move(groupDailyReturns);
+
+    // 风险调整收益：超额收益 = 成本调整后收益 - 无风险日利率
+    {
+        const double riskFreeDailyRate = riskFreeRate / 252.0;
+        result.riskAdjustedLongShortReturns.reserve(result.costAdjustedLongShortReturns.size());
+        for (double r : result.costAdjustedLongShortReturns) {
+            result.riskAdjustedLongShortReturns.push_back(r - riskFreeDailyRate);
+        }
+    }
+
     return result;
 }
 

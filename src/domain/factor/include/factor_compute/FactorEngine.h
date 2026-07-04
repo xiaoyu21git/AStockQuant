@@ -1,4 +1,5 @@
 #pragma once
+#include "factor_compute/MarketDataViewHistoricalAdapter.h"
 // ══════════════════════════════════════════════════════════════════════════════
 // FactorEngine — 合并 Layer 3a+3b+4 的单头文件
 //   DataSvc (Layer 3a): 列存读取 + mmap + 解压 → float32 行情矩阵
@@ -82,9 +83,16 @@ public:
     IMarketDataView* getView() const { return m_marketView; }
     MarketMatrixBatch loadBatch(std::size_t batchIndex);
 
+    using DbFallbackFn = std::function<std::unordered_map<std::string, double>(
+        const std::string& date, const std::string& field,
+        const std::vector<std::string>& symbols)>;
+    void setDbFallback(DbFallbackFn fn) { m_dbFallback = std::move(fn); }
+    const DbFallbackFn& dbFallback() const { return m_dbFallback; }
+
 private:
     IMarketDataView* m_marketView = nullptr;
     std::unique_ptr<class CachedMarketDataView> m_ownedView;
+    DbFallbackFn m_dbFallback;
 };
 
 // ═══ FactorEngine (Layer 3b) ═══
@@ -127,7 +135,8 @@ private:
         class factor::BaseFactor& factor,
         const std::string& dateStr,
         const std::vector<std::string>& symbols,
-        const IMarketDataView& view);
+        const IMarketDataView& view,
+        const CachedMarketDataViewHistoricalAdapter::DbFallbackFn& dbFallback = {});
 
     std::unique_ptr<SignalCache> m_signalCache;
     factor::FactorInstanceManager* m_instanceManager = nullptr;

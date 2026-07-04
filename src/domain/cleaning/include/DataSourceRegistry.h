@@ -44,7 +44,7 @@ inline const std::unordered_set<std::string>& numeric() {
 }
 // SQL SELECT 片段（禁止 SELECT * 带出审计字段）
 inline std::string sqlSelect() {
-    return "d.symbol,d.trade_date,"
+    return "s.symbol,d.trade_date,"
            "d.open,d.high,d.low,d.close,d.pre_close,"
            "d.volume,d.turnover,d.change_pct,d.change_amt,d.amplitude,"
            "d.turnover_rate,d.pe_ratio,d.pb_ratio,"
@@ -63,11 +63,12 @@ inline const std::vector<std::string>& names() {
     return v;
 }
 inline const std::unordered_set<std::string>& numeric() {
-    static const std::unordered_set<std::string> s = {};
+    static const std::unordered_set<std::string> s = {"industry_code"};
     return s;
 }
 inline std::string sqlSelect() {
-    return "s.name,s.exchange,s.industry_code,"
+    return "s.name,s.exchange,"
+           "ic.industry_code,"
            "s.list_date,s.delist_date,s.status";
 }
 } // namespace symbol_info_columns
@@ -124,6 +125,82 @@ inline std::string sqlSelect() {
 }
 } // namespace financial_columns
 
+namespace news_sentiment_columns {
+// 新闻舆情列（来自 data.news_sentiment 表）
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "symbol","publish_time",
+        "sentiment_score","social_sentiment","investor_sentiment","market_sentiment"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {
+        "sentiment_score","social_sentiment","investor_sentiment","market_sentiment"
+    };
+    return s;
+}
+inline std::string sqlSelect() {
+    return "si.symbol,ns.publish_time,"
+           "ns.sentiment_score,ns.social_sentiment,"
+           "ns.investor_sentiment,ns.market_sentiment";
+}
+} // namespace news_sentiment_columns
+
+namespace policy_data_columns {
+// 政策数据列（来自 fund.policy_data 表）
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "symbol","publish_time","policy_score"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {"policy_score"};
+    return s;
+}
+inline std::string sqlSelect() {
+    return "si.symbol,pd.publish_time,pd.policy_score";
+}
+} // namespace policy_data_columns
+
+namespace alternative_data_columns {
+// 另类数据列（来自 fund.alternative_data 表）
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "symbol","trade_date","hot_rank","basis_rate"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {"hot_rank","basis_rate"};
+    return s;
+}
+inline std::string sqlSelect() {
+    return "si.symbol,ad.trade_date,ad.hot_rank,ad.basis_rate";
+}
+} // namespace alternative_data_columns
+
+namespace minute_bar_columns {
+// 分钟线列（来自 mkt.minute_bar 表）
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "symbol","trade_ts","open","high","low","close","volume","amount"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {
+        "open","high","low","close","volume","amount"
+    };
+    return s;
+}
+inline std::string sqlSelect() {
+    return "si.symbol,mb.trade_ts,"
+           "mb.open,mb.high,mb.low,mb.close,mb.volume,mb.amount";
+}
+} // namespace minute_bar_columns
+
 // ═══════════════════════════════════════════════════════════════════
 // 数据源接口与实现
 // ═══════════════════════════════════════════════════════════════════
@@ -150,15 +227,16 @@ public:
 class KlineDataSource : public IDataSource {
 public:
     std::string typeName() const override { return "kline_daily"; }
-    std::string tableName() const override { return "daily_bar"; }
+    std::string tableName() const override { return "mkt.daily_bar"; }
     std::string dateColumn() const override { return "trade_date"; }
 
     std::string buildGroupQuery(const std::string& start,
                                 const std::string& end) const override {
         std::ostringstream sql;
-        sql << "SELECT symbol, MIN(trade_date) AS start_dt, MAX(trade_date) AS end_dt, COUNT(*) AS cnt "
-            << "FROM daily_bar WHERE trade_date BETWEEN '" << start << "' AND '" << end
-            << "' GROUP BY symbol";
+        sql << "SELECT si.symbol, MIN(d.trade_date) AS start_dt, MAX(d.trade_date) AS end_dt, COUNT(*) AS cnt "
+            << "FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id "
+            << "WHERE d.trade_date BETWEEN '" << start << "' AND '" << end
+            << "' GROUP BY si.symbol";
         return sql.str();
     }
 
@@ -168,11 +246,11 @@ public:
         std::ostringstream sql;
         sql << "SELECT " << kline_columns::sqlSelect() << ","
             << symbol_info_columns::sqlSelect()
-            << " FROM daily_bar d"
-            << " JOIN symbol_info s ON d.symbol = s.symbol"
+            << " FROM mkt.daily_bar d"
+            << " JOIN ref.symbol_info s ON d.symbol_id = s.id"
             << " WHERE d.trade_date BETWEEN '" << start << "' AND '" << end << "'";
         if (!symbols.empty() && symbols.size() <= 2000) {
-            sql << " AND d.symbol IN (";
+            sql << " AND s.symbol IN (";
             for (size_t i = 0; i < symbols.size(); ++i) {
                 if (i > 0) sql << ",";
                 sql << "'" << symbols[i] << "'";
@@ -194,7 +272,7 @@ public:
 class FinancialDataSource : public IDataSource {
 public:
     std::string typeName() const override { return "financial"; }
-    std::string tableName() const override { return "financial_indicator_daily"; }
+    std::string tableName() const override { return "fund.financial_indicator_daily"; }
     std::string dateColumn() const override { return "report_date"; }
 
     std::string buildGroupQuery(const std::string& start,
@@ -202,7 +280,7 @@ public:
         std::ostringstream sql;
         sql << "SELECT si.symbol, MIN(fi.report_date) AS start_dt,"
             << " MAX(fi.report_date) AS end_dt, COUNT(*) AS cnt "
-            << "FROM financial_indicator fi JOIN symbol_info si ON fi.symbol_id=si.symbol_id "
+            << "FROM fund.financial_indicator_daily fi JOIN ref.symbol_info si ON fi.symbol_id = si.id "
             << "WHERE fi.report_date BETWEEN '" << start << "' AND '" << end
             << "' GROUP BY si.symbol";
         return sql.str();
@@ -213,8 +291,8 @@ public:
         // 显式列出 25 列，禁止 fi.*
         std::ostringstream sql;
         sql << "SELECT " << financial_columns::sqlSelect()
-            << " FROM financial_indicator fi"
-            << " JOIN symbol_info si ON fi.symbol_id = si.symbol_id"
+            << " FROM fund.financial_indicator_daily fi"
+            << " JOIN ref.symbol_info si ON fi.symbol_id = si.id"
             << " WHERE fi.report_date BETWEEN '" << start << "' AND '" << end << "'";
         return sql.str();
     }

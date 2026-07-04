@@ -106,22 +106,31 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             return;
         }
 
+        // 使用 MarketDataRepository 获取标的覆盖信息（替代 DataSourceRegistry::buildGroupQuery）
+        astock::infrastructure::database::MarketDataRepository repo(db);
         QMap<QString, QVariantMap> merged;
         QStringList allSymbols;
 
+        std::string sd = startDate.toStdString(), ed = endDate.toStdString();
+
+        // 按需查询各数据类型的覆盖信息
         for (const QString& dt : dataTypes) {
-            auto* src = cleaning::sourceByName(dt.toStdString());
-            if (!src) continue;
-            std::string sql = src->buildGroupQuery(startDate.toStdString(), endDate.toStdString());
-            auto result = db->executeQuery(sql, {});
-            for (const auto& row : result.getRows()) {
+            std::vector<astock::database::SqlQueryResultRow> coverage;
+            if (dt == "kline_daily") {
+                coverage = repo.querySymbolCoverage("mkt.daily_bar", "trade_date", sd, ed, "id");
+            } else if (dt == "financial") {
+                coverage = repo.querySymbolCoverage("fund.financial_indicator_daily", "report_date", sd, ed, "id");
+            } else {
+                continue;
+            }
+            for (const auto& row : coverage) {
                 QString sym = QString::fromStdString(row.getString("symbol"));
                 if (merged.contains(sym)) {
                     QVariantMap& m = merged[sym];
                     m["recordCount"] = m["recordCount"].toInt() + row.getInt("cnt");
-                    std::string sd = row.getString("start_dt"), ed = row.getString("end_dt");
-                    if (sd < m["startDate"].toString().toStdString()) m["startDate"] = QString::fromStdString(sd);
-                    if (ed > m["endDate"].toString().toStdString()) m["endDate"] = QString::fromStdString(ed);
+                    std::string s = row.getString("start_dt"), e = row.getString("end_dt");
+                    if (s < m["startDate"].toString().toStdString()) m["startDate"] = QString::fromStdString(s);
+                    if (e > m["endDate"].toString().toStdString()) m["endDate"] = QString::fromStdString(e);
                 } else {
                     QVariantMap item;
                     item["symbol"] = sym;
@@ -192,19 +201,19 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                     for (const auto& row : frows) {
                         const auto& vals = row.getValues();
                         auto symIt = vals.find("symbol");
-                        auto discIt = vals.find("disclosure_date");
-                        if (symIt == vals.end() || discIt == vals.end()
-                            || discIt->second.empty()) continue;
+                        auto rptIt = vals.find("report_date");
+                        if (symIt == vals.end() || rptIt == vals.end()
+                            || rptIt->second.empty()) continue;
                         std::unordered_map<std::string, std::string> fv;
                         for (const auto& [col, val] : vals) {
                             if (!val.empty() && finColSet.count(col)) fv[col] = val;
                         }
-                        // 按披露日排序，对齐时 disclosure_date ≤ trade_date
-                        finCache[symIt->second].emplace_back(discIt->second, std::move(fv));
+                        // 按报告日排序，对齐时 report_date ≤ trade_date
+                        finCache[symIt->second].emplace_back(rptIt->second, std::move(fv));
                     }
                 }
             }
-            // 每标的 disclosure_date 升序
+            // 每标的 report_date 升序
             for (auto& [sym, vec] : finCache)
                 std::sort(vec.begin(), vec.end(),
                     [](auto& a, auto& b) { return a.first < b.first; });
@@ -318,22 +327,14 @@ void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) return;
 
-    std::string sym = "'" + symbol.toStdString() + "'";
-    std::string sd = "'" + m_startDate.toStdString() + "'";
-    std::string ed = "'" + m_endDate.toStdString() + "'";
-    std::string limit = std::to_string(kPageSize);
-    std::string offset = std::to_string(page * kPageSize);
-
     QVariantList data;
 
-    // K线（显式 20 列 + symbol_info 元数据，禁止 SELECT *）
-    std::string kSql = "SELECT " + cleaning::kline_columns::sqlSelect() + ","
-                       + cleaning::symbol_info_columns::sqlSelect()
-                       + " FROM daily_bar d JOIN symbol_info s ON d.symbol = s.symbol"
-                       + " WHERE d.symbol=" + sym + " AND d.trade_date BETWEEN " + sd
-                       + " AND " + ed + " ORDER BY d.trade_date LIMIT " + limit + " OFFSET " + offset;
-    auto kResult = db->executeQuery(kSql, {});
-    for (const auto& row : kResult.getRows()) {
+    // K线（通过 MarketDataRepository，SQL 不对外暴露）
+    astock::infrastructure::database::MarketDataRepository detailRepo(db);
+    auto kRows = detailRepo.queryKlineDetail(
+        symbol.toStdString(), m_startDate.toStdString(), m_endDate.toStdString(),
+        kPageSize, page * kPageSize);
+    for (const auto& row : kRows) {
         QVariantMap m;
         for (const auto& f : cleaning::kline_columns::names())
             m[QString::fromStdString(f)] = QString::fromStdString(row.getString(f));
@@ -343,13 +344,11 @@ void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
         data.append(m);
     }
 
-    // 财务（显式 25 列，禁止 fi.*）
-    std::string fSql = "SELECT " + cleaning::financial_columns::sqlSelect()
-                       + " FROM financial_indicator fi JOIN symbol_info si ON fi.symbol_id=si.symbol_id"
-                       + " WHERE si.symbol=" + sym + " AND fi.report_date BETWEEN " + sd + " AND " + ed
-                       + " ORDER BY fi.report_date LIMIT " + limit + " OFFSET " + offset;
-    auto fResult = db->executeQuery(fSql, {});
-    for (const auto& row : fResult.getRows()) {
+    // 财务（通过 MarketDataRepository，SQL 不对外暴露）
+    auto fRows = detailRepo.queryFinancialDetail(
+        symbol.toStdString(), m_startDate.toStdString(), m_endDate.toStdString(),
+        kPageSize, page * kPageSize);
+    for (const auto& row : fRows) {
         QVariantMap m;
         for (const auto& col : row.getValues()) {
             const auto& val = col.second;

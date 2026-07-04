@@ -1,4 +1,5 @@
 #include "domain/factor/include/BaseFactor.h"
+#include "foundation/log/logging.hpp"
 
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorNeutralizationUtils.h"
@@ -405,21 +406,26 @@ CalculationResult BaseFactor::executeWithCommonParams(
         : NeutralizationStatus::Disabled;
 
     rawCalculator(runtime, result);
+    INTERNAL_WARN_STREAM << "[BP] after raw values=" << result.values.size();
 
     if (result.dataStatus.isValid() && !result.values.empty()) {
         applyCommonNeutralization(context, params, runtime, result, runtime.neutralizationMode);
+        INTERNAL_WARN_STREAM << "[BP] after neutral values=" << result.values.size();
     }
 
     if (result.dataStatus.isValid() && !result.values.empty()) {
         preStandardizationProcessor(runtime, result);
+        INTERNAL_WARN_STREAM << "[BP] after preStd values=" << result.values.size();
     }
 
     if (result.dataStatus.isValid() && !result.values.empty()) {
         applyCommonStandardization(result.values, runtime.standardization);
+        INTERNAL_WARN_STREAM << "[BP] after std values=" << result.values.size();
     }
 
     appendCommonMetadata(result, params, runtime);
     metadataAppender(runtime, result);
+    INTERNAL_WARN_STREAM << "[BP] before return values=" << result.values.size();
     return result;
 }
 
@@ -563,18 +569,9 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     std::string errorMessage;
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
         neutralizationMode = NeutralizationStatus::HistoricalViewFailed;
-        result.values.clear();
-        if (isNeutralizationSampleInsufficientMessage(errorMessage)) {
-            result.dataStatus.availability = DataAvailability::PARTIAL;
-            result.dataStatus.coverage = 0.0;
-            result.dataStatus.message = errorMessage;
-            result.metadata.set("emptyReason", json_helper::toJsonValue(errorMessage));
-            return true;
-        }
-
-        result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue(errorMessage));
-        return false;
+        // 中性化失败不丢弃原始因子值
+        INTERNAL_WARN_STREAM << "[neutralization] failed: " << errorMessage << " — keeping raw values";
+        return true;
     }
 
     neutralizationMode = NeutralizationStatus::HistoricalViewCrossSectionIndustryMarketCap;

@@ -314,6 +314,8 @@ DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId)
 {
     auto session = new ArrowWriteSession();
     session->dataId = dataId;
+    ensureDir(datasetDir(dataId));
+    ensureDir(datasetDir(dataId) + "/raw");
     session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
     return session;
 }
@@ -326,6 +328,8 @@ DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId,
     session->dataId = dataId;
     session->fieldNames = fieldNames;
     session->numericFields = numericFields;
+    ensureDir(datasetDir(dataId));
+    ensureDir(datasetDir(dataId) + "/raw");
     session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
     return session;
 }

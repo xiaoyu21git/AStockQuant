@@ -32,7 +32,11 @@ struct GroupBacktestMetrics final {
 /// 模拟成交的完整回测结果
 struct SimulatedTradingResult final {
     std::vector<GroupBacktestMetrics> groups;
-    std::vector<double> strategyDailyReturns;
+    std::vector<double> strategyDailyReturns;       // 成本调整后的多空日收益（主序列）
+    std::vector<double> rawLongShortReturns;        // 扣费前的原始多空日收益
+    std::vector<double> costAdjustedLongShortReturns; // 扣费后的多空日收益 (= strategyDailyReturns)
+    std::vector<double> riskAdjustedLongShortReturns;  // 风险调整后多空日收益
+    std::vector<std::vector<double>> groupDailyReturns; // 每组每日收益 [groupIndex][dayIndex]
     double annualizedReturn{0.0};
     double maxDrawdown{0.0};
     double annualStdDev{0.0};

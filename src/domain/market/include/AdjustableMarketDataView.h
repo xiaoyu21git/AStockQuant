@@ -39,6 +39,7 @@ public:
 
     [[nodiscard]] const std::vector<factor::compute::DateKey>& dates() const override;
     [[nodiscard]] const std::vector<factor::compute::InstrumentId>& instruments() const override;
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const override;
 
     [[nodiscard]] std::unique_ptr<factor::compute::IMarketDataView>
     slice(factor::compute::DateRange dateRange) const override;

@@ -28,14 +28,7 @@ void PostMarketSyncService::start() {
     m_started = true;
     m_running.store(true);
     m_scheduler = std::make_unique<std::thread>(&PostMarketSyncService::schedulerLoop, this);
-    // 启动检查: 若当前已过15:01且为交易日, 立即触发
-    int today = getCurrentTradingDay();
-    if (isTradingDay(today) && getCurrentLocalMinutes() >= 901) {
-        INTERNAL_INFO_STREAM << "[PostMktSync] 启动检查: 已过15:01, 立即触发 today=" << today;
-        std::thread([this, today]() { syncAll(today); }).detach();
-    } else {
-        INTERNAL_INFO_STREAM << "[PostMktSync] 调度线程已启动, 等待15:01 today=" << today;
-    }
+    INTERNAL_INFO_STREAM << "[PostMktSync] 调度线程已启动 today=" << getCurrentTradingDay();
 }
 
 bool PostMarketSyncService::forceSyncToday() {
@@ -88,9 +81,20 @@ void PostMarketSyncService::schedulerLoop() {
 // ═════════════════════════════════════════════════
 
 void PostMarketSyncService::syncAll(int tradingDay) {
-    if (getSyncStatus(tradingDay) == "success") {
-        INTERNAL_INFO_STREAM << "[PostMktSync] today=" << tradingDay << " 已同步, 跳过";
-        return;
+    // 直接查今天日线是否有数据，有就跳过
+    {
+        int y = tradingDay / 10000, m = (tradingDay % 10000) / 100, d = tradingDay % 100;
+        char ds[32]; snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
+        auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+        if (db && db->isOpen()) {
+            auto r = db->executeQuery(
+                "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1",
+                {astock::database::SqlParam{std::string(ds)}});
+            if (r.rowCount() > 0 && r.getRow(0).getInt(0) > 0) {
+                INTERNAL_INFO_STREAM << "[PostMktSync] today=" << tradingDay << " 已有数据, 跳过同步";
+                return;
+            }
+        }
     }
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 开始同步 today=" << tradingDay;
@@ -110,7 +114,7 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     std::vector<std::string> symbols;
     for (auto& row : res.getRows()) {
         std::string sym = row.getString("symbol");
-        int id = row.getInt("symbol_id");
+        int id = row.getInt("id");
         symToId[sym] = id;
         symbols.push_back(sym);
     }

@@ -291,8 +291,8 @@ m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
 void FactorBacktestBridge::startBacktestWithFactors(
     const QVariantList& factorIds,
     const QString& groupText,
-    const QString& /*startDate*/,
-    const QString& /*endDate*/,
+    const QString& startDate,
+    const QString& endDate,
     const QVariantMap& /*cacheSnapshot*/)
 {
     if (m_isRunning.load()) return;
@@ -351,6 +351,20 @@ void FactorBacktestBridge::startBacktestWithFactors(
     for (const QVariant& id : factorIds) {
         config.factorIds.push_back(id.toString().toStdString());
     }
+
+    // QML 日期字符串 (YYYYMMDD 或 YYYY-MM-DD) → DomainDate
+    auto parseQmlDate = [](const QString& s) -> domain::DomainDate {
+        if (s.isEmpty()) return {};
+        QString cleaned = s;
+        cleaned.remove(QLatin1Char('-'));
+        bool ok = false;
+        int32_t v = cleaned.toInt(&ok);
+        if (ok && v >= 19000101 && v <= 29991231)
+            return domain::DomainDate{v};
+        return {};
+    };
+    config.cacheStartDate = parseQmlDate(startDate);
+    config.cacheEndDate   = parseQmlDate(endDate);
 
     // 异步: 全部重操作移到 worker 线程，不阻塞 UI
     int capturedDatasetId = m_selectedDatasetId;
@@ -489,9 +503,11 @@ void FactorBacktestBridge::startBacktestWithFactors(
                                  double val, const QString& format, bool emphasize,
                                  const QString& tier, int units = 1) {
                         QVariantMap m;
-                        m["key"] = key; m["title"] = title; m["subtitle"] = subtitle;
-                        m["label"] = title; m["value"] = val; m["format"] = format;
+                        bool avail = std::isfinite(val);
+                        m["key"] = key; m["title"] = title; m["subtitle"] = avail ? subtitle : QStringLiteral("不可用");
+                        m["label"] = title; m["value"] = avail ? val : 0.0; m["format"] = format;
                         m["emphasize"] = emphasize; m["tier"] = tier; m["units"] = units;
+                        m["available"] = avail;
                         return m;
                     };
 
@@ -557,15 +573,17 @@ void FactorBacktestBridge::startBacktestWithFactors(
                         groupCharts.append(chart);
                     }
 
-                    // returnSeries — 从 orchestrator JSON 提取收益率序列
-                    QJsonArray retArr = metricsObj.value("returnSeries").toArray();
-                    QVariantList rawReturns, costAdjusted, riskAdjusted;
-                    for (int i = 0; i < retArr.size(); ++i) {
-                        double v = retArr[i].toDouble();
-                        rawReturns.append(v);
-                        costAdjusted.append(v);   // MVP: 同源数据
-                        riskAdjusted.append(v);
-                    }
+                    // returnSeries — 从 orchestrator JSON 提取三条分离的收益率序列
+                    QJsonObject retObj = metricsObj.value("returnSeries").toObject();
+                    auto jsonArrayToVariantList = [](const QJsonArray& arr) {
+                        QVariantList out;
+                        for (int i = 0; i < arr.size(); ++i)
+                            out.append(arr[i].toDouble());
+                        return out;
+                    };
+                    QVariantList rawReturns     = jsonArrayToVariantList(retObj.value("raw").toArray());
+                    QVariantList costAdjusted   = jsonArrayToVariantList(retObj.value("costAdjusted").toArray());
+                    QVariantList riskAdjusted   = jsonArrayToVariantList(retObj.value("riskAdjusted").toArray());
                     QVariantMap returnSeries;
                     returnSeries["rawReturns"]            = rawReturns;
                     returnSeries["costAdjustedReturns"]   = costAdjusted;
@@ -606,6 +624,19 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     fq["coreMetrics"]       = coreMetrics;
                     fq["groupCharts"]       = groupCharts;
                     fq["returnSeries"]      = returnSeries;
+
+                    // groupReturnSeries — 每组每日收益时间序列
+                    QJsonArray grsArr = metricsObj.value("groupReturnSeries").toArray();
+                    QVariantList groupReturnSeries;
+                    for (int gi = 0; gi < grsArr.size(); ++gi) {
+                        QJsonObject gObj = grsArr[gi].toObject();
+                        QVariantMap gMap;
+                        gMap["groupIndex"] = gObj.value("groupIndex").toInt();
+                        gMap["groupName"]  = gObj.value("groupName").toString();
+                        gMap["data"]       = jsonArrayToVariantList(gObj.value("data").toArray());
+                        groupReturnSeries.append(gMap);
+                    }
+                    fq["groupReturnSeries"] = groupReturnSeries;
                     fq["optionalMetrics"]   = optionalMetrics;
                     fq["auxiliaryMetrics"]  = auxiliaryMetrics;
 
@@ -640,6 +671,10 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     // config — QML 读取 config.factorId / startDate / endDate / benchmarkSymbol
                     QVariantMap cfgMap;
                     if (!config.factorIds.empty()) {
+                        QVariantList allFactorIds;
+                        for (const auto& fid : config.factorIds)
+                            allFactorIds.append(QString::fromStdString(fid));
+                        cfgMap["factorIds"] = allFactorIds;
                         cfgMap["factorId"] = QString::fromStdString(config.factorIds.front());
                         result["factorId"] = cfgMap["factorId"];
                     }
@@ -669,7 +704,10 @@ void FactorBacktestBridge::startBacktestWithFactors(
                         if (db && db->isOpen()) {
                             using P = astock::database::SqlParam;
                             std::string runId = foundation::utils::Uuid::generate().to_string_no_dashes();
-                            std::string fid = config.factorIds.empty() ? "unknown" : config.factorIds.front();
+                            std::string fid = config.factorIds.empty() ? "unknown" :
+                                (config.factorIds.size() == 1 ? config.factorIds.front() :
+                                 [&]() { std::string s; for (size_t i=0;i<config.factorIds.size();++i)
+                                    { if(i>0) s+=","; s+=config.factorIds[i]; } return s; }());
                             std::string cfgJson = QJsonDocument(QJsonObject::fromVariantMap(cfgMap)).toJson(QJsonDocument::Compact).toStdString();
                             std::string summaryJson = QJsonDocument(QJsonObject::fromVariantMap(metrics)).toJson(QJsonDocument::Compact).toStdString();
                             std::string groupsJsonStr = QJsonDocument(QJsonArray::fromVariantList(groupsList)).toJson(QJsonDocument::Compact).toStdString();

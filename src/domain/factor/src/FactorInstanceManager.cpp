@@ -476,7 +476,7 @@ void FactorInstanceManager::updateInstanceAvailability(
     if (checkDate.empty()) {
         try {
             auto latestResult = db_->executeQuery(
-                "SELECT MAX(trade_date) as latest_date FROM daily_bar"
+                "SELECT MAX(trade_date) as latest_date FROM mkt.daily_bar"
             );
 
             if (!latestResult.isEmpty()) {

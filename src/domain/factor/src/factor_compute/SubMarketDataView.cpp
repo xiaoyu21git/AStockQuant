@@ -69,6 +69,11 @@ const std::vector<InstrumentId>& SubMarketDataView::instruments() const
     return impl_->instrumentSubset;
 }
 
+const std::vector<std::string>& SubMarketDataView::symbolStrings() const
+{
+    return impl_->source->symbolStrings();
+}
+
 // --- slice implementations ---
 
 std::unique_ptr<IMarketDataView>

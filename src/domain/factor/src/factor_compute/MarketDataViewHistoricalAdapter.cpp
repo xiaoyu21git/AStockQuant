@@ -1,22 +1,7 @@
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
-#include "factor_compute/CachedMarketDataView.h"
-#include "factor_compute/ArrowMarketDataView.h"
+#include "foundation/log/logging.hpp"
 
 namespace factor::compute {
-
-namespace {
-    // 尝试从各种 MarketDataView 子类获取真实股票代码，失败返回空 vector
-    std::vector<std::string> tryGetSymbolStrings(const IMarketDataView& view)
-    {
-        if (auto* cv = dynamic_cast<const CachedMarketDataView*>(&view)) {
-            if (!cv->symbolStrings().empty()) return cv->symbolStrings();
-        }
-        if (auto* av = dynamic_cast<const ArrowMarketDataView*>(&view)) {
-            if (!av->symbolStrings().empty()) return av->symbolStrings();
-        }
-        return {};
-    }
-}
 
 CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     const factor::compute::IMarketDataView& marketDataView)
@@ -33,18 +18,14 @@ CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     }
 
     symbols_.reserve(viewInstruments.size());
-    auto realSymbols = tryGetSymbolStrings(marketDataView);
-    if (!realSymbols.empty()) {
-        for (size_t i = 0; i < viewInstruments.size() && i < realSymbols.size(); ++i) {
-            symbols_.push_back(realSymbols[i]);
-            symbolToIndex_[realSymbols[i]] = static_cast<int32_t>(i);
-        }
-    } else {
-        for (size_t i = 0; i < viewInstruments.size(); ++i) {
-            std::string symStr = std::to_string(viewInstruments[i].value);
-            symbols_.push_back(symStr);
-            symbolToIndex_[symStr] = static_cast<int32_t>(i);
-        }
+    const auto& realSymbols = view_.symbolStrings();
+    if (realSymbols.empty()) {
+        INTERNAL_ERROR_STREAM << "[Adapter] symbolStrings() 为空，无法建立符号映射";
+        return;
+    }
+    for (size_t i = 0; i < viewInstruments.size() && i < realSymbols.size(); ++i) {
+        symbols_.push_back(realSymbols[i]);
+        symbolToIndex_[realSymbols[i]] = static_cast<int32_t>(i);
     }
 }
 

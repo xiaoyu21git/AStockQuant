@@ -41,8 +41,8 @@ std::shared_ptr<arrow::Table> DataTableAssembler::buildFromSqlRows(
         if (!sym.empty() && !td.empty()) {
             auto fit = finCache.find(sym);
             if (fit != finCache.end() && !fit->second.empty()) {
-                auto it = std::upper_bound(fit->second.begin(), fit->second.end(), td,
-                    [](const std::string& d, const auto& rp) { return d < rp.first; });
+                auto it = std::lower_bound(fit->second.begin(), fit->second.end(), td,
+                    [](const auto& rp, const std::string& d) { return rp.first < d; });
                 if (it != fit->second.begin()) fv = &(it - 1)->second;
             }
         }

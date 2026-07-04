@@ -293,17 +293,23 @@ public:
     }
 
     // ── 文件路径（供外部直接读写） ──
+    std::string datasetDir(int dataId) const {
+        return m_persistentDir + "/dataset_" + std::to_string(dataId);
+    }
     std::string binFilePath(int dataId) const {
-        return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_data.bin";
+        return datasetDir(dataId) + "/raw/data.bin";
     }
     std::string dataFilePath(int dataId) const {
-        return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_data.arrow";
+        return datasetDir(dataId) + "/raw/data.arrow";
     }
     std::string jsonDataFilePath(int dataId) const {
-        return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_data.json";
+        return datasetDir(dataId) + "/raw/data.json";
+    }
+    std::string cleanedFilePath(int dataId) const {
+        return datasetDir(dataId) + "/cleaned/data.arrow";
     }
     std::string infoFilePath(int dataId) const {
-        return m_persistentDir + "/dataset_" + std::to_string(dataId) + "_info.json";
+        return datasetDir(dataId) + "/info.json";
     }
 
 private:
@@ -387,6 +393,10 @@ private:
     }
 
     static void writeFile(const std::string& path, const std::string& content) {
+        // 确保父目录存在
+        auto pos = path.rfind('/');
+        if (pos == std::string::npos) pos = path.rfind('\\');
+        if (pos != std::string::npos) ensureDir(path.substr(0, pos));
         FILE* f = fopen(path.c_str(), "wb");
         if (!f) {
             INTERNAL_ERROR_STREAM << "[DataCache] writeFile: fopen failed for " << path;

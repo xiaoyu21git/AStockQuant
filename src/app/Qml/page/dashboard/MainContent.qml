@@ -242,9 +242,12 @@ Item {
             detailColor: liveRecentOrders.length > 0 ? orderSideAccentColor(liveRecentOrders[0].side) : "#94a3b8"
         }
     ] : statusCards
-    readonly property var effectivePositions: pageMode === "live-trading"
-        ? (positionAccountService && positionAccountService.positions
-            ? positionAccountService.positions.map(function(position) {
+    property var effectivePositions: []
+
+    function refreshEffectivePositions() {
+        var result = []
+        if (pageMode === "live-trading" && positionAccountService && positionAccountService.positions) {
+            result = positionAccountService.positions.map(function(position) {
                 var quantity = Number(position.quantity || position.shares || 0)
                 var availableQuantity = Number(position.availableQuantity || position.availableShares || quantity)
                 var avgPrice = Number(position.costBasis || position.avgPrice || 0)
@@ -272,8 +275,11 @@ Item {
             }).sort(function(left, right) {
                 return Number(right.currentValue || 0) - Number(left.currentValue || 0)
             })
-            : [])
-        : positions
+        } else if (pageMode !== "live-trading") {
+            result = positions
+        }
+        effectivePositions = result
+    }
     readonly property var liveMarketSections: pageMode === "live-trading" ? buildLiveMarketSections() : []
     readonly property real livePositionCount: effectivePositions ? effectivePositions.length : 0
     readonly property int liveAccountOrderCount: pageMode === "live-trading" && liveAccountOrderStatusesCache
@@ -551,15 +557,25 @@ Item {
     Component.onCompleted: {
         syncLiveAccountOrderStatusesCache()
         syncLiveMarketSnapshotCache()
+        refreshEffectivePositions()
     }
 
-    onPageModeChanged: syncLiveMarketSnapshotCache()
-    onMarketDataServiceChanged: syncLiveMarketSnapshotCache()
+    onPageModeChanged: {
+        syncLiveMarketSnapshotCache()
+        refreshEffectivePositions()
+    }
+    onMarketDataServiceChanged: {
+        syncLiveMarketSnapshotCache()
+        refreshEffectivePositions()
+    }
     onVisibleChanged: {
         if (visible) {
             syncLiveMarketSnapshotCache()
+            refreshEffectivePositions()
         }
     }
+    onPositionsChanged: refreshEffectivePositions()
+    onMarketDataChanged: refreshEffectivePositions()
 
     Connections {
         target: mainContent.marketDataService
@@ -567,6 +583,7 @@ Item {
 
         function onMarketSnapshotsChanged() {
             mainContent.syncLiveMarketSnapshotCache()
+            mainContent.refreshEffectivePositions()
         }
     }
 
@@ -576,6 +593,15 @@ Item {
 
         function onRecentOrderStatusesChanged() {
             mainContent.syncLiveAccountOrderStatusesCache()
+        }
+        function onPositionsChanged() {
+            mainContent.refreshEffectivePositions()
+        }
+        function onAccountSnapshotChanged() {
+            mainContent.refreshEffectivePositions()
+        }
+        function onDataChanged() {
+            mainContent.refreshEffectivePositions()
         }
     }
 

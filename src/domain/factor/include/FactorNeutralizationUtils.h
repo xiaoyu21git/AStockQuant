@@ -41,6 +41,12 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
     const auto industryBySymbol = context.historicalView->getCrossSection(context.date, industryFieldName, context.symbols);
     const auto marketCapBySymbol = context.historicalView->getCrossSection(context.date, marketCapFieldName, context.symbols);
 
+    INTERNAL_WARN_STREAM << "[neutralization] date=" << context.date
+        << " symbols=" << context.symbols.size()
+        << " industryMap=" << industryBySymbol.size()
+        << " mktcapMap=" << marketCapBySymbol.size()
+        << " values=" << values.size();
+
     struct Sample {
         std::string symbol;
         double value{0.0};
