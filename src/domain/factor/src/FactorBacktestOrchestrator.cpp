@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -157,11 +158,49 @@ void FactorBacktestOrchestrator::run(
             -> std::unordered_map<std::string, double> {
             static std::unordered_map<std::string,
                 std::unordered_map<std::string, std::map<std::string, double>>> s_fullCache;
+            auto& fieldCache = s_fullCache[field];
+
+            // ── 静态字段：与日期无关的标的属性，直接从 ref.symbol_info + industry_classification 查 ──
+            static const std::unordered_set<std::string> staticSymbolFields = {
+                "industry_code",
+            };
+            if (staticSymbolFields.count(field)) {
+                auto cacheIt = fieldCache.find("__static_loaded__");
+                if (cacheIt == fieldCache.end()) {
+                    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                    if (db && db->isOpen()) {
+                        std::ostringstream sql;
+                        sql << "SELECT s.symbol, ic." << field
+                            << " FROM ref.symbol_info s"
+                            << " LEFT JOIN ref.industry_classification ic ON ic.symbol_id = s.id AND ic.end_date IS NULL";
+                        auto rows = db->executeQuery(sql.str());
+                        for (std::size_t i = 0; i < rows.rowCount(); ++i) {
+                            auto row = rows.getRow(i);
+                            std::string sym = row.getString("symbol");
+                            double val = row.getDouble(field);
+                            if (!sym.empty() && std::isfinite(val)) {
+                                fieldCache[sym]["_"] = val;
+                            }
+                        }
+                        fieldCache["__static_loaded__"]["_"] = 1.0;
+                    }
+                }
+                std::unordered_map<std::string, double> result;
+                for (const auto& sym : symbols) {
+                    auto si = fieldCache.find(sym);
+                    if (si == fieldCache.end()) continue;
+                    auto it = si->second.find("_");
+                    if (it != si->second.end())
+                        result[sym] = it->second;
+                }
+                return result;
+            }
+
+            // ── 财务字段：fund.financial_indicator_daily ──
             static const std::unordered_set<std::string> finFields(
                 cleaning::financial_columns::names().begin(),
                 cleaning::financial_columns::names().end());
             bool isFin = finFields.count(field);
-            auto& fieldCache = s_fullCache[field];
 
             if (isFin && fieldCache.empty()) {
                 auto db = astock::database::NativePgConnectionPool::instance().getConnection();
