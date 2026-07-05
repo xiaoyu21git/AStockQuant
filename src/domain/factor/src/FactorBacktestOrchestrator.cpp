@@ -742,11 +742,17 @@ void FactorBacktestOrchestrator::run(
             };
             ::factor::FactorBacktestMetricsCalculator::populateResultMetrics(btResult, inputs);
 
-            // ── 一致性诊断：spread 方向与 IC 一致但策略仍亏损 → 提示检查成本参数 ──
+            // ── 一致性诊断：spread 方向与 IC 一致但策略仍亏损 ──
             if (btResult.factorMetrics.spreadSignMatchIc && tradingResult.totalReturn < -0.05) {
-                INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true but totalReturn="
-                    << tradingResult.totalReturn
-                    << " — group direction aligns with IC, losses may be from costs/slippage/risk controls";
+                if (btResult.factorMetrics.rankIcMean > 0.0) {
+                    INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true (IC>0) but totalReturn="
+                        << tradingResult.totalReturn
+                        << " — factor direction correct, losses may be from costs/slippage/risk controls";
+                } else {
+                    INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true (IC<0) but totalReturn="
+                        << tradingResult.totalReturn
+                        << " — factor is inverted (negative IC), consider reversing long/short baskets";
+                }
             }
 
             // JSON 序列化
