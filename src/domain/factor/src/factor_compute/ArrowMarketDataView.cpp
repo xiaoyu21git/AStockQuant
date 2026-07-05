@@ -132,6 +132,14 @@ public:
         return std::make_unique<SubMarketDataView>(*this, dates_, ids);
     }
 
+    signal_value_t* mutableFieldData(const std::string& fieldName) override {
+        auto it = columns_.find(fieldName);
+        return (it != columns_.end()) ? it->second.values.data() : nullptr;
+    }
+    int32_t fieldDataLength() const override {
+        return static_cast<int32_t>(dates_.size()) * static_cast<int32_t>(instruments_.size());
+    }
+
 private:
     [[nodiscard]] NumericConstMatrixView columnView(const std::string& name) const {
         auto it = columns_.find(name);

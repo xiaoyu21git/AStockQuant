@@ -160,90 +160,72 @@ void FactorBacktestOrchestrator::run(
                 std::unordered_map<std::string, std::map<std::string, double>>> s_fullCache;
             auto& fieldCache = s_fullCache[field];
 
-            // ── 静态字段：与日期无关的标的属性，直接从 ref.symbol_info + industry_classification 查 ──
-            static const std::unordered_set<std::string> staticSymbolFields = {
-                "industry_code",
-            };
-            if (staticSymbolFields.count(field)) {
-                auto cacheIt = fieldCache.find("__static_loaded__");
-                if (cacheIt == fieldCache.end()) {
-                    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-                    if (db && db->isOpen()) {
-                        std::ostringstream sql;
-                        sql << "SELECT s.symbol, ic." << field
-                            << " FROM ref.symbol_info s"
-                            << " LEFT JOIN ref.industry_classification ic ON ic.symbol_id = s.id AND ic.end_date IS NULL";
-                        auto rows = db->executeQuery(sql.str());
+            // ── 统一查库：缓存有什么表，DB 就查什么表 ──
+            auto cacheIt = fieldCache.find("__loaded__");
+            if (cacheIt == fieldCache.end()) {
+                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                if (db && db->isOpen()) {
+                    astock::infrastructure::database::MarketDataRepository repo(db);
+
+                    const auto& klineNames = cleaning::kline_columns::names();
+                    const auto& symInfoNames = cleaning::symbol_info_columns::names();
+                    const auto& finNames = cleaning::financial_columns::names();
+
+                    const bool isSymInfo = std::find(symInfoNames.begin(), symInfoNames.end(), field) != symInfoNames.end();
+                    const bool isFin = std::find(finNames.begin(), finNames.end(), field) != finNames.end();
+                    const bool isKline = std::find(klineNames.begin(), klineNames.end(), field) != klineNames.end();
+
+                    if (isSymInfo) {
+                        auto rows = db->executeQuery(
+                            "SELECT s.symbol, ic." + field
+                            + " FROM ref.symbol_info s"
+                            + " LEFT JOIN ref.industry_classification ic ON ic.symbol_id = s.id AND ic.end_date IS NULL");
                         for (std::size_t i = 0; i < rows.rowCount(); ++i) {
                             auto row = rows.getRow(i);
                             std::string sym = row.getString("symbol");
                             double val = row.getDouble(field);
-                            if (!sym.empty() && std::isfinite(val)) {
+                            if (!sym.empty() && std::isfinite(val))
                                 fieldCache[sym]["_"] = val;
-                            }
                         }
-                        fieldCache["__static_loaded__"]["_"] = 1.0;
+                    } else if (isFin) {
+                        auto rows = repo.queryFinancialFieldAllReports(field, minReportDate, cacheStartDate, symbols);
+                        for (const auto& r : rows)
+                            fieldCache[r.symbol][r.tradeDate] = r.value;
+                    } else if (isKline) {
+                        auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
+                        for (const auto& r : rows)
+                            fieldCache[r.symbol][r.tradeDate] = r.value;
+                    } else {
+                        INTERNAL_WARN_STREAM << "[DB查库] 未知字段 '" << field
+                            << "' — 不在 kline/symbol_info/financial 中";
                     }
+                    fieldCache["__loaded__"]["_"] = 1.0;
                 }
-                std::unordered_map<std::string, double> result;
-                for (const auto& sym : symbols) {
-                    auto si = fieldCache.find(sym);
-                    if (si == fieldCache.end()) continue;
-                    auto it = si->second.find("_");
-                    if (it != si->second.end())
-                        result[sym] = it->second;
-                }
-                return result;
             }
 
-            // ── 财务字段：fund.financial_indicator_daily ──
-            static const std::unordered_set<std::string> finFields(
+            // ── 统一取值 ──
+            static const std::unordered_set<std::string> symInfoSet(
+                cleaning::symbol_info_columns::names().begin(),
+                cleaning::symbol_info_columns::names().end());
+            static const std::unordered_set<std::string> finSet(
                 cleaning::financial_columns::names().begin(),
                 cleaning::financial_columns::names().end());
-            bool isFin = finFields.count(field);
-
-            if (isFin && fieldCache.empty()) {
-                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-                if (db && db->isOpen()) {
-                    astock::infrastructure::database::MarketDataRepository repo(db);
-                    auto rows = repo.queryFinancialFieldAllReports(field, minReportDate, cacheStartDate, symbols);
-                    for (const auto& r : rows)
-                        fieldCache[r.symbol][r.tradeDate] = r.value;
-                }
-            }
+            const bool isStatic = symInfoSet.count(field);
+            const bool isFin = finSet.count(field);
 
             std::unordered_map<std::string, double> result;
-            if (isFin) {
-                for (const auto& sym : symbols) {
-                    auto si = fieldCache.find(sym);
-                    if (si == fieldCache.end()) continue;
+            for (const auto& sym : symbols) {
+                auto si = fieldCache.find(sym);
+                if (si == fieldCache.end()) continue;
+                if (isStatic) {
+                    auto it = si->second.find("_");
+                    if (it != si->second.end()) result[sym] = it->second;
+                } else if (isFin) {
                     auto it = si->second.upper_bound(date);
-                    if (it != si->second.begin()) {
-                        --it;
-                        result[sym] = it->second;
-                    }
-                }
-            } else {
-                // K线字段：首次范围查询全量加载，后续按 date 精确命中缓存
-                auto& klineCache = fieldCache;
-                auto cacheIt = klineCache.find("__kline_loaded__");
-                if (cacheIt == klineCache.end()) {
-                    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-                    if (db && db->isOpen()) {
-                        astock::infrastructure::database::MarketDataRepository repo(db);
-                        auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
-                        for (const auto& r : rows) {
-                            klineCache[r.symbol][r.tradeDate] = r.value;
-                        }
-                        klineCache["__kline_loaded__"]["_"] = 1.0;
-                    }
-                }
-                for (const auto& sym : symbols) {
-                    auto si = klineCache.find(sym);
-                    if (si == klineCache.end()) continue;
+                    if (it != si->second.begin()) { --it; result[sym] = it->second; }
+                } else {
                     auto it = si->second.find(date);
-                    if (it != si->second.end())
-                        result[sym] = it->second;
+                    if (it != si->second.end()) result[sym] = it->second;
                 }
             }
             return result;
@@ -292,16 +274,75 @@ void FactorBacktestOrchestrator::run(
             onProgress(pct, "chunk " + std::to_string(ci + 1) + "/" + std::to_string(totalChunks));
         }
 
-        // 块计算窗口 + 历史回看预热（首块无历史）
         size_t chunkStart = ci * kChunkDates;
-        size_t warmup = (ci == 0) ? 0 : static_cast<size_t>(maxLookback);
+        size_t warmup = static_cast<size_t>(maxLookback);
         size_t loadStart = (chunkStart > warmup) ? (chunkStart - warmup) : 0;
         size_t loadEnd = std::min(chunkStart + kChunkDates + static_cast<size_t>(fwdDays), totalDates);
         std::vector<factor::compute::DateKey> chunkDates(
             allDates.begin() + loadStart, allDates.begin() + loadEnd);
 
-            // 从 Arrow 文件直接加载该块数据（不经过全量缓存）
-            auto chunkView = arrowView->makeChunkView(chunkDates, chunkColumns);
+            // ── 首块：从 DB 一次性补齐回看数据 ──
+            const size_t warmupRowCount = (ci == 0 && maxLookback > 0 && chunkDates.size() > 0)
+                ? static_cast<size_t>(maxLookback)
+                : 0;
+
+            std::unique_ptr<factor::compute::IMarketDataView> chunkView;
+            if (warmupRowCount > 0) {
+                INTERNAL_INFO_STREAM << "[DB补数据] 开始查库: warmupDays=" << warmupRowCount
+                    << " fields=" << chunkColumns.size()
+                    << " symbols=" << arrowView->symbolStrings().size();
+
+                // 生成回看日期
+                int firstVal = chunkDates[0].value;
+                int y = firstVal / 10000, m = (firstVal % 10000) / 100, d = firstVal % 100;
+                std::vector<factor::compute::DateKey> warmupDates;
+                for (size_t wi = 0; wi < warmupRowCount; ++wi) {
+                    if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
+                    int wv = y * 10000 + m * 100 + d;
+                    if (wv < firstVal) warmupDates.push_back({wv});
+                }
+                std::reverse(warmupDates.begin(), warmupDates.end());
+
+                auto extendedDates = warmupDates;
+                extendedDates.insert(extendedDates.end(), chunkDates.begin(), chunkDates.end());
+                chunkView = arrowView->makeChunkView(extendedDates, chunkColumns);
+
+                if (chunkView) {
+                    const auto& dbFn = m_dataService->dbFallback();
+                    if (dbFn) {
+                        const auto syms = arrowView->symbolStrings();
+                        const int32_t nInsts = static_cast<int32_t>(syms.size());
+                        size_t totalCells = 0;
+                        for (size_t wi = 0; wi < warmupRowCount; ++wi) {
+                            char dbuf[16]; int wv = warmupDates[wi].value;
+                            std::snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d",
+                                          wv / 10000, (wv / 100) % 100, wv % 100);
+                            std::string dateStr(dbuf);
+                            for (const auto& col : chunkColumns) {
+                                auto* data = chunkView->mutableFieldData(col);
+                                if (!data) continue;
+                                auto dbRes = dbFn(dateStr, col,
+                                    std::vector<std::string>(syms.begin(), syms.end()));
+                                for (int32_t si = 0; si < nInsts; ++si) {
+                                    auto it = dbRes.find(syms[static_cast<size_t>(si)]);
+                                    double v = (it != dbRes.end()) ? it->second
+                                        : std::numeric_limits<double>::quiet_NaN();
+                                    data[wi * static_cast<size_t>(nInsts) + static_cast<size_t>(si)]
+                                        = static_cast<float>(v);
+                                    if (std::isfinite(v)) ++totalCells;
+                                }
+                            }
+                        }
+                        INTERNAL_INFO_STREAM << "[DB补数据] 查库结束: dates=" << warmupRowCount
+                            << " fields=" << chunkColumns.size()
+                            << " symbols=" << nInsts
+                            << " validCells=" << totalCells;
+                    }
+                }
+            } else {
+                chunkView = arrowView->makeChunkView(chunkDates, chunkColumns);
+            }
+
             if (!chunkView) continue;
 
             // 构建 MarketMatrixBatch

@@ -42,6 +42,10 @@ public:
     /// @return 子视图，与原视图共享底层内存映射
     [[nodiscard]] virtual std::unique_ptr<IMarketDataView>
     slice(const std::vector<InstrumentId>& instrumentIds) const = 0;
+
+    /// @brief 获取可写的列数据指针（仅 DenseChunkView 支持，其他返回 nullptr）
+    virtual signal_value_t* mutableFieldData(const std::string& /*fieldName*/) { return nullptr; }
+    virtual int32_t fieldDataLength() const { return 0; }
 };
 
 } // namespace factor::compute

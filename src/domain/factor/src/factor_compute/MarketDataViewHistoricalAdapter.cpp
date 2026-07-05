@@ -32,20 +32,14 @@ CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
 int32_t CachedMarketDataViewHistoricalAdapter::findDateIndex(const std::string& date) const
 {
     auto it = dateToIndex_.find(date);
-    if (it != dateToIndex_.end()) {
-        return it->second;
-    }
+    if (it != dateToIndex_.end()) return it->second;
     // 支持 YYYY-MM-DD → YYYYMMDD 格式转换
     if (date.size() == 10 && date[4] == '-' && date[7] == '-') {
         std::string compact;
         compact.reserve(8);
-        for (char c : date) {
-            if (c >= '0' && c <= '9') compact += c;
-        }
+        for (char c : date) { if (c >= '0' && c <= '9') compact += c; }
         auto it2 = dateToIndex_.find(compact);
-        if (it2 != dateToIndex_.end()) {
-            return it2->second;
-        }
+        if (it2 != dateToIndex_.end()) return it2->second;
     }
     return -1;
 }
@@ -62,9 +56,7 @@ bool CachedMarketDataViewHistoricalAdapter::hasField(const std::string& field) c
 }
 
 std::optional<double> CachedMarketDataViewHistoricalAdapter::getValue(
-    const std::string& symbol,
-    const std::string& date,
-    const std::string& field) const
+    const std::string& symbol, const std::string& date, const std::string& field) const
 {
     int32_t dateIdx = findDateIndex(date);
     int32_t symIdx = findSymbolIndex(symbol);
@@ -72,20 +64,14 @@ std::optional<double> CachedMarketDataViewHistoricalAdapter::getValue(
 
     auto fieldView = view_.getField(field);
     if (!fieldView.has_value()) return std::nullopt;
-
     const auto& fv = fieldView.value();
-    if (!fv.isValid()) return std::nullopt;
-    if (dateIdx >= fv.rowCount || symIdx >= fv.columnCount) return std::nullopt;
-
-    const size_t flat = static_cast<size_t>(dateIdx) * static_cast<size_t>(fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount)
-        + static_cast<size_t>(symIdx);
-    return fv.data[flat];
+    if (!fv.isValid() || dateIdx >= fv.rowCount || symIdx >= fv.columnCount) return std::nullopt;
+    const size_t stride = static_cast<size_t>(fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount);
+    return fv.data[static_cast<size_t>(dateIdx) * stride + static_cast<size_t>(symIdx)];
 }
 
 std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::getSeries(
-    const std::string& symbol,
-    const std::string& startDate,
-    const std::string& endDate,
+    const std::string& symbol, const std::string& startDate, const std::string& endDate,
     const std::string& field) const
 {
     std::vector<factor::HistoricalDataPoint> result;
@@ -94,32 +80,26 @@ std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::
 
     auto fieldView = view_.getField(field);
     if (!fieldView.has_value()) return result;
-
     const auto& fv = fieldView.value();
     if (!fv.isValid() || symIdx >= fv.columnCount) return result;
 
     int32_t startIdx = findDateIndex(startDate);
-    int32_t endIdx = findDateIndex(endDate);
+    int32_t endIdx   = findDateIndex(endDate);
     if (startIdx < 0) startIdx = 0;
     if (endIdx < 0 || endIdx >= fv.rowCount) endIdx = fv.rowCount - 1;
+    if (startIdx > endIdx) return result;
 
-    const int32_t rowStride = (fv.rowStride >= fv.columnCount) ? fv.rowStride : fv.columnCount;
-
+    const int32_t stride = fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount;
     for (int32_t d = startIdx; d <= endIdx; ++d) {
-        const size_t flat = static_cast<size_t>(d) * static_cast<size_t>(rowStride) + static_cast<size_t>(symIdx);
-        factor::HistoricalDataPoint point;
-        point.date = dates_[static_cast<size_t>(d)];
-        point.value = fv.data[flat];
-        result.push_back(point);
+        double val = fv.data[static_cast<size_t>(d) * static_cast<size_t>(stride) + static_cast<size_t>(symIdx)];
+        if (std::isfinite(val))
+            result.push_back({dates_[static_cast<size_t>(d)], val});
     }
-
     return result;
 }
 
 std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::getSeries(
-    const std::string& symbol,
-    const std::string& anchorDate,
-    int window,
+    const std::string& symbol, const std::string& anchorDate, int window,
     const std::string& field) const
 {
     int32_t anchorIdx = findDateIndex(anchorDate);
@@ -134,8 +114,7 @@ std::vector<std::string> CachedMarketDataViewHistoricalAdapter::getAvailableSymb
 }
 
 std::unordered_map<std::string, double> CachedMarketDataViewHistoricalAdapter::getCrossSection(
-    const std::string& date,
-    const std::string& field,
+    const std::string& date, const std::string& field,
     const std::vector<std::string>& symbols) const
 {
     std::unordered_map<std::string, double> result;
@@ -145,20 +124,16 @@ std::unordered_map<std::string, double> CachedMarketDataViewHistoricalAdapter::g
         if (fieldView.has_value()) {
             const auto& fv = fieldView.value();
             if (fv.isValid() && dateIdx < fv.rowCount) {
-                const int32_t rowStride = (fv.rowStride >= fv.columnCount) ? fv.rowStride : fv.columnCount;
-
+                const int32_t rowStride = fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount;
                 if (symbols.empty()) {
-                    result.reserve(static_cast<size_t>(fv.columnCount));
-                    for (int32_t i = 0; i < fv.columnCount; ++i) {
-                        const size_t flat = static_cast<size_t>(dateIdx) * static_cast<size_t>(rowStride) + static_cast<size_t>(i);
-                        result[symbols_[static_cast<size_t>(i)]] = fv.data[flat];
-                    }
+                    for (int32_t i = 0; i < fv.columnCount; ++i)
+                        result[symbols_[static_cast<size_t>(i)]]
+                            = fv.data[static_cast<size_t>(dateIdx) * static_cast<size_t>(rowStride) + static_cast<size_t>(i)];
                 } else {
                     for (const auto& sym : symbols) {
-                        int32_t symIdx = findSymbolIndex(sym);
-                        if (symIdx < 0) continue;
-                        const size_t flat = static_cast<size_t>(dateIdx) * static_cast<size_t>(rowStride) + static_cast<size_t>(symIdx);
-                        result[sym] = fv.data[flat];
+                        int32_t si = findSymbolIndex(sym);
+                        if (si < 0) continue;
+                        result[sym] = fv.data[static_cast<size_t>(dateIdx) * static_cast<size_t>(rowStride) + static_cast<size_t>(si)];
                     }
                 }
             }
@@ -168,28 +143,23 @@ std::unordered_map<std::string, double> CachedMarketDataViewHistoricalAdapter::g
     // Cache miss / 全 NaN → DB fallback
     if (!result.empty()) {
         bool hasFinite = false;
-        for (const auto& [_, v] : result) {
+        for (const auto& [_, v] : result)
             if (std::isfinite(v)) { hasFinite = true; break; }
-        }
         if (hasFinite) return result;
     }
-    if (dbFallback_) {
+    if (dbFallback_)
         result = dbFallback_(date, field, symbols);
-    }
-
     return result;
 }
 
 std::unordered_map<std::string, std::unordered_map<std::string, double>>
 CachedMarketDataViewHistoricalAdapter::getBatchCrossSections(
-    const std::string& date,
-    const std::vector<std::string>& symbols,
+    const std::string& date, const std::vector<std::string>& symbols,
     const std::vector<std::string>& fields) const
 {
     std::unordered_map<std::string, std::unordered_map<std::string, double>> result;
-    for (const auto& field : fields) {
+    for (const auto& field : fields)
         result[field] = getCrossSection(date, field, symbols);
-    }
     return result;
 }
 

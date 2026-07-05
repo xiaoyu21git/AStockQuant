@@ -130,9 +130,8 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
         adapter.setDbFallback(m_dataSvc->dbFallback());
     }
     auto symbols = adapter.getAvailableSymbols("");
-    INTERNAL_INFO_STREAM << "[FE] compute: symbols=" << symbols.size();
-
     int dateCount = 0, valueCount = 0;
+    INTERNAL_INFO_STREAM << "[FE] compute: symbols=" << symbols.size();
     for (const auto& date : view->dates()) {
         // date.value 是 YYYYMMDD int，转为 "YYYY-MM-DD" 以匹配 getValues 的查找格式
         const int dv = date.value;
