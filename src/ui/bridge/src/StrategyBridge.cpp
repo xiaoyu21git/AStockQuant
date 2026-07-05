@@ -4,7 +4,7 @@
 #include "../include/StrategyListModel.h"
 
 #include "database/MarketDataRepository.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "database/ISqlDatabase.h"
 #include "database/NativePgDatabase.h"
 #include "database/StrategyRepository.h"

@@ -18,7 +18,7 @@
 
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "../../domain/factor/include/FactorBacktestOrchestrator.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 #include "foundation/Utils/Uuid.h"
 #include "../../domain/factor/include/BacktestRunConfig.h"
@@ -347,6 +347,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
     config.initialCapital = m_backtestRuntimeParams.value("initialCapital", 1000000.0).toDouble();
     config.benchmarkSymbol = m_backtestRuntimeParams.value("benchmarkSymbol", "000300.SH").toString().toUpper().toStdString();
     config.adjustPriceType = m_backtestRuntimeParams.value("adjustPriceType", "pre").toString().toStdString();
+    config.winsorizeQuantile = m_backtestRuntimeParams.value("winsorizeQuantile", 0.005).toDouble();
     config.marketEnvironmentProfile = m_backtestRuntimeParams.value("marketEnvironmentProfile", 0).toInt();
     for (const QVariant& id : factorIds) {
         config.factorIds.push_back(id.toString().toStdString());
@@ -616,6 +617,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     }
                     double sharpeVal = tradingMap.value("sharpe").toDouble();
                     double icVal     = icMap.value("value").toDouble();
+                    double icirVal   = icMap.value("ir").toDouble();
                     double wrVal     = icMap.value("winRate").toDouble();
                     addCheck(QStringLiteral("分组单调性"), monotonic,
                         monotonic ? QStringLiteral("单调递减") : QStringLiteral("不单调"),
@@ -626,6 +628,8 @@ void FactorBacktestBridge::startBacktestWithFactors(
                         fmtVal(icVal, "number"), QStringLiteral("> 0"));
                     addCheck(QStringLiteral("IC 胜率 > 50%"), wrVal > 0.5,
                         fmtVal(wrVal, "percent"), QStringLiteral("> 50%"));
+                    addCheck(QStringLiteral("ICIR > 0"), icirVal > 0.0,
+                        fmtVal(icirVal, "number"), QStringLiteral("> 0"));
 
                     // 组装完整 factorQuality
                     QVariantMap fq;
@@ -715,9 +719,9 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     emit backtestResultChanged();
                     emit backtestCompleted(result);
 
-                    // ── 持久化到 alpha.factor_backtest_runs / daily ──
+                    // ── 持久化到 alpha.factor_backtest_* ──
                     {
-                        auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+                        auto& pool = astock::database::NativePgConnectionPool::instance();
                         auto db = pool.getConnection();
                         if (db && db->isOpen()) {
                             using P = astock::database::SqlParam;
@@ -734,20 +738,85 @@ void FactorBacktestBridge::startBacktestWithFactors(
                                 "INSERT INTO alpha.factor_backtest_runs(id,factor_id,config_json,summary_json,groups_json) VALUES($1,$2,$3,$4,$5)",
                                 {P{runId}, P{fid}, P{cfgJson}, P{summaryJson}, P{groupsJsonStr}});
 
-                            // daily series from returnSeries
-                            QJsonArray retArr = rootObj.value("returnSeries").toArray();
-                            QJsonArray rawArr = retArr.size()>0 ? retArr[0].toObject().value("data").toArray() : QJsonArray();
-                            for (int di = 0; di < rawArr.size(); ++di) {
-                                QJsonArray dayData = rawArr[di].toArray();
-                                if (dayData.size() < 2) continue;
-                                std::string dateStr = dayData[0].toString().toStdString();
-                                QJsonArray groupReturns;
-                                for (int gi = 1; gi < dayData.size(); ++gi)
-                                    groupReturns.append(dayData[gi].toDouble());
-                                std::string grJson = QJsonDocument(groupReturns).toJson(QJsonDocument::Compact).toStdString();
+                            // ── 每日收益序列 ──
+                            QJsonArray dateList = rootObj.value("dateList").toArray();
+                            QVariantList rawRets = returnSeries["rawReturns"].toList();
+                            QVariantList costRets = returnSeries["costAdjustedReturns"].toList();
+                            QVariantList riskRets = returnSeries["riskAdjustedReturns"].toList();
+                            // groupReturnSeries: [{"groupIndex":0,"data":[r0,r1,...]}, ...]
+                            QJsonArray grsArr = metricsObj.value("groupReturnSeries").toArray();
+                            std::vector<QJsonArray> grpData;
+                            for (int gi = 0; gi < grsArr.size(); ++gi)
+                                grpData.push_back(grsArr[gi].toObject().value("data").toArray());
+                            for (int di = 0; di < dateList.size(); ++di) {
+                                std::string ds = dateList[di].toString().toStdString();
+                                double rls = di < rawRets.size()  ? rawRets[di].toDouble() : 0.0;
+                                double cls = di < costRets.size() ? costRets[di].toDouble() : 0.0;
+                                double rks = di < riskRets.size() ? riskRets[di].toDouble() : 0.0;
+                                QJsonArray grArr;
+                                for (size_t gi = 0; gi < grpData.size(); ++gi)
+                                    if (di < grpData[gi].size())
+                                        grArr.append(grpData[gi][di].toDouble());
+                                std::string grJson = QJsonDocument(grArr).toJson(QJsonDocument::Compact).toStdString();
                                 db->executeUpdate(
-                                    "INSERT INTO alpha.factor_backtest_daily(run_id,trade_date,group_returns_json) VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO NOTHING",
-                                    {P{runId}, P{dateStr}, P{grJson}});
+                                    "INSERT INTO alpha.factor_backtest_daily(run_id,trade_date,group_returns_json,"
+                                    "raw_long_short,cost_adj_long_short,risk_adj_long_short) "
+                                    "VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(run_id,trade_date) DO UPDATE SET "
+                                    "raw_long_short=EXCLUDED.raw_long_short,cost_adj_long_short=EXCLUDED.cost_adj_long_short,"
+                                    "risk_adj_long_short=EXCLUDED.risk_adj_long_short",
+                                    {P{runId}, P{ds}, P{grJson}, P{rls}, P{cls}, P{rks}});
+                            }
+
+                            // ── IC 日序列 ──
+                            QJsonArray icArr = metricsObj.value("icSeries").toArray();
+                            for (int ii = 0; ii < icArr.size() && ii < dateList.size(); ++ii) {
+                                std::string ds = dateList[ii].toString().toStdString();
+                                double icv = icArr[ii].toDouble();
+                                db->executeUpdate(
+                                    "INSERT INTO alpha.factor_backtest_ic_daily(run_id,trade_date,rank_ic) "
+                                    "VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO UPDATE SET rank_ic=EXCLUDED.rank_ic",
+                                    {P{runId}, P{ds}, P{icv}});
+                            }
+
+                            // ── 交易记录 ──
+                            QJsonArray tradeArr = metricsObj.value("tradeLog").toArray();
+                            for (int ti = 0; ti < tradeArr.size(); ++ti) {
+                                QJsonObject tr = tradeArr[ti].toObject();
+                                db->executeUpdate(
+                                    "INSERT INTO alpha.factor_backtest_trades(run_id,trade_date,symbol,side,basket,price,cost_rate) "
+                                    "VALUES($1,$2,$3,$4,$5,$6,$7)",
+                                    {P{runId},
+                                     P{tr.value("date").toString().toStdString()},
+                                     P{tr.value("symbol").toString().toStdString()},
+                                     P{tr.value("side").toString().toStdString()},
+                                     P{tr.value("basket").toString().toStdString()},
+                                     P{tr.value("price").toDouble()},
+                                     P{tr.value("costRate").toDouble()}});
+                            }
+
+                            // ── 每期追踪 ──
+                            QJsonArray periodArr = metricsObj.value("periodTrackings").toArray();
+                            for (int pi = 0; pi < periodArr.size(); ++pi) {
+                                QJsonObject pr = periodArr[pi].toObject();
+                                db->executeUpdate(
+                                    "INSERT INTO alpha.factor_backtest_periods(run_id,trade_date,"
+                                    "long_held,short_held,long_bought,long_sold,short_bought,short_sold,"
+                                    "long_turnover,short_turnover,long_raw_return,short_raw_return,strategy_net_return) "
+                                    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) "
+                                    "ON CONFLICT(run_id,trade_date) DO NOTHING",
+                                    {P{runId},
+                                     P{pr.value("date").toString().toStdString()},
+                                     P{static_cast<int>(pr.value("longHeld").toDouble())},
+                                     P{static_cast<int>(pr.value("shortHeld").toDouble())},
+                                     P{static_cast<int>(pr.value("longBought").toDouble())},
+                                     P{static_cast<int>(pr.value("longSold").toDouble())},
+                                     P{static_cast<int>(pr.value("shortBought").toDouble())},
+                                     P{static_cast<int>(pr.value("shortSold").toDouble())},
+                                     P{pr.value("longTurnover").toDouble()},
+                                     P{pr.value("shortTurnover").toDouble()},
+                                     P{pr.value("longRawReturn").toDouble()},
+                                     P{pr.value("shortRawReturn").toDouble()},
+                                     P{pr.value("strategyNetReturn").toDouble()}});
                             }
                         }
                     }

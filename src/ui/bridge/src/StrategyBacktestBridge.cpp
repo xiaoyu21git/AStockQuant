@@ -10,7 +10,7 @@
 #include "StrategyBridge.h"
 #include "DataCacheAdapter.h"
 #include "../../../infrastructure/include/database/BacktestResultRepository.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "FactorService.h"
 #include "AppStoragePaths.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
@@ -322,7 +322,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 
             // 持久化到 DB
             {
-                auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+                auto& pool = astock::database::NativePgConnectionPool::instance();
                 if (pool.isInitialized()) {
                     auto db = pool.getConnection();
                     if (db && db->isOpen()) {

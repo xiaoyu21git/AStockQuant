@@ -1,5 +1,5 @@
 #include "database/PostMarketSyncService.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "database/ISqlDatabase.h"
 #include "../../../engine/include/GmSessionEngine.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
@@ -46,7 +46,7 @@ bool PostMarketSyncService::forceSyncToday() {
 }
 
 std::string PostMarketSyncService::getSyncStatus(int tradingDay) const {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return "unknown";
     auto r = db->executeQuery(
         "SELECT status FROM data.sync_task_log WHERE trading_day=$1 AND task_type='DAILY' ORDER BY id DESC LIMIT 1",
@@ -97,7 +97,7 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     {
         int y = tradingDay / 10000, m = (tradingDay % 10000) / 100, d = tradingDay % 100;
         char ds[32]; snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
-        auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+        auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (db && db->isOpen()) {
             auto r = db->executeQuery(
                 "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1",
@@ -119,7 +119,7 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     }
 
     // 预加载 symbol->id 映射
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) { INTERNAL_ERROR_STREAM << "[PostMktSync] DB不可用"; return; }
     auto res = db->executeQuery("SELECT id, symbol FROM ref.symbol_info WHERE status='ACTIVE'");
     std::unordered_map<std::string,int> symToId;
@@ -344,7 +344,7 @@ bool PostMarketSyncService::syncMonthly(std::shared_ptr<astock::database::ISqlDa
 // ═════════════════════════════════════════════════
 
 void PostMarketSyncService::logTaskStart(const std::string& taskType, int tradingDay) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db) return;
     std::string sql = "INSERT INTO data.sync_task_log(trading_day,task_type,status,started_at) VALUES($1,$2,'running',NOW())";
     db->executeUpdate(sql, {astock::database::SqlParam{tradingDay}, astock::database::SqlParam{taskType}});
@@ -352,7 +352,7 @@ void PostMarketSyncService::logTaskStart(const std::string& taskType, int tradin
 
 void PostMarketSyncService::logTaskEnd(const std::string& taskType, int tradingDay,
                                         bool success, int rows, const std::string& error) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db) return;
     std::string sql = "UPDATE data.sync_task_log SET status=$1, rows_written=$2, ended_at=NOW(), error_msg=$3 "
                       "WHERE trading_day=$4 AND task_type=$5 AND ended_at IS NULL";
@@ -389,7 +389,7 @@ int PostMarketSyncService::getCurrentTradingDay() {
 }
 
 bool PostMarketSyncService::isTradingDay(int date) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (db && db->isOpen()) {
         auto r = db->executeQuery(
             "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1",

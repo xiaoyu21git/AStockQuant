@@ -1,5 +1,5 @@
 #include "database/StrategyRepository.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "foundation/log/logging.hpp"
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,7 +9,7 @@ namespace astock { namespace database {
 
 static std::shared_ptr<ISqlDatabase> sdb() {
     try {
-        return NativeMySQLConnectionPool::instance().getConnection();
+        return NativePgConnectionPool::instance().getConnection();
     } catch (const std::exception& e) {
         INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() exception: " << e.what();
         return nullptr;

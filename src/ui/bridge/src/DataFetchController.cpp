@@ -8,7 +8,7 @@
 #include "database/MarketDataRepository.h"
 #include "DataTableAssembler.h"
 #include <arrow/api.h>
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 
 #include "foundation.h"
 #include <QMetaObject>
@@ -95,7 +95,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     FOUNDATION_THREADS.post([self, dataSource, startDate, endDate, dataTypes]() {
         if (!self) return;
 
-        auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+        auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) {
             QMetaObject::invokeMethod(self.get(), [self]() {
                 if (!self) return;
@@ -189,7 +189,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         //   symbol → [(report_date, {col: val})], report_date 升序
         std::map<std::string, std::vector<std::pair<std::string, std::unordered_map<std::string, std::string>>>> finCache;
         {
-            auto dbFin = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            auto dbFin = astock::database::NativePgConnectionPool::instance().getConnection();
             if (dbFin && dbFin->isOpen()) {
                 astock::infrastructure::database::MarketDataRepository finRepo(std::move(dbFin));
                 std::string ed = endDate.toStdString();
@@ -227,7 +227,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         // index_code 映射（直接 Arrow 构建时用）
         std::map<std::string, std::string> indexMap;
         {
-            auto idxDb = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+            auto idxDb = astock::database::NativePgConnectionPool::instance().getConnection();
             if (idxDb && idxDb->isOpen()) {
                 astock::infrastructure::database::MarketDataRepository idxRepo(std::move(idxDb));
                 indexMap = idxRepo.queryIndexCodeMap(endDate.toStdString());
@@ -259,7 +259,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 size_t end = (std::min)(start + symbolChunkSize, allSymbolsVec.size());
                 std::vector<std::string> chunk(allSymbolsVec.begin() + start, allSymbolsVec.begin() + end);
 
-                auto db2 = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+                auto db2 = astock::database::NativePgConnectionPool::instance().getConnection();
                 if (!db2 || !db2->isOpen()) goto dl_end;
                 astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
                 auto rows = repo.queryDailyBarJoined(chunk, ms, me);
@@ -325,7 +325,7 @@ void DataFetchController::fetchDataByType(const QString& dataSource,
 
 void DataFetchController::loadSymbolDetail(const QString& symbol, int page)
 {
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto& pool = astock::database::NativePgConnectionPool::instance();
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) return;
 

@@ -30,7 +30,7 @@
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
 #include "../../ui/bridge/include/MarketDataBridge.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
@@ -362,8 +362,8 @@ bool AppBootstrap::initDatabase()
 {
     INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing database...";
 
-    // 预热数据库连接池（NativeMySQLConnectionPool 自动惰性初始化）
-    auto conn = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    // 预热数据库连接池（NativePgConnectionPool 自动惰性初始化）
+    auto conn = astock::database::NativePgConnectionPool::instance().getConnection();
     if (conn) {
         INTERNAL_INFO_STREAM << "[AppBootstrap] Native PG pool warmed up";
     }

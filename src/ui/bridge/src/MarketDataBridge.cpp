@@ -6,7 +6,7 @@
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../../domain/trading/include/MarketDataUtils.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../infrastructure/include/database/PostMarketSyncService.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
@@ -260,7 +260,7 @@ QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
 void MarketDataBridge::loadBars(const QStringList& symbols, const QString& startDate, const QString& endDate) {
     if (symbols.isEmpty()) return;
 
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return;
 
     astock::infrastructure::database::MarketDataRepository repo(std::move(db));

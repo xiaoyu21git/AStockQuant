@@ -52,6 +52,7 @@ struct BacktestRunConfig {
     double initialCapital = 1000000.0;
     std::string benchmarkSymbol = "000300.SH";
     std::string adjustPriceType = "pre";   // "pre" / "post"
+    double winsorizeQuantile{0.005};       // 因子值双侧缩尾分位数（0.0=不缩尾），传递给 Orchestrator
     int marketEnvironmentProfile = 0;
 
     // ── 预检预注入字段 (从预检结果传入，避免 Orchestrator 重复 createInstance) ──

@@ -1,4 +1,4 @@
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "database/NativePgDatabase.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/log/logging.hpp"
@@ -8,16 +8,16 @@
 namespace astock {
 namespace database {
 
-NativeMySQLConnectionPool& NativeMySQLConnectionPool::instance()
+NativePgConnectionPool& NativePgConnectionPool::instance()
 {
-    static NativeMySQLConnectionPool pool;
+    static NativePgConnectionPool pool;
     return pool;
 }
 
-NativeMySQLConnectionPool::NativeMySQLConnectionPool() = default;
-NativeMySQLConnectionPool::~NativeMySQLConnectionPool() { shutdown(); }
+NativePgConnectionPool::NativePgConnectionPool() = default;
+NativePgConnectionPool::~NativePgConnectionPool() { shutdown(); }
 
-bool NativeMySQLConnectionPool::initialize(const DatabaseConfig& config)
+bool NativePgConnectionPool::initialize(const DatabaseConfig& config)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     if (initialized_) return true;
@@ -26,7 +26,7 @@ bool NativeMySQLConnectionPool::initialize(const DatabaseConfig& config)
     return true;
 }
 
-std::shared_ptr<ISqlDatabase> NativeMySQLConnectionPool::getConnection()
+std::shared_ptr<ISqlDatabase> NativePgConnectionPool::getConnection()
 {
     try {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -60,34 +60,34 @@ std::shared_ptr<ISqlDatabase> NativeMySQLConnectionPool::getConnection()
     }
 }
 
-void NativeMySQLConnectionPool::shutdown()
+void NativePgConnectionPool::shutdown()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     connections_.clear(); initialized_ = false;
 }
 
-bool NativeMySQLConnectionPool::isInitialized() const
+bool NativePgConnectionPool::isInitialized() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return initialized_;
 }
 
-size_t NativeMySQLConnectionPool::activeConnectionCount() const
+size_t NativePgConnectionPool::activeConnectionCount() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return connections_.size();
 }
 
-std::string NativeMySQLConnectionPool::statusReport() const
+std::string NativePgConnectionPool::statusReport() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     std::ostringstream ss;
-    ss << "NativeMySQLConnectionPool[PG init=" << (initialized_ ? "yes" : "no")
+    ss << "NativePgConnectionPool[PG init=" << (initialized_ ? "yes" : "no")
        << " conns=" << connections_.size() << "]";
     return ss.str();
 }
 
-std::shared_ptr<ISqlDatabase> NativeMySQLConnectionPool::createConnection()
+std::shared_ptr<ISqlDatabase> NativePgConnectionPool::createConnection()
 {
     return std::make_shared<NativePgDatabase>(config_);
 }

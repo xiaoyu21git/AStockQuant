@@ -5,7 +5,7 @@
 #include "../include/RuntimeStrategyFactory.h"
 #include "../include/RuntimeFactorSvc.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/DatabaseConfig.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "../../../infrastructure/include/database/OrderRecorder.h"
@@ -88,7 +88,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                                                          std::unique_ptr<IRuntimeFactorService> factorSvc)
 {
     try {
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto& pool = astock::database::NativePgConnectionPool::instance();
     if (!pool.isInitialized()) return nullptr;
 
     auto db = pool.getConnection();
@@ -347,7 +347,7 @@ bool StrategyEngine::prepareMarketData()
     const std::string startDate = start.to_string("%Y-%m-%d");
 
     // ── 从连接池获取 PG 连接（线程缓存复用）──
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto& pool = astock::database::NativePgConnectionPool::instance();
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) {
         INTERNAL_ERROR_STREAM << "[Engine] prepareMarketData: PG connection failed";

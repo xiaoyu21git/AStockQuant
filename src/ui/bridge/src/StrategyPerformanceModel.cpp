@@ -1,6 +1,6 @@
 #include "StrategyPerformanceModel.h"
 #include "../../../infrastructure/include/database/BacktestResultRepository.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 
 #include <QJsonDocument>
@@ -62,7 +62,7 @@ QHash<int, QByteArray> StrategyPerformanceModel::roleNames() const {
 
 bool StrategyPerformanceModel::ensureRepo() {
     if (m_repo) return true;
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto& pool = astock::database::NativePgConnectionPool::instance();
     if (!pool.isInitialized()) { emit errorOccurred("数据库未初始化"); return false; }
     auto db = pool.getConnection();
     if (!db) { emit errorOccurred("数据库连接失败"); return false; }

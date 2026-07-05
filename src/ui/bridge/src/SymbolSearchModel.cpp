@@ -1,7 +1,7 @@
 #include "SymbolSearchModel.h"
 #include "StockNameResolver.h"
 #include "foundation/log/logging.hpp"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 
 #include <algorithm>
 
@@ -28,7 +28,7 @@ QHash<int, QByteArray> SymbolSearchModel::roleNames() const {
 }
 
 void SymbolSearchModel::init() {
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto& pool = astock::database::NativePgConnectionPool::instance();
     if (!pool.isInitialized()) {
         INTERNAL_WARN_STREAM << "[SymbolSearch] DB pool not initialized";
         return;

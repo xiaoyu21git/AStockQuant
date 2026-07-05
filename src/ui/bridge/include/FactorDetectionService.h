@@ -19,12 +19,6 @@
 #include "factor_check/FactorSupportScopeCache.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
 
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
-
 namespace factor {
 class BaseFactor;
 class DataAvailabilityChecker;

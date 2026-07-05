@@ -1,5 +1,5 @@
 #include "StockNameResolver.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 
 #include <mutex>
 
@@ -11,7 +11,7 @@ QString StockNameResolver::name(const QString& symbol)
     static std::once_flag s_loaded;
 
     std::call_once(s_loaded, []() {
-        auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+        auto& pool = astock::database::NativePgConnectionPool::instance();
         if (!pool.isInitialized()) return;
         auto db = pool.getConnection();
         if (!db || !db->isOpen()) return;

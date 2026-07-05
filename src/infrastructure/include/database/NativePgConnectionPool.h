@@ -13,11 +13,11 @@
 namespace astock {
 namespace database {
 
-// 纯 C++ MySQL 连接池 — 每线程缓存一个 NativeMySQLDatabase
-// 不依赖 Qt，直接用 libmysqlclient
-class NativeMySQLConnectionPool {
+// 纯 C++ PG 连接池 — 每线程缓存一个 NativePgDatabase
+// 不依赖 Qt，直接用 libpq
+class NativePgConnectionPool {
 public:
-    static NativeMySQLConnectionPool& instance();
+    static NativePgConnectionPool& instance();
 
     // 用 DatabaseConfig 初始化连接池
     bool initialize(const DatabaseConfig& config);
@@ -35,10 +35,10 @@ public:
     std::string statusReport() const;
 
 private:
-    NativeMySQLConnectionPool();
-    ~NativeMySQLConnectionPool();
-    NativeMySQLConnectionPool(const NativeMySQLConnectionPool&) = delete;
-    NativeMySQLConnectionPool& operator=(const NativeMySQLConnectionPool&) = delete;
+    NativePgConnectionPool();
+    ~NativePgConnectionPool();
+    NativePgConnectionPool(const NativePgConnectionPool&) = delete;
+    NativePgConnectionPool& operator=(const NativePgConnectionPool&) = delete;
 
     struct PooledConnection {
         std::shared_ptr<ISqlDatabase> db;

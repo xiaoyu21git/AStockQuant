@@ -25,7 +25,7 @@
 #include "JujinTypes.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "MarketSubscriptionStatusRegistry.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/market/AStockSymbol.h"

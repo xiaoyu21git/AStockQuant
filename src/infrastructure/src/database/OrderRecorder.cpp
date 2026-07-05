@@ -1,5 +1,5 @@
 #include "database/OrderRecorder.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "database/ISqlDatabase.h"
 #include "foundation/log/logging.hpp"
 
@@ -54,7 +54,7 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
                                 RecSide side, RecOrdType orderType,
                                 double price, int quantity, double signalScore,
                                 RecPosEff positionEffect, int tradingDay) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) {
         INTERNAL_WARN_STREAM << "[OrderRecorder] DB 不可用, 订单记录丢失: " << clOrdId;
         return 0;
@@ -82,7 +82,7 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
 int OrderRecorder::updateOrderStatus(const std::string& clOrdId, RecOrdStatus status,
                                       const std::string& brokerOrderId,
                                       const std::string& message) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =
@@ -100,7 +100,7 @@ int OrderRecorder::updateOrderStatus(const std::string& clOrdId, RecOrdStatus st
 int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string& execId,
                                     double fillPrice, int fillQty, double fillAmount,
                                     double commission, const std::string& fillTime) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =
@@ -118,7 +118,7 @@ int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string
 int OrderRecorder::insertAccountSnapshot(int tradingDay, double totalAsset, double availableCash,
                                           double marketValue, double frozenCash,
                                           double realizedPnl, double unrealizedPnl) {
-    auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return 0;
     using astock::database::SqlParam;
     std::string sql =

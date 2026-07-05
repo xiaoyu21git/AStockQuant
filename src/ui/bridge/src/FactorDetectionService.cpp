@@ -6,7 +6,7 @@
 
 #include "AppStoragePaths.h"
 #include "DataFetchFieldContractUtils.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "DataCacheAdapter.h"
 
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -166,7 +166,7 @@ FactorDetectionService::RuntimeContext FactorDetectionService::resolveRuntimeCon
         return context;
     }
 
-    context.database = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    context.database = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!context.database) {
         context.errorMessage = QStringLiteral("因子检查运行时初始化失败：数据库实例不可用");
         return context;

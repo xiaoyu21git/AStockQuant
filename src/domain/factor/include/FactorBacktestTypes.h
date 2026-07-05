@@ -64,6 +64,8 @@ struct FactorBacktestMetrics {
     double icTStat              = 0.0;
     double monthlyWinRate       = 0.0;
     int    numGroups            = 10;
+    double topBottomSpreadReturn{0.0};   // G1收益 - GN收益（因子值最大组减最小组收益差）
+    bool   spreadSignMatchIc{false};     // spread符号 == IC均值符号（策略方向与因子方向一致）
     std::vector<double> groupAnnualReturns;
     std::vector<double> groupSharpes;
     Rating coreRating{Rating::FAIL};

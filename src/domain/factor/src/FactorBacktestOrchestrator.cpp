@@ -2,7 +2,7 @@
 #include "factor_compute/FactorEngine.h"
 #include "factor_compute/ArrowMarketDataView.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "BacktestScheduler.h"
 #include "BaseFactor.h"
@@ -129,37 +129,88 @@ void FactorBacktestOrchestrator::run(
             neededExtraFields.end());
     }
 
-    // ── 首块 DB 回看：回看期缓存无数据时必须查库，按字段类型路由 ──
-    if (maxLookback > 0 && m_dataService) {
+    if (onProgress) onProgress(5.0, "data indexed");
+
+    // ── 按 config 日期范围过滤 ──
+    const auto& arrowDates = arrowView->dates();
+
+    // ── 首块 DB 回看：缓存首日 - 回看 - 60 交易日 → 一次全部拉回 ──
+    if (m_dataService) {
+        std::string minReportDate = "2014-01-01", cacheStartDate = "2021-01-01"; // 注明只是初始化
+        if (!arrowDates.empty()) {
+            int firstDateVal = arrowDates.front().value;
+            int y = firstDateVal / 10000, m = (firstDateVal % 10000) / 100, d = firstDateVal % 100;
+            int totalBack = maxLookback + 60;
+            while (totalBack-- > 0) {
+                if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
+            }
+            char buf[16]; snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+            minReportDate = buf;
+            snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                firstDateVal / 10000, (firstDateVal % 10000) / 100, firstDateVal % 100);
+            cacheStartDate = buf;
+        }
+
         factor::compute::BacktestDataService::DbFallbackFn dbFn =
-            [](const std::string& date, const std::string& field,
+            [minReportDate, cacheStartDate](const std::string& date, const std::string& field,
                const std::vector<std::string>& symbols)
             -> std::unordered_map<std::string, double> {
-            auto db = astock::database::NativeMySQLConnectionPool::instance().getConnection();
-            if (!db || !db->isOpen()) return {};
-            astock::infrastructure::database::MarketDataRepository repo(db);
-            std::unordered_map<std::string, double> result;
+            static std::unordered_map<std::string,
+                std::unordered_map<std::string, std::map<std::string, double>>> s_fullCache;
             static const std::unordered_set<std::string> finFields(
                 cleaning::financial_columns::names().begin(),
                 cleaning::financial_columns::names().end());
-            if (finFields.count(field)) {
-                auto rows = repo.queryFinancialFieldCrossSection(field, date, symbols);
-                for (const auto& r : rows)
-                    result[r.symbol] = r.value;
+            bool isFin = finFields.count(field);
+            auto& fieldCache = s_fullCache[field];
+
+            if (isFin && fieldCache.empty()) {
+                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                if (db && db->isOpen()) {
+                    astock::infrastructure::database::MarketDataRepository repo(db);
+                    auto rows = repo.queryFinancialFieldAllReports(field, minReportDate, cacheStartDate, symbols);
+                    for (const auto& r : rows)
+                        fieldCache[r.symbol][r.tradeDate] = r.value;
+                }
+            }
+
+            std::unordered_map<std::string, double> result;
+            if (isFin) {
+                for (const auto& sym : symbols) {
+                    auto si = fieldCache.find(sym);
+                    if (si == fieldCache.end()) continue;
+                    auto it = si->second.upper_bound(date);
+                    if (it != si->second.begin()) {
+                        --it;
+                        result[sym] = it->second;
+                    }
+                }
             } else {
-                auto rows = repo.queryFieldCrossSection(field, date, symbols);
-                for (const auto& r : rows)
-                    result[r.symbol] = r.value;
+                // K线字段：首次范围查询全量加载，后续按 date 精确命中缓存
+                auto& klineCache = fieldCache;
+                auto cacheIt = klineCache.find("__kline_loaded__");
+                if (cacheIt == klineCache.end()) {
+                    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                    if (db && db->isOpen()) {
+                        astock::infrastructure::database::MarketDataRepository repo(db);
+                        auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
+                        for (const auto& r : rows) {
+                            klineCache[r.symbol][r.tradeDate] = r.value;
+                        }
+                        klineCache["__kline_loaded__"]["_"] = 1.0;
+                    }
+                }
+                for (const auto& sym : symbols) {
+                    auto si = klineCache.find(sym);
+                    if (si == klineCache.end()) continue;
+                    auto it = si->second.find(date);
+                    if (it != si->second.end())
+                        result[sym] = it->second;
+                }
             }
             return result;
         };
         m_dataService->setDbFallback(std::move(dbFn));
     }
-
-    if (onProgress) onProgress(5.0, "data indexed");
-
-    // ── 按 config 日期范围过滤 ──
-    const auto& arrowDates = arrowView->dates();
     std::vector<factor::compute::DateKey> filteredDatesStorage;
     const std::vector<factor::compute::DateKey>* effectiveDatesPtr = &arrowDates;
     if (config.cacheStartDate.isValid() || config.cacheEndDate.isValid()) {
@@ -292,6 +343,56 @@ void FactorBacktestOrchestrator::run(
                             if (symCountIt != countIt->second.end() && symCountIt->second > 1)
                                 val /= static_cast<double>(symCountIt->second);
                         }
+                    }
+                }
+            }
+
+            // ── 交叉截面缩尾：IC 和策略共享同一份因子值 ──
+            if (config.winsorizeQuantile > 0.0) {
+                const double q = config.winsorizeQuantile;
+                for (size_t wdi = 0; wdi < chunkDates.size(); ++wdi) {
+                    char wdbuf[16];
+                    int wdv = chunkDates[wdi].value;
+                    std::snprintf(wdbuf, sizeof(wdbuf), "%04d-%02d-%02d",
+                                  wdv / 10000, (wdv / 100) % 100, wdv % 100);
+                    std::string wdate(wdbuf);
+                    auto wit = reporterInput.factorValuesByDate.find(wdate);
+                    if (wit == reporterInput.factorValuesByDate.end()) continue;
+                    auto& fvMap = wit->second;
+                    if (fvMap.size() < 10) continue;
+
+                    std::vector<double> allVals;
+                    allVals.reserve(fvMap.size());
+                    for (const auto& [sym, fv] : fvMap)
+                        if (std::isfinite(fv)) allVals.push_back(fv);
+                    if (allVals.size() < 10) continue;
+
+                    const size_t nv = allVals.size();
+                    const size_t loIdx = static_cast<size_t>(q * static_cast<double>(nv));
+                    const size_t hiIdx = nv - 1 - loIdx;
+                    if (loIdx >= hiIdx) continue;
+
+                    std::nth_element(allVals.begin(), allVals.begin() + static_cast<long long>(loIdx), allVals.end());
+                    const double loBound = allVals[loIdx];
+                    std::nth_element(allVals.begin(), allVals.begin() + static_cast<long long>(hiIdx), allVals.end());
+                    const double hiBound = allVals[hiIdx];
+
+                    size_t clipCount = 0;
+                    double origMin = std::numeric_limits<double>::max();
+                    double origMax = std::numeric_limits<double>::lowest();
+                    for (auto& [sym, fv] : fvMap) {
+                        if (!std::isfinite(fv)) continue;
+                        if (fv < origMin) origMin = fv;
+                        if (fv > origMax) origMax = fv;
+                        if (fv < loBound) { fv = loBound; ++clipCount; }
+                        else if (fv > hiBound) { fv = hiBound; ++clipCount; }
+                    }
+
+                    if (clipCount > 0 && static_cast<double>(clipCount) / static_cast<double>(nv) > 0.01) {
+                        INTERNAL_WARN_STREAM << "[Orchestrator] winsorize date=" << wdate
+                            << " clipped " << clipCount << "/" << nv << " values"
+                            << " origRange=[" << origMin << "," << origMax << "]"
+                            << " clipRange=[" << loBound << "," << hiBound << "]";
                     }
                 }
             }
@@ -442,6 +543,7 @@ void FactorBacktestOrchestrator::run(
         params.riskFreeRate    = config.riskFreeRate;
         params.initialCapital  = config.initialCapital;
         params.adjustPriceType = config.adjustPriceType;
+        params.winsorizeQuantile = config.winsorizeQuantile;
         params.onProgress      = [&](double pct) {
             if (onProgress) onProgress(60.0 + pct * 15.0, "simulating trades");
         };
@@ -601,6 +703,13 @@ void FactorBacktestOrchestrator::run(
             };
             ::factor::FactorBacktestMetricsCalculator::populateResultMetrics(btResult, inputs);
 
+            // ── 一致性诊断：spread 方向与 IC 一致但策略仍亏损 → 提示检查成本参数 ──
+            if (btResult.factorMetrics.spreadSignMatchIc && tradingResult.totalReturn < -0.05) {
+                INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true but totalReturn="
+                    << tradingResult.totalReturn
+                    << " — group direction aligns with IC, losses may be from costs/slippage/risk controls";
+            }
+
             // JSON 序列化
             using J = foundation::json::JsonFacade;
             auto root = J::createObject();
@@ -609,6 +718,10 @@ void FactorBacktestOrchestrator::run(
             if (!allSortedDates.empty()) {
                 root.set("startDate", J::createString(allSortedDates.front()));
                 root.set("endDate",   J::createString(allSortedDates.back()));
+                auto dateList = J::createArray();
+                for (const auto& d : allSortedDates)
+                    dateList.push_back(J::createString(d));
+                root.set("dateList", dateList);
             }
 
             auto metrics = J::createObject();
@@ -619,7 +732,7 @@ void FactorBacktestOrchestrator::run(
                 gObj.set("groupIndex",       J::createDouble(static_cast<double>(gm.groupIndex)));
                 gObj.set("returnRate",       J::createDouble(gm.returnRate));
                 gObj.set("annualizedReturn", J::createDouble(gm.annualizedReturn));
-                gObj.set("cumulativeReturn", J::createDouble(gm.returnRate));
+                gObj.set("cumulativeReturn", J::createDouble(gm.cumulativeReturn));
                 gObj.set("stockCount",       J::createDouble(static_cast<double>(gm.stockCount)));
                 gObj.set("minFactorValue",   J::createDouble(gm.minFactorValue));
                 gObj.set("maxFactorValue",   J::createDouble(gm.maxFactorValue));
@@ -654,6 +767,8 @@ void FactorBacktestOrchestrator::run(
             fm.set("alpha",                 J::createDouble(btResult.factorMetrics.alpha));
             fm.set("monthlyWinRate",        J::createDouble(btResult.factorMetrics.monthlyWinRate));
             fm.set("numGroups",             J::createDouble(static_cast<double>(btResult.factorMetrics.numGroups)));
+            fm.set("topBottomSpreadReturn", J::createDouble(btResult.factorMetrics.topBottomSpreadReturn));
+            fm.set("spreadSignMatchIc",     J::createBool(btResult.factorMetrics.spreadSignMatchIc));
             metrics.set("factorMetrics", fm);
 
             auto fq = J::createObject();
@@ -681,6 +796,15 @@ void FactorBacktestOrchestrator::run(
             ex.set("conditionalVaR",   J::createDouble(btResult.conditionalVaR));
             ex.set("finalEquity",      J::createDouble(tradingResult.finalEquity));
             ex.set("validSampleCount", J::createDouble(static_cast<double>(tradingResult.validSampleCount)));
+            // ── 多空价差诊断（策略实际交易的两端）──
+            if (!tradingResult.groups.empty()) {
+                const auto& topGrp = tradingResult.groups.front();
+                const auto& botGrp = tradingResult.groups.back();
+                ex.set("topGroupReturn",       J::createDouble(topGrp.returnRate));
+                ex.set("bottomGroupReturn",    J::createDouble(botGrp.returnRate));
+                ex.set("longShortSpreadReturn", J::createDouble(topGrp.returnRate - botGrp.returnRate));
+                ex.set("spreadSignMatchIc",    J::createBool(btResult.factorMetrics.spreadSignMatchIc));
+            }
             if (benchmarkSummary.hasValidAlignment) {
                 ex.set("benchmarkAnnualReturn", J::createDouble(benchmarkSummary.benchmarkAnnualReturn));
                 ex.set("excessAnnualReturn",   J::createDouble(benchmarkSummary.excessAnnualReturn));
@@ -722,6 +846,46 @@ void FactorBacktestOrchestrator::run(
                 groupRetSeries.push_back(gObj);
             }
             metrics.set("groupReturnSeries", groupRetSeries);
+
+            // ── IC 日序列 ──
+            auto icDailyArr = J::createArray();
+            for (double v : icSeries)
+                icDailyArr.push_back(J::createDouble(v));
+            metrics.set("icSeries", icDailyArr);
+
+            // ── 交易记录 ──
+            auto tradeLogArr = J::createArray();
+            for (const auto& t : tradingResult.tradeLog) {
+                auto tj = J::createObject();
+                tj.set("symbol",  J::createString(t.symbol));
+                tj.set("date",    J::createString(t.date));
+                tj.set("side",    J::createString(t.side));
+                tj.set("basket",  J::createString(t.basket));
+                tj.set("price",   J::createDouble(t.price));
+                tj.set("costRate",J::createDouble(t.cost));
+                tradeLogArr.push_back(tj);
+            }
+            metrics.set("tradeLog", tradeLogArr);
+
+            // ── 每期追踪 ──
+            auto periodArr = J::createArray();
+            for (const auto& p : tradingResult.periodTrackings) {
+                auto pj = J::createObject();
+                pj.set("date",             J::createString(p.date));
+                pj.set("longHeld",         J::createDouble(static_cast<double>(p.longHeld)));
+                pj.set("shortHeld",        J::createDouble(static_cast<double>(p.shortHeld)));
+                pj.set("longBought",       J::createDouble(static_cast<double>(p.longBought)));
+                pj.set("longSold",         J::createDouble(static_cast<double>(p.longSold)));
+                pj.set("shortBought",      J::createDouble(static_cast<double>(p.shortBought)));
+                pj.set("shortSold",        J::createDouble(static_cast<double>(p.shortSold)));
+                pj.set("longTurnover",     J::createDouble(p.longTurnover));
+                pj.set("shortTurnover",    J::createDouble(p.shortTurnover));
+                pj.set("longRawReturn",    J::createDouble(p.longRawReturn));
+                pj.set("shortRawReturn",   J::createDouble(p.shortRawReturn));
+                pj.set("strategyNetReturn",J::createDouble(p.strategyNetReturn));
+                periodArr.push_back(pj);
+            }
+            metrics.set("periodTrackings", periodArr);
 
             root.set("metrics", metrics);
             onComplete(root.toString());

@@ -7,11 +7,6 @@
 #include <functional>
 #include <stdexcept>
 
-// 前向声明
-namespace astock::database {
-    class QtMySQLDatabase;
-}
-
 namespace foundation::thread {
     class IExecutor;
 }
