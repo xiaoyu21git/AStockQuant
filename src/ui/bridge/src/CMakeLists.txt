@@ -32,6 +32,8 @@
     RuleTemplateDetailHelper.cpp
     RuleTemplateSuggestionService.cpp
     CrosshairManager.cpp
+    BacktestAnalyticsService.cpp
+    ../include/BacktestAnalyticsService.h
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})

@@ -74,6 +74,7 @@ private:
     std::unordered_map<std::string, int32_t> symbolToIndex_;
     std::vector<std::string> dates_;
     std::vector<std::string> symbols_;
+
 };
 
 } // namespace factor::compute

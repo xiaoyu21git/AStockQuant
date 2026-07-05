@@ -354,6 +354,38 @@ MarketDataRepository::queryDailyBarJoined(
     return rows;
 }
 
+// ═══ queryFieldCrossSectionRange ═══
+
+std::vector<FieldRow> MarketDataRepository::queryFieldCrossSectionRange(
+    const std::string& field,
+    const std::string& startDate,
+    const std::string& endDate,
+    const std::vector<std::string>& symbols)
+{
+    std::ostringstream sql;
+    sql << "SELECT si.symbol, trade_date, " << field << " AS field_value"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE trade_date >= " << safeStr(startDate)
+        << " AND trade_date <= " << safeStr(endDate);
+    if (!symbols.empty())
+        sql << " AND si.symbol IN " << symbolList(symbols);
+    sql << " ORDER BY si.symbol, trade_date ASC";
+
+    auto result = db_->executeQuery(sql.str());
+    std::vector<FieldRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i) {
+        const auto& row = result.getRow(i);
+        FieldRow fr;
+        fr.symbol    = row.getString("symbol");
+        fr.tradeDate = row.getString("trade_date");
+        fr.fieldName = field;
+        fr.value     = row.getDouble("field_value");
+        rows.push_back(fr);
+    }
+    return rows;
+}
+
 // ═══ queryFinancialFieldCrossSection ═══
 
 std::vector<FieldRow> MarketDataRepository::queryFinancialFieldCrossSection(
@@ -385,6 +417,39 @@ std::vector<FieldRow> MarketDataRepository::queryFinancialFieldCrossSection(
         fr.tradeDate = row.getString("trade_date");
         fr.fieldName = field;
         fr.value     = row.getDouble("field_value");
+        rows.push_back(fr);
+    }
+    return rows;
+}
+
+// ═══ queryFinancialFieldAllReports ═══
+
+std::vector<FieldRow> MarketDataRepository::queryFinancialFieldAllReports(
+    const std::string& field,
+    const std::string& minReportDate,
+    const std::string& maxReportDate,
+    const std::vector<std::string>& symbols)
+{
+    std::vector<FieldRow> rows;
+    std::ostringstream sql;
+    sql << "SELECT si.symbol, fi.report_date AS trade_date, fi." << field << " AS field_value"
+        << " FROM fund.financial_indicator_daily fi"
+        << " JOIN ref.symbol_info si ON fi.symbol_id = si.id"
+        << " WHERE fi.report_date >= " << safeStr(minReportDate)
+        << " AND fi.report_date <= " << safeStr(maxReportDate);
+    if (!symbols.empty())
+        sql << " AND si.symbol IN " << symbolList(symbols);
+    sql << " ORDER BY si.symbol, fi.report_date ASC";
+
+    auto result = db_->executeQuery(sql.str());
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i) {
+        const auto& r = result.getRow(i);
+        FieldRow fr;
+        fr.symbol    = r.getString("symbol");
+        fr.tradeDate = r.getString("trade_date");
+        fr.fieldName = field;
+        fr.value     = r.getDouble("field_value");
         rows.push_back(fr);
     }
     return rows;

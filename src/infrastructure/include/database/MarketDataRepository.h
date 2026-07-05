@@ -48,17 +48,31 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
-    /// 因子字段横截面查询 (mkt.daily_bar)
+    /// 因子字段横截面查询 (mkt.daily_bar, 单日)
     std::vector<FieldRow> queryFieldCrossSection(
         const std::string& field,
         const std::string& date,
         const std::vector<std::string>& symbols = {});
+
+    /// 因子字段范围查询 (mkt.daily_bar, 日期范围，用于首次全量加载)
+    std::vector<FieldRow> queryFieldCrossSectionRange(
+        const std::string& field,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& symbols);
 
     /// 财务字段横截面查询 (fund.financial_indicator_daily, 按 report_date ≤ trade_date 取最近一期)
     std::vector<FieldRow> queryFinancialFieldCrossSection(
         const std::string& field,
         const std::string& date,
         const std::vector<std::string>& symbols = {});
+
+    /// 财务字段全部报告期查询 (返回所有 report_date，用于内存缓存)
+    std::vector<FieldRow> queryFinancialFieldAllReports(
+        const std::string& field,
+        const std::string& minReportDate,
+        const std::string& maxReportDate,
+        const std::vector<std::string>& symbols);
 
     /// 指数成分股查询
     std::vector<std::string> queryIndexConstituents(

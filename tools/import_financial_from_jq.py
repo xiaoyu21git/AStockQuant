@@ -10,7 +10,7 @@ from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import akshare as ak
 import jqdatasdk as jq
-import pymysql
+import psycopg2
 import pandas as pd
 
 
@@ -21,14 +21,20 @@ if str(PROJECT_ROOT) not in sys.path:
 from tools.history_start_policy import resolve_history_date_bounds
 
 
-MYSQL_CONFIG = {
+PG_CONFIG = {
     "host": "127.0.0.1",
-    "port": 3306,
-    "user": "root",
-    "password": "123456a",
+    "port": 5432,
+    "user": "astock",
+    "password": "astock123",
     "database": "astock_quant",
-    "charset": "utf8mb4",
-    "autocommit": False,
+}
+
+# 表名前缀映射（MySQL → PostgreSQL schema）
+TBL = {
+    "fi": "fund.financial_indicator_daily",
+    "fid": "fund.financial_indicator_daily",
+    "si": "ref.symbol_info",
+    "db": "mkt.daily_bar",
 }
 
 DEFAULT_JQ_USER = os.getenv("JQ_USERNAME") or "13552314165"
@@ -86,11 +92,13 @@ def safe_ratio(numerator, denominator):
 
 
 def get_connection():
-    return pymysql.connect(**MYSQL_CONFIG)
+    conn = psycopg2.connect(**PG_CONFIG)
+    conn.autocommit = False
+    return conn
 
 
 def load_symbol_map(cursor) -> Dict[str, int]:
-    cursor.execute("SELECT symbol, symbol_id FROM symbol_info")
+    cursor.execute("SELECT symbol, id FROM ref.symbol_info")
     return {row[0]: int(row[1]) for row in cursor.fetchall()}
 
 
@@ -99,14 +107,14 @@ def load_backfill_symbols(cursor) -> List[Tuple[str, int, Optional[dt.date]]]:
         """
         SELECT
             si.symbol,
-            si.symbol_id,
+            si.id,
             MAX(fi.report_date) AS latest_report_date
-        FROM symbol_info si
-        LEFT JOIN financial_indicator fi
-            ON fi.symbol_id = si.symbol_id
+        FROM ref.symbol_info si
+        LEFT JOIN fund.financial_indicator_daily fi
+            ON fi.symbol_id = si.id
         WHERE si.asset_class = 'STOCK'
           AND UPPER(COALESCE(si.status, 'ACTIVE')) <> 'DELISTED'
-        GROUP BY si.symbol, si.symbol_id
+        GROUP BY si.symbol, si.id
         ORDER BY si.symbol
         """
     )
@@ -120,13 +128,13 @@ def load_backfill_symbols(cursor) -> List[Tuple[str, int, Optional[dt.date]]]:
 
 
 def load_latest_trade_date(cursor) -> Optional[dt.date]:
-    cursor.execute("SELECT MAX(trade_date) FROM daily_bar")
+    cursor.execute("SELECT MAX(trade_date) FROM mkt.daily_bar")
     row = cursor.fetchone()
     return row[0] if row and row[0] else None
 
 
 def load_daily_trade_date_bounds(cursor) -> Tuple[dt.date, dt.date]:
-    cursor.execute("SELECT MIN(trade_date), MAX(trade_date) FROM daily_bar")
+    cursor.execute("SELECT MIN(trade_date), MAX(trade_date) FROM mkt.daily_bar")
     row = cursor.fetchone()
     if not row or row[0] is None or row[1] is None:
         raise RuntimeError("daily_bar 为空，无法对齐财报起止日期")
@@ -274,9 +282,12 @@ def ensure_columns(cursor, table_name: str, ddl_by_column: Dict[str, str]) -> No
 
 
 def ensure_financial_tables(cursor) -> None:
+    # PostgreSQL: 表已由 C++ 建表脚本管理，此处跳过
+    return
+def __ensure_financial_tables_old(cursor) -> None:
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS financial_indicator (
+        CREATE TABLE IF NOT EXISTS fund.financial_indicator_daily (
             indicator_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '指标ID',
             symbol_id INT UNSIGNED NOT NULL COMMENT '标的ID',
             report_date DATE NOT NULL COMMENT '报告期',
@@ -315,7 +326,7 @@ def ensure_financial_tables(cursor) -> None:
     )
     cursor.execute(
         """
-        CREATE TABLE IF NOT EXISTS financial_indicator_daily (
+        CREATE TABLE IF NOT EXISTS fund.financial_indicator_daily (
             indicator_daily_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '日频指标ID',
             symbol_id INT UNSIGNED NOT NULL COMMENT '标的ID',
             trade_date DATE NOT NULL COMMENT '交易日期',
@@ -557,7 +568,7 @@ def load_existing_report_dates(
     cursor.execute(
         """
         SELECT symbol_id, report_date
-        FROM financial_indicator
+        FROM fund.financial_indicator_daily
         WHERE report_date BETWEEN %s AND %s
         """,
         (start_date, end_date),
@@ -749,44 +760,44 @@ def upsert_rows(cursor, rows: Iterable[dict]) -> int:
         return 0
 
     sql = """
-    INSERT INTO financial_indicator (
-        symbol_id, report_date, report_type, effective_disclosure_date,
+    INSERT INTO fund.financial_indicator_daily (
+        symbol_id, trade_date, report_date, report_type, effective_disclosure_date,
         eps, bps, roa, roe, profit_margin, gross_margin, operating_margin,
         debt_to_equity, current_ratio, quick_ratio,
         operating_cash_flow, investing_cash_flow, financing_cash_flow,
         total_revenue, net_profit, total_assets, total_liabilities, equity,
         dividend_yield, payout_ratio, dividend_stability
     ) VALUES (
-        %(symbol_id)s, %(report_date)s, %(report_type)s, %(effective_disclosure_date)s,
+        %(symbol_id)s, %(report_date)s, %(report_date)s, %(report_type)s, %(effective_disclosure_date)s,
         %(eps)s, %(bps)s, %(roa)s, %(roe)s, %(profit_margin)s, %(gross_margin)s, %(operating_margin)s,
         %(debt_to_equity)s, %(current_ratio)s, %(quick_ratio)s,
         %(operating_cash_flow)s, %(investing_cash_flow)s, %(financing_cash_flow)s,
         %(total_revenue)s, %(net_profit)s, %(total_assets)s, %(total_liabilities)s, %(equity)s,
         %(dividend_yield)s, %(payout_ratio)s, %(dividend_stability)s
     )
-    ON DUPLICATE KEY UPDATE
-        effective_disclosure_date = VALUES(effective_disclosure_date),
-        eps = VALUES(eps),
-        bps = VALUES(bps),
-        roa = VALUES(roa),
-        roe = VALUES(roe),
-        profit_margin = VALUES(profit_margin),
-        gross_margin = VALUES(gross_margin),
-        operating_margin = VALUES(operating_margin),
-        debt_to_equity = VALUES(debt_to_equity),
-        current_ratio = VALUES(current_ratio),
-        quick_ratio = VALUES(quick_ratio),
-        operating_cash_flow = VALUES(operating_cash_flow),
-        investing_cash_flow = VALUES(investing_cash_flow),
-        financing_cash_flow = VALUES(financing_cash_flow),
-        total_revenue = VALUES(total_revenue),
-        net_profit = VALUES(net_profit),
-        total_assets = VALUES(total_assets),
-        total_liabilities = VALUES(total_liabilities),
-        equity = VALUES(equity),
-        dividend_yield = VALUES(dividend_yield),
-        payout_ratio = VALUES(payout_ratio),
-        dividend_stability = VALUES(dividend_stability)
+    ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
+        effective_disclosure_date = EXCLUDED.effective_disclosure_date,
+        eps = EXCLUDED.eps,
+        bps = EXCLUDED.bps,
+        roa = EXCLUDED.roa,
+        roe = EXCLUDED.roe,
+        profit_margin = EXCLUDED.profit_margin,
+        gross_margin = EXCLUDED.gross_margin,
+        operating_margin = EXCLUDED.operating_margin,
+        debt_to_equity = EXCLUDED.debt_to_equity,
+        current_ratio = EXCLUDED.current_ratio,
+        quick_ratio = EXCLUDED.quick_ratio,
+        operating_cash_flow = EXCLUDED.operating_cash_flow,
+        investing_cash_flow = EXCLUDED.investing_cash_flow,
+        financing_cash_flow = EXCLUDED.financing_cash_flow,
+        total_revenue = EXCLUDED.total_revenue,
+        net_profit = EXCLUDED.net_profit,
+        total_assets = EXCLUDED.total_assets,
+        total_liabilities = EXCLUDED.total_liabilities,
+        equity = EXCLUDED.equity,
+        dividend_yield = EXCLUDED.dividend_yield,
+        payout_ratio = EXCLUDED.payout_ratio,
+        dividend_stability = EXCLUDED.dividend_stability
     """
     cursor.executemany(sql, payload)
     return len(payload)
@@ -863,9 +874,9 @@ def load_abnormal_roe_repair_targets(
             si.symbol,
             fi.report_date,
             fi.roe
-        FROM financial_indicator fi
-        JOIN symbol_info si
-            ON si.symbol_id = fi.symbol_id
+        FROM fund.financial_indicator_daily fi
+        JOIN ref.symbol_info si
+            ON si.id = fi.symbol_id
         WHERE fi.roe IS NULL
            OR ABS(fi.roe) > %s
         ORDER BY fi.symbol_id, fi.report_date
@@ -1043,7 +1054,7 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
 
             cursor.execute(
                 """
-                CREATE TABLE IF NOT EXISTS financial_indicator_daily (
+                CREATE TABLE IF NOT EXISTS fund.financial_indicator_daily (
                     indicator_daily_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '日频指标ID',
                     symbol_id INT UNSIGNED NOT NULL COMMENT '标的ID',
                     trade_date DATE NOT NULL COMMENT '交易日期',
@@ -1089,14 +1100,14 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                     COUNT(*) AS missing_rows,
                     MIN(db.trade_date) AS first_missing_date,
                     MAX(db.trade_date) AS last_missing_date
-                FROM daily_bar db
-                JOIN symbol_info si
-                    ON si.symbol = db.symbol
-                LEFT JOIN financial_indicator_daily fid
-                    ON fid.symbol_id = si.symbol_id
+                FROM mkt.daily_bar db
+                JOIN ref.symbol_info si
+                    ON si.id = db.symbol_id
+                LEFT JOIN fund.financial_indicator_daily fid
+                    ON fid.symbol_id = si.id
                    AND fid.trade_date = db.trade_date
                 WHERE db.trade_date <= %s
-                  AND fid.indicator_daily_id IS NULL
+                  AND fid.symbol_id IS NULL
                 """,
                 (target_date.isoformat(),),
             )
@@ -1109,8 +1120,8 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
 
             cursor.execute(
                 """
-                UPDATE financial_indicator_daily fid
-                JOIN financial_indicator fi
+                UPDATE fund.financial_indicator_daily fid
+                JOIN fund.financial_indicator_daily fi
                   ON fi.symbol_id = fid.symbol_id
                  AND fi.report_date = fid.report_date
                 SET fid.report_type = fi.report_type,
@@ -1172,7 +1183,7 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
 
             cursor.execute(
                 """
-                INSERT INTO financial_indicator_daily (
+                INSERT INTO fund.financial_indicator_daily (
                     symbol_id, trade_date, report_date, report_type, effective_disclosure_date,
                     eps, bps, roa, roe, profit_margin, gross_margin, operating_margin,
                     debt_to_equity, current_ratio, quick_ratio,
@@ -1209,50 +1220,50 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                     fi.dividend_stability
                 FROM (
                     SELECT
-                        si2.symbol_id,
+                        si2.id,
                         db2.trade_date,
                         MAX(fi2.report_date) AS latest_report_date
-                    FROM daily_bar db2
-                    JOIN symbol_info si2
-                        ON si2.symbol = db2.symbol
-                    LEFT JOIN financial_indicator_daily fid2
-                        ON fid2.symbol_id = si2.symbol_id
+                    FROM mkt.daily_bar db2
+                    JOIN ref.symbol_info si2
+                        ON si2.id = db2.symbol_id
+                    LEFT JOIN fund.financial_indicator_daily fid2
+                        ON fid2.symbol_id = si2.id
                        AND fid2.trade_date = db2.trade_date
-                    JOIN financial_indicator fi2
-                        ON fi2.symbol_id = si2.symbol_id
+                    JOIN fund.financial_indicator_daily fi2
+                        ON fi2.symbol_id = si2.id
                        AND fi2.report_date <= db2.trade_date
                     WHERE db2.trade_date <= %s
-                      AND fid2.indicator_daily_id IS NULL
-                    GROUP BY si2.symbol_id, db2.trade_date
+                      AND fid2.symbol_id IS NULL
+                    GROUP BY si2.id, db2.trade_date
                 ) latest
-                JOIN financial_indicator fi
+                JOIN fund.financial_indicator_daily fi
                     ON fi.symbol_id = latest.symbol_id
                    AND fi.report_date = latest.latest_report_date
-                ON DUPLICATE KEY UPDATE
-                    report_date = VALUES(report_date),
-                    report_type = VALUES(report_type),
-                    effective_disclosure_date = VALUES(effective_disclosure_date),
-                    eps = VALUES(eps),
-                    bps = VALUES(bps),
-                    roa = VALUES(roa),
-                    roe = VALUES(roe),
-                    profit_margin = VALUES(profit_margin),
-                    gross_margin = VALUES(gross_margin),
-                    operating_margin = VALUES(operating_margin),
-                    debt_to_equity = VALUES(debt_to_equity),
-                    current_ratio = VALUES(current_ratio),
-                    quick_ratio = VALUES(quick_ratio),
-                    operating_cash_flow = VALUES(operating_cash_flow),
-                    investing_cash_flow = VALUES(investing_cash_flow),
-                    financing_cash_flow = VALUES(financing_cash_flow),
-                    total_revenue = VALUES(total_revenue),
-                    net_profit = VALUES(net_profit),
-                    total_assets = VALUES(total_assets),
-                    total_liabilities = VALUES(total_liabilities),
-                    equity = VALUES(equity),
-                    dividend_yield = VALUES(dividend_yield),
-                    payout_ratio = VALUES(payout_ratio),
-                    dividend_stability = VALUES(dividend_stability)
+                ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
+                    report_date = EXCLUDED.report_date,
+                    report_type = EXCLUDED.report_type,
+                    effective_disclosure_date = EXCLUDED.effective_disclosure_date,
+                    eps = EXCLUDED.eps,
+                    bps = EXCLUDED.bps,
+                    roa = EXCLUDED.roa,
+                    roe = EXCLUDED.roe,
+                    profit_margin = EXCLUDED.profit_margin,
+                    gross_margin = EXCLUDED.gross_margin,
+                    operating_margin = EXCLUDED.operating_margin,
+                    debt_to_equity = EXCLUDED.debt_to_equity,
+                    current_ratio = EXCLUDED.current_ratio,
+                    quick_ratio = EXCLUDED.quick_ratio,
+                    operating_cash_flow = EXCLUDED.operating_cash_flow,
+                    investing_cash_flow = EXCLUDED.investing_cash_flow,
+                    financing_cash_flow = EXCLUDED.financing_cash_flow,
+                    total_revenue = EXCLUDED.total_revenue,
+                    net_profit = EXCLUDED.net_profit,
+                    total_assets = EXCLUDED.total_assets,
+                    total_liabilities = EXCLUDED.total_liabilities,
+                    equity = EXCLUDED.equity,
+                    dividend_yield = EXCLUDED.dividend_yield,
+                    payout_ratio = EXCLUDED.payout_ratio,
+                    dividend_stability = EXCLUDED.dividend_stability
                 """,
                 (target_date.isoformat(),),
             )
@@ -1280,18 +1291,18 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
             cursor.execute(
                 """
                 SELECT COUNT(*)
-                FROM daily_bar db
-                JOIN symbol_info si
-                    ON si.symbol = db.symbol
-                LEFT JOIN financial_indicator_daily fid
-                    ON fid.symbol_id = si.symbol_id
+                FROM mkt.daily_bar db
+                JOIN ref.symbol_info si
+                    ON si.id = db.symbol_id
+                LEFT JOIN fund.financial_indicator_daily fid
+                    ON fid.symbol_id = si.id
                    AND fid.trade_date = db.trade_date
                 WHERE db.trade_date <= %s
-                  AND fid.indicator_daily_id IS NULL
+                  AND fid.symbol_id IS NULL
                   AND EXISTS (
                       SELECT 1
-                      FROM financial_indicator fi
-                      WHERE fi.symbol_id = si.symbol_id
+                      FROM fund.financial_indicator_daily fi
+                      WHERE fi.symbol_id = si.id
                         AND fi.report_date <= db.trade_date
                   )
                 """,
@@ -1301,18 +1312,18 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
             cursor.execute(
                 """
                 SELECT COUNT(*)
-                FROM daily_bar db
-                JOIN symbol_info si
-                    ON si.symbol = db.symbol
-                LEFT JOIN financial_indicator_daily fid
-                    ON fid.symbol_id = si.symbol_id
+                FROM mkt.daily_bar db
+                JOIN ref.symbol_info si
+                    ON si.id = db.symbol_id
+                LEFT JOIN fund.financial_indicator_daily fid
+                    ON fid.symbol_id = si.id
                    AND fid.trade_date = db.trade_date
                 WHERE db.trade_date <= %s
-                  AND fid.indicator_daily_id IS NULL
+                  AND fid.symbol_id IS NULL
                   AND NOT EXISTS (
                       SELECT 1
-                      FROM financial_indicator fi
-                      WHERE fi.symbol_id = si.symbol_id
+                      FROM fund.financial_indicator_daily fi
+                      WHERE fi.symbol_id = si.id
                         AND fi.report_date <= db.trade_date
                   )
                 """,
@@ -1359,13 +1370,13 @@ def backfill_dividend_metrics(cursor, target_date: dt.date) -> int:
     conn = cursor.connection
     cursor.execute(
         """
-        SELECT si.symbol_id, si.symbol
-        FROM symbol_info si
+        SELECT si.id, si.symbol
+        FROM ref.symbol_info si
         WHERE si.asset_class = 'STOCK'
           AND EXISTS (
               SELECT 1
-              FROM financial_indicator_daily fid
-              WHERE fid.symbol_id = si.symbol_id
+              FROM fund.financial_indicator_daily fid
+              WHERE fid.symbol_id = si.id
                 AND fid.trade_date <= %s
           )
         ORDER BY si.symbol
@@ -1390,11 +1401,11 @@ def backfill_dividend_metrics(cursor, target_date: dt.date) -> int:
         cursor.execute(
             """
             SELECT fid.trade_date, db.close
-            FROM financial_indicator_daily fid
-            JOIN symbol_info si
-              ON si.symbol_id = fid.symbol_id
+            FROM fund.financial_indicator_daily fid
+            JOIN ref.symbol_info si
+              ON si.id = fid.symbol_id
             JOIN daily_bar db
-              ON db.symbol = si.symbol
+              ON db.symbol_id = si.id
              AND db.trade_date = fid.trade_date
             WHERE fid.symbol_id = %s
               AND fid.trade_date <= %s
@@ -1409,7 +1420,7 @@ def backfill_dividend_metrics(cursor, target_date: dt.date) -> int:
         cursor.execute(
             """
             SELECT report_date, eps
-            FROM financial_indicator
+            FROM fund.financial_indicator_daily
             WHERE symbol_id = %s
               AND report_type = 'FY'
               AND report_date <= %s
@@ -1481,13 +1492,13 @@ def backfill_report_dividend_metrics(cursor, target_date: dt.date) -> int:
     conn = cursor.connection
     cursor.execute(
         """
-        SELECT si.symbol_id, si.symbol
-        FROM symbol_info si
+        SELECT si.id, si.symbol
+        FROM ref.symbol_info si
         WHERE si.asset_class = 'STOCK'
           AND EXISTS (
               SELECT 1
-              FROM financial_indicator fi
-              WHERE fi.symbol_id = si.symbol_id
+              FROM fund.financial_indicator_daily fi
+              WHERE fi.symbol_id = si.id
                 AND fi.report_date <= %s
           )
         ORDER BY si.symbol
@@ -1512,10 +1523,10 @@ def backfill_report_dividend_metrics(cursor, target_date: dt.date) -> int:
         cursor.execute(
             """
             SELECT db.trade_date, db.close
-            FROM daily_bar db
-            JOIN symbol_info si
-              ON si.symbol = db.symbol
-            WHERE si.symbol_id = %s
+            FROM mkt.daily_bar db
+            JOIN ref.symbol_info si
+              ON si.id = db.symbol_id
+            WHERE si.id = %s
               AND db.trade_date <= %s
             ORDER BY db.trade_date
             """,
@@ -1528,7 +1539,7 @@ def backfill_report_dividend_metrics(cursor, target_date: dt.date) -> int:
         cursor.execute(
             """
             SELECT report_date, report_type, eps
-            FROM financial_indicator
+            FROM fund.financial_indicator_daily
             WHERE symbol_id = %s
               AND report_date <= %s
             ORDER BY report_date
@@ -1699,7 +1710,7 @@ def fetch_financial_history(start_year: int, end_year: int, limit: int, workers:
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT COUNT(*) FROM financial_indicator")
+            cursor.execute("SELECT COUNT(*) FROM fund.financial_indicator_daily")
             total_rows = cursor.fetchone()[0]
             print(f"[done] total_upserts={total_upserts} total_rows={total_rows}")
             return period_results

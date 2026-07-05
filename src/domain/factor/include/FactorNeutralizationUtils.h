@@ -64,13 +64,29 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
         if (!std::isfinite(industryIt->second) || !std::isfinite(marketCapIt->second) || marketCapIt->second <= 0.0) {
             continue;
         }
-
+        
         const long long industryCode = static_cast<long long>(std::llround(industryIt->second));
         const double logMarketCap = std::log((std::max)(marketCapIt->second, 1.0));
+       
         samples.push_back({symbol, value, logMarketCap, industryCode});
         industryBuckets[industryCode].push_back(value);
     }
 
+    if (values.size() <= 5) {
+        std::ostringstream dbg;
+        for (const auto& [s, v] : values) {
+            auto ii = industryBySymbol.find(s);
+            auto mi = marketCapBySymbol.find(s);
+            dbg << "[" << s << " v=" << v
+                << " ind=" << (ii != industryBySymbol.end() ? ii->second : NAN)
+                << " mc=" << (mi != marketCapBySymbol.end() ? mi->second : NAN) << "] ";
+        }
+        INTERNAL_WARN_STREAM << "[neutralization] SMALL indMap=" << industryBySymbol.size()
+            << " mcMap=" << marketCapBySymbol.size() << " valuesIn=" << values.size()
+            << " detail: " << dbg.str();
+    }
+    INTERNAL_DEBUG_STREAM << "[neutralization] samples=" << samples.size()
+        << " industryBuckets=" << industryBuckets.size();
     if (samples.size() < 3) {
         if (errorMessage) {
             *errorMessage = "中性化样本不足，无法完成行业和市值残差化";

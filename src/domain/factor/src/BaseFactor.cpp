@@ -712,44 +712,35 @@ std::unordered_map<std::string, std::vector<double>> BaseFactor::latestFinancial
     const CalculationContext& context, const std::string& field,
     const std::string& date, int limit) const {
     std::unordered_map<std::string, std::vector<double>> result;
-    if (!context.historicalView || field.empty()) {
-        return result;
-    }
+    if (!context.historicalView || field.empty()) return result;
+
     const std::string effectiveDate = date.empty() ? context.date : date;
     const auto symbols = effectiveSymbols(context);
     const int effectiveLimit = (limit > 0) ? limit : 1;
 
-    // 用 getCrossSection（带 dbFallback）横切多个日期拼成序列
-    int y, m, d;
-    if (effectiveDate.size() != 10 || sscanf(effectiveDate.c_str(), "%d-%d-%d", &y, &m, &d) != 3) {
-        // 日期格式不对 → 回退到单日 getCrossSection
-        auto cs = context.historicalView->getCrossSection(effectiveDate, field, symbols);
-        for (const auto& [sym, val] : cs) {
-            if (std::isfinite(val)) result[sym].push_back(val);
-        }
-        return result;
-    }
+    // 用 getCrossSection 横切多个历史锚点日期（从 effectiveDate 往回推 quarterly），
+    // 自动走 dbFallback 且每次横切只查一次静态缓存
+    int y = 0, m = 0, d = 1;
+    if (effectiveDate.size() == 10)
+        sscanf(effectiveDate.c_str(), "%d-%d-%d", &y, &m, &d);
 
-    for (int i = 0; i < effectiveLimit; ++i) {
-        // 从 effectiveDate 开始，每次往回推一个季度
+    for (int i = 0; i < effectiveLimit * 2 && i < 16; ++i) {
         int qy = y, qm = m - i * 3;
         while (qm <= 0) { qm += 12; --qy; }
         char qBuf[16];
-        snprintf(qBuf, sizeof(qBuf), "%04d-%02d-%02d", qy, qm, d > 28 ? 28 : d);
+        snprintf(qBuf, sizeof(qBuf), "%04d-%02d-%02d", qy, qm, (d > 28 ? 28 : d));
         auto cs = context.historicalView->getCrossSection(std::string(qBuf), field, symbols);
+        bool anyNew = false;
         for (const auto& [sym, val] : cs) {
-            if (std::isfinite(val)) {
-                auto& vec = result[sym];
-                if (vec.empty() || std::abs(vec.back() - val) > 1e-12)
-                    vec.push_back(val);
+            if (!std::isfinite(val)) continue;
+            auto& vec = result[sym];
+            // 只收集不同于前值的（不同报告期）
+            if (vec.empty() || std::abs(vec.back() - val) > 1e-12) {
+                vec.push_back(val);
+                anyNew = true;
             }
         }
-        if (!result.empty()) {
-            bool allDone = true;
-            for (const auto& [_, vec] : result)
-                if (static_cast<int>(vec.size()) < effectiveLimit) { allDone = false; break; }
-            if (allDone) break;
-        }
+        if (!anyNew && i >= effectiveLimit) break;
     }
     return result;
 }

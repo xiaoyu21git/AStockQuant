@@ -32,7 +32,8 @@ QtObject {
             title: "策略与因子",
             items: [
                 {title: "策略库", icon: "📚", badge: "", code: "strategy_library"},
-                {title: "因子库", icon: "📊", badge: "", code: "factor_library"}
+                {title: "因子库", icon: "📊", badge: "", code: "factor_library"},
+                {title: "因子绩效", icon: "📈", badge: "", code: "factor_performance"}
             ]
         },
         "risk_management": {
