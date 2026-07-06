@@ -543,6 +543,26 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
     }
 }
 
+bool FactorService::writeBacktestMetrics(const QString& factorId, const QVariantMap& report)
+{
+    auto metrics = report.value("metrics").toMap();
+    auto ic = metrics.value("ic").toMap();
+    auto factorQuality = metrics.value("factorQuality").toMap();
+    auto exec = metrics.value("execution").toMap();
+    auto config = report.value("config").toMap();
+
+    QVariantMap data;
+    data["factorId"]            = factorId;
+    data["icValue"]             = ic.value("value");
+    data["irValue"]             = ic.value("ir");
+    data["coreRating"]          = factorQuality.value("coreRating");
+    data["turnoverRate"]        = exec.value("turnoverRate");
+    data["effectiveStartDate"]  = config.value("startDate");
+    data["effectiveEndDate"]    = config.value("endDate");
+
+    return updateFactor(factorId, data);
+}
+
 bool FactorService::deleteFactor(const QString& factorId)
 {
     if (factorId.isEmpty()) {

@@ -651,41 +651,7 @@ Item {
             return false
         }
 
-        var factorDetail = factorService.getFactorById(factorId) || ({})
-
-        var metrics = activeReport.metrics || ({})
-        var icMetrics = metrics.ic || ({})
-        var factorQuality = metrics.factorQuality || ({})
-        var executionMetrics = metrics.execution || ({})
-        var config = activeReport.config || ({})
-        var actualStartDate = String(config.actualStartDate || "").trim()
-        var effectiveStartDate = actualStartDate || String(config.startDate || "").trim()
-        var effectiveEndDate = String(config.endDate || "").trim()
-        var warmupTrimmedTradingDays = Number(config.warmupTrimmedTradingDays || 0)
-        if (!isFinite(warmupTrimmedTradingDays) || warmupTrimmedTradingDays < 0) {
-            warmupTrimmedTradingDays = 0
-        }
-        var factorData = Object.assign({}, factorDetail, {
-            icValue: icMetrics.value !== undefined ? icMetrics.value : 0,
-            irValue: icMetrics.ir !== undefined ? icMetrics.ir : 0,
-            coreRating: factorQuality.coreRating !== undefined ? factorQuality.coreRating : 0,
-            turnoverRate: executionMetrics.turnoverRate !== undefined ? executionMetrics.turnoverRate : 0,
-            actualStartDate: actualStartDate,
-            effectiveStartDate: effectiveStartDate,
-            effectiveEndDate: effectiveEndDate,
-            warmupTrimmedTradingDays: Math.floor(warmupTrimmedTradingDays)
-        })
-
-        if (!factorData.factorId) {
-            factorData.factorId = factorId
-        }
-        if ((factorData.factorType === undefined || factorData.factorType === null)
-                && factorDetail.factorType !== undefined
-                && factorDetail.factorType !== null) {
-            factorData.factorType = factorDetail.factorType
-        }
-
-        var updateSuccess = factorService.updateFactor(factorId, factorData)
+        var updateSuccess = factorService.writeBacktestMetrics(factorId, activeReport)
         if (updateSuccess) {
             showToast("已写入回测指标: " + factorId)
         } else {
