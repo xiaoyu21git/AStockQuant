@@ -667,6 +667,9 @@ void StrategyEngine::drainQueue()
                 auto positions = accEng.positions();
                 m_orderBuilder.setAccountId(account.accountId);
 
+                // 逐订单现金约束: 同批订单串行扣减可用资金
+                double remainingCash = account.availableCash;
+
                 // 防御: 账户未初始化或 tick 价格异常时跳过本批次
                 if (account.totalAsset <= 0) {
                     INTERNAL_ERROR_STREAM << "[StrategyEngine] account totalAsset=0, "
@@ -696,18 +699,43 @@ void StrategyEngine::drainQueue()
                     if (order.orderType() == OrderType::Market && tickPrice > 0)
                         order.setPrice(tickPrice);
 
-                    // ── 资金量级分配：targetWeight × 总资产 / 价格 ──
+                    // ── 资金量级分配 + 现金约束 ──
+                    constexpr int64_t kMinLot = 100;
                     double targetWeight = order.extensionAs<double>(
                         domain::trading::ExtKey::kTargetWeight, 0.0);
                     if (targetWeight > 0.0 && account.totalAsset > 0 && tickPrice > 0) {
-                        int64_t capQty = static_cast<int64_t>(
+                        const int64_t targetQty = static_cast<int64_t>(
                             targetWeight * account.totalAsset / tickPrice / 100.0) * 100;
-                        if (capQty >= 100) {
-                            order.setQuantity(static_cast<double>(capQty));
+                        int64_t finalQty = targetQty;
+
+                        if (order.side() == engine::OrderSide::Buy) {
+                            // 买单: 现金约束
+                            double cost = static_cast<double>(finalQty) * tickPrice;
+                            if (remainingCash < cost) {
+                                int64_t affordable = static_cast<int64_t>(
+                                    remainingCash / tickPrice / 100.0) * 100;
+                                if (affordable < kMinLot) {
+                                    INTERNAL_WARN_STREAM << "[StrategyEngine] drainQueue buy skip: cash "
+                                        << remainingCash << " < " << cost << " " << order.symbol();
+                                    continue;
+                                }
+                                finalQty = affordable;
+                            }
+                            if (finalQty >= kMinLot) {
+                                remainingCash -= static_cast<double>(finalQty) * tickPrice;
+                            }
+                        } else {
+                            // 卖单: 释放现金
+                            remainingCash += static_cast<double>(finalQty) * tickPrice;
+                        }
+
+                        if (finalQty >= kMinLot) {
+                            order.setQuantity(static_cast<double>(finalQty));
                             INTERNAL_INFO_STREAM << "[StrategyEngine] 资金分配: symbol="
                                 << order.symbol() << " targetWeight=" << targetWeight
-                                << " capital=" << account.totalAsset
-                                << " price=" << tickPrice << " qty=" << capQty;
+                                << " targetQty=" << targetQty << " finalQty=" << finalQty
+                                << " price=" << tickPrice
+                                << " cashRemaining=" << remainingCash;
                         }
                     }
 
