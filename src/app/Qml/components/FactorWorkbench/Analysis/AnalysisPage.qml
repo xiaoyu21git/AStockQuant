@@ -1856,6 +1856,7 @@ Item {
                         return normalizedListValue(m.groupReturnSeries || [])
                     }
                     returnSeries: returnSeriesSection()
+                    scatterData: normalizedListValue((activeResult || {}).scatterData || [])
                     numGroups: activeFactorQuality.numGroups || 5
                 }
             }

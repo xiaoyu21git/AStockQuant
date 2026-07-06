@@ -11,6 +11,7 @@ Item {
     property var dateList: []
     property int numGroups: 5
     property int chartHeight: 260
+    property var scatterData: []
 
     implicitHeight: icChart.height + groupChart.height + scatterChart.height + 48
 
@@ -227,55 +228,78 @@ Item {
                 anchors.fill: parent
                 anchors.margins: 8
 
-                property var fvSamples: []
-
-                function prepareRandom() {
-                    // placeholder until real factorValues data loads
-                    var pts = []
-                    for (var i = 0; i < 200; i++) {
-                        pts.push({
-                            x: (Math.random() - 0.5) * 4,
-                            y: (Math.random() - 0.5) * 0.2
-                        })
-                    }
-                    fvSamples = pts
-                }
-
                 onPaint: {
                     var ctx = getContext("2d")
                     var w = width, h = height
                     ctx.clearRect(0, 0, w, h)
-                    var pts = fvSamples
-                    if (pts.length === 0) { prepareRandom(); pts = fvSamples }
+                    var data = root.scatterData
+                    if (!data || data.length < 2) return
 
-                    var minX = 0, maxX = 0, minY = 0, maxY = 0
-                    for (var i = 0; i < pts.length; i++) {
-                        if (pts[i].x < minX) minX = pts[i].x
-                        if (pts[i].x > maxX) maxX = pts[i].x
-                        if (pts[i].y < minY) minY = pts[i].y
-                        if (pts[i].y > maxY) maxY = pts[i].y
+                    var n = Math.min(data.length, 1000)
+                    var step = Math.max(1, Math.floor(data.length / n))
+
+                    var minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9
+                    for (var i = 0; i < data.length; i += step) {
+                        var fv = data[i].factorValue || data[i].x || 0
+                        var fr = data[i].forwardRet || data[i].y || 0
+                        if (fv < minX) minX = fv; if (fv > maxX) maxX = fv
+                        if (fr < minY) minY = fr; if (fr > maxY) maxY = fr
                     }
-                    var xR = Math.max(Math.abs(minX), Math.abs(maxX), 0.5) * 1.1
-                    var yR = Math.max(Math.abs(minY), Math.abs(maxY), 0.05) * 1.1
-                    var cx = w / 2, cy = h / 2
+                    if (maxX === minX) { minX -= 0.5; maxX += 0.5 }
+                    if (maxY === minY) { minY -= 0.05; maxY += 0.05 }
+                    var xR = (maxX - minX) * 1.08
+                    var yR = (maxY - minY) * 1.08
+                    var padL = 40, padR = 16, padT = 12, padB = 28
 
                     // axes
                     ctx.strokeStyle = "#334155"
                     ctx.lineWidth = 1
-                    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke()
-                    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke()
+                    var zeroY = padT + (maxY / yR) * (h - padT - padB)
+                    zeroY = Math.max(padT, Math.min(h - padB, h - padB - ((0 - minY) / yR) * (h - padT - padB)))
+                    ctx.beginPath(); ctx.moveTo(padL, zeroY); ctx.lineTo(w - padR, zeroY); ctx.stroke()
+                    var zeroX = padL + ((0 - minX) / xR) * (w - padL - padR)
+                    zeroX = Math.max(padL, Math.min(w - padR, zeroX))
+                    ctx.beginPath(); ctx.moveTo(zeroX, padT); ctx.lineTo(zeroX, h - padB); ctx.stroke()
 
-                    // points
-                    for (var j = 0; j < pts.length; j++) {
-                        var sx = cx + (pts[j].x / xR) * cx
-                        var sy = cy - (pts[j].y / yR) * cy
-                        if (sx < 1 || sx > w - 1 || sy < 1 || sy > h - 1) continue
-                        ctx.fillStyle = "rgba(59,130,246,0.35)"
+                    // regression line (simple linear fit)
+                    var sx = 0, sy = 0, sxy = 0, sx2 = 0, cnt = 0
+                    for (var j = 0; j < data.length; j += step) {
+                        var fv2 = data[j].factorValue || data[j].x || 0
+                        var fr2 = data[j].forwardRet || data[j].y || 0
+                        sx += fv2; sy += fr2; sxy += fv2 * fr2; sx2 += fv2 * fv2; cnt++
+                    }
+                    if (cnt > 2) {
+                        var slope = (cnt * sxy - sx * sy) / (cnt * sx2 - sx * sx)
+                        var intercept = (sy - slope * sx) / cnt
+                        var rl_x1 = padL, rl_y1 = h - padB - ((intercept + slope * minX - minY) / yR) * (h - padT - padB)
+                        var rl_x2 = w - padR, rl_y2 = h - padB - ((intercept + slope * maxX - minY) / yR) * (h - padT - padB)
+                        ctx.strokeStyle = "rgba(239,68,68,0.5)"
+                        ctx.lineWidth = 1
+                        ctx.setLineDash([4, 4])
+                        ctx.beginPath(); ctx.moveTo(rl_x1, rl_y1); ctx.lineTo(rl_x2, rl_y2); ctx.stroke()
+                        ctx.setLineDash([])
+                    }
+
+                    // scatter points
+                    for (var k = 0; k < data.length; k += step) {
+                        var fv3 = data[k].factorValue || data[k].x || 0
+                        var fr3 = data[k].forwardRet || data[k].y || 0
+                        var spx = padL + ((fv3 - minX) / xR) * (w - padL - padR)
+                        var spy = h - padB - ((fr3 - minY) / yR) * (h - padT - padB)
+                        if (spx < padL || spx > w - padR || spy < padT || spy > h - padB) continue
+                        var alpha = 0.18
+                        if (Math.abs(fr3) < 0.02) alpha = 0.08
+                        ctx.fillStyle = "rgba(59,130,246," + alpha + ")"
                         ctx.beginPath()
-                        ctx.arc(sx, sy, 2, 0, Math.PI * 2)
+                        ctx.arc(spx, spy, 1.5, 0, Math.PI * 2)
                         ctx.fill()
                     }
                 }
+            }
+
+            Connections {
+                target: root
+                function onScatterDataChanged() { scatterCanvas.requestPaint() }
             }
         }
     }

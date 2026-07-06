@@ -851,6 +851,21 @@ void FactorBacktestOrchestrator::run(
             }
             root.set("factorValues", fvArr);
 
+            // scatterData — 因子值 vs 前向收益散点 (采样 icByDate, 每期最多200点)
+            auto scatterArr = J::createArray();
+            for (const auto& [date, pairs] : icByDate) {
+                if (pairs.size() < 10) continue;
+                size_t step = std::max(size_t(1), pairs.size() / 200);
+                for (size_t si = 0; si < pairs.size(); si += step) {
+                    auto pt = J::createObject();
+                    pt.set("date",       J::createString(date));
+                    pt.set("factorValue", J::createDouble(pairs[si].first));
+                    pt.set("forwardRet", J::createDouble(pairs[si].second));
+                    scatterArr.push_back(pt);
+                }
+            }
+            root.set("scatterData", scatterArr);
+
             if (!allSortedDates.empty()) {
                 root.set("startDate", J::createString(allSortedDates.front()));
                 root.set("endDate",   J::createString(allSortedDates.back()));
