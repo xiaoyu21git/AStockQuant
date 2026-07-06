@@ -634,55 +634,6 @@ void FactorBacktestOrchestrator::run(
             auto pos = std::count_if(icSeries.begin(), icSeries.end(), [](double v){return v>0.0;});
             icir.icPositiveRatio = static_cast<double>(pos) / icSeries.size();
         }
-        // ── 旧池化 Spearman 已移除 ──
-#if 0
-        if (icPairs.size() >= 30) {
-            // 按日期分组（每30+对对应一个日期）
-            std::vector<double> datesIC;
-            // 简化：直接对所有对分组计算 Spearman
-            // 此处用简化版 — 取所有对的整体秩相关
-            std::vector<double> fvAll, retAll;
-            fvAll.reserve(icPairs.size());
-            retAll.reserve(icPairs.size());
-            for (const auto& [fv, ret] : icPairs) {
-                fvAll.push_back(fv);
-                retAll.push_back(ret);
-            }
-
-            // Spearman rank correlation
-            std::vector<size_t> idx(fvAll.size());
-            for (size_t i = 0; i < idx.size(); ++i) idx[i] = i;
-
-            // Rank factor values
-            std::sort(idx.begin(), idx.end(),
-                [&](size_t a, size_t b) { return fvAll[a] < fvAll[b]; });
-            std::vector<double> fRanks(fvAll.size());
-            for (size_t i = 0; i < idx.size(); ++i) fRanks[idx[i]] = static_cast<double>(i);
-
-            // Rank returns
-            std::sort(idx.begin(), idx.end(),
-                [&](size_t a, size_t b) { return retAll[a] < retAll[b]; });
-            std::vector<double> rRanks(retAll.size());
-            for (size_t i = 0; i < idx.size(); ++i) rRanks[idx[i]] = static_cast<double>(i);
-
-            double sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-            double nn = static_cast<double>(fRanks.size());
-            for (size_t i = 0; i < fRanks.size(); ++i) {
-                sumX += fRanks[i]; sumY += rRanks[i];
-                sumXY += fRanks[i] * rRanks[i];
-                sumX2 += fRanks[i] * fRanks[i];
-                sumY2 += rRanks[i] * rRanks[i];
-            }
-            double num = nn * sumXY - sumX * sumY;
-            double den = std::sqrt((nn * sumX2 - sumX * sumX) * (nn * sumY2 - sumY * sumY));
-            if (den > 1e-12) {
-                icir.icMean = num / den;
-                icir.ir = icir.icMean;
-                icir.icPositiveRatio = (icir.icMean > 0) ? 1.0 : 0.0;
-                icir.icStd = 0.0;
-            }
-#endif
-
         if (onProgress) onProgress(60.0, "factors computed (per-date IC)");
         INTERNAL_INFO_STREAM << "[回测流程] IC计算完成: icSeries.size=" << icir.icSeries.size()
             << " icMean=" << icir.icMean
@@ -915,7 +866,8 @@ void FactorBacktestOrchestrator::run(
             ic.set("value",      J::createDouble(btResult.factorMetrics.rankIcMean));
             ic.set("ir",         J::createDouble(btResult.factorMetrics.rankIcir));
             ic.set("std",        J::createDouble(btResult.factorMetrics.rankIcStd));
-            ic.set("winRate",    J::createDouble(btResult.factorMetrics.icWinRate));
+            ic.set("winRate",      J::createDouble(btResult.factorMetrics.icWinRate));
+            ic.set("positiveRate", J::createDouble(btResult.factorMetrics.icWinRate));  // QML 读取此名
             ic.set("pValue",     J::createDouble(btResult.factorMetrics.icPValue));
             ic.set("tStat",      J::createDouble(btResult.factorMetrics.icTStat));
             ic.set("halfLife",   J::createDouble(static_cast<double>(btResult.factorMetrics.icHalfLife)));
@@ -949,10 +901,14 @@ void FactorBacktestOrchestrator::run(
             ex.set("presentSignals",   J::createDouble(static_cast<double>(reporterOutput.presentSignalCount)));
             ex.set("totalReturn",      J::createDouble(tradingResult.totalReturn));
             ex.set("annualizedReturn", J::createDouble(tradingResult.annualizedReturn));
+            ex.set("annualReturn",     J::createDouble(tradingResult.annualizedReturn));  // QML 读取此名
             ex.set("sharpeRatio",      J::createDouble(tradingResult.sharpeRatio));
             ex.set("volatility",       J::createDouble(tradingResult.annualStdDev));
             ex.set("maxDrawdown",      J::createDouble(tradingResult.maxDrawdown));
             ex.set("turnoverRatio",    J::createDouble(tradingResult.turnoverRate));
+            ex.set("turnoverRate",     J::createDouble(tradingResult.turnoverRate));      // QML/FactorWorkbench 读取此名
+            ex.set("winRate",          J::createDouble(btResult.winRate));                // QML 读取此名
+            ex.set("alpha",            J::createDouble(btResult.factorMetrics.alpha));    // QML 读取此名
             ex.set("finalEquity",      J::createDouble(tradingResult.finalEquity));
             ex.set("validSampleCount", J::createDouble(static_cast<double>(tradingResult.validSampleCount)));
             // ── 多空价差诊断（策略实际交易的两端）──
@@ -962,7 +918,9 @@ void FactorBacktestOrchestrator::run(
                 ex.set("topGroupReturn",       J::createDouble(topGrp.returnRate));
                 ex.set("bottomGroupReturn",    J::createDouble(botGrp.returnRate));
                 ex.set("longShortSpreadReturn", J::createDouble(topGrp.returnRate - botGrp.returnRate));
-                ex.set("spreadSignMatchIc",    J::createBool(btResult.factorMetrics.spreadSignMatchIc));
+                ex.set("spreadSignMatchIc",    J::createBool(
+                    topGrp.returnRate * botGrp.returnRate < 0.0  // 多空方向一致才算匹配
+                ));
             }
             if (benchmarkSummary.hasValidAlignment) {
                 ex.set("benchmarkAnnualReturn", J::createDouble(benchmarkSummary.benchmarkAnnualReturn));
