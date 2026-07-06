@@ -678,7 +678,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     // 组装 metrics
                     QVariantMap metrics;
                     metrics["groups"]        = groupsList;
-
+                    metrics["factorMetrics"] = fmMap;     // C++ 原样, 写入 DB
                     metrics["ic"]            = icMap;
                     metrics["execution"]     = execMap;
                     metrics["factorQuality"] = fq;
@@ -699,6 +699,15 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     }
                     cfgMap["benchmarkSymbol"] = QString::fromStdString(config.benchmarkSymbol);
                     cfgMap["initialCapital"]  = config.initialCapital;
+                    cfgMap["forwardDays"]     = config.forwardDays;
+                    cfgMap["rebalanceDays"]   = config.rebalanceDays;
+                    cfgMap["numGroups"]       = config.numGroups;
+                    cfgMap["commissionRate"]  = config.commissionRate;
+                    cfgMap["slippageRate"]    = config.slippageRate;
+                    cfgMap["riskFreeRate"]    = config.riskFreeRate;
+                    cfgMap["adjustPriceType"] = QString::fromStdString(config.adjustPriceType);
+                    cfgMap["winsorizeQuantile"] = config.winsorizeQuantile;
+                    cfgMap["factorMode"]      = static_cast<int>(config.factorMode);
                     cfgMap["startDate"] = rootObj.value("startDate").toString();
                     cfgMap["endDate"]   = rootObj.value("endDate").toString();
                     result["config"] = cfgMap;
