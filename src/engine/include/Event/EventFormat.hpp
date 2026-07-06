@@ -189,6 +189,15 @@ namespace EventTypes {
     // 性能事件
     constexpr auto PERFORMANCE_METRIC = "performance.metric";
     constexpr auto PERFORMANCE_ALERT = "performance.alert";
+
+    // ── 金融事件 (news.*) — 金融事件感知模块 ──
+    constexpr auto NEWS_EARNINGS    = "news.earnings";       // 业绩预告/快报
+    constexpr auto NEWS_POLICY      = "news.policy";         // 政策/监管
+    constexpr auto NEWS_MATERIAL    = "news.material";       // 重大事项(重组/增减持/分红)
+    constexpr auto NEWS_SOCIAL      = "news.social";         // 社交媒体情绪异动
+    constexpr auto NEWS_QUOTE_ALERT = "news.quote_alert";    // 行情异动(放量/涨跌停)
+    constexpr auto NEWS_ALERT       = "news.alert";          // 突发/快讯
+    constexpr auto NEWS_ALL         = "news.";               // 通配订阅所有新闻事件
 }
 
 // 工具函数
