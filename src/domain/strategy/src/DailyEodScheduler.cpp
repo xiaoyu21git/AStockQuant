@@ -8,6 +8,7 @@
 #include <ctime>
 #include <fstream>
 #include <string>
+#include <thread>
 
 namespace domain::strategy {
 
@@ -40,13 +41,35 @@ void DailyEodScheduler::start() {
         }
     }
 
-    // ── 预收盘窗口: 14:50 ~ 15:00 启动 → 立即触发 ──
+    // ── 预收盘窗口: 15:01 ~ 15:30 启动 → 立即触发 ──
     if (isPreCloseWindow()) {
         auto today = getCurrentTradingDay();
         std::string todayStr = std::to_string(today);
         if (std::stoll(todayStr) > m_lastEvalDay) {
             INTERNAL_INFO_STREAM << "[DailyEod] 预收盘窗口内启动, 立即评估: " << todayStr;
             doEvaluate(todayStr);
+        }
+    }
+
+    // ── 兜底: 盘前启动时, 预计算到15:01的延迟 → 主动触发 ──
+    // gmsdk EOD 回调可能早于15:01(onEodTrigger 会过滤), 若窗口内不再回调则漏评
+    if (!isPreCloseWindow() && !isCompensationWindow()) {
+        int nowMin = getCurrentLocalMinutes();
+        if (nowMin < kPreCloseStart) {
+            int delayMin = kPreCloseStart - nowMin;
+            INTERNAL_INFO_STREAM << "[DailyEod] 距下单窗口还有 " << delayMin
+                << " 分钟, 将在 15:01 主动触发";
+            // 在策略线程上投递延迟任务
+            m_post([this, delayMin]() {
+                std::this_thread::sleep_for(
+                    std::chrono::minutes(delayMin));
+                auto today = getCurrentTradingDay();
+                std::string todayStr = std::to_string(today);
+                if (std::stoll(todayStr) > m_lastEvalDay) {
+                    INTERNAL_INFO_STREAM << "[DailyEod] 兜底触发: " << todayStr;
+                    doEvaluate(todayStr);
+                }
+            });
         }
     }
 
@@ -73,6 +96,15 @@ void DailyEodScheduler::stop() {
 void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
     // 已停止, 不投递 (executor 可能已销毁)
     if (!m_eodRegistered) return;
+
+    // gmsdk EOD 回调触发时间不可控(可能14:50), 仅在下单窗口内才执行
+    if (!isPreCloseWindow()) {
+        INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调触发但不在下单窗口"
+            << " (当前=" << getCurrentLocalMinutes() << "min"
+            << " 窗口=" << kPreCloseStart << "-" << kPreCloseEnd << "min), 忽略";
+        return;
+    }
+
     // gmsdk 线程回调 — 仅投递到策略线程
     m_post([this, tradingDay]() {
         doEvaluate(tradingDay);
