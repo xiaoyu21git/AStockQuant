@@ -652,6 +652,10 @@ Item {
         }
 
         var factorDetail = factorService.getFactorById(factorId) || ({})
+        if (!factorDetail || !factorDetail.factorId) {
+            showToast("因子 '" + factorId + "' 在数据库中不存在，无法写入")
+            return false
+        }
 
         var metrics = activeReport.metrics || ({})
         var icMetrics = metrics.ic || ({})

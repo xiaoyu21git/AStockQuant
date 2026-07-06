@@ -102,6 +102,18 @@ QVariantMap buildFactorInfoMap(const factor::FactorInstanceInfo& info)
     result[QStringLiteral("creator")] = QStringLiteral("system");
     result[QStringLiteral("createDate")] = QString();
     result[QStringLiteral("tags")] = QVariantList();
+
+    // ── 回测指标 (从 full_config.backtest_metrics 提取) ──
+    if (info.config.has("backtest_metrics")) {
+        auto bt = info.config.get("backtest_metrics");
+        if (bt.has("icValue"))            result[QStringLiteral("icValue")]            = bt.get("icValue").asDouble();
+        if (bt.has("irValue"))            result[QStringLiteral("irValue")]            = bt.get("irValue").asDouble();
+        if (bt.has("coreRating"))         result[QStringLiteral("coreRating")]         = bt.get("coreRating").asInt();
+        if (bt.has("coreRatingLabel"))    result[QStringLiteral("coreRatingLabel")]    = toQString(bt.get("coreRatingLabel").asString());
+        if (bt.has("turnoverRate"))       result[QStringLiteral("turnoverRate")]       = bt.get("turnoverRate").asDouble();
+        if (bt.has("effectiveStartDate")) result[QStringLiteral("backtestStartDate")]  = toQString(bt.get("effectiveStartDate").asString());
+        if (bt.has("effectiveEndDate"))   result[QStringLiteral("backtestEndDate")]    = toQString(bt.get("effectiveEndDate").asString());
+    }
     result[QStringLiteral("majorCategory")] = resolveFactorTypeDisplayName(info.factorType);
     result[QStringLiteral("subCategory")] = QString();
     result[QStringLiteral("icValue")] = 0.0;
@@ -482,8 +494,12 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
                 factorData.value(QStringLiteral("irValue")).toDouble()));
         }
         if (factorData.contains(QStringLiteral("coreRating"))) {
-            btMetrics.set("coreRating", foundation::json::JsonFacade::createInt(
-                factorData.value(QStringLiteral("coreRating")).toInt()));
+            int rating = factorData.value(QStringLiteral("coreRating")).toInt();
+            btMetrics.set("coreRating", foundation::json::JsonFacade::createInt(rating));
+            // 同时写入中文标签
+            const char* label = (rating == 3) ? "优秀" : (rating == 2) ? "良好"
+                              : (rating == 1) ? "合格" : "不合格";
+            btMetrics.set("coreRatingLabel", foundation::json::JsonFacade::createString(label));
         }
         if (factorData.contains(QStringLiteral("turnoverRate"))) {
             btMetrics.set("turnoverRate", foundation::json::JsonFacade::createDouble(
