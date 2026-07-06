@@ -482,9 +482,6 @@ void FactorBacktestBridge::startBacktestWithFactors(
                         groupsList.append(groupsArr[i].toObject().toVariantMap());
                     }
 
-                    // trading
-                    QVariantMap tradingMap = metricsObj.value("trading").toObject().toVariantMap();
-
                     // ic
                     QVariantMap icMap = metricsObj.value("ic").toObject().toVariantMap();
 
@@ -681,7 +678,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     // 组装 metrics
                     QVariantMap metrics;
                     metrics["groups"]        = groupsList;
-                    metrics["trading"]       = tradingMap;
+
                     metrics["ic"]            = icMap;
                     metrics["execution"]     = execMap;
                     metrics["factorQuality"] = fq;

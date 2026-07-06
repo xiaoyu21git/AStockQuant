@@ -44,13 +44,12 @@ void BacktestAnalyticsService::refreshRunList() {
                 auto fq = root.value("factorQuality").toObject();
                 auto ic = root.value("ic").toObject();
                 auto ex = root.value("execution").toObject();
-                auto tr = root.value("trading").toObject();
 
-                item["sharpe"]     = tr.value("sharpe").toDouble();
+                item["sharpe"]     = ex.value("sharpeRatio").toDouble();
                 item["icMean"]     = ic.value("value").toDouble();
                 item["icIR"]       = ic.value("ir").toDouble();
-                item["totalReturn"]= tr.value("totalReturn").toDouble();
-                item["maxDrawdown"]= tr.value("maxDrawdown").toDouble();
+                item["totalReturn"]= ex.value("totalReturn").toDouble();
+                item["maxDrawdown"]= ex.value("maxDrawdown").toDouble();
                 item["turnover"]   = ex.value("turnoverRatio").toDouble();
                 item["rating"]     = fq.value("coreRating").toInt();
                 item["ratingLabel"]= fq.value("coreRatingLabel").toString();

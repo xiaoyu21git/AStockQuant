@@ -911,14 +911,6 @@ void FactorBacktestOrchestrator::run(
             }
             metrics.set("groups", groupsArr);
 
-            auto t = J::createObject();
-            t.set("sharpe",           J::createDouble(btResult.sharpeRatio));
-            t.set("annualizedReturn", J::createDouble(btResult.annualReturn));
-            t.set("annualStdDev",     J::createDouble(btResult.volatility));
-            t.set("maxDrawdown",      J::createDouble(btResult.maxDrawdown));
-            t.set("totalReturn",      J::createDouble(tradingResult.totalReturn));
-            metrics.set("trading", t);
-
             auto ic = J::createObject();
             ic.set("value",      J::createDouble(btResult.factorMetrics.rankIcMean));
             ic.set("ir",         J::createDouble(btResult.factorMetrics.rankIcir));
@@ -950,21 +942,17 @@ void FactorBacktestOrchestrator::run(
                 btResult.factorMetrics.coreRating == ::factor::FactorBacktestMetrics::Rating::PASS       ? "合格" : "不合格"));
             metrics.set("factorQuality", fq);
 
+            // 单一数据源: tradingResult (SimulatedTradingExecutor)
+            // 规则: tradingResult 不产出的字段, 直接不输出
             auto ex = J::createObject();
             ex.set("totalSignals",     J::createDouble(static_cast<double>(reporterOutput.totalSignalCount)));
             ex.set("presentSignals",   J::createDouble(static_cast<double>(reporterOutput.presentSignalCount)));
-            ex.set("turnoverRatio",    J::createDouble(tradingResult.turnoverRate));
-            ex.set("sharpeRatio",      J::createDouble(btResult.sharpeRatio));
-            ex.set("annualizedReturn", J::createDouble(btResult.annualReturn));
-            ex.set("maxDrawdown",      J::createDouble(btResult.maxDrawdown));
             ex.set("totalReturn",      J::createDouble(tradingResult.totalReturn));
-            ex.set("winRate",          J::createDouble(btResult.winRate));
-            ex.set("profitFactor",     J::createDouble(btResult.profitFactor));
-            ex.set("volatility",       J::createDouble(btResult.volatility));
-            ex.set("sortinoRatio",     J::createDouble(btResult.sortinoRatio));
-            ex.set("calmarRatio",      J::createDouble(btResult.calmarRatio));
-            ex.set("valueAtRisk",      J::createDouble(btResult.valueAtRisk));
-            ex.set("conditionalVaR",   J::createDouble(btResult.conditionalVaR));
+            ex.set("annualizedReturn", J::createDouble(tradingResult.annualizedReturn));
+            ex.set("sharpeRatio",      J::createDouble(tradingResult.sharpeRatio));
+            ex.set("volatility",       J::createDouble(tradingResult.annualStdDev));
+            ex.set("maxDrawdown",      J::createDouble(tradingResult.maxDrawdown));
+            ex.set("turnoverRatio",    J::createDouble(tradingResult.turnoverRate));
             ex.set("finalEquity",      J::createDouble(tradingResult.finalEquity));
             ex.set("validSampleCount", J::createDouble(static_cast<double>(tradingResult.validSampleCount)));
             // ── 多空价差诊断（策略实际交易的两端）──
