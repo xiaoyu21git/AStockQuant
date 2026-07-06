@@ -57,7 +57,7 @@ private:
     std::string  m_persistPath;
     bool m_eodRegistered = false;
 
-    static constexpr int kPreCloseStart   = 901;  // 15:01
+    static constexpr int kPreCloseStart   = 900;  // 15:00
     static constexpr int kPreCloseEnd     = 930;  // 15:30
     static constexpr int kCompensationEnd = 570;  // 09:30
 };
