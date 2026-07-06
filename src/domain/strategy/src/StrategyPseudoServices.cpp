@@ -270,6 +270,8 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
     outputOrder.setQuantity(static_cast<int64_t>(quantity));
     outputOrder.setExtension(domain::trading::ExtKey::kSignalScore, signal.score());
     outputOrder.setExtension(domain::trading::ExtKey::kTargetWeight, signal.targetWeight());
+    outputOrder.setExtension(domain::trading::ExtKey::kSignalIntent,
+        static_cast<uint64_t>(signal.intent()));
     outputOrder.setOrderType(OrderType::Market);
     outputOrder.setPrice(0);                         // drainQueue 用 tick 价补
 

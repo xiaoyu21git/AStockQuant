@@ -115,6 +115,7 @@ namespace ExtKey {
     constexpr uint64_t kMultiplier        = 0x02;  // 合约乘数
     constexpr uint64_t kSignalScore       = 0x10;  // 策略信号强度
     constexpr uint64_t kTargetWeight     = 0x11;  // 策略目标权重（资金量级分配）
+    constexpr uint64_t kSignalIntent     = 0x12;  // 策略信号意图(SignalIntent枚举值)
     constexpr uint64_t kPostOnly          = 0x20;  // 仅 Maker
     constexpr uint64_t kReduceOnly        = 0x21;  // 仅减仓
     constexpr uint64_t kSlippageTolerance = 0x30;  // 滑点容忍

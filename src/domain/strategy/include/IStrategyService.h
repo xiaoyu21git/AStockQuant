@@ -284,6 +284,7 @@ public:
     virtual void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const = 0;
 
     virtual void setContextHistoricalView(const void* view) = 0;
+    virtual void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) = 0;
 };
 
 class LocalRuleEvaluationService final : public IRuleEvaluationService,
@@ -423,6 +424,7 @@ private:
 
     /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
     void setContextHistoricalView(const void* view);
+    void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) override;
 
 private:
     IRuntimeFactorService& factorService_;

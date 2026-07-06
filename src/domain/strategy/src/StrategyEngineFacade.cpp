@@ -865,6 +865,28 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
 
     double remainingCash = account.availableCash;
     m_liquidationBlocklist.clear();  // 新交易日重置清仓名单
+
+    // ── 计算当前持仓权重 → 传给策略层做意图判断 ──
+    if (account.totalAsset > 0) {
+        std::unordered_map<std::string, double> currentWeights;
+        for (const auto& [code, qty] : posQtyMap) {
+            if (qty <= 0) continue;
+            // 用当日收盘价估算持仓市值 → 权重
+            auto& ld = domain::market::MarketDataService::instance()
+                .liveData(code + ".SZ");
+            double px = ld.valid() ? ld.dailyBar().close() : 0.0;
+            if (px <= 0) {
+                auto& ldSH = domain::market::MarketDataService::instance()
+                    .liveData(code + ".SH");
+                px = ldSH.valid() ? ldSH.dailyBar().close() : 0.0;
+            }
+            if (px > 0) {
+                currentWeights[code] = static_cast<double>(qty) * px
+                    / account.totalAsset;
+            }
+        }
+        strategyService_->updateCurrentWeights(currentWeights);
+    }
     if (m_eventRiskSubscriber)
         m_eventRiskSubscriber->clearBlockedSymbols();  // T+1 事件封禁解禁
     // 买单资金按 pendingOrders 中顺序分配(先到先得),
@@ -1038,6 +1060,14 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             continue;
         }
 
+        // 策略已产出意图 (OPEN/ADD/REDUCE/CLOSE/KEEP), 引擎只负责执行
+        const SignalIntent sigIntent = po.order.side() == engine::OrderSide::Buy
+            ? static_cast<SignalIntent>(
+                po.order.extensionAs<uint64_t>(
+                    domain::trading::ExtKey::kSignalIntent,
+                    static_cast<uint64_t>(SignalIntent::OPEN)))
+            : SignalIntent::CLOSE;
+
         auto it = posQtyMap.find(code);
         int64_t currentQty = (it != posQtyMap.end()) ? it->second : 0;
 
@@ -1045,17 +1075,17 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             po.targetWeight * account.totalAsset / po.tickPrice / 100.0) * 100;
         int64_t delta = targetQty - currentQty;
 
-        if (std::abs(delta) < kMinLotSize) {
-            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD skip: |delta|="
-                                 << std::abs(delta) << " < " << kMinLotSize
-                                 << " " << po.order.symbol()
-                                 << " target=" << targetQty << " current=" << currentQty;
+        if (sigIntent == SignalIntent::KEEP) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD skip: intent=KEEP "
+                                 << po.order.symbol();
             continue;
         }
 
-        // ── 减仓: 信号权重降低, 卖出超出部分 ──
-        if (delta < 0) {
-            const int64_t reduceQty = -delta;
+        // ── 减仓: 策略判断目标权重低于当前 → 卖出差额 ──
+        if (sigIntent == SignalIntent::REDUCE) {
+            const int64_t reduceQty = (currentQty > targetQty) ? (currentQty - targetQty) : 0;
+            if (reduceQty < kMinLotSize) continue;
+
             po.order.setSide(engine::OrderSide::Sell);
             po.order.setQuantity(static_cast<double>(reduceQty));
             const double cashBack = static_cast<double>(reduceQty) * po.tickPrice;
@@ -1070,35 +1100,39 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
                     m_orderListener->onOrders({po.order});
                     remainingCash += cashBack;
                     ordersGenerated++;
-
-                    INTERNAL_INFO_STREAM << "[StrategyEngine] 差额调仓 REDUCE: "
-                                         << po.order.symbol()
-                                         << " target=" << targetQty << " current=" << currentQty
-                                         << " reduce=" << reduceQty
-                                         << " cashRemaining=" << remainingCash;
+                    INTERNAL_INFO_STREAM << "[StrategyEngine] REDUCE: " << po.order.symbol()
+                        << " target=" << targetQty << " current=" << currentQty
+                        << " reduce=" << reduceQty
+                        << " cashRemaining=" << remainingCash;
                 } else {
-                    INTERNAL_INFO_STREAM << "[StrategyEngine] EOD reduce rejected: "
+                    INTERNAL_INFO_STREAM << "[StrategyEngine] REDUCE rejected: "
                                          << po.order.symbol() << " "
                                          << riskResult.description();
                 }
             } catch (const std::exception& e) {
-                INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD reduce exception: "
+                INTERNAL_ERROR_STREAM << "[StrategyEngine] REDUCE exception: "
                                       << po.order.symbol() << " " << e.what();
             }
             continue;
         }
 
         // ── 建仓/加仓: delta > 0 ──
-        const char* intent = (currentQty == 0) ? "OPEN" : "ADD";
+        const char* intentLabel = (sigIntent == SignalIntent::OPEN) ? "OPEN" : "ADD";
+        if (delta < kMinLotSize) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD " << intentLabel
+                << " skip: delta=" << delta << " < " << kMinLotSize
+                << " " << po.order.symbol();
+            continue;
+        }
+
         double cashNeeded = static_cast<double>(delta) * po.tickPrice;
         if (remainingCash < cashNeeded) {
             int64_t affordableQty = static_cast<int64_t>(
                 remainingCash / po.tickPrice / 100.0) * 100;
             if (affordableQty < kMinLotSize) {
-                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD " << intent
-                                     << " skip: cash insufficient "
-                                     << remainingCash << " need=" << cashNeeded
-                                     << " " << po.order.symbol();
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD " << intentLabel
+                    << " skip: cash insufficient " << remainingCash
+                    << " " << po.order.symbol();
                 continue;
             }
             delta = affordableQty;
@@ -1117,20 +1151,19 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
                 m_orderListener->onOrders({po.order});
                 remainingCash -= finalCashNeeded;
                 ordersGenerated++;
-
-                INTERNAL_INFO_STREAM << "[StrategyEngine] 差额调仓 " << intent << ": "
-                                     << po.order.symbol()
-                                     << " target=" << targetQty << " current=" << currentQty
-                                     << " delta=" << finalDelta
-                                     << " cashRemaining=" << remainingCash;
+                INTERNAL_INFO_STREAM << "[StrategyEngine] " << intentLabel << ": "
+                    << po.order.symbol()
+                    << " target=" << targetQty << " current=" << currentQty
+                    << " delta=" << finalDelta
+                    << " cashRemaining=" << remainingCash;
             } else {
-                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD " << intent << " rejected: "
-                                     << po.order.symbol() << " "
-                                     << riskResult.description();
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD " << intentLabel
+                    << " rejected: " << po.order.symbol() << " "
+                    << riskResult.description();
             }
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD " << intent << " exception: "
-                                  << po.order.symbol() << " " << e.what();
+            INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD " << intentLabel
+                << " exception: " << po.order.symbol() << " " << e.what();
         }
     }
 

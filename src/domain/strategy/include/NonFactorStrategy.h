@@ -93,12 +93,33 @@ public:
                 auto dot = realSymbol.find('.');
                 if (dot != std::string::npos)
                     realSymbol = realSymbol.substr(0, dot);
-                allSignals.emplace_back(
+
+                // 查当前持仓权重 → 对比目标权重 → 设置意图
+                double currentW = 0.0;
+                {
+                    auto cwIt = context.currentWeights().find(realSymbol);
+                    if (cwIt != context.currentWeights().end()) currentW = cwIt->second;
+                }
+
+                SignalIntent intent = SignalIntent::KEEP;
+                if (sig.isBuy) {
+                    if (currentW < 0.001)               intent = SignalIntent::OPEN;
+                    else if (sig.weight > currentW)     intent = SignalIntent::ADD;
+                    else if (sig.weight < currentW)     intent = SignalIntent::REDUCE;
+                    else                                intent = SignalIntent::KEEP;
+                } else {
+                    intent = (currentW > 0.001) ? SignalIntent::CLOSE : SignalIntent::KEEP;
+                }
+
+                auto signal = StrategySignal(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},
                     sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
                     sig.score, sig.weight,
                     realSymbol);
+                signal.setCurrentWeight(currentW);
+                signal.setIntent(intent);
+                allSignals.push_back(std::move(signal));
             }
         }
 

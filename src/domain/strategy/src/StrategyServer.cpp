@@ -619,4 +619,13 @@ void StrategyService::setContextHistoricalView(const void* view)
     }
 }
 
+void StrategyService::updateCurrentWeights(
+    const std::unordered_map<std::string, double>& weights)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCurrentWeights(weights);
+    }
+}
+
 } // namespace domain::strategy

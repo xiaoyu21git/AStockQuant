@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace domain::strategy {
@@ -131,6 +132,7 @@ private:
     bool autoExecutionEnabled_{false};
     const void* m_historicalView{nullptr};
     int m_currentEvaluationRow{-1};  // -1 = 实盘/未设置, 使用最后一行
+    std::unordered_map<std::string, double> m_currentWeights;  // symbol→当前持仓权重
 
 public:
     RuntimeStrategyContext() = default;
@@ -159,6 +161,9 @@ public:
     // ── 回测：当前评估行号 (从 0 开始), 实盘为 -1 表示使用最后一行 ──
     void setCurrentEvaluationRow(int row) { m_currentEvaluationRow = row; }
     [[nodiscard]] int currentEvaluationRow() const noexcept { return m_currentEvaluationRow; }
+
+    void setCurrentWeights(std::unordered_map<std::string, double> w) { m_currentWeights = std::move(w); }
+    [[nodiscard]] const std::unordered_map<std::string, double>& currentWeights() const noexcept { return m_currentWeights; }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
     {
@@ -257,6 +262,15 @@ enum class RuntimeOrderSide : std::uint8_t {
     Sell = 1,
 };
 
+/// @brief 策略信号意图 — 策略基于当前持仓权重对比目标权重后产出
+enum class SignalIntent : std::uint8_t {
+    KEEP   = 0,  // 不变, 不产出订单
+    OPEN   = 1,  // 建仓: 当前无持仓, 目标权重 > 0
+    ADD    = 2,  // 加仓: 当前持有, 目标权重 > 当前权重
+    REDUCE = 3,  // 减仓: 当前持有, 目标权重 < 当前权重
+    CLOSE  = 4,  // 平仓: 当前持有, 目标权重 = 0
+};
+
 enum class RuleRejectReason : std::uint8_t {
     None = 0,
     MarketGuardBlocked = 1,
@@ -318,6 +332,8 @@ private:
     RuntimeOrderSide side_{RuntimeOrderSide::Buy};
     double score_{0.0};
     double targetWeight_{0.0};
+    double currentWeight_{0.0};
+    SignalIntent intent_{SignalIntent::KEEP};
     std::string symbolCode_{};
 
 public:
@@ -366,6 +382,12 @@ public:
     {
         return symbolCode_;
     }
+
+    [[nodiscard]] double currentWeight() const noexcept { return currentWeight_; }
+    void setCurrentWeight(double v) noexcept { currentWeight_ = v; }
+
+    [[nodiscard]] SignalIntent intent() const noexcept { return intent_; }
+    void setIntent(SignalIntent v) noexcept { intent_ = v; }
 
     void setSymbolCode(std::string code) { symbolCode_ = std::move(code); }
 

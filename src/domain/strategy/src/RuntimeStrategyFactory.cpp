@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -107,10 +108,35 @@ public:
         if (candidates.empty() || rawWeights.size() != candidates.size()) return;
 
         outputSignals.reserve(outputSignals.size() + candidates.size());
+        const auto& currentWeights = context.currentWeights();
         for (std::size_t i = 0; i < candidates.size(); ++i) {
             const double bw = std::max(wMin, std::min(rawWeights[i], wCap));
-            outputSignals.push_back(domain::strategy::StrategySignal(
-                strategyInstanceId_, candidates[i].instrumentId, candidates[i].side, candidates[i].score, bw));
+            // 查当前权重 → 对比目标权重 → 设置意图
+            double currentW = 0.0;
+            {
+                char codeBuf[16];
+                std::snprintf(codeBuf, sizeof(codeBuf), "%06u",
+                    candidates[i].instrumentId.value);
+                auto cwIt = currentWeights.find(codeBuf);
+                if (cwIt != currentWeights.end()) currentW = cwIt->second;
+            }
+            domain::strategy::SignalIntent intent = domain::strategy::SignalIntent::KEEP;
+            if (candidates[i].side == domain::strategy::RuntimeOrderSide::Sell) {
+                intent = (currentW > 0.001) ? domain::strategy::SignalIntent::CLOSE
+                                            : domain::strategy::SignalIntent::KEEP;
+            } else if (bw > 0.0) {
+                if (currentW < 0.001)       intent = domain::strategy::SignalIntent::OPEN;
+                else if (bw > currentW)     intent = domain::strategy::SignalIntent::ADD;
+                else if (bw < currentW)     intent = domain::strategy::SignalIntent::REDUCE;
+                else                        intent = domain::strategy::SignalIntent::KEEP;
+            }
+
+            auto sig = domain::strategy::StrategySignal(
+                strategyInstanceId_, candidates[i].instrumentId,
+                candidates[i].side, candidates[i].score, bw);
+            sig.setCurrentWeight(currentW);
+            sig.setIntent(intent);
+            outputSignals.push_back(std::move(sig));
         }
     }
 
