@@ -1841,6 +1841,23 @@ Item {
                         }
                     }
                 }
+
+                // ── 因子分析图表: IC 日序列 / 分组累积收益 / 因子-收益散点 ──
+                FactorAnalysisCharts {
+                    id: factorCharts
+                    Layout.fillWidth: true
+                    Layout.topMargin: 12
+                    icSeries: {
+                        var m = (activeResult || {}).metrics || ({})
+                        return normalizedListValue(m.icSeries || [])
+                    }
+                    groupReturnSeries: {
+                        var m = (activeResult || {}).metrics || ({})
+                        return normalizedListValue(m.groupReturnSeries || [])
+                    }
+                    returnSeries: returnSeriesSection()
+                    numGroups: activeFactorQuality.numGroups || 5
+                }
             }
         }
     }

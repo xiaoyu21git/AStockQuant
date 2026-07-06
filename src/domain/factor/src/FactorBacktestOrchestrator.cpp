@@ -836,7 +836,21 @@ void FactorBacktestOrchestrator::run(
             using J = foundation::json::JsonFacade;
             auto root = J::createObject();
             root.set("status", J::createString("SUCCESS"));
-            root.set("factorValues", J::createArray());
+
+            // factorValues — 每日每标的因子值, 供散点图/IC 分析
+            auto fvArr = J::createArray();
+            for (const auto& [date, symMap] : reporterInput.factorValuesByDate) {
+                for (const auto& [sym, fv] : symMap) {
+                    if (!std::isfinite(fv)) continue;
+                    auto fvObj = J::createObject();
+                    fvObj.set("date",   J::createString(date));
+                    fvObj.set("symbol", J::createString(sym));
+                    fvObj.set("value",  J::createDouble(fv));
+                    fvArr.push_back(fvObj);
+                }
+            }
+            root.set("factorValues", fvArr);
+
             if (!allSortedDates.empty()) {
                 root.set("startDate", J::createString(allSortedDates.front()));
                 root.set("endDate",   J::createString(allSortedDates.back()));
