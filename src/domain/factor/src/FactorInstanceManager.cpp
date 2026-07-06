@@ -1,6 +1,7 @@
 #include "FactorInstanceManager.h"
 #include "CompositeFactor.h"
 #include "CustomFactor.h"
+#include "EventDrivenFactor.h"
 #include "DividendFactor.h"
 #include "GrowthFactor.h"
 #include "IndustryFactor.h"
@@ -160,6 +161,13 @@ std::shared_ptr<BaseFactor> createCompositeFactorEntry(const FactorInstanceInfo&
         std::make_shared<FactorResolverAdapter>(manager));
 }
 
+std::shared_ptr<BaseFactor> createEventDrivenFactorEntry(const FactorInstanceInfo& info,
+                                                          std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                          FactorInstanceManager&)
+{
+    return EventDrivenFactor::create(info, std::move(dataChecker));
+}
+
 const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::MOMENTUM, &createMomentumFactorEntry},
     {FactorType::VALUE, &createValueFactorEntry},
@@ -175,6 +183,7 @@ const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::SENTIMENT, &createSentimentFactorEntry},
     {FactorType::CUSTOM, &createCustomFactorEntry},
     {FactorType::COMPOSITE, &createCompositeFactorEntry},
+    {FactorType::EVENT_DRIVEN, &createEventDrivenFactorEntry},
 };
 
 FactorCreator resolveFactorCreator(FactorType factorType)

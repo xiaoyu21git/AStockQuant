@@ -166,6 +166,7 @@ set(FACTOR_SOURCES
     src/SentimentFactor.cpp
     src/CustomFactor.cpp
     src/CompositeFactor.cpp
+    src/EventDrivenFactor.cpp
     src/FactorConfigAccess.cpp
     src/FactorInstanceManager.cpp
     src/FactorRatingEngine.cpp
@@ -214,6 +215,7 @@ set(FACTOR_HEADERS
     include/SentimentFactor.h
     include/CustomFactor.h
     include/CompositeFactor.h
+    include/EventDrivenFactor.h
     include/CompositeFactorConfig.h
     include/IFactorResolver.h
     include/FactorConfigAccess.h

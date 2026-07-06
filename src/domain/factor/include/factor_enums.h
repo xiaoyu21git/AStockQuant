@@ -21,6 +21,7 @@ enum class FactorType : uint8_t {
     CUSTOM = 11,
     LOW_VOLATILITY = 12,
     COMPOSITE = 13,
+    EVENT_DRIVEN = 14,   // 金融事件驱动因子 (金融事件感知模块)
     UNKNOWN = 255
 };
 
@@ -400,6 +401,7 @@ inline constexpr FactorType factorTypeFromIndex(int index)
     case 11: return FactorType::CUSTOM;
     case 12: return FactorType::LOW_VOLATILITY;
     case 13: return FactorType::COMPOSITE;
+    case 14: return FactorType::EVENT_DRIVEN;
     default: return FactorType::UNKNOWN;
     }
 }
