@@ -230,7 +230,7 @@ Item {
                             
                             Item {
                                 property real xPos: (index + 0.5) * (parent.width / groupResults.length)
-                                property real yPos: parent.height * (1 - (modelData.annualizedReturn || 0) / 1.0) // 假设最大收益100%
+                                property real yPos: parent.height * (1 - (modelData.returnRate || 0) / 1.0) // 假设最大收益100%
                                 property real barWidth: parent.width / groupResults.length * 0.6
                                 
                                 // 柱状图
@@ -241,15 +241,15 @@ Item {
                                     x: xPos - width / 2
                                     y: yPos
                                     radius: 2
-                                    color: getBarColor(index, modelData.annualizedReturn)
+                                    color: getBarColor(index, modelData.returnRate)
                                     
                                     // 数值标签
                                     Text {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         anchors.bottom: parent.top
                                         anchors.bottomMargin: 4
-                                        text: (modelData.annualizedReturn !== undefined && modelData.annualizedReturn !== null)
-                                            ? (modelData.annualizedReturn * 100).toFixed(1) + "%"
+                                        text: (modelData.returnRate !== undefined && modelData.returnRate !== null)
+                                            ? (modelData.returnRate * 100).toFixed(1) + "%"
                                             : "N/A"
                                         font.pixelSize: 10
                                         color: "#F1F5F9"
@@ -264,7 +264,7 @@ Item {
                                     radius: 4
                                     x: xPos - width / 2
                                     y: yPos - height / 2
-                                    color: getBarColor(index, modelData.annualizedReturn)
+                                    color: getBarColor(index, modelData.returnRate)
                                     border.width: 2
                                     border.color: "#0F172A"
                                     
@@ -273,8 +273,8 @@ Item {
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         anchors.bottom: parent.top
                                         anchors.bottomMargin: 4
-                                        text: (modelData.annualizedReturn !== undefined && modelData.annualizedReturn !== null)
-                                            ? (modelData.annualizedReturn * 100).toFixed(1) + "%"
+                                        text: (modelData.returnRate !== undefined && modelData.returnRate !== null)
+                                            ? (modelData.returnRate * 100).toFixed(1) + "%"
                                             : "N/A"
                                         font.pixelSize: 10
                                         color: "#F1F5F9"
@@ -325,7 +325,7 @@ Item {
                                 
                                 for (var i = 0; i < groupResults.length; i++) {
                                     var xPos = (i + 0.5) * (width / groupResults.length)
-                                    var yPos = height * (1 - (groupResults[i].annualizedReturn || 0) / 1.0)
+                                    var yPos = height * (1 - (groupResults[i].returnRate || 0) / 1.0)
                                     
                                     if (i === 0) {
                                         ctx.moveTo(xPos, yPos)
@@ -497,8 +497,8 @@ Item {
         
         for (var i = 0; i < groupResults.length; i++) {
             var group = groupResults[i]
-            if (group.annualizedReturn > maxReturn) {
-                maxReturn = group.annualizedReturn
+            if (group.returnRate > maxReturn) {
+                maxReturn = group.returnRate
                 topGroup = "组" + (group.groupIndex || (i + 1))
             }
         }
@@ -515,8 +515,8 @@ Item {
         
         for (var i = 0; i < groupResults.length; i++) {
             var group = groupResults[i]
-            if (group.annualizedReturn < minReturn) {
-                minReturn = group.annualizedReturn
+            if (group.returnRate < minReturn) {
+                minReturn = group.returnRate
                 bottomGroup = "组" + (group.groupIndex || (i + 1))
             }
         }
@@ -532,7 +532,7 @@ Item {
         var minReturn = Infinity
         
         for (var i = 0; i < groupResults.length; i++) {
-            var returnValue = groupResults[i].annualizedReturn || 0
+            var returnValue = groupResults[i].returnRate || 0
             if (returnValue > maxReturn) maxReturn = returnValue
             if (returnValue < minReturn) minReturn = returnValue
         }

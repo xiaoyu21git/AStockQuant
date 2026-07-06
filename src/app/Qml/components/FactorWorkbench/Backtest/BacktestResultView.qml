@@ -315,14 +315,14 @@ Item {
                             // 收益
                             TableCell {
                                 width: 100
-                                text: root.metricPercentText(modelData.annualizedReturn, 2)
-                                color: root.metricColor(modelData.annualizedReturn)
+                                text: root.metricPercentText(modelData.returnRate, 2)
+                                color: root.metricColor(modelData.returnRate)
                             }
                             
                             // 波动�?
                             TableCell {
                                 width: 100
-                                text: root.metricPercentText(modelData.annualizedReturn, 2)
+                                text: root.metricPercentText(modelData.returnRate, 2)
                             }
                             
                             // 夏普比率

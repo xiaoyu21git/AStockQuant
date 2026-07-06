@@ -557,14 +557,14 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     if (groupsArr.size() > 0) {
                         QVariantMap chart;
                         chart["title"]     = QStringLiteral("分组收益");
-                        chart["subtitle"]  = QStringLiteral("各组年化收益与平均股票数");
+                        chart["subtitle"]  = QStringLiteral("各组平均单期收益与平均股票数");
                         chart["isPercent"] = true;
                         QVariantList series;
                         for (int i = 0; i < groupsArr.size(); ++i) {
                             QJsonObject g = groupsArr[i].toObject();
                             QVariantMap bar;
                             bar["label"] = g.value("groupName").toString();
-                            bar["value"] = g.value("annualizedReturn").toDouble();
+                            bar["value"] = g.value("returnRate").toDouble();
                             series.append(bar);
                         }
                         chart["series"] = series;
@@ -612,7 +612,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
                                 { monotonic = false; break; }
                         }
                     }
-                    double sharpeVal = tradingMap.value("sharpe").toDouble();
+                    double sharpeVal = execMap.value("sharpeRatio").toDouble();
                     double icVal     = icMap.value("value").toDouble();
                     double icirVal   = icMap.value("ir").toDouble();
                     double wrVal     = icMap.value("winRate").toDouble();

@@ -4738,14 +4738,14 @@ Item {
                                             spacing: 2
 
                                             Text {
-                                                text: root.formatPercentMetric(modelData.annualizedReturn, 2, false)
+                                                text: root.formatPercentMetric(modelData.returnRate, 2, false)
                                                 font.pixelSize: 16
                                                 font.weight: Font.Bold
-                                                color: root.returnMetricColor(modelData.annualizedReturn)
+                                                color: root.returnMetricColor(modelData.returnRate)
                                             }
 
                                             Text {
-                                                text: "年化收益"
+                                                text: "收益"
                                                 font.pixelSize: 10
                                                 color: "#94A3B8"
                                             }
