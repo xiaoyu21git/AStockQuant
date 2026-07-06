@@ -318,9 +318,16 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
             ? static_cast<int32_t>(groupTotalStocks[g] / groupPeriodCount[g]) : 0;
         if (groupValidDays[g] > 0) {
             gm.returnRate = groupAccumReturns[g] / groupValidDays[g];
-            gm.cumulativeReturn = groupCumulativeNetValue[g] - 1.0; // 逐期复利精确累计
+            gm.cumulativeReturn = groupCumulativeNetValue[g] - 1.0;
             gm.validDays = groupValidDays[g];
-            gm.annualizedReturn = std::pow(1.0 + gm.returnRate, 252.0 / rebalanceDays) - 1.0;
+            // 年化: 基于复利累计收益 (与策略级 totalReturn→annualizedReturn 同公式)
+            const double periodsPerYear = 252.0 / static_cast<double>(rebalanceDays);
+            if (gm.cumulativeReturn > -1.0) {
+                gm.annualizedReturn = std::pow(1.0 + gm.cumulativeReturn,
+                    periodsPerYear / static_cast<double>(groupValidDays[g])) - 1.0;
+            } else {
+                gm.annualizedReturn = -1.0;  // 100% loss
+            }
         }
     }
 
