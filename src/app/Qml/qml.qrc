@@ -94,7 +94,7 @@
         <file>components/Factor/FactorTypeParameterPage.qml</file>
         <file>components/FactorCard.qml</file>
         <file>components/FactorWorkbench/Analysis/AnalysisPage.qml</file>
-        <file>components/FactorWorkbench/Analysis/FactorAnalysisCharts.qml</file>
+        <file>components/FactorWorkbench/Backtest/FactorAnalysisCharts.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestConfigDialog.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestPage.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestResultView.qml</file>

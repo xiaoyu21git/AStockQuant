@@ -272,7 +272,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
-        Qml/components/FactorWorkbench/Analysis/FactorAnalysisCharts.qml
+        Qml/components/FactorWorkbench/Backtest/FactorAnalysisCharts.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml
         Qml/components/FactorWorkbench/Backtest/BacktestPage.qml
