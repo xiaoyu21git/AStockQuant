@@ -471,6 +471,38 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
             config.set("parameters", paramsJson);
         }
 
+        // ── 回测指标写入 (QML 回测完成后回调) ──
+        auto btMetrics = foundation::json::JsonFacade::createObject();
+        if (factorData.contains(QStringLiteral("icValue"))) {
+            btMetrics.set("icValue", foundation::json::JsonFacade::createDouble(
+                factorData.value(QStringLiteral("icValue")).toDouble()));
+        }
+        if (factorData.contains(QStringLiteral("irValue"))) {
+            btMetrics.set("irValue", foundation::json::JsonFacade::createDouble(
+                factorData.value(QStringLiteral("irValue")).toDouble()));
+        }
+        if (factorData.contains(QStringLiteral("coreRating"))) {
+            btMetrics.set("coreRating", foundation::json::JsonFacade::createInt(
+                factorData.value(QStringLiteral("coreRating")).toInt()));
+        }
+        if (factorData.contains(QStringLiteral("turnoverRate"))) {
+            btMetrics.set("turnoverRate", foundation::json::JsonFacade::createDouble(
+                factorData.value(QStringLiteral("turnoverRate")).toDouble()));
+        }
+        if (factorData.contains(QStringLiteral("effectiveStartDate"))) {
+            btMetrics.set("effectiveStartDate", foundation::json::JsonFacade::createString(
+                toStd(factorData.value(QStringLiteral("effectiveStartDate")).toString())));
+        }
+        if (factorData.contains(QStringLiteral("effectiveEndDate"))) {
+            btMetrics.set("effectiveEndDate", foundation::json::JsonFacade::createString(
+                toStd(factorData.value(QStringLiteral("effectiveEndDate")).toString())));
+        }
+        if (factorData.contains(QStringLiteral("warmupTrimmedTradingDays"))) {
+            btMetrics.set("warmupTrimmedTradingDays", foundation::json::JsonFacade::createInt(
+                factorData.value(QStringLiteral("warmupTrimmedTradingDays")).toInt()));
+        }
+        config.set("backtest_metrics", btMetrics);
+
         bool updated = m_instanceManager->updateInstanceConfig(toStd(factorId), config);
 
         if (updated) {
