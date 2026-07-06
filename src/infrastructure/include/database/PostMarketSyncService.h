@@ -54,6 +54,10 @@ private:
     std::atomic<int> m_lastSyncDay{0};  // 上次已同步的 tradingDay，避免重复同步
     std::mutex m_mutex;
     bool m_started = false;
+
+    void loadLastSyncDay();
+    void saveLastSyncDay(int tradingDay);
+    std::string m_persistPath;  // 持久化文件路径
 };
 
 } // namespace astock::infrastructure::database

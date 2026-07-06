@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cmath>
 #include <ctime>
+#include <fstream>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -26,9 +27,12 @@ PostMarketSyncService::~PostMarketSyncService() {
 void PostMarketSyncService::start() {
     if (m_started) return;
     m_started = true;
+    m_persistPath = "post_market_sync_last.txt";
+    loadLastSyncDay();
     m_running.store(true);
     m_scheduler = std::make_unique<std::thread>(&PostMarketSyncService::schedulerLoop, this);
-    INTERNAL_INFO_STREAM << "[PostMktSync] 调度线程已启动 today=" << getCurrentTradingDay();
+    INTERNAL_INFO_STREAM << "[PostMktSync] 调度线程已启动 today=" << getCurrentTradingDay()
+                         << " lastSync=" << m_lastSyncDay.load();
 }
 
 bool PostMarketSyncService::forceSyncToday() {
@@ -77,6 +81,7 @@ void PostMarketSyncService::schedulerLoop() {
             }
             syncAll(today);
             m_lastSyncDay.store(today);
+            saveLastSyncDay(today);
             // 同步完成后睡到下一个交易日
             std::this_thread::sleep_for(std::chrono::hours(8));
         } else {
@@ -414,6 +419,28 @@ std::string PostMarketSyncService::toGmSymbol(const std::string& sym) {
     if (ex == "SZ") return "SZSE." + code;
     if (ex == "BJ") return "BSE." + code;
     return "";
+}
+
+void PostMarketSyncService::loadLastSyncDay() {
+    if (m_persistPath.empty()) return;
+    std::ifstream f(m_persistPath);
+    if (!f.is_open()) return;
+    std::string line;
+    if (std::getline(f, line)) {
+        try { m_lastSyncDay.store(std::stoi(line)); } catch (...) {}
+    }
+    INTERNAL_INFO_STREAM << "[PostMktSync] 加载 lastSyncDay=" << m_lastSyncDay.load();
+}
+
+void PostMarketSyncService::saveLastSyncDay(int tradingDay) {
+    if (m_persistPath.empty()) return;
+    std::string tmpPath = m_persistPath + ".tmp";
+    {
+        std::ofstream f(tmpPath, std::ios::trunc);
+        if (!f.is_open()) return;
+        f << tradingDay << "\n";
+    }
+    std::rename(tmpPath.c_str(), m_persistPath.c_str());
 }
 
 } // namespace astock::infrastructure::database
