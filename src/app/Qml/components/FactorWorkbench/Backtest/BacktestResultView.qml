@@ -315,8 +315,8 @@ Item {
                             // 收益
                             TableCell {
                                 width: 100
-                                text: root.metricPercentText(modelData.returnRate, 2)
-                                color: root.metricColor(modelData.returnRate)
+                                text: root.metricPercentText(modelData.annualizedReturn, 2)
+                                color: root.metricColor(modelData.annualizedReturn)
                             }
                             
                             // 波动�?
