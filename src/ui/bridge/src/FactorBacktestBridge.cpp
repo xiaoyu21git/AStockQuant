@@ -517,19 +517,19 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     QVariantList coreMetrics;
                     coreMetrics.append(mk("rankIcMean", "IC 均值", "Rank IC 均值",
                         icMap.value("value").toDouble(), "number", true, "core"));
-                    coreMetrics.last()["goodThreshold"] = 0.02;  // IC>0.02
+                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.02; coreMetrics.last() = m; }
                     coreMetrics.append(mk("rankIcir",   "ICIR", "IC 信息比率",
                         icMap.value("ir").toDouble(), "number", true, "core"));
-                    coreMetrics.last()["goodThreshold"] = 0.3;   // IR>0.3
+                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.3; coreMetrics.last() = m; }
                     coreMetrics.append(mk("icWinRate",  "IC 胜率", "IC>0 的期数占比",
                         icMap.value("winRate").toDouble(), "percent2", false, "core"));
-                    coreMetrics.last()["goodThreshold"] = 0.55;  // winRate>55%
+                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.55; coreMetrics.last() = m; }
                     coreMetrics.append(mk("monotonicity","单调性", "分组收益单调变化程度",
                         fmMap.value("monotonicityScore").toDouble(), "number", false, "core"));
-                    coreMetrics.last()["goodThreshold"] = 0.7;   // |r|>0.7
+                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.7; coreMetrics.last() = m; }
                     coreMetrics.append(mk("longShortSharpe","多空夏普", "多空组合风险调整收益",
                         fmMap.value("longShortSharpe").toDouble(), "number", true, "core"));
-                    coreMetrics.last()["direction"] = QStringLiteral("high");  // 多空夏普: 越高越好
+                    { auto m = coreMetrics.last().toMap(); m["direction"] = QStringLiteral("high"); coreMetrics.last() = m; }
 
                     // ══ 扩展指标：辅助判断因子质量 ══
                     QVariantList optionalMetrics;
