@@ -43,11 +43,12 @@ FactorBacktestMetrics::Rating FactorBacktestMetricsCalculator::evaluateCoreRatin
         return FactorBacktestMetrics::Rating::GOOD;
     }
 
-    // PASS = 与 ratingChecks 绿色判定一致: IC>0.05, IR>0.3, winRate>0.55
-    const bool pass = metrics.rankIcMean > 0.05
+    // 合格: 5.1 核心评级表 — IC>0.02, P<0.05, IR>0.3, winRate>55%, |r|>0.7, Top>Bottom
+    const bool pass = metrics.rankIcMean > 0.02
+        && metrics.icPValue < 0.05
         && metrics.rankIcir > 0.3
         && metrics.icWinRate > 0.55
-        && metrics.icPValue < 0.05
+        && monotonicityAbsScore > 0.7
         && hasGroupSpread;
     if (pass) {
         return FactorBacktestMetrics::Rating::PASS;
