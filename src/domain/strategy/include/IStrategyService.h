@@ -596,6 +596,7 @@ private:
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
+    std::unique_ptr<class EventRiskSubscriber> m_eventRiskSubscriber;  ///< 金融事件风控订阅器
 };
 
 class StrategyEngine::Builder final {

@@ -12,6 +12,7 @@ target_sources(domain_strategy_runtime PRIVATE
     src/DailyEodScheduler.cpp
     src/StrategyManager.cpp
     src/RiskEvaluator.cpp
+    src/EventRiskSubscriber.cpp
     src/RiskManager.cpp
     src/RiskControl.cpp
     src/StrategyFactory.cpp

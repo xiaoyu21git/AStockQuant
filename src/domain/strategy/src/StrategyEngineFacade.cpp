@@ -17,6 +17,7 @@
 #include "../../factor/include/factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "../../factor/include/FactorMetricsCalculator.h"
 #include "../../trading/TradingTypes.h"
+#include "../include/EventRiskSubscriber.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
 #include "../../../engine/include/AccountEngine.h"
@@ -337,7 +338,7 @@ bool StrategyEngine::prepareMarketData()
         auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
         if (rfs) {
             extraFields = rfs->getRequiredFields();
-            lookbackDays = std::max(90, rfs->getMaxLookbackDays());
+            lookbackDays = (std::max)(90, rfs->getMaxLookbackDays());
         }
     }
 
@@ -577,6 +578,12 @@ void StrategyEngine::startLiveLoop()
             drainQueue();
         });
     }
+
+    // ── 启动金融事件风控订阅器 (日频/高频通用) ──
+    if (!m_eventRiskSubscriber) {
+        m_eventRiskSubscriber = std::make_unique<EventRiskSubscriber>();
+        m_eventRiskSubscriber->start();
+    }
 }
 
 void StrategyEngine::stopLiveLoop()
@@ -590,6 +597,9 @@ void StrategyEngine::stopLiveLoop()
     // 先停调度器, 防止回调在 executor 关闭后投递任务
     if (m_dailyScheduler) {
         m_dailyScheduler->stop();
+    }
+    if (m_eventRiskSubscriber) {
+        m_eventRiskSubscriber->stop();
     }
 
     if (m_dedicatedExecutor) {
@@ -804,6 +814,8 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
 
     double remainingCash = account.availableCash;
     m_liquidationBlocklist.clear();  // 新交易日重置清仓名单
+    if (m_eventRiskSubscriber)
+        m_eventRiskSubscriber->clearBlockedSymbols();  // T+1 事件封禁解禁
     // 买单资金按 pendingOrders 中顺序分配(先到先得),
     // 策略信号已按信号强度排序, 核心标的优先获得资金
 
@@ -849,6 +861,15 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             0);
 
         try {
+            // Phase 1 预过滤: 跳过事件风控封禁的标的
+            if (m_eventRiskSubscriber &&
+                m_eventRiskSubscriber->blockedSymbols().count(
+                    stripExchange(sym))) {
+                INTERNAL_INFO_STREAM
+                    << "[StrategyEngine] EOD Phase1 skip blocked: " << sym;
+                continue;
+            }
+
             auto orders = step(mdp);
             if (orders.has_value()) {
                 for (auto& order : *orders) {
@@ -955,6 +976,14 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
         if (m_liquidationBlocklist.count(code)) {
             INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy blocked: "
                                  << po.order.symbol() << " 当日已清仓, 禁止再次买入";
+            continue;
+        }
+
+        // 事件风控封禁: 负面事件触发封禁的标的
+        if (m_eventRiskSubscriber &&
+            m_eventRiskSubscriber->blockedSymbols().count(code)) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy blocked by event risk: "
+                                 << po.order.symbol();
             continue;
         }
 
@@ -1435,7 +1464,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     // 逐标的盈亏 top5
     std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
     std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });
-    int showN = std::min(5, static_cast<int>(topStocks.size()));
+    int showN = (std::min)(5, static_cast<int>(topStocks.size()));
     if (showN > 0) {
         std::ostringstream topOss;
         topOss << "[backtest] top" << showN << " winners: ";
