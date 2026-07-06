@@ -92,6 +92,13 @@ void FactorBacktestOrchestrator::run(
         ? std::vector<std::string>{"backtest_factor"}
         : config.factorIds;
 
+    INTERNAL_INFO_STREAM << "[回测流程] 开始"
+        << " mode=" << (isComposite ? "composite" : "single")
+        << " factors=" << factorIdList.size()
+        << " groups=" << config.numGroups
+        << " forward=" << config.forwardDays << "d"
+        << " rebalance=" << config.rebalanceDays << "d";
+
     // ── 收集因子需要的额外字段 ──
     // 优先使用预检阶段预注入的字段，避免重复 createInstance + getDataRequirements
     std::vector<std::string> neededExtraFields;
@@ -170,10 +177,12 @@ void FactorBacktestOrchestrator::run(
                     const auto& klineNames = cleaning::kline_columns::names();
                     const auto& symInfoNames = cleaning::symbol_info_columns::names();
                     const auto& finNames = cleaning::financial_columns::names();
+                    const auto& idxNames = cleaning::index_columns::names();
 
                     const bool isSymInfo = std::find(symInfoNames.begin(), symInfoNames.end(), field) != symInfoNames.end();
                     const bool isFin = std::find(finNames.begin(), finNames.end(), field) != finNames.end();
                     const bool isKline = std::find(klineNames.begin(), klineNames.end(), field) != klineNames.end();
+                    const bool isIndex = std::find(idxNames.begin(), idxNames.end(), field) != idxNames.end();
 
                     if (isSymInfo) {
                         auto rows = db->executeQuery(
@@ -195,6 +204,18 @@ void FactorBacktestOrchestrator::run(
                         auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
                         for (const auto& r : rows)
                             fieldCache[r.symbol][r.tradeDate] = r.value;
+                    } else if (isIndex) {
+                        // index_code — 与日期无关，从 ref.symbol_info 获取
+                        auto rows = db->executeQuery(
+                            "SELECT s.symbol, " + field
+                            + " FROM ref.symbol_info s");
+                        for (std::size_t i = 0; i < rows.rowCount(); ++i) {
+                            auto row = rows.getRow(i);
+                            std::string sym = row.getString("symbol");
+                            double val = row.getDouble(field);
+                            if (!sym.empty() && std::isfinite(val))
+                                fieldCache[sym]["_"] = val;
+                        }
                     } else {
                         INTERNAL_WARN_STREAM << "[DB查库] 未知字段 '" << field
                             << "' — 不在 kline/symbol_info/financial 中";
@@ -231,6 +252,9 @@ void FactorBacktestOrchestrator::run(
             return result;
         };
         m_dataService->setDbFallback(std::move(dbFn));
+        INTERNAL_INFO_STREAM << "[回测流程] DB回退已配置"
+            << " range=[" << minReportDate << "," << cacheStartDate << "]"
+            << " maxLookback=" << maxLookback;
     }
     std::vector<factor::compute::DateKey> filteredDatesStorage;
     const std::vector<factor::compute::DateKey>* effectiveDatesPtr = &arrowDates;
@@ -246,12 +270,43 @@ void FactorBacktestOrchestrator::run(
         }
         effectiveDatesPtr = &filteredDatesStorage;
     }
+    // ── 用交易日历过滤非交易日 ──
+    {
+        auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+        if (db && db->isOpen()) {
+            astock::infrastructure::database::MarketDataRepository repo(db);
+            char ds[16], de[16];
+            int sv = effectiveDatesPtr->front().value, ev = effectiveDatesPtr->back().value;
+            std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", sv/10000, (sv/100)%100, sv%100);
+            std::snprintf(de, sizeof(de), "%04d-%02d-%02d", ev/10000, (ev/100)%100, ev%100);
+            auto tradingDays = repo.queryTradeCalendar(ds, de);
+            if (!tradingDays.empty()) {
+                std::unordered_set<int32_t> tradingSet;
+                for (const auto& td : tradingDays) {
+                    std::string clean; for (char c : td) if (c != '-') clean += c;
+                    tradingSet.insert(static_cast<int32_t>(std::stoi(clean)));
+                }
+                std::vector<factor::compute::DateKey> filtered;
+                for (const auto& dk : *effectiveDatesPtr)
+                    if (tradingSet.count(dk.value)) filtered.push_back(dk);
+                if (filtered.size() < effectiveDatesPtr->size()) {
+                    INTERNAL_INFO_STREAM << "[回测流程] 交易日历过滤: skipped="
+                        << (effectiveDatesPtr->size() - filtered.size())
+                        << " remaining=" << filtered.size();
+                    filteredDatesStorage = std::move(filtered);
+                    effectiveDatesPtr = &filteredDatesStorage;
+                }
+            }
+        }
+    }
     const auto& allDates = *effectiveDatesPtr;
 
     // ── 分块大小：每块约 60 个交易日 ──
     constexpr int kChunkDates = 60;
     const size_t totalDates = allDates.size();
     const size_t totalChunks = (totalDates + kChunkDates - 1) / kChunkDates;
+    INTERNAL_INFO_STREAM << "[回测流程] 分块: totalDates=" << totalDates
+        << " chunkSize=" << kChunkDates << " totalChunks=" << totalChunks;
     const int fwdDays = std::max(1, config.forwardDays);
 
     // 分块加载列名：核心 5 列 + 因子字段 + 基类中性化字段
@@ -261,6 +316,15 @@ void FactorBacktestOrchestrator::run(
     for (const auto& f : factor::BaseFactor::neutralizationFields())
         if (std::find(chunkColumns.begin(), chunkColumns.end(), f) == chunkColumns.end())
             chunkColumns.push_back(f);
+
+    {
+        std::ostringstream cols;
+        for (size_t i = 0; i < chunkColumns.size(); ++i) {
+            if (i > 0) cols << ",";
+            cols << chunkColumns[i];
+        }
+        INTERNAL_INFO_STREAM << "[回测流程] chunkColumns(" << chunkColumns.size() << "): " << cols.str();
+    }
 
     factor::compute::BacktestReporterInput reporterInput;
     std::map<std::string, std::vector<std::pair<double, double>>> icByDate; // date→{(fv, fwdRet)}
@@ -288,24 +352,38 @@ void FactorBacktestOrchestrator::run(
 
             std::unique_ptr<factor::compute::IMarketDataView> chunkView;
             if (warmupRowCount > 0) {
-                INTERNAL_INFO_STREAM << "[DB补数据] 开始查库: warmupDays=" << warmupRowCount
-                    << " fields=" << chunkColumns.size()
-                    << " symbols=" << arrowView->symbolStrings().size();
-
-                // 生成回看日期
-                int firstVal = chunkDates[0].value;
-                int y = firstVal / 10000, m = (firstVal % 10000) / 100, d = firstVal % 100;
+                const auto allCacheFields = arrowView->fieldNames();
+                // 回看日期：从缓存首日往前，data.trade_calendar 查 maxLookback 个交易日
                 std::vector<factor::compute::DateKey> warmupDates;
-                for (size_t wi = 0; wi < warmupRowCount; ++wi) {
-                    if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
-                    int wv = y * 10000 + m * 100 + d;
-                    if (wv < firstVal) warmupDates.push_back({wv});
+                {
+                    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                    if (db && db->isOpen()) {
+                        astock::infrastructure::database::MarketDataRepository repo(db);
+                        int sv = chunkDates[0].value;
+                        int y = sv / 10000, m = (sv % 10000) / 100, d = sv % 100;
+                        int back = static_cast<int>(warmupRowCount) * 2;
+                        while (back-- > 0) {
+                            if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
+                        }
+                        char ds[16]; std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
+                        char de[16]; std::snprintf(de, sizeof(de), "%04d-%02d-%02d",
+                            sv / 10000, (sv % 10000) / 100, sv % 100);
+                        auto td = repo.queryTradeCalendar(ds, de);
+                        size_t start = (td.size() > warmupRowCount) ? (td.size() - warmupRowCount) : 0;
+                        for (size_t i = start; i < td.size(); ++i) {
+                            std::string clean; for (char c : td[i]) if (c != '-') clean += c;
+                            warmupDates.push_back({static_cast<int>(std::stoi(clean))});
+                        }
+                    }
                 }
-                std::reverse(warmupDates.begin(), warmupDates.end());
+                INTERNAL_INFO_STREAM << "[DB补数据] 开始查库: warmupDays=" << warmupDates.size()
+                    << " (requested=" << warmupRowCount << ")"
+                    << " fields=" << allCacheFields.size()
+                    << " symbols=" << arrowView->symbolStrings().size();
 
                 auto extendedDates = warmupDates;
                 extendedDates.insert(extendedDates.end(), chunkDates.begin(), chunkDates.end());
-                chunkView = arrowView->makeChunkView(extendedDates, chunkColumns);
+                chunkView = arrowView->makeChunkView(extendedDates, allCacheFields);
 
                 if (chunkView) {
                     const auto& dbFn = m_dataService->dbFallback();
@@ -313,12 +391,12 @@ void FactorBacktestOrchestrator::run(
                         const auto syms = arrowView->symbolStrings();
                         const int32_t nInsts = static_cast<int32_t>(syms.size());
                         size_t totalCells = 0;
-                        for (size_t wi = 0; wi < warmupRowCount; ++wi) {
+                        for (size_t wi = 0; wi < warmupDates.size(); ++wi) {
                             char dbuf[16]; int wv = warmupDates[wi].value;
                             std::snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d",
                                           wv / 10000, (wv / 100) % 100, wv % 100);
                             std::string dateStr(dbuf);
-                            for (const auto& col : chunkColumns) {
+                            for (const auto& col : allCacheFields) {
                                 auto* data = chunkView->mutableFieldData(col);
                                 if (!data) continue;
                                 auto dbRes = dbFn(dateStr, col,
@@ -333,8 +411,8 @@ void FactorBacktestOrchestrator::run(
                                 }
                             }
                         }
-                        INTERNAL_INFO_STREAM << "[DB补数据] 查库结束: dates=" << warmupRowCount
-                            << " fields=" << chunkColumns.size()
+                        INTERNAL_INFO_STREAM << "[DB补数据] 查库结束: dates=" << warmupDates.size()
+                            << " fields=" << allCacheFields.size()
                             << " symbols=" << nInsts
                             << " validCells=" << totalCells;
                     }
@@ -606,6 +684,9 @@ void FactorBacktestOrchestrator::run(
 #endif
 
         if (onProgress) onProgress(60.0, "factors computed (per-date IC)");
+        INTERNAL_INFO_STREAM << "[回测流程] IC计算完成: icSeries.size=" << icir.icSeries.size()
+            << " icMean=" << icir.icMean
+            << " icWinRate=" << icir.icPositiveRatio;
 
         // ── 模拟成交 ──
         factor::compute::SimulatedTradingResult tradingResult;
@@ -681,9 +762,13 @@ void FactorBacktestOrchestrator::run(
             fvByDate[date] = std::move(innerMap);
         }
 
+        INTERNAL_INFO_STREAM << "[回测流程] 模拟交易开始: dates=" << sortedDates.size()
+            << " instruments=" << instrumentIds.size();
         tradingResult = m_executor->execute(fvByDate, sortedDates, priceView,
                                              preAdjustView, postAdjustView,
                                              instrumentIds, instrumentIdToSymbol);
+        INTERNAL_INFO_STREAM << "[回测流程] 模拟交易结束: periods=" << tradingResult.validSampleCount
+            << " totalReturn=" << tradingResult.totalReturn;
 
         if (onProgress) onProgress(80.0, "trading simulated");
 
@@ -974,6 +1059,11 @@ void FactorBacktestOrchestrator::run(
             metrics.set("periodTrackings", periodArr);
 
             root.set("metrics", metrics);
+            INTERNAL_INFO_STREAM << "[回测流程] 完成"
+                << " totalReturn=" << tradingResult.totalReturn
+                << " sharpe=" << btResult.sharpeRatio
+                << " icMean=" << btResult.factorMetrics.rankIcMean
+                << " spreadSignMatch=" << (btResult.factorMetrics.spreadSignMatchIc ? "Y" : "N");
             onComplete(root.toString());
         }
         if (onProgress) onProgress(100.0, "completed");

@@ -85,8 +85,12 @@ inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
             << " mcMap=" << marketCapBySymbol.size() << " valuesIn=" << values.size()
             << " detail: " << dbg.str();
     }
-    INTERNAL_DEBUG_STREAM << "[neutralization] samples=" << samples.size()
-        << " industryBuckets=" << industryBuckets.size();
+    INTERNAL_DEBUG_STREAM << "[neutralization] date=" << context.date
+        << " indMap=" << industryBySymbol.size()
+        << " mcMap=" << marketCapBySymbol.size()
+        << " values=" << values.size()
+        << " samples=" << samples.size()
+        << " buckets=" << industryBuckets.size();
     if (samples.size() < 3) {
         if (errorMessage) {
             *errorMessage = "中性化样本不足，无法完成行业和市值残差化";

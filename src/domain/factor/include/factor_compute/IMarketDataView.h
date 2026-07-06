@@ -27,6 +27,9 @@ public:
     [[nodiscard]] virtual std::optional<NumericConstMatrixView>
     getField(const std::string& fieldName) const = 0;
 
+    /// @brief 所有可用字段名
+    [[nodiscard]] virtual std::vector<std::string> fieldNames() const { return {}; }
+
     [[nodiscard]] virtual const std::vector<DateKey>& dates() const = 0;
     [[nodiscard]] virtual const std::vector<InstrumentId>& instruments() const = 0;
     [[nodiscard]] virtual const std::vector<std::string>& symbolStrings() const = 0;

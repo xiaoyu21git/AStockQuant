@@ -139,6 +139,12 @@ public:
     int32_t fieldDataLength() const override {
         return static_cast<int32_t>(dates_.size()) * static_cast<int32_t>(instruments_.size());
     }
+    std::vector<std::string> fieldNames() const override {
+        std::vector<std::string> names;
+        names.reserve(columns_.size());
+        for (const auto& [k, _] : columns_) names.push_back(k);
+        return names;
+    }
 
 private:
     [[nodiscard]] NumericConstMatrixView columnView(const std::string& name) const {
@@ -475,6 +481,14 @@ void ArrowMarketDataView::ensureColumns(const std::vector<std::string>& names) c
             impl_->availableFields_.erase(n);
         }
     }
+}
+
+std::vector<std::string> ArrowMarketDataView::fieldNames() const {
+    std::vector<std::string> names = {"open","high","low","close","volume"};
+    for (const auto& f : impl_->availableFields_)
+        if (f != "open" && f != "high" && f != "low" && f != "close" && f != "volume")
+            names.push_back(f);
+    return names;
 }
 
 std::unique_ptr<IMarketDataView>

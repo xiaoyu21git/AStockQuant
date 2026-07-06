@@ -40,6 +40,8 @@ public:
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
     [[nodiscard]] const std::vector<std::string>& symbolStrings() const;
 
+    [[nodiscard]] std::vector<std::string> fieldNames() const override;
+
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override;
 

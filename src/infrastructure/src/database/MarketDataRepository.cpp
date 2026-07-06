@@ -669,22 +669,22 @@ MarketDataRepository::querySymbolCoverage(
 
 std::string MarketDataRepository::queryPrevTradingDay(const std::string& anchorDate) {
     std::ostringstream sql;
-    sql << "SELECT MAX(trade_date) FROM trade_calendar"
+    sql << "SELECT MAX(trade_date) AS td FROM data.trade_calendar"
         << " WHERE trade_date < " << safeStr(anchorDate);
     auto result = db_->executeQuery(sql.str());
     if (result.isEmpty()) return {};
-    return result.getRow(0).getString(0);
+    return result.getRow(0).getString("td");
 }
 
 // ═══ isTradingDay ═══
 
 bool MarketDataRepository::isTradingDay(const std::string& date) {
     std::ostringstream sql;
-    sql << "SELECT COUNT(*) FROM trade_calendar"
+    sql << "SELECT COUNT(*) AS cnt FROM data.trade_calendar"
         << " WHERE trade_date = " << safeStr(date) << " AND is_trading_day=1";
     auto result = db_->executeQuery(sql.str());
     if (result.isEmpty()) return false;
-    return result.getRow(0).getInt(0) > 0;
+    return result.getRow(0).getInt("cnt") > 0;
 }
 
 // ═══ queryTradeCalendar ═══
@@ -692,7 +692,7 @@ bool MarketDataRepository::isTradingDay(const std::string& date) {
 std::vector<std::string> MarketDataRepository::queryTradeCalendar(
     const std::string& startDate, const std::string& endDate) {
     std::ostringstream sql;
-    sql << "SELECT trade_date FROM trade_calendar"
+    sql << "SELECT trade_date FROM data.trade_calendar"
         << " WHERE trade_date >= " << safeStr(startDate)
         << " AND trade_date <= " << safeStr(endDate)
         << " AND is_trading_day=1"
@@ -701,7 +701,7 @@ std::vector<std::string> MarketDataRepository::queryTradeCalendar(
     std::vector<std::string> dates;
     dates.reserve(result.rowCount());
     for (std::size_t i = 0; i < result.rowCount(); ++i) {
-        dates.push_back(result.getRow(i).getString(0));
+        dates.push_back(result.getRow(i).getString("trade_date"));
     }
     return dates;
 }
@@ -923,11 +923,11 @@ MarketDataRepository::queryCleanedDailyBar(
 
 std::string MarketDataRepository::queryNextTradingDay(const std::string& anchorDate) {
     std::ostringstream sql;
-    sql << "SELECT MIN(trade_date) FROM trade_calendar"
+    sql << "SELECT MIN(trade_date) AS td FROM data.trade_calendar"
         << " WHERE trade_date > " << safeStr(anchorDate);
     auto result = db_->executeQuery(sql.str());
     if (result.isEmpty()) return {};
-    return result.getRow(0).getString(0);
+    return result.getRow(0).getString("td");
 }
 
 } // namespace astock::infrastructure::database

@@ -44,6 +44,8 @@ public:
     [[nodiscard]] std::optional<NumericConstMatrixView>
     getField(const std::string& fieldName) const override;
 
+    [[nodiscard]] std::vector<std::string> fieldNames() const override;
+
     [[nodiscard]] const std::vector<DateKey>& dates() const override;
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
     [[nodiscard]] const std::vector<std::string>& symbolStrings() const override;

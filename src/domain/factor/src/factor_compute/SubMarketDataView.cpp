@@ -59,6 +59,11 @@ SubMarketDataView::getField(const std::string& fieldName) const
     return impl_->source->getField(fieldName);
 }
 
+std::vector<std::string> SubMarketDataView::fieldNames() const
+{
+    return impl_->source->fieldNames();
+}
+
 const std::vector<DateKey>& SubMarketDataView::dates() const
 {
     return impl_->dateSubset;
