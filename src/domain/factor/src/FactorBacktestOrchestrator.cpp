@@ -918,9 +918,7 @@ void FactorBacktestOrchestrator::run(
                 ex.set("topGroupReturn",       J::createDouble(topGrp.returnRate));
                 ex.set("bottomGroupReturn",    J::createDouble(botGrp.returnRate));
                 ex.set("longShortSpreadReturn", J::createDouble(topGrp.returnRate - botGrp.returnRate));
-                ex.set("spreadSignMatchIc",    J::createBool(
-                    topGrp.returnRate * botGrp.returnRate < 0.0  // 多空方向一致才算匹配
-                ));
+                ex.set("spreadSignMatchIc",    J::createBool(btResult.factorMetrics.spreadSignMatchIc));
             }
             if (benchmarkSummary.hasValidAlignment) {
                 ex.set("benchmarkAnnualReturn", J::createDouble(benchmarkSummary.benchmarkAnnualReturn));
