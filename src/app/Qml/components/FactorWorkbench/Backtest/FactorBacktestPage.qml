@@ -4772,9 +4772,28 @@ Item {
                             }
                         }
                     }
+
+                    // ── 因子分析图表: IC 日序列 / 分组累积收益 / 因子-收益散点 ──
+                    FactorAnalysisCharts {
+                        id: factorCharts
+                        Layout.fillWidth: true
+                        Layout.topMargin: 12
+                        icSeries: {
+                            var m = root.resultMetrics || ({})
+                            return normalizedListValue(m.icSeries || [])
+                        }
+                        groupReturnSeries: {
+                            var m = root.resultMetrics || ({})
+                            return normalizedListValue(m.groupReturnSeries || [])
+                        }
+                        scatterData: {
+                            return normalizedListValue(root.backtestResult ? root.backtestResult.scatterData || [] : [])
+                        }
+                        numGroups: root.groupResults ? root.groupResults.length : 5
+                    }
                 }
-            } // 这里应该是ColumnLayout的结束
-        } // 这里应该是Flickable的结束，这是修复的关键位置
+            } // ColumnLayout 结束
+        } // Flickable 结束
     } // 这是最外层Rectangle的结束
 
     Dialog {
