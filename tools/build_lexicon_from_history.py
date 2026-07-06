@@ -181,20 +181,135 @@ def extract_candidates(texts: List[str], known_words: set,
     return results
 
 
-def export_candidates(candidates: List[Tuple[str, int, bool]],
-                      output_path: str):
-    """导出候选词 CSV"""
+def auto_annotate(candidates: List[Tuple[str, int, bool]],
+                  lexicon_words: Dict[str, float],
+                  lexicon_phrases: Dict[str, float]) -> List[dict]:
+    """用已有词典模式自动推断候选词的情感分
+
+    规则:
+      1. 精确匹配已有词组 → 直接复制分数
+      2. 候选词包含已知词 → 继承分数 (0.8 倍)
+      3. 候选词以否定前缀开头 → 翻转分数
+      4. 候选词包含负面后缀 (函/案/罚/亏/降) → 倾向负分
+      5. 候选词包含正面后缀 (增/盈/升/涨) → 倾向正分
+    返回: [{'word','frequency','is_finance','auto_score','confidence','match_reason'},...]
+    """
+    NEG_PREFIXES = {'被', '遭', '受', '持续', '连续'}
+    NEG_SUFFIXES = {'调查', '函', '案', '罚', '亏', '降', '退', '停', '减',
+                    '损', '弱', '滞', '警', '示', '险', '处', '诉'}
+    POS_SUFFIXES = {'增长', '升', '增', '盈', '涨', '利', '优', '强', '好',
+                    '高', '回', '购', '派', '分', '红', '新', '合', '协'}
+
+    results = []
+    for word, freq, fin in candidates:
+        score = 0.0
+        confidence = 0.0
+        reason = ''
+
+        # Rule 1: 精确匹配
+        if word in lexicon_phrases:
+            score = lexicon_phrases[word]
+            confidence = 1.0
+            reason = 'exact_phrase_match'
+        elif word in lexicon_words:
+            score = lexicon_words[word]
+            confidence = 0.9
+            reason = 'exact_word_match'
+        else:
+            # Rule 2: 部分匹配 — 候选词包含已知词 或 已知词包含候选词
+            best_match_score = 0.0
+            best_match_conf = 0.0
+            for known, known_score in lexicon_words.items():
+                if len(known) < 2:
+                    continue
+                if known in word and len(word) > len(known):
+                    # 候选词包含已知情感词 (如"大幅预增"包含"预增")
+                    overlap = len(known) / len(word)
+                    best_match_score = known_score * 0.8 * overlap
+                    best_match_conf = 0.6 * overlap
+                    reason = f'contains:{known}'
+                    break  # 第一个匹配就是最好的
+                elif word in known and len(known) > len(word):
+                    # 候选词是已知词的一部分
+                    overlap = len(word) / len(known)
+                    best_match_score = known_score * 0.6 * overlap
+                    best_match_conf = 0.4 * overlap
+                    reason = f'substring_of:{known}'
+                    break
+
+            score = best_match_score
+            confidence = best_match_conf
+
+            # Rule 3: 否定前缀
+            for pf in NEG_PREFIXES:
+                if word.startswith(pf) and len(word) > len(pf) + 1:
+                    score = -abs(score)
+                    confidence = max(confidence, 0.4)
+                    reason = f'{reason}+neg_prefix:{pf}'
+                    break
+
+            # Rule 4/5: 后缀暗示
+            if confidence < 0.3:
+                for sf in NEG_SUFFIXES:
+                    if word.endswith(sf):
+                        score = max(score, -0.3)
+                        confidence = max(confidence, 0.2)
+                        reason = f'{reason}+neg_suffix:{sf}'
+                        break
+                if confidence < 0.3:
+                    for sf in POS_SUFFIXES:
+                        if word.endswith(sf):
+                            score = max(score, 0.2)
+                            confidence = max(confidence, 0.2)
+                            reason = f'{reason}+pos_suffix:{sf}'
+                            break
+
+        results.append({
+            'word': word,
+            'frequency': freq,
+            'is_finance': 'Y' if fin else 'N',
+            'auto_score': round(max(-1.0, min(1.0, score)), 2),
+            'confidence': round(min(1.0, confidence), 2),
+            'match_reason': reason,
+        })
+
+    return results
+
+
+def export_candidates(candidates, output_path: str,
+                      auto_annotated: bool = False):
+    """导出候选词 CSV — 自动检测 dict 或 tuple 格式"""
     with open(output_path, 'w', newline='', encoding='utf-8-sig') as f:
         writer = csv.writer(f)
-        writer.writerow(['word', 'frequency', 'is_finance',
-                         'sentiment_score', 'is_phrase', 'notes'])
-        for word, freq, fin in candidates:
-            writer.writerow([word, freq, 'Y' if fin else 'N',
-                             '', '', ''])
+        if auto_annotated and candidates and isinstance(candidates[0], dict):
+            writer.writerow(['word', 'frequency', 'is_finance',
+                             'sentiment_score', 'auto_confidence', 'is_phrase',
+                             'match_reason', 'notes'])
+            for item in candidates:
+                score = item.get('auto_score', 0)
+                conf = item.get('confidence', 0)
+                writer.writerow([
+                    item['word'], item['frequency'], item['is_finance'],
+                    score if conf >= 0.2 else '',
+                    conf, '',
+                    item.get('match_reason', ''), ''])
+        else:
+            writer.writerow(['word', 'frequency', 'is_finance',
+                             'sentiment_score', 'is_phrase', 'notes'])
+            for word, freq, fin in candidates:
+                writer.writerow([word, freq, 'Y' if fin else 'N',
+                                 '', '', ''])
 
+    annotated = 0
+    if auto_annotated:
+        annotated = sum(1 for c in candidates
+                        if isinstance(c, dict) and c.get('confidence', 0) >= 0.2
+                        and c.get('auto_score', 0) != 0)
     logging.info("导出 %d 个候选词 → %s", len(candidates), output_path)
+    if annotated:
+        print(f"自动标注: {annotated}/{len(candidates)} 个候选词已有预填值 (confidence>=0.3)")
     print(f"\n下一步: 在 Excel/WPS 中打开 {output_path}")
-    print("  1. 填写 sentiment_score 列 (-1.0=强负面 ~ 1.0=强正面)")
+    print("  1. 检查/修正 sentiment_score 列 (-1.0=强负面 ~ 1.0=强正面)")
     print("  2. 是词组而非单词的, 填 is_phrase=Y")
     print("  3. 保存后运行: python tools/build_lexicon_from_history.py merge")
 
@@ -278,19 +393,19 @@ def main():
 
     # fetch
     p_fetch = sub.add_parser('fetch', help='拉取新闻 + 提取候选词 → CSV')
-    p_fetch.add_argument('--days', type=int, default=90,
-                         help='拉取天数 (默认90)')
-    p_fetch.add_argument('--top', type=int, default=1500,
-                         help='候选词数量 (默认1500)')
-    p_fetch.add_argument('--output', default='tools/lexicon_candidates.csv',
-                         help='输出 CSV 路径')
+    p_fetch.add_argument('--days', type=int, default=90)
+    p_fetch.add_argument('--top', type=int, default=1500)
+    p_fetch.add_argument('--output', default='tools/lexicon_candidates.csv')
+
+    # prefill — auto-annotate using existing lexicon patterns
+    p_pre = sub.add_parser('prefill', help='用已有词典模式自动预填 CSV 情感分')
+    p_pre.add_argument('--input', default='tools/lexicon_candidates.csv')
+    p_pre.add_argument('--output', default='tools/lexicon_candidates_prefilled.csv')
 
     # merge
     p_merge = sub.add_parser('merge', help='合并已标注 CSV → 词典 JSON')
-    p_merge.add_argument('--input', default='tools/lexicon_candidates.csv',
-                         help='已标注 CSV 路径')
-    p_merge.add_argument('--output', default=None,
-                         help='输出 JSON (默认覆盖原词典)')
+    p_merge.add_argument('--input', default='tools/lexicon_candidates.csv')
+    p_merge.add_argument('--output', default=None)
 
     args = parser.parse_args()
 
@@ -302,6 +417,25 @@ def main():
         candidates = extract_candidates(texts, known, args.top)
         print(f"候选词: {len(candidates)} 个")
         export_candidates(candidates, args.output)
+
+    elif args.command == 'prefill':
+        # 加载已有词典和 CSV 候选词
+        with open(LEXICON_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        # 过滤 _comment 前缀的元数据键
+        words = {k: v for k, v in data.get('words', {}).items()
+                 if not k.startswith('_comment') and isinstance(v, (int, float))}
+        phrases = {k: v for k, v in data.get('phrases', {}).items()
+                   if not k.startswith('_comment') and isinstance(v, (int, float))}
+
+        with open(args.input, 'r', encoding='utf-8-sig') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        candidates = [(r['word'], int(r['frequency']),
+                       r.get('is_finance', 'N') == 'Y') for r in rows]
+        annotated = auto_annotate(candidates, words, phrases)
+        export_candidates(annotated, args.output, auto_annotated=True)
 
     elif args.command == 'merge':
         merge_annotated(args.input, args.output)
