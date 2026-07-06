@@ -38,6 +38,7 @@
 #include <sstream>
 #include <exception>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -685,6 +686,21 @@ void StrategyEngine::drainQueue()
                     if (order.orderType() == OrderType::Market && tickPrice > 0)
                         order.setPrice(tickPrice);
 
+                    // ── 资金量级分配：targetWeight × 总资产 / 价格 ──
+                    double targetWeight = order.extensionAs<double>(
+                        domain::trading::ExtKey::kTargetWeight, 0.0);
+                    if (targetWeight > 0.0 && account.totalAsset > 0 && tickPrice > 0) {
+                        int64_t capQty = static_cast<int64_t>(
+                            targetWeight * account.totalAsset / tickPrice / 100.0) * 100;
+                        if (capQty >= 100) {
+                            order.setQuantity(static_cast<double>(capQty));
+                            INTERNAL_INFO_STREAM << "[StrategyEngine] 资金分配: symbol="
+                                << order.symbol() << " targetWeight=" << targetWeight
+                                << " capital=" << account.totalAsset
+                                << " price=" << tickPrice << " qty=" << capQty;
+                        }
+                    }
+
                     // 风控
                     auto riskResult = RiskManager::instance()
                         .checkAutoSignal(order, account, positions,
@@ -762,13 +778,52 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size() << " 只标的";
 
     int ordersGenerated = 0;
+
+    // ── 获取账户和持仓快照（一次，循环内不复查）──
+    constexpr int64_t kMinLotSize = 100;
+    auto& accEng = engine::AccountEngine::instance();
+    auto account   = accEng.account();     // 返回值拷贝
+    auto positions = accEng.positions();   // 返回值拷贝
+    m_orderBuilder.setAccountId(account.accountId);
+
+    if (account.totalAsset <= 0) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
+        return;
+    }
+
+    auto stripExchange = [](const std::string& sym) -> std::string {
+        auto dot = sym.find('.');
+        return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
+    };
+
+    std::unordered_map<std::string, int64_t> posQtyMap;
+    for (const auto& p : positions) {
+        posQtyMap[stripExchange(p.symbol)] = p.quantity;
+        // quantity 非 availableQty: EOD 下单次日成交, 隔夜无冻结
+    }
+
+    double remainingCash = account.availableCash;
+    m_liquidationBlocklist.clear();  // 新交易日重置清仓名单
+    // 买单资金按 pendingOrders 中顺序分配(先到先得),
+    // 策略信号已按信号强度排序, 核心标的优先获得资金
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 1: 收集 — 遍历所有标的, 生成订单并规范化
+    // ═══════════════════════════════════════════════════════════
+    struct PendingOrder {
+        OrderRequest order;
+        double tickPrice;
+        double targetWeight;
+        double signalScore;
+    };
+    std::vector<PendingOrder> pendingOrders;
+
     for (const auto& sym : symbols) {
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
         if (!d.valid()) continue;
 
         double price = 0;
         if (isCompensation) {
-            // 补单: 用 history_bars_n 拉取历史日线收盘价
             std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
             if (gm.empty()) continue;
             auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, endDateStr.c_str(),
@@ -780,7 +835,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             price = bars->at(0).close;
             bars->release();
         } else {
-            price = d.dailyBar().close();  // 实时: 当日 tick 最新价
+            price = d.dailyBar().close();
         }
         if (price <= 0) continue;
 
@@ -796,54 +851,167 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
         try {
             auto orders = step(mdp);
             if (orders.has_value()) {
-                auto& accEng = engine::AccountEngine::instance();
-                auto account   = accEng.account();
-                auto positions = accEng.positions();
-                m_orderBuilder.setAccountId(account.accountId);
-
-                if (account.totalAsset <= 0) {
-                    INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, "
-                                        << "跳过 " << sym;
-                    continue;
-                }
-
                 for (auto& order : *orders) {
                     if (!order.isValid()) continue;
 
                     double signalScore = order.extensionAs<double>(
                         domain::trading::ExtKey::kSignalScore, 0.5);
+                    double targetWeight = order.extensionAs<double>(
+                        domain::trading::ExtKey::kTargetWeight, 0.0);
+
                     order = m_orderBuilder.buildSignalOrder(
                         order.symbol(), order.side(),
-                        0,  // price=0
+                        0,
                         static_cast<int64_t>(order.quantity()), signalScore);
 
                     auto& ld = domain::market::MarketDataService::instance()
                         .liveData(order.symbol());
                     double tickPrice = ld.valid() ? ld.dailyBar().close() : mdp.lastPrice();
-                    if (order.orderType() == OrderType::Market && tickPrice > 0)
+                    if (!std::isfinite(tickPrice) || tickPrice <= 0) continue;
+
+                    if (order.orderType() == OrderType::Market)
                         order.setPrice(tickPrice);
 
-                    RiskResult riskResult = RiskManager::instance().checkAutoSignal(
-                        order, account, positions, tickPrice, signalScore);
-                    if (riskResult.approved()) {
-                        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 信号下单: "
-                                            << order.symbol() << " "
-                                            << (order.side()==engine::OrderSide::Buy?"买":"卖")
-                                            << " qty=" << order.quantity()
-                                            << " price=" << order.price();
-                        std::vector<OrderRequest> approved{order};
-                        m_orderListener->onOrders(approved);
-                        ordersGenerated++;
-                    } else {
-                        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 信号被风控拒绝: "
-                                            << order.symbol() << " reason="
-                                            << riskResult.description();
-                    }
+                    pendingOrders.push_back(
+                        {std::move(order), tickPrice, targetWeight, signalScore});
                 }
             }
         } catch (const std::exception& e) {
-            INTERNAL_WARN_STREAM << "[StrategyEngine] EOD step 异常: " << sym
+            INTERNAL_WARN_STREAM << "[StrategyEngine] EOD collect 异常: " << sym
                                  << " " << e.what();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 2: 先卖 — 回笼现金, 风控检查使用实时现金快照
+    // 风控使用初始持仓快照(positions), 组合层面规则可能低估已卖出仓位
+    // ═══════════════════════════════════════════════════════════
+    for (auto& po : pendingOrders) {
+        if (po.order.side() != engine::OrderSide::Sell) continue;
+
+        // 当前策略约定: SELL 信号 = 完全退出, targetWeight 必须为 0
+        if (po.targetWeight > 0.0) {
+            INTERNAL_WARN_STREAM << "[StrategyEngine] EOD sell non-zero targetWeight="
+                                 << po.targetWeight << " " << po.order.symbol()
+                                 << " — SELL 仅支持全清, 跳过";
+            continue;
+        }
+
+        std::string code = stripExchange(po.order.symbol());
+        auto it = posQtyMap.find(code);
+        int64_t currentQty = (it != posQtyMap.end()) ? it->second : 0;
+
+        if (currentQty <= 0) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD sell skip: no holding for "
+                                 << po.order.symbol();
+            continue;
+        }
+
+        const int64_t sellQty = currentQty;
+        const double cashBack = static_cast<double>(sellQty) * po.tickPrice;
+
+        po.order.setQuantity(static_cast<double>(sellQty));
+        try {
+            auto tmpAccount = account;
+            tmpAccount.availableCash = remainingCash;
+            RiskResult riskResult = RiskManager::instance().checkAutoSignal(
+                po.order, tmpAccount, positions, po.tickPrice, po.signalScore);
+            if (riskResult.approved()) {
+                m_orderListener->onOrders({po.order});
+                remainingCash += cashBack;
+                posQtyMap[code] = 0;
+                m_liquidationBlocklist.insert(code);  // 当日已清仓, 禁止再次买入
+                ordersGenerated++;
+
+                INTERNAL_INFO_STREAM << "[StrategyEngine] 差额调仓 SELL: "
+                                     << po.order.symbol() << " qty=" << sellQty
+                                     << " cashRemaining=" << remainingCash;
+            } else {
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD sell rejected: "
+                                     << po.order.symbol() << " "
+                                     << riskResult.description();
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD sell exception: "
+                                  << po.order.symbol() << " " << e.what();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // Phase 3: 后买 — 差额计算 + 现金约束, 风控检查使用实时现金快照
+    // ═══════════════════════════════════════════════════════════
+    for (auto& po : pendingOrders) {
+        if (po.order.side() != engine::OrderSide::Buy) continue;
+
+        if (po.targetWeight <= 0.0) {
+            INTERNAL_WARN_STREAM << "[StrategyEngine] EOD buy skip: targetWeight=0 "
+                                 << po.order.symbol();
+            continue;
+        }
+
+        std::string code = stripExchange(po.order.symbol());
+
+        // 风控清仓名单: 当天已卖出的标的当日不得再次买入
+        if (m_liquidationBlocklist.count(code)) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy blocked: "
+                                 << po.order.symbol() << " 当日已清仓, 禁止再次买入";
+            continue;
+        }
+
+        auto it = posQtyMap.find(code);
+        int64_t currentQty = (it != posQtyMap.end()) ? it->second : 0;
+
+        const int64_t targetQty = static_cast<int64_t>(
+            po.targetWeight * account.totalAsset / po.tickPrice / 100.0) * 100;
+        int64_t delta = targetQty - currentQty;
+
+        if (delta < kMinLotSize) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy skip: delta=" << delta
+                                 << " < " << kMinLotSize << " " << po.order.symbol()
+                                 << " target=" << targetQty << " current=" << currentQty;
+            continue;
+        }
+
+        double cashNeeded = static_cast<double>(delta) * po.tickPrice;
+        if (remainingCash < cashNeeded) {
+            int64_t affordableQty = static_cast<int64_t>(
+                remainingCash / po.tickPrice / 100.0) * 100;
+            if (affordableQty < kMinLotSize) {
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy skip: cash insufficient "
+                                     << remainingCash << " need=" << cashNeeded
+                                     << " " << po.order.symbol();
+                continue;
+            }
+            delta = affordableQty;
+        }
+
+        po.order.setQuantity(static_cast<double>(delta));
+        const int64_t finalDelta = delta;
+        const double finalCashNeeded = static_cast<double>(finalDelta) * po.tickPrice;
+
+        try {
+            auto tmpAccount = account;
+            tmpAccount.availableCash = remainingCash;
+            RiskResult riskResult = RiskManager::instance().checkAutoSignal(
+                po.order, tmpAccount, positions, po.tickPrice, po.signalScore);
+            if (riskResult.approved()) {
+                m_orderListener->onOrders({po.order});
+                remainingCash -= finalCashNeeded;
+                ordersGenerated++;
+
+                INTERNAL_INFO_STREAM << "[StrategyEngine] 差额调仓 BUY: "
+                                     << po.order.symbol()
+                                     << " target=" << targetQty << " current=" << currentQty
+                                     << " delta=" << finalDelta
+                                     << " cashRemaining=" << remainingCash;
+            } else {
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy rejected: "
+                                     << po.order.symbol() << " "
+                                     << riskResult.description();
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD buy exception: "
+                                  << po.order.symbol() << " " << e.what();
         }
     }
 

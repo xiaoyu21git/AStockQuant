@@ -17,6 +17,7 @@
 #include <queue>
 #include <chrono>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace foundation {
@@ -594,6 +595,7 @@ private:
     domain::trading::OrderBuilder m_orderBuilder;
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
+    std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
 };
 
 class StrategyEngine::Builder final {
