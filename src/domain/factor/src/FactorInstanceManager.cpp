@@ -360,7 +360,7 @@ bool FactorInstanceManager::updateInstanceConfig(
 
     try {
         const int affectedRows = db_->executeUpdate(
-            "UPDATE factor_instance SET full_config = ?, updated_at = CURRENT_TIMESTAMP "
+            "UPDATE alpha.factor_instance SET full_config = ?::jsonb, updated_at = CURRENT_TIMESTAMP "
             "WHERE instance_id = ?",
             buildParams(newConfig.toString(), instanceId)
         );
@@ -437,8 +437,8 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
         auto result = db_->executeQuery(
             "SELECT fi.instance_id, fi.instance_name, fi.description, "
             "fi.full_config::text AS full_config, fi.status, fi.factor_id, f.major_category "
-            "FROM factor_instance fi "
-            "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
+            "FROM alpha.factor_instance fi "
+            "LEFT JOIN alpha.factors f ON fi.factor_id = f.factor_id "
             "WHERE fi.instance_id = ?",
             buildParams(instanceId)
         );
@@ -525,8 +525,8 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
         auto result = db_->executeQuery(
             "SELECT fi.instance_id, fi.instance_name, fi.description, "
             "fi.full_config::text AS full_config, fi.status, fi.factor_id, f.major_category "
-            "FROM factor_instance fi "
-            "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
+            "FROM alpha.factor_instance fi "
+            "LEFT JOIN alpha.factors f ON fi.factor_id = f.factor_id "
             "WHERE fi.status = 'ACTIVE' "
             "ORDER BY fi.created_at DESC"
         );
