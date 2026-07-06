@@ -597,6 +597,8 @@ private:
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     std::unique_ptr<class EventRiskSubscriber> m_eventRiskSubscriber;  ///< 金融事件风控订阅器
+    int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
+    std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
 };
 
 class StrategyEngine::Builder final {

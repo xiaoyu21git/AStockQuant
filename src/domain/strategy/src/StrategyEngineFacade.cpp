@@ -282,6 +282,9 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     engine->m_isDailyFrequency = (params.behaviorKind
         != ::domain::strategies::StrategyBehaviorKind::HighFrequency);
 
+    engine->m_rebalanceInterval =
+        ::domain::strategies::rebalanceFrequencyStepInterval(params.rebalanceFrequency);
+
     return engine;
 
     } catch (const std::exception& e) {
@@ -785,6 +788,26 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 tradingDay=" << tradingDay
                          << " isCompensation=" << isCompensation;
 
+    // 调仓周期检查: 非调仓日跳过, 避免每日重复下单
+    if (m_rebalanceInterval > 1 && !m_lastRebalanceDate.empty()) {
+        std::string date = tradingDay;
+        int tradingDaysSince = 0;
+        for (int i = 0; i < m_rebalanceInterval && !date.empty(); ++i) {
+            char prevOut[32] = {};
+            if (::get_previous_trading_date("SZSE", date.c_str(), prevOut) != 0)
+                ::get_previous_trading_date("SHSE", date.c_str(), prevOut);
+            date = prevOut;
+            if (date.empty()) break;
+            ++tradingDaysSince;
+            if (date == m_lastRebalanceDate) break;
+        }
+        if (tradingDaysSince < m_rebalanceInterval) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] 非调仓日: 距上次调仓 "
+                << tradingDaysSince << "/" << m_rebalanceInterval << " 交易日, 跳过";
+            return;
+        }
+    }
+
     if (m_isBacktestMode.load(std::memory_order_acquire)) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] 回测模式, 跳过日终评估";
         return;
@@ -1078,6 +1101,8 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
 
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成, 生成 "
                          << ordersGenerated << " 笔信号";
+
+    m_lastRebalanceDate = tradingDay;
 
     // ── 每日账户快照 ──
     {
