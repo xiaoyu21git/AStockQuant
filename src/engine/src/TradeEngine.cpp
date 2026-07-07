@@ -139,25 +139,38 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     return r;
 }
 
-bool TradeEngine::cancelOrder(const std::string& clOrdId) {
-    if (clOrdId.empty()) return false;
+bool TradeEngine::cancelOrder(const std::string& orderId) {
+    if (orderId.empty()) return false;
     auto* s = static_cast<::Strategy*>(m_strategy);
     if (!s) return false;
 
-    std::string brokerId;
+    std::string brokerId, clOrdKey;
     {
         std::lock_guard<std::mutex> lk(m_ordersMutex);
-        auto it = m_activeOrders.find(clOrdId);
-        if (it == m_activeOrders.end()) return false;
-        brokerId = it->second.brokerOrderId;
+        // 先按 clOrdId 查
+        auto it = m_activeOrders.find(orderId);
+        if (it != m_activeOrders.end()) {
+            brokerId = it->second.brokerOrderId;
+            clOrdKey = orderId;
+        } else {
+            // 回退: 按 brokerOrderId 查
+            for (auto& [key, rec] : m_activeOrders) {
+                if (rec.brokerOrderId == orderId) {
+                    brokerId = rec.brokerOrderId;
+                    clOrdKey = key;
+                    break;
+                }
+            }
+        }
     }
+    if (brokerId.empty()) return false;
 
     s->order_cancel(brokerId.c_str(), NULL);
     {
         std::lock_guard<std::mutex> lk(m_ordersMutex);
-        m_activeOrders.erase(clOrdId);
+        m_activeOrders.erase(clOrdKey);
     }
-    INTERNAL_INFO_STREAM << "[TradeEngine] cancel: " << clOrdId;
+    INTERNAL_INFO_STREAM << "[TradeEngine] cancel: " << orderId;
     return true;
 }
 
