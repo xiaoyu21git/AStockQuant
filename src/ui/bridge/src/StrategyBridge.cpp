@@ -601,7 +601,7 @@ bool StrategyBridge::start(const QString& strategyId)
 
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
 
-    // ── 异步委托给 StrategyManager（工作线程：MySQL 查询 → 历史数据 → 启动实盘循环）──
+    // ── 异步委托给 StrategyManager（工作线程：DB 查询 → 历史数据 → 启动实盘循环）──
     if (!m_startupPool) {
         m_startupPool = std::make_unique<foundation::thread::ThreadPoolExecutor>(
             1, 4, std::chrono::seconds(120), "StrategyBridgeStartup");

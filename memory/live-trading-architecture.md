@@ -34,7 +34,7 @@ QML 点击"启动策略"
     → m_startupPool->post(lambda)           [线程池]
       → StrategyManager::createEngine()
       → engine->start()                    (StrategyService 状态→Running)
-      → 加载历史 MarketView (MySQL, ~60交易日)
+      → 加载历史 MarketView (PostgreSQL, ~60交易日)
       → engine->startLiveLoop()            (启动 drainQueue 专用线程)
         → QMetaObject::invokeMethod 回主线程更新UI状态
 ```

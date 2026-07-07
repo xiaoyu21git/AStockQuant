@@ -99,7 +99,6 @@ function(copy_benchmark_qt_sql_plugins target_name)
     if(qt_core_debug_location)
         get_filename_component(qt_core_debug_bin_dir "${qt_core_debug_location}" DIRECTORY)
         list(APPEND qt_sql_plugin_sources
-            "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlmysqld.dll"
             "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlited.dll")
     endif()
 
@@ -107,7 +106,6 @@ function(copy_benchmark_qt_sql_plugins target_name)
     if(qt_core_release_location)
         get_filename_component(qt_core_release_bin_dir "${qt_core_release_location}" DIRECTORY)
         list(APPEND qt_sql_plugin_sources
-            "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlmysql.dll"
             "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlite.dll")
     endif()
 
@@ -270,10 +268,6 @@ copy_gtest_runtime_dlls(test_eventsystem)
 copy_benchmark_runtime_dlls(test_eventsystem)
 copy_benchmark_qt_sql_plugins(test_eventsystem)
 
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
-    message(STATUS "[TESTS] Skipping run_factor_full_market_benchmark: legacy factor backtest modules removed")
-endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
     message(STATUS "[TESTS] Found: run_cleaning_cache_probe.cpp")

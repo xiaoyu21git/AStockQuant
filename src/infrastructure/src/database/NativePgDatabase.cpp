@@ -17,7 +17,7 @@ namespace database {
 
 namespace {
 
-// 将 MySQL 风格 ? 占位符转为 PG $1, $2, ...
+// 将 ? 占位符转为 PG $1, $2, ...
 // 并构造 params 数组给 PQexecParams
 std::string convertPlaceholders(const std::string& sql, int& outCount) {
     outCount = 0;

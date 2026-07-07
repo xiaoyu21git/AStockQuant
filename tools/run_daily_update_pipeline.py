@@ -29,7 +29,7 @@ from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calenda
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db_config import PG_CONFIG
 
-MYSQL_CONFIG = PG_CONFIG  # 兼容旧变量名
+DB_CONFIG = PG_CONFIG
 
 DEFAULT_AUTO_CLOSE_TIME = "15:40"
 
@@ -251,7 +251,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
         return trade_calendar[left:right]
 
     print(f"  [resolve_backfill_range] mode={mode} fetching data...", flush=True)
-    conn = psycopg2.connect(**MYSQL_CONFIG)
+    conn = psycopg2.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
             cursor.execute(

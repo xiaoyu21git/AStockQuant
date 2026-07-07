@@ -181,7 +181,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 return;
             }
 
-            // ─── 2. 获取或创建引擎（含 MySQL 查询 — 现在在工作线程中）───
+            // ─── 2. 获取或创建引擎（含 DB 查询 — 现在在工作线程中）───
             auto& mgr = domain::strategy::StrategyManager::instance();
             auto* engine = mgr.get(capturedStrategyId);
             if (!engine) {

@@ -359,27 +359,6 @@ install(DIRECTORY include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-# 娴嬭瘯绋嬪簭
-set(FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/test_factor.cpp")
-if(BUILD_TESTS AND EXISTS "${FACTOR_TEST_SOURCE}")
-    add_executable(test_factor
-        ${FACTOR_TEST_SOURCE}
-    )
-    
-    target_link_libraries(test_factor
-        factor
-        foundation
-        infrastructure
-        pymysql
-        pthread
-    )
-    
-    # 娣诲姞娴嬭瘯
-    add_test(NAME test_factor
-        COMMAND test_factor
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-endif()
 
 set(FACTOR_COMPUTE_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_factor_signal_engine_smoke.cpp")
 if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")

@@ -258,7 +258,7 @@ std::unordered_set<std::string> loadTableColumns(
             return it->second;
     }
 
-    // PG: 用 search_path 中的全部 schema 代替 MySQL 的 DATABASE()
+    // PG: 用 search_path 中的全部 schema 扫描
     auto result = db->executeQuery(
         "SELECT COLUMN_NAME AS column_name FROM information_schema.COLUMNS "
         "WHERE TABLE_SCHEMA = ANY(regexp_split_to_array("

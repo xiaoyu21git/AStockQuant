@@ -9,7 +9,7 @@ int main() {
 
     auto &manager = MarketDataManager::instance();
 
-    // 直接在配置串中写入 MySQL 连接信息（不依赖环境变量）
+    // 直接在配置串中写入数据库连接信息（不依赖环境变量）
     // 如需修改账号密码，请同步更新这里
     std::string config =
         "host=127.0.0.1;port=3306;database=astock_quant;"
