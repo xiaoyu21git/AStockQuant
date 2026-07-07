@@ -606,8 +606,10 @@ void StrategyEngine::stopLiveLoop()
     }
 
     if (m_dedicatedExecutor) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 等待专用线程退出(最多5s)...";
         m_dedicatedExecutor->shutdown(false);
         m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 专用线程已退出";
     }
 }
 
