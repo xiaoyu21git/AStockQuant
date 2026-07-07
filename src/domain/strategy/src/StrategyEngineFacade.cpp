@@ -617,6 +617,50 @@ bool StrategyEngine::isLiveLoopRunning() const noexcept {
     return m_loopRunning.load(std::memory_order_acquire);
 }
 
+int StrategyEngine::liquidateAll()
+{
+    if (!m_orderListener) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] liquidateAll: 无订单监听器";
+        return -1;
+    }
+
+    auto& accEng = engine::AccountEngine::instance();
+    auto positions = accEng.positions();
+
+    if (positions.empty()) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: 无持仓";
+        return 0;
+    }
+
+    std::vector<OrderRequest> orders;
+    for (const auto& pos : positions) {
+        if (pos.quantity <= 0) continue;
+        OrderRequest order;
+        order.setSymbol(pos.symbol);
+        order.setSide(domain::trading::OrderSide::Sell);
+        order.setQuantity(static_cast<double>(pos.quantity));
+        order.setPrice(0);  // 市价
+        order.setOrderType(domain::trading::OrderType::Market);
+        order.setPositionEffect(domain::trading::PositionEffect::Close);
+        order.setStrategyId(m_strategyId);
+        m_orderBuilder.setAccountId(accEng.account().accountId);
+        order.setAccountId(accEng.account().accountId);
+
+        orders.push_back(std::move(order));
+
+        // 去后缀加入清仓名单
+        auto dot = pos.symbol.find('.');
+        std::string code = (dot != std::string::npos)
+            ? pos.symbol.substr(0, dot) : pos.symbol;
+        m_liquidationBlocklist.insert(code);
+    }
+
+    m_orderListener->onOrders(orders);
+    INTERNAL_WARN_STREAM << "[StrategyEngine] 一键清仓: " << orders.size()
+                         << " 笔订单, 持仓已提交";
+    return static_cast<int>(orders.size());
+}
+
 void StrategyEngine::setOrderListener(IOrderListener* listener)
 {
     m_orderListener = listener;

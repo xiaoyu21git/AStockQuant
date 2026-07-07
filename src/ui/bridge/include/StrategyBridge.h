@@ -53,6 +53,7 @@ public:
     Q_INVOKABLE QVariantList list();
     Q_INVOKABLE bool start(const QString& strategyId);
     Q_INVOKABLE bool stop(const QString& strategyId);
+    Q_INVOKABLE int liquidateAll(const QString& strategyId);
     Q_INVOKABLE bool saveViewCfg(const QString& strategyId, const QVariantMap& visualConfig);
 
     /// @brief 为实盘策略设置行情视图 (QML 可调用)

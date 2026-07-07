@@ -665,6 +665,26 @@ bool StrategyBridge::stop(const QString& strategyId)
     return true;
 }
 
+int StrategyBridge::liquidateAll(const QString& strategyId)
+{
+    const QString repositoryId = strategyId.trimmed();
+    if (repositoryId.isEmpty()) {
+        setErr(QStringLiteral("liquidateAll strategyId is invalid"));
+        return -1;
+    }
+    init();
+    if (!m_inited) return -1;
+
+    auto* engine = domain::strategy::StrategyManager::instance().get(repositoryId.toStdString());
+    if (!engine) {
+        setErr(QStringLiteral("策略未找到"));
+        return -1;
+    }
+
+    INTERNAL_WARN_STREAM << "[Live] 一键清仓: " << repositoryId.toStdString();
+    return engine->liquidateAll();
+}
+
 void StrategyBridge::setupLiveMarketView(const QString& strategyId, const QString& datasetJson)
 {
     const std::string id = strategyId.trimmed().toStdString();

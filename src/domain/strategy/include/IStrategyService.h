@@ -527,6 +527,10 @@ public:
     /// 由 DailyEodScheduler 触发，在专用线程中执行
     void evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
 
+    /// @brief 一键清仓：对所有持仓生成市价卖单，篮子提交
+    /// @return 生成的订单数量，-1 表示失败
+    int liquidateAll();
+
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
 
