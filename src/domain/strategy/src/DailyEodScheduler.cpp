@@ -8,7 +8,6 @@
 #include <ctime>
 #include <fstream>
 #include <string>
-#include <thread>
 
 namespace domain::strategy {
 
@@ -51,29 +50,7 @@ void DailyEodScheduler::start() {
         }
     }
 
-    // ── 兜底: 盘前启动时, 预计算到15:01的延迟 → 主动触发 ──
-    // gmsdk EOD 回调可能早于15:01(onEodTrigger 会过滤), 若窗口内不再回调则漏评
-    if (!isPreCloseWindow() && !isCompensationWindow()) {
-        int nowMin = getCurrentLocalMinutes();
-        if (nowMin < kPreCloseStart) {
-            int delayMin = kPreCloseStart - nowMin;
-            INTERNAL_INFO_STREAM << "[DailyEod] 距下单窗口还有 " << delayMin
-                << " 分钟, 将在 15:01 主动触发";
-            // 在策略线程上投递延迟任务
-            m_post([this, delayMin]() {
-                std::this_thread::sleep_for(
-                    std::chrono::minutes(delayMin));
-                auto today = getCurrentTradingDay();
-                std::string todayStr = std::to_string(today);
-                if (std::stoll(todayStr) > m_lastEvalDay) {
-                    INTERNAL_INFO_STREAM << "[DailyEod] 兜底触发: " << todayStr;
-                    doEvaluate(todayStr);
-                }
-            });
-        }
-    }
-
-    // 注册 MarketDataService EOD 回调
+    // 注册 MarketDataService EOD 回调 (gmsdk 15:00-15:30 触发, onEodTrigger 时间门控)
     if (!m_eodRegistered) {
         domain::market::MarketDataService::instance()
             .registerEndOfDayCallback([this](const std::string& tradingDay) {
