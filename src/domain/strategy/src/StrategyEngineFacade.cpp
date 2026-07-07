@@ -982,6 +982,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
     // Phase 2: 先卖 — 回笼现金, 风控检查使用实时现金快照
     // 风控使用初始持仓快照(positions), 组合层面规则可能低估已卖出仓位
     // ═══════════════════════════════════════════════════════════
+    std::vector<OrderRequest> basketOrders;
     for (auto& po : pendingOrders) {
         if (po.order.side() != engine::OrderSide::Sell) continue;
 
@@ -1013,7 +1014,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             RiskResult riskResult = RiskManager::instance().checkAutoSignal(
                 po.order, tmpAccount, positions, po.tickPrice, po.signalScore);
             if (riskResult.approved()) {
-                m_orderListener->onOrders({po.order});
+                basketOrders.push_back(po.order);
                 remainingCash += cashBack;
                 posQtyMap[code] = 0;
                 m_liquidationBlocklist.insert(code);  // 当日已清仓, 禁止再次买入
@@ -1099,7 +1100,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
                 RiskResult riskResult = RiskManager::instance().checkAutoSignal(
                     po.order, tmpAccount, positions, po.tickPrice, po.signalScore);
                 if (riskResult.approved()) {
-                    m_orderListener->onOrders({po.order});
+                    basketOrders.push_back(po.order);
                     remainingCash += cashBack;
                     ordersGenerated++;
                     INTERNAL_INFO_STREAM << "[StrategyEngine] REDUCE: " << po.order.symbol()
@@ -1150,7 +1151,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             RiskResult riskResult = RiskManager::instance().checkAutoSignal(
                 po.order, tmpAccount, positions, po.tickPrice, po.signalScore);
             if (riskResult.approved()) {
-                m_orderListener->onOrders({po.order});
+                basketOrders.push_back(po.order);
                 remainingCash -= finalCashNeeded;
                 ordersGenerated++;
                 INTERNAL_INFO_STREAM << "[StrategyEngine] " << intentLabel << ": "
@@ -1167,6 +1168,13 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
             INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD " << intentLabel
                 << " exception: " << po.order.symbol() << " " << e.what();
         }
+    }
+
+    // ── 篮子提交: 所有订单一次性发出 ──
+    if (!basketOrders.empty() && m_orderListener) {
+        m_orderListener->onOrders(basketOrders);
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 篮子提交: " << basketOrders.size()
+                             << " 笔订单";
     }
 
     m_lastProcessedAt.store(
