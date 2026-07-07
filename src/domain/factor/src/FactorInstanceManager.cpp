@@ -317,11 +317,9 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::listAvailableInstances() 
 std::vector<FactorInstanceInfo> FactorInstanceManager::listAllInstances() {
     std::lock_guard<std::mutex> lock(cacheMutex_);
 
-    // 延迟加载: QML 因子选择窗口需要全量列表
-    if (infoCache_.empty()) {
-        auto all = loadAllInstancesFromDB();
-        for (auto& info : all) infoCache_[info.instanceId] = info;
-    }
+    // 全量加载: 必须从 DB 拉取, infoCache_ 可能只有部分条目
+    auto all = loadAllInstancesFromDB();
+    for (auto& info : all) infoCache_[info.instanceId] = info;
 
     std::vector<FactorInstanceInfo> allInstances;
     allInstances.reserve(infoCache_.size());
