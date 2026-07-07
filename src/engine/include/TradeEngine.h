@@ -16,6 +16,7 @@ public:
     bool initialized() const;
 
     OrderResult submitOrder(const OrderRequest& req);
+    std::vector<OrderResult> submitBatch(const std::vector<OrderRequest>& reqs);
     bool        cancelOrder(const std::string& brokerOrderId);
 
     using OrderUpdateFn = std::function<void(const OrderUpdate&)>;

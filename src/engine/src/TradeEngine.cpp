@@ -145,6 +145,65 @@ bool TradeEngine::cancelOrder(const std::string& brokerOrderId) {
     return true;
 }
 
+std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest>& reqs) {
+    std::vector<OrderResult> results;
+    if (reqs.empty()) return results;
+
+    auto* s = static_cast<::Strategy*>(m_strategy);
+    if (!s) {
+        for (size_t i = 0; i < reqs.size(); ++i) {
+            OrderResult r; r.message = "TradeEngine not initialized"; results.push_back(r);
+        }
+        return results;
+    }
+
+    // 转换为 gmsdk 原生结构体数组
+    std::vector<::OrderRequest> gmReqs(reqs.size());
+    std::vector<std::string> gmSyms(reqs.size());
+    for (size_t i = 0; i < reqs.size(); ++i) {
+        auto& gmReq = gmReqs[i];
+        std::memset(&gmReq, 0, sizeof(gmReq));
+        gmSyms[i] = toGm(reqs[i].symbol());
+        if (gmSyms[i].empty()) continue;
+        std::strncpy(gmReq.symbol, gmSyms[i].c_str(), sizeof(gmReq.symbol) - 1);
+        gmReq.side       = toGmSide(reqs[i].side());
+        gmReq.volume     = static_cast<double>(reqs[i].quantity());
+        gmReq.price      = reqs[i].price();
+        gmReq.order_type = reqs[i].orderType() == OrderType::Market
+            ? 1 : 2;  // 1=市价, 2=限价
+        gmReq.position_effect = toGmPositionEffect(reqs[i].positionEffect());
+    }
+
+    // 调用掘金原生批量下单
+    auto* gmResults = s->order_batch(gmReqs.data(), static_cast<int>(gmReqs.size()),
+                                      reqs[0].accountId().empty() ? NULL : reqs[0].accountId().c_str());
+
+    if (!gmResults) {
+        for (size_t i = 0; i < reqs.size(); ++i) {
+            OrderResult r; r.message = "order_batch returned null"; results.push_back(r);
+        }
+        return results;
+    }
+
+    for (int i = 0; i < gmResults->count(); ++i) {
+        OrderResult r;
+        auto& gm = gmResults->at(i);
+        if (gm.cl_ord_id[0]) {
+            r.brokerOrderId = gm.cl_ord_id;
+            r.accepted = true;
+        } else {
+            auto err = s->get_last_error_detail();
+            r.message = (err && err[0]) ? err : "order_batch rejected";
+        }
+        results.push_back(r);
+    }
+    gmResults->release();
+
+    INTERNAL_INFO_STREAM << "[TradeEngine] order_batch: " << results.size()
+                         << " submitted, " << reqs.size() << " requested";
+    return results;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 回调
 // ═══════════════════════════════════════════════════════════════════

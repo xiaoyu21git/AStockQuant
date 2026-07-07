@@ -285,6 +285,9 @@ public:
     SubmitResult submitOrder(const TradeOrder& order);  // 自动构建 RiskInput
     SubmitResult submitOrder(const TradeOrder& order, const strategy::RiskInput& riskContext);
     bool cancelOrder(BrokerOrderId brokerOrderId);
+    // ── 篮子委托辅助 ──
+    TradeOrder buildTradeOrder(const strategy::OrderRequest& req) const;
+    strategy::RiskInput buildRiskInput(const TradeOrder& order) const;
 
     // ── Queries ──
     [[nodiscard]] const std::vector<TradeOrder>& recentOrders() const noexcept;

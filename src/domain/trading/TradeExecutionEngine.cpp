@@ -542,62 +542,137 @@ void TradeExecutionEngine::setOnOrderGenerated(OrderGeneratedHandler h) { m_onOr
 void TradeExecutionEngine::setOnOrderSubmitResult(OrderSubmitResultHandler h) { m_onOrderSubmitResult = std::move(h); }
 
 void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& orders) {
-    INTERNAL_INFO_STREAM << "[TradeExec] onOrders received " << orders.size() << " orders from strategy";
-    for (const auto& req : orders) {
-        if (!req.isValid()) { INTERNAL_WARN_STREAM << "[TradeExec] onOrders skip invalid"; continue; }
-        INTERNAL_INFO_STREAM << "[TradeExec] onOrders order: symbol=" << req.symbol()
-                             << " side=" << (req.side() == OrderSide::Buy ? "B" : "S")
-                             << " qty=" << req.quantity() << " price=" << req.price()
-                             << " clOrdId=" << req.clOrdId();
+    if (orders.empty()) return;
 
-        TradeOrder order;
-        order.setSymbol(req.symbol());
-        order.setSide(req.side() == OrderSide::Buy
-                          ? strategy::OrderDirection::Buy
-                          : strategy::OrderDirection::Sell);
-        order.setQuantity(static_cast<std::int64_t>(req.quantity()));
-        order.setStrategyId(req.strategyId());
-        order.setPrice(req.price());
-        order.setSignalStrength(
-            req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
-        order.setOrderType(req.orderType());
-        order.setClOrdId(req.clOrdId());
-        order.setAccountId(req.accountId());
-        order.setCurrency(req.currency());
-        order.setExchange(req.exchange());
-        order.setPositionEffect(
-            static_cast<strategy::PositionEffect>(req.positionEffect()));
-
+    // 单条走快速路径
+    if (orders.size() == 1) {
+        auto& req = orders[0];
+        if (!req.isValid()) return;
+        TradeOrder order = buildTradeOrder(req);
         if (m_onOrderGenerated) m_onOrderGenerated(order);
-
-        strategy::RiskInput risk;
-        risk.setStrategyId(order.strategyId());
-        risk.setSymbol(order.symbol());
-        risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
-        risk.setPrice(order.price());
-        risk.setQuantity(order.quantity());
-        risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
-        risk.setStrategyBound(true);
-        risk.setStrategyActive(true);
-        risk.setAutoStrategySignal(true);
-        risk.setPositionSnapshotReady(true);
-        risk.setTradingSessionOpen(true);
-        // 卖出单：从 AccountEngine 获取可卖量
-        if (!risk.isBuyOrder()) {
-            auto& accEng = engine::AccountEngine::instance();
-            for (const auto& pos : accEng.positions()) {
-                if (pos.symbol == order.symbol()) {
-                    risk.setCloseableQuantity(pos.availableQty);
-                    break;
-                }
-            }
-        }
-        // 应用风控配置 (否则 maxPositionPercent=0 会拦截所有买单)
-        strategy::RiskEvaluator::applyConfig(risk, domain::strategy::RiskManager::instance().riskConfig());
-
+        auto risk = buildRiskInput(order);
         auto result = submitOrder(order, risk);
         if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+        return;
     }
+
+    // ── 篮子委托: 先卖后买, 卖款回笼支撑买单 ──
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子委托: " << orders.size() << " 笔";
+
+    // 拆分为卖单和买单
+    std::vector<TradeOrder> sells, buys;
+    for (const auto& req : orders) {
+        if (!req.isValid()) continue;
+        auto order = buildTradeOrder(req);
+        if (order.side() == strategy::OrderDirection::Sell)
+            sells.push_back(std::move(order));
+        else
+            buys.push_back(std::move(order));
+    }
+
+    // 获取当前可用现金
+    auto& accEng = engine::AccountEngine::instance();
+    auto account = accEng.account();
+    double cashAvailable = account.availableCash;
+
+    int submitted = 0, rejected = 0;
+
+    // ── 阶段1: 先卖 — 释放现金 ──
+    for (auto& order : sells) {
+        if (m_onOrderGenerated) m_onOrderGenerated(order);
+        auto risk = buildRiskInput(order);
+        auto result = submitOrder(order, risk);
+        if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+        if (result.succeeded()) {
+            cashAvailable += order.price() * static_cast<double>(order.quantity());
+            ++submitted;
+        } else {
+            ++rejected;
+        }
+    }
+
+    // ── 阶段2: 后买 — 现金约束 ──
+    for (auto& order : buys) {
+        double cost = order.price() * static_cast<double>(order.quantity());
+        if (cost > cashAvailable && cashAvailable > 0) {
+            // 缩量到可承受手数 (A股100股=1手)
+            auto newQty = static_cast<std::int64_t>(
+                cashAvailable / order.price() / 100.0) * 100;
+            if (newQty < 100) {
+                INTERNAL_WARN_STREAM << "[TradeExec] 篮子买单现金不足: "
+                    << order.symbol() << " need=" << static_cast<int64_t>(cost)
+                    << " cash=" << static_cast<int64_t>(cashAvailable) << " 跳过";
+                ++rejected;
+                continue;
+            }
+            order.setQuantity(newQty);
+            cost = order.price() * static_cast<double>(newQty);
+            INTERNAL_INFO_STREAM << "[TradeExec] 篮子买单缩量: "
+                << order.symbol() << " qty=" << newQty;
+        }
+
+        if (m_onOrderGenerated) m_onOrderGenerated(order);
+        auto risk = buildRiskInput(order);
+        auto result = submitOrder(order, risk);
+        if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+        if (result.succeeded()) {
+            cashAvailable -= cost;
+            ++submitted;
+        } else {
+            ++rejected;
+        }
+    }
+
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子完成: " << submitted
+                         << " 提交 " << rejected << " 拒绝";
+}
+
+TradeOrder TradeExecutionEngine::buildTradeOrder(const strategy::OrderRequest& req) const {
+    TradeOrder order;
+    order.setSymbol(req.symbol());
+    order.setSide(req.side() == OrderSide::Buy
+                      ? strategy::OrderDirection::Buy
+                      : strategy::OrderDirection::Sell);
+    order.setQuantity(static_cast<std::int64_t>(req.quantity()));
+    order.setStrategyId(req.strategyId());
+    order.setPrice(req.price());
+    order.setSignalStrength(
+        req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
+    order.setOrderType(req.orderType());
+    order.setClOrdId(req.clOrdId());
+    order.setAccountId(req.accountId());
+    order.setCurrency(req.currency());
+    order.setExchange(req.exchange());
+    order.setPositionEffect(
+        static_cast<strategy::PositionEffect>(req.positionEffect()));
+    return order;
+}
+
+strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order) const {
+    strategy::RiskInput risk;
+    risk.setStrategyId(order.strategyId());
+    risk.setSymbol(order.symbol());
+    risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
+    risk.setPrice(order.price());
+    risk.setQuantity(order.quantity());
+    risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
+    risk.setStrategyBound(true);
+    risk.setStrategyActive(true);
+    risk.setAutoStrategySignal(true);
+    risk.setPositionSnapshotReady(true);
+    risk.setTradingSessionOpen(true);
+    if (!risk.isBuyOrder()) {
+        auto& accEng = engine::AccountEngine::instance();
+        for (const auto& pos : accEng.positions()) {
+            if (pos.symbol == order.symbol()) {
+                risk.setCloseableQuantity(pos.availableQty);
+                break;
+            }
+        }
+    }
+    strategy::RiskEvaluator::applyConfig(risk,
+        domain::strategy::RiskManager::instance().riskConfig());
+    return risk;
 }
 
 // ============================================================================
