@@ -127,21 +127,37 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     Order gm = s->place_order(gmReq, req.accountId().c_str());
     if (gm.cl_ord_id[0]) {
         r.brokerOrderId = gm.cl_ord_id; r.accepted = true;
-        INTERNAL_INFO_STREAM << "[TradeEngine] place_order OK clOrdId=" << gm.cl_ord_id;
+        if (!req.clOrdId().empty()) {
+            std::lock_guard<std::mutex> lk(m_ordersMutex);
+            m_activeOrders[req.clOrdId()] = {req.clOrdId(), gm.cl_ord_id,
+                std::chrono::steady_clock::now(), false};
+        }
     } else {
         auto err = s->get_last_error_detail();
         r.message = (err && err[0]) ? err : "place_order rejected";
-        INTERNAL_ERROR_STREAM << "[TradeEngine] place_order FAILED: " << r.message;
     }
     return r;
 }
 
-bool TradeEngine::cancelOrder(const std::string& brokerOrderId) {
-    if (brokerOrderId.empty()) return false;
+bool TradeEngine::cancelOrder(const std::string& clOrdId) {
+    if (clOrdId.empty()) return false;
     auto* s = static_cast<::Strategy*>(m_strategy);
     if (!s) return false;
-    // order_cancel(cl_ord_id, account) — account=NULL 使用策略默认账户
-    s->order_cancel(brokerOrderId.c_str(), NULL);
+
+    std::string brokerId;
+    {
+        std::lock_guard<std::mutex> lk(m_ordersMutex);
+        auto it = m_activeOrders.find(clOrdId);
+        if (it == m_activeOrders.end()) return false;
+        brokerId = it->second.brokerOrderId;
+    }
+
+    s->order_cancel(brokerId.c_str(), NULL);
+    {
+        std::lock_guard<std::mutex> lk(m_ordersMutex);
+        m_activeOrders.erase(clOrdId);
+    }
+    INTERNAL_INFO_STREAM << "[TradeEngine] cancel: " << clOrdId;
     return true;
 }
 
@@ -191,6 +207,11 @@ std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest
         if (gm.cl_ord_id[0]) {
             r.brokerOrderId = gm.cl_ord_id;
             r.accepted = true;
+            if (i < static_cast<int>(reqs.size()) && !reqs[i].clOrdId().empty()) {
+                std::lock_guard<std::mutex> lk(m_ordersMutex);
+                m_activeOrders[reqs[i].clOrdId()] = {reqs[i].clOrdId(), gm.cl_ord_id,
+                    std::chrono::steady_clock::now(), false};
+            }
         } else {
             auto err = s->get_last_error_detail();
             r.message = (err && err[0]) ? err : "order_batch rejected";
@@ -204,6 +225,66 @@ std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest
     return results;
 }
 
+std::vector<OrderResult> TradeEngine::submitSplit(const OrderRequest& req, SplitSpec spec) {
+    std::vector<OrderResult> results;
+    if (req.quantity() <= 0 || spec.chunkSize <= 0) return results;
+
+    int64_t remaining = static_cast<int64_t>(req.quantity());
+    while (remaining > 0) {
+        int64_t chunk = (std::min)(static_cast<int64_t>(spec.chunkSize), remaining);
+        OrderRequest sub = req;
+        sub.setQuantity(static_cast<double>(chunk));
+        auto r = submitOrder(sub);
+        results.push_back(r);
+        remaining -= chunk;
+        if (remaining > 0)
+            std::this_thread::sleep_for(std::chrono::milliseconds(spec.intervalMs));
+    }
+
+    INTERNAL_INFO_STREAM << "[TradeEngine] split: " << results.size()
+                         << " chunks, total qty=" << req.quantity();
+    return results;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 自动撤单
+// ═══════════════════════════════════════════════════════════════════
+
+void TradeEngine::setAutoCancelTimeout(std::chrono::milliseconds timeout) {
+    m_autoCancelTimeout = timeout;
+}
+
+void TradeEngine::startAutoCancel() {
+    if (m_autoCancelRunning.load() || m_autoCancelTimeout.count() <= 0) return;
+    m_autoCancelRunning.store(true);
+    m_autoCancelThread = std::make_unique<std::thread>([this]() {
+        while (m_autoCancelRunning.load()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+            auto now = std::chrono::steady_clock::now();
+            std::vector<std::string> toCancel;
+            {
+                std::lock_guard<std::mutex> lk(m_ordersMutex);
+                for (auto& [id, rec] : m_activeOrders) {
+                    if (!rec.filled && (now - rec.submitTime) > m_autoCancelTimeout) {
+                        toCancel.push_back(id);
+                    }
+                }
+            }
+            for (auto& id : toCancel) {
+                cancelOrder(id);
+            }
+        }
+    });
+    INTERNAL_INFO_STREAM << "[TradeEngine] 自动撤单已启动 timeout="
+                         << m_autoCancelTimeout.count() << "ms";
+}
+
+void TradeEngine::stopAutoCancel() {
+    m_autoCancelRunning.store(false);
+    if (m_autoCancelThread && m_autoCancelThread->joinable())
+        m_autoCancelThread->join();
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // 回调
 // ═══════════════════════════════════════════════════════════════════
@@ -212,9 +293,30 @@ void TradeEngine::setOnOrderUpdate(OrderUpdateFn cb) { m_onOrderUpdate = std::mo
 void TradeEngine::setOnTradeFill(TradeFillFn cb)     { m_onTradeFill   = std::move(cb); }
 
 void TradeEngine::onOrderStatus(const OrderUpdate& u) {
+    // 标记成交或终态订单, 从活跃列表移除
+    if (u.status == OrderUpdate::Status::Filled
+        || u.status == OrderUpdate::Status::Rejected
+        || u.status == OrderUpdate::Status::Cancelled) {
+        std::lock_guard<std::mutex> lk(m_ordersMutex);
+        for (auto it = m_activeOrders.begin(); it != m_activeOrders.end(); ) {
+            if (it->second.brokerOrderId == u.brokerOrderId) {
+                it = m_activeOrders.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
     if (m_onOrderUpdate) m_onOrderUpdate(u);
 }
+
 void TradeEngine::onTradeFill(const TradeFill& f) {
+    // 标记已成交
+    {
+        std::lock_guard<std::mutex> lk(m_ordersMutex);
+        for (auto& [id, rec] : m_activeOrders) {
+            if (rec.brokerOrderId == f.brokerOrderId) rec.filled = true;
+        }
+    }
     if (m_onTradeFill) m_onTradeFill(f);
 }
 
