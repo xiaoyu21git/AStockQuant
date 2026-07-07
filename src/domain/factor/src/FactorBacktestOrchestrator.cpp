@@ -186,9 +186,8 @@ void FactorBacktestOrchestrator::run(
 
                     if (isSymInfo) {
                         auto rows = db->executeQuery(
-                            "SELECT s.symbol, ic." + field
-                            + " FROM ref.symbol_info s"
-                            + " LEFT JOIN ref.industry_classification ic ON ic.symbol_id = s.id AND ic.end_date IS NULL");
+                            "SELECT s.symbol, s." + field
+                            + " FROM ref.symbol_info s");
                         for (std::size_t i = 0; i < rows.rowCount(); ++i) {
                             auto row = rows.getRow(i);
                             std::string sym = row.getString("symbol");

@@ -68,7 +68,7 @@ inline const std::unordered_set<std::string>& numeric() {
 }
 inline std::string sqlSelect() {
     return "s.name,s.exchange,"
-           "ic.industry_code,"
+           "s.industry_code,"
            "s.list_date,s.delist_date,s.status";
 }
 } // namespace symbol_info_columns
