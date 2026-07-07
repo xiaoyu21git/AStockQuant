@@ -236,6 +236,8 @@ void DailyEodScheduler::persistLastEvalDay() {
         f << m_lastEvalDay << "\n";
         f.close();
     }
+    // Windows rename 不覆盖已有文件, 先删再rename
+    std::remove(m_persistPath.c_str());
     if (std::rename(tmpPath.c_str(), m_persistPath.c_str()) != 0) {
         INTERNAL_WARN_STREAM << "[DailyEod] 持久化文件重命名失败: " << m_persistPath;
     }
