@@ -89,7 +89,14 @@ std::shared_ptr<arrow::Table> buildArrowTable(
             for (const auto& row : rows) {
                 if (row.isObject() && row.has(fname.c_str())) {
                     auto v = row.get(fname.c_str());
-                    builder.Append(v.isNumber() ? v.asDouble() : std::numeric_limits<double>::quiet_NaN());
+                    if (v.isNumber()) {
+                        builder.Append(v.asDouble());
+                    } else if (v.isString()) {
+                        try { builder.Append(std::stod(v.asString())); }
+                        catch (...) { builder.Append(std::numeric_limits<double>::quiet_NaN()); }
+                    } else {
+                        builder.Append(std::numeric_limits<double>::quiet_NaN());
+                    }
                 } else {
                     builder.AppendNull();
                 }
