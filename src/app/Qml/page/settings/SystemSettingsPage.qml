@@ -242,6 +242,7 @@ Item {
                         Text { text: "盘后数据同步"; font.pixelSize: 14; color: "#E2E8F0" }
                         Item { Layout.fillWidth: true }
                         Button { text: "立即同步"; onClicked: syncResult.text = marketDataService ? marketDataService.forceSyncToday() : "Bridge未就绪" }
+                        Button { text: "补复权因子"; onClicked: syncResult.text = marketDataService ? marketDataService.fillAdjFactors() : "Bridge未就绪" }
                     }
                     Text { id: syncResult; Layout.fillWidth: true; font.pixelSize: 12; color: "#94A3B8" }
                     Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: 13; color: "#94A3B8"

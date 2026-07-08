@@ -205,7 +205,7 @@ void PostMarketSyncService::syncAll(int tradingDay) {
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (db && db->isOpen()) {
             auto r = db->executeQuery(
-                "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1",
+                "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
                 {astock::database::SqlParam{std::string(ds)}});
             if (r.rowCount() > 0 && r.getRow(0).getInt(0) > 0) {
                 INTERNAL_INFO_STREAM << "[PostMktSync] today=" << tradingDay << " 已有数据, 跳过同步";
@@ -497,7 +497,7 @@ bool PostMarketSyncService::isTradingDay(int date) {
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (db && db->isOpen()) {
         auto r = db->executeQuery(
-            "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1",
+            "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1::date",
             {astock::database::SqlParam{date}});
         if (r.rowCount() > 0) return r.getRow(0).getInt("is_trading_day") == 1;
     }
