@@ -43,7 +43,7 @@
 | `list_date` | `date` | | 上市日期 |
 | `delist_date` | `date` | | 退市日期 |
 | `status` | `varchar(20)` | NOT NULL | ACTIVE / DELISTED / ST / \*ST / SUSPENDED |
-| `industry` | `varchar(100)` | | 行业名称 |
+| `industry_code` | `varchar(100)` | | 行业代码 |
 | `created_at` | `timestamptz` | DEFAULT now() | |
 | `updated_at` | `timestamptz` | DEFAULT now() | |
 

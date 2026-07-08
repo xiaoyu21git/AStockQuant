@@ -106,6 +106,10 @@ public:
     void shutdown();
     bool initialized() const;
 
+    // ── 交易时段查询（零副作用，纯基于系统时钟）──
+    bool isAfterHoursSession() const;  // 15:05-15:30
+    bool isInLockPeriod() const;       // 15:00-15:05
+
     // ── 行情订阅 ──
     void subscribeTick(const std::string& symbol);
     void unsubscribeTick(const std::string& symbol);

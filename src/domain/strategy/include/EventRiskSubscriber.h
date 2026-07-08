@@ -18,14 +18,17 @@ namespace domain::strategy {
 ///   - ST 警示   → 封禁开仓 + 降仓位上限 (10% → 2%)
 ///   - 政策负面  → 降总敞口 (100% → 80%)
 ///
-/// 生命周期: StrategyEngine::startLiveLoop() 创建并启动
+/// 生命周期: AppBootstrap 启动时创建，全局单例
 /// 解禁逻辑: T+1 自动解禁 (evaluateEndOfDay 入口清空)
 class EventRiskSubscriber final {
 public:
+    static EventRiskSubscriber& instance();
+
     EventRiskSubscriber();
     ~EventRiskSubscriber();
 
     // ── 生命周期 ──
+    bool isStarted() const { return m_bus != nullptr; }
     void start();
     void stop();
 

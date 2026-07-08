@@ -41,7 +41,7 @@ public:
     static bool isPriceAtLimit(double currentPrice, double preClose, bool isBuy);
 
 private:
-    RiskManager() = default;
+    RiskManager() : m_config(RiskConfig::defaults()) {}
     RiskConfig m_config;
 };
 

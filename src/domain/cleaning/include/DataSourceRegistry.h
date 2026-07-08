@@ -287,13 +287,21 @@ public:
     }
 
     std::string buildDataQuery(const std::string& start, const std::string& end,
-                               const std::vector<std::string>&) const override {
+                               const std::vector<std::string>& symbols) const override {
         // 显式列出 25 列，禁止 fi.*
         std::ostringstream sql;
         sql << "SELECT " << financial_columns::sqlSelect()
             << " FROM fund.financial_indicator_daily fi"
             << " JOIN ref.symbol_info si ON fi.symbol_id = si.id"
             << " WHERE fi.report_date BETWEEN '" << start << "' AND '" << end << "'";
+        if (!symbols.empty() && symbols.size() <= 2000) {
+            sql << " AND si.symbol IN (";
+            for (size_t i = 0; i < symbols.size(); ++i) {
+                if (i > 0) sql << ",";
+                sql << "'" << symbols[i] << "'";
+            }
+            sql << ")";
+        }
         return sql.str();
     }
 

@@ -77,6 +77,10 @@ public:
 
     // ── 盘后数据同步 ──
     Q_INVOKABLE QString forceSyncToday();
+    Q_INVOKABLE QString forceSyncDate(int tradingDay);  // tradingDay 格式: YYYYMMDD
+    Q_INVOKABLE QString forceSyncMissingDays(int lookbackDays = 30);  // 自动补齐近N天缺口
+    Q_INVOKABLE QString probeGmCoverage(const QString& symbol, const QVariantList& dates);  // 探测掘金覆盖
+    Q_INVOKABLE QString fillAdjFactors();  // 补全复权因子
 
     // ── Domain 工具方法 ──
     Q_INVOKABLE int priceDigitsForMode(const QString& mode) const;

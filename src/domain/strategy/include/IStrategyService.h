@@ -460,7 +460,8 @@ public:
     /// @brief 从数据库通过 strategyId 加载参数并构建引擎（接管 factorSvc 所有权）
     /// @param factorSvc 因子服务 (unique_ptr, 传 nullptr 则只支持非因子策略)
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId,
-                                                                 std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr);
+                                                                 std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr,
+                                                                 IRuntimeOrderSink* orderSink = nullptr);
 
     /// @brief 从策略参数构建完整的引擎实例
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromParams(const StrategyCreationParams& params);
@@ -525,7 +526,8 @@ public:
     /// @param tradingDay 评估目标交易日
     /// @param isCompensation true=补单(历史收盘价), false=实时(当日 tick 价)
     /// 由 DailyEodScheduler 触发，在专用线程中执行
-    void evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
+    /// @return 评估结果状态，用于决定是否持久化 lastEvalDay
+    EodEvaluationStatus evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
 
     /// @brief 一键清仓：对所有持仓生成市价卖单，篮子提交
     /// @return 生成的订单数量，-1 表示失败
@@ -602,7 +604,6 @@ private:
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
-    std::unique_ptr<class EventRiskSubscriber> m_eventRiskSubscriber;  ///< 金融事件风控订阅器
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
 };

@@ -10,6 +10,7 @@ add_library(domain_trading STATIC
     src/ExecutionCheckpointManager.cpp
     src/ExecutionSchedulingEngine.cpp
     src/OrderSubmissionPipeline.cpp
+    src/TradingSystem.cpp
 )
 
 target_include_directories(domain_trading

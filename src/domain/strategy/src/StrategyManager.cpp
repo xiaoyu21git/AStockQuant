@@ -15,9 +15,10 @@ StrategyManager& StrategyManager::instance() {
 }
 
 StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
-                                               std::unique_ptr<IRuntimeFactorService> factorSvc) {
+                                               std::unique_ptr<IRuntimeFactorService> factorSvc,
+                                               IRuntimeOrderSink* orderSink) {
     INTERNAL_INFO_STREAM << "[SM] createEngine: id=" << strategyId << " factorSvc=" << static_cast<void*>(factorSvc.get());
-    auto engine = StrategyEngine::fromDb(strategyId, std::move(factorSvc));
+    auto engine = StrategyEngine::fromDb(strategyId, std::move(factorSvc), orderSink);
     INTERNAL_INFO_STREAM << "[SM] createEngine: fromDb returned engine=" << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
 
@@ -145,7 +146,7 @@ StrategyEngine* StrategyManager::getOrCreateEngine(const std::string& strategyId
     // 创建因子服务（如果 FactorInstanceManager 已注入）
     std::unique_ptr<IRuntimeFactorService> factorSvc = createFactorService();
 
-    return createEngine(strategyId, std::move(factorSvc));
+    return createEngine(strategyId, std::move(factorSvc), m_defaultOrderSink);
 }
 
 void StrategyManager::startStrategy(const std::string& strategyId)

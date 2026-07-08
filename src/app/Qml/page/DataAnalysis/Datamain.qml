@@ -5,6 +5,7 @@ import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 import AStock.Bridge 1.0
 import "../../components/DataAnalysis" as DataAnalysisComponents
+import "../../components" as SharedComponents
 
 Item {
     id: root
@@ -323,6 +324,7 @@ Item {
                 font.bold: true
                 color: "white"
             }
+
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true

@@ -87,7 +87,8 @@ std::vector<std::string> parseFactorIds(const std::string& json) {
 } // anonymous namespace
 
 std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId,
-                                                         std::unique_ptr<IRuntimeFactorService> factorSvc)
+                                                         std::unique_ptr<IRuntimeFactorService> factorSvc,
+                                                         IRuntimeOrderSink* orderSink)
 {
     try {
     auto& pool = astock::database::NativePgConnectionPool::instance();
@@ -163,6 +164,9 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
             rfsPtr->setFactorIds(params.factorIds);
         }
         engineBuilder.withFactorService(std::move(factorSvc));
+    }
+    if (orderSink) {
+        engineBuilder.withOrderSink(*orderSink);
     }
     INTERNAL_INFO_STREAM << "[fromDb] building engine...";
     auto engine = engineBuilder
@@ -568,8 +572,8 @@ void StrategyEngine::startLiveLoop()
                 persistPath
             );
             m_dailyScheduler->setEvalCallback(
-                [this](const std::string& tradingDay, bool isCompensation) {
-                    evaluateEndOfDay(tradingDay, isCompensation);
+                [this](const std::string& tradingDay, bool isCompensation) -> EodEvaluationStatus {
+                    return evaluateEndOfDay(tradingDay, isCompensation);
                 });
             m_dailyScheduler->start();
         }
@@ -582,11 +586,7 @@ void StrategyEngine::startLiveLoop()
         });
     }
 
-    // ── 启动金融事件风控订阅器 (日频/高频通用) ──
-    if (!m_eventRiskSubscriber) {
-        m_eventRiskSubscriber = std::make_unique<EventRiskSubscriber>();
-        m_eventRiskSubscriber->start();
-    }
+    // ── 金融事件风控订阅器在 AppBootstrap 已全局启动，此处无需操作 ──
 }
 
 void StrategyEngine::stopLiveLoop()
@@ -601,9 +601,7 @@ void StrategyEngine::stopLiveLoop()
     if (m_dailyScheduler) {
         m_dailyScheduler->stop();
     }
-    if (m_eventRiskSubscriber) {
-        m_eventRiskSubscriber->stop();
-    }
+    // 风控订阅器全局单例，不在此停止
 
     if (m_dedicatedExecutor) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] 等待专用线程退出(最多5s)...";
@@ -829,7 +827,7 @@ void StrategyEngine::drainQueue()
 // evaluateEndOfDay — 日频策略盘后评估: 当日 Bar 已封口, 跑一次完整策略
 // ═════════════════════════════════════════════════════════════════════════
 
-void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isCompensation)
+EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isCompensation)
 {
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 tradingDay=" << tradingDay
                          << " isCompensation=" << isCompensation;
@@ -850,24 +848,24 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
         if (tradingDaysSince < m_rebalanceInterval) {
             INTERNAL_INFO_STREAM << "[StrategyEngine] 非调仓日: 距上次调仓 "
                 << tradingDaysSince << "/" << m_rebalanceInterval << " 交易日, 跳过";
-            return;
+            return EodEvaluationStatus::Skipped;
         }
     }
 
     if (m_isBacktestMode.load(std::memory_order_acquire)) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] 回测模式, 跳过日终评估";
-        return;
+        return EodEvaluationStatus::Skipped;
     }
     if (!m_orderListener) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] 无订单监听器, 日终评估跳过";
-        return;
+        return EodEvaluationStatus::Skipped;
     }
 
     // ── 从 MarketDataService 取所有已订阅标的 ──
     auto symbols = domain::market::MarketDataService::instance().symbols();
     if (symbols.empty()) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无订阅标的, 跳过";
-        return;
+        return EodEvaluationStatus::Skipped;
     }
 
     // 补单: tradingDay 转 "YYYY-MM-DD" 供 history_bars_n 用
@@ -895,7 +893,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
 
     if (account.totalAsset <= 0) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
-        return;
+        return EodEvaluationStatus::Skipped;
     }
 
     auto stripExchange = [](const std::string& sym) -> std::string {
@@ -933,8 +931,8 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
         }
         strategyService_->updateCurrentWeights(currentWeights);
     }
-    if (m_eventRiskSubscriber)
-        m_eventRiskSubscriber->clearBlockedSymbols();  // T+1 事件封禁解禁
+    if (EventRiskSubscriber::instance().isStarted())
+        EventRiskSubscriber::instance().clearBlockedSymbols();  // T+1 事件封禁解禁
     // 买单资金按 pendingOrders 中顺序分配(先到先得),
     // 策略信号已按信号强度排序, 核心标的优先获得资金
 
@@ -981,8 +979,8 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
 
         try {
             // Phase 1 预过滤: 跳过事件风控封禁的标的
-            if (m_eventRiskSubscriber &&
-                m_eventRiskSubscriber->blockedSymbols().count(
+            if (EventRiskSubscriber::instance().isStarted() &&
+                EventRiskSubscriber::instance().blockedSymbols().count(
                     stripExchange(sym))) {
                 INTERNAL_INFO_STREAM
                     << "[StrategyEngine] EOD Phase1 skip blocked: " << sym;
@@ -1026,6 +1024,7 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
     // Phase 2: 先卖 — 回笼现金, 风控检查使用实时现金快照
     // 风控使用初始持仓快照(positions), 组合层面规则可能低估已卖出仓位
     // ═══════════════════════════════════════════════════════════
+    int totalGenerated = static_cast<int>(pendingOrders.size());  // Phase 1 收集的订单总数
     std::vector<OrderRequest> basketOrders;
     for (auto& po : pendingOrders) {
         if (po.order.side() != engine::OrderSide::Sell) continue;
@@ -1100,8 +1099,8 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
         }
 
         // 事件风控封禁: 负面事件触发封禁的标的
-        if (m_eventRiskSubscriber &&
-            m_eventRiskSubscriber->blockedSymbols().count(code)) {
+        if (EventRiskSubscriber::instance().isStarted() &&
+            EventRiskSubscriber::instance().blockedSymbols().count(code)) {
             INTERNAL_INFO_STREAM << "[StrategyEngine] EOD buy blocked by event risk: "
                                  << po.order.symbol();
             continue;
@@ -1215,20 +1214,28 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
     }
 
     // ── 篮子提交: 所有订单一次性发出 ──
+    int totalSubmitted = 0;
     if (!basketOrders.empty() && m_orderListener) {
         m_orderListener->onOrders(basketOrders);
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 篮子提交: " << basketOrders.size()
+        totalSubmitted = static_cast<int>(basketOrders.size());
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 篮子提交: " << totalSubmitted
                              << " 笔订单";
     }
+    int totalRejected = totalGenerated - totalSubmitted;
 
     m_lastProcessedAt.store(
         std::chrono::steady_clock::now().time_since_epoch().count(),
         std::memory_order_release);
 
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成, 生成 "
-                         << ordersGenerated << " 笔信号";
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成"
+                         << " 信号=" << totalGenerated
+                         << " 提交=" << totalSubmitted
+                         << " 拒绝=" << totalRejected;
 
-    m_lastRebalanceDate = tradingDay;
+    // 只在成功提交后更新调仓日（避免 rejected 的订单被跳过）
+    if (totalSubmitted > 0) {
+        m_lastRebalanceDate = tradingDay;
+    }
 
     // ── 每日账户快照 ──
     {
@@ -1240,6 +1247,11 @@ void StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isComp
                 acc.realizedPnl, acc.unrealizedPnl);
         }
     }
+
+    // ── 返回篮子状态 ──
+    if (totalGenerated == 0) return EodEvaluationStatus::NoSignal;
+    if (totalSubmitted == 0) return EodEvaluationStatus::AllRejected;
+    return EodEvaluationStatus::Submitted;
 }
 
 StrategyEngine::Builder::Builder() = default;

@@ -590,6 +590,7 @@ StrategyServiceFlowResult StrategyService::flushPendingOrders()
             static_cast<double>(order.quantity()),
             static_cast<double>(order.side() == OrderSide::Buy ? 1 : -1)));
     }
+    pendingOrderBuffer_.clear();
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 

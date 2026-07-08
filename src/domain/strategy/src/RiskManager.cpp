@@ -180,11 +180,30 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions(domain::trading::
     auto positions = accEng.positions();
     if (positions.empty()) return orders;
 
+    static int patrolRound = 0;
+    if (++patrolRound == 1) {
+        INTERNAL_INFO_STREAM << "[RiskManager] 巡检启动, 持仓数=" << positions.size();
+        for (const auto& pos : positions) {
+            INTERNAL_INFO_STREAM << "[RiskManager]   持仓: " << pos.symbol
+                                 << " qty=" << pos.availableQty << " cost=" << pos.costPrice
+                                 << " last=" << pos.lastPrice;
+        }
+    }
+    static int skipLogCount = 0;
     for (const auto& pos : positions) {
-        if (pos.availableQty <= 0 || pos.costPrice <= 0) continue;
+        if (pos.availableQty <= 0 || pos.costPrice <= 0) {
+            if (++skipLogCount <= 5)
+                INTERNAL_INFO_STREAM << "[RiskManager] 跳过持仓(无成本): " << pos.symbol
+                                     << " qty=" << pos.availableQty << " cost=" << pos.costPrice;
+            continue;
+        }
 
         auto& d = domain::market::MarketDataService::instance().liveData(pos.symbol);
-        if (!d.valid()) continue;
+        if (!d.valid()) {
+            if (skipLogCount <= 5)
+                INTERNAL_INFO_STREAM << "[RiskManager] 跳过持仓(无行情): " << pos.symbol;
+            continue;
+        }
         double price = d.dailyBar().close();
         if (price <= 0) continue;
 

@@ -7,6 +7,7 @@
 #include "../../domain/market/include/MarketDataService.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
+#include <chrono>
 #include <cstdio>
 #include <ctime>
 
@@ -374,6 +375,34 @@ void GmSessionEngine::shutdown() {
 }
 
 bool GmSessionEngine::initialized() const { return m_impl && m_impl->initialized.load(); }
+
+// ── 交易时段查询（纯基于系统时钟 + 交易日历，零副作用）──
+
+bool GmSessionEngine::isAfterHoursSession() const {
+    auto now = std::chrono::system_clock::now();
+    auto tt = std::chrono::system_clock::to_time_t(now);
+    std::tm local;
+#ifdef _WIN32
+    localtime_s(&local, &tt);
+#else
+    localtime_r(&tt, &local);
+#endif
+    int minutes = local.tm_hour * 60 + local.tm_min;
+    return minutes >= 905 && minutes <= 930;  // 15:05-15:30
+}
+
+bool GmSessionEngine::isInLockPeriod() const {
+    auto now = std::chrono::system_clock::now();
+    auto tt = std::chrono::system_clock::to_time_t(now);
+    std::tm local;
+#ifdef _WIN32
+    localtime_s(&local, &tt);
+#else
+    localtime_r(&tt, &local);
+#endif
+    int minutes = local.tm_hour * 60 + local.tm_min;
+    return minutes >= 900 && minutes < 905;  // 15:00-15:05
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // 行情订阅

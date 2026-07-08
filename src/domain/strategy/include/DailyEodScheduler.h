@@ -9,11 +9,20 @@
 
 namespace domain::strategy {
 
+/// @brief 日终评估结果状态
+enum class EodEvaluationStatus {
+    Submitted,    // 篮子已提交，至少一笔订单成功发出
+    NoSignal,     // 策略评估后无交易信号
+    AllRejected,  // 有信号但全部被风控/资金拒绝
+    Skipped,      // 评估被跳过（非调仓日/回测/无标的）
+    Error         // 异常中断
+};
+
 class DailyEodScheduler {
 public:
-    /// @brief 策略评估回调 (tradingDay, isCompensation)
+    /// @brief 策略评估回调 (tradingDay, isCompensation) → 评估结果
     /// 所在线程: 策略专用线程
-    using EvalFn = std::function<void(const std::string& tradingDay, bool isCompensation)>;
+    using EvalFn = std::function<EodEvaluationStatus(const std::string& tradingDay, bool isCompensation)>;
 
     /// @brief 投递任务到策略线程
     using PostFn = std::function<void(std::function<void()>)>;

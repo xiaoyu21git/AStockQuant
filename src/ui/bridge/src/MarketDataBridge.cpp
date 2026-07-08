@@ -885,24 +885,35 @@ void MarketDataBridge::fetchSectorHeat() {
 }
 
 QString MarketDataBridge::forceSyncToday() {
-    int mins = 0;
-    {
-        auto now = std::chrono::system_clock::now();
-        auto tt = std::chrono::system_clock::to_time_t(now);
-        struct tm local;
-#if defined(_WIN32) || defined(_WIN64)
-        localtime_s(&local, &tt);
-#else
-        localtime_r(&tt, &local);
-#endif
-        mins = local.tm_hour * 60 + local.tm_min;
-    }
-    if (mins >= 565 && mins < 900)
-        return QStringLiteral("盘中禁止同步, 请15:00后操作");
-    static astock::infrastructure::database::PostMarketSyncService s;
+    auto& s = astock::infrastructure::database::PostMarketSyncService::instance();
     if (s.forceSyncToday())
         return QStringLiteral("同步已启动, 查看日志");
     return QStringLiteral("同步失败或已在运行中");
+}
+
+QString MarketDataBridge::forceSyncDate(int tradingDay) {
+    auto& s = astock::infrastructure::database::PostMarketSyncService::instance();
+    s.forceSyncDate(tradingDay);
+    return QStringLiteral("补同步已启动: %1").arg(tradingDay);
+}
+
+QString MarketDataBridge::forceSyncMissingDays(int lookbackDays) {
+    auto& s = astock::infrastructure::database::PostMarketSyncService::instance();
+    s.forceSyncMissingDays(lookbackDays);
+    return QStringLiteral("缺口补齐已启动, 回溯%1天, 查看日志").arg(lookbackDays);
+}
+
+QString MarketDataBridge::probeGmCoverage(const QString& symbol, const QVariantList& dates) {
+    std::vector<std::string> dts;
+    for (const auto& d : dates) dts.push_back(d.toString().toStdString());
+    astock::infrastructure::database::PostMarketSyncService::instance().probeGmCoverage(
+        symbol.toStdString(), dts);
+    return QStringLiteral("探测已启动, 查看日志");
+}
+
+QString MarketDataBridge::fillAdjFactors() {
+    astock::infrastructure::database::PostMarketSyncService::instance().fillAdjFactors();
+    return QStringLiteral("复权因子补全已启动, 查看日志");
 }
 
 } // namespace bridge

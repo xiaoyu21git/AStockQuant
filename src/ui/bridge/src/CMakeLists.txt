@@ -11,6 +11,7 @@
     FactorMetaService.cpp
     FactorViewModel.cpp
     StrategyBridge.cpp
+    RuntimeOrderSink.cpp
     FactorBacktestBridge.cpp
     StrategyBacktestBridge.cpp
     FactorService.cpp

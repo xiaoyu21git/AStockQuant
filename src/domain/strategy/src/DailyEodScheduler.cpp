@@ -116,11 +116,28 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
 
     INTERNAL_INFO_STREAM << "[DailyEod] 开始评估 tradingDay=" << tradingDay
                          << " isCompensation=" << isCompensation;
-    m_evalFn(tradingDay, isCompensation);
 
-    m_lastEvalDay = evalDay;
-    persistLastEvalDay();
-    INTERNAL_INFO_STREAM << "[DailyEod] 评估完成, lastEvalDay=" << m_lastEvalDay;
+    EodEvaluationStatus status = EodEvaluationStatus::Error;
+    try {
+        status = m_evalFn(tradingDay, isCompensation);
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[DailyEod] 评估异常: " << e.what();
+        status = EodEvaluationStatus::Error;
+    } catch (...) {
+        INTERNAL_ERROR_STREAM << "[DailyEod] 评估未知异常";
+        status = EodEvaluationStatus::Error;
+    }
+
+    // 只在篮子已提交或无信号时持久化，其他状态允许补单重试
+    if (status == EodEvaluationStatus::Submitted || status == EodEvaluationStatus::NoSignal) {
+        m_lastEvalDay = evalDay;
+        persistLastEvalDay();
+    } else {
+        INTERNAL_WARN_STREAM << "[DailyEod] 不持久化 lastEvalDay, status="
+                             << static_cast<int>(status) << " (等待补单重试)";
+    }
+    INTERNAL_INFO_STREAM << "[DailyEod] 评估完成, lastEvalDay=" << m_lastEvalDay
+                         << " status=" << static_cast<int>(status);
 }
 
 // ═══════════════════════════════════════════════════════════════════

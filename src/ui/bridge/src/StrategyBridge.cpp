@@ -1,4 +1,5 @@
 #include "../include/StrategyBridge.h"
+#include "../include/RuntimeOrderSink.h"
 
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"
@@ -13,6 +14,7 @@
 
 #include "../../domain/backtest/include/ResolvedStrategyBehavior.h"
 #include "../../domain/trading/TradeExecutionEngine.h"
+#include "../../domain/trading/include/TradingSystem.h"
 #include "../../domain/factor/include/FactorInstanceManager.h"
 #include "../../domain/factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
@@ -334,12 +336,21 @@ void StrategyBridge::init()
             mgr.setFactorInstanceManager(factorSvcBridge->instanceManager());
         }
 
+        // 初始化 TradingSystem（交易 facade）
+        domain::trading::TradingSystem::instance().initialize();
+
         // 注册 TradeExecutionEngine 为策略订单监听器
         {
             auto& engine = domain::trading::TradeExecutionEngine::instance();
             mgr.setOrderListener(&engine);
             mgr.setDefaultOrderListener(&engine);
         }
+
+        // 创建 RuntimeOrderSink 并注入 StrategyManager
+        // 注意：RuntimeOrderSink 生命周期随 StrategyManager（全局单例），不需额外持有
+        static auto s_orderSink = std::make_unique<bridge::RuntimeOrderSink>(
+            domain::trading::TradeExecutionEngine::instance());
+        mgr.setDefaultOrderSink(s_orderSink.get());
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";
         m_inited = true;

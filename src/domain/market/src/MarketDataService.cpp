@@ -121,8 +121,8 @@ void MarketDataService::onTick(const engine::GmTickData& td)
 #endif
         int minutes = local.tm_hour * 60 + local.tm_min;
 
-        // ── 预收盘触发: 14:50-15:00, 当前交易日 ──
-        if (minutes >= 890 && minutes < 900
+        // ── 预收盘触发: (根据最新规则盘后固定时间是15:05---15:30) 当前交易日 ──
+        if (minutes >= 905 && minutes < 930
             && m_activeTradingDay > 0
             && m_activeTradingDay != m_lastEvalTradingDay) {
             m_lastEvalTradingDay = m_activeTradingDay;

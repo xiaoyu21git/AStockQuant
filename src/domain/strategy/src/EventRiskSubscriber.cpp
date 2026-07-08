@@ -9,6 +9,11 @@
 
 namespace domain::strategy {
 
+EventRiskSubscriber& EventRiskSubscriber::instance() {
+    static EventRiskSubscriber s;
+    return s;
+}
+
 EventRiskSubscriber::EventRiskSubscriber() = default;
 
 EventRiskSubscriber::~EventRiskSubscriber() {

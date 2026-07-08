@@ -32,6 +32,7 @@
 #include "../../ui/bridge/include/MarketDataBridge.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
+#include "../../../domain/strategy/include/EventRiskSubscriber.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinMarketConnector.h"
@@ -437,8 +438,7 @@ void AppBootstrap::initializeDeferredDomainServices()
     }
 
     // 启动盘后数据同步服务
-    static astock::infrastructure::database::PostMarketSyncService syncSvc;
-    syncSvc.start();
+    astock::infrastructure::database::PostMarketSyncService::instance().start();
 
     initializeDeferredTradingServices();
 
