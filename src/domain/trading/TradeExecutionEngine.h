@@ -285,6 +285,9 @@ public:
     // ── 注册外部提交的订单 (直连网关绕过管线), 使 EventBus 回调能追踪状态 ──
     void registerOrder(const TradeOrder& order);
 
+    /// @brief 回填 brokerOrderId（先注册再提交的场景，如 JMC 止损单）
+    void updateOrderBrokerId(const std::string& clOrdId, const std::string& brokerOrderId);
+
     // ── Order operations ──
     SubmitResult submitOrder(const TradeOrder& order);  // 自动构建 RiskInput
     SubmitResult submitOrder(const TradeOrder& order, const strategy::RiskInput& riskContext);

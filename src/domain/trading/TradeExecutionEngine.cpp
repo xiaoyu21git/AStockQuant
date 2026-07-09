@@ -346,6 +346,17 @@ void TradeExecutionEngine::registerOrder(const TradeOrder& order) {
     m_impl->appendRecentOrder(order);
 }
 
+void TradeExecutionEngine::updateOrderBrokerId(const std::string& clOrdId,
+                                                 const std::string& brokerOrderId) {
+    std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+    for (auto& o : m_impl->m_recentOrders) {
+        if (o.clOrdId() == clOrdId) {
+            o.setBrokerOrderId(brokerOrderId);
+            return;
+        }
+    }
+}
+
 // ============================================================================
 // Scheduling controls
 // ============================================================================

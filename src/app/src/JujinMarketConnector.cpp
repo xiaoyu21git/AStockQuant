@@ -454,12 +454,29 @@ void JujinMarketConnector::riskPatrolLoop()
                 const_cast<engine::OrderRequest&>(o).setExtension(
                     domain::trading::ExtKey::kBasketId, patrolBasketId);
                 if (tradeEng.initialized()) {
+                    // 先注册到 recentOrders，再提交 — gmsdk 回调可能异步先到
+                    domain::trading::TradeOrder tOrder;
+                    tOrder.setSymbol(o.symbol());
+                    tOrder.setSide(domain::strategy::OrderDirection::Sell);
+                    tOrder.setQuantity(static_cast<std::int64_t>(o.quantity()));
+                    tOrder.setPrice(o.price());
+                    tOrder.setClOrdId(o.clOrdId());
+                    tOrder.setAccountId(o.accountId());
+                    tOrder.setOrderType(domain::trading::OrderType::Limit);
+                    tOrder.setPositionEffect(domain::strategy::PositionEffect::Close);
+                    tOrder.setSignalStrength(0.8);
+                    domain::trading::TradeExecutionEngine::instance().registerOrder(tOrder);
+
                     auto result = tradeEng.submitOrder(o);
                     INTERNAL_INFO_STREAM << "[JMC] 止损/止盈提交: " << o.symbol()
                                          << " accepted=" << result.accepted
                                          << " basketId=" << patrolBasketId
                                          << " msg=" << result.message;
-                    // 入库
+                    // 回填 brokerOrderId 并入库
+                    if (result.accepted) {
+                        domain::trading::TradeExecutionEngine::instance().updateOrderBrokerId(
+                            o.clOrdId(), result.brokerOrderId);
+                    }
                     astock::infrastructure::database::OrderRecorder::instance().insertOrder(
                         o.clOrdId(), "", o.symbol(),
                         astock::infrastructure::database::RecSide::Sell,
@@ -471,19 +488,6 @@ void JujinMarketConnector::riskPatrolLoop()
                         astock::infrastructure::database::OrderRecorder::instance().updateOrderStatus(
                             o.clOrdId(), astock::infrastructure::database::RecOrdStatus::Pending,
                             result.brokerOrderId, "");
-                        // 注册到 TradeExecutionEngine 以供状态追踪和 UI 更新
-                        domain::trading::TradeOrder tOrder;
-                        tOrder.setSymbol(o.symbol());
-                        tOrder.setSide(domain::strategy::OrderDirection::Sell);
-                        tOrder.setQuantity(static_cast<std::int64_t>(o.quantity()));
-                        tOrder.setPrice(o.price());
-                        tOrder.setClOrdId(o.clOrdId());
-                        tOrder.setBrokerOrderId(result.brokerOrderId);
-                        tOrder.setAccountId(o.accountId());
-                        tOrder.setOrderType(domain::trading::OrderType::Limit);
-                        tOrder.setPositionEffect(domain::strategy::PositionEffect::Close);
-                        tOrder.setSignalStrength(0.8);
-                        domain::trading::TradeExecutionEngine::instance().registerOrder(tOrder);
                     }
                 } else {
                     INTERNAL_ERROR_STREAM << "[JMC] TradeEngine 未初始化, 止损/止盈订单未提交: "
