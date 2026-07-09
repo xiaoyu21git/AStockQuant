@@ -60,11 +60,9 @@ Rectangle {
     property double macdAbsMax: 0
 
     onChartPeriodChanged: {
-        console.log("[CandlestickChart] period=" + chartPeriod)
         if (dataLoader) dataLoader.loadFromDB(stockCode, chartPeriod)
     }
     onStockCodeChanged: {
-        console.log("[CandlestickChart] stockCode=" + stockCode)
         if (dataLoader) dataLoader.loadFromDB(stockCode, chartPeriod)
     }
 

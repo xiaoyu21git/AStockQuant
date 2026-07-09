@@ -368,6 +368,14 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
         isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
         order.price(), order.quantity(), pe);
 
+    if (!engineReq.isValid()) {
+        QVariantMap out;
+        out["accepted"] = false;
+        out["message"]  = QStringLiteral("订单构建失败: 价格/数量无效");
+        setLastError(out["message"].toString());
+        return out;
+    }
+
     // 篮子ID — 手动单也标记以便审计追溯
     {
         static std::atomic<uint64_t> s_manualBasketSeq{0};
