@@ -146,7 +146,6 @@ Rectangle {
     property string marginSellShares: "100"
     property string marginSellPriceType: "limit"
     property string marginSellPrice: ""
-    property string lastAutoStockPrice: ""
     property string lastAutoMarginBuyPrice: ""
     property string lastAutoMarginSellPrice: ""
     property string lastAutoStockPriceType: ""
@@ -182,7 +181,6 @@ Rectangle {
         marketSnapshot || ({})
     )
     readonly property bool openingMarketWindow: headerDisplay.openingMarketWindow === true
-    readonly property string currentReferenceText: String(headerDisplay.referenceText || "")
     readonly property var quickButtonModel: tradingFormHelper.quickButtonsForMode(currentMode)
     readonly property var equityQuickPriceButtonModel: tradingFormHelper.equityQuickPriceButtons()
     function equityDisplay(eqMode, code, shares, priceType, price) {
