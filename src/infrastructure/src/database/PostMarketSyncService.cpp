@@ -153,9 +153,7 @@ void PostMarketSyncService::fillAdjFactors() {
             int symOk=0;
             for(size_t i=0;i<af->count();++i){auto&f=af->at(i);
                 if(!std::isfinite(f.adj_factor_fwd)||f.adj_factor_fwd<=0||!std::isfinite(f.adj_factor_bwd)||f.adj_factor_bwd<=0)continue;
-                time_t td=static_cast<time_t>(static_cast<int64_t>(f.trade_date));struct tm t;localtime_s(&t,&td);
-                char dtBuf[16];snprintf(dtBuf,sizeof(dtBuf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-                using P=astock::database::SqlParam;db->executeUpdate(sql,{P{f.adj_factor_fwd},P{f.adj_factor_bwd},P{s.sid},P{std::string(dtBuf)}});++symOk;}
+                using P=astock::database::SqlParam;db->executeUpdate(sql,{P{f.adj_factor_fwd},P{f.adj_factor_bwd},P{s.sid},P{std::string(f.trade_date)}});++symOk;}
             af->release();ok+=symOk;
             if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<")";
         }
