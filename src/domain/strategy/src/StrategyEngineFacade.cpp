@@ -1000,6 +1000,9 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
                         order.symbol(), order.side(),
                         0,
                         static_cast<int64_t>(order.quantity()), signalScore);
+                    // 保留 kTargetWeight — buildPositionAwareOrders 依赖此字段计算 delta
+                    if (targetWeight > 0.0)
+                        order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);
 
                     auto& ld = domain::market::MarketDataService::instance()
                         .liveData(order.symbol());
