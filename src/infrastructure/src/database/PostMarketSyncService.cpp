@@ -247,6 +247,8 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     // 阶段3-4: 周月线
     syncWeekly(db, tradingDay);
     syncMonthly(db, tradingDay);
+    // 阶段5: 复权因子 (耗时, 日线完成后异步补)
+    fillAdjFactors();
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 全部完成 today=" << tradingDay;
 }
@@ -259,66 +261,45 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
                                        const std::unordered_map<std::string,int>& symToId,
                                        const std::vector<std::string>& symbols, int tradingDay) {
     logTaskStart("DAILY", tradingDay);
-    int ok = 0, noData = 0, err = 0;
+    int ok = 0, err = 0;
 
     char dateStr[32];
-    {
-        int y = tradingDay / 10000, m = (tradingDay % 10000) / 100, d = tradingDay % 100;
-        snprintf(dateStr, sizeof(dateStr), "%04d-%02d-%02d", y, m, d);
-    }
+    { int y = tradingDay/10000, m=(tradingDay%10000)/100, d=tradingDay%100;
+      snprintf(dateStr,sizeof(dateStr),"%04d-%02d-%02d",y,m,d); }
+
+    // gmsdk符号 → 原始符号 反向映射
+    std::unordered_map<std::string,std::string> gmToSym;
+    std::vector<std::string> gmList;
+    for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
 
     std::vector<std::vector<astock::database::SqlParam>> batch;
-    auto flush = [&]() {
-        if (batch.empty()) return;
-        std::string sql =
-            "INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source) "
-            "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'GMSDK') "
-            "ON CONFLICT(symbol_id,trade_date) DO UPDATE SET "
-            "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,"
-            "volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,pre_close=EXCLUDED.pre_close";
-        for (auto& p : batch) db->executeUpdate(sql, p);
-        batch.clear();
-    };
+    auto flush=[&](){if(batch.empty())return;
+        std::string sql="INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET "
+            "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,pre_close=EXCLUDED.pre_close";
+        for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
 
-    for (const auto& sym : symbols) {
-        const int kMaxRetry = 3;
-        bool gotData = false;
-        for (int retry = 0; retry < kMaxRetry; ++retry) {
-            std::string gm = toGmSymbol(sym);
-            if (gm.empty()) { ++err; break; }
-            auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, dateStr, 0, nullptr, true, nullptr);
-            if (!bars || bars->status() || bars->count() <= 0) {
-                if (bars) bars->release();
-                if (retry < kMaxRetry - 1) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(500 * (1 << retry)));
-                    continue;
-                }
-                ++noData; // 停牌无数据 = 正常
-                break;
-            }
-            auto& b = bars->at(0);
-            if (b.close <= 0) { bars->release(); ++noData; break; }
-            auto it = symToId.find(sym);
-            if (it == symToId.end()) { bars->release(); ++err; break; }
-            using P = astock::database::SqlParam;
-            batch.push_back({P{it->second}, P{tradingDay},
-                P{static_cast<double>(b.open)}, P{static_cast<double>(b.high)},
-                P{static_cast<double>(b.low)}, P{static_cast<double>(b.close)},
-                P{static_cast<int64_t>(b.volume)}, P{b.amount},
-                P{static_cast<double>(b.pre_close > 0 ? b.pre_close : 0.0)}});
-            bars->release();
-            ++ok; gotData = true;
-            if (batch.size() >= 500) flush();
-            break;
+    static constexpr int kBatchSize=100;
+    for(size_t i=0;i<gmList.size();i+=kBatchSize){
+        size_t end=std::min(i+kBatchSize,gmList.size());
+        std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
+        auto* bars=::history_bars_n(gmBatch.c_str(),"1d",1,dateStr,0,nullptr,true,nullptr);
+        if(!bars||bars->status()||bars->count()<=0){if(bars)bars->release();err+=static_cast<int>(end-i);continue;}
+        for(size_t k=0;k<bars->count();++k){
+            auto&b=bars->at(k);if(b.close<=0)continue;
+            std::string gsym(b.symbol?b.symbol:"");auto it=gmToSym.find(gsym);if(it==gmToSym.end())continue;
+            auto si=symToId.find(it->second);if(si==symToId.end())continue;
+            using P=astock::database::SqlParam;
+            batch.push_back({P{si->second},P{tradingDay},
+                P{static_cast<double>(b.open)},P{static_cast<double>(b.high)},P{static_cast<double>(b.low)},P{static_cast<double>(b.close)},
+                P{static_cast<int64_t>(b.volume)},P{b.amount},P{static_cast<double>(b.pre_close>0?b.pre_close:0.0)}});
+            if(batch.size()>=500)flush();++ok;
         }
-        if (!gotData && err > noData) { err = ok > 0 ? err : err; } // track errors
+        bars->release();
     }
     flush();
-
-    int total = static_cast<int>(symbols.size());
-    bool success = (err < total * 0.05) && (err < 50);
-    logTaskEnd("DAILY", tradingDay, success, ok, std::to_string(err) + " errors " + std::to_string(noData) + " no_data");
-    return success;
+    logTaskEnd("DAILY",tradingDay,err<50,ok,"batched "+std::to_string(gmList.size())+" symbols");
+    return err<50;
 }
 
 // ═════════════════════════════════════════════════
@@ -332,49 +313,39 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
     int ok = 0, err = 0;
 
     char sDate[32], eDate[32];
-    int y = tradingDay / 10000, m = (tradingDay % 10000) / 100, d = tradingDay % 100;
-    snprintf(sDate, sizeof(sDate), "%04d-%02d-%02d 09:30:00", y, m, d);
-    snprintf(eDate, sizeof(eDate), "%04d-%02d-%02d 15:00:00", y, m, d);
+    { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
+      snprintf(sDate,sizeof(sDate),"%04d-%02d-%02d 09:30:00",y,m,d);
+      snprintf(eDate,sizeof(eDate),"%04d-%02d-%02d 15:00:00",y,m,d); }
+
+    std::unordered_map<std::string,std::string> gmToSym;
+    std::vector<std::string> gmList;
+    for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
 
     std::vector<std::vector<astock::database::SqlParam>> batch;
-    auto flush = [&]() {
-        if (batch.empty()) return;
-        std::string sql =
-            "INSERT INTO mkt.minute_bar(symbol_id,trade_ts,open,high,low,close,volume,amount) "
-            "VALUES($1,$2,$3,$4,$5,$6,$7,$8) "
-            "ON CONFLICT(symbol_id,trade_ts) DO UPDATE SET "
-            "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,"
-            "volume=EXCLUDED.volume,amount=EXCLUDED.amount";
-        for (auto& p : batch) db->executeUpdate(sql, p);
-        batch.clear();
-    };
+    auto flush=[&](){if(batch.empty())return;
+        std::string sql="INSERT INTO mkt.minute_bar(symbol_id,trade_ts,open,high,low,close,volume,amount) "
+            "VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(symbol_id,trade_ts) DO UPDATE SET "
+            "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount";
+        for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
 
-    for (const auto& sym : symbols) {
-        std::string gm = toGmSymbol(sym);
-        if (gm.empty()) { ++err; continue; }
-        auto* bars = ::history_bars(gm.c_str(), "60s", sDate, eDate, 0, nullptr, true, nullptr);
-        if (!bars || bars->status() || bars->count() <= 0) {
-            if (bars) bars->release();
-            continue;
-        }
-        auto it = symToId.find(sym);
-        if (it == symToId.end()) { bars->release(); ++err; continue; }
-        int sid = it->second;
-        for (size_t i = 0; i < bars->count(); ++i) {
-            auto& b = bars->at(i);
-            if (b.close <= 0) continue;
-            // bob is epoch seconds → timestamptz
-            auto ts = static_cast<time_t>(static_cast<int64_t>(b.bob));
-            char tsBuf[64];
-            struct tm utc; gmtime_s(&utc, &ts);
-            strftime(tsBuf, sizeof(tsBuf), "%Y-%m-%d %H:%M:%S+08", &utc);
-            using P = astock::database::SqlParam;
-            batch.push_back({P{sid}, P{std::string(tsBuf)},
-                P{static_cast<double>(b.open)}, P{static_cast<double>(b.high)},
-                P{static_cast<double>(b.low)}, P{static_cast<double>(b.close)},
-                P{static_cast<int64_t>(b.volume)}, P{b.amount}});
-            if (batch.size() >= 500) flush();
-            ++ok;
+    static constexpr int kBatchSize=50;
+    for(size_t i=0;i<gmList.size();i+=kBatchSize){
+        size_t end=std::min(i+kBatchSize,gmList.size());
+        std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
+        auto* bars=::history_bars(gmBatch.c_str(),"60s",sDate,eDate,0,nullptr,true,nullptr);
+        if(!bars||bars->status()||bars->count()<=0){if(bars)bars->release();err+=static_cast<int>(end-i);continue;}
+        for(size_t k=0;k<bars->count();++k){
+            auto&b=bars->at(k);if(b.close<=0)continue;
+            std::string gsym(b.symbol?b.symbol:"");auto it=gmToSym.find(gsym);if(it==gmToSym.end())continue;
+            auto si=symToId.find(it->second);if(si==symToId.end())continue;
+            int sid=si->second;
+            auto ts=static_cast<time_t>(static_cast<int64_t>(b.bob));char tsBuf[64];
+            struct tm utc;gmtime_s(&utc,&ts);strftime(tsBuf,sizeof(tsBuf),"%Y-%m-%d %H:%M:%S+08",&utc);
+            using P=astock::database::SqlParam;
+            batch.push_back({P{sid},P{std::string(tsBuf)},
+                P{static_cast<double>(b.open)},P{static_cast<double>(b.high)},P{static_cast<double>(b.low)},P{static_cast<double>(b.close)},
+                P{static_cast<int64_t>(b.volume)},P{b.amount}});
+            if(batch.size()>=500)flush();++ok;
         }
         bars->release();
     }
