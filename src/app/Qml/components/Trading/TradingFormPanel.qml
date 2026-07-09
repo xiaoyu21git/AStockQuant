@@ -83,6 +83,24 @@ Rectangle {
     property string stockPriceType: "limit"
     property string stockPrice: ""
 
+    // 选股/切股时自动拉取最新市价
+    onStockCodeChanged: {
+        if (!stockCode) return
+        Qt.callLater(function() {
+            var sym = stockCode
+            if (sym.indexOf('.') < 0) {
+                // 尝试SZ/SH后缀
+                var snapSZ = Bridge.MarketDataBridge.marketSnapshots[sym + ".SZ"] || {}
+                var snapSH = Bridge.MarketDataBridge.marketSnapshots[sym + ".SH"] || {}
+                var snap = (snapSZ.price > 0) ? snapSZ : snapSH
+                if (snap.price > 0) {
+                    stockPrice = snap.price.toFixed(2)
+                    lastAutoStockPrice = snap.price.toFixed(2)
+                }
+            }
+        })
+    }
+
     property string futuresCode: "RB2410"
     property string futuresLots: "1"
     property string futuresPriceType: "market"
@@ -1623,18 +1641,36 @@ Rectangle {
                                 leftPadding: compactInputHorizontalPadding
                                 rightPadding: compactInputHorizontalPadding
                                 property bool suppressTextChange: false
-                                text: root.stockDisplayName || root.stockCode || ""
+                                // 显示"名称 代码"，用户输入时只回写代码避免双向绑定循环
+                                text: root.stockDisplayName
+                                      ? (root.stockCode ? root.stockDisplayName + " " + root.stockCode
+                                                        : root.stockDisplayName)
+                                      : (root.stockCode || "")
                                 onTextChanged: {
                                     if (suppressTextChange) return
                                     var t = text.trim()
+                                    // 用户输入代码(数字)时回写stockCode，搜素名称时只触发search
+                                    var codeMatch = t.match(/\b(\d{6})\b/)
                                     suppressTextChange = true
-                                    root.stockDisplayName = t
-                                    root.stockCode = t
+                                    if (codeMatch) {
+                                        root.stockCode = codeMatch[1]
+                                    } else {
+                                        root.stockCode = t
+                                    }
                                     symbolSearch.search(t)
                                     Qt.callLater(function() {
                                         searchPopup.visible = symbolSearch.count > 0
                                     })
-                                    suppressTextChange = false
+                                    Qt.callLater(function() { suppressTextChange = false })
+                                }
+                                Connections {
+                                    target: root
+                                    function onStockCodeChanged() {
+                                        if (!suppressTextChange)
+                                            stockCodeField.text = root.stockDisplayName
+                                                ? root.stockDisplayName + " " + root.stockCode
+                                                : root.stockCode
+                                    }
                                 }
                                 background: Rectangle {
                                     radius: compactInputRadius
@@ -2404,7 +2440,7 @@ Rectangle {
                         }
                         if (fld) {
                             fld.suppressTextChange = true
-                            fld.text = nm
+                            fld.text = nm + " " + sym
                             fld.suppressTextChange = false
                         }
                         if (pop) pop.visible = false
