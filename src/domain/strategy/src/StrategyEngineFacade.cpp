@@ -675,6 +675,7 @@ std::vector<OrderRequest> StrategyEngine::buildPositionAwareOrders(
 {
     std::vector<OrderRequest> result;
     constexpr int64_t kMinLot = 100;
+    std::unordered_set<std::string> seenKeys;  // 同标的+方向去重，防止重复下单
 
     auto stripExchange = [](const std::string& sym) -> std::string {
         auto dot = sym.find('.');
@@ -683,6 +684,12 @@ std::vector<OrderRequest> StrategyEngine::buildPositionAwareOrders(
 
     for (const auto& raw : rawOrders) {
         if (!raw.isValid()) continue;
+
+        // 同标的+方向去重（多策略或多轮评估可能产生重复信号）
+        std::string dedupKey = stripExchange(raw.symbol())
+            + (raw.side() == OrderSide::Buy ? "_B" : "_S");
+        if (seenKeys.count(dedupKey)) continue;
+        seenKeys.insert(dedupKey);
 
         double targetWeight = raw.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
         double signalScore  = raw.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
