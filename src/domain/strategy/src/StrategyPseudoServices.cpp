@@ -301,10 +301,10 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
     outputOrder.setOrderType(OrderType::Market);
     outputOrder.setPrice(0);                         // drainQueue 用 tick 价补
 
-    INTERNAL_INFO_STREAM << "[OrderBuild] signal→order: symbol=" << outputOrder.symbol()
-                         << " side=" << (outputOrder.side() == OrderSide::Buy ? "B" : "S")
-                         << " qty=" << outputOrder.quantity()
-                         << " weight=" << weight << " score=" << signal.score();
+    INTERNAL_DEBUG_STREAM << "[OrderBuild] signal→order: symbol=" << outputOrder.symbol()
+                          << " side=" << (outputOrder.side() == OrderSide::Buy ? "B" : "S")
+                          << " qty=" << outputOrder.quantity()
+                          << " weight=" << weight << " score=" << signal.score();
 
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
