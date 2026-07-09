@@ -7,6 +7,7 @@
 #include "../../domain/trading/include/OrderBuilder.h"
 #include "../../domain/trading/TradeExecutionEngine.h"
 #include "../../domain/strategy/include/RiskManager.h"
+#include "../../../infrastructure/include/database/OrderRecorder.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <algorithm>
@@ -449,15 +450,27 @@ void JujinMarketConnector::riskPatrolLoop()
                                      << " price=" << o.price() << " qty=" << o.quantity();
                 // 篮子ID
                 static std::atomic<uint64_t> s_patrolBasketSeq{0};
+                uint64_t patrolBasketId = s_patrolBasketSeq.fetch_add(1);
                 const_cast<engine::OrderRequest&>(o).setExtension(
-                    domain::trading::ExtKey::kBasketId,
-                    s_patrolBasketSeq.fetch_add(1));
+                    domain::trading::ExtKey::kBasketId, patrolBasketId);
                 if (tradeEng.initialized()) {
                     auto result = tradeEng.submitOrder(o);
                     INTERNAL_INFO_STREAM << "[JMC] 止损/止盈提交: " << o.symbol()
                                          << " accepted=" << result.accepted
+                                         << " basketId=" << patrolBasketId
                                          << " msg=" << result.message;
+                    // 入库
+                    astock::infrastructure::database::OrderRecorder::instance().insertOrder(
+                        o.clOrdId(), "", o.symbol(),
+                        astock::infrastructure::database::RecSide::Sell,
+                        astock::infrastructure::database::RecOrdType::Limit,
+                        o.price(), static_cast<int>(o.quantity()),
+                        0.8, astock::infrastructure::database::RecPosEff::Close,
+                        0, std::to_string(patrolBasketId));
                     if (result.accepted) {
+                        astock::infrastructure::database::OrderRecorder::instance().updateOrderStatus(
+                            o.clOrdId(), astock::infrastructure::database::RecOrdStatus::Pending,
+                            result.brokerOrderId, "");
                         // 注册到 TradeExecutionEngine 以供状态追踪和 UI 更新
                         domain::trading::TradeOrder tOrder;
                         tOrder.setSymbol(o.symbol());

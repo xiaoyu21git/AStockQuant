@@ -312,7 +312,8 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
             side, otype,
             order.price(), static_cast<int>(order.quantity()),
             order.signalStrength(), pe,
-            td > 0 ? td : 0);
+            td > 0 ? td : 0,
+            std::to_string(order.basketId()));
         if (result.accepted) {
             Rec::instance().updateOrderStatus(order.clOrdId(),
                 astock::infrastructure::database::RecOrdStatus::Pending, result.brokerOrderId, "");
@@ -567,6 +568,7 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
     for (const auto& req : orders) {
         if (!req.isValid()) continue;
         auto order = buildTradeOrder(req);
+        order.setBasketId(req.extensionAs<uint64_t>(domain::trading::ExtKey::kBasketId, 0));
         if (order.side() == strategy::OrderDirection::Sell)
             sells.push_back(std::move(order));
         else

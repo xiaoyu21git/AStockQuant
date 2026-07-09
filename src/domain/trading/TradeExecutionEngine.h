@@ -138,6 +138,9 @@ public:
     [[nodiscard]] const std::string& brokerOrderId() const noexcept { return m_brokerOrderId; }
     void setBrokerOrderId(std::string v) { m_brokerOrderId = std::move(v); }
 
+    [[nodiscard]] uint64_t basketId() const noexcept { return m_basketId; }
+    void setBasketId(uint64_t v) noexcept { m_basketId = v; }
+
     [[nodiscard]] OrderStatusValue status() const noexcept { return m_status; }
     void setStatus(OrderStatusValue v) noexcept { m_status = v; }
 
@@ -176,6 +179,7 @@ private:
     std::string m_exchange;
 
     std::string m_brokerOrderId;
+    uint64_t m_basketId{0};
     OrderStatusValue m_status{OrderStatusValue::Pending};
     double m_filledPrice{0.0};
     std::int64_t m_filledQuantity{0};
