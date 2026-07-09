@@ -137,23 +137,29 @@ void PostMarketSyncService::fillAdjFactors() {
     std::thread([this](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen()){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors DB不可用";return;}
-        auto res=db->executeQuery("SELECT d.symbol_id,si.symbol,d.trade_date::text FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE d.pre_adjust_factor=1.0");
-        struct Rec{int sid;std::string sym,dt;};std::vector<Rec> recs;
-        for(auto&r:res.getRows())recs.push_back({r.getInt("symbol_id"),r.getString("symbol"),r.getString("trade_date")});
-        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<recs.size()<<" 条待补";if(recs.empty())return;
+        // 按标的聚合: distinct symbol, 每标的调一次gmsdk拉全部日期复权因子
+        auto res=db->executeQuery("SELECT DISTINCT d.symbol_id,si.symbol FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE d.pre_adjust_factor=1.0");
+        struct Sym{int sid;std::string sym;};std::vector<Sym> syms;
+        for(auto&r:res.getRows())syms.push_back({r.getInt("symbol_id"),r.getString("symbol")});
+        int total=static_cast<int>(syms.size());
+        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<total<<" 只标的待补";if(syms.empty())return;
         std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
-        int ok=0,proc=0,total=static_cast<int>(recs.size());
-        for(auto&r:recs){
-            std::string gm;{auto d=r.sym.find('.');if(d!=std::string::npos){std::string c=r.sym.substr(0,d),e=r.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
-            if(gm.empty())continue;
-            auto* af=::stk_get_adj_factor(gm.c_str(),r.dt.c_str(),r.dt.c_str());
-            if(af&&af->status()==0&&af->count()>0){auto&f=af->at(0);
-                if(std::isfinite(f.adj_factor_fwd)&&f.adj_factor_fwd>0&&std::isfinite(f.adj_factor_bwd)&&f.adj_factor_bwd>0){
-                    using P=astock::database::SqlParam;db->executeUpdate(sql,{P{f.adj_factor_fwd},P{f.adj_factor_bwd},P{r.sid},P{r.dt}});++ok;
-                }}if(af){af->release();af=nullptr;}
-            ++proc;if(proc%500==0)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<")";
+        int ok=0,proc=0;
+        for(auto&s:syms){
+            std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
+            if(gm.empty()){++proc;continue;}++proc;
+            auto* af=::stk_get_adj_factor(gm.c_str(),"2000-01-01","2099-12-31");
+            if(!af||af->status()!=0||af->count()<=0){if(af)af->release();continue;}
+            int symOk=0;
+            for(size_t i=0;i<af->count();++i){auto&f=af->at(i);
+                if(!std::isfinite(f.adj_factor_fwd)||f.adj_factor_fwd<=0||!std::isfinite(f.adj_factor_bwd)||f.adj_factor_bwd<=0)continue;
+                time_t td=static_cast<time_t>(static_cast<int64_t>(f.trade_date));struct tm t;localtime_s(&t,&td);
+                char dtBuf[16];snprintf(dtBuf,sizeof(dtBuf),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
+                using P=astock::database::SqlParam;db->executeUpdate(sql,{P{f.adj_factor_fwd},P{f.adj_factor_bwd},P{s.sid},P{std::string(dtBuf)}});++symOk;}
+            af->release();ok+=symOk;
+            if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<")";
         }
-        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<"/"<<total;
+        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<" 条更新, "<<total<<" 只标的";
     }).detach();
 }
 
