@@ -460,7 +460,7 @@ void JujinMarketConnector::riskPatrolLoop()
                         tOrder.setQuantity(static_cast<std::int64_t>(o.quantity()));
                         tOrder.setPrice(o.price());
                         tOrder.setClOrdId(o.clOrdId());
-                        tOrder.setBrokerOrderId(domain::trading::BrokerOrderId(result.brokerOrderId));
+                        tOrder.setBrokerOrderId(result.brokerOrderId);
                         tOrder.setAccountId(o.accountId());
                         tOrder.setOrderType(domain::trading::OrderType::Limit);
                         tOrder.setPositionEffect(domain::strategy::PositionEffect::Close);
