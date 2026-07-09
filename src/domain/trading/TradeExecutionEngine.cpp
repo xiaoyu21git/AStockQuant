@@ -291,7 +291,33 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
                          << " orderType=" << (riskContext.isAutoStrategySignal() ? "Market" : "Limit")
                          << " posEffect=" << static_cast<int>(engineReq.positionEffect());
 
+    // 先注册到 recentOrders，再提交 — gmsdk 回调可能异步先到
+    {
+        TradeOrder pending = order;
+        pending.setStatus(OrderStatusValue::Pending);
+        m_impl->appendRecentOrder(pending);
+    }
+
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
+
+    // 回填 brokerOrderId
+    if (result.accepted) {
+        std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+        for (auto& o : m_impl->m_recentOrders) {
+            if (o.clOrdId() == order.clOrdId() && o.brokerOrderId().empty()) {
+                o.setBrokerOrderId(result.brokerOrderId);
+                o.setStatus(OrderStatusValue::New);
+                o.setStatusMessage("accepted");
+                break;
+            }
+        }
+        if (m_impl->m_orderAcceptedCallback) {
+            TradeOrder accepted = order;
+            accepted.setBrokerOrderId(result.brokerOrderId);
+            accepted.setStatus(OrderStatusValue::New);
+            m_impl->m_orderAcceptedCallback(accepted);
+        }
+    }
 
     // ── 持久化: 订单写入 live_order 表 ──
     {
@@ -334,14 +360,6 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     }
 
     if (result.accepted) {
-        TradeOrder accepted = order;
-        accepted.setStatus(OrderStatusValue::New);
-        accepted.setStatusMessage("accepted");
-        accepted.setBrokerOrderId(result.brokerOrderId);
-        m_impl->appendRecentOrder(accepted);
-        if (m_impl->m_orderAcceptedCallback) {
-            m_impl->m_orderAcceptedCallback(accepted);
-        }
         return SubmitResult::success(BrokerOrderId(result.brokerOrderId));
     }
 
