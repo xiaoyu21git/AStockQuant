@@ -68,7 +68,13 @@ bool PostMarketSyncService::forceSyncToday() {
             for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         }
         int mins=getCurrentLocalMinutes();
-        if(mins>=900&&m_lastSyncDay.load()!=today){syncDailyMinute(today);syncWeeklyMonthly(today);if(isMonthlyMaintenanceDay())syncFinancialData(today);}
+        if(mins>=900&&m_lastSyncDay.load()!=today){
+            syncDailyMinute(today);
+            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 日线+分钟线完成 ======";
+            syncWeeklyMonthly(today);
+            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 周月线完成 ======";
+            if(isMonthlyMaintenanceDay())syncFinancialData(today);
+        }
         if(mins>=900){m_lastSyncDay.store(today);saveLastSyncDay(today);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
         // 复权因子异步补（耗时，不阻塞同步完成通知）
@@ -244,11 +250,14 @@ void PostMarketSyncService::syncAll(int tradingDay) {
         INTERNAL_ERROR_STREAM << "[PostMktSync] 日线失败, 终止";
         return;
     }
+    INTERNAL_INFO_STREAM << "[PostMktSync] ====== 日线完成 ======";
     // 阶段2: 分钟线 (独立, 失败继续)
     syncMinute(db, symToId, symbols, tradingDay);
+    INTERNAL_INFO_STREAM << "[PostMktSync] ====== 分钟线完成 ======";
     // 阶段3-4: 周月线
     syncWeekly(db, tradingDay);
     syncMonthly(db, tradingDay);
+    INTERNAL_INFO_STREAM << "[PostMktSync] ====== 周月线完成 ======";
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 全部完成 today=" << tradingDay;
     // 阶段5: 复权因子异步补（耗时，不阻塞完成通知）
@@ -562,7 +571,7 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
         for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
     for(auto&r:rows){double pe=peM[r.dt].count(r.sid)?peM[r.dt][r.sid]:0,pb=pbM[r.dt].count(r.sid)?pbM[r.dt][r.sid]:0;double mc=mtM[r.dt].count(r.sid)?mtM[r.dt][r.sid]:0,cc=ciM[r.dt].count(r.sid)?ciM[r.dt][r.sid]:0;double tr=trM[r.dt].count(r.sid)?trM[r.dt][r.sid]:0;double chg=(r.pc>0)?(r.c-r.pc)/r.pc*100:0,amp=(r.pc>0&&r.h-r.l>0)?(r.h-r.l)/r.pc*100:0;using P=astock::database::SqlParam;batch.push_back({P{r.sid},P{r.dt},P{r.o},P{r.h},P{r.l},P{r.c},P{r.pc},P{static_cast<int64_t>(r.vol)},P{r.amt},P{chg},P{r.c-r.pc},P{amp},P{tr},P{pe},P{pb},P{mc},P{cc},P{1.0},P{1.0}});if(batch.size()>=500)flush();++writeOk;}
     flush();
-    INTERNAL_INFO_STREAM<<"[PostMktSync] syncDailyRange 完成 "<<writeOk<<" 行 "<<targetDates.size()<<" 天";
+    INTERNAL_INFO_STREAM<<"[PostMktSync] ====== syncDailyRange 完成 "<<writeOk<<" 行 "<<targetDates.size()<<" 天 ======";
     return true;
 }
 
