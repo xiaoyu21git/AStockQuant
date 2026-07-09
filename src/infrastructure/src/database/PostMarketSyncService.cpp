@@ -574,15 +574,20 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
     std::vector<std::string> missing;
     for(auto&g:gmList)if(!gotSyms.count(g))missing.push_back(g);
     if(!missing.empty()){
-        int retryTotal=static_cast<int>(missing.size()),retryOk=0,retryIdx=0,retryNull=0,retryEmpty=0,retryErr=0;
+        int retryTotal=static_cast<int>(missing.size()),retryOk=0,retryIdx=0,
+            retryNull=0,retryEmpty=0,retryErr=0,retryStatusNonZero=0;
         INTERNAL_INFO_STREAM<<"[PostMktSync] 重试 "<<retryTotal<<" 只遗漏标的 (批量覆盖="<<gotSyms.size()<<"/"<<gmList.size()<<")";
         for(auto&g:missing){
-            bool ok=false;
+            bool ok=false;int lastStatus=-1;
             for(int retry=0;retry<3&&!ok;++retry){
                 if(retry>0)std::this_thread::sleep_for(std::chrono::milliseconds(500*(1<<retry)));
                 auto* bars=::history_bars(g.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
-                if(!bars){++retryNull;continue;}
-                if(bars->status()!=0||bars->count()<=0){if(bars->count()<=0)++retryEmpty;else++retryErr;bars->release();continue;}
+                if(!bars){lastStatus=-1;continue;}
+                lastStatus=bars->status();
+                if(bars->status()!=0||bars->count()<=0){
+                    if(bars->status()!=0)++retryStatusNonZero; else ++retryEmpty;
+                    bars->release();continue;
+                }
                 for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
                     if(!std::isfinite(b.close)||b.close<=0.01)continue;
                     std::string gsym(b.symbol?b.symbol:g);auto sit=gmToSym.find(gsym);
@@ -594,11 +599,13 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
                     rows.push_back({it->second,sit->second,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
                 ok=true;++retryOk;bars->release();
             }
-            ++retryIdx;
+            ++retryIdx;if(!ok){++retryNull;
+                if(retryIdx<=5)INTERNAL_WARN_STREAM<<"[PostMktSync] 重试失败 "<<g<<" lastStatus="<<lastStatus;}
             if(retryIdx%50==0||retryIdx==retryTotal)
                 INTERNAL_INFO_STREAM<<"[PostMktSync] 重试进度 "<<(retryIdx*100/retryTotal)<<"% "<<retryIdx<<"/"<<retryTotal<<" (ok="<<retryOk<<")";
         }
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试完成: ok="<<retryOk<<" null="<<retryNull<<" empty="<<retryEmpty<<" err="<<retryErr<<" / total="<<retryTotal;
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试完成: ok="<<retryOk<<" null="<<retryNull
+            <<" empty="<<retryEmpty<<" statusErr="<<retryStatusNonZero<<" / total="<<retryTotal;
     }
 
     if(rows.empty()){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyRange 无数据";return false;}
