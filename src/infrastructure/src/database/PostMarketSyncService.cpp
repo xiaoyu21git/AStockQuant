@@ -573,7 +573,8 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
     std::vector<std::string> missing;
     for(auto&g:gmList)if(!skipSet.count(g)&&!gotSyms.count(g))missing.push_back(g);
     if(!missing.empty()){
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试 "<<missing.size()<<" 只缺失标的";
+        int retryTotal=static_cast<int>(missing.size()),retryOk=0,retryIdx=0;
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试 "<<retryTotal<<" 只缺失标的";
         std::unordered_set<std::string> permFail;
         for(auto&g:missing){
             bool ok=false;
@@ -590,42 +591,60 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
                         char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
                         std::string dt(ds);if(!targets.count(dt))continue;
                         rows.push_back({it->second,sit->second,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
-                    ok=true;}
+                    ok=true;++retryOk;}
                 if(bars)bars->release();
             }
+            ++retryIdx;
             if(!ok)permFail.insert(g);
+            if(retryIdx%50==0||retryIdx==retryTotal)
+                INTERNAL_INFO_STREAM<<"[PostMktSync] 重试进度 "<<(retryIdx*100/retryTotal)<<"% "<<retryIdx<<"/"<<retryTotal<<" (ok="<<retryOk<<")";
         }
-        // 持久化永久失败
         if(!permFail.empty()){
             std::ofstream f("post_mkt_skip.txt",std::ios::app);
             for(auto&g:permFail){f<<g<<"\n";skipSet.insert(g);}
-            INTERNAL_WARN_STREAM<<"[PostMktSync] "<<permFail.size()<<" 只标的3次重试仍失败, 已记录跳过";
+            INTERNAL_WARN_STREAM<<"[PostMktSync] "<<permFail.size()<<" 只3次重试仍失败, 已记录跳过";
         }
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试完成, 成功 "<<(missing.size()-permFail.size())<<"/"<<missing.size();
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试完成, 成功 "<<retryOk<<"/"<<retryTotal;
     }
 
     if(rows.empty()){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyRange 无数据";return false;}
     INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 done, "<<rows.size()<<" 行 (跳过 "<<skipSet.size()<<" 已知失败)";
+
+    // 先写日线基础数据，再异步补估值 — 保证日线先入库
+    std::vector<std::vector<astock::database::SqlParam>> batch;int writeOk=0;
+    auto flush=[&](){if(batch.empty())return;
+        std::string sql="INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,pre_close,volume,turnover,change_pct,change_amt,amplitude,data_source) VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,change_pct=EXCLUDED.change_pct,change_amt=EXCLUDED.change_amt,amplitude=EXCLUDED.amplitude";
+        for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
+    for(auto&r:rows){double chg=(r.pc>0)?(r.c-r.pc)/r.pc*100:0,amp=(r.pc>0&&r.h-r.l>0)?(r.h-r.l)/r.pc*100:0;using P=astock::database::SqlParam;batch.push_back({P{r.sid},P{r.dt},P{r.o},P{r.h},P{r.l},P{r.c},P{r.pc},P{static_cast<int64_t>(r.vol)},P{r.amt},P{chg},P{r.c-r.pc},P{amp}});if(batch.size()>=500)flush();++writeOk;}
+    flush();
+    INTERNAL_INFO_STREAM<<"[PostMktSync] 日线已入库 "<<writeOk<<" 行, 开始补估值数据...";
+
+    // Pass2: 估值数据异步补 (pe/pb/市值/换手率), 失败不影响已入库的日线
     std::unordered_map<std::string,int> gmToId;
     for(auto&r:rows){std::string g=toGmSymbol(r.sym);if(!g.empty())gmToId[g]=r.sid;}
-    std::unordered_map<std::string,std::unordered_map<int,double>> peM,pbM,mtM,ciM,trM;
     for(const auto& dt:targetDates){
         std::string chunk;for(const auto&r:rows)if(r.dt==dt){std::string g=toGmSymbol(r.sym);if(!g.empty()){if(!chunk.empty())chunk+=",";chunk+=g;}}
         if(chunk.empty())continue;
         auto* v=::stk_get_daily_valuation_pt(chunk.c_str(),"pe_lyr,pb_mrq",dt.c_str());
-        if(v&&v->status()==0){while(!v->is_end()){const char* s=v->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double pe=v->get_real("pe_lyr"),pb=v->get_real("pb_mrq");if(std::isfinite(pe)&&pe>=-10000&&pe<=100000)peM[dt][it->second]=pe;if(std::isfinite(pb)&&pb>=-10000&&pb<=100000)pbM[dt][it->second]=pb;}}v->next();}}if(v){v->release();v=nullptr;}
+        if(v&&v->status()==0){std::vector<std::vector<astock::database::SqlParam>> ub;auto uf=[&](){if(ub.empty())return;
+            std::string us="UPDATE mkt.daily_bar SET pe_ratio=$1,pb_ratio=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
+            for(auto&p:ub)db->executeUpdate(us,p);ub.clear();};
+            while(!v->is_end()){const char* s=v->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double pe=v->get_real("pe_lyr"),pb=v->get_real("pb_mrq");if(std::isfinite(pe)&&pe>=-10000&&pe<=100000)ub.push_back({astock::database::SqlParam{pe},astock::database::SqlParam{pb},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(ub.size()>=500)uf();}}v->next();}uf();}
+        if(v){v->release();v=nullptr;}
         auto* mv=::stk_get_daily_mktvalue_pt(chunk.c_str(),"tot_mv,a_mv",dt.c_str());
-        if(mv&&mv->status()==0){while(!mv->is_end()){const char* s=mv->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double mc=mv->get_real("tot_mv"),cc=mv->get_real("a_mv");if(std::isfinite(mc)&&mc>=0&&mc<=1e16)mtM[dt][it->second]=mc;if(std::isfinite(cc)&&cc>=0&&cc<=1e16)ciM[dt][it->second]=cc;}}mv->next();}}if(mv){mv->release();mv=nullptr;}
+        if(mv&&mv->status()==0){std::vector<std::vector<astock::database::SqlParam>> mb;auto mf=[&](){if(mb.empty())return;
+            std::string ms="UPDATE mkt.daily_bar SET market_cap=$1,circulating_market_cap=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
+            for(auto&p:mb)db->executeUpdate(ms,p);mb.clear();};
+            while(!mv->is_end()){const char* s=mv->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double mc=mv->get_real("tot_mv"),cc=mv->get_real("a_mv");if(std::isfinite(mc)&&mc>=0&&mc<=1e16)mb.push_back({astock::database::SqlParam{mc},astock::database::SqlParam{cc},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(mb.size()>=500)mf();}}mv->next();}mf();}
+        if(mv){mv->release();mv=nullptr;}
         auto* b=::stk_get_daily_basic_pt(chunk.c_str(),"turnrate",dt.c_str());
-        if(b&&b->status()==0){while(!b->is_end()){const char* s=b->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double tr=b->get_real("turnrate");if(std::isfinite(tr)&&tr>=0)trM[dt][it->second]=tr;}}b->next();}}if(b){b->release();b=nullptr;}
+        if(b&&b->status()==0){std::vector<std::vector<astock::database::SqlParam>> tb;auto tf=[&](){if(tb.empty())return;
+            std::string ts="UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date";
+            for(auto&p:tb)db->executeUpdate(ts,p);tb.clear();};
+            while(!b->is_end()){const char* s=b->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double tr=b->get_real("turnrate");if(std::isfinite(tr)&&tr>=0)tb.push_back({astock::database::SqlParam{tr},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(tb.size()>=500)tf();}}b->next();}tf();}
+        if(b){b->release();b=nullptr;}
         INTERNAL_INFO_STREAM<<"[PostMktSync] Pass2 "<<dt;
     }
-    std::vector<std::vector<astock::database::SqlParam>> batch;int writeOk=0;
-    auto flush=[&](){if(batch.empty())return;
-        std::string sql="INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,pre_close,volume,turnover,change_pct,change_amt,amplitude,turnover_rate,pe_ratio,pb_ratio,market_cap,circulating_market_cap,pre_adjust_factor,post_adjust_factor,data_source) VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,change_pct=EXCLUDED.change_pct,change_amt=EXCLUDED.change_amt,amplitude=EXCLUDED.amplitude,turnover_rate=EXCLUDED.turnover_rate,pe_ratio=EXCLUDED.pe_ratio,pb_ratio=EXCLUDED.pb_ratio,market_cap=EXCLUDED.market_cap,circulating_market_cap=EXCLUDED.circulating_market_cap,pre_adjust_factor=EXCLUDED.pre_adjust_factor,post_adjust_factor=EXCLUDED.post_adjust_factor";
-        for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
-    for(auto&r:rows){double pe=peM[r.dt].count(r.sid)?peM[r.dt][r.sid]:0,pb=pbM[r.dt].count(r.sid)?pbM[r.dt][r.sid]:0;double mc=mtM[r.dt].count(r.sid)?mtM[r.dt][r.sid]:0,cc=ciM[r.dt].count(r.sid)?ciM[r.dt][r.sid]:0;double tr=trM[r.dt].count(r.sid)?trM[r.dt][r.sid]:0;double chg=(r.pc>0)?(r.c-r.pc)/r.pc*100:0,amp=(r.pc>0&&r.h-r.l>0)?(r.h-r.l)/r.pc*100:0;using P=astock::database::SqlParam;batch.push_back({P{r.sid},P{r.dt},P{r.o},P{r.h},P{r.l},P{r.c},P{r.pc},P{static_cast<int64_t>(r.vol)},P{r.amt},P{chg},P{r.c-r.pc},P{amp},P{tr},P{pe},P{pb},P{mc},P{cc},P{1.0},P{1.0}});if(batch.size()>=500)flush();++writeOk;}
-    flush();
     INTERNAL_INFO_STREAM<<"[PostMktSync] ====== syncDailyRange 完成 "<<writeOk<<" 行 "<<targetDates.size()<<" 天 ======";
     return true;
 }
