@@ -1,5 +1,5 @@
 #include "../include/StrategyBridge.h"
-#include "../include/RuntimeOrderSink.h"
+
 
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"
@@ -345,12 +345,6 @@ void StrategyBridge::init()
             mgr.setOrderListener(&engine);
             mgr.setDefaultOrderListener(&engine);
         }
-
-        // 创建 RuntimeOrderSink 并注入 StrategyManager
-        // 注意：RuntimeOrderSink 生命周期随 StrategyManager（全局单例），不需额外持有
-        static auto s_orderSink = std::make_unique<bridge::RuntimeOrderSink>(
-            domain::trading::TradeExecutionEngine::instance());
-        mgr.setDefaultOrderSink(s_orderSink.get());
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";
         m_inited = true;

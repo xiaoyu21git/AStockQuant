@@ -94,31 +94,14 @@ public:
                 if (dot != std::string::npos)
                     realSymbol = realSymbol.substr(0, dot);
 
-                // 查当前持仓权重 → 对比目标权重 → 设置意图
-                double currentW = 0.0;
-                {
-                    auto cwIt = context.currentWeights().find(realSymbol);
-                    if (cwIt != context.currentWeights().end()) currentW = cwIt->second;
-                }
-
-                SignalIntent intent = SignalIntent::KEEP;
-                if (sig.isBuy) {
-                    if (currentW < 0.001)               intent = SignalIntent::OPEN;
-                    else if (sig.weight > currentW)     intent = SignalIntent::ADD;
-                    else if (sig.weight < currentW)     intent = SignalIntent::REDUCE;
-                    else                                intent = SignalIntent::KEEP;
-                } else {
-                    intent = (currentW > 0.001) ? SignalIntent::CLOSE : SignalIntent::KEEP;
-                }
-
+                // 策略只输出纯信号: (symbol, side, targetWeight, score)
+                // 意图(OPEN/ADD/REDUCE/CLOSE)由调度层 buildPositionAwareOrders 根据持仓对比确定
                 auto signal = StrategySignal(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},
                     sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
                     sig.score, sig.weight,
                     realSymbol);
-                signal.setCurrentWeight(currentW);
-                signal.setIntent(intent);
                 allSignals.push_back(std::move(signal));
             }
         }

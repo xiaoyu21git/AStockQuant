@@ -5,6 +5,7 @@
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
 #include "../../domain/trading/include/OrderBuilder.h"
+#include "../../domain/trading/TradeExecutionEngine.h"
 #include "../../domain/strategy/include/RiskManager.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
@@ -451,6 +452,20 @@ void JujinMarketConnector::riskPatrolLoop()
                     INTERNAL_INFO_STREAM << "[JMC] 止损/止盈提交: " << o.symbol()
                                          << " accepted=" << result.accepted
                                          << " msg=" << result.message;
+                    if (result.accepted) {
+                        // 注册到 TradeExecutionEngine 以供状态追踪和 UI 更新
+                        domain::trading::TradeOrder tOrder;
+                        tOrder.setSymbol(o.symbol());
+                        tOrder.setSide(domain::strategy::OrderDirection::Sell);
+                        tOrder.setQuantity(static_cast<std::int64_t>(o.quantity()));
+                        tOrder.setPrice(o.price());
+                        tOrder.setClOrdId(o.clOrdId());
+                        tOrder.setAccountId(o.accountId());
+                        tOrder.setOrderType(domain::trading::OrderType::Limit);
+                        tOrder.setPositionEffect(domain::strategy::PositionEffect::Close);
+                        tOrder.setSignalStrength(0.8);
+                        domain::trading::TradeExecutionEngine::instance().registerOrder(tOrder);
+                    }
                 } else {
                     INTERNAL_ERROR_STREAM << "[JMC] TradeEngine 未初始化, 止损/止盈订单未提交: "
                                           << o.symbol();

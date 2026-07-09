@@ -25,18 +25,6 @@ StrategyService::StrategyService(IRuntimeFactorService& factorService,
     reserveWorkingBuffers();
 }
 
-StrategyService::StrategyService(IRuntimeFactorService& factorService,
-                                 IRuleEvaluationService& ruleEvaluationService,
-                                 IRuntimeOrderSink& orderSink)
-    : factorService_(factorService)
-    , ruleEvaluationService_(ruleEvaluationService)
-    , orderSink_(&orderSink)
-    , orderBuilder_(&kDefaultOrderBuilder)
-    , plan_(defaultExecutionPlan())
-{
-    reserveWorkingBuffers();
-}
-
 StrategyServiceFlowResult StrategyService::configureExecutionPlan(
     const StrategyServiceExecutionPlan& plan)
 {
@@ -297,7 +285,8 @@ StrategyCount StrategyService::pendingOrderCount() const
 void StrategyService::copyPendingOrders(std::vector<OrderRequest>& outputOrders) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    outputOrders.assign(pendingOrderBuffer_.begin(), pendingOrderBuffer_.end());
+    outputOrders = std::move(pendingOrderBuffer_);
+    pendingOrderBuffer_.clear();
 }
 
 StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesBatch()
@@ -378,7 +367,7 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesBatch()
     stats_.setGeneratedSignalCount(generatedSignalCount);
     stats_.setPassedRuleCount(passedCount);
     stats_.setRejectedRuleCount(rejectedCount);
-    return flushPendingOrders();
+    return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 
 StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
@@ -457,15 +446,7 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
     stats_.setPassedRuleCount(passedCount);
     stats_.setRejectedRuleCount(rejectedCount);
 
-    s_evalRound++;
-    s_totalSignals += generatedSignalCount;
-    s_totalOrders += pendingOrderBuffer_.size();
-    if (s_evalRound % 50 == 0 || generatedSignalCount > 0)
-        INTERNAL_INFO_STREAM << "[评估] 第" << s_evalRound << "轮: 信号="
-                             << generatedSignalCount << " 订单=" << pendingOrderBuffer_.size()
-                             << " 累计信号=" << s_totalSignals << " 累计订单=" << s_totalOrders;
-
-    return flushPendingOrders();
+    return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 
 StrategyServiceFlowResult StrategyService::evaluateEntrySignals(
@@ -563,37 +544,6 @@ void StrategyService::publishDiagnostics(const DiagnosticsEvent& event)
     }
 }
 
-StrategyServiceFlowResult StrategyService::flushPendingOrders()
-{
-    if (pendingOrderBuffer_.empty()) {
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-    }
-    // 未配置下单出口：回测/仿真模式下由上层通过 copyPendingOrders 读取订单；
-    // 实盘场景下必须配置 orderSink_，否则订单将被丢弃。
-    if (!orderSink_) {
-        INTERNAL_WARN_STREAM << "[StrategyService] flushPendingOrders: orderSink_ is null, "
-                             << pendingOrderBuffer_.size() << " orders will not be submitted";
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-    }
-
-    for (const OrderRequest& order : pendingOrderBuffer_) {
-        const StrategyServiceFlowResult submitResult = orderSink_->submit(order);
-        if (!submitResult.isOk()) {
-            return StrategyServiceFlowResult(StrategyServiceFlowCode::OrderSubmitFailed);
-        }
-
-        publishDiagnostics(DiagnosticsEvent(
-            DiagnosticsEventCode::OrderSubmitted,
-            StrategyServiceFlowCode::Ok,
-            static_cast<std::uint64_t>(std::stoull(order.strategyId())),
-            InstrumentId(static_cast<std::uint32_t>(std::stoul(order.symbol()))),
-            static_cast<double>(order.quantity()),
-            static_cast<double>(order.side() == OrderSide::Buy ? 1 : -1)));
-    }
-    pendingOrderBuffer_.clear();
-    return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-}
-
 void StrategyService::reserveWorkingBuffers()
 {
     factorSnapshotBuffer_.clear();
@@ -621,12 +571,9 @@ void StrategyService::setContextHistoricalView(const void* view)
 }
 
 void StrategyService::updateCurrentWeights(
-    const std::unordered_map<std::string, double>& weights)
+    const std::unordered_map<std::string, double>& /*weights*/)
 {
-    std::lock_guard<std::mutex> lock(mutex_);
-    for (auto& entry : strategyEntries_) {
-        entry.context.setCurrentWeights(weights);
-    }
+    // 策略不再感知持仓权重，意图由调度层 buildPositionAwareOrders 确定
 }
 
 } // namespace domain::strategy

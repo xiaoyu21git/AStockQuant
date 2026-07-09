@@ -1,4 +1,5 @@
 #include "../include/RiskEvaluator.h"
+#include "../include/RiskManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -71,6 +72,17 @@ RiskResult RiskEvaluator::evaluateOrder(const RiskInput& input) {
         return RiskResult::rejected(
             RiskRejectCode::Level3TradingHaltActive, 1.0,
             "三级熔断生效中，暂停所有交易");
+    }
+
+    // ── 步骤 2.5：涨跌停检查（买卖通用，referencePrice 由 buildRiskInput 从 preClose 填充）──
+    if (input.referencePrice() > 0.0) {
+        bool atLimit = RiskManager::isPriceAtLimit(
+            input.price(), input.referencePrice(), input.isBuyOrder());
+        if (atLimit) {
+            return RiskResult::rejected(
+                RiskRejectCode::PriceInvalid, 1.0,
+                input.isBuyOrder() ? "涨停板，无法买入" : "跌停板，无法卖出");
+        }
     }
 
     // ── 步骤 3：买入/卖出侧定向检查 ──

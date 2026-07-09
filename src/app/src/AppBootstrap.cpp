@@ -324,6 +324,9 @@ bool AppBootstrap::initServices()
 
             engine::register_engine_event_bus(m_eventBus.get());
             INTERNAL_INFO_STREAM << "[AppBootstrap] Application EventBus initialized";
+
+            // 启动事件风控订阅器（订阅 news.* 事件，动态调整风控参数）
+            domain::strategy::EventRiskSubscriber::instance().start();
         }
 
         // ── GmSessionEngine（唯一 gmsdk 连接）在 QML 之前初始化 ──

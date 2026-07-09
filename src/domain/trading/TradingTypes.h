@@ -119,6 +119,7 @@ namespace ExtKey {
     constexpr uint64_t kPostOnly          = 0x20;  // 仅 Maker
     constexpr uint64_t kReduceOnly        = 0x21;  // 仅减仓
     constexpr uint64_t kSlippageTolerance = 0x30;  // 滑点容忍
+    constexpr uint64_t kBasketId          = 0x31;  // 篮子ID，同批次订单关联查询
     constexpr uint64_t kAlgoType          = 0x40;  // 算法单类型
     constexpr uint64_t kAlgoDuration      = 0x41;  // 算法单时长
     constexpr uint64_t kStopPrice         = 0x50;  // 止损价 (gmsdk)

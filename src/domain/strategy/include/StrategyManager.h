@@ -24,8 +24,7 @@ public:
     static StrategyManager& instance();
 
     [[nodiscard]] StrategyEngine* createEngine(const std::string& strategyId,
-                                               std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr,
-                                               IRuntimeOrderSink* orderSink = nullptr);
+                                               std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr);
     [[nodiscard]] StrategyEngine* get(const std::string& id) const;
     void remove(const std::string& id);
 
@@ -55,11 +54,6 @@ public:
         m_defaultOrderListener = listener;
     }
 
-    /// @brief 设置默认订单直达槽（由桥接层在初始化时注入一次，所有引擎共享）
-    void setDefaultOrderSink(IRuntimeOrderSink* sink) {
-        m_defaultOrderSink = sink;
-    }
-
     // ── 统一生命周期管理 ──
 
     /// @brief 完整启动一个策略：创建引擎 → 加载历史数据 → 启动实盘循环
@@ -84,7 +78,6 @@ private:
     std::unordered_map<std::string, std::unique_ptr<StrategyEngine>> m_engines;
     factor::FactorInstanceManager* m_factorInstanceManager{nullptr};
     IOrderListener* m_defaultOrderListener{nullptr};
-    IRuntimeOrderSink* m_defaultOrderSink{nullptr};
 };
 
 } // namespace domain::strategy

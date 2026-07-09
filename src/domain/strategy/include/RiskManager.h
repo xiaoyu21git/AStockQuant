@@ -15,19 +15,6 @@ class RiskManager {
 public:
     static RiskManager& instance();
 
-    // ── 被动 ──
-
-    RiskResult checkManualOrder(const engine::OrderRequest& req,
-                                const engine::AccountInfo& account,
-                                const std::vector<engine::Position>& positions,
-                                double currentPrice);
-
-    RiskResult checkAutoSignal(const engine::OrderRequest& req,
-                               const engine::AccountInfo& account,
-                               const std::vector<engine::Position>& positions,
-                               double currentPrice,
-                               double signalStrength);
-
     // ── 主动 ──
 
     /// @brief 巡检所有持仓，触发止损止盈时委托 OrderBuilder 生成退出订单

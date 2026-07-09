@@ -352,47 +352,21 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     emit orderRequested(orderMap);
     emit orderRequestPublished(orderMap);
 
-    // ── 手动单账户风控 ──
+    // 构建 OrderRequest（风控在 Trading 引擎 submitOrder 内部统一完成）
     engine::OrderRequest engineReq;
-    {
-        auto& accEng = engine::AccountEngine::instance();
-        auto account   = accEng.account();
-        auto positions = accEng.positions();
+    auto& accEng = engine::AccountEngine::instance();
+    auto account   = accEng.account();
 
-        domain::trading::OrderBuilder manualBuilder;
-        manualBuilder.setStrategyId(strategyId.toStdString());
-        manualBuilder.setAccountId(account.accountId);
-        bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
-        auto pe = isBuy ? domain::trading::PositionEffect::Open
-                        : domain::trading::PositionEffect::Close;
-        engineReq = manualBuilder.buildManualOrder(
-            order.symbol(),
-            isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
-            order.price(), order.quantity(), pe);
-
-        auto riskResult = domain::strategy::RiskManager::instance()
-            .checkManualOrder(engineReq, account, positions, order.price());
-        if (!riskResult.approved()) {
-            QVariantMap out;
-            out["accepted"] = false;
-            out["message"]  = QString::fromStdString(riskResult.description());
-            setLastError(QString::fromStdString(riskResult.description()));
-            QVariantMap rejectEntry;
-            rejectEntry["status"]     = QStringLiteral("REJECTED");
-            rejectEntry["rawStatus"]  = QStringLiteral("REJECTED");
-            rejectEntry["message"]    = out["message"];
-            rejectEntry["symbol"]     = orderMap.value("symbol");
-            rejectEntry["side"]       = orderMap.value("side");
-            rejectEntry["price"]      = orderMap.value("price");
-            rejectEntry["quantity"]   = orderMap.value("quantity");
-            rejectEntry["reasonCode"] = QString::fromStdString(
-                domain::strategy::RiskEvaluator::descriptionForCode(riskResult.code()));
-            rejectEntry["statusOrigin"] = QStringLiteral("risk_reject");
-            emit orderStatusChanged(rejectEntry);
-            emit orderStatusPublished(rejectEntry);
-            return out;
-        }
-    }
+    domain::trading::OrderBuilder manualBuilder;
+    manualBuilder.setStrategyId(strategyId.toStdString());
+    manualBuilder.setAccountId(account.accountId);
+    bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
+    auto pe = isBuy ? domain::trading::PositionEffect::Open
+                    : domain::trading::PositionEffect::Close;
+    engineReq = manualBuilder.buildManualOrder(
+        order.symbol(),
+        isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
+        order.price(), order.quantity(), pe);
 
     // TradeOrder 字段对齐 OrderBuilder 输出
     order.setClOrdId(engineReq.clOrdId());

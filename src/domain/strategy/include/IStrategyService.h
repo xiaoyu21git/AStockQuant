@@ -26,6 +26,10 @@ class IExecutor;
 }
 }
 
+namespace engine {
+struct AccountInfo;
+}
+
 namespace astock { namespace database { class ISqlDatabase; } }
 
 namespace domain::backtest {
@@ -361,9 +365,6 @@ class StrategyService final : public IStrategyService {
 public:
     StrategyService(IRuntimeFactorService& factorService,
                     IRuleEvaluationService& ruleEvaluationService);
-    StrategyService(IRuntimeFactorService& factorService,
-                    IRuleEvaluationService& ruleEvaluationService,
-                    IRuntimeOrderSink& orderSink);
 
     [[nodiscard]] StrategyServiceFlowResult configureExecutionPlan(
         const StrategyServiceExecutionPlan& plan) override;
@@ -418,7 +419,6 @@ private:
         const RuntimeStrategyContext& context) const;
     [[nodiscard]] const RuntimeStrategyContext* findContext(StrategyInstanceId strategyInstanceId) const;
     void publishDiagnostics(const DiagnosticsEvent& event);
-    [[nodiscard]] StrategyServiceFlowResult flushPendingOrders();
     void reserveWorkingBuffers();
     void resetStats();
 
@@ -429,7 +429,6 @@ private:
 private:
     IRuntimeFactorService& factorService_;
     IRuleEvaluationService& ruleEvaluationService_;
-    IRuntimeOrderSink* orderSink_{nullptr};
     IDiagnosticsSink* diagnosticsSink_{nullptr};
     const IOrderBuilder* orderBuilder_{nullptr};
     StrategyServiceState state_{StrategyServiceState::Stopped};
@@ -439,7 +438,7 @@ private:
     std::vector<RuntimeFactorSnapshot> factorSnapshotBuffer_;
     std::vector<StrategySignal> signalBuffer_;
     std::vector<RuleEvaluationResult> ruleResultBuffer_;
-    std::vector<OrderRequest> pendingOrderBuffer_;
+    mutable std::vector<OrderRequest> pendingOrderBuffer_;
     mutable std::mutex mutex_;
 };
 
@@ -460,8 +459,7 @@ public:
     /// @brief 从数据库通过 strategyId 加载参数并构建引擎（接管 factorSvc 所有权）
     /// @param factorSvc 因子服务 (unique_ptr, 传 nullptr 则只支持非因子策略)
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId,
-                                                                 std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr,
-                                                                 IRuntimeOrderSink* orderSink = nullptr);
+                                                                 std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr);
 
     /// @brief 从策略参数构建完整的引擎实例
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromParams(const StrategyCreationParams& params);
@@ -579,6 +577,13 @@ private:
     /// @brief 后台线程主函数（分钟频/高频）：阻塞等待行情 → step() → 通知订单。
     void drainQueue();
 
+    /// @brief 持仓感知建单：对比信号目标权重与当前持仓，计算实际买卖数量和意图
+    std::vector<OrderRequest> buildPositionAwareOrders(
+        const std::vector<OrderRequest>& rawOrders,
+        const std::unordered_map<std::string, int64_t>& posQtyMap,
+        const engine::AccountInfo& account,
+        double priceForWeight);
+
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
@@ -614,7 +619,6 @@ public:
 
     Builder& withFactorService(std::unique_ptr<IRuntimeFactorService> factorService);
     Builder& withRuleEvaluationService(std::unique_ptr<IRuleEvaluationService> ruleEvaluationService);
-    Builder& withOrderSink(IRuntimeOrderSink& orderSink);
     Builder& withDiagnosticsSink(IDiagnosticsSink& diagnosticsSink);
     Builder& withOrderBuilder(const IOrderBuilder& orderBuilder);
     Builder& withAsyncExecutor(std::shared_ptr<foundation::thread::IExecutor> executor);
@@ -628,7 +632,6 @@ public:
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
-    IRuntimeOrderSink* orderSink_{nullptr};
     IDiagnosticsSink* diagnosticsSink_{nullptr};
     const IOrderBuilder* orderBuilder_{nullptr};
     std::shared_ptr<foundation::thread::IExecutor> asyncExecutor_;

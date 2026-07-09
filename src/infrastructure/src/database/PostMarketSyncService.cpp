@@ -129,7 +129,7 @@ void PostMarketSyncService::fillAdjFactors() {
     std::thread([this](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen()){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors DB不可用";return;}
-        auto res=db->executeQuery("SELECT d.symbol_id,si.symbol,d.trade_date::text FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE d.data_source='GMSDK' AND d.pre_adjust_factor=1.0");
+        auto res=db->executeQuery("SELECT d.symbol_id,si.symbol,d.trade_date::text FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE d.pre_adjust_factor=1.0");
         struct Rec{int sid;std::string sym,dt;};std::vector<Rec> recs;
         for(auto&r:res.getRows())recs.push_back({r.getInt("symbol_id"),r.getString("symbol"),r.getString("trade_date")});
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<recs.size()<<" 条待补";if(recs.empty())return;

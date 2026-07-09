@@ -670,6 +670,12 @@ strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order
             }
         }
     }
+    // 填充前日收盘价供涨跌停检查
+    {
+        auto& d = domain::market::MarketDataService::instance().liveData(order.symbol());
+        if (d.valid() && d.preClose() > 0.0)
+            risk.setReferencePrice(d.preClose());
+    }
     strategy::RiskEvaluator::applyConfig(risk,
         domain::strategy::RiskManager::instance().riskConfig());
     return risk;
