@@ -340,6 +340,7 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
         for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
 
     static constexpr int kBatchSize=50;
+    int gmTotal=static_cast<int>(gmList.size());
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
@@ -359,6 +360,7 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
             if(batch.size()>=500)flush();++ok;
         }
         bars->release();
+        if(i%500==0||end>=gmList.size())INTERNAL_INFO_STREAM<<"[PostMktSync] MINUTE "<<(std::min(end,gmList.size())*100/gmTotal)<<"% "<<std::min(end,gmList.size())<<"/"<<gmTotal<<" (ok="<<ok<<")";
     }
     flush();
     logTaskEnd("MINUTE", tradingDay, true, ok);
