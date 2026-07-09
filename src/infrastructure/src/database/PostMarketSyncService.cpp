@@ -544,7 +544,7 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
     // Pass1: 批量查询
     std::unordered_set<std::string> gotSyms;
     static constexpr int kBatchSize=100;
-    int batchReq=0,batchEmpty=0,batchErr=0,batchTotalBars=0;
+    int batchReq=0,batchEmpty=0,batchErr=0,batchTotalBars=0,batchMatchMiss=0;
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
@@ -555,10 +555,12 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
             if(bars)bars->release();continue;
         }
         batchTotalBars+=static_cast<int>(bars->count());
+        // 第一批打印gm到原始symbol的映射样本用于诊断
+        if(i==0&&bars->count()>0){std::string s1(bars->at(0).symbol?bars->at(0).symbol:"");auto it0=gmToSym.find(s1);INTERNAL_INFO_STREAM<<"[PostMktSync] gm返回首个symbol=["<<s1<<"] gmToSym匹配="<<(it0!=gmToSym.end()?"OK":"FAIL")<<" gmToSym样例:";int n=0;for(auto&p:gmToSym){if(n++<3)INTERNAL_INFO_STREAM<<"  "<<p.first<<" -> "<<p.second;}}
         for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
             if(!std::isfinite(b.close)||b.close<=0.01||b.close>=10000.0)continue;
             std::string gsym(b.symbol?b.symbol:"");auto sit=gmToSym.find(gsym);
-            if(sit==gmToSym.end())continue;std::string sym=sit->second;gotSyms.insert(gsym);
+            if(sit==gmToSym.end()){++batchMatchMiss;continue;}std::string sym=sit->second;gotSyms.insert(gsym);
             auto it=symToId.find(sym);if(it==symToId.end())continue;
             time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;gmtime_s(&t,&bob);
             char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
@@ -568,7 +570,8 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
         if(i%500==0||end>=gmList.size())INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 "<<(std::min(end,gmList.size())*100/total)<<"% "
             <<std::min(end,gmList.size())<<"/"<<total<<" gmBars="<<batchTotalBars<<" rows="<<rows.size();
     }
-    INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 批量统计: 请求 "<<batchReq<<" 批, 空 "<<batchEmpty<<" 批, 错 "<<batchErr<<" 批, gm返回 "<<batchTotalBars<<" 条, 收集 "<<rows.size()<<" 行, 覆盖 "<<gotSyms.size()<<" 标的";
+    INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 批量统计: 请求 "<<batchReq<<" 批, 空 "<<batchEmpty<<" 批, 错 "<<batchErr
+        <<" 批, gm返回 "<<batchTotalBars<<" 条, 符号匹配失败 "<<batchMatchMiss<<" 条, 收集 "<<rows.size()<<" 行, 覆盖 "<<gotSyms.size()<<" 标的";
 
     // 重试: 批量遗漏的标的单独拉
     std::vector<std::string> missing;
