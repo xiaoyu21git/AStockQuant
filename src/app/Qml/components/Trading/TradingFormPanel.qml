@@ -12,7 +12,20 @@ Rectangle {
     border.width: 1
     implicitHeight: compactMode ? 620 : 980
 
-    property var marketSnapshot: (Bridge.MarketDataBridge.marketSnapshots[currentSymbol] || {})
+    // 解析完整symbol (代码→代码.后缀)
+    function resolveFullSymbol(code) {
+        if (!code) return ""
+        if (code.indexOf('.') >= 0) return code
+        var snaps = Bridge.MarketDataBridge.marketSnapshots
+        return (snaps[code + ".SZ"] && snaps[code + ".SZ"].price > 0) ? code + ".SZ"
+             : (snaps[code + ".SH"] && snaps[code + ".SH"].price > 0) ? code + ".SH"
+             : (snaps[code + ".BJ"] && snaps[code + ".BJ"].price > 0) ? code + ".BJ"
+             : code + ".SZ"
+    }
+    property var marketSnapshot: {
+        var sym = resolveFullSymbol(currentSymbol)
+        return sym ? (Bridge.MarketDataBridge.marketSnapshots[sym] || {}) : {}
+    }
 
     // 持仓列表点击 → primarySymbol 变更 → 自动填入下单控件+价格
     Connections {
@@ -42,7 +55,7 @@ Rectangle {
             }
         }
     }
-    property var depthSnapshot: ({})
+    property var depthSnapshot: (marketSnapshot && marketSnapshot.depthSnapshot) ? marketSnapshot.depthSnapshot : ({})
     property real availableCapital: 500000
     property var pendingOrders: []
     property string toastMessage: ""
@@ -83,20 +96,38 @@ Rectangle {
     property string stockPriceType: "limit"
     property string stockPrice: ""
 
+    // 当前参考价文本（最新价/涨停/跌停/昨收）
+    property var currentReferenceText: {
+        var ms = marketSnapshot
+        var px = ms.price || ms.lastPrice || 0
+        return px > 0 ? ("最新 " + px.toFixed(2)) : "暂无行情"
+    }
+    property real lastPrice: (marketSnapshot && marketSnapshot.price > 0) ? marketSnapshot.price : 0
+    property real bidPrice: {
+        var ds = depthSnapshot
+        if (ds && ds.bids && ds.bids.length > 0) return ds.bids[0].price || 0
+        return 0
+    }
+    property real askPrice: {
+        var ds = depthSnapshot
+        if (ds && ds.asks && ds.asks.length > 0) return ds.asks[0].price || 0
+        return 0
+    }
+    property real preClose:  (marketSnapshot && marketSnapshot.preClose  > 0) ? marketSnapshot.preClose  : 0
+    property real limitUp:   (marketSnapshot && marketSnapshot.limitUp   > 0) ? marketSnapshot.limitUp   : 0
+    property real limitDown: (marketSnapshot && marketSnapshot.limitDown > 0) ? marketSnapshot.limitDown : 0
+    property real lastAutoStockPrice: 0
+
     // 选股/切股时自动拉取最新市价
     onStockCodeChanged: {
         if (!stockCode) return
+        var fullSym = resolveFullSymbol(stockCode)
+        if (fullSym) Bridge.MarketDataBridge.resolveInstrument(fullSym)
         Qt.callLater(function() {
-            var sym = stockCode
-            if (sym.indexOf('.') < 0) {
-                // 尝试SZ/SH后缀
-                var snapSZ = Bridge.MarketDataBridge.marketSnapshots[sym + ".SZ"] || {}
-                var snapSH = Bridge.MarketDataBridge.marketSnapshots[sym + ".SH"] || {}
-                var snap = (snapSZ.price > 0) ? snapSZ : snapSH
-                if (snap.price > 0) {
-                    stockPrice = snap.price.toFixed(2)
-                    lastAutoStockPrice = snap.price.toFixed(2)
-                }
+            var snap = marketSnapshot
+            if (snap && snap.price > 0) {
+                stockPrice = snap.price.toFixed(2)
+                lastAutoStockPrice = snap.price.toFixed(2)
             }
         })
     }

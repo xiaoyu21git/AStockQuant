@@ -167,6 +167,8 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
     snap["source"]     = QStringLiteral("实时行情");
     snap["updatedAt"]  = QDateTime::currentDateTime().toString(Qt::ISODate);
     snap["preClose"]      = pc;
+    snap["limitUpPrice"]  = d.limitUp();
+    snap["limitDownPrice"]= d.limitDown();
     double changePct = (pc > 0.0) ? (bar.close() - pc) / pc * 100.0 : 0.0;
     snap["changePct"]      = changePct;
     snap["changePercent"]  = QVariant::fromValue(changePct);
