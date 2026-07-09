@@ -535,21 +535,30 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
      int y=ed/10000,m=(ed%10000)/100,d=ed%100;snprintf(eBuf,sizeof(eBuf),"%04d-%02d-%02d",y,m,d);}
     INTERNAL_INFO_STREAM<<"[PostMktSync] syncDailyRange "<<sBuf<<" ~ "<<eBuf;
     struct Row{int sid;std::string sym,dt;double o,h,l,c,pc,vol,amt;};
-    std::vector<Row> rows;int total=static_cast<int>(symbols.size()),ok=0;
-    for(const auto& sym:symbols){
-        std::string gm=toGmSymbol(sym);if(gm.empty())continue;
-        auto* bars=::history_bars(gm.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
+    std::vector<Row> rows;int total=static_cast<int>(symbols.size());
+    // gm符号→原始符号 映射
+    std::unordered_map<std::string,std::string> gmToSym;
+    std::vector<std::string> gmList;
+    for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
+    static constexpr int kBatchSize=100;
+    for(size_t i=0;i<gmList.size();i+=kBatchSize){
+        size_t end=std::min(i+kBatchSize,gmList.size());
+        std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
+        auto* bars=::history_bars(gmBatch.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
         if(!bars||bars->status()!=0||bars->count()<=0){if(bars)bars->release();continue;}
-        auto it=symToId.find(sym);if(it==symToId.end()){bars->release();continue;}
         for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
             if(!std::isfinite(b.close)||b.close<=0.01||b.close>=10000.0)continue;
+            std::string gsym(b.symbol?b.symbol:"");auto sit=gmToSym.find(gsym);
+            if(sit==gmToSym.end())continue;std::string sym=sit->second;
+            auto it=symToId.find(sym);if(it==symToId.end())continue;
             time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;gmtime_s(&t,&bob);
             char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
             std::string dt(ds);if(!targets.count(dt))continue;
             rows.push_back({it->second,sym,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
-        bars->release();++ok;if(ok%500==0)INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 "<<(ok*100/total)<<"% "<<ok<<"/"<<total;
+        bars->release();
+        if(i%500==0||end>=gmList.size())INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 "<<(std::min(end,gmList.size())*100/total)<<"% "<<std::min(end,gmList.size())<<"/"<<total;
     }
-    if(rows.empty())return false;
+    if(rows.empty()){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyRange 无数据";return false;}
     INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 done, "<<rows.size()<<" 行";
     std::unordered_map<std::string,int> gmToId;
     for(auto&r:rows){std::string g=toGmSymbol(r.sym);if(!g.empty())gmToId[g]=r.sid;}
