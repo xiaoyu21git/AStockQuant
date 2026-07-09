@@ -66,18 +66,31 @@ RuleEvaluationResult LocalRuleEvaluationService::evaluate(
 
     bool passed = true;
     RuleRejectReason rejectReason = RuleRejectReason::None;
+    std::string failDetail;
     for (rules::RuleId ruleId : selectedRules) {
         if (ruleId == kRuleScoreNonNegative && signal.score() < kMinSignalScore) {
             passed = false;
             rejectReason = RuleRejectReason::RuleTemplateBlocked;
+            failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";
             break;
         }
         if (ruleId == kRuleTargetWeightAbsLimit
             && std::fabs(signal.targetWeight()) > kMaxAbsoluteTargetWeight) {
             passed = false;
             rejectReason = RuleRejectReason::RiskGuardBlocked;
+            failDetail = "|targetWeight|≤1.0 不通过(weight=" + std::to_string(signal.targetWeight()) + ")";
             break;
         }
+    }
+
+    if (!passed) {
+        char symBuf[16];
+        std::snprintf(symBuf, sizeof(symBuf), "%06u", signal.instrumentId().value);
+        INTERNAL_WARN_STREAM << "[RuleEval] 规则拒绝: " << symBuf
+                             << " " << failDetail
+                             << " score=" << signal.score()
+                             << " targetWeight=" << signal.targetWeight()
+                             << " side=" << (signal.side() == RuntimeOrderSide::Buy ? 'B' : 'S');
     }
 
     const auto endAt = std::chrono::steady_clock::now();
@@ -143,19 +156,32 @@ StrategyServiceFlowResult LocalRuleEvaluationService::evaluateBatch(
 
         bool passed = true;
         RuleRejectReason rejectReason = RuleRejectReason::None;
+        std::string failDetail;
 
         for (rules::RuleId ruleId : selectedRules) {
             if (ruleId == kRuleScoreNonNegative && signal.score() < kMinSignalScore) {
                 passed = false;
                 rejectReason = RuleRejectReason::RuleTemplateBlocked;
+                failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";
                 break;
             }
             if (ruleId == kRuleTargetWeightAbsLimit
                 && std::fabs(signal.targetWeight()) > kMaxAbsoluteTargetWeight) {
                 passed = false;
                 rejectReason = RuleRejectReason::RiskGuardBlocked;
+                failDetail = "|targetWeight|≤1.0 不通过(weight=" + std::to_string(signal.targetWeight()) + ")";
                 break;
             }
+        }
+
+        if (!passed) {
+            char symBuf[16];
+            std::snprintf(symBuf, sizeof(symBuf), "%06u", signal.instrumentId().value);
+            INTERNAL_WARN_STREAM << "[RuleEval] 规则拒绝: " << symBuf
+                                 << " " << failDetail
+                                 << " score=" << signal.score()
+                                 << " targetWeight=" << signal.targetWeight()
+                                 << " side=" << (signal.side() == RuntimeOrderSide::Buy ? 'B' : 'S');
         }
 
         const auto endAt = std::chrono::steady_clock::now();

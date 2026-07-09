@@ -368,6 +368,13 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
         isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
         order.price(), order.quantity(), pe);
 
+    // 篮子ID — 手动单也标记以便审计追溯
+    {
+        static std::atomic<uint64_t> s_manualBasketSeq{0};
+        engineReq.setExtension(domain::trading::ExtKey::kBasketId,
+                               s_manualBasketSeq.fetch_add(1));
+    }
+
     // TradeOrder 字段对齐 OrderBuilder 输出
     order.setClOrdId(engineReq.clOrdId());
     order.setAccountId(engineReq.accountId());

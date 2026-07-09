@@ -557,7 +557,10 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
     }
 
     // ── 篮子委托: 先卖后买, 卖款回笼支撑买单 ──
-    INTERNAL_INFO_STREAM << "[TradeExec] 篮子委托: " << orders.size() << " 笔";
+    uint64_t basketId = orders.empty() ? 0
+        : orders[0].extensionAs<uint64_t>(domain::trading::ExtKey::kBasketId, 0);
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子委托: basketId=" << basketId
+                         << " orders=" << orders.size();
 
     // 拆分为卖单和买单
     std::vector<TradeOrder> sells, buys;
@@ -623,8 +626,9 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         }
     }
 
-    INTERNAL_INFO_STREAM << "[TradeExec] 篮子完成: " << submitted
-                         << " 提交 " << rejected << " 拒绝";
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子完成: basketId=" << basketId
+                         << " submitted=" << submitted
+                         << " rejected=" << rejected;
 }
 
 TradeOrder TradeExecutionEngine::buildTradeOrder(const strategy::OrderRequest& req) const {

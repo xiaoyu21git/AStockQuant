@@ -645,8 +645,15 @@ int StrategyEngine::liquidateAll()
         m_liquidationBlocklist.insert(code);
     }
 
+    // 篮子ID
+    static std::atomic<uint64_t> s_liqBasketSeq{0};
+    uint64_t basketId = s_liqBasketSeq.fetch_add(1);
+    for (auto& o : orders)
+        o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
+
     m_orderListener->onOrders(orders);
-    INTERNAL_WARN_STREAM << "[StrategyEngine] 一键清仓: " << orders.size()
+    INTERNAL_WARN_STREAM << "[StrategyEngine] 一键清仓: basketId=" << basketId
+                         << " orders=" << orders.size()
                          << " 笔订单, 持仓已提交";
     return static_cast<int>(orders.size());
 }

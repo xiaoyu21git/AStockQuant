@@ -447,6 +447,11 @@ void JujinMarketConnector::riskPatrolLoop()
             for (const auto& o : stopOrders) {
                 INTERNAL_WARN_STREAM << "[JMC] 止损/止盈触发: " << o.symbol()
                                      << " price=" << o.price() << " qty=" << o.quantity();
+                // 篮子ID
+                static std::atomic<uint64_t> s_patrolBasketSeq{0};
+                const_cast<engine::OrderRequest&>(o).setExtension(
+                    domain::trading::ExtKey::kBasketId,
+                    s_patrolBasketSeq.fetch_add(1));
                 if (tradeEng.initialized()) {
                     auto result = tradeEng.submitOrder(o);
                     INTERNAL_INFO_STREAM << "[JMC] 止损/止盈提交: " << o.symbol()
