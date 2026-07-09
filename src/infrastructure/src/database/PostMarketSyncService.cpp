@@ -565,7 +565,7 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
             std::string gsym(b.symbol?b.symbol:"");auto sit=gmToSym.find(gsym);
             if(sit==gmToSym.end()){++batchMatchMiss;continue;}std::string sym=sit->second;gotSyms.insert(gsym);
             auto it=symToId.find(sym);if(it==symToId.end())continue;
-            time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;gmtime_s(&t,&bob);
+            time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;localtime_s(&t,&bob);
             char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
             std::string dt(ds);if(!targets.count(dt))continue;
             rows.push_back({it->second,sym,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
@@ -600,7 +600,7 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
                     std::string gsym(b.symbol?b.symbol:g);auto sit=gmToSym.find(gsym);
                     if(sit==gmToSym.end())continue;
                     auto it=symToId.find(sit->second);if(it==symToId.end())continue;
-                    time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;gmtime_s(&t,&bob);
+                    time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;localtime_s(&t,&bob);
                     char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
                     std::string dt(ds);if(!targets.count(dt))continue;
                     rows.push_back({it->second,sit->second,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
