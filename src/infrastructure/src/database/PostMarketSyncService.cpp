@@ -68,7 +68,7 @@ bool PostMarketSyncService::forceSyncToday() {
             for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         }
         int mins=getCurrentLocalMinutes();
-        if(mins>=900&&m_lastSyncDay.load()!=today){syncDailyMinute(today);syncWeeklyMonthly(today);if(isMonthlyMaintenanceDay())syncFinancialData(today);}
+        if(mins>=900&&m_lastSyncDay.load()!=today){syncDailyMinute(today);syncWeeklyMonthly(today);if(isMonthlyMaintenanceDay())syncFinancialData(today);fillAdjFactors();}
         if(mins>=900){m_lastSyncDay.store(today);saveLastSyncDay(today);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
     }).detach();
