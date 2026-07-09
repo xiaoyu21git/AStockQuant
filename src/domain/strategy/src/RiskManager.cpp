@@ -63,16 +63,10 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions(domain::trading::
         INTERNAL_INFO_STREAM << "[RiskManager] 巡检启动, 持仓数=" << positions.size();
     }
     for (const auto& pos : positions) {
-        if (pos.availableQty <= 0 || pos.costPrice <= 0) {
-            INTERNAL_DEBUG_STREAM << "[RiskManager] 跳过持仓(无成本): " << pos.symbol;
-            continue;
-        }
+        if (pos.availableQty <= 0 || pos.costPrice <= 0) continue;
 
         auto& d = domain::market::MarketDataService::instance().liveData(pos.symbol);
-        if (!d.valid()) {
-            INTERNAL_DEBUG_STREAM << "[RiskManager] 跳过持仓(无行情): " << pos.symbol;
-            continue;
-        }
+        if (!d.valid()) continue;
         double price = d.dailyBar().close();
         if (price <= 0) continue;
 
