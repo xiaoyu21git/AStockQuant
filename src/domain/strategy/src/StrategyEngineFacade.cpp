@@ -148,28 +148,23 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     const bool isFactorType = params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
                            || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MachineLearning;
 
-    INTERNAL_INFO_STREAM << "[fromDb] strategyId=" << strategyId << " isFactorType=" << isFactorType << " factorSvc=" << static_cast<void*>(factorSvc.get()) << " factorIds=" << params.factorIds.size();
-
     if (isFactorType && !factorSvc) {
         INTERNAL_WARN_STREAM << "[fromDb] ABORT: factor strategy but factorSvc is null";
         return nullptr;
     }
 
-    // ── 创建引擎 (Builder 直接注入 IRuntimeFactorService，Engine 接管所有权) ──
     auto engineBuilder = StrategyEngine::builder();
     if (factorSvc) {
         auto* rfsPtr = dynamic_cast<RuntimeFactorSvc*>(factorSvc.get());
-        INTERNAL_INFO_STREAM << "[fromDb] factorSvc dynamic_cast to RuntimeFactorSvc = " << static_cast<void*>(rfsPtr);
         if (rfsPtr && !params.factorIds.empty()) {
             rfsPtr->setFactorIds(params.factorIds);
         }
         engineBuilder.withFactorService(std::move(factorSvc));
     }
-    INTERNAL_INFO_STREAM << "[fromDb] building engine...";
-    auto engine = engineBuilder
-        .maxStrategies(params.maxPositions)
-        .build();
-    INTERNAL_INFO_STREAM << "[fromDb] engine built: " << static_cast<void*>(engine.get());
+    auto engine = engineBuilder.maxStrategies(params.maxPositions).build();
+    INTERNAL_INFO_STREAM << "[fromDb] " << strategyId << " kind=" << static_cast<int>(params.behaviorKind)
+                         << " factorIds=" << params.factorIds.size()
+                         << " engine=" << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
     engine->setStrategyId(strategyId);
     engine->m_orderBuilder.setStrategyId(strategyId);
@@ -382,7 +377,7 @@ bool StrategyEngine::prepareMarketData()
         auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
         auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
         auto rawRows = repo->queryAllMarketDailyBarWithFields(startDate, endDate, extraFields);
-        INTERNAL_INFO_STREAM << "[Engine] query Factor: " << rawRows.size()<< " rows, fields=" << (5 + extraFields.size());
+        INTERNAL_DEBUG_STREAM << "[Engine] query Factor: " << rawRows.size()<< " rows, fields=" << (5 + extraFields.size());
         if (!rawRows.empty() && rfs) {
             rfs->buildLiveView(rawRows, extraFields);
         }
@@ -556,7 +551,7 @@ void StrategyEngine::startLiveLoop()
 
     if (m_isDailyFrequency) {
         // ── 日频: DailyEodScheduler 管理 EOD 回调 + 补单 ──
-        INTERNAL_INFO_STREAM << "[启动] 日频策略 — 创建 DailyEodScheduler";
+        INTERNAL_INFO_STREAM << "[启动] 日频策略 — DailyEodScheduler";
 
         if (!m_dailyScheduler) {
             // 持久化路径: 策略数据目录下 strategy_<id>_last_eval.txt
@@ -601,10 +596,10 @@ void StrategyEngine::stopLiveLoop()
     // 风控订阅器全局单例，不在此停止
 
     if (m_dedicatedExecutor) {
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 等待专用线程退出(最多5s)...";
+        INTERNAL_DEBUG_STREAM << "[StrategyEngine] 等待专用线程退出...";
         m_dedicatedExecutor->shutdown(false);
         m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 专用线程已退出";
+        INTERNAL_DEBUG_STREAM << "[StrategyEngine] 专用线程已退出";
     }
 }
 
@@ -737,7 +732,7 @@ std::vector<OrderRequest> StrategyEngine::buildPositionAwareOrders(
         }
 
         if (deltaQty < kMinLot) {
-            INTERNAL_INFO_STREAM << "[buildPAO] delta不足一手: " << code
+            INTERNAL_DEBUG_STREAM << "[buildPAO] delta不足一手: " << code
                 << " delta=" << deltaQty << " intent=" << static_cast<int>(intent);
             continue;
         }

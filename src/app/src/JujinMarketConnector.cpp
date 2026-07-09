@@ -244,7 +244,7 @@ bool JujinMarketConnector::start()
     }
 
     auto& cfgMgr = foundation::config::ConfigManager::instance();
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] start requested";
+    INTERNAL_INFO_STREAM << "[JMC] 启动中...";
 
     // 通过 ConfigManager 统一读取 trading_connection.json
     std::string token, accountId, gmStrategyId, accountRuntimeId;
@@ -273,7 +273,7 @@ bool JujinMarketConnector::start()
     engine::TradeEngine::instance().initialize(s);
     engine::AccountEngine::instance().initialize(s);
     engine::OrderManager::instance().initialize(s);
-    INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 初始化成功";
+    INTERNAL_DEBUG_STREAM << "[JMC] GmSessionEngine 初始化成功";
 
     m_started = true;
     m_lastError.clear();
@@ -309,7 +309,7 @@ bool JujinMarketConnector::start()
         1, 1, std::chrono::seconds(60), "JmcRiskPatrol");
     m_patrolExecutor->post([this]() { riskPatrolLoop(); });
 
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] start completed";
+    INTERNAL_INFO_STREAM << "[JMC] 启动完成";
     return true;
 }
 
@@ -326,7 +326,7 @@ void JujinMarketConnector::stop()
 
     engine::GmSessionEngine::instance().shutdown();
     m_started = false;
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] stopped";
+    INTERNAL_INFO_STREAM << "[JMC] 已停止";
 }
 
 std::string JujinMarketConnector::symbolName(const std::string& gmSymbol) const {
@@ -362,7 +362,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
     m_initialOrderSyncThread = std::thread([this, rawEventBus,
                                             configuredRuntimeId, configuredBoundIds]() {
         try {
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] initial unfinished-order sync started (C++ gmsdk)";
+        INTERNAL_DEBUG_STREAM << "[JMC] unfinished-order sync 开始";
 
         auto& engine = engine::GmSessionEngine::instance();
         auto* s = static_cast<::Strategy*>(engine.strategy());
