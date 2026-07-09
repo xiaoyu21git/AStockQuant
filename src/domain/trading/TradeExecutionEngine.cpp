@@ -200,6 +200,16 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order) {
     risk.setAutoStrategySignal(!order.strategyId().empty());
     risk.setPositionSnapshotReady(true);
     risk.setTradingSessionOpen(true);
+    // 卖单补 closeableQuantity，避免便利重载遗漏导致风控误拒
+    if (!risk.isBuyOrder()) {
+        auto& accEng = engine::AccountEngine::instance();
+        for (const auto& pos : accEng.positions()) {
+            if (pos.symbol == order.symbol()) {
+                risk.setCloseableQuantity(pos.availableQty);
+                break;
+            }
+        }
+    }
     return submitOrder(order, risk);
 }
 
