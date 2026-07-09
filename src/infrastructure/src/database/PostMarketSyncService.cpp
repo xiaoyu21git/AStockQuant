@@ -540,16 +540,26 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
     std::unordered_map<std::string,std::string> gmToSym;
     std::vector<std::string> gmList;
     for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
+
+    // 加载持久化的跳过列表 (多次重试仍失败)
+    std::unordered_set<std::string> skipSet;
+    {std::ifstream f("post_mkt_skip.txt");std::string line;while(std::getline(f,line)){if(!line.empty())skipSet.insert(line);}}
+
+    // Pass1: 批量查询
+    std::unordered_set<std::string> gotSyms;
     static constexpr int kBatchSize=100;
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
-        std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
+        std::string gmBatch;for(size_t j=i;j<end;++j){
+            std::string g=gmList[j];if(skipSet.count(g))continue;  // 跳过已知失败
+            if(!gmBatch.empty())gmBatch+=",";gmBatch+=g;}
+        if(gmBatch.empty())continue;
         auto* bars=::history_bars(gmBatch.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
         if(!bars||bars->status()!=0||bars->count()<=0){if(bars)bars->release();continue;}
         for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
             if(!std::isfinite(b.close)||b.close<=0.01||b.close>=10000.0)continue;
             std::string gsym(b.symbol?b.symbol:"");auto sit=gmToSym.find(gsym);
-            if(sit==gmToSym.end())continue;std::string sym=sit->second;
+            if(sit==gmToSym.end())continue;std::string sym=sit->second;gotSyms.insert(gsym);
             auto it=symToId.find(sym);if(it==symToId.end())continue;
             time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;gmtime_s(&t,&bob);
             char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
@@ -558,8 +568,44 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
         bars->release();
         if(i%500==0||end>=gmList.size())INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 "<<(std::min(end,gmList.size())*100/total)<<"% "<<std::min(end,gmList.size())<<"/"<<total;
     }
+
+    // 重试: 批量未返回的标的单独拉 (最多3次, 指数退避)
+    std::vector<std::string> missing;
+    for(auto&g:gmList)if(!skipSet.count(g)&&!gotSyms.count(g))missing.push_back(g);
+    if(!missing.empty()){
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试 "<<missing.size()<<" 只缺失标的";
+        std::unordered_set<std::string> permFail;
+        for(auto&g:missing){
+            bool ok=false;
+            for(int retry=0;retry<3&&!ok;++retry){
+                if(retry>0)std::this_thread::sleep_for(std::chrono::milliseconds(500*(1<<retry)));
+                auto* bars=::history_bars(g.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
+                if(bars&&bars->status()==0&&bars->count()>0){
+                    for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
+                        if(!std::isfinite(b.close)||b.close<=0.01)continue;
+                        std::string gsym(b.symbol?b.symbol:g);auto sit=gmToSym.find(gsym);
+                        if(sit==gmToSym.end())continue;
+                        auto it=symToId.find(sit->second);if(it==symToId.end())continue;
+                        time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;gmtime_s(&t,&bob);
+                        char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
+                        std::string dt(ds);if(!targets.count(dt))continue;
+                        rows.push_back({it->second,sit->second,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
+                    ok=true;}
+                if(bars)bars->release();
+            }
+            if(!ok)permFail.insert(g);
+        }
+        // 持久化永久失败
+        if(!permFail.empty()){
+            std::ofstream f("post_mkt_skip.txt",std::ios::app);
+            for(auto&g:permFail){f<<g<<"\n";skipSet.insert(g);}
+            INTERNAL_WARN_STREAM<<"[PostMktSync] "<<permFail.size()<<" 只标的3次重试仍失败, 已记录跳过";
+        }
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试完成, 成功 "<<(missing.size()-permFail.size())<<"/"<<missing.size();
+    }
+
     if(rows.empty()){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyRange 无数据";return false;}
-    INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 done, "<<rows.size()<<" 行";
+    INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 done, "<<rows.size()<<" 行 (跳过 "<<skipSet.size()<<" 已知失败)";
     std::unordered_map<std::string,int> gmToId;
     for(auto&r:rows){std::string g=toGmSymbol(r.sym);if(!g.empty())gmToId[g]=r.sid;}
     std::unordered_map<std::string,std::unordered_map<int,double>> peM,pbM,mtM,ciM,trM;
