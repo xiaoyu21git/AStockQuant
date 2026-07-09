@@ -555,8 +555,11 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
             if(bars)bars->release();continue;
         }
         batchTotalBars+=static_cast<int>(bars->count());
-        // 第一批打印gm到原始symbol的映射样本用于诊断
-        if(i==0&&bars->count()>0){std::string s1(bars->at(0).symbol?bars->at(0).symbol:"");auto it0=gmToSym.find(s1);INTERNAL_INFO_STREAM<<"[PostMktSync] gm返回首个symbol=["<<s1<<"] gmToSym匹配="<<(it0!=gmToSym.end()?"OK":"FAIL")<<" gmToSym样例:";int n=0;for(auto&p:gmToSym){if(n++<3)INTERNAL_INFO_STREAM<<"  "<<p.first<<" -> "<<p.second;}}
+        // 第一批打印gm返回的symbol和日期样本
+        if(i==0&&bars->count()>0){
+            std::string s1(bars->at(0).symbol?bars->at(0).symbol:"");time_t bob0=static_cast<time_t>(static_cast<int64_t>(bars->at(0).bob));struct tm t0;gmtime_s(&t0,&bob0);char ds0[16];snprintf(ds0,sizeof(ds0),"%04d-%02d-%02d",t0.tm_year+1900,t0.tm_mon+1,t0.tm_mday);
+            INTERNAL_INFO_STREAM<<"[PostMktSync] gm首个: sym=["<<s1<<"] dt="<<ds0<<" targets="<<targetDates.size()<<" 样例:"<<(targetDates.empty()?"无":targetDates[0]);
+        }
         for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
             if(!std::isfinite(b.close)||b.close<=0.01||b.close>=10000.0)continue;
             std::string gsym(b.symbol?b.symbol:"");auto sit=gmToSym.find(gsym);
@@ -571,7 +574,8 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
             <<std::min(end,gmList.size())<<"/"<<total<<" gmBars="<<batchTotalBars<<" rows="<<rows.size();
     }
     INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 批量统计: 请求 "<<batchReq<<" 批, 空 "<<batchEmpty<<" 批, 错 "<<batchErr
-        <<" 批, gm返回 "<<batchTotalBars<<" 条, 符号匹配失败 "<<batchMatchMiss<<" 条, 收集 "<<rows.size()<<" 行, 覆盖 "<<gotSyms.size()<<" 标的";
+        <<" 批, gm返回 "<<batchTotalBars<<" 条, 符号匹配失败 "<<batchMatchMiss
+        <<" 条, 收集 "<<rows.size()<<" 行(目标日期="<<targetDates.size()<<"天), 覆盖 "<<gotSyms.size()<<" 标的";
 
     // 重试: 批量遗漏的标的单独拉
     std::vector<std::string> missing;
