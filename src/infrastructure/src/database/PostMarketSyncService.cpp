@@ -144,18 +144,25 @@ void PostMarketSyncService::fillAdjFactors() {
         int total=static_cast<int>(syms.size());
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<total<<" 只标的待补";if(syms.empty())return;
         std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
-        int ok=0,proc=0;
+        int ok=0,proc=0,fail=0;
         for(auto&s:syms){
             std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
             if(gm.empty()){++proc;continue;}++proc;
-            auto* af=::stk_get_adj_factor(gm.c_str(),"2000-01-01","2099-12-31");
-            if(!af||af->status()!=0||af->count()<=0){if(af)af->release();continue;}
-            int symOk=0;
-            for(size_t i=0;i<af->count();++i){auto&f=af->at(i);
-                if(!std::isfinite(f.adj_factor_fwd)||f.adj_factor_fwd<=0||!std::isfinite(f.adj_factor_bwd)||f.adj_factor_bwd<=0)continue;
-                using P=astock::database::SqlParam;db->executeUpdate(sql,{P{f.adj_factor_fwd},P{f.adj_factor_bwd},P{s.sid},P{std::string(f.trade_date)}});++symOk;}
-            af->release();ok+=symOk;
-            if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<")";
+            // 限速: 每标的间隔50ms, 避免gmsdk限流
+            if(proc>1)std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            int symOk=0;bool gotData=false;
+            for(int retry=0;retry<2&&!gotData;++retry){
+                if(retry>0)std::this_thread::sleep_for(std::chrono::seconds(2));
+                auto* af=::stk_get_adj_factor(gm.c_str(),"2000-01-01","2099-12-31");
+                if(af&&af->status()==0&&af->count()>0){
+                    for(size_t i=0;i<af->count();++i){auto&f=af->at(i);
+                        if(!std::isfinite(f.adj_factor_fwd)||f.adj_factor_fwd<=0||!std::isfinite(f.adj_factor_bwd)||f.adj_factor_bwd<=0)continue;
+                        using P=astock::database::SqlParam;db->executeUpdate(sql,{P{f.adj_factor_fwd},P{f.adj_factor_bwd},P{s.sid},P{std::string(f.trade_date)}});++symOk;}
+                    gotData=true;}
+                if(af)af->release();
+            }
+            ok+=symOk;if(!gotData)++fail;
+            if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<" fail="<<fail<<")";
         }
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<" 条更新, "<<total<<" 只标的";
     }).detach();
