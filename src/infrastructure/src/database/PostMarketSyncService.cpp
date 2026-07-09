@@ -68,9 +68,11 @@ bool PostMarketSyncService::forceSyncToday() {
             for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         }
         int mins=getCurrentLocalMinutes();
-        if(mins>=900&&m_lastSyncDay.load()!=today){syncDailyMinute(today);syncWeeklyMonthly(today);if(isMonthlyMaintenanceDay())syncFinancialData(today);fillAdjFactors();}
+        if(mins>=900&&m_lastSyncDay.load()!=today){syncDailyMinute(today);syncWeeklyMonthly(today);if(isMonthlyMaintenanceDay())syncFinancialData(today);}
         if(mins>=900){m_lastSyncDay.store(today);saveLastSyncDay(today);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
+        // 复权因子异步补（耗时，不阻塞同步完成通知）
+        fillAdjFactors();
     }).detach();
     return true;
 }
@@ -247,10 +249,10 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     // 阶段3-4: 周月线
     syncWeekly(db, tradingDay);
     syncMonthly(db, tradingDay);
-    // 阶段5: 复权因子 (耗时, 日线完成后异步补)
-    fillAdjFactors();
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 全部完成 today=" << tradingDay;
+    // 阶段5: 复权因子异步补（耗时，不阻塞完成通知）
+    fillAdjFactors();
 }
 
 // ═════════════════════════════════════════════════
