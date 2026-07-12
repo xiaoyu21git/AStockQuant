@@ -589,6 +589,12 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
         <<" 批, gm返回 "<<batchTotalBars<<" 条, 符号匹配失败 "<<batchMatchMiss
         <<" 条, 收集 "<<rows.size()<<" 行(目标日期="<<targetDates.size()<<"天), 覆盖 "<<gotSyms.size()<<" 标的";
 
+    // 批量全空→gmsdk暂无数据，跳过重试
+    if(rows.empty()){
+        INTERNAL_WARN_STREAM<<"[PostMktSync] syncDailyRange 全空(掘金暂无数据), 跳过重试";
+        return false;
+    }
+
     // 重试: 批量遗漏的标的单独拉
     std::vector<std::string> missing;
     for(auto&g:gmList)if(!gotSyms.count(g))missing.push_back(g);
