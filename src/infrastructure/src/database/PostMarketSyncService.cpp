@@ -42,7 +42,6 @@ void PostMarketSyncService::start() {
 
 bool PostMarketSyncService::forceSyncToday() {
     int today = getCurrentTradingDay();
-    if (!isTradingDay(today)) { INTERNAL_WARN_STREAM << "[PostMktSync] 非交易日, 跳过"; return false; }
     std::thread([this, today]() {
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) { INTERNAL_ERROR_STREAM << "[PostMktSync] DB不可用"; return; }
@@ -67,15 +66,15 @@ bool PostMarketSyncService::forceSyncToday() {
             syncDailyRange(db,s2i,syms,mindate,maxdate,md);
             for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         }
-        int mins=getCurrentLocalMinutes();
-        if(mins>=900&&m_lastSyncDay.load()!=today){
+        // 手动触发不检查时间窗口和交易日
+        if(m_lastSyncDay.load()!=today){
             syncDailyMinute(today);
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 日线+分钟线完成 ======";
             syncWeeklyMonthly(today);
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 周月线完成 ======";
             if(isMonthlyMaintenanceDay())syncFinancialData(today);
         }
-        if(mins>=900){m_lastSyncDay.store(today);saveLastSyncDay(today);}
+        m_lastSyncDay.store(today);saveLastSyncDay(today);
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
         // 复权因子异步补（耗时，不阻塞同步完成通知）
         fillAdjFactors();
