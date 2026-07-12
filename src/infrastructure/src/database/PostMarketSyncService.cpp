@@ -143,7 +143,7 @@ void PostMarketSyncService::fillAdjFactors() {
         int total=static_cast<int>(syms.size());
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<total<<" 只标的待补";if(syms.empty())return;
         std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND pre_adjust_factor=1.0";
-        int ok=0,proc=0,fail=0;
+        int ok=0,proc=0,fail=0,firstFailStreak=0;
         for(auto&s:syms){
             std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
             if(gm.empty()){++proc;continue;}++proc;
@@ -160,7 +160,9 @@ void PostMarketSyncService::fillAdjFactors() {
                     gotData=true;}
                 if(af)af->release();
             }
-            ok+=symOk;if(!gotData)++fail;
+            ok+=symOk;if(!gotData){++fail;++firstFailStreak;}else firstFailStreak=0;
+            // 连续50只全失败→gm不可用，终止
+            if(firstFailStreak>=50&&ok==0){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors 连续"<<firstFailStreak<<"只失败, gm不可用, 终止";break;}
             if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<" fail="<<fail<<")";
         }
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<" 条更新, "<<total<<" 只标的";
