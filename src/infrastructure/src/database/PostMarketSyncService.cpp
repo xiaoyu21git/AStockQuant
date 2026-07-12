@@ -681,7 +681,13 @@ void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     auto res=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
     std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
     for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
-    if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyMinute 日线失败";return;}
+    // 日线已有则跳过，只补估值+分钟线
+    auto cntRes=db->executeQuery("SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
+        {astock::database::SqlParam{std::to_string(tradingDay)}});
+    bool dailyExists=(cntRes.rowCount()>0&&cntRes.getRow(0).getInt(0)>static_cast<int>(syms.size()*0.9));
+    if(!dailyExists){
+        if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyMinute 日线失败";return;}
+    } else {INTERNAL_INFO_STREAM<<"[PostMktSync] 日线已有 "<<cntRes.getRow(0).getInt(0)<<" 条, 跳过同步";}
     syncValuation(db,s2i,syms,tradingDay);
     syncMinute(db,s2i,syms,tradingDay);
 }
