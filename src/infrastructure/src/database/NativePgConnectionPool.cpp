@@ -39,6 +39,8 @@ std::shared_ptr<ISqlDatabase> NativePgConnectionPool::getConnection()
             cfg.username = cfgMgr.get_app_config_string("pg.user", "astock");
             cfg.password = cfgMgr.get_app_config_string("pg.password", "astock123");
             cfg.charset  = "utf8";
+            INTERNAL_INFO_STREAM << "[Pool] PG: host='" << cfg.host << "' port=" << cfg.port
+                                 << " db=" << cfg.database << " user=" << cfg.username;
             config_ = cfg; initialized_ = true;
         }
         std::thread::id tid = std::this_thread::get_id();
