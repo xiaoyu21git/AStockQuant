@@ -388,12 +388,12 @@ ApplicationWindow {
                         }
                     }
 
-                    // 因子绩效分析页 (索引12)
+                    // 因子绩效分析页 (索引13)
                     Loader {
                         id: factorPerformancePageLoader
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 12 || item !== null
+                        active: mainStack.currentIndex === 13 || item !== null
                         asynchronous: true
                         sourceComponent: factorPerformancePageComponent
                     }
@@ -656,7 +656,7 @@ ApplicationWindow {
             "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
             "factor_library": 5,              // 因子库 -> FactorWorkbench (索引5)
             "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
-            "factor_performance": 12,         // 因子绩效 -> FactorPerformancePage (索引12)
+            "factor_performance": 13,         // 因子绩效 -> FactorPerformancePage (索引13)
             "risk_configuration": 6,          // 风险配置 -> 风险管理 (索引6)
             "risk_monitoring": 6,             // 风险监控 -> 风险管理 (索引6)
             "stress_testing": 6,              // 压力测试 -> 风险管理 (索引6)
