@@ -24,8 +24,7 @@ private:
     PythonEventBridge() = default;
     ~PythonEventBridge();
 
-    static void schedulerThread(const std::string& eventsPath,
-                                const std::string& binPath);
+    static void schedulerThread(std::string eventsPath, std::string binPath);
 
     std::unique_ptr<std::thread> m_thread;
     std::atomic<bool> m_running{false};

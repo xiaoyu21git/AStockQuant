@@ -65,8 +65,7 @@ bool PythonEventBridge::start() {
                          << " home=" << homePath << " exeDir=" << exeDir;
 
     m_running.store(true);
-    m_thread = std::make_unique<std::thread>(&PythonEventBridge::schedulerThread,
-                                              this, eventsPath, binPath);
+    m_thread = std::make_unique<std::thread>(schedulerThread, eventsPath, binPath);
     return true;
 }
 
@@ -83,8 +82,7 @@ void PythonEventBridge::stop() {
     }
 }
 
-void PythonEventBridge::schedulerThread(const std::string& eventsPath,
-                                         const std::string& binPath) {
+void PythonEventBridge::schedulerThread(std::string eventsPath, std::string binPath) {
     PyGILState_STATE gstate = PyGILState_Ensure();
 
     std::string script =
