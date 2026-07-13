@@ -8,8 +8,12 @@
 
 #include "foundation/log/logging.hpp"
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -305,6 +309,218 @@ std::vector<std::string> DataCache::loadDataSetSchemaFields(int dataId)
         fields.push_back(schema->field(i)->name());
     }
     return fields;
+}
+
+// ── 增量：扫描 trade_date 列取真实最大日期（以文件为准）──
+
+std::string DataCache::getMaxTradeDate(int dataId)
+{
+    std::string path = dataFilePath(dataId);
+
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) {
+        INTERNAL_WARN_STREAM << "[DataCache] getMaxTradeDate: cannot open " << path;
+        return {};
+    }
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) return {};
+    auto reader = readerResult.ValueOrDie();
+    auto schema = reader->schema();
+    if (!schema) return {};
+
+    int tdIdx = schema->GetFieldIndex(std::string(CF::TRADE_DATE.c_str()));
+    if (tdIdx < 0) {
+        INTERNAL_WARN_STREAM << "[DataCache] getMaxTradeDate: no trade_date column in " << path;
+        return {};
+    }
+
+    std::string maxTd;
+    for (int i = 0; i < reader->num_record_batches(); ++i) {
+        auto batchResult = reader->ReadRecordBatch(i);
+        if (!batchResult.ok()) continue;
+        auto col = batchResult.ValueOrDie()->column(tdIdx);
+        if (!col || col->type_id() != arrow::Type::STRING) continue;
+        auto sArr = std::static_pointer_cast<arrow::StringArray>(col);
+        for (int64_t r = 0; r < sArr->length(); ++r) {
+            if (sArr->IsNull(r)) continue;
+            std::string v = sArr->GetString(r);
+            if (v > maxTd) maxTd = std::move(v);
+        }
+    }
+    return maxTd;
+}
+
+// ── 增量：按日期范围加载完整行 ──
+std::vector<J> DataCache::loadDataSetRange(int dataId, const std::string& sinceDate)
+{
+    std::string path = dataFilePath(dataId);
+
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: cannot open " << path << ": " << inResult.status().ToString();
+        return {};
+    }
+
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: open error " << readerResult.status().ToString();
+        return {};
+    }
+
+    auto reader = readerResult.ValueOrDie();
+    std::vector<std::shared_ptr<arrow::RecordBatch>> batches;
+    for (int i = 0; i < reader->num_record_batches(); ++i) {
+        auto batchResult = reader->ReadRecordBatch(i);
+        if (!batchResult.ok()) continue;
+        batches.push_back(batchResult.ValueOrDie());
+    }
+    if (batches.empty()) return {};
+
+    auto tableResult = arrow::Table::FromRecordBatches(batches);
+    if (!tableResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: table error " << tableResult.status().ToString();
+        return {};
+    }
+
+    auto allRows = tableToRows(tableResult.ValueOrDie());
+
+    // 过滤 trade_date >= sinceDate（trade_date 为 "YYYY-MM-DD" 字符串，字典序即时间序）
+    std::vector<J> result;
+    result.reserve(allRows.size());
+    const char* kTradeDate = CF::TRADE_DATE.c_str();
+    for (auto& row : allRows) {
+        if (!row.isObject() || !row.has(kTradeDate)) continue;
+        auto v = row.get(kTradeDate);
+        if (!v.isString()) continue;
+        if (v.asString() >= sinceDate) result.push_back(std::move(row));
+    }
+    INTERNAL_INFO_STREAM << "[DataCache] loadRange " << path << ": " << result.size() << " rows since " << sinceDate;
+    return result;
+}
+
+// ── 增量：原子追加写入 ──
+
+int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
+    const std::vector<std::string>& fieldNames,
+    const std::unordered_set<std::string>& numericFields)
+{
+    if (newRows.empty()) {
+        INTERNAL_WARN_STREAM << "[DataCache] append: no new rows for dataset " << dataId;
+        return -1;
+    }
+
+    const std::string path = dataFilePath(dataId);
+    const std::string tmpPath = path + ".tmp";
+
+    // 0. 清理上次崩溃残留的临时文件
+    std::error_code rmEc;
+    std::filesystem::remove(tmpPath, rmEc);
+
+    // 1. 打开旧文件，读取 schema（并延迟到写完新 batch 后再读旧 batch）
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open old file " << path << ": " << inResult.status().ToString();
+        return -1;
+    }
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] append: read old error " << readerResult.status().ToString();
+        return -1;
+    }
+    auto reader = readerResult.ValueOrDie();
+    auto oldSchema = reader->schema();
+
+    // 2. 构建新数据 Table，校验 schema 与旧文件一致
+    auto newTable = buildArrowTable(newRows, fieldNames, numericFields);
+    if (!newTable->schema()->Equals(*oldSchema)) {
+        INTERNAL_ERROR_STREAM << "[DataCache] append: schema mismatch for dataset " << dataId << ", abort (old file kept)";
+        return -1;
+    }
+
+    // 3. 写临时文件：旧 batch 全量 + 新 Table。任一步失败即清理 tmp、保留旧文件
+    int64_t oldRows = 0;
+    {
+        auto outResult = arrow::io::FileOutputStream::Open(tmpPath);
+        if (!outResult.ok()) {
+            INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open tmp " << tmpPath << ": " << outResult.status().ToString();
+            return -1;
+        }
+        auto stream = outResult.ValueOrDie();
+        auto writerResult = arrow::ipc::MakeFileWriter(stream, oldSchema);
+        if (!writerResult.ok()) {
+            INTERNAL_ERROR_STREAM << "[DataCache] append: writer error " << writerResult.status().ToString();
+            stream.reset();
+            std::filesystem::remove(tmpPath, rmEc);
+            return -1;
+        }
+        auto writer = writerResult.ValueOrDie();
+
+        auto fail = [&](const std::string& what) -> int {
+            INTERNAL_ERROR_STREAM << "[DataCache] append: " << what << " (old file kept)";
+            writer->Close();      // 尽力关闭
+            stream.reset();
+            std::filesystem::remove(tmpPath, rmEc);
+            return -1;
+        };
+
+        for (int i = 0; i < reader->num_record_batches(); ++i) {
+            auto batchResult = reader->ReadRecordBatch(i);
+            if (!batchResult.ok()) return fail("read old batch failed: " + batchResult.status().ToString());
+            auto batch = batchResult.ValueOrDie();
+            auto st = writer->WriteRecordBatch(*batch);
+            if (!st.ok()) return fail("write old batch failed: " + st.ToString());
+            oldRows += batch->num_rows();
+        }
+
+        auto wst = writer->WriteTable(*newTable);
+        if (!wst.ok()) return fail("write new table failed: " + wst.ToString());
+
+        auto cst = writer->Close();
+        if (!cst.ok()) return fail("close writer failed: " + cst.ToString());
+        stream.reset();  // 关闭 tmp 输出流（flush 到磁盘）
+    }
+
+    // 4. 释放旧文件 reader 句柄（Windows 上被占用则无法替换）
+    reader.reset();
+
+    // 5. 原子替换：tmp → path。带退避重试，应对读端短暂占用 .arrow
+    constexpr int kMaxRenameRetries = 5;
+    constexpr int kRetryDelayMs = 100;
+    std::error_code ec;
+    bool renamed = false;
+    for (int attempt = 0; attempt < kMaxRenameRetries; ++attempt) {
+        std::filesystem::rename(tmpPath, path, ec);
+        if (!ec) { renamed = true; break; }
+        std::this_thread::sleep_for(std::chrono::milliseconds(kRetryDelayMs));
+    }
+    if (!renamed) {
+        INTERNAL_ERROR_STREAM << "[DataCache] append: atomic replace failed after retries: " << ec.message() << " (old file kept)";
+        std::filesystem::remove(tmpPath, rmEc);
+        return -1;
+    }
+
+    // 6. 更新元数据：rowCount 与 endDate
+    const int64_t totalRows = oldRows + newTable->num_rows();
+    std::string maxTradeDate;
+    for (const auto& row : newRows) {
+        if (!row.isObject() || !row.has(CF::TRADE_DATE.c_str())) continue;
+        auto v = row.get(CF::TRADE_DATE.c_str());
+        if (v.isString() && v.asString() > maxTradeDate) maxTradeDate = v.asString();
+    }
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_index.find(dataId);
+        if (it != m_index.end()) {
+            it->second.rowCount = static_cast<int>(totalRows);
+            if (!maxTradeDate.empty() && maxTradeDate > it->second.endDate)
+                it->second.endDate = maxTradeDate;
+            saveCatalog();
+        }
+    }
+
+    INTERNAL_INFO_STREAM << "[DataCache] appended dataset " << dataId << ": +" << newTable->num_rows()
+                         << " rows (old=" << oldRows << ", total=" << totalRows << "), endDate<=" << maxTradeDate;
+    return static_cast<int>(totalRows);
 }
 
 // ── 批量写入 ──

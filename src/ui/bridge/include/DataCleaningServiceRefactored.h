@@ -60,6 +60,12 @@ public:
     Q_INVOKABLE void cleanDataFromDataSet(int dataSetId,
                                           const QVariantMap& rules);
 
+    // 增量更新已清洗的数据集：从 PG 拉取回溯窗口+新交易日的原始数据，
+    //   与清洗全量同源装配(RawMarketDataAssembler)，清洗后仅保留 trade_date > 缓存 endDate 的行，
+    //   原子追加到该数据集的 Arrow 文件。字段集与旧文件不一致时拒绝并提示全量重清。
+    Q_INVOKABLE void incrementalUpdateDataSet(int dataSetId,
+                                              const QVariantMap& rules);
+
     // 3. 取消当前清洗操作
     void cancelCleaning(const QString& requestId = QString());
     
@@ -98,6 +104,11 @@ signals:
     void cleaningStarted(const QString& requestId, const QString& description);
     void dataSetCleaned(int dataSetId, int resultDataSetId,
                         const QString& message, int inputRows, int outputRows);
+
+    // 增量更新信号
+    void incrementalUpdateStarted(int dataSetId);
+    void incrementalUpdateProgress(int dataSetId, int pct, const QString& stage);
+    void incrementalUpdateFinished(int dataSetId, bool success, int newRows, const QString& message);
 
     // 统计信号
     void cleaningStatsUpdated(const QString& requestId, const RefactoredCleaningStats& stats);

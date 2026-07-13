@@ -53,6 +53,8 @@ public:
     Q_INVOKABLE void onDropdownRefreshed(int count);
     Q_INVOKABLE void loadSymbolDetail(const QString& symbol, int page);
     Q_INVOKABLE void cleanDataFromDataSet(int dataSetId, const QVariantMap& rules);
+    // 增量更新已清洗数据集（转发到清洗服务，UI 入口放在数据清洗页）
+    Q_INVOKABLE void incrementalUpdateDataSet(int dataSetId);
     Q_INVOKABLE bool removeDataSet(int dataSetId);
 
     QString dataSource() const { return m_dataSource; }
@@ -99,6 +101,10 @@ signals:
     void symbolDetailLoaded(const QString& symbol, int page, const QVariantList& data);
     void dataSetCleaned(int dataSetId, int resultDataSetId, const QString& message,
                         int inputRows, int outputRows);
+    // 增量更新信号（转发自清洗服务）
+    void datasetUpdateStarted(int dataSetId);
+    void datasetUpdateProgress(int dataSetId, int pct, const QString& stage);
+    void datasetUpdateFinished(int dataSetId, bool success, int newRows, const QString& message);
     void dataSetReadyForCleaning(int dataSetId);
     void previewModelChanged();
     void requestCleanData(const QVariantList& data, const QVariantMap& rules);

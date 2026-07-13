@@ -13,6 +13,7 @@ Item {
 
     property int dataSourceCount: 0
     property int currentCacheIndex: -1
+    property bool cacheUpdating: false
     property var selectedRules: []
     property int selectedRulesRevision: 0
     property int selectedRulesCount: selectedRules ? selectedRules.length : 0
@@ -945,6 +946,34 @@ Item {
                                 }
                             }
                         }
+
+                        // 增量更新缓存：仅对已清洗数据集(sourceType 含 cleaning)可用
+                        Button {
+                            id: cacheIncrementalUpdateButton
+                            width: parent.width
+                            height: 32
+                            property var selEntry: (cacheSelectionComboBox.currentIndex >= 0 && cacheSelectionComboBox.currentIndex < cacheDisplayModel.count)
+                                ? cacheDisplayModel.get(cacheSelectionComboBox.currentIndex) : null
+                            property bool isCleaned: selEntry && String(selEntry.sourceType || "").indexOf("cleaning") >= 0
+                            enabled: isCleaned && (selEntry ? selEntry.id > 0 : false) && !root.cacheUpdating
+                            opacity: enabled ? 1.0 : 0.5
+                            text: root.cacheUpdating ? "增量更新中..." : "🔄 更新缓存(增量)"
+                            background: Rectangle { color: parent.enabled ? "#7c3aed" : "#374151"; radius: 4 }
+                            contentItem: Text {
+                                text: parent.text
+                                color: parent.enabled ? "white" : "#666"
+                                font.pixelSize: 12
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                var entry = cacheDisplayModel.get(cacheSelectionComboBox.currentIndex)
+                                if (entry && entry.id > 0) {
+                                    dataFetchController.incrementalUpdateDataSet(entry.id)
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -1061,6 +1090,20 @@ Item {
         onDataSetCleaned: function(inputId, resultId, message, inputRows, outputRows) {
             handlePanelStatusRequested("清洗完成: " + inputRows + " -> " + outputRows + " 行, 新数据集 ID=" + resultId, "success")
             dataFetchController.refreshDataSetInfos()
+        }
+
+        onDatasetUpdateStarted: function(datasetId) {
+            root.cacheUpdating = true
+            root.handlePanelStatusRequested("⏳ 开始增量更新缓存 #" + datasetId + "...", "warning")
+        }
+
+        onDatasetUpdateProgress: function(datasetId, pct, stage) {
+            root.handlePanelStatusRequested("⏳ " + stage + " (" + pct + "%)", "warning")
+        }
+
+        onDatasetUpdateFinished: function(datasetId, success, newRows, message) {
+            root.cacheUpdating = false
+            root.handlePanelStatusRequested((success ? "✓ " : "❌ ") + message, success ? "success" : "error")
         }
 
         onDataSetInfosRefreshed: function(infos) {

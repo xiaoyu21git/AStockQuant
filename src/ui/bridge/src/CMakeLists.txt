@@ -7,6 +7,7 @@
     DataCleaningServiceRefactored.cpp
     PreviewDataModel.cpp
     DataFetchController.cpp
+    RawMarketDataAssembler.cpp
     FactorDebugController.cpp
     FactorMetaService.cpp
     FactorViewModel.cpp

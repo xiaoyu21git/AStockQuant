@@ -146,3 +146,6 @@ Thumbs.db
 *.tar
 *.gz
 *.7z
+
+# 缓存备份(勿提交)
+backup/

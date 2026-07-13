@@ -7,6 +7,7 @@
 #include "DataSourceRegistry.h"
 #include "database/MarketDataRepository.h"
 #include "DataTableAssembler.h"
+#include "RawMarketDataAssembler.h"
 #include <arrow/api.h>
 #include "database/NativePgConnectionPool.h"
 
@@ -62,6 +63,16 @@ DataFetchController::DataFetchController(QObject* parent)
             this, [this](const QString&, const QString& e) {
         m_operationInProgress = false; emit operationInProgressChanged();
         emit dataCleaningError(e);
+    });
+    // 增量更新信号转发（一次性连接，避免重复触发）
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::incrementalUpdateStarted,
+            this, [this](int id) { emit datasetUpdateStarted(id); });
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::incrementalUpdateProgress,
+            this, [this](int id, int pct, const QString& stage) { emit datasetUpdateProgress(id, pct, stage); });
+    connect(m_cleaningSvc, &DataCleaningServiceRefactored::incrementalUpdateFinished,
+            this, [this](int id, bool ok, int newRows, const QString& msg) {
+        if (ok && newRows > 0) refreshDataSetInfos(); // 新数据落盘后刷新列表(rowCount/endDate)
+        emit datasetUpdateFinished(id, ok, newRows, msg);
     });
     QTimer::singleShot(0, this, [this]() { refreshDataSetInfos(); });
     QTimer::singleShot(1000, this, SLOT(logInitMessage()));
@@ -160,79 +171,21 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             self->updateStatus(QString("共 %1 只标的").arg(total), 20);
         }, Qt::QueuedConnection);
 
-        // 按月分片下载，每月更新进度
-        auto y1 = startDate.mid(0,4).toInt(), m1 = startDate.mid(5,2).toInt(), d1 = startDate.mid(8,2).toInt();
-        auto y2 = endDate.mid(0,4).toInt(),   m2 = endDate.mid(5,2).toInt(),   d2 = endDate.mid(8,2).toInt();
-        int totalMonths = (y2 - y1) * 12 + (m2 - m1) + 1;
-        int monthCount = totalMonths;
-        int doneMonths = 0;
-        QMetaObject::invokeMethod(self.get(), [self, monthCount]() { if (self) self->updateStatus(QString("开始下载 %1 个批次...").arg(monthCount), 30); }, Qt::QueuedConnection);
-
-        // ── 构建统一 Schema（DataSourceRegistry 唯一定义点）──
+        // ── 构建统一 Schema（用于建数据集写入 token；装配细节委托 RawMarketDataAssembler）──
         std::vector<std::string> typeNames;
         for (const QString& dt : dataTypes) typeNames.push_back(dt.toStdString());
-        auto mergedSchema = cleaning::fullSchemaForTypes(typeNames);
+        auto mergedSchema = bridge::RawMarketDataAssembler::schemaFor(typeNames);
         const auto& allFields = mergedSchema.names;
         const auto& numericFields = mergedSchema.numeric;
-        if (allFields.empty()) { /* error handling */ return; }
+        if (allFields.empty()) { return; }
 
-        // 财务字段名集合（用于后续合并判断）
-        const auto& finCols = cleaning::financial_columns::names();
-        std::unordered_set<std::string> finColSet(finCols.begin(), finCols.end());
-
-        // 预构建全量 symbol 列表 + 分片大小
+        // 预构建全量 symbol 列表
         std::vector<std::string> allSymbolsVec;
         for (const auto& s : allSymbols) allSymbolsVec.push_back(s.toStdString());
-        static const int symbolChunkSize = 200;
 
-        // ── 第一步：全量加载财务数据到内存（~11万行，<200MB）──
-        //   symbol → [(report_date, {col: val})], report_date 升序
-        std::map<std::string, std::vector<std::pair<std::string, std::unordered_map<std::string, std::string>>>> finCache;
-        {
-            auto dbFin = astock::database::NativePgConnectionPool::instance().getConnection();
-            if (dbFin && dbFin->isOpen()) {
-                astock::infrastructure::database::MarketDataRepository finRepo(std::move(dbFin));
-                std::string ed = endDate.toStdString();
-                // 财务数据需覆盖缓存起始之前的报告期，确保首个交易日能对齐最近财报
-                std::string finSd = "2014-01-01"; // 数据库最早 report_date=2014-12-31
-                // 分批查询避免单次结果集过大
-                for (size_t fs = 0; fs < allSymbolsVec.size(); fs += symbolChunkSize) {
-                    size_t fe = (std::min)(fs + symbolChunkSize, allSymbolsVec.size());
-                    std::vector<std::string> fchunk(allSymbolsVec.begin() + fs, allSymbolsVec.begin() + fe);
-                    auto frows = finRepo.queryFinancialData(fchunk, finSd, ed);
-                    for (const auto& row : frows) {
-                        const auto& vals = row.getValues();
-                        auto symIt = vals.find("symbol");
-                        auto rptIt = vals.find("report_date");
-                        if (symIt == vals.end() || rptIt == vals.end()
-                            || rptIt->second.empty()) continue;
-                        std::unordered_map<std::string, std::string> fv;
-                        for (const auto& [col, val] : vals) {
-                            if (!val.empty() && finColSet.count(col)) fv[col] = val;
-                        }
-                        // 按报告日排序，对齐时 report_date ≤ trade_date
-                        finCache[symIt->second].emplace_back(rptIt->second, std::move(fv));
-                    }
-                }
-            }
-            // 每标的 report_date 升序
-            for (auto& [sym, vec] : finCache)
-                std::sort(vec.begin(), vec.end(),
-                    [](auto& a, auto& b) { return a.first < b.first; });
-        }
         QMetaObject::invokeMethod(self.get(), [self]() {
-            if (self) self->updateStatus("财务数据已加载，开始下载K线...", 30);
+            if (self) self->updateStatus("加载财务数据并下载K线...", 30);
         }, Qt::QueuedConnection);
-
-        // index_code 映射（直接 Arrow 构建时用）
-        std::map<std::string, std::string> indexMap;
-        {
-            auto idxDb = astock::database::NativePgConnectionPool::instance().getConnection();
-            if (idxDb && idxDb->isOpen()) {
-                astock::infrastructure::database::MarketDataRepository idxRepo(std::move(idxDb));
-                indexMap = idxRepo.queryIndexCodeMap(endDate.toStdString());
-            }
-        }
 
         // 创建数据集 + 预设 Schema
         QVariantMap infoMap;
@@ -244,60 +197,24 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
         auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId, allFields, numericFields) : nullptr;
         if (!token) { /* error handling */ return; }
-        int totalRows = 0;
 
-        // ── 第二步：按月分片下载 K线，每行即时合并财务数据 ──
-        static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
-        for (int mi = 0; mi < totalMonths; mi++) {
-            int cm = m1 + mi, cy = y1 + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
-            int cs = (cy == y1 && cm == m1) ? d1 : 1;
-            int ce = (cy == y2 && cm == m2) ? d2 : dtab[cm] + (cm==2 && cy%4==0 && (cy%100!=0||cy%400==0) ? 1 : 0);
-            char buf[32]; snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, cs); std::string ms = buf;
-            snprintf(buf, 32, "%04d-%02d-%02d", cy, cm, ce); std::string me = buf;
-
-            for (size_t start = 0; start < allSymbolsVec.size(); start += symbolChunkSize) {
-                size_t end = (std::min)(start + symbolChunkSize, allSymbolsVec.size());
-                std::vector<std::string> chunk(allSymbolsVec.begin() + start, allSymbolsVec.begin() + end);
-
-                auto db2 = astock::database::NativePgConnectionPool::instance().getConnection();
-                if (!db2 || !db2->isOpen()) goto dl_end;
-                astock::infrastructure::database::MarketDataRepository repo(std::move(db2));
-                auto rows = repo.queryDailyBarJoined(chunk, ms, me);
-                if (rows.empty()) continue;
-                int64_t nRows = static_cast<int64_t>(rows.size());
-
-                // ── 委托领域层构建 Arrow Table ──
-                auto table = domain::data::DataTableAssembler::buildFromSqlRows(
-                    rows, allFields, numericFields, finCache, indexMap);
-                rows.clear(); rows.shrink_to_fit();
-
-                if (table) DataCacheAdapter::instance().appendArrowTable(token, table);
-                totalRows += static_cast<int>(nRows);
-            }
-            // 本月 K线已写完，清除不会再被后续月份引用的旧财报
-            for (auto it = finCache.begin(); it != finCache.end(); ) {
-                auto& vec = it->second;
-                auto cut = std::lower_bound(vec.begin(), vec.end(), ms,
-                    [](const auto& rp, const std::string& c) { return rp.first < c; });
-                if (cut != vec.begin()) --cut;
-                if (cut != vec.begin()) { vec.erase(vec.begin(), cut); vec.shrink_to_fit(); }
-                if (vec.empty()) it = finCache.erase(it);
-                else ++it;
-            }
-            doneMonths++; int dm=doneMonths, tm=monthCount, tr=totalRows;
-            QMetaObject::invokeMethod(self.get(), [self,dm,tm,tr](){
-                if(!self)return;
-                int pct=30+(dm*68)/qMax(1,tm);
-                self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr),pct);
-                emit self->dataFetchProgress(pct,QString("下载 %1/%2 月").arg(dm).arg(tm));
-            }, Qt::QueuedConnection);
-        }
-        dl_end:
+        // ── 委托共享组装器：按月分片装配原始行情，逐块写入 token（与增量路径同源）──
+        bridge::RawMarketDataAssembler assembler;
+        auto asmResult = assembler.assemble(
+            typeNames, allSymbolsVec, startDate.toStdString(), endDate.toStdString(),
+            [token](const std::shared_ptr<arrow::Table>& table) {
+                DataCacheAdapter::instance().appendArrowTable(token, table);
+            },
+            [self](int dm, int tm, int tr) {
+                QMetaObject::invokeMethod(self.get(), [self, dm, tm, tr]() {
+                    if (!self) return;
+                    int pct = 30 + (dm * 68) / qMax(1, tm);
+                    self->updateStatus(QString("下载 %1/%2 月 (%3 行)").arg(dm).arg(tm).arg(tr), pct);
+                    emit self->dataFetchProgress(pct, QString("下载 %1/%2 月").arg(dm).arg(tm));
+                }, Qt::QueuedConnection);
+            });
+        int totalRows = asmResult.totalRows;
         DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
-        // 释放财务缓存和标的列表
-        finCache.clear();
-        allSymbolsVec.clear(); allSymbolsVec.shrink_to_fit();
-        indexMap.clear();
         int did = dataId, tr = totalRows;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
             if (!self || did <= 0) return;
@@ -461,6 +378,12 @@ void DataFetchController::cleanDataFromDataSet(int dataSetId, const QVariantMap&
     });
 
     m_cleaningSvc->cleanDataFromDataSet(dataSetId, rules);
+}
+
+void DataFetchController::incrementalUpdateDataSet(int dataSetId)
+{
+    // 增量更新转发到清洗服务；进度/结果经构造函数中的连接转发为 datasetUpdate* 信号
+    m_cleaningSvc->incrementalUpdateDataSet(dataSetId, QVariantMap());
 }
 
 void DataFetchController::cleanDataAsync(const QVariantMap& rules)

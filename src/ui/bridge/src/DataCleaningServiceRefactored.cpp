@@ -5,6 +5,11 @@
 #include "DataCleaningServiceRefactored.h"
 #include "CleaningEngine.h"
 #include "DataCacheAdapter.h"
+#include "DataCache.h"
+#include "RawMarketDataAssembler.h"
+#include "DataSourceRegistry.h"
+#include "database/MarketDataRepository.h"
+#include "database/NativePgConnectionPool.h"
 #include "rules/CoreCleaningRules.h"
 #include "AppStoragePaths.h"
 #include "LightRow.h"
@@ -17,9 +22,12 @@
 #include <QMutexLocker>
 #include <QPointer>
 #include <QCoreApplication>
+#include <QDate>
 
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
+#include <unordered_set>
 
 using J = cleaning::LightRow;
 
@@ -327,9 +335,218 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
     });
 }
 
+// ── 增量更新：Arrow Table → LightRow 池（已 CombineChunks，单 chunk）──
+static std::vector<cleaning::LightRow> tableToLightRows(const std::shared_ptr<arrow::Table>& table)
+{
+    std::vector<cleaning::LightRow> rows;
+    if (!table) return rows;
+    const int64_t n = table->num_rows();
+    rows.reserve(static_cast<size_t>(n));
+    const int nCols = table->num_columns();
+    const auto& schema = table->schema();
+
+    std::vector<const arrow::DoubleArray*> dbl(static_cast<size_t>(nCols), nullptr);
+    std::vector<const arrow::StringArray*> str(static_cast<size_t>(nCols), nullptr);
+    std::vector<std::string> names(static_cast<size_t>(nCols));
+    std::vector<std::shared_ptr<arrow::Array>> owners(static_cast<size_t>(nCols));
+    for (int c = 0; c < nCols; ++c) {
+        names[static_cast<size_t>(c)] = schema->field(c)->name();
+        auto chunked = table->column(c);
+        owners[static_cast<size_t>(c)] = chunked->num_chunks() > 0 ? chunked->chunk(0) : nullptr;
+        auto& own = owners[static_cast<size_t>(c)];
+        if (!own) continue;
+        if (own->type_id() == arrow::Type::DOUBLE)
+            dbl[static_cast<size_t>(c)] = static_cast<const arrow::DoubleArray*>(own.get());
+        else if (own->type_id() == arrow::Type::STRING)
+            str[static_cast<size_t>(c)] = static_cast<const arrow::StringArray*>(own.get());
+    }
+
+    for (int64_t i = 0; i < n; ++i) {
+        auto row = cleaning::LightRow::createObject();
+        for (size_t c = 0; c < static_cast<size_t>(nCols); ++c) {
+            const char* nm = names[c].c_str();
+            if (dbl[c]) {
+                if (dbl[c]->IsNull(i)) row.setNull(nm); else row.setDouble(nm, dbl[c]->Value(i));
+            } else if (str[c]) {
+                if (str[c]->IsNull(i)) row.setNull(nm); else row.setString(nm, str[c]->GetString(i));
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    return rows;
+}
+
+// ── 增量更新已清洗的数据集 ──
+void DataCleaningServiceRefactored::incrementalUpdateDataSet(int dataSetId,
+                                                             const QVariantMap& rules)
+{
+    if (!m_impl->executor) {
+        emit incrementalUpdateFinished(dataSetId, false, 0, QStringLiteral("线程池未初始化"));
+        return;
+    }
+    if (dataSetId <= 0) {
+        emit incrementalUpdateFinished(dataSetId, false, 0, QStringLiteral("无效的数据集ID"));
+        return;
+    }
+
+    QVariantMap effectiveRules = rules.isEmpty() ? getDefaultRules() : rules;
+    auto executor = m_impl->executor;
+    QPointer<DataCleaningServiceRefactored> self(this);
+
+    emit incrementalUpdateStarted(dataSetId);
+
+    executor->post([self, dataSetId, effectiveRules]() {
+        if (!self) return;
+        using JF = foundation::json::JsonFacade;
+
+        auto emitFinished = [self, dataSetId](bool ok, int newRows, const QString& msg) {
+            QMetaObject::invokeMethod(self.get(), [self, dataSetId, ok, newRows, msg]() {
+                if (!self) return;
+                emit self->incrementalUpdateFinished(dataSetId, ok, newRows, msg);
+            }, Qt::QueuedConnection);
+        };
+        auto emitProgress = [self, dataSetId](int pct, const QString& stage) {
+            QMetaObject::invokeMethod(self.get(), [self, dataSetId, pct, stage]() {
+                if (!self) return;
+                emit self->incrementalUpdateProgress(dataSetId, pct, stage);
+            }, Qt::QueuedConnection);
+        };
+
+        try {
+            auto& cache = cleaning::DataCache::instance();
+            auto info = cache.getDataSetInfo(dataSetId);
+            if (info.id != dataSetId) { emitFinished(false, 0, QStringLiteral("数据集不存在")); return; }
+            if (info.sourceType != "cleaning") { emitFinished(false, 0, QStringLiteral("仅支持对已清洗数据集增量更新")); return; }
+            if (info.stockCodes.empty()) { emitFinished(false, 0, QStringLiteral("数据集无标的列表")); return; }
+
+            emitProgress(5, QStringLiteral("读取缓存文件字段与截止日期..."));
+
+            // 1. 以文件为准：真实字段集 + 真实最大 trade_date（不信任元数据）
+            auto existingFields = cache.loadDataSetSchemaFields(dataSetId);
+            if (existingFields.empty()) { emitFinished(false, 0, QStringLiteral("无法读取缓存文件字段")); return; }
+            const std::string endDate = cache.getMaxTradeDate(dataSetId);
+            if (endDate.empty()) { emitFinished(false, 0, QStringLiteral("无法从缓存文件读取 trade_date")); return; }
+
+            // 2. 从文件字段集推断 dataTypes（kline_daily 恒有；含财务列则加 financial）
+            std::vector<std::string> dataTypes = {"kline_daily"};
+            {
+                std::unordered_set<std::string> fileFields(existingFields.begin(), existingFields.end());
+                for (const auto& fc : cleaning::financial_columns::names()) {
+                    if (fileFields.count(fc)) { dataTypes.push_back("financial"); break; }
+                }
+            }
+
+            // 3. 字段集对齐：文件 schema 必须与装配器产出逐列一致，否则拒绝（转全量重清，绝不 null 填充凑对齐）
+            auto schema = bridge::RawMarketDataAssembler::schemaFor(dataTypes);
+            if (existingFields != schema.names) {
+                emitFinished(false, 0, QStringLiteral("字段集与缓存文件不一致，需全量重新清洗（不做增量以避免数据错位）"));
+                return;
+            }
+            const std::vector<std::string>& fieldNames = existingFields;
+            const std::unordered_set<std::string>& numericFields = schema.numeric;
+
+            // 3. 精确回溯窗口：endDate 往前 kLookbackTradingDays 个交易日（覆盖有状态填充规则最大回溯 + 余量）
+            constexpr int kLookbackTradingDays = 20; // SuspensionFill(10) + MissingValueFill(5) 最大回溯 + 余量
+            std::string sinceDate = endDate;
+            std::string today;
+            {
+                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                if (!db || !db->isOpen()) { emitFinished(false, 0, QStringLiteral("数据库连接失败")); return; }
+                astock::infrastructure::database::MarketDataRepository repo(std::move(db));
+                QDate endQd = QDate::fromString(QString::fromStdString(endDate), "yyyy-MM-dd");
+                QString calStart = endQd.isValid()
+                    ? endQd.addDays(-(kLookbackTradingDays * 2 + 30)).toString("yyyy-MM-dd")
+                    : QString::fromStdString(endDate);
+                auto days = repo.queryTradeCalendar(calStart.toStdString(), endDate);
+                if (!days.empty()) {
+                    int idx = static_cast<int>(days.size()) - 1 - kLookbackTradingDays;
+                    sinceDate = (idx >= 0) ? days[static_cast<size_t>(idx)] : days.front();
+                }
+                today = QDate::currentDate().toString("yyyy-MM-dd").toStdString();
+            }
+
+            emitProgress(10, QStringLiteral("拉取增量原始数据..."));
+
+            // 4. 同源装配 [sinceDate, today] 原始数据（含财务 join，schema 与旧文件一致）
+            std::vector<std::string> symbols = info.stockCodes;
+            bridge::RawMarketDataAssembler assembler;
+            std::vector<std::shared_ptr<arrow::Table>> tables;
+            auto asmR = assembler.assemble(dataTypes, symbols, sinceDate, today,
+                [&tables](const std::shared_ptr<arrow::Table>& t) { if (t) tables.push_back(t); },
+                [&emitProgress](int dm, int tm, int) {
+                    int pct = 10 + (tm > 0 ? dm * 40 / tm : 0);
+                    emitProgress(pct, QStringLiteral("拉取原始数据 %1/%2").arg(dm).arg(tm));
+                });
+            if (!asmR.ok) { emitFinished(false, 0, QStringLiteral("拉取原始数据失败: %1").arg(QString::fromStdString(asmR.error))); return; }
+            if (tables.empty()) { emitFinished(true, 0, QStringLiteral("已是最新（无新数据）")); return; }
+
+            // 合并为单表 + 合并 chunk
+            auto concatR = arrow::ConcatenateTables(tables);
+            tables.clear();
+            if (!concatR.ok()) { emitFinished(false, 0, QStringLiteral("合并原始数据失败")); return; }
+            auto combineR = concatR.ValueOrDie()->CombineChunks();
+            if (!combineR.ok()) { emitFinished(false, 0, QStringLiteral("整理原始数据失败")); return; }
+            auto rawTable = combineR.ValueOrDie();
+
+            emitProgress(55, QStringLiteral("清洗增量..."));
+
+            // 5. Table → LightRow 池，按 (symbol, trade_date) 排序（有状态规则按标的顺序 seed）
+            cleaning::LightSchema::instance().init(fieldNames);
+            std::vector<cleaning::LightRow> pool = tableToLightRows(rawTable);
+            rawTable.reset();
+            const char* symKey = cleaning::CF::SYMBOL.c_str();
+            const char* tdKey = cleaning::CF::TRADE_DATE.c_str();
+            std::sort(pool.begin(), pool.end(), [symKey, tdKey](const cleaning::LightRow& a, const cleaning::LightRow& b) {
+                std::string sa = a.has(symKey) ? a.get(symKey).asString() : std::string();
+                std::string sb = b.has(symKey) ? b.get(symKey).asString() : std::string();
+                if (sa != sb) return sa < sb;
+                std::string ta = a.has(tdKey) ? a.get(tdKey).asString() : std::string();
+                std::string tb = b.has(tdKey) ? b.get(tdKey).asString() : std::string();
+                return ta < tb;
+            });
+
+            // 6. 清洗合并批：回溯段 seed 状态后丢弃，只保留 trade_date > endDate 的新行
+            cleaning::CleaningEngine engine;
+            for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
+                auto r = createCppRule(it.key().toStdString(), "");
+                if (r) engine.addRule(std::move(r));
+            }
+            std::vector<JF> newRows;
+            engine.cleanSortedBatch(pool, true, true, [&](cleaning::LightRow& row) {
+                if (!row.has(tdKey)) return;
+                auto tv = row.get(tdKey);
+                if (!tv.isString() || tv.asString() <= endDate) return; // 回溯段丢弃
+                JF j = JF::createObject();
+                for (const auto& f : fieldNames) {
+                    const char* fn = f.c_str();
+                    if (!row.has(fn)) continue;
+                    auto v = row.get(fn);
+                    if (v.isNumber()) j.set(fn, JF::createDouble(v.asDouble()));
+                    else if (v.isString()) j.set(fn, JF::createString(v.asString()));
+                }
+                newRows.push_back(std::move(j));
+            });
+
+            if (newRows.empty()) { emitFinished(true, 0, QStringLiteral("已是最新（无新交易日）")); return; }
+
+            emitProgress(85, QStringLiteral("原子追加到缓存..."));
+
+            // 7. 原子追加（失败旧文件保持不变）
+            int total = cache.appendDataSetFile(dataSetId, newRows, fieldNames, numericFields);
+            if (total < 0) { emitFinished(false, 0, QStringLiteral("追加写入失败（旧文件保持不变）")); return; }
+
+            int added = static_cast<int>(newRows.size());
+            emitFinished(true, added, QStringLiteral("增量更新完成：新增 %1 行，总计 %2 行").arg(added).arg(total));
+        } catch (const std::exception& e) {
+            emitFinished(false, 0, QStringLiteral("增量更新异常: %1").arg(e.what()));
+        } catch (...) {
+            emitFinished(false, 0, QStringLiteral("增量更新未知异常"));
+        }
+    });
+}
+
 // ── 自定义规则 ──
-void DataCleaningServiceRefactored::addCustomRule(const QString& ruleName, const QVariantMap& ruleConfig) {
-    QMutexLocker lock(&m_impl->stateMutex);
+void DataCleaningServiceRefactored::addCustomRule(const QString& ruleName, const QVariantMap& ruleConfig) {    QMutexLocker lock(&m_impl->stateMutex);
     m_impl->customRules[ruleName] = ruleConfig;
     emit rulesUpdated();
 }

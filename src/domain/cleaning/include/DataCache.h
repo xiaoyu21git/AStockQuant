@@ -235,6 +235,24 @@ public:
     /// @brief 从 Arrow 文件加载数据集数据
     std::vector<JCache> loadDataSetFile(int dataId);
 
+    /// @brief 加载缓存中 trade_date >= sinceDate 的所有行（完整列），
+    /// 用于增量清洗构建回溯窗口上下文。返回按文件原有顺序排列的完整 LightRow/JsonFacade 向量。
+    /// @param dataId 数据集 ID
+    /// @param sinceDate 起始日期（含），格式 "YYYY-MM-DD"
+    std::vector<JCache> loadDataSetRange(int dataId, const std::string& sinceDate);
+
+    /// @brief 增量追加：读取现有 .arrow 全部 RecordBatch，与新数据合并后写入
+    /// 临时文件，最后原子替换（std::filesystem::rename）。
+    /// 保证：要么原子换成含新数据的文件，要么旧文件完好如初，不存在中间态。
+    /// @return 追加后的总行数；失败返回 -1（旧文件不变）
+    int appendDataSetFile(int dataId, const std::vector<JCache>& newRows,
+        const std::vector<std::string>& fieldNames,
+        const std::unordered_set<std::string>& numericFields);
+
+    /// @brief 扫描 .arrow 文件的 trade_date 列，返回真实最大 trade_date（"YYYY-MM-DD"）。
+    /// 以文件内容为准，不依赖 DataSetInfo 元数据；文件不存在/无该列返回空串。
+    std::string getMaxTradeDate(int dataId);
+
     /// @brief 从 Arrow 文件加载为 Arrow Table
     std::shared_ptr<arrow::Table> loadDataSetTable(int dataId);
 
