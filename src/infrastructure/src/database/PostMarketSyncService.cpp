@@ -59,12 +59,10 @@ bool PostMarketSyncService::forceSyncToday() {
         for(auto&r:covRes.getRows()){int c=r.getInt("cnt");cov[r.getString("dt")]=c;if(c>mc)mc=c;}
         std::vector<std::string> md;
         for(auto&d:tds){int c=cov.count(d)?cov[d]:0;if(c<mc*90/100)md.push_back(d);}
+        // 缺口补齐: 统一走syncDailyMinute (日线→估值→分钟线)
         if(!md.empty()){
-            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 补齐缺口 "<<md.size()<<" 天: "<<md.front()<<" ~ "<<md.back()<<" ======";
-            int mindate=foundation::utils::Timestamp(md.front(),"%Y-%m-%d").to_yyyymmdd();
-            int maxdate=foundation::utils::Timestamp(md.back(),"%Y-%m-%d").to_yyyymmdd();
-            syncDailyRange(db,s2i,syms,mindate,maxdate,md);
-            for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
+            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 补齐 "<<md.size()<<" 天: "<<md.front()<<" ~ "<<md.back()<<" ======";
+            for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncDailyMinute(td);}
         }
         // 手动触发不检查时间窗口和交易日
         if(m_lastSyncDay.load()!=today){
@@ -73,8 +71,6 @@ bool PostMarketSyncService::forceSyncToday() {
             syncWeeklyMonthly(today);
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 周月线完成 ======";
             if(isMonthlyMaintenanceDay())syncFinancialData(today);
-            // PE历史回填: 扫描缺PE的日期逐天补
-            backfillPE(db,s2i,syms);
         }
         m_lastSyncDay.store(today);saveLastSyncDay(today);
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
@@ -694,21 +690,33 @@ void PostMarketSyncService::backfillPE(std::shared_ptr<astock::database::ISqlDat
     INTERNAL_INFO_STREAM<<"[PostMktSync] PE回填完成 "<<dates.size()<<" 天";
 }
 
+// 通用日线同步: 任意交易日都走日线→估值→分钟线, 不区分今天还是历史
 void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
     if(!db||!db->isOpen())return;
     auto res=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
     std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
     for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
-    // 日线已有则跳过，只补估值+分钟线
+    // 日线: 缺则补，满则跳过
     auto cntRes=db->executeQuery("SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
     bool dailyExists=(cntRes.rowCount()>0&&cntRes.getRow(0).getInt(0)>static_cast<int>(syms.size()*0.9));
     if(!dailyExists){
-        if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyMinute 日线失败";return;}
-    } else {INTERNAL_INFO_STREAM<<"[PostMktSync] 日线已有 "<<cntRes.getRow(0).getInt(0)<<" 条, 跳过同步";}
-    syncValuation(db,s2i,syms,tradingDay);
-    syncMinute(db,s2i,syms,tradingDay);
+        logTaskStart("DAILY",tradingDay);
+        if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return;}
+    }
+    // 估值: 始终补 (PE/PB/市值/换手率), 缺则补满则跳过
+    auto peRes=db->executeQuery("SELECT COUNT(*) FILTER (WHERE pe_ratio=0) FROM mkt.daily_bar WHERE trade_date=$1::date",
+        {astock::database::SqlParam{std::to_string(tradingDay)}});
+    bool peMissing=(peRes.rowCount()>0&&peRes.getRow(0).getInt(0)>0);
+    if(peMissing)syncValuation(db,s2i,syms,tradingDay);
+    // 分钟线: 日线有则补
+    if(dailyExists||!dailyExists){
+        auto minRes=db->executeQuery("SELECT COUNT(*) FROM mkt.minute_bar WHERE trade_ts::date=$1::date",
+            {astock::database::SqlParam{std::to_string(tradingDay)}});
+        bool minExists=(minRes.rowCount()>0&&minRes.getRow(0).getInt(0)>0);
+        if(!minExists)syncMinute(db,s2i,syms,tradingDay);
+    }
 }
 
 // 估值补全: PE/PB/市值/换手率 (gmsdk批量)
