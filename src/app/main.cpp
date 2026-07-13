@@ -4,8 +4,6 @@
 #include <QIcon>
 #include <QObject>
 #include <iostream>
-#include <locale>
-#include <codecvt>
 #include "AppBootstrap.h"
 
 #ifdef Q_OS_WIN
@@ -17,10 +15,6 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_WIN
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    // 强制C++流也用UTF-8 (Windows 10 1903+)
-    try { std::locale::global(std::locale(".UTF-8")); } catch(...) {}
-    try { std::cout.imbue(std::locale(".UTF-8")); } catch(...) {}
-    try { std::cerr.imbue(std::locale(".UTF-8")); } catch(...) {}
 #endif
     QCoreApplication::setOrganizationName("AStock");
     QCoreApplication::setOrganizationDomain("astock.com");
