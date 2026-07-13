@@ -102,21 +102,10 @@ Rectangle {
         var px = ms.price || ms.lastPrice || 0
         return px > 0 ? ("最新 " + px.toFixed(2)) : "暂无行情"
     }
-    property real lastPrice: (marketSnapshot && marketSnapshot.price > 0) ? marketSnapshot.price : 0
-    property real bidPrice: {
-        var ds = depthSnapshot
-        if (ds && ds.bids && ds.bids.length > 0) return ds.bids[0].price || 0
-        return 0
-    }
-    property real askPrice: {
-        var ds = depthSnapshot
-        if (ds && ds.asks && ds.asks.length > 0) return ds.asks[0].price || 0
-        return 0
-    }
-    property real preClose:  (marketSnapshot && marketSnapshot.preClose  > 0) ? marketSnapshot.preClose  : 0
-    property real limitUp:   (marketSnapshot && marketSnapshot.limitUp   > 0) ? marketSnapshot.limitUp   : 0
-    property real limitDown: (marketSnapshot && marketSnapshot.limitDown > 0) ? marketSnapshot.limitDown : 0
-    property real lastAutoStockPrice: 0
+    property var preClose:  (marketSnapshot && marketSnapshot.preClose  > 0) ? marketSnapshot.preClose  : 0
+    property var limitUp:   (marketSnapshot && marketSnapshot.limitUp   > 0) ? marketSnapshot.limitUp   : 0
+    property var limitDown: (marketSnapshot && marketSnapshot.limitDown > 0) ? marketSnapshot.limitDown : 0
+    property string lastAutoStockPrice: ""
 
     // 选股/切股时自动拉取最新市价
     onStockCodeChanged: {
@@ -124,10 +113,10 @@ Rectangle {
         var fullSym = resolveFullSymbol(stockCode)
         if (fullSym) Bridge.MarketDataBridge.resolveInstrument(fullSym)
         Qt.callLater(function() {
-            var snap = marketSnapshot
-            if (snap && snap.price > 0) {
-                stockPrice = snap.price.toFixed(2)
-                lastAutoStockPrice = snap.price.toFixed(2)
+            var ms = marketSnapshot
+            if (ms && ms.price > 0) {
+                stockPrice = ms.price.toFixed(2)
+                lastAutoStockPrice = ms.price.toFixed(2)
             }
         })
     }
