@@ -142,7 +142,7 @@ void PostMarketSyncService::fillAdjFactors() {
         for(auto&r:res.getRows())syms.push_back({r.getInt("symbol_id"),r.getString("symbol")});
         int total=static_cast<int>(syms.size());
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<total<<" 只标的待补";if(syms.empty())return;
-        std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND pre_adjust_factor=1.0";
+        std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND (pre_adjust_factor=1.0 OR trade_date>=CURRENT_DATE-30)";
         int ok=0,proc=0,fail=0,firstFailStreak=0;
         for(auto&s:syms){
             std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
