@@ -55,7 +55,7 @@ bool PythonEventBridge::start() {
 
     // 释放GIL，允许子线程运行Python
     PyEval_InitThreads();
-    m_gilState = PyEval_SaveThread();  // 主线程释放GIL
+    m_gilState = static_cast<void*>(PyEval_SaveThread());  // 主线程释放GIL
 
     std::string exeDir = getExeDir();
     std::string eventsPath = exeDir + "/../../../astock_engine/events";
@@ -77,7 +77,7 @@ void PythonEventBridge::stop() {
         m_thread.reset();
     }
     if (Py_IsInitialized()) {
-        PyEval_RestoreThread(m_gilState);
+        PyEval_RestoreThread(static_cast<PyThreadState*>(m_gilState));
         Py_FinalizeEx();
         INTERNAL_INFO_STREAM << "[PyBridge] Python卸载";
     }
