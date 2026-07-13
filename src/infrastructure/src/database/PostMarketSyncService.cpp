@@ -679,21 +679,6 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
     return true;
 }
 
-// PE历史回填: 扫描缺PE的日期逐天调用syncValuation
-void PostMarketSyncService::backfillPE(std::shared_ptr<astock::database::ISqlDatabase> db,
-    const std::unordered_map<std::string,int>& symToId, const std::vector<std::string>& symbols) {
-    auto res=db->executeQuery("SELECT trade_date::text FROM mkt.daily_bar WHERE pe_ratio=0 GROUP BY trade_date HAVING COUNT(*)>100 ORDER BY trade_date");
-    std::vector<std::string> dates;for(auto&r:res.getRows())dates.push_back(r.getString("trade_date"));
-    if(dates.empty()){INTERNAL_INFO_STREAM<<"[PostMktSync] PE已全覆盖";return;}
-    INTERNAL_INFO_STREAM<<"[PostMktSync] PE回填 "<<dates.size()<<" 天: "<<dates.front()<<" ~ "<<dates.back();
-    int done=0;for(auto&dt:dates){
-        int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();
-        syncValuation(db,symToId,symbols,td);++done;
-        if(done%10==0||done==static_cast<int>(dates.size()))INTERNAL_INFO_STREAM<<"[PostMktSync] PE回填 "<<(done*100/dates.size())<<"% "<<done<<"/"<<dates.size();
-    }
-    INTERNAL_INFO_STREAM<<"[PostMktSync] PE回填完成 "<<dates.size()<<" 天";
-}
-
 // 通用日线同步: 任意交易日都走日线→估值→分钟线, 不区分今天还是历史
 void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
