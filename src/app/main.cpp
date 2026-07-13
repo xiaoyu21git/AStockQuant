@@ -8,8 +8,6 @@
 
 #ifdef Q_OS_WIN
 #include <windows.h>
-#include <fcntl.h>
-#include <io.h>
 #endif
 
 int main(int argc, char* argv[])
@@ -17,9 +15,6 @@ int main(int argc, char* argv[])
 #ifdef Q_OS_WIN
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
-    // CRT也走UTF-8，修复Foundation logger输出乱码
-    _setmode(_fileno(stdout), _O_U8TEXT);
-    _setmode(_fileno(stderr), _O_U8TEXT);
 #endif
     QCoreApplication::setOrganizationName("AStock");
     QCoreApplication::setOrganizationDomain("astock.com");
