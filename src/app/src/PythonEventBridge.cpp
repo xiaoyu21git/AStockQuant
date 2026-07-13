@@ -47,11 +47,6 @@ bool PythonEventBridge::start() {
     // 启动前禁用不需要的模块，避免 import readline 等崩溃
     PyImport_AppendInittab("readline", nullptr);
 
-    // UTF-8: 解决Windows下中文乱码
-#ifdef _WIN32
-    SetConsoleOutputCP(CP_UTF8);
-    SetConsoleCP(CP_UTF8);
-#endif
     Py_Initialize();
     if (!Py_IsInitialized()) {
         INTERNAL_ERROR_STREAM << "[PyBridge] Py_Initialize 失败";
@@ -91,13 +86,12 @@ void PythonEventBridge::schedulerThread(std::string eventsPath, std::string binP
     PyGILState_STATE gstate = PyGILState_Ensure();
 
     std::string script =
-        "import sys, io\n"
+        "import sys, io, os\n"
         "sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')\n"
         "sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')\n"
-        "sys.path.insert(0, r'" + eventsPath + "/..')\n"
-        "sys.path.insert(0, r'" + binPath + "')\n"
-        "import os\n"
-        "os.chdir(r'" + eventsPath + "')\n"
+        "sys.path.insert(0, os.path.normpath(r'" + eventsPath + "/..'))\n"
+        "sys.path.insert(0, os.path.normpath(r'" + binPath + "'))\n"
+        "os.chdir(os.path.normpath(r'" + eventsPath + "'))\n"
         "try:\n"
         "    from astock_engine.events.scheduler import main\n"
         "    main()\n"
