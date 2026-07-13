@@ -40,6 +40,7 @@ add_subdirectory(adapters)
 # 閸掓稑缂撴稉璇茬氨閻╊喗鐖?
 add_library(astockquantapp SHARED
     src/AppBootstrap.cpp
+    src/PythonEventBridge.cpp
     src/VasAurora.cpp
     facade/MarketDataFacade.cpp
 )
@@ -75,6 +76,7 @@ target_link_libraries(astockquantapp
         Qt6::Sql
         Qt6::Qml
         Qt6::QuickWidgets
+        Python::Python
     PRIVATE
         engine
         domain

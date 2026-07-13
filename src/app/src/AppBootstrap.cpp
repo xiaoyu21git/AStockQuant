@@ -33,6 +33,7 @@
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
 #include "../../../domain/strategy/include/EventRiskSubscriber.h"
+#include "../include/PythonEventBridge.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinMarketConnector.h"
@@ -327,6 +328,9 @@ bool AppBootstrap::initServices()
 
             // 启动事件风控订阅器（订阅 news.* 事件，动态调整风控参数）
             domain::strategy::EventRiskSubscriber::instance().start();
+
+            // 启动嵌入式Python金融事件感知调度器（路径相对于可执行文件）
+            app::PythonEventBridge::instance().start();
         }
 
         // ── GmSessionEngine（唯一 gmsdk 连接）在 QML 之前初始化 ──
