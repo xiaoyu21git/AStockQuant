@@ -59,9 +59,13 @@ bool PostMarketSyncService::forceSyncToday() {
         for(auto&r:covRes.getRows()){int c=r.getInt("cnt");cov[r.getString("dt")]=c;if(c>mc)mc=c;}
         std::vector<std::string> md;
         for(auto&d:tds){int c=cov.count(d)?cov[d]:0;if(c<mc*90/100)md.push_back(d);}
-        // 缺口补齐: 统一走syncDailyMinute (日线→估值→分钟线)
+        // 缺口补齐 + PE回填: 扫描日线缺口和PE缺失的日期, 统一走syncDailyMinute
+        {
+            auto peGapRes=db->executeQuery("SELECT trade_date::text FROM mkt.daily_bar WHERE pe_ratio=0 GROUP BY trade_date HAVING COUNT(*)>100");
+            for(auto&r:peGapRes.getRows()){std::string d=r.getString("trade_date");if(std::find(md.begin(),md.end(),d)==md.end())md.push_back(d);}
+        }
         if(!md.empty()){
-            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 补齐 "<<md.size()<<" 天: "<<md.front()<<" ~ "<<md.back()<<" ======";
+            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 补齐 "<<md.size()<<" 天 (日线缺口+PE缺口): "<<md.front()<<" ~ "<<md.back()<<" ======";
             for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncDailyMinute(td);}
         }
         // 手动触发不检查时间窗口和交易日
@@ -701,22 +705,21 @@ void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     auto cntRes=db->executeQuery("SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
     bool dailyExists=(cntRes.rowCount()>0&&cntRes.getRow(0).getInt(0)>static_cast<int>(syms.size()*0.9));
-    if(!dailyExists){
-        logTaskStart("DAILY",tradingDay);
-        if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return;}
-    }
-    // 估值: 始终补 (PE/PB/市值/换手率), 缺则补满则跳过
+    // 估值状态
     auto peRes=db->executeQuery("SELECT COUNT(*) FILTER (WHERE pe_ratio=0) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
     bool peMissing=(peRes.rowCount()>0&&peRes.getRow(0).getInt(0)>0);
+    // 分钟线状态
+    auto minRes=db->executeQuery("SELECT COUNT(*) FROM mkt.minute_bar WHERE trade_ts::date=$1::date",
+        {astock::database::SqlParam{std::to_string(tradingDay)}});
+    bool minMissing=(minRes.rowCount()==0||minRes.getRow(0).getInt(0)==0);
+
+    const char* dStatus=dailyExists?"已覆盖":"补";const char* pStatus=peMissing?"补":"已覆盖";const char* mStatus=minMissing?"补":"已覆盖";
+    INTERNAL_INFO_STREAM<<"[PostMktSync] "<<tradingDay<<" 日线="<<dStatus<<" PE="<<pStatus<<" 分钟="<<mStatus;
+
+    if(!dailyExists){if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return;}}
     if(peMissing)syncValuation(db,s2i,syms,tradingDay);
-    // 分钟线: 日线有则补
-    if(dailyExists||!dailyExists){
-        auto minRes=db->executeQuery("SELECT COUNT(*) FROM mkt.minute_bar WHERE trade_ts::date=$1::date",
-            {astock::database::SqlParam{std::to_string(tradingDay)}});
-        bool minExists=(minRes.rowCount()>0&&minRes.getRow(0).getInt(0)>0);
-        if(!minExists)syncMinute(db,s2i,syms,tradingDay);
-    }
+    if(minMissing)syncMinute(db,s2i,syms,tradingDay);
 }
 
 // 估值补全: PE/PB/市值/换手率 (gmsdk批量)
