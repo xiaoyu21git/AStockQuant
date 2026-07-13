@@ -1,15 +1,11 @@
 #include "PythonEventBridge.h"
 #include "foundation/log/logging.hpp"
 
-// Python C API
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
 #ifdef _WIN32
 #include <windows.h>
-#else
-#include <unistd.h>
-#include <libgen.h>
 #endif
 
 namespace app {
@@ -23,13 +19,7 @@ static std::string getExeDir() {
     auto pos = path.rfind('\\');
     return (pos != std::string::npos) ? path.substr(0, pos) : ".";
 #else
-    char buf[4096];
-    ssize_t len = readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-    if (len <= 0) return ".";
-    buf[len] = '\0';
-    std::string path(buf);
-    auto pos = path.rfind('/');
-    return (pos != std::string::npos) ? path.substr(0, pos) : ".";
+    return ".";
 #endif
 }
 
@@ -43,13 +33,9 @@ PythonEventBridge::~PythonEventBridge() { stop(); }
 bool PythonEventBridge::start() {
     if (m_running.load()) return true;
 
-    // Python Home: 优先环境变量, 否则用编译时的 Python 路径
     const char* pyHome = std::getenv("PYTHONHOME");
-    std::string homePath;
-    if (pyHome && pyHome[0]) {
-        homePath = pyHome;
-    } else {
-        // 回退: 去掉 "python.exe" 后缀取目录
+    std::string homePath = pyHome ? std::string(pyHome) : "";
+    if (homePath.empty()) {
         homePath = PYTHON_EXECUTABLE;
         auto pos = homePath.rfind('\\');
         if (pos == std::string::npos) pos = homePath.rfind('/');
@@ -58,24 +44,29 @@ bool PythonEventBridge::start() {
     std::wstring whome(homePath.begin(), homePath.end());
     Py_SetPythonHome(whome.c_str());
 
+    // 启动前禁用不需要的模块，避免 import readline 等崩溃
+    PyImport_AppendInittab("readline", nullptr);
+
     Py_Initialize();
     if (!Py_IsInitialized()) {
         INTERNAL_ERROR_STREAM << "[PyBridge] Py_Initialize 失败";
         return false;
     }
 
-    // 路径计算: 从可执行文件位置推导
+    // 释放GIL，允许子线程运行Python
+    PyEval_InitThreads();
+    m_gilState = PyEval_SaveThread();  // 主线程释放GIL
+
     std::string exeDir = getExeDir();
-    // eventsPath: ../../../astock_engine/events (from bin/Release to project root)
     std::string eventsPath = exeDir + "/../../../astock_engine/events";
-    std::string binPath = exeDir + "/../lib/Release";  // eventbus_native.dll
+    std::string binPath = exeDir + "/../lib/Release";
 
     INTERNAL_INFO_STREAM << "[PyBridge] Python " << Py_GetVersion()
-                         << " home=" << homePath
-                         << " exeDir=" << exeDir;
+                         << " home=" << homePath << " exeDir=" << exeDir;
 
     m_running.store(true);
-    m_thread = std::make_unique<std::thread>(schedulerThread, eventsPath, binPath);
+    m_thread = std::make_unique<std::thread>(&PythonEventBridge::schedulerThread,
+                                              this, eventsPath, binPath);
     return true;
 }
 
@@ -86,13 +77,16 @@ void PythonEventBridge::stop() {
         m_thread.reset();
     }
     if (Py_IsInitialized()) {
+        PyEval_RestoreThread(m_gilState);
         Py_FinalizeEx();
-        INTERNAL_INFO_STREAM << "[PyBridge] Python已卸载";
+        INTERNAL_INFO_STREAM << "[PyBridge] Python卸载";
     }
 }
 
 void PythonEventBridge::schedulerThread(const std::string& eventsPath,
                                          const std::string& binPath) {
+    PyGILState_STATE gstate = PyGILState_Ensure();
+
     std::string script =
         "import sys\n"
         "sys.path.insert(0, r'" + eventsPath + "/..')\n"
@@ -102,16 +96,18 @@ void PythonEventBridge::schedulerThread(const std::string& eventsPath,
         "try:\n"
         "    from astock_engine.events.scheduler import main\n"
         "    main()\n"
-        "except Exception as e:\n"
-        "    import traceback; traceback.print_exc()\n";
+        "except Exception:\n"
+        "    import traceback\n"
+        "    traceback.print_exc()\n";
 
-    INTERNAL_INFO_STREAM << "[PyBridge] 调度器线程启动";
+    INTERNAL_INFO_STREAM << "[PyBridge] scheduler start";
     int ret = PyRun_SimpleString(script.c_str());
     if (ret != 0) {
-        INTERNAL_ERROR_STREAM << "[PyBridge] 调度器异常退出 code=" << ret;
-        if (PyErr_Occurred()) PyErr_Print();
+        INTERNAL_ERROR_STREAM << "[PyBridge] exit code=" << ret;
+        PyErr_Print();
     }
-    INTERNAL_INFO_STREAM << "[PyBridge] 调度器线程退出";
+    PyGILState_Release(gstate);
+    INTERNAL_INFO_STREAM << "[PyBridge] scheduler exit";
 }
 
 } // namespace app

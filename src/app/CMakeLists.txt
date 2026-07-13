@@ -107,6 +107,11 @@ if(ENABLE_JUJIN_MARKET)
             thirdParty
     )
 
+    # Python嵌入: 将CMake变量传递给C++
+    target_compile_definitions(astockquantapp PRIVATE
+        PYTHON_EXECUTABLE="${Python_EXECUTABLE}"
+    )
+
     get_filename_component(GMSDK_RUNTIME_DIR "${GMSDK_LIBRARY}" DIRECTORY)
     foreach(GMSDK_RUNTIME_FILE gmsdk.dll thostmduserapi_se.dll thostmd_wrap.dll)
         if(EXISTS "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}")

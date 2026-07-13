@@ -29,6 +29,7 @@ private:
 
     std::unique_ptr<std::thread> m_thread;
     std::atomic<bool> m_running{false};
+    PyThreadState* m_gilState{nullptr};
 };
 
 } // namespace app
