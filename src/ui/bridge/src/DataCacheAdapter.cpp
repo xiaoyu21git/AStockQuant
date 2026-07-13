@@ -155,6 +155,24 @@ QVariantMap DataCacheAdapter::getDataSetInfo(int dataId) const {
     return cppInfoToMap(m_cache->getDataSetInfo(dataId));
 }
 
+QVariantList DataCacheAdapter::loadRowsBySymbol(int dataId, const QString& symbol) {
+    ensureInitialized();
+    auto rows = m_cache->loadDataSetRowsBySymbol(dataId, symbol.toStdString());
+    QVariantList result;
+    result.reserve(static_cast<int>(rows.size()));
+    for (const auto& row : rows) {
+        QVariantMap m;
+        for (const auto& key : row.keys()) {
+            auto v = row.get(key);
+            if (v.isNumber()) m[QString::fromStdString(key)] = v.asDouble();
+            else if (v.isString()) m[QString::fromStdString(key)] = QString::fromStdString(v.asString());
+            else if (v.isBool()) m[QString::fromStdString(key)] = v.asBool();
+        }
+        result.append(m);
+    }
+    return result;
+}
+
 QStringList DataCacheAdapter::getDataSetSchemaFields(int dataId) const {
     QStringList fields;
     for (const auto& f : m_cache->loadDataSetSchemaFields(dataId))

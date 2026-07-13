@@ -947,30 +947,62 @@ Item {
                             }
                         }
 
-                        // 增量更新缓存：仅对已清洗数据集(sourceType 含 cleaning)可用
-                        Button {
-                            id: cacheIncrementalUpdateButton
+                        // 已清洗缓存增量更新（独立选择器：清洗集不在上方原始集下拉里）
+                        Column {
                             width: parent.width
-                            height: 32
-                            property var selEntry: (cacheSelectionComboBox.currentIndex >= 0 && cacheSelectionComboBox.currentIndex < cacheDisplayModel.count)
-                                ? cacheDisplayModel.get(cacheSelectionComboBox.currentIndex) : null
-                            property bool isCleaned: selEntry && String(selEntry.sourceType || "").indexOf("cleaning") >= 0
-                            enabled: isCleaned && (selEntry ? selEntry.id > 0 : false) && !root.cacheUpdating
-                            opacity: enabled ? 1.0 : 0.5
-                            text: root.cacheUpdating ? "增量更新中..." : "🔄 更新缓存(增量)"
-                            background: Rectangle { color: parent.enabled ? "#7c3aed" : "#374151"; radius: 4 }
-                            contentItem: Text {
-                                text: parent.text
-                                color: parent.enabled ? "white" : "#666"
+                            spacing: 6
+
+                            Text {
+                                text: "已清洗缓存 (增量更新):"
                                 font.pixelSize: 12
-                                font.bold: true
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
+                                color: "#a0aec0"
                             }
-                            onClicked: {
-                                var entry = cacheDisplayModel.get(cacheSelectionComboBox.currentIndex)
-                                if (entry && entry.id > 0) {
-                                    dataFetchController.incrementalUpdateDataSet(entry.id)
+
+                            ComboBox {
+                                id: cleanedCacheCombo
+                                width: parent.width
+                                height: 34
+                                model: cleanedCacheModel
+                                textRole: "displayName"
+                                enabled: cleanedCacheModel.count > 0 && !root.cacheUpdating
+                                contentItem: Text {
+                                    text: cleanedCacheModel.count > 0
+                                        ? (cleanedCacheCombo.currentText || "请选择已清洗缓存...")
+                                        : "暂无已清洗缓存"
+                                    color: "white"; font.pixelSize: 12; leftPadding: 8
+                                    verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+                                }
+                                background: Rectangle { radius: 4; color: "#374151"; border.width: 1; border.color: "#4b5563" }
+                            }
+
+                            Button {
+                                id: cacheIncrementalUpdateButton
+                                width: parent.width
+                                height: 32
+                                property int selIdx: cleanedCacheCombo.currentIndex
+                                property var selEntry: (selIdx >= 0 && selIdx < cleanedCacheModel.count)
+                                    ? cleanedCacheModel.get(selIdx) : null
+                                enabled: (selEntry ? (selEntry.id > 0) : false) && !root.cacheUpdating
+                                opacity: enabled ? 1.0 : 0.5
+                                text: root.cacheUpdating ? "增量更新中..." : "🔄 更新缓存(增量)"
+                                background: Rectangle { color: parent.enabled ? "#7c3aed" : "#374151"; radius: 4 }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: parent.enabled ? "white" : "#666"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    var i = cleanedCacheCombo.currentIndex
+                                    var e = (i >= 0 && i < cleanedCacheModel.count) ? cleanedCacheModel.get(i) : null
+                                    if (e && e.id > 0) {
+                                        root.handlePanelStatusRequested("⏳ 提交增量更新 #" + e.id + "...", "warning")
+                                        dataFetchController.incrementalUpdateDataSet(e.id)
+                                    } else {
+                                        root.handlePanelStatusRequested("❌ 没有可更新的已清洗缓存", "error")
+                                    }
                                 }
                             }
                         }
@@ -1054,7 +1086,12 @@ Item {
     ListModel {
         id: cacheDisplayModel
     }
-    
+
+    // 已清洗缓存模型（增量更新选择器用）
+    ListModel {
+        id: cleanedCacheModel
+    }
+
     // DataFetchController实例 - 用于数据获取和清洗（遵循不在QML中操作数据的原则）
     DataFetchController {
         id: dataFetchController
@@ -1090,6 +1127,7 @@ Item {
         onDataSetCleaned: function(inputId, resultId, message, inputRows, outputRows) {
             handlePanelStatusRequested("清洗完成: " + inputRows + " -> " + outputRows + " 行, 新数据集 ID=" + resultId, "success")
             dataFetchController.refreshDataSetInfos()
+            dataFetchController.refreshCleanedDataSetInfos()  // 新清洗集加入增量更新下拉
         }
 
         onDatasetUpdateStarted: function(datasetId) {
@@ -1120,6 +1158,21 @@ Item {
                     sourceType: info.sourceType || "",
                     rowCount: info.rowCount || 0,
                     stockCodes: info.stockCodes || [],
+                    startDate: info.startDate || "",
+                    endDate: info.endDate || ""
+                })
+            }
+        }
+
+        onCleanedDataSetInfosRefreshed: function(infos) {
+            cleanedCacheModel.clear()
+            for (var i = 0; i < infos.length; i++) {
+                var info = infos[i]
+                cleanedCacheModel.append({
+                    id: info.id,
+                    displayName: (info.displayName || ("清洗集 #" + info.id))
+                        + "  [" + (info.startDate || "?") + "~" + (info.endDate || "?") + "]",
+                    rowCount: info.rowCount || 0,
                     startDate: info.startDate || "",
                     endDate: info.endDate || ""
                 })

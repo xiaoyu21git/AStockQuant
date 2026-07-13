@@ -241,6 +241,9 @@ public:
     /// @param sinceDate 起始日期（含），格式 "YYYY-MM-DD"
     std::vector<JCache> loadDataSetRange(int dataId, const std::string& sinceDate);
 
+    /// @brief 加载指定 symbol 的所有行（完整列，按文件原有顺序），用于缓存数据查看/清洗前后对比
+    std::vector<JCache> loadDataSetRowsBySymbol(int dataId, const std::string& symbol);
+
     /// @brief 增量追加：读取现有 .arrow 全部 RecordBatch，与新数据合并后写入
     /// 临时文件，最后原子替换（std::filesystem::rename）。
     /// 保证：要么原子换成含新数据的文件，要么旧文件完好如初，不存在中间态。

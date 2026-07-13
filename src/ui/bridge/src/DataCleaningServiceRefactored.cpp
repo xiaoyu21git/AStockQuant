@@ -207,6 +207,12 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             cleaning::CleaningEngine engine;
             int ruleCount = 0;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
+                // 只添加“启用”的规则。原逻辑忽略 enabled 标志，把禁用规则(尤其 reportDateAlignment)
+                // 也加入引擎 → trade_date 被披露日覆盖 → 日期重复/数据错位。这是数据损坏的根因。
+                const QVariant rv = it.value();
+                const bool enabled = (rv.canConvert<QVariantMap>() && rv.toMap().contains("enabled"))
+                    ? rv.toMap().value("enabled").toBool() : rv.toBool();
+                if (!enabled) continue;
                 auto r = createCppRule(it.key().toStdString(), "");
                 if (r) { engine.addRule(std::move(r)); ++ruleCount; }
             }
@@ -239,7 +245,9 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                 auto batch = reader->ReadRecordBatch(bi).ValueOrDie();
                 int64_t n = batch->num_rows();
                 if (n == 0) continue;
-                if (n > poolSize) pool.resize(static_cast<size_t>(n));
+                // 关键修复：pool 精确调成本批 n 行。原逻辑只增不减，导致 pool[n..size] 残留
+                // 上一批的行被 cleanSortedBatch 反复处理 → 重复输出 + 污染有状态规则（是数据既多又缺的根因）
+                pool.resize(static_cast<size_t>(n));
                 inputRows += static_cast<int>(n);
 
                 // 填池：预提取列数组 + 字段名 + 类型，避免行循环内 shared_ptr 分配 + hash 查找
@@ -262,7 +270,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
 
                 for (int64_t ri = 0; ri < n; ++ri) {
                     auto& row = pool[static_cast<size_t>(ri)];
-                    if (!row.isObject()) row = J::createObject();
+                    row = J::createObject();  // 每行重置为全新对象，避免复用行残留上一批规则加的内部字段
                     for (size_t c = 0; c < static_cast<size_t>(nCols); ++c) {
                         if (colIsNum[c]) {
                             if (doublePtrs[c]->IsNull(ri)) row.setNull(colNames[c].c_str());
@@ -508,6 +516,11 @@ void DataCleaningServiceRefactored::incrementalUpdateDataSet(int dataSetId,
             // 6. 清洗合并批：回溯段 seed 状态后丢弃，只保留 trade_date > endDate 的新行
             cleaning::CleaningEngine engine;
             for (auto it = effectiveRules.begin(); it != effectiveRules.end(); ++it) {
+                // 同全量清洗：只添加启用的规则，避免 reportDateAlignment 等禁用规则改写 trade_date
+                const QVariant rv = it.value();
+                const bool enabled = (rv.canConvert<QVariantMap>() && rv.toMap().contains("enabled"))
+                    ? rv.toMap().value("enabled").toBool() : rv.toBool();
+                if (!enabled) continue;
                 auto r = createCppRule(it.key().toStdString(), "");
                 if (r) engine.addRule(std::move(r));
             }

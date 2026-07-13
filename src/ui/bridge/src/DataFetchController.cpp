@@ -64,17 +64,28 @@ DataFetchController::DataFetchController(QObject* parent)
         m_operationInProgress = false; emit operationInProgressChanged();
         emit dataCleaningError(e);
     });
-    // 增量更新信号转发（一次性连接，避免重复触发）
+    // 增量更新信号转发（一次性连接，避免重复触发）；同步驱动进度条属性 progress/operationInProgress
     connect(m_cleaningSvc, &DataCleaningServiceRefactored::incrementalUpdateStarted,
-            this, [this](int id) { emit datasetUpdateStarted(id); });
+            this, [this](int id) {
+        m_operationInProgress = true; emit operationInProgressChanged();
+        m_operationPhase = QStringLiteral("增量更新"); emit operationPhaseChanged();
+        m_progress = 0; emit progressChanged();
+        emit datasetUpdateStarted(id);
+    });
     connect(m_cleaningSvc, &DataCleaningServiceRefactored::incrementalUpdateProgress,
-            this, [this](int id, int pct, const QString& stage) { emit datasetUpdateProgress(id, pct, stage); });
+            this, [this](int id, int pct, const QString& stage) {
+        m_progress = pct; m_statusMessage = stage;
+        emit progressChanged(); emit statusMessageChanged();
+        emit datasetUpdateProgress(id, pct, stage);
+    });
     connect(m_cleaningSvc, &DataCleaningServiceRefactored::incrementalUpdateFinished,
             this, [this](int id, bool ok, int newRows, const QString& msg) {
-        if (ok && newRows > 0) refreshDataSetInfos(); // 新数据落盘后刷新列表(rowCount/endDate)
+        m_operationInProgress = false; emit operationInProgressChanged();
+        m_progress = ok ? 100 : m_progress; emit progressChanged();
+        if (ok && newRows > 0) { refreshDataSetInfos(); refreshCleanedDataSetInfos(); } // 新数据落盘后刷新列表
         emit datasetUpdateFinished(id, ok, newRows, msg);
     });
-    QTimer::singleShot(0, this, [this]() { refreshDataSetInfos(); });
+    QTimer::singleShot(0, this, [this]() { refreshDataSetInfos(); refreshCleanedDataSetInfos(); });
     QTimer::singleShot(1000, this, SLOT(logInitMessage()));
 }
 
@@ -310,6 +321,28 @@ void DataFetchController::refreshDataSetInfos()
     emit dataSetInfosRefreshed(result);
 }
 
+void DataFetchController::refreshCleanedDataSetInfos()
+{
+    auto& cache = DataCacheAdapter::instance();
+    auto infos = cache.getAllDataSetInfos();
+    QVariantList result;
+    for (const QVariantMap& info : infos) {
+        // 只列已清洗缓存（sourceType == "cleaning"），与原始集下拉框互补
+        if (info.value("sourceType").toString() != QStringLiteral("cleaning")) {
+            continue;
+        }
+        QVariantMap map;
+        map["id"] = info.value("id"); map["displayName"] = info.value("displayName");
+        map["sourceType"] = info.value("sourceType"); map["rowCount"] = info.value("rowCount");
+        map["stockCodes"] = info.value("stockCodes");
+        map["startDate"] = info.value("startDate"); map["endDate"] = info.value("endDate");
+        qint64 created = info.value("createdAt", 0).toLongLong();
+        map["createdTime"] = created > 0 ? QDateTime::fromSecsSinceEpoch(created).toString("yyyy-MM-dd HH:mm:ss") : "";
+        result.append(map);
+    }
+    emit cleanedDataSetInfosRefreshed(result);
+}
+
 void DataFetchController::onDropdownRefreshed(int count)
 {
     Q_UNUSED(count);
@@ -384,6 +417,19 @@ void DataFetchController::incrementalUpdateDataSet(int dataSetId)
 {
     // 增量更新转发到清洗服务；进度/结果经构造函数中的连接转发为 datasetUpdate* 信号
     m_cleaningSvc->incrementalUpdateDataSet(dataSetId, QVariantMap());
+}
+
+// ── 缓存数据查看 ──
+QVariantList DataFetchController::allDataSetInfos()
+{
+    QVariantList out;
+    for (const auto& m : DataCacheAdapter::instance().getAllDataSetInfos()) out.append(m);
+    return out;
+}
+
+QVariantList DataFetchController::loadCacheRowsBySymbol(int dataId, const QString& symbol)
+{
+    return DataCacheAdapter::instance().loadRowsBySymbol(dataId, symbol);
 }
 
 void DataFetchController::cleanDataAsync(const QVariantMap& rules)

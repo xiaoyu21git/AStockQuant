@@ -756,6 +756,14 @@ public:
     bool clean(J& row) override {
         if (!row.has(FF::REPORT_DATE.c_str())) return true;
 
+        // 护栏：日线行(带 OHLC/成交量)的 trade_date 是真实交易日，绝不能被披露日覆盖。
+        // 财务数据 join 到每条日线后每行都有 report_date，若不加此护栏，整批日线的 trade_date
+        // 会被改写成披露日 → 同季度所有交易日塌成同一天(数据不重复、日期重复)。
+        // 该规则只对“纯财务行”(无行情价量)做日期对齐。
+        if (row.has(MF::CLOSE.c_str()) || row.has(MF::OPEN.c_str()) || row.has(MF::VOLUME.c_str())) {
+            return true;
+        }
+
         std::string rd = row.get(FF::REPORT_DATE.c_str()).asString();
         if (rd.size() < 10) return true;
 

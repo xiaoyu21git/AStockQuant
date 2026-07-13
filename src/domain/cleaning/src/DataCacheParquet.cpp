@@ -350,6 +350,59 @@ std::string DataCache::getMaxTradeDate(int dataId)
     return maxTd;
 }
 
+// ── 查看：加载指定 symbol 的所有行（完整列，按文件原有顺序）──
+
+std::vector<J> DataCache::loadDataSetRowsBySymbol(int dataId, const std::string& symbol)
+{
+    std::string path = dataFilePath(dataId);
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) return {};
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) return {};
+    auto reader = readerResult.ValueOrDie();
+    auto schema = reader->schema();
+    if (!schema) return {};
+
+    const int nCols = schema->num_fields();
+    const int symIdx = schema->GetFieldIndex(std::string(CF::SYMBOL.c_str()));
+    if (symIdx < 0) return {};
+    std::vector<std::string> names(static_cast<size_t>(nCols));
+    for (int c = 0; c < nCols; ++c) names[static_cast<size_t>(c)] = schema->field(c)->name();
+
+    std::vector<J> out;
+    for (int i = 0; i < reader->num_record_batches(); ++i) {
+        auto bR = reader->ReadRecordBatch(i);
+        if (!bR.ok()) continue;
+        auto batch = bR.ValueOrDie();
+        auto symCol = batch->column(symIdx);
+        if (!symCol || symCol->type_id() != arrow::Type::STRING) continue;
+        auto symArr = std::static_pointer_cast<arrow::StringArray>(symCol);
+
+        // 预取每列 typed 指针
+        std::vector<const arrow::DoubleArray*> dbl(static_cast<size_t>(nCols), nullptr);
+        std::vector<const arrow::StringArray*> str(static_cast<size_t>(nCols), nullptr);
+        std::vector<std::shared_ptr<arrow::Array>> owners(static_cast<size_t>(nCols));
+        for (int c = 0; c < nCols; ++c) {
+            owners[static_cast<size_t>(c)] = batch->column(c);
+            auto& o = owners[static_cast<size_t>(c)];
+            if (o->type_id() == arrow::Type::DOUBLE) dbl[static_cast<size_t>(c)] = static_cast<const arrow::DoubleArray*>(o.get());
+            else if (o->type_id() == arrow::Type::STRING) str[static_cast<size_t>(c)] = static_cast<const arrow::StringArray*>(o.get());
+        }
+
+        const int64_t n = batch->num_rows();
+        for (int64_t r = 0; r < n; ++r) {
+            if (symArr->IsNull(r) || symArr->GetString(r) != symbol) continue;
+            auto obj = J::createObject();
+            for (size_t c = 0; c < static_cast<size_t>(nCols); ++c) {
+                if (dbl[c]) { if (!dbl[c]->IsNull(r)) obj.set(names[c], J::createDouble(dbl[c]->Value(r))); }
+                else if (str[c]) { if (!str[c]->IsNull(r)) obj.set(names[c], J::createString(str[c]->GetString(r))); }
+            }
+            out.push_back(std::move(obj));
+        }
+    }
+    return out;
+}
+
 // ── 增量：按日期范围加载完整行 ──
 std::vector<J> DataCache::loadDataSetRange(int dataId, const std::string& sinceDate)
 {
@@ -417,39 +470,48 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
     std::filesystem::remove(tmpPath, rmEc);
 
     // 1. 打开旧文件，读取 schema（并延迟到写完新 batch 后再读旧 batch）
-    auto inResult = arrow::io::ReadableFile::Open(path);
-    if (!inResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open old file " << path << ": " << inResult.status().ToString();
-        return -1;
-    }
-    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
-    if (!readerResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] append: read old error " << readerResult.status().ToString();
-        return -1;
-    }
-    auto reader = readerResult.ValueOrDie();
-    auto oldSchema = reader->schema();
-
-    // 2. 构建新数据 Table，校验 schema 与旧文件一致
-    auto newTable = buildArrowTable(newRows, fieldNames, numericFields);
-    if (!newTable->schema()->Equals(*oldSchema)) {
-        INTERNAL_ERROR_STREAM << "[DataCache] append: schema mismatch for dataset " << dataId << ", abort (old file kept)";
-        return -1;
-    }
-
-    // 3. 写临时文件：旧 batch 全量 + 新 Table。任一步失败即清理 tmp、保留旧文件
+    // 1~3. 读旧文件 + 构建新表校验 schema + 写临时文件。
+    //   所有 arrow 读写句柄都限制在此作用域内，作用域结束(且显式 Close 旧文件)后再 rename，
+    //   避免 Windows 下 Result 对象残留的 ReadableFile 句柄未释放导致 rename "拒绝访问"。
     int64_t oldRows = 0;
+    int64_t newRowCount = 0;
     {
+        auto inResult = arrow::io::ReadableFile::Open(path);
+        if (!inResult.ok()) {
+            INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open old file " << path << ": " << inResult.status().ToString();
+            return -1;
+        }
+        auto inFile = inResult.ValueOrDie();
+        auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inFile);
+        if (!readerResult.ok()) {
+            INTERNAL_ERROR_STREAM << "[DataCache] append: read old error " << readerResult.status().ToString();
+            (void)inFile->Close();
+            return -1;
+        }
+        auto reader = readerResult.ValueOrDie();
+        auto oldSchema = reader->schema();
+
+        // 构建新数据 Table，校验 schema 与旧文件一致
+        auto newTable = buildArrowTable(newRows, fieldNames, numericFields);
+        if (!newTable->schema()->Equals(*oldSchema)) {
+            INTERNAL_ERROR_STREAM << "[DataCache] append: schema mismatch for dataset " << dataId << ", abort (old file kept)";
+            (void)inFile->Close();
+            return -1;
+        }
+        newRowCount = newTable->num_rows();
+
+        // 写临时文件：旧 batch 全量 + 新 Table。任一步失败即清理 tmp、保留旧文件
         auto outResult = arrow::io::FileOutputStream::Open(tmpPath);
         if (!outResult.ok()) {
             INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open tmp " << tmpPath << ": " << outResult.status().ToString();
+            (void)inFile->Close();
             return -1;
         }
         auto stream = outResult.ValueOrDie();
         auto writerResult = arrow::ipc::MakeFileWriter(stream, oldSchema);
         if (!writerResult.ok()) {
             INTERNAL_ERROR_STREAM << "[DataCache] append: writer error " << writerResult.status().ToString();
-            stream.reset();
+            stream.reset(); (void)inFile->Close();
             std::filesystem::remove(tmpPath, rmEc);
             return -1;
         }
@@ -457,8 +519,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
 
         auto fail = [&](const std::string& what) -> int {
             INTERNAL_ERROR_STREAM << "[DataCache] append: " << what << " (old file kept)";
-            writer->Close();      // 尽力关闭
-            stream.reset();
+            writer->Close(); stream.reset(); (void)inFile->Close();
             std::filesystem::remove(tmpPath, rmEc);
             return -1;
         };
@@ -477,12 +538,10 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
 
         auto cst = writer->Close();
         if (!cst.ok()) return fail("close writer failed: " + cst.ToString());
-        stream.reset();  // 关闭 tmp 输出流（flush 到磁盘）
+        stream.reset();          // 关闭 tmp 输出流（flush 到磁盘）
+        (void)inFile->Close();   // 显式关闭旧文件读句柄
+        // reader/readerResult/inFile/inResult/writer/stream 均在此作用域结束时析构
     }
-
-    // 4. 释放旧文件 reader 句柄（Windows 上被占用则无法替换）
-    reader.reset();
-
     // 5. 原子替换：tmp → path。带退避重试，应对读端短暂占用 .arrow
     constexpr int kMaxRenameRetries = 5;
     constexpr int kRetryDelayMs = 100;
@@ -500,7 +559,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
     }
 
     // 6. 更新元数据：rowCount 与 endDate
-    const int64_t totalRows = oldRows + newTable->num_rows();
+    const int64_t totalRows = oldRows + newRowCount;
     std::string maxTradeDate;
     for (const auto& row : newRows) {
         if (!row.isObject() || !row.has(CF::TRADE_DATE.c_str())) continue;
@@ -518,7 +577,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
         }
     }
 
-    INTERNAL_INFO_STREAM << "[DataCache] appended dataset " << dataId << ": +" << newTable->num_rows()
+    INTERNAL_INFO_STREAM << "[DataCache] appended dataset " << dataId << ": +" << newRowCount
                          << " rows (old=" << oldRows << ", total=" << totalRows << "), endDate<=" << maxTradeDate;
     return static_cast<int>(totalRows);
 }
