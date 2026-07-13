@@ -58,7 +58,7 @@ bool PythonEventBridge::start() {
     m_gilState = static_cast<void*>(PyEval_SaveThread());  // 主线程释放GIL
 
     std::string exeDir = getExeDir();
-    std::string eventsPath = exeDir + "/../../../astock_engine/events";
+    std::string eventsPath = exeDir + "/../../astock_engine/events";
     std::string binPath = exeDir + "/../lib/Release";
 
     INTERNAL_INFO_STREAM << "[PyBridge] Python " << Py_GetVersion()
