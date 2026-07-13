@@ -79,6 +79,10 @@ private:
                        const std::unordered_map<std::string,int>& symToId,
                        const std::vector<std::string>& symbols, int tradingDay);
 
+    void backfillPE(std::shared_ptr<astock::database::ISqlDatabase> db,
+                    const std::unordered_map<std::string,int>& symToId,
+                    const std::vector<std::string>& symbols);
+
     void logTaskStart(const std::string& taskType, int tradingDay);
     void logTaskEnd(const std::string& taskType, int tradingDay, bool success,
                     int rows, const std::string& error = "");
