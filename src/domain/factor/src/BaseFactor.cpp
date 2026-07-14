@@ -718,6 +718,15 @@ std::unordered_map<std::string, std::vector<double>> BaseFactor::latestFinancial
     const auto symbols = effectiveSymbols(context);
     const int effectiveLimit = (limit > 0) ? limit : 1;
 
+    // 记忆化：财务按季度更新，回测每交易日都调本函数；同一 (field,effectiveDate,limit)
+    // 的结果不变，缓存后跨交易日直接复用，避免每天重复做 4~16 次全市场横切(dbFallback)。
+    const std::string cacheKey =
+        field + "|" + effectiveDate + "|" + std::to_string(effectiveLimit);
+    {
+        auto cit = m_finSeriesCache.find(cacheKey);
+        if (cit != m_finSeriesCache.end()) return cit->second;
+    }
+
     // 用 getCrossSection 横切多个历史锚点日期（从 effectiveDate 往回推 quarterly），
     // 自动走 dbFallback 且每次横切只查一次静态缓存
     int y = 0, m = 0, d = 1;
@@ -742,6 +751,10 @@ std::unordered_map<std::string, std::vector<double>> BaseFactor::latestFinancial
         }
         if (!anyNew && i >= effectiveLimit) break;
     }
+    // 上限保护：月频工作集很小(每月同一 effectiveDate 复用)，几乎不触发；
+    // 日频 effectiveDate 每日变、不复用，满则清空以免内存无限增长。
+    if (m_finSeriesCache.size() >= 256) m_finSeriesCache.clear();
+    m_finSeriesCache.emplace(cacheKey, result);
     return result;
 }
 

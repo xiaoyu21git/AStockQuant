@@ -345,6 +345,12 @@ private:
                                    const CommonRuntimeState& runtime,
                                    CalculationResult& result,
                                    NeutralizationStatus& neutralizationMode) const;
+
+    // latestFinancialSeries 的记忆化缓存（仅成长因子经此函数取财务序列）。
+    // 财务按季度更新、回测每交易日都调，缓存后同一 (field,effectiveDate,limit) 只算一次、跨日复用。
+    // key = field + "|" + effectiveDate + "|" + limit；per-instance，回测按日顺序执行、无需加锁。
+    mutable std::unordered_map<std::string,
+        std::unordered_map<std::string, std::vector<double>>> m_finSeriesCache;
 };
 
 // ── 框架公共字段名（中性化、边界规则、元数据）──

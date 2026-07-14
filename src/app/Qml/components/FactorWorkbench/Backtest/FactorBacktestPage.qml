@@ -2059,12 +2059,24 @@ Item {
         if (datasetId <= 0) return "未选择缓存集"
         var supportMap = factorSupportMapCache
         if (!supportMap || Object.keys(supportMap).length === 0) return "因子支持校验未完成，请打开因子选择器点击\"开始校验\""
-        if (!selectedFactorIds || selectedFactorIds.length === 0) return "未选择因子"
-        for (var si = 0; si < selectedFactorIds.length; si++) {
-            var factorId = String(selectedFactorIds[si])
-            var sInfo = supportMap[factorId]
-            if (!sInfo) return "因子 " + factorId + " 未经校验"
-            if (sInfo.supported === false) return "因子 " + factorId + " 不支持: " + (sInfo.reason || "未知原因")
+        // 组合因子模式检查 compositeChildAllocations，单因子模式检查 selectedFactorIds
+        if (backtestEntryMode === 1) {
+            if (!compositeChildAllocations || compositeChildAllocations.length < 2)
+                return "组合因子需要至少2个子因子"
+            for (var ci = 0; ci < compositeChildAllocations.length; ci++) {
+                var cid = String((compositeChildAllocations[ci] || {}).instanceId || "")
+                var cinfo = supportMap[cid]
+                if (!cinfo) return "子因子 " + cid + " 未经校验"
+                if (cinfo.supported === false) return "子因子 " + cid + " 不支持: " + (cinfo.reason || "未知原因")
+            }
+        } else {
+            if (!selectedFactorIds || selectedFactorIds.length === 0) return "未选择因子"
+            for (var si = 0; si < selectedFactorIds.length; si++) {
+                var factorId = String(selectedFactorIds[si])
+                var sInfo = supportMap[factorId]
+                if (!sInfo) return "因子 " + factorId + " 未经校验"
+                if (sInfo.supported === false) return "因子 " + factorId + " 不支持: " + (sInfo.reason || "未知原因")
+            }
         }
         return ""
     }
@@ -2083,11 +2095,22 @@ Item {
             console.warn("回测按钮禁用原因:", backtestDisabledReason)
             console.warn("  cacheDatasetOptions.length:", cacheDatasetOptions ? cacheDatasetOptions.length : -1)
             console.warn("  factorSupportMapCache keys:", factorSupportMapCache ? Object.keys(factorSupportMapCache).length : -1)
-            console.warn("  selectedFactorIds:", JSON.stringify(selectedFactorIds))
-            if (factorSupportMapCache && selectedFactorIds.length > 0) {
-                for (var si = 0; si < selectedFactorIds.length; si++) {
-                    var fid = String(selectedFactorIds[si])
-                    console.warn("  factor " + fid + " in map:", factorSupportMapCache[fid] !== undefined, "supported:", factorSupportMapCache[fid] ? factorSupportMapCache[fid].supported : "N/A")
+            console.warn("  backtestEntryMode:", backtestEntryMode)
+            if (backtestEntryMode === 1) {
+                console.warn("  compositeChildAllocations.length:", compositeChildAllocations ? compositeChildAllocations.length : -1)
+                if (factorSupportMapCache && compositeChildAllocations && compositeChildAllocations.length > 0) {
+                    for (var ci = 0; ci < compositeChildAllocations.length; ci++) {
+                        var cfid = String((compositeChildAllocations[ci] || {}).instanceId || "")
+                        console.warn("  composite child " + cfid + " in map:", factorSupportMapCache[cfid] !== undefined, "supported:", factorSupportMapCache[cfid] ? factorSupportMapCache[cfid].supported : "N/A")
+                    }
+                }
+            } else {
+                console.warn("  selectedFactorIds:", JSON.stringify(selectedFactorIds))
+                if (factorSupportMapCache && selectedFactorIds.length > 0) {
+                    for (var si = 0; si < selectedFactorIds.length; si++) {
+                        var fid = String(selectedFactorIds[si])
+                        console.warn("  factor " + fid + " in map:", factorSupportMapCache[fid] !== undefined, "supported:", factorSupportMapCache[fid] ? factorSupportMapCache[fid].supported : "N/A")
+                    }
                 }
             }
         }
