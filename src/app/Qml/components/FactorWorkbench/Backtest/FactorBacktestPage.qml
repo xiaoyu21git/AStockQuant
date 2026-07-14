@@ -3239,8 +3239,51 @@ Item {
                                     wrapMode: Text.WordWrap
                                 }
                             }
+
+                            // 保存为实例：持久化组合因子配置，以后可在因子列表中直接选用
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: backtestEntryMode === 1 && compositeChildAllocations.length > 0
+
+                                Button {
+                                    id: saveCompositeButton
+                                    text: "💾 保存为因子实例"
+                                    Layout.preferredHeight: 32
+                                    enabled: !isBacktesting && compositeDraftName.length > 0
+                                    background: Rectangle { color: parent.enabled ? (saveCompositeButton.hovered ? "#059669" : "#047857") : "#374151"; radius: 6 }
+                                    contentItem: Text { text: parent.text; color: parent.enabled ? "white" : "#666"; font.pixelSize: 12; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    onClicked: {
+                                        if (!factorService || typeof factorService.addFactor !== "function") {
+                                            console.log("FactorService 不可用，无法保存组合因子实例")
+                                            return
+                                        }
+                                        var draft = buildCompositeDraft()
+                                        // 纠正并补充类型标记（组合因子在 JSON 里要显式标 FACTOR_TYPE）
+                                        draft.factorType = "COMPOSITE"
+                                        var result = factorService.addFactor(draft)
+                                        if (result && String(result).length > 0) {
+                                            console.log("组合因子实例已保存:", result)
+                                            handlePanelStatusRequested("✓ 组合因子实例已保存: " + String(result), "success")
+                                        } else {
+                                            console.log("组合因子实例保存失败")
+                                            handlePanelStatusRequested("❌ 保存失败", "error")
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: compositeDraftName.length > 0
+                                        ? ("保存后将在因子列表中可见，随时可选用或再次编辑")
+                                        : "请输入组合名称后才可保存"
+                                    font.pixelSize: 10
+                                    color: compositeDraftName.length > 0 ? "#10B981" : "#FCA5A5"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
                         }
-                        
+
                         // 回测配置
                         RowLayout {
                             Layout.fillWidth: true
