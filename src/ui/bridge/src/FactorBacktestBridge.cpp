@@ -849,138 +849,15 @@ void FactorBacktestBridge::startCompositeBacktest(const QVariantMap& compositeDr
                                                    const QString& startDate, const QString& endDate,
                                                    const QVariantMap& supportSnapshot)
 {
-    INTERNAL_INFO_STREAM << "[FactBacktestBridge] 组合回测: children="
-        << compositeDraft.value("children").toList().size();
-
-    m_isRunning.store(true); emit isRunningChanged();
-    emit backtestStarted(QStringLiteral("composite"));
-
-    // QVariantMap → BacktestRunConfig
-    Factor::backtest::BacktestRunConfig config;
-    config.dataSourceMode    = Factor::backtest::DataSourceMode::Cache;
-    config.selectedDatasetId = m_selectedDatasetId;
-    config.factorMode        = Factor::backtest::FactorMode::Composite;
-
-    // 组合参数（字段名对齐 BacktestRunConfig）
-    config.compositeCombineMode   = compositeDraft.value("combineMode", 0).toInt();
-    config.compositeMissingPolicy = compositeDraft.value("missingPolicy", 1).toInt();
-    config.compositeMinCoverageRatio = compositeDraft.value("minimumCoverageRatio", 0.5).toDouble();
-
-    // 子因子列表（CompositeChildSpec 结构体，与 QML buildCompositeDraft 字段一致）
+    // 组合回测 = 提取子因子 instanceId 列表 → 委托单因子路径。
+    // startBacktestWithFactors 已包含完整初始化/编排/结果处理流水线，不动单因子任何一行。
     const QVariantList children = compositeDraft.value("children").toList();
-    for (const QVariant& cv : children) {
-        const QVariantMap cm = cv.toMap();
-        factor::CompositeChildSpec spec;
-        spec.instanceId     = cm.value("instanceId").toString().toStdString();
-        spec.weight         = cm.value("weight", 1.0).toDouble();
-        spec.ascending      = cm.value("ascending", true).toBool();
-        spec.normalizeMode  = static_cast<factor::CompositeNormalizeMode>(
-            cm.value("normalizeMode", 0).toInt());
-        config.compositeChildren.push_back(std::move(spec));
-    }
+    QVariantList childIds;
+    for (const QVariant& cv : children)
+        childIds.append(cv.toMap().value("instanceId").toString());
 
-    config.numGroups          = m_numGroups;
-    config.forwardDays        = m_backtestRuntimeParams.value("forwardDays", 60).toInt();
-    config.rebalanceDays      = m_backtestRuntimeParams.value("rebalanceDays", 45).toInt();
-    config.commissionRate     = m_backtestRuntimeParams.value("commissionRate", 0.001).toDouble();
-    config.slippageRate       = m_backtestRuntimeParams.value("slippageRate", 0.001).toDouble();
-    config.riskFreeRate       = m_backtestRuntimeParams.value("riskFreeRate", 0.02).toDouble();
-    config.initialCapital     = m_backtestRuntimeParams.value("initialCapital", 1000000.0).toDouble();
-    config.benchmarkSymbol    = m_backtestRuntimeParams.value("benchmarkSymbol", "000300.SH").toString().toUpper().toStdString();
-    config.adjustPriceType    = m_backtestRuntimeParams.value("adjustPriceType", "pre").toString().toStdString();
-    config.winsorizeQuantile  = m_backtestRuntimeParams.value("winsorizeQuantile", 0.005).toDouble();
-
-    auto parseQmlDate = [](const QString& s) -> domain::DomainDate {
-        if (s.isEmpty()) return {};
-        QString cleaned = s; cleaned.remove(QLatin1Char('-'));
-        bool ok = false; int32_t v = cleaned.toInt(&ok);
-        if (ok && v >= 19000101 && v <= 29991231) return domain::DomainDate{v};
-        return {};
-    };
-    config.cacheStartDate = parseQmlDate(startDate);
-    config.cacheEndDate   = parseQmlDate(endDate);
-
-    // 异步: 复用单因子 startBacktestWithFactors 完全相同的 worker → orchestrator → 结果流水线
-    // 组合与单因子唯一区别：factorMode=Composite + compositeChildren；回测/结果处理完全一样。
-    int capturedDatasetId = m_selectedDatasetId;
-    m_workerPool->post([this, config, capturedDatasetId]() {
-        QMetaObject::invokeMethod(this, [this]() {
-            m_progress = 2.0; m_statusText = QStringLiteral("初始化中...");
-            emit progressChanged(); emit backtestProgress(m_progress, m_statusText);
-        }, Qt::QueuedConnection);
-
-        if (capturedDatasetId > 0 && m_backtestDataSvc) {
-            std::string arrowPath = cleaning::DataCache::instance().dataFilePath(capturedDatasetId);
-            auto arrowView = std::make_unique<factor::compute::ArrowMarketDataView>(arrowPath);
-            m_arrowView = std::move(arrowView);
-            m_backtestDataSvc->setMarketView(m_arrowView.get());
-            m_backtestDataSvc->buildViewForFields({});
-            if (!m_arrowView || m_arrowView->instruments().empty()) {
-                QMetaObject::invokeMethod(this, [this]() {
-                    emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));
-                    m_isRunning.store(false); emit isRunningChanged();
-                }, Qt::QueuedConnection);
-                return;
-            }
-        }
-        if (!m_orchestrator) {
-            QMetaObject::invokeMethod(this, [this]() {
-                emit backtestFailed(QStringLiteral("回测编排器未初始化"));
-                m_isRunning.store(false); emit isRunningChanged();
-            }, Qt::QueuedConnection);
-            return;
-        }
-
-        // ── 委托编排器（支持 Composite 模式，其余与单因子完全一样）──
-        m_orchestrator->run(
-            config,
-            [this](double progress, const std::string& status) {
-                QMetaObject::invokeMethod(this, [this, progress, status]() {
-                    m_progress = progress; m_statusText = QString::fromStdString(status);
-                    emit progressChanged(); emit statusChanged();
-                    emit backtestProgress(progress, m_statusText);
-                }, Qt::QueuedConnection);
-            },
-            // 结果回调：与 startBacktestWithFactors 完全相同
-            [this, config](const std::string& serializedResult) {
-                QMetaObject::invokeMethod(this, [this, serializedResult, config]() {
-                    m_isRunning.store(false); emit isRunningChanged();
-                    QString jsonStr = QString::fromStdString(serializedResult);
-                    QJsonParseError parseError;
-                    QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &parseError);
-                    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-                        emit backtestFailed(QStringLiteral("回测结果解析失败"));
-                        return;
-                    }
-                    QJsonObject rootObj = doc.object();
-                    if (rootObj.contains("error") && !rootObj["error"].toString().isEmpty()) {
-                        emit backtestFailed(rootObj["error"].toString());
-                        return;
-                    }
-                    QVariantMap result;
-                    result["status"] = QStringLiteral("SUCCESS");
-                    result["results"] = QVariantList();
-                    QJsonObject metricsObj = rootObj.value("metrics").toObject();
-                    if (metricsObj.contains("execution"))
-                        result["execution"] = metricsObj.value("execution").toObject().toVariantMap();
-                    if (metricsObj.contains("factorMetrics"))
-                        result["factorMetrics"] = metricsObj.value("factorMetrics").toObject().toVariantMap();
-                    if (metricsObj.contains("ic"))
-                        result["ic"] = metricsObj.value("ic").toObject().toVariantMap();
-                    if (metricsObj.contains("groups"))
-                        result["groups"] = metricsObj.value("groups").toArray().toVariantList();
-                    if (metricsObj.contains("returnSeries")) {
-                        auto rawArr = metricsObj.value("returnSeries").toObject().value("raw").toArray();
-                        QVariantList rawList; for (auto v : rawArr) rawList.append(v.toDouble());
-                        result["longShortReturns"] = rawList;
-                    }
-                    result["backtestCompleted"] = true;
-                    result["factorName"] = QStringLiteral("composite");
-                    m_backtestResult = result;
-                    emit backtestCompleted(result);
-                }, Qt::QueuedConnection);
-            });
-    });
+    startBacktestWithFactors(childIds, groupsDef, startDate, endDate, supportSnapshot);
+    return;
 }
 
 void FactorBacktestBridge::cancelBacktest()
