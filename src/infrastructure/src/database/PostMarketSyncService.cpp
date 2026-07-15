@@ -282,6 +282,26 @@ void PostMarketSyncService::syncAll(int tradingDay) {
         return;
     }
     INTERNAL_INFO_STREAM << "[PostMktSync] ====== 日线完成 ======";
+    // ── 补衍生字段 + 换手率 ──
+    {
+        char dt[16]; int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
+        snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
+        db->executeUpdate("UPDATE mkt.daily_bar SET change_pct=CASE WHEN pre_close>0 THEN (close-pre_close)/pre_close*100 ELSE NULL END,change_amt=close-pre_close,amplitude=CASE WHEN pre_close>0 THEN (high-low)/pre_close*100 ELSE NULL END WHERE trade_date=$1::date AND (change_pct IS NULL OR amplitude IS NULL)",{astock::database::SqlParam{std::string(dt)}});
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 衍生字段 updated";
+        // 换手率
+        std::unordered_map<std::string,int> gmToId;std::string chunk;
+        for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToId[g]=symToId.at(sym);if(!chunk.empty())chunk+=",";chunk+=g;}}
+        if(!chunk.empty()){auto* b=::stk_get_daily_basic_pt(chunk.c_str(),"turnrate",std::string(dt).c_str());
+            if(b&&b->status()==0){std::vector<std::vector<astock::database::SqlParam>> tb;auto tf=[&](){if(tb.empty())return;
+                std::string ts="UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date";
+                for(auto&p:tb)db->executeUpdate(ts,p);tb.clear();};
+                while(!b->is_end()){const char* s=b->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double tr=b->get_real("turnrate");if(std::isfinite(tr)&&tr>=0)tb.push_back({astock::database::SqlParam{tr},astock::database::SqlParam{it->second},astock::database::SqlParam{std::string(dt)}});if(tb.size()>=500)tf();}}b->next();}tf();}
+            if(b)b->release();
+        }
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 换手率 updated";
+        // PE/PB/市值
+        syncValuation(db,symToId,symbols,tradingDay);
+    }
     // 阶段2: 分钟线 (独立, 失败继续)
     syncMinute(db, symToId, symbols, tradingDay);
     INTERNAL_INFO_STREAM << "[PostMktSync] ====== 分钟线完成 ======";
