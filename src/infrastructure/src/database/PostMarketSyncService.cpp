@@ -337,8 +337,9 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         bars->release();
     }
     flush();
-    logTaskEnd("DAILY",tradingDay,err<50,ok,"batched "+std::to_string(gmList.size())+" symbols");
-    return err<50;
+    bool success = err <= static_cast<int>(gmList.size()) / 20;  // 允许 ≤5% 标的拉取失败
+    logTaskEnd("DAILY",tradingDay,success,ok,"batched "+std::to_string(gmList.size())+" symbols err="+std::to_string(err));
+    return success;
 }
 
 // ═════════════════════════════════════════════════
