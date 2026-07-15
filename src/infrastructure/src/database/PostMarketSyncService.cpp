@@ -341,6 +341,13 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         }
     }
     flush();
+    // 验证 INSERT 是否真正持久化
+    {
+        char verifyDate[16]; snprintf(verifyDate,sizeof(verifyDate),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
+        auto vr = db->executeQuery("SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date", {astock::database::SqlParam{std::string(verifyDate)}});
+        int cnt = (vr.rowCount()>0)?vr.getRow(0).getInt(0):-1;
+        INTERNAL_INFO_STREAM << "[PostMktSync] DAILY verify " << cnt << " rows for " << verifyDate;
+    }
     int maxErr = static_cast<int>(gmList.size()) / 20;  // 允许 ≤5% 失败
     bool success = err <= maxErr;
     logTaskEnd("DAILY",tradingDay,success,ok,"batched "+std::to_string(gmList.size())+" symbols err="+std::to_string(err));
