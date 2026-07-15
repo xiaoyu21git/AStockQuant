@@ -367,6 +367,7 @@ ApplicationWindow {
                         active: mainStack.currentIndex === 10 || item !== null
                         asynchronous: true
                         sourceComponent: settingsPageComponent
+                        onLoaded: if (item) item.settingsSubPage = window.currentPageCode
                     }
 
                     // 动态工作区
@@ -463,10 +464,20 @@ ApplicationWindow {
     Component {
         id: settingsPageComponent
 
-        SystemSettingsPage {
-            configService: Bridge.TradingConnectionConfigService
+        Item {
+            property string settingsSubPage: ""
+            Loader {
+                anchors.fill: parent
+                sourceComponent: {
+                    if (parent.settingsSubPage === "global_settings") return globalSettingsComponent
+                    return systemSettingsComponent
+                }
+            }
         }
     }
+
+    Component { id: systemSettingsComponent; SystemSettingsPage { configService: Bridge.TradingConnectionConfigService } }
+    Component { id: globalSettingsComponent;  SettingsPage {} }
 
     Component {
         id: monitoringPageComponent
@@ -579,6 +590,7 @@ ApplicationWindow {
     }
     // === 页面切换 ===
     property string currentPage: "dashboard" // 默认初始页面为仪表盘
+    property string currentPageCode: ""       // 当前页面代码（用于 settings 子页面切换）
     property int mainStackIndex: 0 // 当前页面索引，为仪表盘
     property string currentMenuCode: "data_dashboard" // 当前菜单代码，用于StackLayout切换
 
@@ -613,9 +625,10 @@ ApplicationWindow {
     
     function switchPage(menuCode, menuTitle) {
         console.log("切换页面:", menuCode, "菜单标题:", menuTitle)
-        
+
         // 更新当前菜单代码
         currentMenuCode = menuCode
+        currentPageCode = menuCode     // 供 settings 子页面切换
 
         // 确保侧边栏菜单状态同步
         if (sidebar && sidebar.setCurrentMenu) {
@@ -662,19 +675,16 @@ ApplicationWindow {
             "stress_testing": 6,              // 压力测试 -> 风险管理 (索引6)
             "risk_reporting": 6,              // 风险报告 -> 风险管理 (索引6)
             "compliance_check": 6,            // 合规检查 -> 风险管理 (索引6)
-            "trade_execution": 7,             // 交易执行 -> TradingPage
             "fund_management": 8,             // 资金管理 -> 实盘总览 Dashboard
-            "dynamic_workspace": 11,           // 动态区
             "performance_analysis": 8,        // 绩效分析 -> 实盘总览 Dashboard
+            "dynamic_workspace": 11,            // 实盘交易执行(原动态区) -> DynamicWorkspace
             "real_time_monitoring": 9,        // 实时监控 -> 监控面板
             "alert_center": 9,                // 报警中心 -> 监控面板
             "system_status": 9,               // 系统状态 -> 监控面板
             "log_viewer": 9,                  // 日志查看 -> 监控面板
             "personal_settings": 10,          // 个人设置 -> 系统设置
-            "trade_settings": 10,             // 交易设置 -> 系统设置
-            "notification_settings": 10,      // 通知设置 -> 系统设置
-            "permission_management": 10,      // 权限管理 -> 系统设置
-            "system_configuration": 10        // 系统配置 -> 系统设置
+            "system_configuration": 10,       // 系统配置 -> 系统设置
+            "global_settings": 10              // 全局设置 -> 系统设置
         };
         
         // 首先检查一级菜单

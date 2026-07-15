@@ -151,7 +151,8 @@ qt_add_qml_module(astockquantapp
         Qml/page/monitoring/MonitoringPage.qml
         Qml/page/trading/TradingPage.qml
         Qml/page/settings/SystemSettingsPage.qml
-        Qml/page/leftSidebar/DynamicMenu.qml    
+        Qml/page/SettingsPage.qml
+        Qml/page/leftSidebar/DynamicMenu.qml
         Qml/page/leftSidebar/FundOperationPanel.qml
         Qml/page/leftSidebar/MenuModel.qml
         Qml/page/leftSidebar/SecondaryMenu.qml

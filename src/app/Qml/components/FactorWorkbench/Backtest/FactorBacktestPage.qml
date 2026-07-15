@@ -2061,6 +2061,8 @@ Item {
         if (!supportMap || Object.keys(supportMap).length === 0) return "因子支持校验未完成，请打开因子选择器点击\"开始校验\""
         // 组合因子模式检查 compositeChildAllocations，单因子模式检查 selectedFactorIds
         if (backtestEntryMode === 1) {
+            if (!compositeDraftName || String(compositeDraftName).trim().length === 0)
+                return "请输入组合因子名称"
             if (!compositeChildAllocations || compositeChildAllocations.length < 2)
                 return "组合因子需要至少2个子因子"
             for (var ci = 0; ci < compositeChildAllocations.length; ci++) {

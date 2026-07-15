@@ -7,6 +7,8 @@
 #include "../../engine/include/GlobalEventBusRegistry.h"
 #include "../market/include/MarketDataService.h"
 #include "../../../infrastructure/include/database/OrderRecorder.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
+#include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/Utils/Uuid.h"
 
@@ -721,6 +723,37 @@ strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order
         if (d.valid() && d.preClose() > 0.0)
             risk.setReferencePrice(d.preClose());
     }
+
+    // ── 大盘指数回撤保护 ──
+    {
+        const auto& rcfg = domain::strategy::RiskManager::instance().riskConfig();
+        if (rcfg.indexDrawdownLimitPercent > 0.0 && !rcfg.indexSymbol.empty()) {
+            auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+            if (db && db->isOpen()) {
+                astock::infrastructure::database::MarketDataRepository repo(db);
+                // 取最近 lookbackDays 个交易日的 close
+                auto rows = repo.queryKlineDetail(
+                    rcfg.indexSymbol, "2000-01-01", "2100-01-01",
+                    rcfg.indexDrawdownLookbackDays, 0);
+                if (rows.size() >= 2) {
+                    double firstClose = 0.0, lastClose = 0.0;
+                    for (const auto& row : rows) {
+                        double c = row.getDouble("close");
+                        if (c > 0.0) {
+                            if (firstClose == 0.0) firstClose = c;
+                            lastClose = c;
+                        }
+                    }
+                    if (firstClose > 0.0 && lastClose > 0.0) {
+                        double drop = (firstClose - lastClose) / firstClose * 100.0;
+                        if (drop > 0.0) risk.setIndexDrawdownPct(drop);
+                    }
+                }
+            }
+        }
+        risk.setIndexDrawdownLimitPercent(rcfg.indexDrawdownLimitPercent);
+    }
+
     strategy::RiskEvaluator::applyConfig(risk,
         domain::strategy::RiskManager::instance().riskConfig());
     return risk;

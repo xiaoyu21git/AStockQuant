@@ -49,10 +49,9 @@ QtObject {
         "live_trading": {
             title: "实盘交易",
             items: [
-                {title: "交易执行", icon: "⚡", badge: "实时", code: "trade_execution"},
-                {title: "动态区", icon: "🖥️", badge: "", code: "dynamic_workspace"},
                 {title: "资金管理", icon: "💵", badge: "", code: "fund_management"},
-                {title: "绩效分析", icon: "📈", badge: "", code: "performance_analysis"}
+                {title: "绩效分析", icon: "📈", badge: "", code: "performance_analysis"},
+                {title: "实盘交易执行", icon: "🖥️", badge: "", code: "dynamic_workspace"}
             ]
         },
         "monitoring": {
@@ -67,10 +66,8 @@ QtObject {
         "settings": {
             title: "系统设置",
             items: [
+                {title: "全局设置", icon: "🔧", badge: "", code: "global_settings"},
                 {title: "个人设置", icon: "👤", badge: "", code: "personal_settings"},
-                {title: "交易设置", icon: "⚡", badge: "", code: "trade_settings"},
-                {title: "通知设置", icon: "🔔", badge: "", code: "notification_settings"},
-                {title: "权限管理", icon: "👥", badge: "", code: "permission_management"},
                 {title: "系统配置", icon: "⚙️", badge: "", code: "system_configuration"}
             ]
         }

@@ -294,7 +294,9 @@ void FactorBacktestBridge::startBacktestWithFactors(
     const QString& groupText,
     const QString& startDate,
     const QString& endDate,
-    const QVariantMap& /*cacheSnapshot*/)
+    const QVariantMap& /*cacheSnapshot*/,
+    const QVariantList& compositeChildren,
+    const QString& compositeName)
 {
     if (m_isRunning.load()) return;
 
@@ -337,6 +339,20 @@ void FactorBacktestBridge::startBacktestWithFactors(
         config.factorMode = Factor::backtest::FactorMode::Dual;
     } else {
         config.factorMode = Factor::backtest::FactorMode::Composite;
+    }
+
+    // 注入组合名称与子因子（组合回测通过参数传入；单因子调用时为空，不影响）
+    if (!compositeName.isEmpty())
+        config.compositeName = compositeName.toStdString();
+    for (const QVariant& cv : compositeChildren) {
+        const QVariantMap cm = cv.toMap();
+        factor::CompositeChildSpec spec;
+        spec.instanceId     = cm.value("instanceId").toString().toStdString();
+        spec.weight         = cm.value("weight", 1.0).toDouble();
+        spec.ascending      = cm.value("ascending", true).toBool();
+        spec.normalizeMode  = static_cast<factor::CompositeNormalizeMode>(
+            cm.value("normalizeMode", 0).toInt());
+        config.compositeChildren.push_back(std::move(spec));
     }
 
     config.numGroups = m_numGroups;
@@ -475,6 +491,9 @@ void FactorBacktestBridge::startBacktestWithFactors(
                     QVariantMap result;
                     result["status"]  = QStringLiteral("SUCCESS");
                     result["results"] = QVariantList(); // 单结果模式
+                    // 组合因子回测名(编排器 root 层已输出;单因子时不设此字段)
+                    if (rootObj.contains("factorName") && !rootObj["factorName"].toString().isEmpty())
+                        result["factorName"] = rootObj["factorName"].toString();
 
                     // groups
                     QJsonArray groupsArr = metricsObj.value("groups").toArray();
@@ -849,14 +868,15 @@ void FactorBacktestBridge::startCompositeBacktest(const QVariantMap& compositeDr
                                                    const QString& startDate, const QString& endDate,
                                                    const QVariantMap& supportSnapshot)
 {
-    // 组合回测 = 提取子因子 instanceId 列表 → 委托单因子路径。
+    // 组合回测 = 提取子因子 instanceId 列表 + 组合名 → 委托单因子路径。
     // startBacktestWithFactors 已包含完整初始化/编排/结果处理流水线，不动单因子任何一行。
     const QVariantList children = compositeDraft.value("children").toList();
     QVariantList childIds;
     for (const QVariant& cv : children)
         childIds.append(cv.toMap().value("instanceId").toString());
 
-    startBacktestWithFactors(childIds, groupsDef, startDate, endDate, supportSnapshot);
+    const QString compositeName = compositeDraft.value("name").toString().trimmed();
+    startBacktestWithFactors(childIds, groupsDef, startDate, endDate, supportSnapshot, children, compositeName);
     return;
 }
 

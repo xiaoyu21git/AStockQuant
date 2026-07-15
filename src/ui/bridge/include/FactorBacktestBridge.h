@@ -84,7 +84,7 @@ public:
     /// @brief 设置 DataService 指针（普通 C++ 方法，非 Q_INVOKABLE）
     void setDataService(QObject* ds);
 
-    Q_INVOKABLE void startBacktestWithFactors(const QVariantList& factorIds, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot);
+    Q_INVOKABLE void startBacktestWithFactors(const QVariantList& factorIds, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot, const QVariantList& compositeChildren = {}, const QString& compositeName = {});
     Q_INVOKABLE void startCompositeBacktest(const QVariantMap& compositeDraft, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot);
     Q_INVOKABLE void cancelBacktest();
     Q_INVOKABLE QVariantMap getDefaultConfig() const;

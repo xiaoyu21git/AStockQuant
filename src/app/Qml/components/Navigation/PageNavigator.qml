@@ -27,10 +27,9 @@ QtObject {
         "compliance_check": { stackIndex: 7, pageName: "合规检查", moduleId: "risk-management" },
         
         // 实盘交易相关页面
-        "trade_execution": { stackIndex: 8, pageName: "交易执行", moduleId: "live-trading" },
         "fund_management": { stackIndex: 9, pageName: "资金管理", moduleId: "live-trading" },
-        "trade_records": { stackIndex: 9, pageName: "交易记录", moduleId: "live-trading" },
         "performance_analysis": { stackIndex: 9, pageName: "绩效分析", moduleId: "live-trading" },
+        "dynamic_workspace":  { stackIndex: 11, pageName: "实盘交易执行", moduleId: "live-trading" },
         "factor_performance":  { stackIndex: 13, pageName: "因子绩效", moduleId: "strategy-factor" },
         
         // 监控面板相关页面
@@ -40,10 +39,8 @@ QtObject {
         "log_viewer": { stackIndex: 10, pageName: "日志查看", moduleId: "monitoring" },
         
         // 系统设置相关页面
+        "global_settings":       { stackIndex: 11, pageName: "全局设置", moduleId: "settings" },
         "personal_settings": { stackIndex: 11, pageName: "个人设置", moduleId: "settings" },
-        "trade_settings": { stackIndex: 11, pageName: "交易设置", moduleId: "settings" },
-        "notification_settings": { stackIndex: 11, pageName: "通知设置", moduleId: "settings" },
-        "permission_management": { stackIndex: 11, pageName: "权限管理", moduleId: "settings" },
         "system_configuration": { stackIndex: 11, pageName: "系统配置", moduleId: "settings" }
     }
     
@@ -60,15 +57,13 @@ QtObject {
             "risk_reporting", "compliance_check"
         ],
         "live-trading": [
-            "trade_execution", "fund_management",
-            "trade_records", "performance_analysis"
+            "fund_management", "performance_analysis", "dynamic_workspace"
         ],
         "monitoring": [
             "real_time_monitoring", "alert_center", "system_status", "log_viewer"
         ],
         "settings": [
-            "personal_settings", "trade_settings", "notification_settings",
-            "permission_management", "system_configuration"
+            "global_settings", "personal_settings", "system_configuration"
         ]
     }
     

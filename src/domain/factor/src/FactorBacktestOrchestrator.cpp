@@ -835,6 +835,8 @@ void FactorBacktestOrchestrator::run(
             using J = foundation::json::JsonFacade;
             auto root = J::createObject();
             root.set("status", J::createString("SUCCESS"));
+            if (!config.compositeName.empty())
+                root.set("factorName", J::createString(config.compositeName));
 
             // factorValues — 每日每标的因子值, 供散点图/IC 分析
             auto fvArr = J::createArray();
