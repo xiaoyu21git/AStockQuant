@@ -296,9 +296,10 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
       int maxd=md[nm]+(nm==2&&(ny%4==0&&(ny%100!=0||ny%400==0))?1:0);
       if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
       nextDay = ny*10000 + nm*100 + nd; }
-    char startStr[16], endStr[16];
+    char startStr[16], endStr[16], dateParam[16];
     snprintf(startStr,sizeof(startStr),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
     snprintf(endStr,sizeof(endStr),"%04d-%02d-%02d",nextDay/10000,(nextDay%10000)/100,nextDay%100);
+    snprintf(dateParam,sizeof(dateParam),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
 
     // gmsdk符号 → 原始符号 反向映射
     std::unordered_map<std::string,std::string> gmToSym;
@@ -306,14 +307,11 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
 
     std::vector<std::vector<astock::database::SqlParam>> batch;
-    // 日期嵌入 SQL 字符串，绕过 SqlParam 类型转换问题
-    char tradeDateSql[16];
-    snprintf(tradeDateSql,sizeof(tradeDateSql),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
-    std::string insertSql = std::string("INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source) ")
-        + "VALUES($1,'" + tradeDateSql + "',$2,$3,$4,$5,$6,$7,$8,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET "
-        + "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,pre_close=EXCLUDED.pre_close";
-    auto flush=[&,insertSql](){if(batch.empty())return;
-        for(auto&p:batch)db->executeUpdate(insertSql,p);batch.clear();};
+    auto flush=[&](){if(batch.empty())return;
+        std::string sql="INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source) "
+            "VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET "
+            "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,pre_close=EXCLUDED.pre_close";
+        for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
 
     static constexpr int kBatchSize=100;
     const size_t totalBatches = (gmList.size() + kBatchSize - 1) / kBatchSize;
@@ -330,7 +328,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
             std::string gsym(b.symbol?b.symbol:"");auto it=gmToSym.find(gsym);if(it==gmToSym.end())continue;
             auto si=symToId.find(it->second);if(si==symToId.end())continue;
             using P=astock::database::SqlParam;
-            batch.push_back({P{si->second},
+            batch.push_back({P{si->second},P{std::string(dateParam)},
                 P{static_cast<double>(b.open)},P{static_cast<double>(b.high)},P{static_cast<double>(b.low)},P{static_cast<double>(b.close)},
                 P{static_cast<int64_t>(b.volume)},P{b.amount},P{static_cast<double>(b.pre_close>0?b.pre_close:0.0)}});
             if(batch.size()>=500)flush();++ok;
