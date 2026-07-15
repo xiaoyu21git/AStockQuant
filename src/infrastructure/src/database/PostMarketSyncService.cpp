@@ -138,23 +138,38 @@ void PostMarketSyncService::fillAdjFactors() {
     std::thread([this](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen()){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors DB不可用";return;}
-        // 按标的聚合: distinct symbol, 每标的调一次gmsdk拉全部日期复权因子
-        auto res=db->executeQuery("SELECT DISTINCT d.symbol_id,si.symbol FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id WHERE d.pre_adjust_factor=1.0");
+
+        // 读取上次复权因子同步日期，只拉该日期之后的新复权事件
+        std::string lastAdjDate = "2000-01-01";
+        {
+            std::ifstream f("post_market_adj_factor_last.txt");
+            if(f){std::string l;std::getline(f,l);if(l.size()>=10)lastAdjDate=l;}
+        }
+        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors lastSync="<<lastAdjDate;
+
+        // 全量标的(不仅 pre_adjust_factor=1.0——已有因子的也可能有新复权事件)
+        auto res=db->executeQuery("SELECT DISTINCT d.symbol_id,si.symbol FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id");
         struct Sym{int sid;std::string sym;};std::vector<Sym> syms;
         for(auto&r:res.getRows())syms.push_back({r.getInt("symbol_id"),r.getString("symbol")});
         int total=static_cast<int>(syms.size());
-        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<total<<" 只标的待补";if(syms.empty())return;
-        std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND (pre_adjust_factor=1.0 OR trade_date>=CURRENT_DATE-30)";
+        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<total<<" 只标的待补(增量模式,since="<<lastAdjDate<<")";
+        if(syms.empty())return;
+
+        // 用今天作为 end_date，只拉上次同步后到今天的新复权事件
+        time_t now=time(nullptr);struct tm today;localtime_s(&today,&now);
+        char endDate[16];snprintf(endDate,sizeof(endDate),"%04d-%02d-%02d",today.tm_year+1900,today.tm_mon+1,today.tm_mday);
+
+        std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date>=$4::date";
         int ok=0,proc=0,fail=0,firstFailStreak=0;
         for(auto&s:syms){
             std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
             if(gm.empty()){++proc;continue;}++proc;
-            // 限速: 每标的间隔50ms, 避免gmsdk限流
             if(proc>1)std::this_thread::sleep_for(std::chrono::milliseconds(50));
             int symOk=0;bool gotData=false;
             for(int retry=0;retry<2&&!gotData;++retry){
                 if(retry>0)std::this_thread::sleep_for(std::chrono::seconds(2));
-                auto* af=::stk_get_adj_factor(gm.c_str(),"2000-01-01","2099-12-31");
+                // 增量: 只查 lastAdjDate 之后的新复权事件
+                auto* af=::stk_get_adj_factor(gm.c_str(),lastAdjDate.c_str(),endDate);
                 if(af&&af->status()==0&&af->count()>0){
                     for(size_t i=0;i<af->count();++i){auto&f=af->at(i);
                         if(!std::isfinite(f.adj_factor_fwd)||f.adj_factor_fwd<=0||!std::isfinite(f.adj_factor_bwd)||f.adj_factor_bwd<=0)continue;
@@ -163,11 +178,13 @@ void PostMarketSyncService::fillAdjFactors() {
                 if(af)af->release();
             }
             ok+=symOk;if(!gotData){++fail;++firstFailStreak;}else firstFailStreak=0;
-            // 连续50只全失败→gm不可用，终止
             if(firstFailStreak>=50&&ok==0){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors 连续"<<firstFailStreak<<"只失败, gm不可用, 终止";break;}
             if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<" fail="<<fail<<")";
         }
-        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<" 条更新, "<<total<<" 只标的";
+
+        // 保存本次同步日期
+        {std::ofstream f("post_market_adj_factor_last.txt");if(f)f<<endDate;}
+        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<" 条更新, "<<total<<" 只标的, 下次since="<<endDate;
     }).detach();
 }
 
