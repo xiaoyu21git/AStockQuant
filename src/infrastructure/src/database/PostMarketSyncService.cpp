@@ -384,6 +384,7 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
         auto* bars=::history_bars(gmBatch.c_str(),"60s",sDate,eDate,0,nullptr,true,nullptr);
+        if(i==0){int st=bars?bars->status():-1;int ct=bars?bars->count():0;INTERNAL_INFO_STREAM<<"[PostMktSync] MINUTE 首批 bar: status="<<st<<" count="<<ct<<" sDate="<<sDate<<" eDate="<<eDate;}
         if(!bars||bars->status()||bars->count()<=0){if(bars)bars->release();err+=static_cast<int>(end-i);continue;}
         for(size_t k=0;k<bars->count();++k){
             auto&b=bars->at(k);if(b.close<=0)continue;
