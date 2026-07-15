@@ -113,14 +113,15 @@ QVariantMap buildFactorInfoMap(const factor::FactorInstanceInfo& info)
         if (bt.has("turnoverRate"))       result[QStringLiteral("turnoverRate")]       = bt.get("turnoverRate").asDouble();
         if (bt.has("effectiveStartDate")) result[QStringLiteral("backtestStartDate")]  = toQString(bt.get("effectiveStartDate").asString());
         if (bt.has("effectiveEndDate"))   result[QStringLiteral("backtestEndDate")]    = toQString(bt.get("effectiveEndDate").asString());
+    } else {
+        result[QStringLiteral("icValue")]     = 0.0;
+        result[QStringLiteral("irValue")]     = 0.0;
+        result[QStringLiteral("coreRating")]  = 0.0;
+        result[QStringLiteral("turnoverRate")]= 0.0;
     }
     result[QStringLiteral("majorCategory")] = resolveFactorTypeDisplayName(info.factorType);
     result[QStringLiteral("subCategory")] = QString();
-    result[QStringLiteral("icValue")] = 0.0;
-    result[QStringLiteral("irValue")] = 0.0;
-    result[QStringLiteral("coreRating")] = 0.0;
     result[QStringLiteral("validityDays")] = 0;
-    result[QStringLiteral("turnoverRate")] = 0.0;
     result[QStringLiteral("isRecommended")] = false;
     result[QStringLiteral("isFavorite")] = false;
     result[QStringLiteral("groupReturns")] = QVariantMap();
