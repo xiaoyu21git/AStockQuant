@@ -159,7 +159,7 @@ void PostMarketSyncService::fillAdjFactors() {
         time_t now=time(nullptr);struct tm today;localtime_s(&today,&now);
         char endDate[16];snprintf(endDate,sizeof(endDate),"%04d-%02d-%02d",today.tm_year+1900,today.tm_mon+1,today.tm_mday);
 
-        std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND trade_date>=$4::date";
+        std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND (pre_adjust_factor=1.0 OR trade_date>=$4::date)";
         int ok=0,proc=0,fail=0,firstFailStreak=0;
         for(auto&s:syms){
             std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
