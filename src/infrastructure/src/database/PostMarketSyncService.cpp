@@ -299,9 +299,10 @@ void PostMarketSyncService::syncAll(int tradingDay) {
             if(b)b->release();
         }
         INTERNAL_INFO_STREAM<<"[PostMktSync] 换手率 updated";
-        // PE/PB/市值
-        syncValuation(db,symToId,symbols,tradingDay);
     }
+    // PE/PB/市值(独立调用,与syncDailyMinute对齐)
+    syncValuation(db,symToId,symbols,tradingDay);
+    INTERNAL_INFO_STREAM<<"[PostMktSync] 估值已补";
     // 阶段2: 分钟线 (独立, 失败继续)
     syncMinute(db, symToId, symbols, tradingDay);
     INTERNAL_INFO_STREAM << "[PostMktSync] ====== 分钟线完成 ======";
