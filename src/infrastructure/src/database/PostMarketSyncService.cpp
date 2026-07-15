@@ -296,10 +296,8 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
       int maxd=md[nm]+(nm==2&&(ny%4==0&&(ny%100!=0||ny%400==0))?1:0);
       if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
       nextDay = ny*10000 + nm*100 + nd; }
-    char startStr[16], endStr[16], dateStr[16];
+    char startStr[16], endStr[16];
     snprintf(startStr,sizeof(startStr),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
-    snprintf(dateStr,sizeof(dateStr),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
-    astock::database::SqlParam tradeDateParam{std::string(dateStr)};
     snprintf(endStr,sizeof(endStr),"%04d-%02d-%02d",nextDay/10000,(nextDay%10000)/100,nextDay%100);
 
     // gmsdk符号 → 原始符号 反向映射
@@ -329,7 +327,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
             std::string gsym(b.symbol?b.symbol:"");auto it=gmToSym.find(gsym);if(it==gmToSym.end())continue;
             auto si=symToId.find(it->second);if(si==symToId.end())continue;
             using P=astock::database::SqlParam;
-            batch.push_back({P{si->second},tradeDateParam,
+            batch.push_back({P{si->second},P{tradingDay},
                 P{static_cast<double>(b.open)},P{static_cast<double>(b.high)},P{static_cast<double>(b.low)},P{static_cast<double>(b.close)},
                 P{static_cast<int64_t>(b.volume)},P{b.amount},P{static_cast<double>(b.pre_close>0?b.pre_close:0.0)}});
             if(batch.size()>=500)flush();++ok;
