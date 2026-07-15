@@ -319,9 +319,6 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         // history_bars_n 的 symbol 参数只支持单个标的，多标的应用 history_bars(复数)
         auto* bars=::history_bars(gmBatch.c_str(),"1d",startStr,endStr,0,nullptr,true,nullptr);
         if(!bars||bars->status()||bars->count()<=0){
-            int st = bars ? bars->status() : -1;
-            int ct = bars ? bars->count() : 0;
-            INTERNAL_ERROR_STREAM << "[PostMktSync] history_bars batch["<<(i/kBatchSize)<<"/"<<((gmList.size()+kBatchSize-1)/kBatchSize)<<"] fail start=" << startStr << " end=" << endStr << " status=" << st << " count=" << ct << " syms=" << (end-i);
             if(bars)bars->release();err+=static_cast<int>(end-i);continue;
         }
         for(size_t k=0;k<bars->count();++k){
@@ -337,9 +334,8 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         bars->release();
     }
     flush();
-    bool success = err <= static_cast<int>(gmList.size()) / 20;  // 允许 ≤5% 标的拉取失败
-    logTaskEnd("DAILY",tradingDay,success,ok,"batched "+std::to_string(gmList.size())+" symbols err="+std::to_string(err));
-    return success;
+    logTaskEnd("DAILY",tradingDay,err<50,ok,"batched "+std::to_string(gmList.size())+" symbols");
+    return err<50;
 }
 
 // ═════════════════════════════════════════════════
