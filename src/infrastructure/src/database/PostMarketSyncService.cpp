@@ -308,7 +308,8 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
-        auto* bars=::history_bars_n(gmBatch.c_str(),"1d",1,dateStr,0,nullptr,true,nullptr);
+        // history_bars_n 的 symbol 参数只支持单个标的，多标的应用 history_bars(复数)
+        auto* bars=::history_bars(gmBatch.c_str(),"1d",dateStr,dateStr,0,nullptr,true,nullptr);
         if(!bars||bars->status()||bars->count()<=0){
             int st = bars ? bars->status() : -1;
             int ct = bars ? bars->count() : 0;
