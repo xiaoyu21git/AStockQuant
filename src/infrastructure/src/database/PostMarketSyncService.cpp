@@ -313,6 +313,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
 
     static constexpr int kBatchSize=100;
+    const size_t totalBatches = (gmList.size() + kBatchSize - 1) / kBatchSize;
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
@@ -332,6 +333,12 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
             if(batch.size()>=500)flush();++ok;
         }
         bars->release();
+        // 每 5 批或最后一批打印进度百分比
+        size_t batchIdx = i / kBatchSize;
+        if (batchIdx % 5 == 0 || i + kBatchSize >= gmList.size()) {
+            int pct = static_cast<int>((batchIdx + 1) * 100 / totalBatches);
+            INTERNAL_INFO_STREAM << "[PostMktSync] 日线进度 " << pct << "% (" << (batchIdx+1) << "/" << totalBatches << ") ok=" << ok << " err=" << err;
+        }
     }
     flush();
     logTaskEnd("DAILY",tradingDay,err<50,ok,"batched "+std::to_string(gmList.size())+" symbols");
