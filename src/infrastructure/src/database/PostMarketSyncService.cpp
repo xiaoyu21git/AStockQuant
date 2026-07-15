@@ -308,6 +308,11 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
 
     std::vector<std::vector<astock::database::SqlParam>> batch;
+    // 构造日期字符串，与 syncDailyRange 678行一样：$2::date + 传 std::string
+    char dateBuf[16];
+    snprintf(dateBuf,sizeof(dateBuf),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
+    std::string dateStr(dateBuf);
+
     auto flush=[&](){if(batch.empty())return;
         std::string sql="INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source) "
             "VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET "
@@ -319,8 +324,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
-        // history_bars_n 的 symbol 参数只支持单个标的，多标的应用 history_bars(复数)
-        auto* bars=::history_bars(gmBatch.c_str(),"1d",startStr,endStr,0,nullptr,true,nullptr);
+        auto* bars=::history_bars(gmBatch.c_str(),"1d",dateBuf,dateBuf,0,nullptr,true,nullptr);
         if(!bars||bars->status()||bars->count()<=0){
             if(bars)bars->release();err+=static_cast<int>(end-i);continue;
         }
@@ -329,13 +333,12 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
             std::string gsym(b.symbol?b.symbol:"");auto it=gmToSym.find(gsym);if(it==gmToSym.end())continue;
             auto si=symToId.find(it->second);if(si==symToId.end())continue;
             using P=astock::database::SqlParam;
-            batch.push_back({P{si->second},P{dateParamStr},
+            batch.push_back({P{si->second},P{dateStr},
                 P{static_cast<double>(b.open)},P{static_cast<double>(b.high)},P{static_cast<double>(b.low)},P{static_cast<double>(b.close)},
                 P{static_cast<int64_t>(b.volume)},P{b.amount},P{static_cast<double>(b.pre_close>0?b.pre_close:0.0)}});
             if(batch.size()>=500)flush();++ok;
         }
         bars->release();
-        // 每 5 批或最后一批打印进度百分比
         size_t batchIdx = i / kBatchSize;
         if (batchIdx % 5 == 0 || i + kBatchSize >= gmList.size()) {
             int pct = static_cast<int>((batchIdx + 1) * 100 / totalBatches);
@@ -343,15 +346,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         }
     }
     flush();
-    // 验证 INSERT 是否真正持久化（日期嵌入 SQL 字符串，绕过 SqlParam 类型转换）
-    {
-        char verifyDate[16]; snprintf(verifyDate,sizeof(verifyDate),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
-        std::string vsql = "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date='" + std::string(verifyDate) + "'";
-        auto vr = db->executeQuery(vsql);
-        int cnt = (vr.rowCount()>0)?vr.getRow(0).getInt(0):-1;
-        INTERNAL_INFO_STREAM << "[PostMktSync] DAILY verify count=" << cnt << " for " << verifyDate;
-    }
-    int maxErr = static_cast<int>(gmList.size()) / 20;  // 允许 ≤5% 失败
+    int maxErr = static_cast<int>(gmList.size()) / 20;
     bool success = err <= maxErr;
     logTaskEnd("DAILY",tradingDay,success,ok,"batched "+std::to_string(gmList.size())+" symbols err="+std::to_string(err));
     return success;
