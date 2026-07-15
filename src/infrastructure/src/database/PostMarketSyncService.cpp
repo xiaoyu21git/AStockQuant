@@ -729,6 +729,35 @@ void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     INTERNAL_INFO_STREAM<<"[PostMktSync] "<<tradingDay<<" 日线="<<dStatus<<" PE="<<pStatus<<" 分钟="<<mStatus;
 
     if(!dailyExists){if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return;}}
+    // ── 补派生字段: change_pct/change_amt/amplitude(从已有OHLC计算,一条SQL完成)──
+    {
+        char dt[16]; int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
+        snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
+        auto ur=db->executeUpdate("UPDATE mkt.daily_bar SET "
+            "change_pct=CASE WHEN pre_close>0 THEN (close-pre_close)/pre_close*100 ELSE NULL END,"
+            "change_amt=close-pre_close,"
+            "amplitude=CASE WHEN pre_close>0 THEN (high-low)/pre_close*100 ELSE NULL END "
+            "WHERE trade_date=$1::date AND (change_pct IS NULL OR amplitude IS NULL)",
+            {astock::database::SqlParam{std::string(dt)}});
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 衍生字段 updated for "<<dt;
+    }
+    // ── 补换手率: 参照 syncDailyRange 用 stk_get_daily_basic_pt ──
+    {
+        std::unordered_map<std::string,int> gmToId;std::string chunk;
+        for(const auto& sym:syms){std::string g=toGmSymbol(sym);if(!g.empty()){gmToId[g]=s2i.at(sym);if(!chunk.empty())chunk+=",";chunk+=g;}}
+        if(!chunk.empty()){
+            char dt[16];int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
+            snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
+            std::string dtStr(dt);
+            auto* b=::stk_get_daily_basic_pt(chunk.c_str(),"turnrate",dtStr.c_str());
+            if(b&&b->status()==0){std::vector<std::vector<astock::database::SqlParam>> tb;auto tf=[&](){if(tb.empty())return;
+                std::string ts="UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date";
+                for(auto&p:tb)db->executeUpdate(ts,p);tb.clear();};
+                while(!b->is_end()){const char* s=b->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double tr=b->get_real("turnrate");if(std::isfinite(tr)&&tr>=0)tb.push_back({astock::database::SqlParam{tr},astock::database::SqlParam{it->second},astock::database::SqlParam{dtStr}});if(tb.size()>=500)tf();}}b->next();}tf();}
+            if(b){b->release();b=nullptr;}
+            INTERNAL_INFO_STREAM<<"[PostMktSync] 换手率 updated for "<<dtStr;
+        }
+    }
     if(peMissing)syncValuation(db,s2i,syms,tradingDay);
     if(minMissing)syncMinute(db,s2i,syms,tradingDay);
 }
