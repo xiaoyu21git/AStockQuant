@@ -374,7 +374,7 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
     std::vector<std::vector<astock::database::SqlParam>> batch;
     auto flush=[&](){if(batch.empty())return;
         std::string sql="INSERT INTO mkt.minute_bar(symbol_id,trade_ts,open,high,low,close,volume,amount) "
-            "VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(symbol_id,trade_ts) DO UPDATE SET "
+            "VALUES($1,$2::timestamptz,$3,$4,$5,$6,$7,$8) ON CONFLICT(symbol_id,trade_ts) DO UPDATE SET "
             "open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,volume=EXCLUDED.volume,amount=EXCLUDED.amount";
         for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
 
