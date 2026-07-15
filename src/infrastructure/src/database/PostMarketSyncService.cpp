@@ -288,15 +288,17 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     logTaskStart("DAILY", tradingDay);
     int ok = 0, err = 0;
 
-    // history_bars 需要 %Y-%m-%d 格式；endDate=次日确保当日 bar 在 [start,end) 内
-    char startStr[16], endStr[16];
+    // 与 syncDailyRange 一致: %Y-%m-%d 格式, startDay=tradingDay, endDay=tradingDay+1
+    int nextDay = tradingDay;
     { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-      snprintf(startStr,sizeof(startStr),"%04d-%02d-%02d",y,m,d);
       int nd=d+1,nm=m,ny=y;
       static const int md[]={0,31,28,31,30,31,30,31,31,30,31,30,31};
       int maxd=md[nm]+(nm==2&&(ny%4==0&&(ny%100!=0||ny%400==0))?1:0);
       if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
-      snprintf(endStr,sizeof(endStr),"%04d-%02d-%02d",ny,nm,nd); }
+      nextDay = ny*10000 + nm*100 + nd; }
+    char startStr[16], endStr[16];
+    snprintf(startStr,sizeof(startStr),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
+    snprintf(endStr,sizeof(endStr),"%04d-%02d-%02d",nextDay/10000,(nextDay%10000)/100,nextDay%100);
 
     // gmsdk符号 → 原始符号 反向映射
     std::unordered_map<std::string,std::string> gmToSym;
@@ -319,7 +321,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         if(!bars||bars->status()||bars->count()<=0){
             int st = bars ? bars->status() : -1;
             int ct = bars ? bars->count() : 0;
-            if (i == 0) INTERNAL_ERROR_STREAM << "[PostMktSync] history_bars 首批失败 start=" << startStr << " end=" << endStr << " status=" << st << " count=" << ct << " syms=" << (end-i);
+            INTERNAL_ERROR_STREAM << "[PostMktSync] history_bars batch["<<(i/kBatchSize)<<"/"<<((gmList.size()+kBatchSize-1)/kBatchSize)<<"] fail start=" << startStr << " end=" << endStr << " status=" << st << " count=" << ct << " syms=" << (end-i);
             if(bars)bars->release();err+=static_cast<int>(end-i);continue;
         }
         for(size_t k=0;k<bars->count();++k){
