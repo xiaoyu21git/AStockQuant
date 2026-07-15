@@ -289,15 +289,10 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     int ok = 0, err = 0;
 
     char dateStr[32];
-    // 用次日作为 end_time，确保当日日线 bar（收盘时间戳 15:00:00）在查询范围内。
-    // 纯日期字符串 "YYYY-MM-DD" 被 GMSDK 解释为 00:00:00，当日 bar 在此时刻之后 → 返空。
+    // end_time 加 " 23:59:59" 时间，确保当日日线 bar(收盘 15:00:00)在查询范围内。
+    // 纯日期 "YYYY-MM-DD" 被 GMSDK 解释为 00:00:00 → 当日 bar 在此时刻之后 → 返空。
     { int y = tradingDay/10000, m=(tradingDay%10000)/100, d=tradingDay%100;
-      // +1天: 简化日期进位，仅处理月末
-      int nd = d + 1, nm = m, ny = y;
-      static const int md[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
-      int maxd = md[nm] + (nm==2 && (ny%4==0 && (ny%100!=0||ny%400==0)) ? 1 : 0);
-      if (nd > maxd) { nd = 1; if (++nm > 12) { nm = 1; ++ny; } }
-      snprintf(dateStr,sizeof(dateStr),"%04d-%02d-%02d",ny,nm,nd); }
+      snprintf(dateStr,sizeof(dateStr),"%04d-%02d-%02d 23:59:59",y,m,d); }
 
     // gmsdk符号 → 原始符号 反向映射
     std::unordered_map<std::string,std::string> gmToSym;

@@ -368,6 +368,12 @@ ApplicationWindow {
                         asynchronous: true
                         sourceComponent: settingsPageComponent
                         onLoaded: if (item) item.settingsSubPage = window.currentPageCode
+                        Connections {
+                            target: window
+                            function onCurrentPageCodeChanged() {
+                                if (settingsPage.item) settingsPage.item.settingsSubPage = window.currentPageCode
+                            }
+                        }
                     }
 
                     // 动态工作区
