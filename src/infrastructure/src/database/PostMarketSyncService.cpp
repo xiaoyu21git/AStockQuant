@@ -310,7 +310,8 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
-        auto* bars=::history_bars_n(gmBatch.c_str(),"1d",1,dateStr,0,nullptr,true,nullptr);
+        // count=2: 大部分日期只要 1 根，但有些新发布日需要多取才能覆盖
+        auto* bars=::history_bars_n(gmBatch.c_str(),"1d",2,dateStr,0,nullptr,true,nullptr);
         if(!bars||bars->status()||bars->count()<=0){
             int st = bars ? bars->status() : -1;
             int ct = bars ? bars->count() : 0;
