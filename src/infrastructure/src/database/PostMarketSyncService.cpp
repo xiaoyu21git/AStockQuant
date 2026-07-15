@@ -311,7 +311,12 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
         auto* bars=::history_bars_n(gmBatch.c_str(),"1d",1,dateStr,0,nullptr,true,nullptr);
-        if(!bars||bars->status()||bars->count()<=0){if(bars)bars->release();err+=static_cast<int>(end-i);continue;}
+        if(!bars||bars->status()||bars->count()<=0){
+            int st = bars ? bars->status() : -1;
+            int ct = bars ? bars->count() : 0;
+            if (i == 0) INTERNAL_ERROR_STREAM << "[PostMktSync] history_bars_n 首批失败 date=" << dateStr << " status=" << st << " count=" << ct << " syms=" << (end-i);
+            if(bars)bars->release();err+=static_cast<int>(end-i);continue;
+        }
         for(size_t k=0;k<bars->count();++k){
             auto&b=bars->at(k);if(b.close<=0)continue;
             std::string gsym(b.symbol?b.symbol:"");auto it=gmToSym.find(gsym);if(it==gmToSym.end())continue;
