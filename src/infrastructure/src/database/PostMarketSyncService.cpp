@@ -288,11 +288,9 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     logTaskStart("DAILY", tradingDay);
     int ok = 0, err = 0;
 
-    char dateStr[32];
-    // end_time 加 " 23:59:59" 时间，确保当日日线 bar(收盘 15:00:00)在查询范围内。
-    // 纯日期 "YYYY-MM-DD" 被 GMSDK 解释为 00:00:00 → 当日 bar 在此时刻之后 → 返空。
-    { int y = tradingDay/10000, m=(tradingDay%10000)/100, d=tradingDay%100;
-      snprintf(dateStr,sizeof(dateStr),"%04d-%02d-%02d 23:59:59",y,m,d); }
+    // 用无横线的 YYYYMMDD 格式，这是 GMSDK 内部使用的格式
+    char dateStr[16];
+    snprintf(dateStr,sizeof(dateStr),"%d",tradingDay);
 
     // gmsdk符号 → 原始符号 反向映射
     std::unordered_map<std::string,std::string> gmToSym;
@@ -310,8 +308,7 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     for(size_t i=0;i<gmList.size();i+=kBatchSize){
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
-        // count=2: 大部分日期只要 1 根，但有些新发布日需要多取才能覆盖
-        auto* bars=::history_bars_n(gmBatch.c_str(),"1d",2,dateStr,0,nullptr,true,nullptr);
+        auto* bars=::history_bars_n(gmBatch.c_str(),"1d",1,dateStr,0,nullptr,true,nullptr);
         if(!bars||bars->status()||bars->count()<=0){
             int st = bars ? bars->status() : -1;
             int ct = bars ? bars->count() : 0;
