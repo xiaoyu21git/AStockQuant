@@ -288,15 +288,15 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
     logTaskStart("DAILY", tradingDay);
     int ok = 0, err = 0;
 
-    // 用无横线的 YYYYMMDD 格式(GMSDK 内部)，endDate=次日确保当日 bar 在范围内
-    char dateStr[16], endDate[16];
+    // history_bars 需要 %Y-%m-%d 格式；endDate=次日确保当日 bar 在 [start,end) 内
+    char startStr[16], endStr[16];
     { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-      snprintf(dateStr,sizeof(dateStr),"%d",tradingDay);
+      snprintf(startStr,sizeof(startStr),"%04d-%02d-%02d",y,m,d);
       int nd=d+1,nm=m,ny=y;
       static const int md[]={0,31,28,31,30,31,30,31,31,30,31,30,31};
       int maxd=md[nm]+(nm==2&&(ny%4==0&&(ny%100!=0||ny%400==0))?1:0);
       if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
-      snprintf(endDate,sizeof(endDate),"%04d%02d%02d",ny,nm,nd); }
+      snprintf(endStr,sizeof(endStr),"%04d-%02d-%02d",ny,nm,nd); }
 
     // gmsdk符号 → 原始符号 反向映射
     std::unordered_map<std::string,std::string> gmToSym;
@@ -315,11 +315,11 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
         // history_bars_n 的 symbol 参数只支持单个标的，多标的应用 history_bars(复数)
-        auto* bars=::history_bars(gmBatch.c_str(),"1d",dateStr,endDate,0,nullptr,true,nullptr);
+        auto* bars=::history_bars(gmBatch.c_str(),"1d",startStr,endStr,0,nullptr,true,nullptr);
         if(!bars||bars->status()||bars->count()<=0){
             int st = bars ? bars->status() : -1;
             int ct = bars ? bars->count() : 0;
-            if (i == 0) INTERNAL_ERROR_STREAM << "[PostMktSync] history_bars_n 首批失败 date=" << dateStr << " status=" << st << " count=" << ct << " syms=" << (end-i);
+            if (i == 0) INTERNAL_ERROR_STREAM << "[PostMktSync] history_bars 首批失败 start=" << startStr << " end=" << endStr << " status=" << st << " count=" << ct << " syms=" << (end-i);
             if(bars)bars->release();err+=static_cast<int>(end-i);continue;
         }
         for(size_t k=0;k<bars->count();++k){
