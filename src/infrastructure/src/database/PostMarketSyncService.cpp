@@ -754,7 +754,7 @@ void PostMarketSyncService::syncDailyMinute(int tradingDay) {
         {astock::database::SqlParam{std::to_string(tradingDay)}});
     bool dailyExists=(cntRes.rowCount()>0&&cntRes.getRow(0).getInt(0)>static_cast<int>(syms.size()*0.9));
     // 估值状态
-    auto peRes=db->executeQuery("SELECT COUNT(*) FILTER (WHERE pe_ratio=0) FROM mkt.daily_bar WHERE trade_date=$1::date",
+    auto peRes=db->executeQuery("SELECT COUNT(*) FILTER (WHERE pe_ratio=0 OR pe_ratio IS NULL) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
     bool peMissing=(peRes.rowCount()>0&&peRes.getRow(0).getInt(0)>0);
     // 分钟线状态
