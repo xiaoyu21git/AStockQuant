@@ -286,8 +286,10 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     {
         char dt[16]; int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
         snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
-        db->executeUpdate("UPDATE mkt.daily_bar SET change_pct=CASE WHEN pre_close>0 THEN (close-pre_close)/pre_close*100 ELSE NULL END,change_amt=close-pre_close,amplitude=CASE WHEN pre_close>0 THEN (high-low)/pre_close*100 ELSE NULL END WHERE trade_date=$1::date AND (change_pct IS NULL OR amplitude IS NULL)",{astock::database::SqlParam{std::string(dt)}});
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 衍生字段 updated";
+        auto ur=db->executeUpdate("UPDATE mkt.daily_bar SET change_pct=CASE WHEN pre_close>0 THEN (close-pre_close)/pre_close*100 ELSE NULL END,change_amt=close-pre_close,amplitude=CASE WHEN pre_close>0 THEN (high-low)/pre_close*100 ELSE NULL END WHERE trade_date=$1::date AND (change_pct IS NULL OR amplitude IS NULL)",{astock::database::SqlParam{std::string(dt)}});
+        auto vr=db->executeQuery("SELECT COUNT(*) FILTER (WHERE change_pct IS NOT NULL) FROM mkt.daily_bar WHERE trade_date=$1::date",{astock::database::SqlParam{std::string(dt)}});
+        int done=(vr.rowCount()>0)?vr.getRow(0).getInt(0):-1;
+        INTERNAL_INFO_STREAM<<"[PostMktSync] 衍生字段 updated, change_pct done="<<done;
         // 换手率
         std::unordered_map<std::string,int> gmToId;std::string chunk;
         for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToId[g]=symToId.at(sym);if(!chunk.empty())chunk+=",";chunk+=g;}}
