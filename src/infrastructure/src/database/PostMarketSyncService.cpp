@@ -810,19 +810,19 @@ void PostMarketSyncService::syncValuation(std::shared_ptr<astock::database::ISql
     if(chunk.empty())return;
     auto* v=::stk_get_daily_valuation_pt(chunk.c_str(),"pe_lyr,pb_mrq",dt.c_str());
     if(v&&v->status()==0){std::vector<std::vector<astock::database::SqlParam>> ub;auto uf=[&](){if(ub.empty())return;
-        std::string us="UPDATE mkt.daily_bar SET pe_ratio=$1,pb_ratio=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND (pe_ratio=0 OR pb_ratio=0)";
+        std::string us="UPDATE mkt.daily_bar SET pe_ratio=$1,pb_ratio=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND (pe_ratio=0 OR pe_ratio IS NULL OR pb_ratio=0 OR pb_ratio IS NULL)";
         for(auto&p:ub)db->executeUpdate(us,p);ub.clear();};
         while(!v->is_end()){const char* s=v->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double pe=v->get_real("pe_lyr"),pb=v->get_real("pb_mrq");if(std::isfinite(pe))ub.push_back({astock::database::SqlParam{pe},astock::database::SqlParam{pb},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(ub.size()>=500)uf();}}v->next();}uf();}
     if(v){v->release();v=nullptr;}
     auto* mv=::stk_get_daily_mktvalue_pt(chunk.c_str(),"tot_mv,a_mv",dt.c_str());
     if(mv&&mv->status()==0){std::vector<std::vector<astock::database::SqlParam>> mb;auto mf=[&](){if(mb.empty())return;
-        std::string ms="UPDATE mkt.daily_bar SET market_cap=$1,circulating_market_cap=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND (market_cap=0 OR circulating_market_cap=0)";
+        std::string ms="UPDATE mkt.daily_bar SET market_cap=$1,circulating_market_cap=$2 WHERE symbol_id=$3 AND trade_date=$4::date AND (market_cap=0 OR market_cap IS NULL OR circulating_market_cap=0 OR circulating_market_cap IS NULL)";
         for(auto&p:mb)db->executeUpdate(ms,p);mb.clear();};
         while(!mv->is_end()){const char* s=mv->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double mc=mv->get_real("tot_mv"),cc=mv->get_real("a_mv");if(std::isfinite(mc))mb.push_back({astock::database::SqlParam{mc},astock::database::SqlParam{cc},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(mb.size()>=500)mf();}}mv->next();}mf();}
     if(mv){mv->release();mv=nullptr;}
     auto* b=::stk_get_daily_basic_pt(chunk.c_str(),"turnrate",dt.c_str());
     if(b&&b->status()==0){std::vector<std::vector<astock::database::SqlParam>> tb;auto tf=[&](){if(tb.empty())return;
-        std::string ts="UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date AND turnover_rate=0";
+        std::string ts="UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date AND (turnover_rate=0 OR turnover_rate IS NULL)";
         for(auto&p:tb)db->executeUpdate(ts,p);tb.clear();};
         while(!b->is_end()){const char* s=b->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double tr=b->get_real("turnrate");if(std::isfinite(tr))tb.push_back({astock::database::SqlParam{tr},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(tb.size()>=500)tf();}}b->next();}tf();}
     if(b){b->release();b=nullptr;}
