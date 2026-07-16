@@ -785,7 +785,7 @@ function getPositionSizingDescription(method) {
             id: "weightScheme",
             type: "select",
             label: "权重方案",
-            description: "仓位权重分配方案",
+            description: "0=等权重 1=市值加权 2=信号强度加权 3=风险平价",
             options: [0, 1, 2, 3],
             default: 0,
             category: tr('strategyCreation.commonParameters')
@@ -794,7 +794,7 @@ function getPositionSizingDescription(method) {
             id: "rebalanceFrequency",
             type: "select",
             label: "调仓频率",
-            description: "策略调仓频率枚举",
+            description: "0=每日 1=每周 2=每月 3=每季度 4=每年",
             options: [0, 1, 2, 3, 4],
             default: 0,
             category: tr('strategyCreation.commonParameters')

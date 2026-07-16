@@ -47,9 +47,7 @@ Page {
     }
 
     ColumnLayout {
-        anchors.centerIn: parent
-        width: Math.min(parent.width - 40, 1100)
-        height: parent.height - 20
+        anchors.fill: parent
         spacing: 0
         
         
@@ -70,21 +68,18 @@ Page {
                 Rectangle {
                     id: step1Content
                     readonly property real selectorPanelWidth: width >= 1560 ? 320 : (width >= 1320 ? 280 : 236)
-                    readonly property bool useWideBasicInfoLayout: width >= 1320
                     color: "transparent"
-                    
+
                     RowLayout {
                         anchors.fill: parent
                         spacing: 14
-                        
+
                         // 左侧: 策略类型选择
                         StrategyComponents.StrategyTypeSelector {
                             id: strategyTypeSelector
                             Layout.fillHeight: true
                             Layout.preferredWidth: step1Content.selectorPanelWidth
-                            Layout.minimumWidth: step1Content.selectorPanelWidth
-                            Layout.maximumWidth: step1Content.selectorPanelWidth
-                            
+
                             onStrategyTypeIndexChanged: function(strategyTypeIndex) {
                                 root.selectedStrategyTypeIndex = strategyTypeIndex
                                 if (Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
@@ -93,15 +88,15 @@ Page {
                                 }
                             }
                         }
-                        
-                        // 右侧: 策略基本信息
+
+                        // 右侧: 策略基本信息(上下结构)
                         StrategyComponents.StrategyBasicInfo {
                             id: strategyBasicInfo
                             Layout.fillHeight: true
                             Layout.fillWidth: true
                             selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
-                            useWideCardLayout: step1Content.useWideBasicInfoLayout
-                            
+                            useWideCardLayout: false
+
                             onValidationChanged: function(isValid) {
                                 step1Valid = isValid
                             }
