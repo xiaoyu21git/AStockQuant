@@ -78,7 +78,7 @@ void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
     if (!isPreCloseWindow()) {
         INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调触发但不在下单窗口"
             << " (当前=" << getCurrentLocalMinutes() << "min"
-            << " 窗口=" << kPreCloseStart << "-" << kPreCloseEnd << "min), 忽略";
+            << " 窗口=" << m_preCloseStart << "-" << m_preCloseEnd << "min), 忽略";
         return;
     }
 
@@ -235,6 +235,12 @@ void DailyEodScheduler::persistLastEvalDay() {
     if (std::rename(tmpPath.c_str(), m_persistPath.c_str()) != 0) {
         INTERNAL_WARN_STREAM << "[DailyEod] 持久化文件重命名失败: " << m_persistPath;
     }
+}
+
+void DailyEodScheduler::setPreCloseWindow(const std::string& start, const std::string& end) {
+    auto parse = [](const std::string& s)->int { if(s.size()<5)return -1; return std::stoi(s.substr(0,2))*60+std::stoi(s.substr(3,2)); };
+    int s=parse(start),e=parse(end);
+    if(s>=0&&e>s){m_preCloseStart=s;m_preCloseEnd=e;}
 }
 
 } // namespace domain::strategy

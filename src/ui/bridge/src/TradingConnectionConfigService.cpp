@@ -110,6 +110,25 @@ QVariantMap TradingConnectionConfigService::defaultConfiguration() const {
     cfg["symbols"] = QVariantList();
     cfg["updatedAt"] = QString();
     cfg["version"] = 1;
+    // ── 设置页: 交易执行 ──
+    cfg["defaultOrderType"]       = QStringLiteral("Limit");
+    cfg["preCloseOrderStart"]     = QStringLiteral("15:00");
+    cfg["preCloseOrderEnd"]       = QStringLiteral("15:30");
+    cfg["useBoardLot"]            = true;
+    cfg["limitPriceTolerance"]    = 9.9;
+    // ── 设置页: 同步调度 ──
+    cfg["syncTriggerTime"]        = QStringLiteral("15:01");
+    cfg["syncBlockStart"]         = QStringLiteral("09:25");
+    cfg["syncBlockEnd"]           = QStringLiteral("15:00");
+    cfg["syncDailyBatchSize"]     = 100;
+    cfg["syncMinuteBatchSize"]    = 50;
+    cfg["syncDbFlushSize"]        = 500;
+    cfg["syncCoverageRatio"]      = 0.9;
+    cfg["syncAdjRetryCount"]      = 2;
+    cfg["dailyUpdateStart"]       = QStringLiteral("15:30");
+    cfg["dailyUpdateEnd"]         = QStringLiteral("16:00");
+    cfg["orderRefillStart"]       = QStringLiteral("15:00");
+    cfg["orderRefillEnd"]         = QStringLiteral("15:30");
     return cfg;
 }
 

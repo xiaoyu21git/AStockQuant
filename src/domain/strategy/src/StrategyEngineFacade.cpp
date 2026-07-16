@@ -563,6 +563,17 @@ void StrategyEngine::startLiveLoop()
                 },
                 persistPath
             );
+            // 从 TradingConnectionConfig 读取下单窗口配置(默认 15:00-15:30)
+            {
+                auto& cfgMgr = foundation::config::ConfigManager::instance();
+                auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+                std::string start = "15:00", end = "15:30";
+                if (cfg && !cfg->isNull()) {
+                    if (cfg->has("preCloseOrderStart")) start = cfg->get("preCloseOrderStart").asString();
+                    if (cfg->has("preCloseOrderEnd"))   end   = cfg->get("preCloseOrderEnd").asString();
+                }
+                m_dailyScheduler->setPreCloseWindow(start, end);
+            }
             m_dailyScheduler->setEvalCallback(
                 [this](const std::string& tradingDay, bool isCompensation) -> EodEvaluationStatus {
                     return evaluateEndOfDay(tradingDay, isCompensation);

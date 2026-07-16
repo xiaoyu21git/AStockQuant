@@ -40,6 +40,9 @@ public:
     /// @brief 停止: 注销 EOD 回调
     void stop();
 
+    // 设置下单窗口(格式 "HH:MM"),未调用时使用默认值 15:00-15:30
+    void setPreCloseWindow(const std::string& start, const std::string& end);
+
 private:
     // ── MarketDataService EOD 回调 (gmsdk 线程) ──
     void onEodTrigger(const std::string& tradingDay);
@@ -54,7 +57,7 @@ private:
     static int  getCurrentLocalMinutes();
     static std::int64_t getCurrentTradingDay();
     static bool isCompensationWindow() { return getCurrentLocalMinutes() < kCompensationEnd; }
-    static bool isPreCloseWindow()     { auto m = getCurrentLocalMinutes(); return m >= kPreCloseStart && m < kPreCloseEnd; }
+    bool isPreCloseWindow()     const { auto m = getCurrentLocalMinutes(); return m >= m_preCloseStart && m < m_preCloseEnd; }
 
     // ── 持久化 ──
     void loadLastEvalDay();
@@ -66,9 +69,10 @@ private:
     std::string  m_persistPath;
     bool m_eodRegistered = false;
 
-    static constexpr int kPreCloseStart   = 900;  // 15:00
-    static constexpr int kPreCloseEnd     = 930;  // 15:30
     static constexpr int kCompensationEnd = 570;  // 09:30
+private:
+    int m_preCloseStart{900};
+    int m_preCloseEnd{930};
 };
 
 } // namespace domain::strategy
