@@ -573,6 +573,7 @@ void StrategyEngine::startLiveLoop()
                     if (cfg->has("preCloseOrderEnd"))   end   = cfg->get("preCloseOrderEnd").asString();
                 }
                 m_dailyScheduler->setPreCloseWindow(start, end);
+                INTERNAL_INFO_STREAM << "[启动] DailyEod 下单窗口 " << start << "-" << end;
             }
             m_dailyScheduler->setEvalCallback(
                 [this](const std::string& tradingDay, bool isCompensation) -> EodEvaluationStatus {
