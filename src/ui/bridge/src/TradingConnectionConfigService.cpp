@@ -124,10 +124,6 @@ QVariantMap TradingConnectionConfigService::defaultConfiguration() const {
     cfg["syncDbFlushSize"]        = 500;
     cfg["syncCoverageRatio"]      = 0.9;
     cfg["syncAdjRetryCount"]      = 2;
-    cfg["dailyUpdateStart"]       = QStringLiteral("15:30");
-    cfg["dailyUpdateEnd"]         = QStringLiteral("16:00");
-    cfg["orderRefillStart"]       = QStringLiteral("15:00");
-    cfg["orderRefillEnd"]         = QStringLiteral("15:30");
     return cfg;
 }
 
