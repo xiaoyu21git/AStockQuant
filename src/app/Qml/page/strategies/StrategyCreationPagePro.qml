@@ -41,13 +41,15 @@ Page {
     property var factorService: Bridge.FactorService
     
     // ============ 主布局 ============
-    
+
     background: Rectangle {
         color: "#0f172a"
     }
-    
+
     ColumnLayout {
-        anchors.fill: parent
+        anchors.centerIn: parent
+        width: Math.min(parent.width - 40, 1100)
+        height: parent.height - 20
         spacing: 0
         
         
