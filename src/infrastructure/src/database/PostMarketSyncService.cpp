@@ -4,6 +4,7 @@
 #include "../../../engine/include/GmSessionEngine.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/config/ConfigManager.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -206,13 +207,25 @@ void PostMarketSyncService::schedulerLoop() {
     while (m_running.load()) {
         int today = getCurrentTradingDay();
         if (!isTradingDay(today)) {
-            // 非交易日, 睡到明天
             std::this_thread::sleep_for(std::chrono::hours(4));
             continue;
         }
+        // ── 从配置读取同步参数 ──
+        int syncTriggerMin = 901;  // 默认 15:01
+        int syncBlockStart = 565;  // 默认 9:25
+        int syncBlockEnd   = 900;  // 默认 15:00
+        {
+            auto& cfgMgr = foundation::config::ConfigManager::instance();
+            auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+            if (cfg && !cfg->isNull()) {
+                auto parseTime = [](const std::string& s)->int { if(s.size()<5)return -1; return std::stoi(s.substr(0,2))*60+std::stoi(s.substr(3,2)); };
+                if (cfg->has("syncTriggerTime")) syncTriggerMin = parseTime(cfg->get("syncTriggerTime").asString());
+                if (cfg->has("syncBlockStart"))  syncBlockStart  = parseTime(cfg->get("syncBlockStart").asString());
+                if (cfg->has("syncBlockEnd"))    syncBlockEnd    = parseTime(cfg->get("syncBlockEnd").asString());
+            }
+        }
         int mins = getCurrentLocalMinutes();
-        if (mins >= 901) {
-            // 已过15:01 — 检查是否今天已经同步过
+        if (mins >= syncTriggerMin) {
             if (m_lastSyncDay.load() == today) {
                 INTERNAL_INFO_STREAM << "[PostMktSync] today=" << today << " 已同步过，跳过";
                 std::this_thread::sleep_for(std::chrono::hours(1));
@@ -223,11 +236,21 @@ void PostMarketSyncService::schedulerLoop() {
             saveLastSyncDay(today);
             // 同步完成后睡到下一个交易日
             std::this_thread::sleep_for(std::chrono::hours(8));
+        } else if (mins >= syncBlockStart && mins < syncBlockEnd) {
+            // 盘中窗口：禁止同步
+            INTERNAL_WARN_STREAM << "[PostMktSync] 盘中禁止同步 " << mins << "min";
+            std::this_thread::sleep_for(std::chrono::seconds(60));
         } else {
-            // 等到15:01
-            int waitMin = 901 - mins;
-            INTERNAL_INFO_STREAM << "[PostMktSync] 等待 " << waitMin << " 分钟到15:01";
-            std::this_thread::sleep_for(std::chrono::minutes(waitMin));
+            int waitMin = syncTriggerMin - mins;
+            if (waitMin > 0) {
+                INTERNAL_INFO_STREAM << "[PostMktSync] 等待 " << waitMin << " 分钟到同步时间";
+                std::this_thread::sleep_for(std::chrono::minutes(waitMin));
+            } else {
+                syncAll(today);
+                m_lastSyncDay.store(today);
+                saveLastSyncDay(today);
+                std::this_thread::sleep_for(std::chrono::hours(8));
+            }
         }
     }
 }
@@ -255,11 +278,18 @@ void PostMarketSyncService::syncAll(int tradingDay) {
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 开始同步 today=" << tradingDay;
 
-    // 盘中不允许同步
+    // 盘中不允许同步(从配置读取屏蔽窗口)
     int mins = getCurrentLocalMinutes();
-    if (mins >= 565 && mins < 900) { // 9:25-15:00
-        INTERNAL_WARN_STREAM << "[PostMktSync] 盘中禁止同步, 请15:00后操作";
-        return;
+    {
+        int blockStart=565, blockEnd=900;
+        auto& cfgMgr = foundation::config::ConfigManager::instance();
+        auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        if(cfg&&!cfg->isNull()){
+            auto pt=[](const std::string& s)->int{if(s.size()<5)return-1;return std::stoi(s.substr(0,2))*60+std::stoi(s.substr(3,2));};
+            if(cfg->has("syncBlockStart"))blockStart=pt(cfg->get("syncBlockStart").asString());
+            if(cfg->has("syncBlockEnd"))blockEnd=pt(cfg->get("syncBlockEnd").asString());
+        }
+        if(mins>=blockStart&&mins<blockEnd){INTERNAL_WARN_STREAM<<"[PostMktSync] 盘中禁止同步";return;}
     }
 
     // 预加载 symbol->id 映射

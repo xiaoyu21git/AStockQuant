@@ -685,7 +685,25 @@ TradeOrder TradeExecutionEngine::buildTradeOrder(const strategy::OrderRequest& r
     order.setPrice(req.price());
     order.setSignalStrength(
         req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
-    order.setOrderType(req.orderType());
+    // 从配置读取默认委托类型(若策略未指定)
+    if (req.orderType() == OrderType::Limit) {
+        auto cfg = foundation::config::ConfigManager::instance()
+            .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        std::string defType = "Limit";
+        if (cfg && !cfg->isNull() && cfg->has("defaultOrderType"))
+            defType = cfg->get("defaultOrderType").asString();
+        if (defType == "Market") order.setOrderType(OrderType::Market);
+        else order.setOrderType(OrderType::Limit);
+    } else {
+        order.setOrderType(req.orderType());
+    }
+    // 从配置读整手开关
+    {
+        auto cfg = foundation::config::ConfigManager::instance()
+            .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        if (cfg && !cfg->isNull() && cfg->has("useBoardLot"))
+            order.setBoardLotMode(cfg->get("useBoardLot").asBool());
+    }
     order.setClOrdId(req.clOrdId());
     order.setAccountId(req.accountId());
     order.setCurrency(req.currency());
