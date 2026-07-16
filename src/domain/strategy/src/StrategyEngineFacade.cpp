@@ -563,17 +563,15 @@ void StrategyEngine::startLiveLoop()
                 },
                 persistPath
             );
-            // 从 TradingConnectionConfig 读取下单窗口配置(默认 15:00-15:30)
+            // 从 TradingConnectionConfig 读取 EOD 触发时间(默认 15:00)
             {
                 auto& cfgMgr = foundation::config::ConfigManager::instance();
                 auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
-                std::string start = "15:00", end = "15:30";
-                if (cfg && !cfg->isNull()) {
-                    if (cfg->has("preCloseOrderStart")) start = cfg->get("preCloseOrderStart").asString();
-                    if (cfg->has("preCloseOrderEnd"))   end   = cfg->get("preCloseOrderEnd").asString();
-                }
-                m_dailyScheduler->setPreCloseWindow(start, end);
-                INTERNAL_INFO_STREAM << "[启动] DailyEod 下单窗口 " << start << "-" << end;
+                std::string triggerTime = "15:00";
+                if (cfg && !cfg->isNull() && cfg->has("eodTriggerTime"))
+                    triggerTime = cfg->get("eodTriggerTime").asString();
+                m_dailyScheduler->setEodTriggerTime(triggerTime);
+                INTERNAL_INFO_STREAM << "[启动] DailyEod 触发时间 " << triggerTime;
             }
             m_dailyScheduler->setEvalCallback(
                 [this](const std::string& tradingDay, bool isCompensation) -> EodEvaluationStatus {

@@ -40,12 +40,13 @@ void DailyEodScheduler::start() {
         }
     }
 
-    // ── 预收盘窗口: 15:01 ~ 15:30 启动 → 立即触发 ──
-    if (isPreCloseWindow()) {
+    // ── 启动时检查: 如果当前时间已过EOD触发时间且今天未评估，立即补评估 ──
+    {
+        int mins = getCurrentLocalMinutes();
         auto today = getCurrentTradingDay();
         std::string todayStr = std::to_string(today);
-        if (std::stoll(todayStr) > m_lastEvalDay) {
-            INTERNAL_INFO_STREAM << "[DailyEod] 预收盘窗口内启动, 立即评估: " << todayStr;
+        if (mins >= m_eodTriggerMinute && std::stoll(todayStr) > m_lastEvalDay) {
+            INTERNAL_INFO_STREAM << "[DailyEod] 启动时已过触发时间 " << m_eodTriggerMinute << "min, 立即补评估: " << todayStr;
             doEvaluate(todayStr);
         }
     }
@@ -74,11 +75,10 @@ void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
     // 已停止, 不投递 (executor 可能已销毁)
     if (!m_eodRegistered) return;
 
-    // gmsdk EOD 回调触发时间不可控(可能14:50), 仅在下单窗口内才执行
-    if (!isPreCloseWindow()) {
-        INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调触发但不在下单窗口"
-            << " (当前=" << getCurrentLocalMinutes() << "min"
-            << " 窗口=" << m_preCloseStart << "-" << m_preCloseEnd << "min), 忽略";
+    // 检查是否已达到触发时间（EOD 回调可能在触发时间之后到，此时立即执行）
+    if (getCurrentLocalMinutes() < m_eodTriggerMinute) {
+        INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调到来但未到触发时间"
+            << " (当前=" << getCurrentLocalMinutes() << "min 触发=" << m_eodTriggerMinute << "min), 忽略";
         return;
     }
 
@@ -237,10 +237,8 @@ void DailyEodScheduler::persistLastEvalDay() {
     }
 }
 
-void DailyEodScheduler::setPreCloseWindow(const std::string& start, const std::string& end) {
-    auto parse = [](const std::string& s)->int { if(s.size()<5)return -1; return std::stoi(s.substr(0,2))*60+std::stoi(s.substr(3,2)); };
-    int s=parse(start),e=parse(end);
-    if(s>=0&&e>s){m_preCloseStart=s;m_preCloseEnd=e;}
+void DailyEodScheduler::setEodTriggerTime(const std::string& time) {
+    if(time.size()>=5) m_eodTriggerMinute = std::stoi(time.substr(0,2))*60 + std::stoi(time.substr(3,2));
 }
 
 } // namespace domain::strategy

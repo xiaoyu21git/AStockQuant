@@ -41,25 +41,16 @@ public:
     void stop();
 
     // 设置下单窗口(格式 "HH:MM"),未调用时使用默认值 15:00-15:30
-    void setPreCloseWindow(const std::string& start, const std::string& end);
+    /// @brief 设置 EOD 触发时间(格式 "HH:MM")，策略每天在此时间触发日频评估下单
+    void setEodTriggerTime(const std::string& time);
 
 private:
-    // ── MarketDataService EOD 回调 (gmsdk 线程) ──
     void onEodTrigger(const std::string& tradingDay);
-
-    // ── 策略线程评估入口 ──
     void doEvaluate(const std::string& tradingDay);
-
-    // ── 交易日工具 ──
     static std::string getPreviousTradingDay(const std::string& date);
-
-    // ── 时间窗口 ──
     static int  getCurrentLocalMinutes();
     static std::int64_t getCurrentTradingDay();
     static bool isCompensationWindow() { return getCurrentLocalMinutes() < kCompensationEnd; }
-    bool isPreCloseWindow()     const { auto m = getCurrentLocalMinutes(); return m >= m_preCloseStart && m < m_preCloseEnd; }
-
-    // ── 持久化 ──
     void loadLastEvalDay();
     void persistLastEvalDay();
 
@@ -68,11 +59,8 @@ private:
     std::int64_t m_lastEvalDay = 0;
     std::string  m_persistPath;
     bool m_eodRegistered = false;
-
-    static constexpr int kCompensationEnd = 570;  // 09:30
-private:
-    int m_preCloseStart{900};
-    int m_preCloseEnd{930};
+    int m_eodTriggerMinute{900};         // EOD 触发时间(分钟, 默认 15:00)
+    static constexpr int kCompensationEnd = 570;
 };
 
 } // namespace domain::strategy

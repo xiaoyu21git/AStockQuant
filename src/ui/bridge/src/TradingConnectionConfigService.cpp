@@ -112,8 +112,7 @@ QVariantMap TradingConnectionConfigService::defaultConfiguration() const {
     cfg["version"] = 1;
     // ── 设置页: 交易执行 ──
     cfg["defaultOrderType"]       = QStringLiteral("Limit");
-    cfg["preCloseOrderStart"]     = QStringLiteral("15:00");
-    cfg["preCloseOrderEnd"]       = QStringLiteral("15:30");
+    cfg["eodTriggerTime"]         = QStringLiteral("15:00");
     cfg["useBoardLot"]            = true;
     cfg["limitPriceTolerance"]    = 9.9;
     // ── 设置页: 同步调度 ──
