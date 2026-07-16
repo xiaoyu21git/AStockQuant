@@ -13,6 +13,7 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyManager.cpp
     src/RiskEvaluator.cpp
     src/EventRiskSubscriber.cpp
+    src/FactorSignalProcessor.cpp
     src/RiskManager.cpp
     src/RiskControl.cpp
     src/StrategyFactory.cpp

@@ -5,6 +5,7 @@
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
 #include "DailyEodScheduler.h"
+#include "FactorSignalProcessor.h"
 #include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
@@ -608,6 +609,7 @@ private:
     domain::trading::OrderBuilder m_orderBuilder;
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
+    FactorSignalProcessor m_factorSignalProcessor;  ///< 混合模式因子信号处理(过滤+缩放)
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD

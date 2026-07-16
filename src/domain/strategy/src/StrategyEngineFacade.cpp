@@ -174,10 +174,18 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
 
     if (isFactorType) {//策略中因子的开关。true 表示策略中使用了因子，false 表示策略中不使用因子
-        // ── 因子策略 ──
-        if (params.factorIds.empty()) {
-            INTERNAL_WARN_STREAM << "[fromDb] factor strategy has no factor_ids configured";
-            return nullptr;
+        // ── 混合模式: 因子辅助策略(过滤+缩放) ──
+        // factorIds 为空时因子层零开销跳过; 非空时初始化过滤/缩放配置
+        if (!params.factorIds.empty()) {
+            std::vector<FactorFilterConfig> filterCfgs;
+            std::vector<FactorScaleConfig> scaleCfgs;
+            for (const auto& fid : params.factorIds) {
+                // 默认: 所有因子同时做过滤(分位数0.1)和缩放(影响力1.0)
+                filterCfgs.push_back({fid, 0.1});
+                scaleCfgs.push_back({fid, 1.0});
+            }
+            engine->m_factorSignalProcessor.setFilters(filterCfgs);
+            engine->m_factorSignalProcessor.setScalers(scaleCfgs);
         }
 
         ::domain::strategies::StrategyCommonConfig commonCfg;
@@ -472,7 +480,25 @@ StrategyServiceFlowResult StrategyEngine::stop()
 std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPoint& marketDataPoint)
 {
     try {
-        return collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
+        auto orders = collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
+        // 混合模式: 因子辅助(过滤+缩放)
+        if (m_hasFactorStrategies && m_factorSignalProcessor.enabled() && orders.has_value()) {
+            for (auto it = orders->begin(); it != orders->end(); ) {
+                const std::string& sym = it->symbol();
+                if (!sym.empty() && !m_factorSignalProcessor.passFilter(sym)) {
+                    it = orders->erase(it); continue;
+                }
+                if (!sym.empty()) {
+                    double scale = m_factorSignalProcessor.scaleFactor(sym);
+                    if (scale != 1.0) {
+                        double orig = it->extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
+                        it->setExtension(domain::trading::ExtKey::kSignalScore, orig * scale);
+                    }
+                }
+                ++it;
+            }
+        }
+        return orders;
     } catch (const std::exception& e) {
         INTERNAL_ERROR_STREAM << "[StrategyEngine] step() exception: " << e.what()
                              << " instId=" << marketDataPoint.instrumentId().value
