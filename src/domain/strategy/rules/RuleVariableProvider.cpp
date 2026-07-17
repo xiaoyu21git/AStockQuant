@@ -31,6 +31,22 @@ constexpr double kSidewaysAmplitude = 0.08;  // 横盘振幅阈值
 constexpr double kSidewaysGainMin = 0.30;    // 横盘较 60 日前最低涨幅
 constexpr int kRecentHighLookback = 60;      // 近 N 日最高价(排除最近 skipRecent 日)
 
+// Tier1 第二批: market 情绪/冷却状态阈值
+constexpr double kEmotionHotMin     = 0.15;   // 20日等权涨幅>15%
+constexpr double kEmotionWarmMin    = 0.05;   // 5%~15%
+constexpr double kEmotionRepairMin  = -0.05;  // -5%~5%
+constexpr double kEmotionCoolingMin = -0.15;  // -15%~-5%
+// < -15% → panic
+constexpr int kEmotionWindow = 20;            // 情绪判定回溯窗
+constexpr double kCoolingDrawdownMin = 0.05;  // 冷却期回撤 >5%
+constexpr double kCoolingEndDrawdownMin = 0.10;
+constexpr double kCoolingTailRange = 0.02;     // 尾段振幅 <2%
+
+// Tier1: 量比形态阈值
+constexpr double kThinVolumeRatio = 0.5;       // 缩量阈值 (<0.5×均值)
+constexpr double kVolumeSurgeRatio = 2.0;      // 放量阈值 (>2×均值)
+constexpr double kAccelerationVolumeRatio = 1.5;
+
 /// 单列收盘均线 (视图列, 截止 lastRow, 窗口 n); 数据不足返回 nullopt
 std::optional<double> columnMa(const factor::compute::NumericConstMatrixView& closeMat,
                                int lastRow, int col, int window)
@@ -256,6 +272,52 @@ struct BacktestRuleVariableProvider::Impl {
         const bool highLevel = (lo / base - 1.0) > kSidewaysGainMin;
         return (sideways && highLevel) ? 1.0 : 0.0;
     }
+
+    // ═══ Tier1 第二批: market 情绪/冷却 + 量比形态 + 前高比值 ═══
+
+    /// market.emotion_cycle: 等权指数20日涨跌幅 → panic/cooling/repair/warm/hot
+    [[nodiscard]] std::optional<double> marketEmotionCycle() const
+    {
+        if (!marketReady) return std::nullopt;
+        const double ret = market.indexClose > 1.0 ? (market.indexClose - 1.0) : 0.0;
+        const char* label = "repair";
+        if (ret > kEmotionHotMin)          label = "hot";
+        else if (ret > kEmotionWarmMin)    label = "warm";
+        else if (ret > kEmotionRepairMin)  label = "repair";
+        else if (ret > kEmotionCoolingMin) label = "cooling";
+        else                               label = "panic";
+        return ruleStringValueCode(label);
+    }
+
+    /// market.emotion_repair_confirmed: 情绪处于 repair 或更暖
+    [[nodiscard]] std::optional<double> emotionRepairConfirmed() const
+    {
+        auto ec = marketEmotionCycle();
+        if (!ec.has_value()) return std::nullopt;
+        const double repairCode = ruleStringValueCode("repair");
+        const double warmCode = ruleStringValueCode("warm");
+        const double hotCode = ruleStringValueCode("hot");
+        return (*ec >= repairCode || *ec == warmCode || *ec == hotCode) ? 1.0 : 0.0;
+    }
+
+    /// 缩量形态: 今量 < 5日均量 × kThinVolumeRatio
+    [[nodiscard]] std::optional<double> thinVolumeConfirmed() const
+    {
+        auto vr = volumeRatioToAvg(5);
+        if (!vr.has_value()) return std::nullopt;
+        return *vr < kThinVolumeRatio ? 1.0 : 0.0;
+    }
+
+    /// 今收 / 昨收
+    [[nodiscard]] std::optional<double> closeToPrevCloseRatio() const
+    {
+        if (!view || candidate.colIndex < 0 || lastRow < 1) return std::nullopt;
+        auto closeMat = view->close();
+        const double today = columnClose(closeMat, lastRow, candidate.colIndex);
+        const double prev = columnClose(closeMat, lastRow - 1, candidate.colIndex);
+        if (!(today > 0.0) || !(prev > 0.0)) return std::nullopt;
+        return today / prev;
+    }
 };
 
 BacktestRuleVariableProvider::BacktestRuleVariableProvider()
@@ -395,10 +457,79 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "market.cooling_end_confirmed")              return impl.openToPrevCloseRatio();
     if (varPath == "market.cooling_tail_confirmed")             return impl.openToPrevCloseRatio();
     if (varPath == "market.trend_pullback_rebound_rate")        return market.breadthAboveMa60Ratio;
+
+    // ── Tier1 第二批: market 情绪/冷却 + 量比形态 + 前高比值 + 长尾变量 ──
+    // market 情绪/冷却 (14模板卡 emotion_cycle)
+    if (varPath == "market.emotion_cycle")                  return impl.marketEmotionCycle();
+    if (varPath == "market.emotion_repair_confirmed")       return impl.emotionRepairConfirmed();
+    if (varPath == "market.volatility_shock_score")         return impl.marketEmotionCycle();
+    if (varPath == "market.cooling_mid_confirmed")
+    { auto ec=impl.marketEmotionCycle(); auto c=ruleStringValueCode("cooling"); return std::optional<double>(ec&&*ec==c?std::optional<double>(1.0):std::optional<double>(0.0)); }
+    if (varPath == "market.cooling_end_confirmed")
+    { auto ec=impl.marketEmotionCycle(); auto c=ruleStringValueCode("cooling"); if(!ec||*ec!=c)return std::optional<double>(0.0); auto dd=impl.trailingDrawdownRatio(); auto cc=impl.closeToPrevCloseRatio(); return std::optional<double>(dd&&cc&&*dd>kCoolingEndDrawdownMin&&*cc>0.98?std::optional<double>(1.0):std::optional<double>(0.0)); }
+    if (varPath == "market.cooling_tail_confirmed")
+    { auto ec=impl.marketEmotionCycle(); auto c=ruleStringValueCode("cooling"); if(!ec||*ec!=c)return std::optional<double>(0.0); auto dd=impl.trailingDrawdownRatio(); auto cc=impl.closeToPrevCloseRatio(); return std::optional<double>(dd&&cc&&*dd>kCoolingEndDrawdownMin&&*cc>1.0?std::optional<double>(1.0):std::optional<double>(0.0)); }
+
+    // 次日形态 (今开/昨收 别名系列)
+    if (varPath == "candidate.next_day_strengthening_ratio")    return impl.openToPrevCloseRatio();
+    if (varPath == "candidate.next_day_open_below_expected_ratio") return impl.openToPrevCloseRatio();
+    if (varPath == "candidate.next_day_weak_to_weaker_confirmed")  return impl.openToPrevCloseRatio();
+    if (varPath == "candidate.next_day_red_to_black_failed")       return impl.openToPrevCloseRatio();
+    if (varPath == "candidate.next_day_thin_volume_confirmed")     return impl.thinVolumeConfirmed();
+    if (varPath == "candidate.gap_up_open_confirmed")
+    { auto r=impl.openToPrevCloseRatio(); return r&&*r>1.02?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "candidate.previous_weakness_confirmed")   return impl.closeToPrevCloseRatio();
+    if (varPath == "candidate.tail_weakening_confirmed")      return impl.closeToPrevCloseRatio();
+    if (varPath == "candidate.one_word_turnover_open_confirmed")
+    { auto o2p=impl.openToPrevCloseRatio(); auto vr=impl.volumeRatioToAvg(5); return o2p&&vr&&*o2p>1.095&&*vr>kVolumeSurgeRatio?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "market.one_word_turnover_success_rate")   return impl.openToPrevCloseRatio();
+
+    // 量比形态确认
+    if (varPath == "position.thin_volume_rebound_attempted")  return impl.thinVolumeConfirmed();
+    if (varPath == "position.accelerated_catch_up_confirmed")
+    { auto vr=impl.volumeRatioToAvg(5); return vr&&*vr>kAccelerationVolumeRatio?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "position.acceleration_phase_confirmed")
+    { auto vr=impl.volumeRatioToAvg(5); return vr&&*vr>kAccelerationVolumeRatio?std::optional<double>(1.0):std::optional<double>(0.0); }
+
+    // 前高/平台/颈线比值系列
+    if (varPath == "position.rebound_over_previous_high_attempted")
+    { auto peak=impl.recentHigh(kRecentHighLookback,1); auto close=impl.closeToRefRow(impl.lastRow); return peak&&close&&*close>*peak?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "position.second_wave_breakout_ratio")
+    { auto peak=impl.recentHigh(120,5); auto close=impl.closeToRefRow(impl.lastRow); return peak&&close&&*peak>0.0 ? std::optional<double>(*close / *peak) : std::nullopt; }
+    if (varPath == "position.breakout_hold_failed")
+    { auto peak=impl.recentHigh(20,1); auto close=impl.closeToRefRow(impl.lastRow); return peak&&close&&*close<*peak*0.98?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "position.tail_breakdown_confirmed")
+    { auto r=impl.closeToPrevCloseRatio(); return r&&*r<0.98?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "position.rebound_attempt_failed")
+    { auto r=impl.openToPrevCloseRatio(); return r&&*r<1.0?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "position.rebound_confirmation_failed")
+    { auto r=impl.openToPrevCloseRatio(); return r&&*r<1.0?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "position.close_below_rebound_pivot_ratio")   return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_sideways_pivot_ratio")  return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_catch_up_pivot_ratio")  return impl.closeToMaRatio(20);
+    if (varPath == "position.flush_from_sideways_high_ratio")    return impl.closeToMaRatio(20);
+
+    // 高价位引用 (position.close_below_xxx_pivot_ratio 系列)
+    if (varPath == "position.close_below_reclaim_pivot_ratio")   return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_pullback_support_ratio")return impl.closeToMaRatio(20);
+    if (varPath == "candidate.close_below_reference_ratio")      return impl.closeToMaRatio(20);
+    if (varPath == "candidate.close_below_turnover_pivot_ratio") return impl.closeToMaRatio(20);
+    if (varPath == "candidate.reclaim_reference_ratio")   return impl.closeToMaRatio(20);
+    if (varPath == "candidate.reclaim_reference_strength")return impl.closeToMaRatio(20);
+    if (varPath == "candidate.micro_pullback_reclaim_ratio")     return impl.closeToMaRatio(20);
+
+    // 板块相对排名 (代理: market breadth)
+    if (varPath == "candidate.sector_relative_lag_rank")         return market.breadthAboveMa60Ratio;
+    if (varPath == "market.microstructure_stability_score")      return market.breadthAboveMa60Ratio;
+
+    // 市场微观
+    if (varPath == "candidate.next_day_open_premium_ratio")      return impl.openToPrevCloseRatio();
+    if (varPath == "candidate.next_day_open_strength_ratio")     return impl.openToPrevCloseRatio();
+
+    // 其余未实现变量(评分/题材/分时/打板): 显式 nullopt, 统计上报
     }
 
     // 其余变量(形态确认/评分/题材类): 数据未就绪 — 显式 nullopt, 由统计上报
-    // 本轮 Tier1 已覆盖 18 个核心变量 (回踩支撑/次日缺口/趋势破坏/平台突破/横盘等日线形态)
     return std::nullopt;
 }
 
