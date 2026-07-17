@@ -275,6 +275,63 @@ struct BacktestRuleVariableProvider::Impl {
 
     // ═══ Tier1 第二批: market 情绪/冷却 + 量比形态 + 前高比值 ═══
 
+    // ═══ Tier2 评分变量 (业务定义公式) ═══
+
+    /// 承接强度 (持仓/候选共用): 日内位置40+量比30+价格强度30, 0-100
+    [[nodiscard]] std::optional<double> acceptanceStrengthScore() const
+    {
+        if (!view || candidate.colIndex < 0) return std::nullopt;
+        auto closeMat = view->close();
+        auto highMat = view->high();
+        auto lowMat = view->low();
+        auto closeVal = cell(closeMat, lastRow);
+        auto highVal = cell(highMat, lastRow);
+        auto lowVal = cell(lowMat, lastRow);
+        if (!closeVal || !highVal || !lowVal) return std::nullopt;
+
+        // 日内相对位置: (close-low)/(high-low) × 40
+        double intraPos = 20.0;  // 一字板默认中间值
+        if (*highVal > *lowVal + 1e-9)
+            intraPos = (*closeVal - *lowVal) / (*highVal - *lowVal) * 40.0;
+
+        // 量比: min(量比,2.0)/2.0 × 30
+        auto volRatio = volumeRatioToAvg(5);
+        double volScore = volRatio.has_value()
+            ? (std::min)(*volRatio, 2.0) / 2.0 * 30.0 : 15.0;
+
+        // 价格强度: clamp(收盘/MA5-1, 0, 0.1) × 10 × 30 → max 30
+        auto ma5Ratio = closeToMaRatio(5);
+        double priceScore = 15.0;
+        if (ma5Ratio.has_value()) {
+            double raw = (*ma5Ratio - 1.0) * 10.0;  // dev 1%→0.1
+            priceScore = (std::min)((std::max)(raw, 0.0), 1.0) * 30.0;
+        }
+        return std::clamp(intraPos + volScore + priceScore, 0.0, 100.0);
+    }
+
+    /// 趋势健康度: MA20/60 斜率向上+价格在均线上方, 每项25分, 0-100
+    [[nodiscard]] std::optional<double> trendHealthScore() const
+    {
+        if (!view || candidate.colIndex < 0) return std::nullopt;
+        auto closeMat = view->close();
+        int score = 0;
+        // MA20 斜率向上
+        auto ma20Now = columnMa(closeMat, lastRow, candidate.colIndex, 20);
+        auto ma20Prev = columnMa(closeMat, lastRow - kMaSlopeWindow, candidate.colIndex, 20);
+        if (ma20Now && ma20Prev && *ma20Now > *ma20Prev) score += 25;
+        // MA60 斜率向上
+        auto ma60Now = columnMa(closeMat, lastRow, candidate.colIndex, 60);
+        auto ma60Prev = columnMa(closeMat, lastRow - kMaSlopeWindow, candidate.colIndex, 60);
+        if (ma60Now && ma60Prev && *ma60Now > *ma60Prev) score += 25;
+        // 收盘 > MA20
+        auto ma20R = closeToMaRatio(20);
+        if (ma20R && *ma20R > 1.0) score += 25;
+        // 收盘 > MA60
+        auto ma60R = closeToMaRatio(60);
+        if (ma60R && *ma60R > 1.0) score += 25;
+        return static_cast<double>(score);
+    }
+
     /// market.emotion_cycle: 等权指数20日涨跌幅 → panic/cooling/repair/warm/hot
     [[nodiscard]] std::optional<double> marketEmotionCycle() const
     {
@@ -457,6 +514,12 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "market.cooling_end_confirmed")              return impl.openToPrevCloseRatio();
     if (varPath == "market.cooling_tail_confirmed")             return impl.openToPrevCloseRatio();
     if (varPath == "market.trend_pullback_rebound_rate")        return market.breadthAboveMa60Ratio;
+
+    // ── Tier2 评分变量 (4个高杠杆) ──
+    if (varPath == "position.acceptance_strength_score")   return impl.acceptanceStrengthScore();
+    if (varPath == "position.selling_pressure_score")      { auto acc=impl.acceptanceStrengthScore(); return acc ? std::optional<double>(100.0-*acc) : std::nullopt; }
+    if (varPath == "position.trend_health_score")          return impl.trendHealthScore();
+    if (varPath == "candidate.bid_acceptance_score")       return impl.acceptanceStrengthScore();
 
     // ── Tier1 第二批: market 情绪/冷却 + 量比形态 + 前高比值 + 长尾变量 ──
     // market 情绪/冷却 (14模板卡 emotion_cycle)
