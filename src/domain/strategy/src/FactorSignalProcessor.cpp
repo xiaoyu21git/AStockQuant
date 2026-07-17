@@ -20,32 +20,56 @@ void FactorSignalProcessor::updateSnapshot(
     const std::string& factorId,
     const std::unordered_map<std::string, double>& factorValues)
 {
-    // 按因子独立存储 symbol→value 快照 (旧版把同一份值塞给所有因子, 多因子语义错误)
-    auto& snap = m_snapshot[factorId];
-    snap.clear();
-    for (const auto& [sym, val] : factorValues)
-        if (std::isfinite(val)) snap[sym] = val;
+    // 按因子独立存储 symbol→value 快照, 并预计算统计量:
+    // 值先排序再求和 → 浮点加法顺序确定 → 跨进程/重启结果可复现
+    // (旧实现每笔订单遍历 unordered_map 求均值方差: O(N)/单 且哈希顺序致不可复现)
+    FactorSnapshotStats stats;
+    stats.values.reserve(factorValues.size());
+    std::vector<double> sortedValues;
+    sortedValues.reserve(factorValues.size());
+    for (const auto& [sym, val] : factorValues) {
+        if (!std::isfinite(val)) continue;
+        stats.values[sym] = val;
+        sortedValues.push_back(val);
+    }
+    std::sort(sortedValues.begin(), sortedValues.end());
+
+    const std::size_t count = sortedValues.size();
+    if (count >= 2) {
+        double sum = 0.0;
+        for (double v : sortedValues) sum += v;
+        stats.mean = sum / static_cast<double>(count);
+        double sqSum = 0.0;
+        for (double v : sortedValues) {
+            const double diff = v - stats.mean;
+            sqSum += diff * diff;
+        }
+        stats.stdev = std::sqrt(sqSum / static_cast<double>(count));
+    }
+
+    // 过滤阈值: 该因子配置的 minPercentile 分位对应的值下界
+    for (const auto& f : m_filters) {
+        if (f.factorId != factorId || count == 0) continue;
+        std::size_t rank = static_cast<std::size_t>(
+            f.minPercentile * static_cast<double>(count));
+        if (rank >= count) rank = count - 1;
+        stats.filterThreshold = sortedValues[rank];
+        stats.hasThreshold = true;
+    }
+
+    m_snapshot[factorId] = std::move(stats);
 }
 
 bool FactorSignalProcessor::passFilter(const std::string& symbol) const
 {
     for (const auto& f : m_filters) {
         auto it = m_snapshot.find(f.factorId);
-        if (it == m_snapshot.end()) continue;
-        const auto& snap = it->second;
-        auto vi = snap.find(symbol);
-        if (vi == snap.end()) continue;  // 无该因子数据→不过滤
+        if (it == m_snapshot.end() || !it->second.hasThreshold) continue;
+        const auto& stats = it->second;
+        auto vi = stats.values.find(symbol);
+        if (vi == stats.values.end()) continue;  // 无该因子数据→不过滤
 
-        // 计算该符号在所有符号中的分位数
-        std::vector<double> vals; vals.reserve(snap.size());
-        for (const auto& [_, v] : snap) vals.push_back(v);
-        std::sort(vals.begin(), vals.end());
-        size_t rank = 0;
-        for (size_t i = 0; i < vals.size(); ++i) {
-            if (vals[i] >= vi->second) { rank = i; break; }
-        }
-        double pct = static_cast<double>(rank) / static_cast<double>(vals.size());
-        if (pct < f.minPercentile) return false;
+        if (vi->second < stats.filterThreshold) return false;
     }
     return true;
 }
@@ -56,20 +80,13 @@ double FactorSignalProcessor::scaleFactor(const std::string& symbol) const
     for (const auto& s : m_scalers) {
         auto it = m_snapshot.find(s.factorId);
         if (it == m_snapshot.end()) continue;
-        const auto& snap = it->second;
-        auto vi = snap.find(symbol);
-        if (vi == snap.end()) continue;
+        const auto& stats = it->second;
+        auto vi = stats.values.find(symbol);
+        if (vi == stats.values.end()) continue;
+        if (stats.stdev < 1e-12) continue;
 
         // Z-score → clamp to [-3,3] → map to [0.5, 1.5]
-        // 先算均值和标准差
-        double sum = 0, sq = 0; size_t n = 0;
-        for (const auto& [_, v] : snap) { sum += v; sq += v*v; ++n; }
-        if (n < 2) continue;
-        double mean = sum / static_cast<double>(n);
-        double stdev = std::sqrt(sq / static_cast<double>(n) - mean * mean);
-        if (stdev < 1e-12) continue;
-
-        double z = (vi->second - mean) / stdev;
+        double z = (vi->second - stats.mean) / stats.stdev;
         z = std::max(-3.0, std::min(3.0, z));
         double mapped = 0.5 + (z + 3.0) / 6.0 * (1.5 - 0.5); // [-3,3]→[0.5,1.5]
         double weighted = 1.0 + (mapped - 1.0) * s.influence;   // 影响力系数

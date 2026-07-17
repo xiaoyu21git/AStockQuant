@@ -29,7 +29,9 @@ public:
     /// 配置涉及的全部因子 ID (filters ∪ scalers, 去重)
     [[nodiscard]] std::vector<std::string> factorIds() const;
 
-    /// 更新单个因子的快照(日频每因子调用一次，日内复用)
+    /// 更新单个因子的快照(日频每因子调用一次，日内复用)。
+    /// 快照统计量(均值/标准差/过滤阈值)在此按值排序后预计算:
+    /// 求和顺序确定 → 跨进程结果可复现; passFilter/scaleFactor 退化为 O(1) 查询
     void updateSnapshot(const std::string& factorId,
                         const std::unordered_map<std::string, double>& factorValues);
 
@@ -40,10 +42,19 @@ public:
     [[nodiscard]] double scaleFactor(const std::string& symbol) const;
 
 private:
+    /// 单因子快照 + 预计算统计量
+    struct FactorSnapshotStats {
+        std::unordered_map<std::string, double> values;  // symbol → value
+        double mean{0.0};
+        double stdev{0.0};
+        double filterThreshold{0.0};   // minPercentile 分位对应的值下界
+        bool hasThreshold{false};
+    };
+
     std::vector<FactorFilterConfig> m_filters;
     std::vector<FactorScaleConfig> m_scalers;
-    // factorId → {symbol → value} 快照
-    std::unordered_map<std::string, std::unordered_map<std::string, double>> m_snapshot;
+    // factorId → 快照与统计量
+    std::unordered_map<std::string, FactorSnapshotStats> m_snapshot;
 };
 
 } // namespace domain::strategy

@@ -19,6 +19,9 @@
 #include "../../factor/include/FactorMetricsCalculator.h"
 #include "../../trading/TradingTypes.h"
 #include "../include/EventRiskSubscriber.h"
+#include "RuleGate.h"
+#include "RuleVariableProvider.h"
+#include "RuleConditionEvaluator.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
 #include "../../../engine/include/AccountEngine.h"
@@ -123,6 +126,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     // ── 混合模式因子叠加: parameters.factor_overlay 为权威来源(含配置权重) ──
     // (factor_id, weight_percent) 列表; enabled=false 或缺失时为空
     std::vector<std::pair<std::string, double>> overlayFactors;
+    // ── 规则模板: 策略勾选的 templateId 列表 ──
+    std::vector<std::string> enabledRuleTemplates;
     std::string paramJson = row.getString("parameters");
     if (!paramJson.empty() && paramJson != "null") {
         auto root = foundation::json::JsonFacade::parse(paramJson);
@@ -162,6 +167,30 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                 }
             }
         }
+
+        // ── 规则模板勾选: rule_composer_state.stages[].groups[].rules[].templateId ──
+        if (root.has("rule_composer_state")) {
+            auto composer = root.get("rule_composer_state");
+            if (composer.has("stages")) {
+                auto stages = composer.get("stages");
+                for (std::size_t si = 0; si < stages.size(); ++si) {
+                    auto stage = stages.at(si);
+                    if (!stage.has("groups")) continue;
+                    auto groups = stage.get("groups");
+                    for (std::size_t gi = 0; gi < groups.size(); ++gi) {
+                        auto group = groups.at(gi);
+                        if (!group.has("rules")) continue;
+                        auto boundRules = group.get("rules");
+                        for (std::size_t ri = 0; ri < boundRules.size(); ++ri) {
+                            auto binding = boundRules.at(ri);
+                            std::string tid = binding.has("templateId")
+                                ? binding.get("templateId").asString() : "";
+                            if (!tid.empty()) enabledRuleTemplates.push_back(tid);
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // ── 根据策略类型判断是否需要因子 ──
@@ -197,6 +226,19 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     if (!engine) return nullptr;
     engine->setStrategyId(strategyId);
     engine->m_orderBuilder.setStrategyId(strategyId);
+
+    // ── 规则闸门: 策略勾选的模板 × 共享规则库 ──
+    if (!enabledRuleTemplates.empty()) {
+        const auto* ruleLibrary = rules::sharedRuleLibrary();
+        if (ruleLibrary) {
+            const int bound = engine->m_ruleGate.configure(enabledRuleTemplates, *ruleLibrary);
+            INTERNAL_INFO_STREAM << "[fromDb] 规则闸门: 勾选 " << enabledRuleTemplates.size()
+                                 << " 个模板, 绑定 " << bound << " 个";
+        } else {
+            INTERNAL_WARN_STREAM << "[fromDb] 规则库不可用, 策略勾选的 "
+                                 << enabledRuleTemplates.size() << " 个规则模板不生效";
+        }
+    }
 
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
@@ -1425,6 +1467,11 @@ StrategyBacktestResult StrategyEngine::backtest(
     std::unordered_map<std::string, double> symbolPnl;  // 逐标的累计盈亏
     std::vector<double> equityCurve;
     equityCurve.reserve(totalDays);
+    // 混合模式各因子实际参与天数(喂入快照成功计数), 回测结束输出
+    std::unordered_map<std::string, int> hybridFactorCoveredDays;
+    // 规则闸门: 变量提供者 + 当日新开仓许可
+    rules::BacktestRuleVariableProvider ruleProvider;
+    bool ruleAllowEntriesToday = true;
 
     // 数据准备完成 → 0%
     if (onProgress) onProgress(0.0);
@@ -1481,7 +1528,65 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
+        // ── 规则闸门: 每日市场快照 + 新开仓许可 ──
+        if (m_ruleGate.enabled()) {
+            ruleProvider.setDay(view, dates[static_cast<std::size_t>(r)].value, &backtestPositions);
+            ruleAllowEntriesToday = m_ruleGate.allowNewEntriesToday(ruleProvider);
+        } else {
+            ruleAllowEntriesToday = true;
+        }
+
         auto ordersOpt = stepBatch(mdpBatch);
+
+        // ── 规则闸门: 命中退出的持仓生成卖出订单(stepBatch 后注入) ──
+        if (m_ruleGate.enabled() && !backtestPositions.empty()) {
+            std::vector<OrderRequest> generatedExits;
+            for (const auto& kvPos : backtestPositions) {
+                const std::string& fullSymbol = kvPos.first;
+                const auto& pos = kvPos.second;
+                if (pos.quantity() <= 0) continue;
+                rules::RuleCandidateContext posCtx;
+                posCtx.symbol = fullSymbol;
+                auto dot = fullSymbol.find('.');
+                posCtx.code = dot != std::string::npos ? fullSymbol.substr(0, dot) : fullSymbol;
+                posCtx.isHolding = true;
+                posCtx.holdDays = 0.0;
+                auto bpIt = buyPriceMap.find(fullSymbol);
+                posCtx.entryPrice = bpIt != buyPriceMap.end() ? bpIt->second : 0.0;
+                double currentPrice = 0.0;
+                for (std::size_t cc = 0; cc < view->instruments().size(); ++cc) {
+                    auto sit = idToSymbol.find(view->instruments()[cc].value);
+                    if (sit != idToSymbol.end() && sit->second == fullSymbol) {
+                        posCtx.colIndex = static_cast<int>(cc);
+                        for (const auto& mdp : mdpBatch)
+                            if (mdp.instrumentId().value == view->instruments()[cc].value)
+                                { currentPrice = mdp.lastPrice(); break; }
+                        break;
+                    }
+                }
+                if (posCtx.entryPrice > 0.0 && currentPrice > 0.0)
+                    posCtx.pnlPercent = (currentPrice - posCtx.entryPrice) / posCtx.entryPrice * 100.0;  // 百分数口径, 与规则阈值(如 ≥12)一致
+                ruleProvider.setCandidate(posCtx);
+                const rules::RuleAction exitAction = m_ruleGate.positionAction(ruleProvider);
+                if (exitAction == rules::RuleAction::Exit || exitAction == rules::RuleAction::Reduce) {
+                    OrderRequest exitOrder;
+                    exitOrder.setSymbol(fullSymbol);
+                    exitOrder.setSide(OrderSide::Sell);
+                    exitOrder.setQuantity(exitAction == rules::RuleAction::Exit
+                        ? pos.quantity() : (std::max)(static_cast<std::int64_t>(1), pos.quantity() / 2));
+                    generatedExits.push_back(std::move(exitOrder));
+                }
+            }
+            if (!generatedExits.empty()) {
+                if (!ordersOpt.has_value()) ordersOpt = std::move(generatedExits);
+                else {
+                    auto& list = ordersOpt.value();
+                    list.insert(list.end(),
+                                std::make_move_iterator(generatedExits.begin()),
+                                std::make_move_iterator(generatedExits.end()));
+                }
+            }
+        }
 
         // ── 混合模式: 喂当日因子快照(因子值首访全量计算并缓存) ──
         if (m_factorSignalProcessor.enabled()) {
@@ -1491,6 +1596,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 for (const auto& fid : m_factorSignalProcessor.factorIds()) {
                     const auto* factorVals = rfsBt->backtestValuesBySymbol(fid, dayValue);
                     if (!factorVals) continue;
+                    ++hybridFactorCoveredDays[fid];
                     // 缓存 key 为无后缀6位码, 订单 symbol 为 fullSymbol → 转换后喂入
                     std::unordered_map<std::string, double> bySymbol;
                     bySymbol.reserve(factorVals->size());
@@ -1544,6 +1650,23 @@ StrategyBacktestResult StrategyEngine::backtest(
                                 domain::trading::ExtKey::kTargetWeight, 0.0) * factorScale);
                         order.setExtension(domain::trading::ExtKey::kTargetWeight, scaledWeight);
                     }
+                }
+
+                // ── 规则闸门: 买入候选审核 ──
+                if (m_ruleGate.enabled() && order.side() == OrderSide::Buy) {
+                    if (!ruleAllowEntriesToday) continue;  // 市场冻结
+                    rules::RuleCandidateContext signalCtx;
+                    signalCtx.symbol = order.symbol();
+                    auto dot = signalCtx.symbol.find('.');
+                    signalCtx.code = dot != std::string::npos
+                        ? signalCtx.symbol.substr(0, dot) : signalCtx.symbol;
+                    for (std::size_t cc = 0; cc < view->instruments().size(); ++cc) {
+                        auto sit = idToSymbol.find(view->instruments()[cc].value);
+                        if (sit != idToSymbol.end() && sit->second == signalCtx.symbol)
+                            { signalCtx.colIndex = static_cast<int>(cc); break; }
+                    }
+                    ruleProvider.setCandidate(signalCtx);
+                    if (!m_ruleGate.allowSignal(ruleProvider)) continue;  // 规则拒绝
                 }
 
                 // ── 下单量换算: 昨日总资产 × 最终目标权重, 整百股 ──
@@ -1709,6 +1832,38 @@ StrategyBacktestResult StrategyEngine::backtest(
     }
 
     INTERNAL_INFO_STREAM << "[backtest] loop done: days=" << totalDays << " finalEquity=" << btAccount().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
+
+    // ── 混合模式因子参与统计: 明确回答"跑了几个因子、各参与多少天" ──
+    if (m_factorSignalProcessor.enabled()) {
+        std::ostringstream coverageLog;
+        for (const auto& fid : m_factorSignalProcessor.factorIds()) {
+            const auto coveredIt = hybridFactorCoveredDays.find(fid);
+            const int coveredDays = coveredIt != hybridFactorCoveredDays.end() ? coveredIt->second : 0;
+            result.hybridFactorCoverage.push_back({fid, coveredDays});
+            coverageLog << " " << fid << "=" << coveredDays << "/" << totalDays << "天";
+        }
+        INTERNAL_INFO_STREAM << "[backtest] 混合因子参与: " << result.hybridFactorCoverage.size()
+                             << " 个:" << coverageLog.str();
+    } else {
+        INTERNAL_INFO_STREAM << "[backtest] 混合因子参与: 0 个 (纯策略信号)";
+    }
+
+    // ── 规则闸门统计: 明确回答"规则是否生效、拦了什么、缺了什么数据" ──
+    if (m_ruleGate.enabled()) {
+        const auto& gateStats = m_ruleGate.stats();
+        INTERNAL_INFO_STREAM << "[backtest] 规则闸门: 绑定模板=" << m_ruleGate.boundTemplateCount()
+                             << " 市场冻结天数=" << gateStats.frozenDays
+                             << " 信号被拒=" << gateStats.signalsBlocked
+                             << " 规则出场=" << gateStats.positionExits;
+        for (const auto& [templateId, templateStats] : gateStats.byTemplate) {
+            INTERNAL_INFO_STREAM << "[backtest]   规则模板 " << templateId
+                                 << ": 评估=" << templateStats.evaluated
+                                 << " 命中=" << templateStats.hits
+                                 << " 数据未就绪=" << templateStats.dataMissing;
+        }
+    } else {
+        INTERNAL_INFO_STREAM << "[backtest] 规则闸门: 未启用 (策略无勾选模板或规则库不可用)";
+    }
     // 逐标的盈亏 top5
     std::vector<std::pair<std::string, double>> topStocks(symbolPnl.begin(), symbolPnl.end());
     std::sort(topStocks.begin(), topStocks.end(), [](auto& a, auto& b){ return a.second > b.second; });

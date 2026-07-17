@@ -582,12 +582,19 @@ struct BacktestTradeRecord final {
     double realizedPnl{0.0};         // 卖出时的已实现盈亏(净额), 买入为 0
 };
 
+/// @brief 混合模式因子参与统计 (该因子在回测中成功喂入快照的交易日数)
+struct HybridFactorCoverage final {
+    std::string factorId;
+    int coveredDays{0};
+};
+
 /// @brief 策略回测结果（纯域层，无 Qt 依赖）
 struct StrategyBacktestResult final {
     PerformanceSummaryMetrics metrics;
     TimeSeriesSnapshot timeSeries;
     TradeStatistics tradeStats;
     std::vector<BacktestTradeRecord> tradeLog;  // 逐笔成交明细
+    std::vector<HybridFactorCoverage> hybridFactorCoverage;  // 混合模式各因子参与天数
     bool success{false};
     std::string errorMessage;
     int riskRejectedCount{0};

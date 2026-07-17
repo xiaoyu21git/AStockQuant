@@ -270,6 +270,15 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             metricsMap["beta"]             = result.metrics.beta;
             metricsMap["informationRatio"] = result.metrics.informationRatio;
             metricsMap["trackingError"]    = result.metrics.trackingError;
+            // 混合模式因子参与统计: 落库后可精确回答"该次回测跑了几个因子"
+            QVariantList hybridFactorList;
+            for (const auto& coverage : result.hybridFactorCoverage) {
+                QVariantMap coverageRow;
+                coverageRow["factorId"]    = QString::fromStdString(coverage.factorId);
+                coverageRow["coveredDays"] = coverage.coveredDays;
+                hybridFactorList.append(coverageRow);
+            }
+            metricsMap["hybridFactors"] = hybridFactorList;
             qResult["performance"] = metricsMap;
 
             QVariantMap tradeStats;

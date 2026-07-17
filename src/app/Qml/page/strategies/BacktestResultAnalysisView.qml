@@ -20,6 +20,13 @@ Item {
     property var ts: (backtestResult && backtestResult.timeSeries) ? backtestResult.timeSeries : ({})
     property var params: (backtestResult && backtestResult.parameters) ? backtestResult.parameters : ({})
     property var risk: (backtestResult && backtestResult.risk) ? backtestResult.risk : ({})
+    property var tradeRows: (backtestResult && backtestResult.tradeLog) ? backtestResult.tradeLog : []
+    property var ddIndexByDate: ({})   // 交易日(YYYYMMDD) → timeSeries 下标, 成交行对齐当日回撤
+
+    function fmtDate(v){var s=String(v||"");return s.length===8?s.substr(0,4)+"-"+s.substr(4,2)+"-"+s.substr(6,2):(s||"--")}
+    // 卖出收益率 = 已实现盈亏 / 成本基数(卖出金额 − 盈亏)
+    function tradeReturnRatio(row){var cost=(row.amount||0)-(row.realizedPnl||0);return cost>0?(row.realizedPnl||0)/cost:NaN}
+    function dayDrawdownOf(d){var i=ddIndexByDate[d];return (i!==undefined&&ts.drawdowns)?ts.drawdowns[i]:NaN}
 
     function rejectionLabel(code) {
         switch(Number(code)) {
@@ -50,6 +57,10 @@ Item {
         eqY.min=pMin*0.95;eqY.max=pMax*1.05;ddY.min=dMin*1.1;ddY.max=dMax>0?dMax*1.1:0
         var cum=0; for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum);if(cum>rMax)rMax=cum;if(cum<rMin)rMin=cum}
         retY.min=rMin*1.1;retY.max=rMax*1.1
+        // 交易日 → 序列下标映射 (成交明细行对齐当日回撤)
+        var dateIndexMap={}; var tsDates=tss.dates||[]
+        for(var di=0;di<tsDates.length;di++) dateIndexMap[tsDates[di]]=di
+        ddIndexByDate=dateIndexMap
         console.log("分析页图形更新: "+pv.length+" 净值点, "+dd.length+" 回撤点, "+ret.length+" 收益点")
     }
 
@@ -161,6 +172,35 @@ Item {
                             ValueAxis{id:retY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
                             LineSeries{id:returnS;axisX:retX;axisY:retY;color:"#38BDF8";width:2}} } }
             }
+
+            // 成交明细 (逐笔订单: 收益/收益率/当日回撤)
+            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 240; radius: 8; color: "#1E293B"
+                visible: tradeRows.length > 0
+                ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
+                    Text{text:"成交明细 ("+tradeRows.length+" 笔)";font.pixelSize:11;color:"#94A3B8"}
+                    ListView { Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: tradeRows
+                        header: Rectangle { width: parent.width; height: 20; color: "transparent"
+                            Row { anchors.verticalCenter: parent.verticalCenter
+                                Text{width:80;text:"日期";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:80;text:"标的";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:40;text:"方向";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:60;text:"数量";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:60;text:"价格";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:80;text:"金额";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:80;text:"收益";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:70;text:"收益率";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                                Text{width:70;text:"当日回撤";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold} } }
+                        delegate: Rectangle { width: ListView.view.width; height: 22; color: index%2?"transparent":"#0B1220"
+                            Row { anchors.verticalCenter: parent.verticalCenter
+                                Text{width:80;text:fmtDate(modelData.date);font.pixelSize:9;color:"#94A3B8"}
+                                Text{width:80;text:modelData.symbol||"--";font.pixelSize:9;color:"#F1F5F9"}
+                                Text{width:40;text:modelData.isBuy?"买入":"卖出";font.pixelSize:9;color:modelData.isBuy?"#EF4444":"#10B981"}
+                                Text{width:60;text:fn(modelData.quantity,0);font.pixelSize:9;color:"#F1F5F9"}
+                                Text{width:60;text:fn(modelData.price,2);font.pixelSize:9;color:"#F1F5F9"}
+                                Text{width:80;text:fn(modelData.amount,0);font.pixelSize:9;color:"#94A3B8"}
+                                Text{width:80;text:modelData.isBuy?"--":fn(modelData.realizedPnl,0);font.pixelSize:9;color:(modelData.realizedPnl||0)>=0?"#FCA5A5":"#86EFAC"}
+                                Text{width:70;text:modelData.isBuy?"--":fp(tradeReturnRatio(modelData));font.pixelSize:9;color:(modelData.realizedPnl||0)>=0?"#FCA5A5":"#86EFAC"}
+                                Text{width:70;text:fp(dayDrawdownOf(modelData.date));font.pixelSize:9;color:"#F59E0B"} } } } } }
 
             // 每日明细
             Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 200; radius: 8; color: "#1E293B"

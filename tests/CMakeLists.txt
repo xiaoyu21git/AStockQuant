@@ -418,3 +418,27 @@ target_link_libraries(test_weight_schemes
 )
 
 message(STATUS "[TESTS] Configured test_weight_schemes executable")
+
+# ─── 规则引擎单元测试 (条件求值三态语义 + compiled.json 全量加载) ───
+add_executable(test_rule_engine
+    test_rule_engine.cpp
+)
+
+set_target_properties(test_rule_engine PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_rule_engine
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/rules
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_rule_engine
+    PRIVATE
+        astock_core
+        thirdParty
+)
+
+message(STATUS "[TESTS] Configured test_rule_engine executable")
