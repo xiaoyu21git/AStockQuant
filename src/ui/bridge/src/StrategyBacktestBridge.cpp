@@ -5,6 +5,8 @@
 #include "StrategyBacktestBridge.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/Utils/Timestamp.h"
+#include "foundation/Utils/Uuid.h"
+#include "foundation/log/logging.hpp"
 
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
@@ -320,7 +322,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             riskMap["rejectionDetails"] = rejectionMap;
             qResult["risk"] = riskMap;
 
-            // 持久化到 DB
+            // 持久化到 DB (结果 + 逐笔成交明细, 供独立重放验证)
             {
                 auto& pool = astock::database::NativePgConnectionPool::instance();
                 if (pool.isInitialized()) {
@@ -329,6 +331,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         domain::backtest::BacktestResultRepository repo(*db);
                         repo.ensureTables();
                         domain::backtest::StoredStrategyBacktest record;
+                        record.id = foundation::utils::Uuid::generate_v4().to_string();
                         record.strategyId = capturedStrategyId;
                         record.metricsJson = QJsonDocument(QJsonObject::fromVariantMap(
                             qResult["performance"].toMap())).toJson(QJsonDocument::Compact).toStdString();
@@ -336,7 +339,22 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                             qResult["timeSeries"].toMap())).toJson(QJsonDocument::Compact).toStdString();
                         record.tradeStatsJson = QJsonDocument(QJsonObject::fromVariantMap(
                             qResult["trades"].toMap())).toJson(QJsonDocument::Compact).toStdString();
-                        repo.saveStrategyBacktest(record);
+                        if (repo.saveStrategyBacktest(record)) {
+                            std::vector<domain::backtest::StoredStrategyTrade> storedTrades;
+                            storedTrades.reserve(result.tradeLog.size());
+                            for (const auto& trade : result.tradeLog) {
+                                char dateBuf[16];
+                                std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                                              trade.tradeDate / 10000, (trade.tradeDate / 100) % 100,
+                                              trade.tradeDate % 100);
+                                storedTrades.push_back({record.id, dateBuf, trade.symbol,
+                                                        trade.isBuy, trade.quantity,
+                                                        trade.price, trade.realizedPnl});
+                            }
+                            repo.saveStrategyTrades(storedTrades);
+                            INTERNAL_INFO_STREAM << "[StrategyBacktest] 已持久化 run=" << record.id
+                                                 << " trades=" << storedTrades.size();
+                        }
                     }
                 }
             }

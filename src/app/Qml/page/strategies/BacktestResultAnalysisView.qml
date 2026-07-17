@@ -11,7 +11,8 @@ Item {
     property var backtestResult: null
     signal backToWorkbench()
 
-    function fp(v,d){var n=Number(v);return isNaN(n)?"--":n.toFixed(d||2)+"%"}
+    // 比例小数 → 百分比显示 (0.0677 → "6.77%")
+    function fp(v,d){var n=Number(v);return isNaN(n)?"--":(n*100).toFixed(d||2)+"%"}
     function fn(v,d){var n=Number(v);return isNaN(n)?"--":n.toFixed(d||2)}
 
     property var perf: (backtestResult && backtestResult.performance) ? backtestResult.performance : ({})

@@ -572,11 +572,22 @@ struct StrategyPerformanceSummary final {
     PerformanceSummaryMetrics latestMetrics;
 };
 
+/// @brief 回测逐笔成交记录 (独立重放验证的审计明细)
+struct BacktestTradeRecord final {
+    std::int32_t tradeDate{0};       // YYYYMMDD
+    std::string symbol;              // fullSymbol (如 "300097.SZ")
+    bool isBuy{true};
+    std::int64_t quantity{0};
+    double price{0.0};               // 成交基准价(当日收盘)
+    double realizedPnl{0.0};         // 卖出时的已实现盈亏(净额), 买入为 0
+};
+
 /// @brief 策略回测结果（纯域层，无 Qt 依赖）
 struct StrategyBacktestResult final {
     PerformanceSummaryMetrics metrics;
     TimeSeriesSnapshot timeSeries;
     TradeStatistics tradeStats;
+    std::vector<BacktestTradeRecord> tradeLog;  // 逐笔成交明细
     bool success{false};
     std::string errorMessage;
     int riskRejectedCount{0};

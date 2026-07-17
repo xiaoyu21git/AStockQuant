@@ -46,17 +46,31 @@ struct DailyEquitySnapshot {
     double dailyReturn = 0.0;
 };
 
+/// @brief 回测逐笔成交明细行 (审计/独立重放验证)
+struct StoredStrategyTrade {
+    std::string runId;         // 归属的回测 run (strategy_backtest_results.id)
+    std::string tradeDate;     // YYYY-MM-DD
+    std::string symbol;        // fullSymbol
+    bool isBuy = true;
+    long long quantity = 0;
+    double price = 0.0;
+    double realizedPnl = 0.0;
+};
+
 class BacktestResultRepository final {
 public:
     explicit BacktestResultRepository(astock::database::ISqlDatabase& db);
 
-    /// @brief 初始化表结构（首次调用时创建）
+    /// @brief 初始化表结构（首次调用时创建; 旧 schema 自动重建）
     bool ensureTables();
 
     // ── 策略回测结果 ──
     bool saveStrategyBacktest(const StoredStrategyBacktest& record);
     std::vector<StoredStrategyBacktest> loadStrategyBacktests(const std::string& strategyId,
                                                                int limit = 20);
+
+    // ── 回测逐笔成交明细 ──
+    bool saveStrategyTrades(const std::vector<StoredStrategyTrade>& trades);
 
     // ── 因子回测结果 ──
     bool saveFactorBacktest(const StoredFactorBacktest& record);

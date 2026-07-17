@@ -1617,6 +1617,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                         dayBuyAmount += closePrice * static_cast<double>(filledQty);
                         if (dayMinQty == 0 || filledQty < dayMinQty) dayMinQty = filledQty;
                         if (filledQty > dayMaxQty) dayMaxQty = filledQty;
+                        result.tradeLog.push_back({dates[static_cast<std::size_t>(r)].value,
+                                                   order.symbol(), true, filledQty, closePrice, 0.0});
                         domain::trading::Position pos;
                         pos.setSymbol(symbol);
                         pos.setSide(domain::trading::PositionSide::Long);
@@ -1643,6 +1645,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                         auto bpIt = buyPriceMap.find(symbol);
                         if (bpIt != buyPriceMap.end()) { bp = bpIt->second; buyPriceMap.erase(bpIt); }
                         double pnl = (fr.income / sellQty - bp) * sellQty;
+                        result.tradeLog.push_back({dates[static_cast<std::size_t>(r)].value,
+                                                   order.symbol(), false, sellQty, closePrice, pnl});
                         if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
                         else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
                         symbolPnl[symbol] += pnl;
