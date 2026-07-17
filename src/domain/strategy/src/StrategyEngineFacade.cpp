@@ -597,6 +597,34 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                 ++it;
             }
         }
+        // ── 规则闸门: 分钟频信号审核(因子过滤后) ──
+        if (m_ruleGate.enabled() && orders.has_value() && liveMarketView()) {
+            const auto* view = liveMarketView();
+            const std::int64_t today = domain::market::MarketDataService::instance()
+                .activeTradingDay();
+            if (today > 0) {
+                rules::BacktestRuleVariableProvider gateProvider;
+                gateProvider.setDay(view, static_cast<std::int32_t>(today), nullptr);
+                for (auto it = orders->begin(); it != orders->end(); ) {
+                    if (it->side() == OrderSide::Buy) {
+                        rules::RuleCandidateContext ctx;
+                        ctx.symbol = it->symbol();
+                        auto dot = ctx.symbol.find('.');
+                        ctx.code = dot != std::string::npos
+                            ? ctx.symbol.substr(0, dot) : ctx.symbol;
+                        // 从视图查列号
+                        const auto& symStrs = view->symbolStrings();
+                        for (size_t cc = 0; cc < symStrs.size(); ++cc)
+                            if (symStrs[cc] == ctx.symbol) { ctx.colIndex = static_cast<int>(cc); break; }
+                        gateProvider.setCandidate(ctx);
+                        if (!m_ruleGate.allowSignal(gateProvider))
+                            { it = orders->erase(it); continue; }
+                    }
+                    ++it;
+                }
+                if (orders->empty()) orders.reset();
+            }
+        }
         return orders;
     } catch (const std::exception& e) {
         INTERNAL_ERROR_STREAM << "[StrategyEngine] step() exception: " << e.what()
