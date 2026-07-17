@@ -1165,6 +1165,42 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     }
 
     // ═══════════════════════════════════════════════════════════
+    // 规则闸门: 信号审核(实盘EOD, Phase1后/Phase2前)
+    // ═══════════════════════════════════════════════════════════
+    int eodGateRejected = 0;
+    if (m_ruleGate.enabled() && liveMarketView()) {
+        const auto* view = liveMarketView();
+        const int dayValue = std::stoi(tradingDay);
+        // 构造当日 symbol → column 映射(用于 Provider 查均线/量比)
+        std::unordered_map<std::string, int> symToCol;
+        const auto& instrs = view->instruments();
+        const auto& symStrs = view->symbolStrings();
+        for (size_t c = 0; c < symStrs.size() && c < instrs.size(); ++c)
+            symToCol[stripExchange(symStrs[c])] = static_cast<int>(c);
+
+        rules::BacktestRuleVariableProvider eodProvider;
+        eodProvider.setDay(view, dayValue, nullptr);
+        std::vector<PendingOrder> filtered;
+        filtered.reserve(pendingOrders.size());
+        for (auto& po : pendingOrders) {
+            if (po.order.side() == OrderSide::Buy) {
+                const std::string sym6 = stripExchange(po.order.symbol());
+                rules::RuleCandidateContext ctx;
+                auto cite = symToCol.find(sym6);
+                ctx.colIndex = cite != symToCol.end() ? cite->second : -1;
+                ctx.symbol = po.order.symbol();
+                ctx.code = sym6;
+                eodProvider.setCandidate(ctx);
+                if (!m_ruleGate.allowSignal(eodProvider)) {
+                    ++eodGateRejected; continue;
+                }
+            }
+            filtered.push_back(std::move(po));
+        }
+        pendingOrders = std::move(filtered);
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // Phase 2+3: 持仓感知建单 (buildPositionAwareOrders)
     // ═══════════════════════════════════════════════════════════
 
@@ -1200,6 +1236,13 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     }
 
     auto finalOrders = buildPositionAwareOrders(rawOrders, posQtyMap, account, priceForWeight);
+
+    // ── 规则闸门输出(当日) ──
+    if (m_ruleGate.enabled()) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 信号审核拒绝=" << eodGateRejected
+                             << "/" << (totalGenerated + eodGateRejected)
+                             << " (绑定模板=" << m_ruleGate.boundTemplateCount() << ")";
+    }
 
     int totalSubmitted = 0;
     if (!finalOrders.empty() && m_orderListener) {
