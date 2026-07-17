@@ -278,8 +278,7 @@ struct BacktestRuleVariableProvider::Impl {
 
     // ═══ Tier2 评分变量 (业务定义公式) ═══
 
-    /// 承接强度 (持仓/候选共用): 日内位置50+量比20+价格强度30, 0-100
-    /// (增大日内权重使 score 对价格走弱更敏感, 更早触发 exit 阈值)
+    /// 承接强度 (持仓/候选共用): 日内位置40+量比30+价格强度30, 0-100
     [[nodiscard]] std::optional<double> acceptanceStrengthScore() const
     {
         if (!view || candidate.colIndex < 0) return std::nullopt;
@@ -291,15 +290,15 @@ struct BacktestRuleVariableProvider::Impl {
         auto lowVal = cell(lowMat, lastRow);
         if (!closeVal || !highVal || !lowVal) return std::nullopt;
 
-        // 日内相对位置: (close-low)/(high-low) × 50 (↑从40)
-        double intraPos = 25.0;  // 一字板默认中间值
+        // 日内相对位置: (close-low)/(high-low) × 40
+        double intraPos = 20.0;  // 一字板默认中间值
         if (*highVal > *lowVal + 1e-9)
-            intraPos = (*closeVal - *lowVal) / (*highVal - *lowVal) * 50.0;
+            intraPos = (*closeVal - *lowVal) / (*highVal - *lowVal) * 40.0;
 
-        // 量比: min(量比,2.0)/2.0 × 20 (↓从30)
+        // 量比: min(量比,2.0)/2.0 × 30
         auto volRatio = volumeRatioToAvg(5);
         double volScore = volRatio.has_value()
-            ? (std::min)(*volRatio, 2.0) / 2.0 * 20.0 : 10.0;
+            ? (std::min)(*volRatio, 2.0) / 2.0 * 30.0 : 15.0;
 
         // 价格强度: clamp(收盘/MA5-1, 0, 0.1) × 10 × 30 → max 30
         auto ma5Ratio = closeToMaRatio(5);
