@@ -53,13 +53,14 @@ public:
         auto dates = view->dates();
         int rows = static_cast<int>(dates.size());
         int cols = static_cast<int>(instruments.size());
-        if (rows < 50 || cols == 0) return;
+        // 数据集总量不足以覆盖策略所需窗口时无法产生任何信号
+        if (rows < requiredLookbackBars() || cols == 0) return;
 
         int rowStride = closeMat.rowStride;
         // 回测时用 context 中的当前行号，实盘（-1）回退到最后一行
         int evalRow = context.currentEvaluationRow();
         int lastRow = (evalRow >= 0) ? evalRow : (rows - 1);
-        int lookback = std::min(50, lastRow + 1);
+        int lookback = std::min(requiredLookbackBars(), lastRow + 1);
         const int kMaxDailySignals = std::max(1, m_commonCfg.maxPositions);
 
         // 收集所有信号，按评分排序后限流
@@ -96,11 +97,12 @@ public:
 
                 // 策略只输出纯信号: (symbol, side, targetWeight, score)
                 // 意图(OPEN/ADD/REDUCE/CLOSE)由调度层 buildPositionAwareOrders 根据持仓对比确定
+                // 目标权重由信号强度在 [minWeight, maxWeight] 区间插值
                 auto signal = StrategySignal(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},
                     sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
-                    sig.score, sig.weight,
+                    sig.score, weightForSignalScore(sig.score),
                     realSymbol);
                 allSignals.push_back(std::move(signal));
             }
@@ -132,8 +134,29 @@ protected:
         bool isBuy = true;
         std::uint32_t instrumentId = 0;
         double score = 0.7;
-        double weight = 0.0;
     };
+
+    /// TA 指标递推稳定余量(交易日)
+    static constexpr int kLookbackSafetyMargin = 5;
+
+    /// @brief 按信号强弱在 [minWeight, maxWeight] 区间插值分配目标权重
+    /// 弱信号贴近下限, 强信号逼近上限, 仓位随信号强度合理分布
+    [[nodiscard]] double weightForSignalScore(double score) const noexcept
+    {
+        const double weightFloor = (std::max)(0.0, m_commonCfg.minWeightPerStock);
+        const double weightCap = (std::max)(weightFloor, m_commonCfg.maxWeightPerStock);
+        const double normalizedScore = std::clamp(score, 0.0, 1.0);
+        return weightFloor + (weightCap - weightFloor) * normalizedScore;
+    }
+
+    /// @brief 策略所需回看窗口(交易日) — 各子类按自己实际使用的指标参数覆写
+    /// 原实现硬编码 50, slowPeriod≥50 的策略永远凑不够样本而全程无信号
+    [[nodiscard]] virtual int requiredLookbackBars() const noexcept
+    {
+        // 基类兜底: 无特定指标, 给通用最小窗口
+        constexpr int kMinIndicatorWindow = 26;
+        return kMinIndicatorWindow + kLookbackSafetyMargin;
+    }
 
     /// @brief 子类实现：对单个标的判断买卖信号
     virtual SignalResult evaluateSymbol(const std::vector<double>&,
@@ -153,6 +176,12 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// MA 交叉判定需要慢线产出 ≥2 个点: N ≥ slowPeriod + 1
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        return m_commonCfg.slowPeriod + 1 + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -160,7 +189,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         int N = static_cast<int>(closePrices.size());
         if (N < cfg.slowPeriod + 1) return sig;
@@ -188,6 +216,12 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// RSI(signalPeriod) 需要 N ≥ signalPeriod + 1
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        return m_commonCfg.signalPeriod + 1 + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -195,7 +229,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         double rsi = computeRSI(closePrices, cfg.signalPeriod);
         if (rsi < 30.0) { sig.valid = true; sig.isBuy = true;  sig.score = 0.70; }
@@ -220,6 +253,12 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// MACD 交叉判定需要信号线产出 ≥2 个点: N ≥ macdSlow + macdSignal
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        return m_commonCfg.macdSlow + m_commonCfg.macdSignal + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -227,7 +266,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         bool golden = checkMACD(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
         bool dead   = checkMACD(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
@@ -256,6 +294,12 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// 布林带 %B 需要 N ≥ bbPeriod + 1
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        return m_commonCfg.bbPeriod + 1 + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -263,7 +307,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         // 布林带 %B: (price - lower) / (upper - lower), < 0.1 → 超卖买入, > 0.9 → 超买卖出
         auto bb = computeBBands(closePrices, cfg.bbPeriod, cfg.bbStdDev);
@@ -300,6 +343,13 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// 固定窗口: 最近 5 日 vs 前 20 日对比 + ATR(14), 最低 22 根
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        constexpr int kEventCompareWindow = 22;
+        return kEventCompareWindow + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -307,7 +357,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         int N = static_cast<int>(closePrices.size());
         if (N < 22) return sig;
@@ -360,6 +409,13 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// 短期动量: ROC(6) + 最近 5 根方向一致性, 最低 12 根
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        constexpr int kMicroMomentumWindow = 12;
+        return kMicroMomentumWindow + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -367,7 +423,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         int N = static_cast<int>(closePrices.size());
         if (N < 12) return sig;
@@ -396,6 +451,17 @@ public:
     using NonFactorStrategy::NonFactorStrategy;
 
 protected:
+    /// 多指标复合: MA(fast/slow)交叉 + RSI(signalPeriod) + MACD, 取所用指标最大窗口
+    [[nodiscard]] int requiredLookbackBars() const noexcept override
+    {
+        constexpr int kCompositeMinWindow = 26;
+        int maxWindow = kCompositeMinWindow;
+        maxWindow = (std::max)(maxWindow, m_commonCfg.slowPeriod + 1);
+        maxWindow = (std::max)(maxWindow, m_commonCfg.macdSlow + m_commonCfg.macdSignal);
+        maxWindow = (std::max)(maxWindow, m_commonCfg.signalPeriod + 1);
+        return maxWindow + kLookbackSafetyMargin;
+    }
+
     SignalResult evaluateSymbol(const std::vector<double>& closePrices,
                                  std::uint32_t instrumentId,
                                  const RuntimeStrategyContext& ctx,
@@ -403,7 +469,6 @@ protected:
     {
         SignalResult sig;
         sig.instrumentId = instrumentId;
-        sig.weight = std::min(1.0 / std::max(1, cfg.maxPositions), cfg.maxWeightPerStock);
 
         int N = static_cast<int>(closePrices.size());
         if (N < 26) return sig;

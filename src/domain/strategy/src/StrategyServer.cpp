@@ -247,6 +247,8 @@ StrategyServiceFlowResult StrategyService::onMarketDataBatch(
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
     if (batch.size() > plan_.maxMarketDataPerBatch()) {
+        INTERNAL_WARN_STREAM << "[StrategyService] 行情批量超限被拒: batch=" << batch.size()
+                             << " max=" << plan_.maxMarketDataPerBatch();
         return StrategyServiceFlowResult(StrategyServiceFlowCode::CapacityExceeded);
     }
 
@@ -455,7 +457,11 @@ StrategyServiceFlowResult StrategyService::evaluateEntrySignals(
 {
     factorSnapshotBuffer_.clear();
     signalBuffer_.clear();
-    factorService_.copySnapshots(factorSnapshotBuffer_);
+    // 因子快照仅多因子选股策略消费; 非因子策略(含混合模式)跳过,
+    // 避免每日为 overlay 因子做全市场符号匹配的无效开销
+    if (entry.strategy->usesFactors()) {
+        factorService_.copySnapshots(factorSnapshotBuffer_);
+    }
     // 策略只消费当前因子结果快照，不接触因子服务更新职责。
     entry.strategy->evaluate(factorSnapshotBuffer_, entry.context, signalBuffer_);
     generatedSignalCount += signalBuffer_.size();
@@ -567,6 +573,13 @@ void StrategyService::setContextHistoricalView(const void* view)
 {
     for (auto& entry : strategyEntries_) {
         entry.context.setHistoricalView(view);
+    }
+}
+
+void StrategyService::setContextEvaluationRow(int row)
+{
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCurrentEvaluationRow(row);
     }
 }
 

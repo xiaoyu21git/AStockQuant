@@ -29,6 +29,15 @@ static QVariantMap fromJson(const std::string& j) {
     return doc.isObject() ? doc.object().toVariantMap() : QVariantMap{};
 }
 
+// 旧数据 metadata_json 可能没有 strategyTypeIndex 键;
+// 缺失时返回 -1 (Invalid), 由 UI 层用 behaviorKind 推导, 不得伪造成合法值 0
+constexpr int kInvalidStrategyTypeIndex = -1;
+static int readStrategyTypeIndex(const QVariantMap& metaJson) {
+    return metaJson.contains("strategyTypeIndex")
+        ? metaJson.value("strategyTypeIndex").toInt()
+        : kInvalidStrategyTypeIndex;
+}
+
 // stub helpers for typed structs
 bool PersistedStrategyData::isValid() const { return !strategyId.empty(); }
 QVariantMap PersistedStrategyData::toVariantMap() const {
@@ -80,7 +89,7 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
     d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
         metaJson.value("behaviorKind").toInt());
     d.metadata.enabled = metaJson.value("enabled").toBool();
-    d.strategyTypeIndex = metaJson.value("strategyTypeIndex").toInt();
+    d.strategyTypeIndex = readStrategyTypeIndex(metaJson);
     d.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{};
     d.parameters = fromJson(row.getString("parameters"));
     d.performanceMetrics = fromJson(row.getString("performance_metrics"));
@@ -121,7 +130,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
             d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
                 metaJson.value("behaviorKind").toInt());
             d.metadata.enabled = metaJson.value("enabled").toBool();
-            d.strategyTypeIndex = metaJson.value("strategyTypeIndex").toInt();
+            d.strategyTypeIndex = readStrategyTypeIndex(metaJson);
             v.push_back(d);
         }
         return v;
@@ -153,10 +162,11 @@ QString StrategyRepository::save(const PersistedStrategyData& d) {
     metaJson["enabled"] = d.metadata.enabled;
     metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
 
+    // 字符串参数以 text OID 绑定, jsonb 列必须显式 ::jsonb 转换 (否则 PG 42804)
     db->executeUpdate(
         "INSERT INTO strategy(strategy_id,strategy_code,metadata_json,strategy_identity_json,"
         "version,author,language,status,parameters,performance_metrics,runtime_json) "
-        "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(strategy_id) DO UPDATE SET "
+        "VALUES(?,?,?::jsonb,?::jsonb,?,?,?,?,?::jsonb,?::jsonb,?::jsonb) ON CONFLICT(strategy_id) DO UPDATE SET "
         "strategy_code=EXCLUDED.strategy_code,metadata_json=EXCLUDED.metadata_json,"
         "strategy_identity_json=EXCLUDED.strategy_identity_json,version=EXCLUDED.version,"
         "author=EXCLUDED.author,language=EXCLUDED.language,status=EXCLUDED.status,"
@@ -184,14 +194,22 @@ bool StrategyRepository::update(const QString& id, const PersistedStrategyData& 
     metaJson["enabled"] = d.metadata.enabled;
     metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
 
-    return db->executeUpdate(
-        "UPDATE strategy SET strategy_code=?,metadata_json=?,strategy_identity_json=?,"
-        "version=?,author=?,language=?,status=?,parameters=?,performance_metrics=?,"
-        "runtime_json=?,updated_at=NOW() WHERE strategy_id=?",
+    // 字符串参数以 text OID 绑定, jsonb 列必须显式 ::jsonb 转换,
+    // 否则 PG 报 42804 (text→jsonb 无赋值转换) 导致更新失败
+    const int affected = db->executeUpdate(
+        "UPDATE strategy SET strategy_code=?,metadata_json=?::jsonb,strategy_identity_json=?::jsonb,"
+        "version=?,author=?,language=?,status=?,parameters=?::jsonb,performance_metrics=?::jsonb,"
+        "runtime_json=?::jsonb,updated_at=NOW() WHERE strategy_id=?",
         {SqlParam{d.strategyCode},SqlParam{toJson(metaJson)},SqlParam{"{}"},
          SqlParam{d.version},SqlParam{d.author},SqlParam{std::to_string(static_cast<int>(d.language))},
          SqlParam{std::to_string(0)},SqlParam{toJson(d.parameters)},SqlParam{toJson(d.performanceMetrics)},
-         SqlParam{"{}"},SqlParam{toS(id)}}) > 0;
+         SqlParam{"{}"},SqlParam{toS(id)}});
+    if (affected <= 0) {
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] update failed id=" << toS(id)
+                              << " error=" << db->lastError();
+        return false;
+    }
+    return true;
 }
 
 bool StrategyRepository::remove(const QString& id) {
@@ -209,14 +227,14 @@ bool StrategyRepository::updateStatus(const QString& id, strategy_view::Strategy
 bool StrategyRepository::updateParameters(const QString& id, const QVariantMap& p) {
     auto db = sdb();
     if (!db) return false;
-    return db->executeUpdate("UPDATE strategy SET parameters=?,updated_at=NOW() WHERE strategy_id=?",
+    return db->executeUpdate("UPDATE strategy SET parameters=?::jsonb,updated_at=NOW() WHERE strategy_id=?",
         {SqlParam{toJson(p)},SqlParam{toS(id)}}) > 0;
 }
 
 bool StrategyRepository::updatePerformance(const QString& id, const QVariantMap& p) {
     auto db = sdb();
     if (!db) return false;
-    return db->executeUpdate("UPDATE strategy SET performance_metrics=?,updated_at=NOW() WHERE strategy_id=?",
+    return db->executeUpdate("UPDATE strategy SET performance_metrics=?::jsonb,updated_at=NOW() WHERE strategy_id=?",
         {SqlParam{toJson(p)},SqlParam{toS(id)}}) > 0;
 }
 

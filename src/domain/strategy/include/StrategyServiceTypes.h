@@ -485,6 +485,9 @@ public:
 inline constexpr std::size_t kDefaultSignalBufferReserve = 256;
 inline constexpr std::size_t kDefaultRuleResultBufferReserve = 256;
 inline constexpr std::size_t kDefaultMarketDataBatchReserve = 256;
+/// 全市场日频批量容量: A股+北交所约 5800 标的, 预留增长余量。
+/// 回测逐日推送全市场行情、实盘 EOD 评估同样是全市场批量, 必须容纳全体标的。
+inline constexpr std::size_t kAllMarketDataBatchCapacity = 16384;
 
 [[nodiscard]] inline StrategyServiceExecutionPlan defaultExecutionPlan() noexcept
 {

@@ -289,6 +289,8 @@ public:
     virtual void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const = 0;
 
     virtual void setContextHistoricalView(const void* view) = 0;
+    /// @brief 设置所有策略上下文的当前评估行号 (回测逐日推进用, -1=实盘)
+    virtual void setContextEvaluationRow(int row) = 0;
     virtual void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) = 0;
 };
 
@@ -425,6 +427,8 @@ private:
 
     /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
     void setContextHistoricalView(const void* view);
+    /// @brief 设置所有策略上下文的当前评估行号 (回测逐日推进用, -1=实盘)
+    void setContextEvaluationRow(int row) override;
     void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) override;
 
 private:
@@ -609,6 +613,7 @@ private:
     domain::trading::OrderBuilder m_orderBuilder;
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
+    bool m_needsMarketCapField{false};  ///< 权重方案为市值加权时置位，prepareMarketData 追加 market_cap 字段
     FactorSignalProcessor m_factorSignalProcessor;  ///< 混合模式因子信号处理(过滤+缩放)
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日

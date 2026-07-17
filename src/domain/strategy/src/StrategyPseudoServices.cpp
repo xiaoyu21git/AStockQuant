@@ -301,7 +301,8 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
     outputOrder.setOrderType(OrderType::Market);
     outputOrder.setPrice(0);                         // drainQueue 用 tick 价补
 
-    INTERNAL_DEBUG_STREAM << "[OrderBuild] signal->order: symbol=" << outputOrder.symbol()
+    // 占位数量, 真实下单量由回测循环/实盘调度按权重×信号强度换算 — TRACE 防刷屏
+    INTERNAL_TRACE_STREAM << "[OrderBuild] signal->order: symbol=" << outputOrder.symbol()
                           << " side=" << (outputOrder.side() == OrderSide::Buy ? "B" : "S")
                           << " qty=" << outputOrder.quantity()
                           << " weight=" << weight << " score=" << signal.score();

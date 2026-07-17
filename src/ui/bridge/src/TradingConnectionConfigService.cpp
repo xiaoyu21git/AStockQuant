@@ -115,10 +115,9 @@ QVariantMap TradingConnectionConfigService::defaultConfiguration() const {
     cfg["eodTriggerTime"]         = QStringLiteral("15:00");
     cfg["useBoardLot"]            = true;
     cfg["limitPriceTolerance"]    = 9.9;
-    // ── 设置页: 同步调度 ──
+    // ── 设置页: 同步调度 (封锁结束不单独配置, 由 eodTriggerTime 派生) ──
     cfg["syncTriggerTime"]        = QStringLiteral("15:01");
     cfg["syncBlockStart"]         = QStringLiteral("09:25");
-    cfg["syncBlockEnd"]           = QStringLiteral("15:00");
     cfg["syncDailyBatchSize"]     = 100;
     cfg["syncMinuteBatchSize"]    = 50;
     cfg["syncDbFlushSize"]        = 500;

@@ -87,8 +87,13 @@ QVariantList FactorBacktestBridge::buildCoreMetrics(
               metrics.rankIcir, diag.rankIcirReason);
     addMetric("icWinRate", "IC 胜率", "percent1", "high", 0.55,
               metrics.icWinRate, diag.icWinRateReason);
+    // 单调性取 |r|: -1(完美递减)/+1(完美递增)都是满分单调, 方向看分组收益图
+    // 与域层评级口径(FactorRatingEngine 用 std::abs)统一
+    factor::compute::AnalysisScalarMetric monotonicityAbs = metrics.monotonicityScore;
+    if (monotonicityAbs.available && std::isfinite(monotonicityAbs.value))
+        monotonicityAbs.value = std::abs(monotonicityAbs.value);
     addMetric("monotonicityScore", "单调性", "number3", "high", 0.7,
-              metrics.monotonicityScore, diag.monotonicityScoreReason);
+              monotonicityAbs, diag.monotonicityScoreReason);
     addMetric("longShortSharpe", "多空夏普", "number2", "high", 1.0,
               metrics.longShortSharpe, diag.longShortSharpeReason);
     addMetric("longShortAnnualReturn", "多空年化收益", "percent2", "high", 0.1,
@@ -289,6 +294,415 @@ m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
 }
 
 
+// ── 单次回测运行结果: 解析 → 组装 → 持久化 (worker 线程执行) ──
+// 批量单因子模式下每个因子独立调用一次; 不触碰成员状态、不发信号,
+// 结果由调用方缓存并在全部完成后经 publishBatchResults 统一放出。
+QVariantMap FactorBacktestBridge::processRunResult(
+    const Factor::backtest::BacktestRunConfig& config,
+    const std::string& serializedResult,
+    QString& errorOut) const
+{
+    QString jsonStr = QString::fromStdString(serializedResult);
+    QJsonParseError parseError;
+    QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &parseError);
+
+    // 检查 orchestrator 是否返回了错误
+    if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
+        QJsonObject rootObj = doc.object();
+        if (rootObj.contains("error") && !rootObj["error"].toString().isEmpty()) {
+            errorOut = rootObj["error"].toString();
+            return {};
+        }
+    }
+
+    // 解析失败或缺少 metrics 时使用空对象
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        errorOut = QStringLiteral("回测结果解析失败: ") + parseError.errorString();
+        return {};
+    }
+
+    QJsonObject rootObj = doc.object();
+    QJsonObject metricsObj = rootObj.value("metrics").toObject();
+
+    // ── 手动构建 QVariantMap 确保深层嵌套正确 ──
+    QVariantMap result;
+    result["status"]  = QStringLiteral("SUCCESS");
+    result["results"] = QVariantList(); // 单结果模式
+    // 组合因子回测名(编排器 root 层已输出;单因子时不设此字段)
+    if (rootObj.contains("factorName") && !rootObj["factorName"].toString().isEmpty())
+        result["factorName"] = rootObj["factorName"].toString();
+
+    // groups
+    QJsonArray groupsArr = metricsObj.value("groups").toArray();
+    QVariantList groupsList;
+    for (int i = 0; i < groupsArr.size(); ++i) {
+        groupsList.append(groupsArr[i].toObject().toVariantMap());
+    }
+
+    // ic
+    QVariantMap icMap = metricsObj.value("ic").toObject().toVariantMap();
+
+    // execution
+    QVariantMap execMap = metricsObj.value("execution").toObject().toVariantMap();
+
+    // factorMetrics — Calculator 输出的全部因子质量指标
+    QVariantMap fmMap = metricsObj.value("factorMetrics").toObject().toVariantMap();
+
+    // ── 构建 factorQuality（AnalysisPage 需要的富结构）──
+    QJsonObject fqRaw = metricsObj.value("factorQuality").toObject();
+    int rating = fqRaw.value("rating").toInt(1);
+    QString ratingLabel = fqRaw.value("label").toString(QStringLiteral("合格"));
+
+    // tier: "core"=大卡152px, "optional"=标准114px, "auxiliary"=紧凑108px
+    auto mk = [](const QString& key, const QString& title, const QString& subtitle,
+                 double val, const QString& format, bool emphasize,
+                 const QString& tier, int units = 1) {
+        QVariantMap m;
+        bool avail = std::isfinite(val);
+        m["key"] = key; m["title"] = title; m["subtitle"] = avail ? subtitle : QStringLiteral("不可用");
+        m["label"] = title; m["value"] = avail ? val : 0.0; m["format"] = format;
+        m["emphasize"] = emphasize; m["tier"] = tier; m["units"] = units;
+        m["available"] = avail;
+        m["goodThreshold"] = 0.0;  // 由调用方覆盖
+        m["direction"]    = QStringLiteral("high");
+        return m;
+    };
+
+    // ══ 核心指标：判断因子是否合格（5 张，刚好一行）══
+    // goodThreshold = 文档 5.1 合格标准
+    QVariantList coreMetrics;
+    coreMetrics.append(mk("rankIcMean", "IC 均值", "Rank IC 均值",
+        icMap.value("value").toDouble(), "number", true, "core"));
+    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.02; coreMetrics.last() = m; }
+    coreMetrics.append(mk("rankIcir",   "ICIR", "IC 信息比率",
+        icMap.value("ir").toDouble(), "number", true, "core"));
+    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.3; coreMetrics.last() = m; }
+    coreMetrics.append(mk("icWinRate",  "IC 胜率", "IC>0 的期数占比",
+        icMap.value("winRate").toDouble(), "percent2", false, "core"));
+    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.55; coreMetrics.last() = m; }
+    // 单调性取 |r|: -1(完美递减)/+1(完美递增)都是满分单调, 方向看分组收益图
+    coreMetrics.append(mk("monotonicity","单调性", "分组收益单调程度(绝对值)",
+        std::abs(fmMap.value("monotonicityScore").toDouble()), "number", false, "core"));
+    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.7; coreMetrics.last() = m; }
+    coreMetrics.append(mk("longShortSharpe","多空夏普", "多空组合风险调整收益",
+        fmMap.value("longShortSharpe").toDouble(), "number", true, "core"));
+    { auto m = coreMetrics.last().toMap(); m["direction"] = QStringLiteral("high"); coreMetrics.last() = m; }
+
+    // ══ 扩展指标：辅助判断因子质量 ══
+    QVariantList optionalMetrics;
+    optionalMetrics.append(mk("rankIcStd", "IC 标准差", "IC 波动幅度",
+        icMap.value("std").toDouble(), "number", false, "optional"));
+    optionalMetrics.append(mk("icPValue", "IC P 值", "IC 显著性检验 P 值，<0.05 显著",
+        icMap.value("pValue").toDouble(), "number", false, "optional"));
+    optionalMetrics.append(mk("icTStat", "IC T 统计", "IC 显著性 T 统计量",
+        icMap.value("tStat").toDouble(), "number", false, "optional"));
+    optionalMetrics.append(mk("icHalfLife","IC 半衰期", "IC 自相关衰减至一半的天数",
+        icMap.value("halfLife").toDouble(), "integer", false, "optional"));
+    optionalMetrics.append(mk("longShortRet","多空年化", "多空组合年化收益",
+        fmMap.value("longShortAnnualReturn").toDouble(), "percent2", false, "optional"));
+    optionalMetrics.append(mk("costAdjSharpe","成本夏普", "扣除交易成本后的多空夏普",
+        fmMap.value("costAdjustedSharpe").toDouble(), "number", false, "optional"));
+    optionalMetrics.append(mk("monthlyWinRate","月度胜率", "月度正收益占比",
+        fmMap.value("monthlyWinRate").toDouble(), "percent2", false, "optional"));
+    optionalMetrics.append(mk("annualTurnover","年化换手", "因子持仓的年化换手率",
+        fmMap.value("annualTurnover").toDouble(), "number2", false, "optional"));
+    optionalMetrics.append(mk("alpha","Alpha", "因子超额收益",
+        fmMap.value("alpha").toDouble(), "number", false, "optional"));
+
+    // ══ 辅助指标：参考信息（可折叠）══
+    QVariantList auxiliaryMetrics;
+    auxiliaryMetrics.append(mk("numGroups","分组数", "回测分组数量",
+        fmMap.value("numGroups").toDouble(), "number", false, "auxiliary"));
+    auxiliaryMetrics.append(mk("totalSignals","总信号数", "回测期总信号量",
+        execMap.value("totalSignals").toDouble(), "number", false, "auxiliary"));
+    auxiliaryMetrics.append(mk("validSamples","有效样本", "有效回测周期数",
+        execMap.value("validSampleCount").toDouble(), "number", false, "auxiliary"));
+
+    // groupCharts — 从 groups 构建 QML 期望的 {title, subtitle, series, isPercent} 格式
+    QVariantList groupCharts;
+    if (groupsArr.size() > 0) {
+        QVariantMap chart;
+        chart["title"]     = QStringLiteral("分组收益");
+        chart["subtitle"]  = QStringLiteral("各组平均单期收益与平均股票数");
+        chart["isPercent"] = true;
+        QVariantList series;
+        for (int i = 0; i < groupsArr.size(); ++i) {
+            QJsonObject g = groupsArr[i].toObject();
+            QVariantMap bar;
+            bar["label"] = g.value("groupName").toString();
+            bar["value"] = g.value("returnRate").toDouble();
+            series.append(bar);
+        }
+        chart["series"] = series;
+        groupCharts.append(chart);
+    }
+
+    // returnSeries — 从 orchestrator JSON 提取三条分离的收益率序列
+    QJsonObject retObj = metricsObj.value("returnSeries").toObject();
+    auto jsonArrayToVariantList = [](const QJsonArray& arr) {
+        QVariantList out;
+        for (int i = 0; i < arr.size(); ++i)
+            out.append(arr[i].toDouble());
+        return out;
+    };
+    QVariantList rawReturns     = jsonArrayToVariantList(retObj.value("raw").toArray());
+    QVariantList costAdjusted   = jsonArrayToVariantList(retObj.value("costAdjusted").toArray());
+    QVariantList riskAdjusted   = jsonArrayToVariantList(retObj.value("riskAdjusted").toArray());
+    QVariantMap returnSeries;
+    returnSeries["rawReturns"]            = rawReturns;
+    returnSeries["costAdjustedReturns"]   = costAdjusted;
+    returnSeries["riskAdjustedReturns"]   = riskAdjusted;
+
+    // 评级检查项
+    QVariantList ratingChecks;
+    auto addCheck = [&](const QString& label, bool passed,
+                        const QString& actual, const QString& threshold) {
+        QVariantMap c;
+        c["label"]         = label;
+        c["passed"]        = passed;
+        c["actualText"]    = actual;
+        c["thresholdText"] = threshold;
+        ratingChecks.append(c);
+    };
+    auto fmtVal = [](double v, const QString& fmt) {
+        if (!std::isfinite(v)) return QStringLiteral("--");
+        if (fmt == "percent") return QString::number(v * 100.0, 'f', 1) + "%";
+        return QString::number(v, 'f', 3);
+    };
+    bool hasGroups = groupsArr.size() >= 2;
+    bool monotonic = true;
+    if (hasGroups) {
+        for (int i = 1; i < groupsArr.size(); ++i) {
+            if (groupsArr[i].toObject().value("returnRate").toDouble() >
+                groupsArr[i-1].toObject().value("returnRate").toDouble())
+                { monotonic = false; break; }
+        }
+    }
+    double sharpeVal = execMap.value("sharpeRatio").toDouble();
+    double icVal     = icMap.value("value").toDouble();
+    double icirVal   = icMap.value("ir").toDouble();
+    double wrVal     = icMap.value("winRate").toDouble();
+    addCheck(QStringLiteral("分组单调性"), monotonic,
+        monotonic ? QStringLiteral("单调递减") : QStringLiteral("不单调"),
+        QStringLiteral("G1 ≥ G2 ≥ ... ≥ GN"));
+    addCheck(QStringLiteral("夏普比率 > 0"), sharpeVal > 0.0,
+        fmtVal(sharpeVal, "number"), QStringLiteral("> 0"));
+    addCheck(QStringLiteral("IC 均值 > 0"), icVal > 0.0,
+        fmtVal(icVal, "number"), QStringLiteral("> 0"));
+    addCheck(QStringLiteral("IC 胜率 > 50%"), wrVal > 0.5,
+        fmtVal(wrVal, "percent"), QStringLiteral("> 50%"));
+    addCheck(QStringLiteral("ICIR > 0"), icirVal > 0.0,
+        fmtVal(icirVal, "number"), QStringLiteral("> 0"));
+
+    // 组装完整 factorQuality
+    QVariantMap fq;
+    fq["numGroups"]         = fmMap.value("numGroups").toDouble();
+    fq["coreRating"]        = rating;
+    fq["coreRatingLabel"]   = ratingLabel;
+    fq["coreRatingTitle"]   = QStringLiteral("因子质量评级");
+    fq["coreRatingSummary"] = rating >= 3 ? QStringLiteral("因子表现优秀，分组单调且风险调整收益良好")
+                             : rating >= 2 ? QStringLiteral("因子表现良好，具备选股能力")
+                             : rating >= 1 ? QStringLiteral("因子基本合格，可考虑与其他因子复合使用")
+                             : QStringLiteral("因子表现不佳，建议重新审视因子逻辑");
+    fq["coreRatingChecks"]  = ratingChecks;
+    fq["coreMetrics"]       = coreMetrics;
+    fq["groupCharts"]       = groupCharts;
+    fq["returnSeries"]      = returnSeries;
+
+    // groupReturnSeries — 每组每日收益时间序列
+    QJsonArray grsArr = metricsObj.value("groupReturnSeries").toArray();
+    QVariantList groupReturnSeries;
+    for (int gi = 0; gi < grsArr.size(); ++gi) {
+        QJsonObject gObj = grsArr[gi].toObject();
+        QVariantMap gMap;
+        gMap["groupIndex"] = gObj.value("groupIndex").toInt();
+        gMap["groupName"]  = gObj.value("groupName").toString();
+        gMap["data"]       = jsonArrayToVariantList(gObj.value("data").toArray());
+        groupReturnSeries.append(gMap);
+    }
+    fq["groupReturnSeries"] = groupReturnSeries;
+    fq["optionalMetrics"]   = optionalMetrics;
+    fq["auxiliaryMetrics"]  = auxiliaryMetrics;
+
+    QVariantMap coreSection;
+    coreSection["title"]    = QStringLiteral("核心指标");
+    coreSection["subtitle"] = QStringLiteral("因子回测关键绩效与质量指标");
+    fq["coreSection"]       = coreSection;
+
+    QVariantMap optSection;
+    optSection["title"]    = QStringLiteral("扩展指标");
+    optSection["subtitle"] = QStringLiteral("补充风险与统计指标");
+    fq["optionalSection"]  = optSection;
+
+    QVariantMap auxSection;
+    auxSection["title"]              = QStringLiteral("辅助指标");
+    auxSection["subtitle"]           = QStringLiteral("其他参考指标");
+    auxSection["expandedSubtitle"]   = QStringLiteral("收起辅助指标");
+    auxSection["collapsedSubtitle"]  = QStringLiteral("展开辅助指标");
+    fq["auxiliarySection"]           = auxSection;
+
+    // 组装 metrics
+    QVariantMap metrics;
+    metrics["groups"]        = groupsList;
+    metrics["factorMetrics"] = fmMap;     // C++ 原样, 写入 DB
+    metrics["ic"]            = icMap;
+    metrics["execution"]     = execMap;
+    metrics["factorQuality"] = fq;
+
+    result["metrics"] = metrics;
+
+    // config — QML 读取 config.factorId / startDate / endDate / benchmarkSymbol
+    QVariantMap cfgMap;
+    if (!config.factorIds.empty()) {
+        QVariantList allFactorIds;
+        for (const auto& fid : config.factorIds)
+            allFactorIds.append(QString::fromStdString(fid));
+        cfgMap["factorIds"] = allFactorIds;
+        cfgMap["factorId"]  = QString::fromStdString(config.factorIds.front());
+        result["factorId"]   = cfgMap["factorId"];
+        result["activeAnalysisFactorId"] = cfgMap["factorId"];
+    }
+    cfgMap["benchmarkSymbol"] = QString::fromStdString(config.benchmarkSymbol);
+    cfgMap["initialCapital"]  = config.initialCapital;
+    cfgMap["forwardDays"]     = config.forwardDays;
+    cfgMap["rebalanceDays"]   = config.rebalanceDays;
+    cfgMap["numGroups"]       = config.numGroups;
+    cfgMap["commissionRate"]  = config.commissionRate;
+    cfgMap["slippageRate"]    = config.slippageRate;
+    cfgMap["riskFreeRate"]    = config.riskFreeRate;
+    cfgMap["adjustPriceType"] = QString::fromStdString(config.adjustPriceType);
+    cfgMap["winsorizeQuantile"] = config.winsorizeQuantile;
+    cfgMap["factorMode"]      = static_cast<int>(config.factorMode);
+    cfgMap["startDate"] = rootObj.value("startDate").toString();
+    cfgMap["endDate"]   = rootObj.value("endDate").toString();
+    result["config"] = cfgMap;
+
+    // ── 持久化到 alpha.factor_backtest_* ──
+    {
+        auto& pool = astock::database::NativePgConnectionPool::instance();
+        auto db = pool.getConnection();
+        if (db && db->isOpen()) {
+            using P = astock::database::SqlParam;
+            std::string runId = foundation::utils::Uuid::generate().to_string_no_dashes();
+            std::string fid = config.factorIds.empty() ? "unknown" :
+                (config.factorIds.size() == 1 ? config.factorIds.front() :
+                 [&]() { std::string s; for (size_t i=0;i<config.factorIds.size();++i)
+                    { if(i>0) s+=","; s+=config.factorIds[i]; } return s; }());
+            std::string cfgJson = QJsonDocument(QJsonObject::fromVariantMap(cfgMap)).toJson(QJsonDocument::Compact).toStdString();
+            std::string summaryJson = QJsonDocument(QJsonObject::fromVariantMap(metrics)).toJson(QJsonDocument::Compact).toStdString();
+            std::string groupsJsonStr = QJsonDocument(QJsonArray::fromVariantList(groupsList)).toJson(QJsonDocument::Compact).toStdString();
+
+            db->executeUpdate(
+                "INSERT INTO alpha.factor_backtest_runs(id,factor_id,config_json,summary_json,groups_json) VALUES($1,$2,$3,$4,$5)",
+                {P{runId}, P{fid}, P{cfgJson}, P{summaryJson}, P{groupsJsonStr}});
+
+            // ── 每日收益序列 ──
+            QJsonArray dateList = rootObj.value("dateList").toArray();
+            QVariantList rawRets = returnSeries["rawReturns"].toList();
+            QVariantList costRets = returnSeries["costAdjustedReturns"].toList();
+            QVariantList riskRets = returnSeries["riskAdjustedReturns"].toList();
+            // groupReturnSeries: [{"groupIndex":0,"data":[r0,r1,...]}, ...]
+            QJsonArray grsArr = metricsObj.value("groupReturnSeries").toArray();
+            std::vector<QJsonArray> grpData;
+            for (int gi = 0; gi < grsArr.size(); ++gi)
+                grpData.push_back(grsArr[gi].toObject().value("data").toArray());
+            for (int di = 0; di < dateList.size(); ++di) {
+                std::string ds = dateList[di].toString().toStdString();
+                double rls = di < rawRets.size()  ? rawRets[di].toDouble() : 0.0;
+                double cls = di < costRets.size() ? costRets[di].toDouble() : 0.0;
+                double rks = di < riskRets.size() ? riskRets[di].toDouble() : 0.0;
+                QJsonArray grArr;
+                for (size_t gi = 0; gi < grpData.size(); ++gi)
+                    if (di < grpData[gi].size())
+                        grArr.append(grpData[gi][di].toDouble());
+                std::string grJson = QJsonDocument(grArr).toJson(QJsonDocument::Compact).toStdString();
+                db->executeUpdate(
+                    "INSERT INTO alpha.factor_backtest_daily(run_id,trade_date,group_returns_json,"
+                    "raw_long_short,cost_adj_long_short,risk_adj_long_short) "
+                    "VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(run_id,trade_date) DO UPDATE SET "
+                    "raw_long_short=EXCLUDED.raw_long_short,cost_adj_long_short=EXCLUDED.cost_adj_long_short,"
+                    "risk_adj_long_short=EXCLUDED.risk_adj_long_short",
+                    {P{runId}, P{ds}, P{grJson}, P{rls}, P{cls}, P{rks}});
+            }
+
+            // ── IC 日序列 ──
+            QJsonArray icArr = metricsObj.value("icSeries").toArray();
+            for (int ii = 0; ii < icArr.size() && ii < dateList.size(); ++ii) {
+                std::string ds = dateList[ii].toString().toStdString();
+                double icv = icArr[ii].toDouble();
+                db->executeUpdate(
+                    "INSERT INTO alpha.factor_backtest_ic_daily(run_id,trade_date,rank_ic) "
+                    "VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO UPDATE SET rank_ic=EXCLUDED.rank_ic",
+                    {P{runId}, P{ds}, P{icv}});
+            }
+
+            // ── 交易记录 ──
+            QJsonArray tradeArr = metricsObj.value("tradeLog").toArray();
+            for (int ti = 0; ti < tradeArr.size(); ++ti) {
+                QJsonObject tr = tradeArr[ti].toObject();
+                db->executeUpdate(
+                    "INSERT INTO alpha.factor_backtest_trades(run_id,trade_date,symbol,side,basket,price,cost_rate) "
+                    "VALUES($1,$2,$3,$4,$5,$6,$7)",
+                    {P{runId},
+                     P{tr.value("date").toString().toStdString()},
+                     P{tr.value("symbol").toString().toStdString()},
+                     P{tr.value("side").toString().toStdString()},
+                     P{tr.value("basket").toString().toStdString()},
+                     P{tr.value("price").toDouble()},
+                     P{tr.value("costRate").toDouble()}});
+            }
+
+            // ── 每期追踪 ──
+            QJsonArray periodArr = metricsObj.value("periodTrackings").toArray();
+            for (int pi = 0; pi < periodArr.size(); ++pi) {
+                QJsonObject pr = periodArr[pi].toObject();
+                db->executeUpdate(
+                    "INSERT INTO alpha.factor_backtest_periods(run_id,trade_date,"
+                    "long_held,short_held,long_bought,long_sold,short_bought,short_sold,"
+                    "long_turnover,short_turnover,long_raw_return,short_raw_return,strategy_net_return) "
+                    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) "
+                    "ON CONFLICT(run_id,trade_date) DO NOTHING",
+                    {P{runId},
+                     P{pr.value("date").toString().toStdString()},
+                     P{static_cast<int>(pr.value("longHeld").toDouble())},
+                     P{static_cast<int>(pr.value("shortHeld").toDouble())},
+                     P{static_cast<int>(pr.value("longBought").toDouble())},
+                     P{static_cast<int>(pr.value("longSold").toDouble())},
+                     P{static_cast<int>(pr.value("shortBought").toDouble())},
+                     P{static_cast<int>(pr.value("shortSold").toDouble())},
+                     P{pr.value("longTurnover").toDouble()},
+                     P{pr.value("shortTurnover").toDouble()},
+                     P{pr.value("longRawReturn").toDouble()},
+                     P{pr.value("shortRawReturn").toDouble()},
+                     P{pr.value("strategyNetReturn").toDouble()}});
+            }
+        }
+    }
+
+    return result;
+}
+
+// ── 统一放出缓存的批量回测结果 (UI 线程执行) ──
+void FactorBacktestBridge::publishBatchResults(const QVariantList& results)
+{
+    for (const QVariant& entry : results) {
+        const QVariantMap result = entry.toMap();
+        m_resultMetrics = result.value(QStringLiteral("metrics")).toMap();
+        m_backtestResult = result;
+        emit resultMetricsChanged();
+        emit backtestResultChanged();
+        emit backtestCompleted(result);
+    }
+    // 批量(>1份): 母结果携带 results 数组, 驱动 QML 结果切换器
+    // (applyDisplayedBacktestResult 按 selectedBacktestResultIndex 从 results 取单份)
+    if (results.size() > 1) {
+        QVariantMap batchResult = results.last().toMap();
+        batchResult[QStringLiteral("results")] = results;
+        m_backtestResult = batchResult;
+        emit backtestResultChanged();
+    }
+}
+
 void FactorBacktestBridge::startBacktestWithFactors(
     const QVariantList& factorIds,
     const QString& groupText,
@@ -384,9 +798,28 @@ void FactorBacktestBridge::startBacktestWithFactors(
     config.cacheStartDate = parseQmlDate(startDate);
     config.cacheEndDate   = parseQmlDate(endDate);
 
+    // ── 运行计划 ──
+    // 组合模式(compositeChildren 非空): 强制 Composite, 单次加权组合回测;
+    // 非组合多因子: 拆分为每因子独立的单因子回测, 互不影响, 各出一份结果
+    std::vector<Factor::backtest::BacktestRunConfig> runConfigs;
+    if (!compositeChildren.isEmpty()) {
+        config.factorMode = Factor::backtest::FactorMode::Composite;
+        runConfigs.push_back(config);
+    } else if (config.factorIds.size() <= 1) {
+        runConfigs.push_back(config);
+    } else {
+        runConfigs.reserve(config.factorIds.size());
+        for (const auto& singleFactorId : config.factorIds) {
+            Factor::backtest::BacktestRunConfig singleRunConfig = config;
+            singleRunConfig.factorMode = Factor::backtest::FactorMode::Single;
+            singleRunConfig.factorIds = {singleFactorId};
+            runConfigs.push_back(std::move(singleRunConfig));
+        }
+    }
+
     // 异步: 全部重操作移到 worker 线程，不阻塞 UI
     int capturedDatasetId = m_selectedDatasetId;
-    m_workerPool->post([this, config, capturedDatasetId]() {
+    m_workerPool->post([this, runConfigs, capturedDatasetId]() {
         // 初始化阶段进度
         QMetaObject::invokeMethod(this, [this]() {
             m_progress = 2.0; m_statusText = QStringLiteral("初始化中...");
@@ -449,416 +882,64 @@ void FactorBacktestBridge::startBacktestWithFactors(
             }
         }
 
-        m_orchestrator->run(
-            config,
-            // 进度回调
-            [this](double progress, const std::string& status) {
-                QMetaObject::invokeMethod(this, [this, progress, status]() {
-                    m_progress = progress;
-                    m_statusText = QString::fromStdString(status);
-                    emit progressChanged(); emit statusChanged();
-                    emit backtestProgress(progress, m_statusText);
-                }, Qt::QueuedConnection);
-            },
-            // 结果回调
-            [this, config](const std::string& serializedResult) {
-                QMetaObject::invokeMethod(this, [this, serializedResult, config]() {
-                    QString jsonStr = QString::fromStdString(serializedResult);
-                    QJsonParseError parseError;
-                    QJsonDocument doc = QJsonDocument::fromJson(jsonStr.toUtf8(), &parseError);
+        // ── 顺序执行运行计划: 每个 config 独立回测互不影响, 结果缓存, 全部完成后统一放出 ──
+        const int totalRuns = static_cast<int>(runConfigs.size());
+        QVariantList batchResults;
+        for (int runIndex = 0; runIndex < totalRuns; ++runIndex) {
+            const auto& runConfig = runConfigs[static_cast<std::size_t>(runIndex)];
 
-                    // 检查 orchestrator 是否返回了错误
-                    if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
-                        QJsonObject rootObj = doc.object();
-                        if (rootObj.contains("error") && !rootObj["error"].toString().isEmpty()) {
-                            emit backtestFailed(rootObj["error"].toString());
-                            m_isRunning.store(false); emit isRunningChanged();
-                            return;
-                        }
-                    }
+            std::string serializedResult;
+            m_orchestrator->run(
+                runConfig,
+                // 进度回调: 按因子数折算总进度 (k*100+p)/N
+                [this, runIndex, totalRuns](double progress, const std::string& status) {
+                    const double mappedProgress =
+                        (static_cast<double>(runIndex) * 100.0 + progress) / totalRuns;
+                    const QString statusText = totalRuns > 1
+                        ? QStringLiteral("因子 %1/%2: %3").arg(runIndex + 1).arg(totalRuns)
+                              .arg(QString::fromStdString(status))
+                        : QString::fromStdString(status);
+                    QMetaObject::invokeMethod(this, [this, mappedProgress, statusText]() {
+                        m_progress = mappedProgress;
+                        m_statusText = statusText;
+                        emit progressChanged(); emit statusChanged();
+                        emit backtestProgress(mappedProgress, m_statusText);
+                    }, Qt::QueuedConnection);
+                },
+                // 结果回调: 编排器同步调用, 仅暂存序列化结果
+                [&serializedResult](const std::string& serialized) {
+                    serializedResult = serialized;
+                });
 
-                    // 解析失败或缺少 metrics 时使用空对象
-                    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
-                        emit backtestFailed(QStringLiteral("回测结果解析失败: ") + parseError.errorString());
-                        m_isRunning.store(false); emit isRunningChanged();
-                        return;
-                    }
-
-                    QJsonObject rootObj = doc.object();
-                    QJsonObject metricsObj = rootObj.value("metrics").toObject();
-
-                    // ── 手动构建 QVariantMap 确保深层嵌套正确 ──
-                    QVariantMap result;
-                    result["status"]  = QStringLiteral("SUCCESS");
-                    result["results"] = QVariantList(); // 单结果模式
-                    // 组合因子回测名(编排器 root 层已输出;单因子时不设此字段)
-                    if (rootObj.contains("factorName") && !rootObj["factorName"].toString().isEmpty())
-                        result["factorName"] = rootObj["factorName"].toString();
-
-                    // groups
-                    QJsonArray groupsArr = metricsObj.value("groups").toArray();
-                    QVariantList groupsList;
-                    for (int i = 0; i < groupsArr.size(); ++i) {
-                        groupsList.append(groupsArr[i].toObject().toVariantMap());
-                    }
-
-                    // ic
-                    QVariantMap icMap = metricsObj.value("ic").toObject().toVariantMap();
-
-                    // execution
-                    QVariantMap execMap = metricsObj.value("execution").toObject().toVariantMap();
-
-                    // factorMetrics — Calculator 输出的全部因子质量指标
-                    QVariantMap fmMap = metricsObj.value("factorMetrics").toObject().toVariantMap();
-
-                    // ── 构建 factorQuality（AnalysisPage 需要的富结构）──
-                    QJsonObject fqRaw = metricsObj.value("factorQuality").toObject();
-                    int rating = fqRaw.value("rating").toInt(1);
-                    QString ratingLabel = fqRaw.value("label").toString(QStringLiteral("合格"));
-
-                    // tier: "core"=大卡152px, "optional"=标准114px, "auxiliary"=紧凑108px
-                    auto mk = [](const QString& key, const QString& title, const QString& subtitle,
-                                 double val, const QString& format, bool emphasize,
-                                 const QString& tier, int units = 1) {
-                        QVariantMap m;
-                        bool avail = std::isfinite(val);
-                        m["key"] = key; m["title"] = title; m["subtitle"] = avail ? subtitle : QStringLiteral("不可用");
-                        m["label"] = title; m["value"] = avail ? val : 0.0; m["format"] = format;
-                        m["emphasize"] = emphasize; m["tier"] = tier; m["units"] = units;
-                        m["available"] = avail;
-                        m["goodThreshold"] = 0.0;  // 由调用方覆盖
-                        m["direction"]    = QStringLiteral("high");
-                        return m;
-                    };
-
-                    // ══ 核心指标：判断因子是否合格（5 张，刚好一行）══
-                    // goodThreshold = 文档 5.1 合格标准
-                    QVariantList coreMetrics;
-                    coreMetrics.append(mk("rankIcMean", "IC 均值", "Rank IC 均值",
-                        icMap.value("value").toDouble(), "number", true, "core"));
-                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.02; coreMetrics.last() = m; }
-                    coreMetrics.append(mk("rankIcir",   "ICIR", "IC 信息比率",
-                        icMap.value("ir").toDouble(), "number", true, "core"));
-                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.3; coreMetrics.last() = m; }
-                    coreMetrics.append(mk("icWinRate",  "IC 胜率", "IC>0 的期数占比",
-                        icMap.value("winRate").toDouble(), "percent2", false, "core"));
-                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.55; coreMetrics.last() = m; }
-                    coreMetrics.append(mk("monotonicity","单调性", "分组收益单调变化程度",
-                        fmMap.value("monotonicityScore").toDouble(), "number", false, "core"));
-                    { auto m = coreMetrics.last().toMap(); m["goodThreshold"] = 0.7; coreMetrics.last() = m; }
-                    coreMetrics.append(mk("longShortSharpe","多空夏普", "多空组合风险调整收益",
-                        fmMap.value("longShortSharpe").toDouble(), "number", true, "core"));
-                    { auto m = coreMetrics.last().toMap(); m["direction"] = QStringLiteral("high"); coreMetrics.last() = m; }
-
-                    // ══ 扩展指标：辅助判断因子质量 ══
-                    QVariantList optionalMetrics;
-                    optionalMetrics.append(mk("rankIcStd", "IC 标准差", "IC 波动幅度",
-                        icMap.value("std").toDouble(), "number", false, "optional"));
-                    optionalMetrics.append(mk("icPValue", "IC P 值", "IC 显著性检验 P 值，<0.05 显著",
-                        icMap.value("pValue").toDouble(), "number", false, "optional"));
-                    optionalMetrics.append(mk("icTStat", "IC T 统计", "IC 显著性 T 统计量",
-                        icMap.value("tStat").toDouble(), "number", false, "optional"));
-                    optionalMetrics.append(mk("icHalfLife","IC 半衰期", "IC 自相关衰减至一半的天数",
-                        icMap.value("halfLife").toDouble(), "integer", false, "optional"));
-                    optionalMetrics.append(mk("longShortRet","多空年化", "多空组合年化收益",
-                        fmMap.value("longShortAnnualReturn").toDouble(), "percent2", false, "optional"));
-                    optionalMetrics.append(mk("costAdjSharpe","成本夏普", "扣除交易成本后的多空夏普",
-                        fmMap.value("costAdjustedSharpe").toDouble(), "number", false, "optional"));
-                    optionalMetrics.append(mk("monthlyWinRate","月度胜率", "月度正收益占比",
-                        fmMap.value("monthlyWinRate").toDouble(), "percent2", false, "optional"));
-                    optionalMetrics.append(mk("annualTurnover","年化换手", "因子持仓的年化换手率",
-                        fmMap.value("annualTurnover").toDouble(), "number2", false, "optional"));
-                    optionalMetrics.append(mk("alpha","Alpha", "因子超额收益",
-                        fmMap.value("alpha").toDouble(), "number", false, "optional"));
-
-                    // ══ 辅助指标：参考信息（可折叠）══
-                    QVariantList auxiliaryMetrics;
-                    auxiliaryMetrics.append(mk("numGroups","分组数", "回测分组数量",
-                        fmMap.value("numGroups").toDouble(), "number", false, "auxiliary"));
-                    auxiliaryMetrics.append(mk("totalSignals","总信号数", "回测期总信号量",
-                        execMap.value("totalSignals").toDouble(), "number", false, "auxiliary"));
-                    auxiliaryMetrics.append(mk("validSamples","有效样本", "有效回测周期数",
-                        execMap.value("validSampleCount").toDouble(), "number", false, "auxiliary"));
-
-                    // groupCharts — 从 groups 构建 QML 期望的 {title, subtitle, series, isPercent} 格式
-                    QVariantList groupCharts;
-                    if (groupsArr.size() > 0) {
-                        QVariantMap chart;
-                        chart["title"]     = QStringLiteral("分组收益");
-                        chart["subtitle"]  = QStringLiteral("各组平均单期收益与平均股票数");
-                        chart["isPercent"] = true;
-                        QVariantList series;
-                        for (int i = 0; i < groupsArr.size(); ++i) {
-                            QJsonObject g = groupsArr[i].toObject();
-                            QVariantMap bar;
-                            bar["label"] = g.value("groupName").toString();
-                            bar["value"] = g.value("returnRate").toDouble();
-                            series.append(bar);
-                        }
-                        chart["series"] = series;
-                        groupCharts.append(chart);
-                    }
-
-                    // returnSeries — 从 orchestrator JSON 提取三条分离的收益率序列
-                    QJsonObject retObj = metricsObj.value("returnSeries").toObject();
-                    auto jsonArrayToVariantList = [](const QJsonArray& arr) {
-                        QVariantList out;
-                        for (int i = 0; i < arr.size(); ++i)
-                            out.append(arr[i].toDouble());
-                        return out;
-                    };
-                    QVariantList rawReturns     = jsonArrayToVariantList(retObj.value("raw").toArray());
-                    QVariantList costAdjusted   = jsonArrayToVariantList(retObj.value("costAdjusted").toArray());
-                    QVariantList riskAdjusted   = jsonArrayToVariantList(retObj.value("riskAdjusted").toArray());
-                    QVariantMap returnSeries;
-                    returnSeries["rawReturns"]            = rawReturns;
-                    returnSeries["costAdjustedReturns"]   = costAdjusted;
-                    returnSeries["riskAdjustedReturns"]   = riskAdjusted;
-
-                    // 评级检查项
-                    QVariantList ratingChecks;
-                    auto addCheck = [&](const QString& label, bool passed,
-                                        const QString& actual, const QString& threshold) {
-                        QVariantMap c;
-                        c["label"]         = label;
-                        c["passed"]        = passed;
-                        c["actualText"]    = actual;
-                        c["thresholdText"] = threshold;
-                        ratingChecks.append(c);
-                    };
-                    auto fmtVal = [](double v, const QString& fmt) {
-                        if (!std::isfinite(v)) return QStringLiteral("--");
-                        if (fmt == "percent") return QString::number(v * 100.0, 'f', 1) + "%";
-                        return QString::number(v, 'f', 3);
-                    };
-                    bool hasGroups = groupsArr.size() >= 2;
-                    bool monotonic = true;
-                    if (hasGroups) {
-                        for (int i = 1; i < groupsArr.size(); ++i) {
-                            if (groupsArr[i].toObject().value("returnRate").toDouble() >
-                                groupsArr[i-1].toObject().value("returnRate").toDouble())
-                                { monotonic = false; break; }
-                        }
-                    }
-                    double sharpeVal = execMap.value("sharpeRatio").toDouble();
-                    double icVal     = icMap.value("value").toDouble();
-                    double icirVal   = icMap.value("ir").toDouble();
-                    double wrVal     = icMap.value("winRate").toDouble();
-                    addCheck(QStringLiteral("分组单调性"), monotonic,
-                        monotonic ? QStringLiteral("单调递减") : QStringLiteral("不单调"),
-                        QStringLiteral("G1 ≥ G2 ≥ ... ≥ GN"));
-                    addCheck(QStringLiteral("夏普比率 > 0"), sharpeVal > 0.0,
-                        fmtVal(sharpeVal, "number"), QStringLiteral("> 0"));
-                    addCheck(QStringLiteral("IC 均值 > 0"), icVal > 0.0,
-                        fmtVal(icVal, "number"), QStringLiteral("> 0"));
-                    addCheck(QStringLiteral("IC 胜率 > 50%"), wrVal > 0.5,
-                        fmtVal(wrVal, "percent"), QStringLiteral("> 50%"));
-                    addCheck(QStringLiteral("ICIR > 0"), icirVal > 0.0,
-                        fmtVal(icirVal, "number"), QStringLiteral("> 0"));
-
-                    // 组装完整 factorQuality
-                    QVariantMap fq;
-                    fq["numGroups"]         = fmMap.value("numGroups").toDouble();
-                    fq["coreRating"]        = rating;
-                    fq["coreRatingLabel"]   = ratingLabel;
-                    fq["coreRatingTitle"]   = QStringLiteral("因子质量评级");
-                    fq["coreRatingSummary"] = rating >= 3 ? QStringLiteral("因子表现优秀，分组单调且风险调整收益良好")
-                                             : rating >= 2 ? QStringLiteral("因子表现良好，具备选股能力")
-                                             : rating >= 1 ? QStringLiteral("因子基本合格，可考虑与其他因子复合使用")
-                                             : QStringLiteral("因子表现不佳，建议重新审视因子逻辑");
-                    fq["coreRatingChecks"]  = ratingChecks;
-                    fq["coreMetrics"]       = coreMetrics;
-                    fq["groupCharts"]       = groupCharts;
-                    fq["returnSeries"]      = returnSeries;
-
-                    // groupReturnSeries — 每组每日收益时间序列
-                    QJsonArray grsArr = metricsObj.value("groupReturnSeries").toArray();
-                    QVariantList groupReturnSeries;
-                    for (int gi = 0; gi < grsArr.size(); ++gi) {
-                        QJsonObject gObj = grsArr[gi].toObject();
-                        QVariantMap gMap;
-                        gMap["groupIndex"] = gObj.value("groupIndex").toInt();
-                        gMap["groupName"]  = gObj.value("groupName").toString();
-                        gMap["data"]       = jsonArrayToVariantList(gObj.value("data").toArray());
-                        groupReturnSeries.append(gMap);
-                    }
-                    fq["groupReturnSeries"] = groupReturnSeries;
-                    fq["optionalMetrics"]   = optionalMetrics;
-                    fq["auxiliaryMetrics"]  = auxiliaryMetrics;
-
-                    QVariantMap coreSection;
-                    coreSection["title"]    = QStringLiteral("核心指标");
-                    coreSection["subtitle"] = QStringLiteral("因子回测关键绩效与质量指标");
-                    fq["coreSection"]       = coreSection;
-
-                    QVariantMap optSection;
-                    optSection["title"]    = QStringLiteral("扩展指标");
-                    optSection["subtitle"] = QStringLiteral("补充风险与统计指标");
-                    fq["optionalSection"]  = optSection;
-
-                    QVariantMap auxSection;
-                    auxSection["title"]              = QStringLiteral("辅助指标");
-                    auxSection["subtitle"]           = QStringLiteral("其他参考指标");
-                    auxSection["expandedSubtitle"]   = QStringLiteral("收起辅助指标");
-                    auxSection["collapsedSubtitle"]  = QStringLiteral("展开辅助指标");
-                    fq["auxiliarySection"]           = auxSection;
-
-                    // 组装 metrics
-                    QVariantMap metrics;
-                    metrics["groups"]        = groupsList;
-                    metrics["factorMetrics"] = fmMap;     // C++ 原样, 写入 DB
-                    metrics["ic"]            = icMap;
-                    metrics["execution"]     = execMap;
-                    metrics["factorQuality"] = fq;
-
-                    m_resultMetrics = metrics;
-                    result["metrics"] = metrics;
-
-                    // config — QML 读取 config.factorId / startDate / endDate / benchmarkSymbol
-                    QVariantMap cfgMap;
-                    if (!config.factorIds.empty()) {
-                        QVariantList allFactorIds;
-                        for (const auto& fid : config.factorIds)
-                            allFactorIds.append(QString::fromStdString(fid));
-                        cfgMap["factorIds"] = allFactorIds;
-                        cfgMap["factorId"]  = QString::fromStdString(config.factorIds.front());
-                        result["factorId"]   = cfgMap["factorId"];
-                        result["activeAnalysisFactorId"] = cfgMap["factorId"];
-                    }
-                    cfgMap["benchmarkSymbol"] = QString::fromStdString(config.benchmarkSymbol);
-                    cfgMap["initialCapital"]  = config.initialCapital;
-                    cfgMap["forwardDays"]     = config.forwardDays;
-                    cfgMap["rebalanceDays"]   = config.rebalanceDays;
-                    cfgMap["numGroups"]       = config.numGroups;
-                    cfgMap["commissionRate"]  = config.commissionRate;
-                    cfgMap["slippageRate"]    = config.slippageRate;
-                    cfgMap["riskFreeRate"]    = config.riskFreeRate;
-                    cfgMap["adjustPriceType"] = QString::fromStdString(config.adjustPriceType);
-                    cfgMap["winsorizeQuantile"] = config.winsorizeQuantile;
-                    cfgMap["factorMode"]      = static_cast<int>(config.factorMode);
-                    cfgMap["startDate"] = rootObj.value("startDate").toString();
-                    cfgMap["endDate"]   = rootObj.value("endDate").toString();
-                    result["config"] = cfgMap;
-
-                    // 先结束 isRunning（让 onBacktestResultChanged 的 guard 通过）
-                    m_progress = 100.0;
-                    m_statusText = QStringLiteral("回测完成");
+            QString runError;
+            QVariantMap runResult = processRunResult(runConfig, serializedResult, runError);
+            if (runResult.isEmpty()) {
+                // 任一因子失败 → 中止整批: 已完成的结果统一放出后报失败
+                const QString failedFactorId = runConfig.factorIds.empty()
+                    ? QString()
+                    : QString::fromStdString(runConfig.factorIds.front());
+                QMetaObject::invokeMethod(this, [this, batchResults, failedFactorId, runError]() {
                     m_isRunning.store(false);
-                    emit progressChanged(); emit statusChanged();
                     emit isRunningChanged();
-
-                    emit resultMetricsChanged();
-
-                    m_backtestResult = result;
-                    emit backtestResultChanged();
-                    emit backtestCompleted(result);
-
-                    // ── 持久化到 alpha.factor_backtest_* ──
-                    {
-                        auto& pool = astock::database::NativePgConnectionPool::instance();
-                        auto db = pool.getConnection();
-                        if (db && db->isOpen()) {
-                            using P = astock::database::SqlParam;
-                            std::string runId = foundation::utils::Uuid::generate().to_string_no_dashes();
-                            std::string fid = config.factorIds.empty() ? "unknown" :
-                                (config.factorIds.size() == 1 ? config.factorIds.front() :
-                                 [&]() { std::string s; for (size_t i=0;i<config.factorIds.size();++i)
-                                    { if(i>0) s+=","; s+=config.factorIds[i]; } return s; }());
-                            std::string cfgJson = QJsonDocument(QJsonObject::fromVariantMap(cfgMap)).toJson(QJsonDocument::Compact).toStdString();
-                            std::string summaryJson = QJsonDocument(QJsonObject::fromVariantMap(metrics)).toJson(QJsonDocument::Compact).toStdString();
-                            std::string groupsJsonStr = QJsonDocument(QJsonArray::fromVariantList(groupsList)).toJson(QJsonDocument::Compact).toStdString();
-
-                            db->executeUpdate(
-                                "INSERT INTO alpha.factor_backtest_runs(id,factor_id,config_json,summary_json,groups_json) VALUES($1,$2,$3,$4,$5)",
-                                {P{runId}, P{fid}, P{cfgJson}, P{summaryJson}, P{groupsJsonStr}});
-
-                            // ── 每日收益序列 ──
-                            QJsonArray dateList = rootObj.value("dateList").toArray();
-                            QVariantList rawRets = returnSeries["rawReturns"].toList();
-                            QVariantList costRets = returnSeries["costAdjustedReturns"].toList();
-                            QVariantList riskRets = returnSeries["riskAdjustedReturns"].toList();
-                            // groupReturnSeries: [{"groupIndex":0,"data":[r0,r1,...]}, ...]
-                            QJsonArray grsArr = metricsObj.value("groupReturnSeries").toArray();
-                            std::vector<QJsonArray> grpData;
-                            for (int gi = 0; gi < grsArr.size(); ++gi)
-                                grpData.push_back(grsArr[gi].toObject().value("data").toArray());
-                            for (int di = 0; di < dateList.size(); ++di) {
-                                std::string ds = dateList[di].toString().toStdString();
-                                double rls = di < rawRets.size()  ? rawRets[di].toDouble() : 0.0;
-                                double cls = di < costRets.size() ? costRets[di].toDouble() : 0.0;
-                                double rks = di < riskRets.size() ? riskRets[di].toDouble() : 0.0;
-                                QJsonArray grArr;
-                                for (size_t gi = 0; gi < grpData.size(); ++gi)
-                                    if (di < grpData[gi].size())
-                                        grArr.append(grpData[gi][di].toDouble());
-                                std::string grJson = QJsonDocument(grArr).toJson(QJsonDocument::Compact).toStdString();
-                                db->executeUpdate(
-                                    "INSERT INTO alpha.factor_backtest_daily(run_id,trade_date,group_returns_json,"
-                                    "raw_long_short,cost_adj_long_short,risk_adj_long_short) "
-                                    "VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(run_id,trade_date) DO UPDATE SET "
-                                    "raw_long_short=EXCLUDED.raw_long_short,cost_adj_long_short=EXCLUDED.cost_adj_long_short,"
-                                    "risk_adj_long_short=EXCLUDED.risk_adj_long_short",
-                                    {P{runId}, P{ds}, P{grJson}, P{rls}, P{cls}, P{rks}});
-                            }
-
-                            // ── IC 日序列 ──
-                            QJsonArray icArr = metricsObj.value("icSeries").toArray();
-                            for (int ii = 0; ii < icArr.size() && ii < dateList.size(); ++ii) {
-                                std::string ds = dateList[ii].toString().toStdString();
-                                double icv = icArr[ii].toDouble();
-                                db->executeUpdate(
-                                    "INSERT INTO alpha.factor_backtest_ic_daily(run_id,trade_date,rank_ic) "
-                                    "VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO UPDATE SET rank_ic=EXCLUDED.rank_ic",
-                                    {P{runId}, P{ds}, P{icv}});
-                            }
-
-                            // ── 交易记录 ──
-                            QJsonArray tradeArr = metricsObj.value("tradeLog").toArray();
-                            for (int ti = 0; ti < tradeArr.size(); ++ti) {
-                                QJsonObject tr = tradeArr[ti].toObject();
-                                db->executeUpdate(
-                                    "INSERT INTO alpha.factor_backtest_trades(run_id,trade_date,symbol,side,basket,price,cost_rate) "
-                                    "VALUES($1,$2,$3,$4,$5,$6,$7)",
-                                    {P{runId},
-                                     P{tr.value("date").toString().toStdString()},
-                                     P{tr.value("symbol").toString().toStdString()},
-                                     P{tr.value("side").toString().toStdString()},
-                                     P{tr.value("basket").toString().toStdString()},
-                                     P{tr.value("price").toDouble()},
-                                     P{tr.value("costRate").toDouble()}});
-                            }
-
-                            // ── 每期追踪 ──
-                            QJsonArray periodArr = metricsObj.value("periodTrackings").toArray();
-                            for (int pi = 0; pi < periodArr.size(); ++pi) {
-                                QJsonObject pr = periodArr[pi].toObject();
-                                db->executeUpdate(
-                                    "INSERT INTO alpha.factor_backtest_periods(run_id,trade_date,"
-                                    "long_held,short_held,long_bought,long_sold,short_bought,short_sold,"
-                                    "long_turnover,short_turnover,long_raw_return,short_raw_return,strategy_net_return) "
-                                    "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) "
-                                    "ON CONFLICT(run_id,trade_date) DO NOTHING",
-                                    {P{runId},
-                                     P{pr.value("date").toString().toStdString()},
-                                     P{static_cast<int>(pr.value("longHeld").toDouble())},
-                                     P{static_cast<int>(pr.value("shortHeld").toDouble())},
-                                     P{static_cast<int>(pr.value("longBought").toDouble())},
-                                     P{static_cast<int>(pr.value("longSold").toDouble())},
-                                     P{static_cast<int>(pr.value("shortBought").toDouble())},
-                                     P{static_cast<int>(pr.value("shortSold").toDouble())},
-                                     P{pr.value("longTurnover").toDouble()},
-                                     P{pr.value("shortTurnover").toDouble()},
-                                     P{pr.value("longRawReturn").toDouble()},
-                                     P{pr.value("shortRawReturn").toDouble()},
-                                     P{pr.value("strategyNetReturn").toDouble()}});
-                            }
-                        }
-                    }
-
-                    emit backtestProgress(100.0, m_statusText);
+                    publishBatchResults(batchResults);
+                    emit backtestFailed(
+                        QStringLiteral("因子 %1 回测失败: %2").arg(failedFactorId, runError));
                 }, Qt::QueuedConnection);
+                return;
             }
-        );
+            batchResults.append(runResult);
+        }
+
+        // ── 全部完成: 统一放出全部结果 ──
+        QMetaObject::invokeMethod(this, [this, batchResults]() {
+            m_progress = 100.0;
+            m_statusText = QStringLiteral("回测完成");
+            m_isRunning.store(false);
+            emit progressChanged(); emit statusChanged();
+            emit isRunningChanged();
+            publishBatchResults(batchResults);
+            emit backtestProgress(100.0, m_statusText);
+        }, Qt::QueuedConnection);
     });
 }
 
@@ -1048,7 +1129,13 @@ QVariantList FactorBacktestBridge::normalizeFactorIds(const QVariantList& ids) c
   std::sort(out.begin(), out.end(), [](const QVariant& a, const QVariant& b) { return a.toString() < b.toString(); });
   return out; }
 
-QVariantList FactorBacktestBridge::displayedBacktestResults(const QVariantMap& r) const { QVariantList l; l.append(r); return l; }
+QVariantList FactorBacktestBridge::displayedBacktestResults(const QVariantMap& r) const
+{
+    // 批量回测: 母结果的 results 数组即切换列表; 单结果: 包装为单元素列表
+    const QVariantList batch = r.value(QStringLiteral("results")).toList();
+    if (!batch.isEmpty()) return batch;
+    QVariantList l; l.append(r); return l;
+}
 QString FactorBacktestBridge::displayedBacktestResultName(const QVariantMap& e) const { return e.value("factorId").toString(); }
 QVariantMap FactorBacktestBridge::buildSingleFactorRunEntry(const QVariantMap& r, const QString& n) const { QVariantMap m = r; m["factorId"] = n; return m; }
 QVariantList FactorBacktestBridge::pushSingleFactorRunHistory(const QVariantList& h, const QVariantMap& e, int limit, const QString&) const

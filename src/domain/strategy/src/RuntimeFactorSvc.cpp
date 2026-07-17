@@ -91,6 +91,28 @@ void RuntimeFactorSvc::setFactorIds(const std::vector<std::string>& factorIds) {
     m_factorIds = factorIds;
 }
 
+const std::map<std::string, double>* RuntimeFactorSvc::backtestValuesBySymbol(
+    const std::string& instanceId, std::int32_t date)
+{
+    if (!m_dataSvc || !m_engine) return nullptr;
+    // 与 getValues 回测分支共享同一份缓存: 首次访问全量计算
+    if (m_factorCache.find(instanceId) == m_factorCache.end()) {
+        factor::compute::FactorCacheKey key;
+        key.factorName = instanceId;
+        factor::compute::MarketMatrixBatch batch;
+        batch.batchIndex = 0;
+        m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
+        INTERNAL_INFO_STREAM << "[RFS] backtestValuesBySymbol cache FILLED: id=" << instanceId
+                             << " dates=" << m_factorCache[instanceId].size();
+    }
+    char dateBuf[16];
+    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                  date / 10000, (date / 100) % 100, date % 100);
+    const auto& cache = m_factorCache[instanceId];
+    const auto it = cache.find(dateBuf);
+    return it != cache.end() ? &it->second : nullptr;
+}
+
 std::vector<std::string> RuntimeFactorSvc::getRequiredFields() const {
     std::vector<std::string> fields;
     for (const auto& fid : m_factorIds) {

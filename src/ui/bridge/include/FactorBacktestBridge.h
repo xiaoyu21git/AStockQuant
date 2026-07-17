@@ -153,6 +153,16 @@ private:
         const factor::compute::AnalysisReport& report,
         const QString& factorId) const;
 
+    /// @brief 单次回测运行结果的解析/组装/持久化 (worker 线程执行, 不碰成员/不发信号)
+    /// @param errorOut 编排器返回错误或结果解析失败时的原因
+    /// @return 组装完成的结果 map; 失败返回空 map
+    QVariantMap processRunResult(const Factor::backtest::BacktestRunConfig& config,
+                                 const std::string& serializedResult,
+                                 QString& errorOut) const;
+
+    /// @brief 统一放出缓存的批量回测结果 (UI 线程执行, 每份结果各发一次 backtestCompleted)
+    void publishBatchResults(const QVariantList& results);
+
     static QVariantList buildCoreMetrics(const factor::compute::FactorQualityMetrics16View& metrics,
                                          const factor::compute::FactorQualityMetrics16DiagnosticsView& diag);
     static QVariantList buildGroupCharts(const factor::compute::SimulatedTradingResult& tradingResult);

@@ -739,7 +739,10 @@ function getPositionSizingDescription(method) {
             type: "select",
             label: "允许做空",
             description: "是否允许空头仓位",
-            options: [false, true],
+            options: [
+                {value: false, label: "否"},
+                {value: true, label: "是"}
+            ],
             default: false,
             category: tr('strategyCreation.commonParameters')
         });
@@ -785,8 +788,13 @@ function getPositionSizingDescription(method) {
             id: "weightScheme",
             type: "select",
             label: "权重方案",
-            description: "0=等权重 1=市值加权 2=信号强度加权 3=风险平价",
-            options: [0, 1, 2, 3],
+            description: "仓位权重分配方案",
+            options: [
+                {value: 0, label: "等权重"},
+                {value: 1, label: "市值加权"},
+                {value: 2, label: "信号强度加权"},
+                {value: 3, label: "风险平价"}
+            ],
             default: 0,
             category: tr('strategyCreation.commonParameters')
         });
@@ -794,8 +802,14 @@ function getPositionSizingDescription(method) {
             id: "rebalanceFrequency",
             type: "select",
             label: "调仓频率",
-            description: "0=每日 1=每周 2=每月 3=每季度 4=每年",
-            options: [0, 1, 2, 3, 4],
+            description: "策略调仓频率",
+            options: [
+                {value: 0, label: "每日"},
+                {value: 1, label: "每周"},
+                {value: 2, label: "每月"},
+                {value: 3, label: "每季度"},
+                {value: 4, label: "每年"}
+            ],
             default: 0,
             category: tr('strategyCreation.commonParameters')
         });
@@ -807,7 +821,12 @@ function getPositionSizingDescription(method) {
         if (normalizedStrategyTypeIndex === StrategyTypeIndex.DoubleMovingAverage) {
             configs.push({id: "fastPeriod", type: "slider", label: "快线周期", default: 5, min: 2, max: 100, step: 1, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "slowPeriod", type: "slider", label: "慢线周期", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
-            configs.push({id: "priceField", type: "select", label: "价格字段", options: [0, 1, 2, 3, 4], default: 3, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "priceField", type: "select", label: "价格字段", description: "均线计算所用的价格", options: [
+                {value: 0, label: "收盘价"},
+                {value: 1, label: "开盘价"},
+                {value: 2, label: "最高价"},
+                {value: 3, label: "最低价"}
+            ], default: 0, category: tr('strategyCreation.personalizedParameters')});
         } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.TurtleBreakout) {
             configs.push({id: "channelPeriod", type: "slider", label: "通道周期", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "breakoutMultiplier", type: "slider", label: "突破倍数", default: 1.0, min: 0.1, max: 5.0, step: 0.1, decimals: 1, category: tr('strategyCreation.personalizedParameters')});
@@ -825,7 +844,10 @@ function getPositionSizingDescription(method) {
                    || normalizedStrategyTypeIndex === StrategyTypeIndex.MultiFactor) {
             configs.push({id: "factorWeights", type: "input", label: "因子权重", placeholder: "[{\"factorId\":\"f1\",\"weight\":0.2}]", category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "topN", type: "slider", label: "TopN", default: 50, min: 1, max: 500, step: 1, category: tr('strategyCreation.personalizedParameters')});
-            configs.push({id: "industryNeutral", type: "select", label: "行业中性", options: [false, true], default: false, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "industryNeutral", type: "select", label: "行业中性", options: [
+                {value: false, label: "否"},
+                {value: true, label: "是"}
+            ], default: false, category: tr('strategyCreation.personalizedParameters')});
         } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.EarningsSurprise) {
             configs.push({id: "surpriseThreshold", type: "slider", label: "惊喜阈值", default: 0.2, min: 0.01, max: 2.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "holdDays", type: "slider", label: "持有天数", default: 5, min: 1, max: 120, step: 1, category: tr('strategyCreation.personalizedParameters')});
@@ -854,7 +876,10 @@ function getPositionSizingDescription(method) {
             configs.push({id: "historicalVolatilityWindow", type: "slider", label: "历史波动率窗口", default: 20, min: 5, max: 250, step: 1, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "entrySpreadUpper", type: "slider", label: "入场上阈", default: 0.05, min: 0.0, max: 1.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
             configs.push({id: "entrySpreadLower", type: "slider", label: "入场下阈", default: -0.05, min: -1.0, max: 0.0, step: 0.01, decimals: 2, category: tr('strategyCreation.personalizedParameters')});
-            configs.push({id: "deltaNeutral", type: "select", label: "Delta 中性", options: [false, true], default: true, category: tr('strategyCreation.personalizedParameters')});
+            configs.push({id: "deltaNeutral", type: "select", label: "Delta 中性", options: [
+                {value: false, label: "否"},
+                {value: true, label: "是"}
+            ], default: true, category: tr('strategyCreation.personalizedParameters')});
         } else if (normalizedStrategyTypeIndex === StrategyTypeIndex.Custom) {
             configs.push({
                 id: "customCode",

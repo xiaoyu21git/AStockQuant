@@ -341,11 +341,16 @@ Rectangle {
     
     // ============ 方法 ============
     
-    // 标准化选项格式
+    // 缓存上次的原始 options 和标准化结果, 避免每次 configChanged 重建数组导致死循环
+    property var _lastRawOptions: undefined
+    property var _cachedNormalized: []
+
     function normalizeOptions(opts) {
         if (!opts || !Array.isArray(opts)) return []
-        
-        return opts.map(function(opt) {
+        if (_lastRawOptions !== undefined && _lastRawOptions === opts) return _cachedNormalized
+
+        _lastRawOptions = opts
+        _cachedNormalized = opts.map(function(opt) {
             if (typeof opt === "object") {
                 return {
                     value: opt.value !== undefined ? opt.value : opt.label,
@@ -362,6 +367,7 @@ Rectangle {
                 }
             }
         })
+        return _cachedNormalized
     }
     
     function updateValue(newValue) {

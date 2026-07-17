@@ -52,6 +52,11 @@ public:
     /// @brief 设置关注的因子实例 ID 列表（copySnapshots 迭代用）
     void setFactorIds(const std::vector<std::string>& factorIds);
 
+    /// @brief 回测: 直取某因子某交易日的 symbol→value 全量映射 (首次访问触发全量计算并缓存)
+    /// @param date YYYYMMDD 整数; 无数据返回 nullptr。key 为视图 symbolStrings (无交易所后缀)
+    [[nodiscard]] const std::map<std::string, double>* backtestValuesBySymbol(
+        const std::string& instanceId, std::int32_t date);
+
     /// @brief 从因子需求收集所需的数据字段
     [[nodiscard]] std::vector<std::string> getRequiredFields() const;
 

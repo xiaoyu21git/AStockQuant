@@ -8,6 +8,7 @@
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/DatabaseConfig.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
+#include "../../../infrastructure/include/database/MarketDataService.h"
 #include "../../../infrastructure/include/database/OrderRecorder.h"
 #include "../../backtest/include/BacktestRequest.h"
 #include "../../backtest/include/BacktestFillSimulator.h"
@@ -119,6 +120,9 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     params.factorIds = parseFactorIds(meta.has("factorIds") ? meta.get("factorIds").toString() : "");
 
     // 解析 parameters JSON
+    // ── 混合模式因子叠加: parameters.factor_overlay 为权威来源(含配置权重) ──
+    // (factor_id, weight_percent) 列表; enabled=false 或缺失时为空
+    std::vector<std::pair<std::string, double>> overlayFactors;
     std::string paramJson = row.getString("parameters");
     if (!paramJson.empty() && paramJson != "null") {
         auto root = foundation::json::JsonFacade::parse(paramJson);
@@ -142,6 +146,22 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
             params.weightScheme = static_cast<::domain::strategies::WeightScheme>(root.get("weightScheme").asInt());
         if (root.has("rebalanceFrequency"))
             params.rebalanceFrequency = static_cast<::domain::strategies::RebalanceFrequency>(root.get("rebalanceFrequency").asInt());
+
+        if (root.has("factor_overlay")) {
+            auto overlay = root.get("factor_overlay");
+            if (overlay.has("enabled") && overlay.get("enabled").asBool()
+                && overlay.has("allocations")) {
+                auto allocations = overlay.get("allocations");
+                for (std::size_t i = 0; i < allocations.size(); ++i) {
+                    auto allocation = allocations.at(i);
+                    std::string fid = allocation.has("factor_id")
+                        ? allocation.get("factor_id").asString() : "";
+                    double weightPercent = allocation.has("weight_percent")
+                        ? allocation.get("weight_percent").asDouble() : 0.0;
+                    if (!fid.empty()) overlayFactors.push_back({fid, weightPercent});
+                }
+            }
+        }
     }
 
     // ── 根据策略类型判断是否需要因子 ──
@@ -156,12 +176,21 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     auto engineBuilder = StrategyEngine::builder();
     if (factorSvc) {
         auto* rfsPtr = dynamic_cast<RuntimeFactorSvc*>(factorSvc.get());
-        if (rfsPtr && !params.factorIds.empty()) {
-            rfsPtr->setFactorIds(params.factorIds);
+        if (rfsPtr) {
+            // 因子策略的 factorIds ∪ 混合模式 overlay 因子, 供因子服务计算
+            std::vector<std::string> allFactorIds = params.factorIds;
+            for (const auto& [fid, weight] : overlayFactors) {
+                if (std::find(allFactorIds.begin(), allFactorIds.end(), fid) == allFactorIds.end())
+                    allFactorIds.push_back(fid);
+            }
+            if (!allFactorIds.empty()) rfsPtr->setFactorIds(allFactorIds);
         }
         engineBuilder.withFactorService(std::move(factorSvc));
     }
-    auto engine = engineBuilder.maxStrategies(params.maxPositions).build();
+    // 回测/实盘 EOD 均按全市场逐日批量推送行情, 批容量必须覆盖全体标的
+    auto engine = engineBuilder.maxStrategies(params.maxPositions)
+                      .maxMarketDataPerBatch(kAllMarketDataBatchCapacity)
+                      .build();
     INTERNAL_INFO_STREAM << "[fromDb] " << strategyId << " kind=" << static_cast<int>(params.behaviorKind)
                          << " factorIds=" << params.factorIds.size()
                          << " engine=" << static_cast<void*>(engine.get());
@@ -174,6 +203,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
 
     if (isFactorType) {//策略中因子的开关。true 表示策略中使用了因子，false 表示策略中不使用因子
+        // 市值加权需要 market_cap 字段, prepareMarketData 查询时追加
+        engine->m_needsMarketCapField =
+            (params.weightScheme == ::domain::strategies::WeightScheme::MARKET_CAP);
+
         // ── 混合模式: 因子辅助策略(过滤+缩放) ──
         // factorIds 为空时因子层零开销跳过; 非空时初始化过滤/缩放配置
         if (!params.factorIds.empty()) {
@@ -223,6 +256,22 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
             return nullptr;
     } else {
         // ── 非因子策略 — 按 behaviorKind 创建对应子类 ──
+        // 混合模式: factor_overlay 因子对策略信号做过滤+缩放, 影响力=配置权重占比
+        if (!overlayFactors.empty()) {
+            constexpr double kDefaultFilterPercentile = 0.1;  // 剔除因子值后10%的标的
+            double totalWeight = 0.0;
+            for (const auto& [fid, weight] : overlayFactors) totalWeight += weight;
+            std::vector<FactorFilterConfig> filterCfgs;
+            std::vector<FactorScaleConfig> scaleCfgs;
+            for (const auto& [fid, weight] : overlayFactors) {
+                filterCfgs.push_back({fid, kDefaultFilterPercentile});
+                scaleCfgs.push_back({fid, totalWeight > 0.0 ? weight / totalWeight : 1.0});
+            }
+            engine->m_factorSignalProcessor.setFilters(filterCfgs);
+            engine->m_factorSignalProcessor.setScalers(scaleCfgs);
+            INTERNAL_INFO_STREAM << "[fromDb] 混合模式启用: overlay 因子=" << overlayFactors.size();
+        }
+
         ::domain::strategies::StrategyCommonConfig commonCfg;
         commonCfg.allowShort          = params.allowShort;
         commonCfg.maxPositions         = params.maxPositions;
@@ -310,6 +359,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromParams(const StrategyCreatio
     // Builder 模式构建引擎 — 因子服务由调用方通过 fromDb(with factorSvc) 注入
     auto engine = builder()
         .maxStrategies(params.maxPositions)
+        .maxMarketDataPerBatch(kAllMarketDataBatchCapacity)
         .build();
     if (engine) {
         engine->setStrategyId(params.strategyId);
@@ -331,9 +381,9 @@ void StrategyEngine::setLiveMarketView(const void* view)
     if (auto* rfs = dynamic_cast<RuntimeFactorSvc*>(factorService_.get())) {
         rfs->setLiveMarketView(v);
     }
-    if (!m_hasFactorStrategies) {
-        setContextHistoricalView(view);
-    }
+    // 因子/非因子策略都注入上下文视图:
+    // 非因子策略用它取 OHLCV; 因子策略权重方案(市值加权/风险平价)用它取市值和波动率
+    setContextHistoricalView(view);
 }
 
 bool StrategyEngine::prepareMarketData()
@@ -346,6 +396,13 @@ bool StrategyEngine::prepareMarketData()
         if (rfs) {
             extraFields = rfs->getRequiredFields();
             lookbackDays = (std::max)(90, rfs->getMaxLookbackDays());
+        }
+        // 市值加权方案需要 market_cap, 因子需求未覆盖时追加
+        if (m_needsMarketCapField) {
+            const char* kMarketCapField = astock::infrastructure::database::field::MARKET_CAP;
+            if (std::find(extraFields.begin(), extraFields.end(), kMarketCapField) == extraFields.end()) {
+                extraFields.push_back(kMarketCapField);
+            }
         }
     }
 
@@ -481,8 +538,8 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
 {
     try {
         auto orders = collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
-        // 混合模式: 因子辅助(过滤+缩放)
-        if (m_hasFactorStrategies && m_factorSignalProcessor.enabled() && orders.has_value()) {
+        // 混合模式: 因子辅助(过滤+缩放) — 非因子策略 + factor_overlay 时启用
+        if (m_factorSignalProcessor.enabled() && orders.has_value()) {
             for (auto it = orders->begin(); it != orders->end(); ) {
                 const std::string& sym = it->symbol();
                 if (!sym.empty() && !m_factorSignalProcessor.passFilter(sym)) {
@@ -1339,12 +1396,14 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
-    double backtestCash = req.costSpec.initialCapital.value;
+    double latestEquity = req.costSpec.initialCapital.value;  // 最新总资产(现金+持仓市值)
+    double cash = req.costSpec.initialCapital.value;          // 可用现金
     std::unordered_map<std::string, domain::trading::Position> backtestPositions;
     auto btAccount = [&]() {
         domain::trading::AccountSnapshot a;
-        a.setTotalAsset(backtestCash);
-        a.setAvailableCash(backtestCash);
+        a.setTotalAsset(latestEquity);
+        a.setAvailableCash(cash);
+        a.setMarketValue(latestEquity - cash);
         return a;
     };
     domain::trading::AccountSnapshot acc;
@@ -1359,7 +1418,6 @@ StrategyBacktestResult StrategyEngine::backtest(
     fillParams.slippageRate   = req.costSpec.slippageRate.value;
     domain::backtest::BacktestFillSimulator fillSim(fillParams);
 
-    double cash = req.costSpec.initialCapital.value;
     int riskRejectedCount = 0;
     int totalFills = 0, winningFills = 0, losingFills = 0;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
@@ -1372,6 +1430,18 @@ StrategyBacktestResult StrategyEngine::backtest(
     if (onProgress) onProgress(0.0);
 
     // 3. 逐日驱动
+    // 回测结束(含早退)复位策略上下文: 视图归 dataSvc 所有, 回测返回后即失效, 防悬垂;
+    // 行号复位 -1 (实盘语义=最后一行), 避免复用引擎时残留回测状态
+    struct ContextResetGuard {
+        StrategyEngine& eng;
+        explicit ContextResetGuard(StrategyEngine& e) : eng(e) {}
+        ~ContextResetGuard() {
+            eng.setContextHistoricalView(nullptr);
+            if (eng.strategyService_) eng.strategyService_->setContextEvaluationRow(-1);
+        }
+    };
+    ContextResetGuard contextResetGuard(*this);
+
     // 第一步会触发惰性因子计算（FactorEngine::compute），我们不知道它占总时间的比例
     // 但它是真实工作，后续逐日循环也是真实工作
     const double kSetupFrac  = 0.0;
@@ -1383,13 +1453,19 @@ StrategyBacktestResult StrategyEngine::backtest(
         auto batch = dataSvc->loadBatch(0);
         const auto* view = batch.marketView;
         if (!view) { result.errorMessage = "View lost during backtest"; return result; }
+
+        // 逐日注入时点上下文: 策略(非因子 OHLCV / 因子权重方案市值·波动率)
+        // 只读到第 r 行为止的数据, 避免前视偏差
+        setContextHistoricalView(view);
+        if (strategyService_) strategyService_->setContextEvaluationRow(r);
+
         const auto& dates = view->dates();
         const auto& instruments = view->instruments();
         auto closeMat = view->close();
         auto volumeMat = view->volume();
 
         if (r == 0 || r == totalDays-1 || r % 100 == 0) {
-            INTERNAL_INFO_STREAM << "[backtest] day " << r << "/" << totalDays << " equity=" << btAccount().totalAsset() << " positions=" << backtestPositions.size();
+            INTERNAL_INFO_STREAM << "[backtest] day " << r << "/" << totalDays << " equity=" << btAccount().totalAsset() << " cash=" << cash << " positions=" << backtestPositions.size();
         }
 
         std::vector<MarketDataPoint> mdpBatch;
@@ -1407,11 +1483,33 @@ StrategyBacktestResult StrategyEngine::backtest(
 
         auto ordersOpt = stepBatch(mdpBatch);
 
+        // ── 混合模式: 喂当日因子快照(因子值首访全量计算并缓存) ──
+        if (m_factorSignalProcessor.enabled()) {
+            auto* rfsBt = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
+            if (rfsBt) {
+                const std::int32_t dayValue = dates[static_cast<std::size_t>(r)].value;
+                for (const auto& fid : m_factorSignalProcessor.factorIds()) {
+                    const auto* factorVals = rfsBt->backtestValuesBySymbol(fid, dayValue);
+                    if (!factorVals) continue;
+                    // 缓存 key 为无后缀6位码, 订单 symbol 为 fullSymbol → 转换后喂入
+                    std::unordered_map<std::string, double> bySymbol;
+                    bySymbol.reserve(factorVals->size());
+                    for (const auto& [code, value] : *factorVals)
+                        bySymbol[foundation::market::AStockSymbol::fromCode(code).fullSymbol()] = value;
+                    m_factorSignalProcessor.updateSnapshot(fid, bySymbol);
+                }
+            }
+        }
+
         if (ordersOpt.has_value()) {
             auto& orderList = ordersOpt.value();
             if (r == 0 || r % 100 == 0) {
                 INTERNAL_INFO_STREAM << "[backtest] day " << r << " orders=" << orderList.size();
             }
+            // 当日真实成交统计 (换算后的最终下单量, 采样日输出)
+            int dayBuys = 0, daySells = 0, dayCashShort = 0, dayBudgetSmall = 0;
+            double dayBuyAmount = 0.0;
+            std::int64_t dayMinQty = 0, dayMaxQty = 0;
             for (auto& order : orderList) {
                 // symbol 在策略层已填为纯数字码 (如 "600000")
                 const std::string& symStr = order.symbol();
@@ -1432,6 +1530,53 @@ StrategyBacktestResult StrategyEngine::backtest(
                 }
                 if (closePrice <= 0.0) continue;
 
+                // ── 混合模式: 因子过滤 + 信号缩放 (先于下单量换算, 最终强度定量) ──
+                if (m_factorSignalProcessor.enabled()) {
+                    if (!m_factorSignalProcessor.passFilter(order.symbol())) continue;
+                    const double factorScale = m_factorSignalProcessor.scaleFactor(order.symbol());
+                    if (factorScale != 1.0) {
+                        const double scaledScore = order.extensionAs<double>(
+                            domain::trading::ExtKey::kSignalScore, 0.5) * factorScale;
+                        order.setExtension(domain::trading::ExtKey::kSignalScore, scaledScore);
+                        // 因子增强/减弱直接作用于目标权重(仓位), 上限 1.0 防超配
+                        const double scaledWeight = (std::min)(1.0,
+                            order.extensionAs<double>(
+                                domain::trading::ExtKey::kTargetWeight, 0.0) * factorScale);
+                        order.setExtension(domain::trading::ExtKey::kTargetWeight, scaledWeight);
+                    }
+                }
+
+                // ── 下单量换算: 昨日总资产 × 最终目标权重, 整百股 ──
+                // targetWeight 已由策略按信号强度在 [minWeight, maxWeight] 插值,
+                // 混合模式因子缩放亦已作用于权重 — 不再重复乘 score
+                const double sizingBase = equityCurve.empty()
+                    ? req.costSpec.initialCapital.value : equityCurve.back();
+                const double signalScore = std::clamp(order.extensionAs<double>(
+                    domain::trading::ExtKey::kSignalScore, 0.5), 0.0, 1.0);
+                if (order.side() == OrderSide::Buy) {
+                    constexpr std::int64_t kSharesPerLot = 100;
+                    const double targetWeight = order.extensionAs<double>(
+                        domain::trading::ExtKey::kTargetWeight, 0.0);
+                    // 预算受可用现金约束, 不足一手则放弃该信号
+                    const double budget = (std::min)(sizingBase * targetWeight, cash);
+                    const std::int64_t lots = static_cast<std::int64_t>(
+                        budget / (closePrice * static_cast<double>(kSharesPerLot)));
+                    if (lots <= 0) {
+                        // 区分跳过原因: 现金买不起一手 vs 权重预算本身不足一手
+                        if (cash < closePrice * static_cast<double>(kSharesPerLot)) ++dayCashShort;
+                        else ++dayBudgetSmall;
+                        continue;
+                    }
+                    order.setQuantity(lots * kSharesPerLot);
+                } else {
+                    // 卖出信号 = 离场: 全平该标的持仓
+                    auto sizingPosIt = backtestPositions.find(symbol);
+                    const std::int64_t held = (sizingPosIt != backtestPositions.end())
+                        ? sizingPosIt->second.quantity() : 0;
+                    if (held <= 0) continue;
+                    order.setQuantity(held);
+                }
+
                 // ── 风控检查 (RiskEvaluator — 公共类) ──
                 domain::strategy::RiskInput riskInput;
                 riskInput.setStrategyId(req.strategyIdentity.strategyId.text());
@@ -1441,7 +1586,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 riskInput.setQuantity(static_cast<std::int64_t>(order.quantity()));
                 riskInput.setStrategyBound(true);
                 riskInput.setStrategyActive(true);
-                riskInput.setSignalStrength(0.5);         // 回测默认信号强度
+                riskInput.setSignalStrength(signalScore);  // 真实信号强度进风控
                 riskInput.setPositionSnapshotReady(true);  // 回测持仓快照可用
                 auto accSnap = btAccount();
                 riskInput.setCurrentTotalAsset(accSnap.totalAsset());
@@ -1467,6 +1612,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                         static_cast<std::int64_t>(order.quantity()));
                     if (remaining >= 0.0) {
                         cash = remaining;
+                        ++dayBuys;
+                        const std::int64_t filledQty = static_cast<std::int64_t>(order.quantity());
+                        dayBuyAmount += closePrice * static_cast<double>(filledQty);
+                        if (dayMinQty == 0 || filledQty < dayMinQty) dayMinQty = filledQty;
+                        if (filledQty > dayMaxQty) dayMaxQty = filledQty;
                         domain::trading::Position pos;
                         pos.setSymbol(symbol);
                         pos.setSide(domain::trading::PositionSide::Long);
@@ -1488,6 +1638,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         auto fr = fillSim.simulateSell(closePrice, sellQty);
                         cash += fr.income;
                         ++totalFills;
+                        ++daySells;
                         double bp = closePrice;
                         auto bpIt = buyPriceMap.find(symbol);
                         if (bpIt != buyPriceMap.end()) { bp = bpIt->second; buyPriceMap.erase(bpIt); }
@@ -1509,6 +1660,20 @@ StrategyBacktestResult StrategyEngine::backtest(
                     }
                 }
             }
+
+            // 采样日输出真实成交统计 (换算后的最终下单量)
+            if ((r == 0 || r % 100 == 0)
+                && (dayBuys > 0 || daySells > 0 || dayCashShort > 0 || dayBudgetSmall > 0)) {
+                std::ostringstream fillLog;
+                fillLog << "[backtest] day " << r << " fills: buy=" << dayBuys;
+                if (dayBuys > 0)
+                    fillLog << " (qty " << dayMinQty << "~" << dayMaxQty
+                            << ", 金额" << static_cast<std::int64_t>(dayBuyAmount) << ")";
+                fillLog << " sell=" << daySells
+                        << " 现金不足跳过=" << dayCashShort
+                        << " 权重预算不足一手=" << dayBudgetSmall;
+                INTERNAL_INFO_STREAM << fillLog.str();
+            }
         }
 
         // 更新账户
@@ -1529,7 +1694,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         newAcc.setAvailableCash(cash);
         newAcc.setMarketValue(marketValue);
         newAcc.setTotalAsset(equity);
-        backtestCash = newAcc.availableCash();
+        latestEquity = newAcc.totalAsset();
         equityCurve.push_back(equity);
 
         if (onProgress && totalDays > 0) {

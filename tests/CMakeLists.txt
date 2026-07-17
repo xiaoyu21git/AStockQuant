@@ -392,3 +392,29 @@ if(ENABLE_RULE_SERVICE_PY_WORKER_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE
 
     message(STATUS "[TESTS] Configured run_strategy_rule_service_py_worker_hf_benchmark executable")
 endif()
+
+# ─── 权重方案单元测试 (市值加权/风险平价, 无 DB/UI 依赖) ───
+add_executable(test_weight_schemes
+    test_weight_schemes.cpp
+)
+
+set_target_properties(test_weight_schemes PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_weight_schemes
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+        ${CMAKE_SOURCE_DIR}/src/domain/strategies/include
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_weight_schemes
+    PRIVATE
+        astock_core
+        thirdParty
+)
+
+message(STATUS "[TESTS] Configured test_weight_schemes executable")

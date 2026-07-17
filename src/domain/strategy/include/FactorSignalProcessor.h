@@ -26,8 +26,12 @@ public:
     void setScalers(const std::vector<FactorScaleConfig>& scalers) { m_scalers = scalers; }
     bool enabled() const { return !m_filters.empty() || !m_scalers.empty(); }
 
-    /// 更新因子快照(日频调用一次即可，日内复用)
-    void updateSnapshot(const std::unordered_map<std::string, double>& factorValues);
+    /// 配置涉及的全部因子 ID (filters ∪ scalers, 去重)
+    [[nodiscard]] std::vector<std::string> factorIds() const;
+
+    /// 更新单个因子的快照(日频每因子调用一次，日内复用)
+    void updateSnapshot(const std::string& factorId,
+                        const std::unordered_map<std::string, double>& factorValues);
 
     /// 过滤：返回 true 表示该标的通过所有过滤条件
     [[nodiscard]] bool passFilter(const std::string& symbol) const;

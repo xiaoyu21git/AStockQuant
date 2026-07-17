@@ -49,6 +49,15 @@ public:
 private:
     void schedulerLoop();
 
+    /// @brief 同步屏蔽窗口 [start, end) — end 由 EOD 下单时间派生, 不可独立配置/写死
+    /// end = eodTriggerTime: 下单未触发前禁止同步; 同步触发时间同样不得早于下单
+    struct SyncWindow {
+        int blockStartMin{565};   // 默认 09:25
+        int blockEndMin{900};     // 配置缺失时的回退值, 实际派生自 eodTriggerTime
+        int triggerMin{901};      // 有效同步触发 = max(syncTriggerTime, blockEnd)
+    };
+    [[nodiscard]] SyncWindow resolveSyncWindow() const;
+
     // 频率分层
     void syncAll(int tradingDay);
     void syncDailyMinute(int tradingDay);

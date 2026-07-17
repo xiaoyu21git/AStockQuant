@@ -5,22 +5,26 @@
 
 namespace domain::strategy {
 
+std::vector<std::string> FactorSignalProcessor::factorIds() const
+{
+    std::vector<std::string> ids;
+    auto appendUnique = [&ids](const std::string& fid) {
+        if (std::find(ids.begin(), ids.end(), fid) == ids.end()) ids.push_back(fid);
+    };
+    for (const auto& f : m_filters) appendUnique(f.factorId);
+    for (const auto& s : m_scalers) appendUnique(s.factorId);
+    return ids;
+}
+
 void FactorSignalProcessor::updateSnapshot(
+    const std::string& factorId,
     const std::unordered_map<std::string, double>& factorValues)
 {
-    // 每个因子独立存储一份 symbol→value 快照
-    for (const auto& f : m_filters) {
-        auto& snap = m_snapshot[f.factorId];
-        snap.clear();
-        for (const auto& [sym, val] : factorValues)
-            if (std::isfinite(val)) snap[sym] = val;
-    }
-    for (const auto& s : m_scalers) {
-        auto& snap = m_snapshot[s.factorId];
-        snap.clear();
-        for (const auto& [sym, val] : factorValues)
-            if (std::isfinite(val)) snap[sym] = val;
-    }
+    // 按因子独立存储 symbol→value 快照 (旧版把同一份值塞给所有因子, 多因子语义错误)
+    auto& snap = m_snapshot[factorId];
+    snap.clear();
+    for (const auto& [sym, val] : factorValues)
+        if (std::isfinite(val)) snap[sym] = val;
 }
 
 bool FactorSignalProcessor::passFilter(const std::string& symbol) const
