@@ -1088,7 +1088,26 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     };
     std::vector<PendingOrder> pendingOrders;
 
+    // ── 规则闸门: 市场审核(每日冻结) ──
+    // 视图已由 prepareMarketData 构建, 仅需计算市场快照
+    bool ruleAllowEntriesEod = true;
+    std::unordered_map<std::string, int> eodSymToCol;
+    if (m_ruleGate.enabled() && liveMarketView()) {
+        const auto* view = liveMarketView();
+        const auto& instrs = view->instruments();
+        const auto& symStrs = view->symbolStrings();
+        for (size_t c = 0; c < symStrs.size() && c < instrs.size(); ++c)
+            eodSymToCol[stripExchange(symStrs[c])] = static_cast<int>(c);
+        rules::BacktestRuleVariableProvider eodProvider;
+        eodProvider.setDay(view, std::stoi(tradingDay), nullptr);
+        ruleAllowEntriesEod = m_ruleGate.allowNewEntriesToday(eodProvider);
+        if (!ruleAllowEntriesEod)
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 市场冻结, 当日不产生新买单";
+    }
+
     for (const auto& sym : symbols) {
+        // 规则闸门冻结 → 跳过所有新开仓
+        if (!ruleAllowEntriesEod) break;
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
         if (!d.valid()) continue;
 
@@ -1204,6 +1223,49 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     // Phase 2+3: 持仓感知建单 (buildPositionAwareOrders)
     // ═══════════════════════════════════════════════════════════
 
+    // ── 规则闸门: 持仓出场审核 ──
+    int eodPositionExits = 0;
+    if (m_ruleGate.enabled() && liveMarketView() && !positions.empty()) {
+        const auto* view = liveMarketView();
+        const int dayValue = std::stoi(tradingDay);
+        rules::BacktestRuleVariableProvider exitProvider;
+        exitProvider.setDay(view, dayValue, nullptr);
+        for (const auto& pos : positions) {
+            if (pos.quantity <= 0 || pos.costPrice <= 0.0) continue;
+            const std::string sym6 = stripExchange(pos.symbol);
+            rules::RuleCandidateContext posCtx;
+            posCtx.symbol = pos.symbol;
+            posCtx.code = sym6;
+            auto cite = eodSymToCol.find(sym6);
+            posCtx.colIndex = cite != eodSymToCol.end() ? cite->second : -1;
+            posCtx.isHolding = true;
+            posCtx.entryPrice = pos.costPrice;
+            const double currentPrice = pos.lastPrice;
+            if (currentPrice > 0.0 && posCtx.entryPrice > 0.0)
+                posCtx.pnlPercent = (currentPrice - posCtx.entryPrice) / posCtx.entryPrice * 100.0;
+            exitProvider.setCandidate(posCtx);
+            const rules::RuleAction action = m_ruleGate.positionAction(exitProvider);
+            if (action == rules::RuleAction::Exit || action == rules::RuleAction::Reduce) {
+                OrderRequest exitOrderReq;
+                exitOrderReq.setSymbol(pos.symbol);
+                exitOrderReq.setSide(OrderSide::Sell);
+                exitOrderReq.setQuantity(action == rules::RuleAction::Exit
+                    ? pos.quantity : (std::max)(static_cast<std::int64_t>(1), pos.quantity / 2));
+                exitOrderReq.setOrderType(domain::trading::OrderType::Market);
+                exitOrderReq.setPrice(currentPrice);
+                PendingOrder exitPo;
+                exitPo.order = std::move(exitOrderReq);
+                exitPo.tickPrice = currentPrice;
+                exitPo.signalScore = 1.0;
+                exitPo.targetWeight = 0.0;
+                pendingOrders.push_back(std::move(exitPo));
+                ++eodPositionExits;
+            }
+        }
+        if (eodPositionExits > 0)
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 持仓出场=" << eodPositionExits;
+    }
+
     int totalGenerated = static_cast<int>(pendingOrders.size());
 
     // 计算用于权重估算的参考价格
@@ -1239,8 +1301,10 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
 
     // ── 规则闸门输出(当日) ──
     if (m_ruleGate.enabled()) {
-        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 信号审核拒绝=" << eodGateRejected
+        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 冻结=" << (!ruleAllowEntriesEod)
+                             << " 信号审核拒绝=" << eodGateRejected
                              << "/" << (totalGenerated + eodGateRejected)
+                             << " 持仓出场=" << eodPositionExits
                              << " (绑定模板=" << m_ruleGate.boundTemplateCount() << ")";
     }
 
