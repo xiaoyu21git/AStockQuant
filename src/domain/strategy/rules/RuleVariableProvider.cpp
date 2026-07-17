@@ -526,7 +526,10 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     // market 情绪/冷却 (14模板卡 emotion_cycle)
     if (varPath == "market.emotion_cycle")                  return impl.marketEmotionCycle();
     if (varPath == "market.emotion_repair_confirmed")       return impl.emotionRepairConfirmed();
-    if (varPath == "market.volatility_shock_score")         return impl.marketEmotionCycle();
+    // 波动冲击评分: 近期回撤越深→冲击越大, 范围 0~1 (sideways 模板要求 ≤0.58)
+    // (原错误代理到 marketEmotionCycle 返回字符串编码值, 永远 >0.58)
+    if (varPath == "market.volatility_shock_score")
+        return market.indexDrawdownFromRecentHigh;
     if (varPath == "market.cooling_mid_confirmed")
     { auto ec=impl.marketEmotionCycle(); auto c=ruleStringValueCode("cooling"); return std::optional<double>(ec&&*ec==c?std::optional<double>(1.0):std::optional<double>(0.0)); }
     if (varPath == "market.cooling_end_confirmed")
