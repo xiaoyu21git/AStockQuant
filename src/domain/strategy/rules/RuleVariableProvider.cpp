@@ -19,8 +19,8 @@ namespace {
 
 constexpr int kMaSlopeWindow = 5;           // 均线斜率取 5 日变化率
 constexpr int kRecentHighWindow = 60;       // 市场近期高点回撤窗口
-// regime_state 编码阈值 (基于全市场站上 MA60 比例; 业务定义待校准)
-constexpr double kRegimeBullBreadth = 0.60;
+// regime_state 编码阈值 (与模板条件对齐: bull_trend 要求 breadth≥0.58+regime=bull)
+constexpr double kRegimeBullBreadth = 0.55;   // ≥55% 标的站上 MA60 → 牛市
 constexpr double kRegimeBearBreadth = 0.35;
 
 // Tier1 日线形态变量阈值
@@ -635,6 +635,23 @@ RuleMarketSnapshot computeMarketSnapshot(
     }
     snapshot.indexClose = index;
     snapshot.indexDrawdownFromRecentHigh = peak > 0.0 ? 1.0 - index / peak : 0.0;
+
+    // 等权指数 MA120: 逐日重放指数序列, 取近120日均值 (bull_trend 依赖此字段)
+    {
+        double index120Sum = 1.0;
+        int n120 = 1;
+        for (int r = (std::max)(1, lastRow - 120); r <= lastRow; ++r) {
+            double sumRet = 0.0; int cnt = 0;
+            for (int c = 0; c < cols; ++c) {
+                const double today = columnClose(closeMat, r, c);
+                const double prev = columnClose(closeMat, r - 1, c);
+                if (today > 0.0 && prev > 0.0) { sumRet += today / prev - 1.0; ++cnt; }
+            }
+            if (cnt > 0) index120Sum *= (1.0 + sumRet / cnt);
+            ++n120;
+        }
+        snapshot.indexMa120 = index120Sum / static_cast<double>(n120);
+    }
 
     // ── 市场状态编码 (阈值见 kRegime*) ──
     const char* regime = "sideways";
