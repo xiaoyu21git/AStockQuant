@@ -39,6 +39,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <string>
+#include <unordered_map>
 #include <cstdlib>
 #include <sstream>
 #include <exception>
@@ -2060,63 +2062,63 @@ StrategyBacktestResult StrategyEngine::backtest(
         result.timeSeries.drawdowns = dds;
     }
 
-    // 基准对比 (沪深300)，从 View 中提取基准价格序列
+    // 基准对比 (沪深300)，从 PG 查询指数日K线，按回测日期对齐
     {
-        std::vector<double> bmRet;
-        // 从 idToSymbol 反查基准标的的 instrumentId，再从 View 的 close 矩阵提取价格
         std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
-        std::uint32_t bmId = 0;
-        for (const auto& [id, sym] : idToSymbol) {
-            if (sym == bmSym) { bmId = id; break; }
-        }
-        // fallback: 尝试 instrumentId == 300 (沪深300 指数代码)
-        if (bmId == 0) {
-            for (const auto& instr : view->instruments()) {
-                if (instr.value == 300) { bmId = instr.value; break; }
-            }
-        }
-        if (bmId != 0) {
-            auto closeMat = view->close();
-            const auto& instrs = view->instruments();
-            int benchCol = -1;
-            for (size_t c = 0; c < instrs.size(); ++c) {
-                if (instrs[c].value == bmId) { benchCol = static_cast<int>(c); break; }
-            }
-            if (benchCol >= 0) {
-                const std::size_t colCount = instrs.size();
-                // 基准收益率：按天遍历，与策略 equityCurve 逐日严格对齐
-                bmRet.reserve(static_cast<size_t>(totalDays));
-                for (int r = 0; r < totalDays; ++r) {
-                    if (r == 0) { bmRet.push_back(0.0); continue; } // 首日无前值，收益为0
-                    const std::size_t prevOff = static_cast<std::size_t>(r - 1) * colCount + static_cast<std::size_t>(benchCol);
-                    const std::size_t currOff = static_cast<std::size_t>(r)     * colCount + static_cast<std::size_t>(benchCol);
-                    double prev = static_cast<double>(closeMat.data[prevOff]);
-                    double curr = static_cast<double>(closeMat.data[currOff]);
-                    bmRet.push_back(prev > 0.0 ? curr / prev - 1.0 : 0.0);
+        const auto& dates = view->dates();
+        if (!dates.empty()) {
+            auto& pool = astock::database::NativePgConnectionPool::instance();
+            auto db = pool.getConnection();
+            auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+            std::string startStr = std::to_string(dates.front().value);
+            std::string endStr   = std::to_string(dates.back().value);
+            auto rows = repo->queryDailyBar(bmSym, startStr, endStr);
+            if (!rows.empty()) {
+                // date → close 映射（tradeDate 是 YYYY-MM-DD 格式 → YYYYMMDD int）
+                std::unordered_map<int, double> dateClose;
+                for (const auto& r : rows) {
+                    std::string ds = r.tradeDate;
+                    ds.erase(std::remove(ds.begin(), ds.end(), '-'), ds.end());
+                    int d = 0;
+                    try { d = std::stoi(ds); } catch (...) { continue; }
+                    if (d > 0 && r.close > 0) dateClose[d] = r.close;
                 }
-            }
-        }
-        if (!bmRet.empty()) {
-            auto benchMetrics = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
-                dailyReturns, bmRet);
-            result.metrics.beta             = benchMetrics.beta;
-            result.metrics.alpha            = benchMetrics.alpha;
-            result.metrics.trackingError    = benchMetrics.trackingError;
-            result.metrics.informationRatio = benchMetrics.informationRatio;
-
-            // 构建基准净值曲线和回撤曲线（与 strategy 逐日对齐，totalDays 点）
-            const double initialCapital = req.costSpec.initialCapital.value > 0
-                ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
-            result.timeSeries.benchmarkValues.reserve(bmRet.size());
-            result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size());
-            double bmEquity = initialCapital;
-            double bmPeak = bmEquity;
-            for (double r : bmRet) {
-                bmEquity *= (1.0 + r);
-                if (bmEquity > bmPeak) bmPeak = bmEquity;
-                double dd = bmPeak > 0.0 ? (bmPeak - bmEquity) / bmPeak : 0.0;
-                result.timeSeries.benchmarkValues.push_back(bmEquity);
-                result.timeSeries.benchmarkDrawdowns.push_back(dd);
+                // 逐回测日计算基准收益
+                std::vector<double> bmRet;
+                bmRet.reserve(dates.size());
+                double prevClose = 0.0;
+                for (size_t i = 0; i < dates.size(); ++i) {
+                    int d = dates[i].value;
+                    auto it = dateClose.find(d);
+                    double currClose = (it != dateClose.end()) ? it->second : 0.0;
+                    if (i == 0 || prevClose <= 0.0 || currClose <= 0.0) {
+                        bmRet.push_back(0.0);
+                    } else {
+                        bmRet.push_back(currClose / prevClose - 1.0);
+                    }
+                    if (currClose > 0.0) prevClose = currClose;
+                }
+                // 指标计算
+                auto benchMetrics = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
+                    dailyReturns, bmRet);
+                result.metrics.beta             = benchMetrics.beta;
+                result.metrics.alpha            = benchMetrics.alpha;
+                result.metrics.trackingError    = benchMetrics.trackingError;
+                result.metrics.informationRatio = benchMetrics.informationRatio;
+                // 净值曲线 + 回撤曲线
+                const double initialCapital = req.costSpec.initialCapital.value > 0
+                    ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
+                result.timeSeries.benchmarkValues.reserve(bmRet.size());
+                result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size());
+                double bmEquity = initialCapital;
+                double bmPeak = bmEquity;
+                for (double r : bmRet) {
+                    bmEquity *= (1.0 + r);
+                    if (bmEquity > bmPeak) bmPeak = bmEquity;
+                    double dd = bmPeak > 0.0 ? (bmPeak - bmEquity) / bmPeak : 0.0;
+                    result.timeSeries.benchmarkValues.push_back(bmEquity);
+                    result.timeSeries.benchmarkDrawdowns.push_back(dd);
+                }
             }
         }
     }

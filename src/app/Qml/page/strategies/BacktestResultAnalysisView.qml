@@ -51,20 +51,20 @@ Item {
         bmEquityS.clear(); bmDrawdownS.clear()
 
         // 标准化到同一起点（1.0），首日净值归一
-        var stratBase = pv.length > 0 && pv[0] > 0 ? pv[0] : 1.0
-        var bmBase = bv.length > 0 && bv[0] > 0 ? bv[0] : 1.0
+        var stratBase = (pv.length > 0 && isFinite(pv[0]) && pv[0] > 0) ? pv[0] : 1.0
+        var bmBase = (bv.length > 0 && isFinite(bv[0]) && bv[0] > 0) ? bv[0] : 1.0
 
         var pMin=1e18,pMax=-1e18,dMin=0,dMax=-1e18,rMin=1e18,rMax=-1e18
         for(var i=0;i<pv.length;i++){
-            var sv = pv[i] / stratBase
-            equityS.append(i, sv); drawdownS.append(i, dd[i]||0)
+            var sv = isFinite(pv[i]) && stratBase > 0 ? pv[i] / stratBase : 1.0
+            equityS.append(i, sv); drawdownS.append(i, isFinite(dd[i]) ? dd[i] : 0)
             if(sv>pMax)pMax=sv;if(sv<pMin)pMin=sv
             if(dd[i]<dMin)dMin=dd[i];if(dd[i]>dMax)dMax=dd[i]
         }
         // 基准曲线（归一化到同一起点）
         for(var k=0;k<bv.length;k++){
-            var bmv = bv[k] / bmBase
-            bmEquityS.append(k, bmv); bmDrawdownS.append(k, bdd[k]||0)
+            var bmv = isFinite(bv[k]) && bmBase > 0 ? bv[k] / bmBase : 1.0
+            bmEquityS.append(k, bmv); bmDrawdownS.append(k, isFinite(bdd[k]) ? bdd[k] : 0)
             if(bmv>pMax)pMax=bmv;if(bmv<pMin)pMin=bmv
             if(bdd[k]<dMin)dMin=bdd[k];if(bdd[k]>dMax)dMax=bdd[k]
         }
@@ -77,7 +77,7 @@ Item {
         var dateIndexMap={}; var tsDates=tss.dates||[]
         for(var di=0;di<tsDates.length;di++) dateIndexMap[tsDates[di]]=di
         ddIndexByDate=dateIndexMap
-        console.log("分析页图形更新: "+pv.length+" 净值点, "+dd.length+" 回撤点, "+ret.length+" 收益点")
+        console.log("分析页: 策略"+pv.length+"点 基准"+bv.length+"点 回撤"+dd.length+"点 基准首值"+bmBase+" 策略首值"+stratBase)
     }
 
     Flickable { anchors.fill: parent; contentWidth: parent.width; contentHeight: content.implicitHeight+20; clip: true
