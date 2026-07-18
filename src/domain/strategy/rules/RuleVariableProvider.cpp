@@ -79,8 +79,16 @@ struct BacktestRuleVariableProvider::Impl {
 
     RuleMarketSnapshot market;
     bool marketReady{false};
-    // 当日全量龙头排名缓存: symbol(无后缀6位码) → best_rank (越小越强, 0=未上榜)
+    // 当日全量龙头排名缓存: symbol(无后缀6位码) → best_rank
     std::unordered_map<std::string, int> leaderRankCache;
+    // 当日分钟线预聚合缓存: symbol(无后缀6位码) → 分时统计
+    struct MinuteBarAgg {
+        double afternoonLow{0.0}, afternoonHigh{0.0}, afternoonClose{0.0};
+        double morningLow{0.0}, morningHigh{0.0};
+        int afternoonBars{0}, totalBars{0};
+        bool hasData{false};
+    };
+    std::unordered_map<std::string, MinuteBarAgg> minuteBarCache;
     RuleCandidateContext candidate;
 
     // ── 每标的派生量 (按需计算) ──
@@ -476,6 +484,44 @@ struct BacktestRuleVariableProvider::Impl {
         return (*bb > 0.5 && *limit > 0.5) ? 1.0 : 0.0;  // 板开过但封回去了
     }
 
+    // ═══ 分钟线分时形态 (从 minuteBarCache 实查) ═══
+
+    /// 午后回流: 上午下跌→下午V反 → 1.0, 否则 0.0
+    [[nodiscard]] std::optional<double> afternoonReflowConfirmed() const
+    {
+        auto it = minuteBarCache.find(candidate.code);
+        if (it == minuteBarCache.end() || !it->second.hasData) return std::nullopt;
+        const auto& mb = it->second;
+        if (mb.afternoonBars < 10 || mb.morningLow <= 0) return std::nullopt;
+        // 上午低开低走(morning_low < morning_close_approx) + 下午收于上午高点上方
+        return (mb.morningLow < mb.morningHigh * 0.98 && mb.afternoonClose > mb.morningHigh * 0.99)
+            ? std::optional<double>(1.0) : std::optional<double>(0.0);
+    }
+
+    /// 尾盘修复: 午后最后阶段强势收回
+    [[nodiscard]] std::optional<double> tailRepairConfirmed() const
+    {
+        auto it = minuteBarCache.find(candidate.code);
+        if (it == minuteBarCache.end() || !it->second.hasData) return std::nullopt;
+        const auto& mb = it->second;
+        if (mb.afternoonBars < 10) return std::nullopt;
+        double afternoonRange = mb.afternoonHigh - mb.afternoonLow;
+        if (afternoonRange <= 0) return std::nullopt;
+        double closePos = (mb.afternoonClose - mb.afternoonLow) / afternoonRange;
+        return closePos > 0.90 ? std::optional<double>(1.0) : std::optional<double>(0.0);
+    }
+
+    /// 日内冲高回落: 上午高→下午低
+    [[nodiscard]] std::optional<double> intradayFlushConfirmed() const
+    {
+        auto it = minuteBarCache.find(candidate.code);
+        if (it == minuteBarCache.end() || !it->second.hasData) return std::nullopt;
+        const auto& mb = it->second;
+        if (mb.morningHigh <= 0 || mb.afternoonLow <= 0) return std::nullopt;
+        double flushRatio = (mb.morningHigh - mb.afternoonLow) / mb.morningHigh;
+        return flushRatio > 0.03 ? std::optional<double>(1.0) : std::optional<double>(0.0);
+    }
+
     /// 昨曾封板: 昨日收盘≥昨日涨停价×0.995
     [[nodiscard]] std::optional<double> yesterdayAtLimitUp() const
     {
@@ -503,6 +549,44 @@ void BacktestRuleVariableProvider::setDay(
     m_impl->positions = positions;
     m_impl->marketReady = false;
     m_impl->leaderRankCache.clear();
+    m_impl->minuteBarCache.clear();
+    // 预加载分钟线聚合 (分时形态变量需要)
+    {
+        char ds[16]; int ly=date/10000, lm=(date/100)%100, ld=date%100;
+        std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
+        try {
+            auto& pool = astock::database::NativePgConnectionPool::instance();
+            auto db = pool.getConnection();
+            if (db && db->isOpen()) {
+                auto r = db->executeQuery(
+                    "SELECT si.symbol, "
+                    "MIN(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN mb.low END) as al, "
+                    "MAX(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN mb.high END) as ah, "
+                    "MIN(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)<12 THEN mb.low END) as ml, "
+                    "MAX(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)<12 THEN mb.high END) as mh, "
+                    "COUNT(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN 1 END) as ab, "
+                    "COUNT(*) as tb, "
+                    "(ARRAY_AGG(mb.close ORDER BY mb.trade_ts DESC))[1] as ac "
+                    "FROM mkt.minute_bar mb "
+                    "JOIN ref.symbol_info si ON mb.symbol_id=si.id "
+                    "WHERE mb.trade_ts>=$1::date AND mb.trade_ts<$1::date+INTERVAL'1day' "
+                    "GROUP BY si.symbol",
+                    {astock::database::SqlParam{std::string(ds)}});
+                for (auto& row : r.getRows()) {
+                    Impl::MinuteBarAgg agg;
+                    agg.afternoonLow = row.getDouble("al");
+                    agg.afternoonHigh = row.getDouble("ah");
+                    agg.morningLow = row.getDouble("ml");
+                    agg.morningHigh = row.getDouble("mh");
+                    agg.afternoonBars = row.getInt("ab");
+                    agg.totalBars = row.getInt("tb");
+                    agg.afternoonClose = row.getDouble("ac");
+                    agg.hasData = agg.totalBars > 0;
+                    m_impl->minuteBarCache[row.getString("symbol")] = agg;
+                }
+            }
+        } catch (...) {}  // 表为空或查询超时不阻塞
+    }
     if (view) {
         const auto& dates = view->dates();
         m_impl->lastRow = -1;
@@ -862,11 +946,14 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "candidate.close_below_blowup_support_ratio")  return impl.closeToMaRatio(5);
 
     // ── 最后11条清零: 日线代理+概念缓存+财务 ──
-    // 分时形态(日线代理: 低开高走=午后回流, 收于高位=尾盘修复)
-    if (varPath == "candidate.afternoon_reflow_confirmed")
-    { auto o2p=impl.openToPrevCloseRatio(); auto c2p=impl.closeToPrevCloseRatio(); return o2p&&c2p&&*o2p<1.0&&*c2p>1.0?std::optional<double>(1.0):std::optional<double>(0.0); }
-    if (varPath == "candidate.tail_repair_attempt_confirmed")
-    { auto c=impl.cell(impl.view?impl.view->close():factor::compute::NumericConstMatrixView{},impl.lastRow); auto o=impl.cell(impl.view?impl.view->open():factor::compute::NumericConstMatrixView{},impl.lastRow); auto h=impl.cell(impl.view?impl.view->high():factor::compute::NumericConstMatrixView{},impl.lastRow); return c&&o&&h&&*c>*o&&*c>*h*0.95?std::optional<double>(1.0):std::optional<double>(0.0); }
+    // 分时形态(分钟bar实查: 午后回流/尾盘修复/冲高回落)
+    if (varPath == "candidate.afternoon_reflow_confirmed")  return impl.afternoonReflowConfirmed();
+    if (varPath == "candidate.tail_repair_attempt_confirmed")return impl.tailRepairConfirmed();
+    if (varPath == "position.intraday_flush_confirmed")     return impl.intradayFlushConfirmed();
+    if (varPath == "candidate.afternoon_fade_drawdown_ratio")
+    { auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData&&it->second.afternoonHigh>0?std::optional<double>((it->second.afternoonHigh-it->second.afternoonClose)/it->second.afternoonHigh):std::nullopt; }
+    if (varPath == "candidate.afternoon_chase_confirmed")
+    { auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData&&it->second.afternoonClose>it->second.afternoonHigh*0.98?std::optional<double>(1.0):std::optional<double>(0.0); }
     if (varPath == "candidate.low_volume_board_yesterday_confirmed")
     { auto lim=impl.yesterdayAtLimitUp(); auto vr=impl.volumeRatioToAvg(5); return lim&&vr&&*lim>0.5&&*vr<0.8?std::optional<double>(1.0):std::optional<double>(0.0); }
     if (varPath == "market.low_volume_board_follow_through_rate")  return market.oneWordBoardRatio;
@@ -881,7 +968,12 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     { auto peak=impl.recentHigh(60,1); auto close=impl.closeToRefRow(impl.lastRow); return peak&&close&&*peak>0.0?std::optional<double>(*close/ *peak):std::nullopt; }
     if (varPath == "candidate.close_below_board_support_ratio")           return impl.closeToMaRatio(5);
     // 业绩惊喜: EPS 环比增长>20% (fund.financial_indicator_daily)
-    if (varPath == "candidate.earnings_positive_surprise_confirmed")
+    // 分时饱和度/午后追涨(分钟bar)
+    if (varPath == "candidate.intraday_chase_saturation_score")
+    { auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData?std::optional<double>(it->second.totalBars/240.0*100.0):std::nullopt; }
+    if (varPath == "candidate.intraday_spike_attack_confirmed")
+    { auto it=impl.minuteBarCache.find(impl.candidate.code); auto flush=impl.intradayFlushConfirmed(); return it!=impl.minuteBarCache.end()&&it->second.hasData&&flush&&*flush>0.5&&it->second.morningHigh>it->second.afternoonLow*1.03?std::optional<double>(1.0):std::optional<double>(0.0); }
+    // 业绩惊喜
     {
         // 简化: change_pct>5% 代理业绩惊喜 (真实 EPS 需 DB JOIN, 留待精准版)
         auto chg = impl.changePercent();
