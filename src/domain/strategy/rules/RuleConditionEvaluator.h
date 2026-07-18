@@ -16,11 +16,11 @@ namespace domain::strategy::rules {
 /// @param overrides 可选用户参数覆盖 map (paramKey → newValue)
 [[nodiscard]] std::function<TriState(const IRuleVariableProvider&)>
 compileCondition(const foundation::json::JsonFacade& conditionNode,
-                 const std::map<std::string, double>* overrides = nullptr);
+                 const std::map<std::string, double>* overrides);
 
 /// @brief 从 compiled.json 根节点加载规则库，paramOverrides 可选覆盖条件数值
 [[nodiscard]] std::unique_ptr<RuleLibrary> loadRuleLibrary(
     const foundation::json::JsonFacade& compiledJson,
-    const ParamOverrides& paramOverrides = {});
+    const ParamOverrides& paramOverrides);
 
 } // namespace domain::strategy::rules

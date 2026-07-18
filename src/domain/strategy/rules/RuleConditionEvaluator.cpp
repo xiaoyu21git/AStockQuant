@@ -50,7 +50,7 @@ using OverrideMap = std::map<std::string, double>; // paramKey → newValue
 
 std::function<TriState(const IRuleVariableProvider&)>
 compileCondition(const foundation::json::JsonFacade& node,
-                 const OverrideMap* overrides = nullptr)
+                 const OverrideMap* overrides)
 {
     if (!node.has("op")) {
         // 裸 {var: x} 视为 truthy (not.value 的隐式形态)
