@@ -1603,7 +1603,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     int totalFills = 0, winningFills = 0, losingFills = 0;
     int stopLossExitCount = 0, ruleExitCount = 0, drawdownBlockCount = 0;
     int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
-    int stopLossSkippedNoHeld = 0, stopLossSkippedBuy = 0;
+    int stopLossSkippedNoHeld = 0, totalStopLossOrders = 0;
     std::unordered_set<std::string> todayStopLossSyms, todayRuleExitSyms;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
@@ -1989,6 +1989,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         backtestPositions[symbol] = pos;
                     }
                 } else {
+                    if (todayStopLossSyms.count(order.symbol())) ++totalStopLossOrders;
                     const auto& posMap = backtestPositions;
                     auto it = posMap.find(symbol);
                     const std::int64_t held = (it != posMap.end()) ? it->second.quantity() : 0LL;
@@ -2260,10 +2261,9 @@ StrategyBacktestResult StrategyEngine::backtest(
     INTERNAL_INFO_STREAM << "[回测结果] 初始资金: " << req.costSpec.initialCapital.value
                          << "  最终净值: " << (equityCurve.empty() ? 0 : static_cast<int64_t>(equityCurve.back()));
     INTERNAL_INFO_STREAM << "[交易明细] 止损扫描: " << stopLossExitCount << "次"
+                         << "  到达sell段: " << totalStopLossOrders << "次"
                          << "  实际卖出: " << stopLossFilled << "笔"
-                         << "  跳过(无持仓): " << stopLossSkippedNoHeld << "次"
-                         << "  规则出场: " << ruleExitFilled << "笔"
-                         << "  普通卖出: " << normalSellFilled << "笔";
+                         << "  跳过(无持仓): " << stopLossSkippedNoHeld << "次";
     // 卖单按盈亏排序，打印 top20
     std::vector<const BacktestTradeRecord*> sells;
     for (const auto& t : result.tradeLog)
