@@ -946,32 +946,26 @@ void PostMarketSyncService::syncConceptMembership()
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return;
 
-    // 1. 拉取概念分类: 先试 get_concept 遍历常见代码, 或 stk_get_symbol_sector 反向查
-    // GM 的 stk_get_sector_category 在某些版本返回 1027(概念数据未订阅);
-    // 改用 stk_get_symbol_sector 从具体标的反查其所属概念
-    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: stk_get_sector_category 返回 1027, 改用 stk_get_symbol_sector 反查";
-
-    // 用几个典型标的反查概念 → 采集 sector_code 集合 → 再逐概念查成分股
+    // 1. 从标杆股反查概念板块 (stk_get_sector_category 返回 1027 → 用 stk_get_symbol_sector)
+    // GM sector_type: "1"=行业 "2"=概念 "3"=地域; 1027=无效入参(某些版本不支持 category)
+    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 从标杆股反查概念板块";
     std::unordered_set<std::string> sectorCodes;
-    const char* probeSymbols[] = {"SHSE.600519", "SZSE.000858", "SHSE.601318", "SZSE.300750",
-                                   "SHSE.600030", "SZSE.002594", "SHSE.688981", nullptr};
+    const char* probeSymbols[] = {"SHSE.600519","SZSE.000858","SHSE.601318","SZSE.300750",
+                                   "SHSE.600030","SZSE.002594","SHSE.688981", nullptr};
     for (int i = 0; probeSymbols[i]; ++i) {
-        auto* ss = ::stk_get_symbol_sector(probeSymbols[i], "concept");
-        if (!ss || ss->status()) {
-            if (ss) ss->release();
-            ss = ::stk_get_symbol_sector(probeSymbols[i], "概念");
-            if (!ss || ss->status()) { if(ss)ss->release(); continue; }
+        auto* ss = ::stk_get_symbol_sector(probeSymbols[i], "2");  // sector_type=2=概念
+        if (!ss || ss->status()) { if(ss)ss->release(); continue; }
+        for (size_t j = 0; j < ss->count(); ++j) {
+            std::string code(ss->at(j).sector_code);
+            if (!code.empty()) sectorCodes.insert(code);
         }
-        for (size_t j = 0; j < ss->count(); ++j)
-            sectorCodes.insert(ss->at(j).sector_code);
         ss->release();
     }
     if (sectorCodes.empty()) {
-        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: 反查概念也失败, 跳过";
+        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: 反查概念为空,跳过";
         return;
     }
     INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 反查得到 " << sectorCodes.size() << " 个概念";
-    // sectorCodes 驱动后续拉取循环
     int totalConcepts = 0, totalMembers = 0;
     using P = astock::database::SqlParam;
 
