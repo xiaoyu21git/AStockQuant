@@ -46,8 +46,11 @@ double encodeStringValue(const std::string& text) {
 
 double ruleStringValueCode(const std::string& text) { return encodeStringValue(text); }
 
+using OverrideMap = std::map<std::string, double>; // paramKey → newValue
+
 std::function<TriState(const IRuleVariableProvider&)>
-compileCondition(const foundation::json::JsonFacade& node)
+compileCondition(const foundation::json::JsonFacade& node,
+                 const OverrideMap* overrides = nullptr)
 {
     if (!node.has("op")) {
         // 裸 {var: x} 视为 truthy (not.value 的隐式形态)
@@ -68,7 +71,7 @@ compileCondition(const foundation::json::JsonFacade& node)
         if (node.has("conditions")) {
             auto conditions = node.get("conditions");
             for (std::size_t i = 0; i < conditions.size(); ++i)
-                children.push_back(compileCondition(conditions.at(i)));
+                children.push_back(compileCondition(conditions.at(i), overrides));
         }
         if (children.empty()) return makeFailAlways("all/any 无子条件");
         const bool isAll = (op == "all");
@@ -87,7 +90,7 @@ compileCondition(const foundation::json::JsonFacade& node)
 
     if (op == "not") {
         if (!node.has("value")) return makeFailAlways("not 无 value");
-        auto inner = compileCondition(node.get("value"));
+        auto inner = compileCondition(node.get("value"), overrides);
         return [inner](const IRuleVariableProvider& provider) {
             const TriState verdict = inner(provider);
             if (verdict == TriState::DataMissing) return TriState::DataMissing;
@@ -115,6 +118,15 @@ compileCondition(const foundation::json::JsonFacade& node)
         double rightValue = 0.0;
         if (right.isString()) rightValue = encodeStringValue(right.asString());
         else rightValue = right.asDouble();
+
+        // 用户参数覆盖
+        if (overrides && !overrides->empty() && !varPath.empty()) {
+            std::string key = varPath + "__" + op;
+            auto it = overrides->find(key);
+            if (it != overrides->end()) {
+                rightValue = it->second;
+            }
+        }
 
         enum class Cmp : std::uint8_t { Lt, Gt, Le, Ge, Eq };
         Cmp cmp = Cmp::Eq;
@@ -154,36 +166,6 @@ RuleAction parseAction(const std::string& result) {
 }
 
 } // namespace
-
-/// 递归遍历条件树，对数值比较节点应用覆盖值
-static void applyOverrides(foundation::json::JsonFacade& node,
-                           const std::map<std::string, double>& tmplOverrides,
-                           int depth = 0) {
-    if (depth > 20 || !node.has("op")) return;
-    std::string op = node.get("op").asString();
-    if (op == "lt" || op == "gt" || op == "le" || op == "ge" || op == "eq") {
-        if (node.has("left") && node.has("right")) {
-            auto left = node.get("left");
-            std::string varPath = left.has("var") ? left.get("var").asString() : "";
-            if (!varPath.empty()) {
-                std::string key = varPath + "__" + op;
-                auto it = tmplOverrides.find(key);
-                if (it != tmplOverrides.end()) {
-                    node.set("right", foundation::json::JsonFacade::createDouble(it->second));
-                }
-            }
-        }
-    }
-    if (node.has("conditions")) {
-        auto conds = node.get("conditions");
-        for (std::size_t i = 0; i < conds.size(); ++i) {
-            auto child = conds.at(i);
-            applyOverrides(child, tmplOverrides, depth + 1);
-            conds.set(std::to_string(i), child);  // 写回修改后的子节点
-        }
-        node.set("conditions", conds);
-    }
-}
 
 std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade& compiledJson,
                                               const ParamOverrides& paramOverrides)
@@ -236,13 +218,12 @@ std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade&
                 rule.priority = ruleNode.has("priority") ? ruleNode.get("priority").asInt() : 0;
                 if (ruleNode.has("when")) {
                     auto whenNode = ruleNode.get("when");
-                    // 应用用户参数覆盖
+                    // 查找该模板的用户参数覆盖
+                    const OverrideMap* ov = nullptr;
                     auto tmplIt = paramOverrides.find(compiledTemplate.templateId);
-                    if (tmplIt != paramOverrides.end()) {
-                        applyOverrides(whenNode, tmplIt->second);
-                    }
+                    if (tmplIt != paramOverrides.end()) ov = &tmplIt->second;
                     rule.conditionJson = whenNode.toString();
-                    rule.evaluateCondition = compileCondition(whenNode);
+                    rule.evaluateCondition = compileCondition(whenNode, ov);
                 } else {
                     rule.evaluateCondition = [](const IRuleVariableProvider&) { return TriState::Fail; };
                 }
