@@ -2090,7 +2090,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                     const std::size_t currOff = static_cast<std::size_t>(r)     * colCount + static_cast<std::size_t>(benchCol);
                     double prev = static_cast<double>(closeMat.data[prevOff]);
                     double curr = static_cast<double>(closeMat.data[currOff]);
-                    if (prev > 0.0) bmRet.push_back(curr / prev - 1.0);
+                    // 无有效数据时填 0（保持与策略日线对齐）
+                    bmRet.push_back(prev > 0.0 ? curr / prev - 1.0 : 0.0);
                 }
             }
         }

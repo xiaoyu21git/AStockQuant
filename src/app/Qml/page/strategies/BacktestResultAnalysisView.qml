@@ -59,8 +59,10 @@ Item {
         for(var k=0;k<bv.length;k++){
             bmEquityS.append(k,bv[k]);bmDrawdownS.append(k,bdd[k]||0)
             if(bv[k]>pMax)pMax=bv[k];if(bv[k]<pMin)pMin=bv[k]
+            if(bdd[k]<dMin)dMin=bdd[k];if(bdd[k]>dMax)dMax=bdd[k]
         }
-        var n=Math.max(1,pv.length-1); eqX.max=n; ddX.max=n; retX.max=Math.max(1,ret.length-1)
+        var eqN=Math.max(1,Math.max(pv.length,bv.length)-1)
+        eqX.max=eqN; ddX.max=eqN; retX.max=Math.max(1,ret.length-1)
         eqY.min=pMin*0.95;eqY.max=pMax*1.05;ddY.min=dMin*1.1;ddY.max=dMax>0?dMax*1.1:0
         var cum=0; for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum);if(cum>rMax)rMax=cum;if(cum<rMin)rMin=cum}
         retY.min=rMin*1.1;retY.max=rMax*1.1

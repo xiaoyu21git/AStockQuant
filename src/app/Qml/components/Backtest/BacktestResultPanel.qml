@@ -1304,7 +1304,8 @@ Rectangle {
         portfolioAxisMin = portfolioBounds.min
         portfolioAxisMax = portfolioBounds.max
 
-        var drawdownBounds = calculateAxisBounds(drawdowns, -1, 0)
+        var allDrawdowns = drawdowns.concat(benchmarkDrawdowns)
+        var drawdownBounds = calculateAxisBounds(allDrawdowns, -1, 0)
         drawdownAxisMin = Math.min(drawdownBounds.min, -0.001)
         drawdownAxisMax = Math.max(drawdownBounds.max, 0)
 
