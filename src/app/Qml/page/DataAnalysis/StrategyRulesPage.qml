@@ -296,8 +296,7 @@ Item {
                             DAComponents.RuleParamEditor {
                                 width: parent.width
                                 params: selectedParams; editable: true
-                                onParamChanged: function(key, value) {
-                                    if (_paramInit) return  // 跳过初始化绑定
+                                onParamChanged: {
                                     var cfg = {}; cfg[key] = value
                                     StrategyRuleStatsBridge.updateTemplateParams(selectedTemplateId, cfg, strategyFilterId)
                                 }
