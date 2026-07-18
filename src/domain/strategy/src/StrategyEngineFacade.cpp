@@ -370,7 +370,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     // 将策略配置的风控参数同步到引擎 — 只启用止盈/止损/回撤
     domain::strategy::RiskConfig riskCfg;  // 全零起步
-    riskCfg.stopLossPercent        = params.stopLossPercent > 0 ? params.stopLossPercent : 5.0;
+    riskCfg.stopLossPercent        = params.stopLossPercent > 0 ? params.stopLossPercent : 10.0;
     riskCfg.takeProfitPercent      = params.takeProfitPercent > 0 ? params.takeProfitPercent : 20.0;
     riskCfg.maxDrawdownLimitPercent = 12.0;
     domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
