@@ -1739,21 +1739,35 @@ StrategyBacktestResult StrategyEngine::backtest(
                 auto bpIt = buyPriceMap.find(posSymbol);
                 if (bpIt == buyPriceMap.end() || bpIt->second <= 0.0) continue;
                 double currentPrice = 0.0;
+                int colIdx = -1;
+                for (size_t ci = 0; ci < view->instruments().size(); ++ci) {
+                    auto sit = idToSymbol.find(view->instruments()[ci].value);
+                    if (sit != idToSymbol.end() && sit->second == posSymbol) { colIdx = static_cast<int>(ci); break; }
+                }
                 for (const auto& mdp : mdpBatch) {
-                    auto sit = idToSymbol.find(mdp.instrumentId().value);
-                    if (sit != idToSymbol.end() && sit->second == posSymbol) {
+                    if (colIdx >= 0 && mdp.instrumentId().value == view->instruments()[static_cast<size_t>(colIdx)].value) {
                         currentPrice = mdp.lastPrice(); break;
                     }
                 }
-                if (currentPrice <= 0.0) continue;
+                if (currentPrice <= 0.0 || colIdx < 0) continue;
                 double lossPct = (bpIt->second - currentPrice) / bpIt->second * 100.0;
                 if (lossPct >= m_riskConfig.stopLossPercent) {
-                    // 信号确认：买入时信号强度 * 当前价格/买入价 = 当前有效信号
-                    // 若当前有效信号 < 0.3（弱），确认卖出；否则持有（可能是短暂洗盘）
-                    auto bsIt = buySignalScoreMap.find(posSymbol);
-                    double entrySignal = (bsIt != buySignalScoreMap.end()) ? bsIt->second : 0.5;
-                    double currentSignal = entrySignal * (currentPrice / bpIt->second);  // 价格衰减
-                    if (currentSignal < 0.3) {
+                    // 均线破位确认: 5日均线 < 10日均线（趋势已经转弱），才确认止损
+                    auto closeMat = view->close();
+                    const size_t colCount = view->instruments().size();
+                    double sum5 = 0.0, sum10 = 0.0;
+                    int cnt5 = 0, cnt10 = 0;
+                    for (int back = 0; back < 10 && (r - back) >= 0; ++back) {
+                        double c = static_cast<double>(closeMat.data[
+                            static_cast<size_t>(r - back) * colCount + static_cast<size_t>(colIdx)]);
+                        if (c > 0) {
+                            if (back < 5) { sum5 += c; ++cnt5; }
+                            sum10 += c; ++cnt10;
+                        }
+                    }
+                    bool trendDown = (cnt5 >= 3 && cnt10 >= 5)
+                        ? (sum5 / cnt5) < (sum10 / cnt10) : false;
+                    if (trendDown) {
                         OrderRequest exitOrder;
                         exitOrder.setSymbol(posSymbol);
                         exitOrder.setSide(OrderSide::Sell);
