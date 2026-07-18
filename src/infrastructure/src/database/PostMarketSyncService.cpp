@@ -946,33 +946,44 @@ void PostMarketSyncService::syncConceptMembership()
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return;
 
-    // 1. 拉取全量概念分类 — 尝试多种 sector_type 参数
-    auto* cats = ::stk_get_sector_category("concept");
-    if (!cats || cats->status()) {
-        // 尝试中文参数 / 行业参数 / 其他 sector_type
-        const char* candidates[] = {"概念", "行业", "地域", "板块", nullptr};
-        for (int i = 0; i < 4 && (!cats || cats->status()); ++i) {
-            if (cats) { cats->release(); cats = nullptr; }
-            cats = ::stk_get_sector_category(candidates[i]);
+    // 1. 拉取概念分类: 先试 get_concept 遍历常见代码, 或 stk_get_symbol_sector 反向查
+    // GM 的 stk_get_sector_category 在某些版本返回 1027(概念数据未订阅);
+    // 改用 stk_get_symbol_sector 从具体标的反查其所属概念
+    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: stk_get_sector_category 返回 1027, 改用 stk_get_symbol_sector 反查";
+
+    // 用几个典型标的反查概念 → 采集 sector_code 集合 → 再逐概念查成分股
+    std::unordered_set<std::string> sectorCodes;
+    const char* probeSymbols[] = {"SHSE.600519", "SZSE.000858", "SHSE.601318", "SZSE.300750",
+                                   "SHSE.600030", "SZSE.002594", "SHSE.688981", nullptr};
+    for (int i = 0; probeSymbols[i]; ++i) {
+        auto* ss = ::stk_get_symbol_sector(probeSymbols[i], "concept");
+        if (!ss || ss->status()) {
+            if (ss) ss->release();
+            ss = ::stk_get_symbol_sector(probeSymbols[i], "概念");
+            if (!ss || ss->status()) { if(ss)ss->release(); continue; }
         }
+        for (size_t j = 0; j < ss->count(); ++j)
+            sectorCodes.insert(ss->at(j).sector_code);
+        ss->release();
     }
-    if (!cats || cats->status()) {
-        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: stk_get_sector_category 失败 (尝试了concept/概念/行业/地域/板块) status="
-                             << (cats ? cats->status() : -1);
-        if (cats) cats->release();
+    if (sectorCodes.empty()) {
+        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: 反查概念也失败, 跳过";
         return;
     }
-    int catCount = cats->count();
-    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 获取概念分类 " << catCount << " 个";
-
-    // 2. 遍历概念, 拉取成分股
+    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 反查得到 " << sectorCodes.size() << " 个概念";
+    // sectorCodes 驱动后续拉取循环
     int totalConcepts = 0, totalMembers = 0;
     using P = astock::database::SqlParam;
-    for (int i = 0; i < catCount; ++i) {
-        auto& cat = cats->at(i);
-        std::string code(cat.sector_code);
-        std::string name(cat.sector_name);
-        if (code.empty()) continue;
+
+    // 2. 遍历概念 code, 拉取成分股
+    for (const auto& code : sectorCodes) {
+        // 查询概念名称: 从 stk_get_sector_constituents 第一条的 sector_name
+        auto* members = ::stk_get_sector_constituents(code.c_str());
+        if (!members || members->status()) {
+            if (members) members->release();
+            continue;
+        }
+        std::string name = members->count() > 0 ? members->at(0).sector_name : code;
 
         // 写 catalog
         db->executeUpdate(
@@ -981,8 +992,7 @@ void PostMarketSyncService::syncConceptMembership()
             "concept_name=EXCLUDED.concept_name,stock_count=EXCLUDED.stock_count,updated_at=NOW()",
             {P{code}, P{name}});
 
-        // 拉取成分股
-        auto* members = ::stk_get_sector_constituents(code.c_str());
+        // 已在循环头部查询过 members, 跳过重复调用
         if (!members || members->status()) {
             if (members) members->release();
             continue;
@@ -1009,8 +1019,7 @@ void PostMarketSyncService::syncConceptMembership()
         ++totalConcepts;
         members->release();
     }
-    cats->release();
-    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 同步完成 concepts=" << totalConcepts
+    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 反查同步完成 concepts=" << totalConcepts
                          << " members=" << totalMembers;
 }
 
