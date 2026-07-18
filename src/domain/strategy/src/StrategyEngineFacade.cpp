@@ -1604,6 +1604,9 @@ StrategyBacktestResult StrategyEngine::backtest(
     int stopLossExitCount = 0, ruleExitCount = 0, drawdownBlockCount = 0;
     int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
     int stopLossSkippedNoHeld = 0, totalStopLossOrders = 0;
+    auto stripEx = [](const std::string& sym) -> std::string {
+        auto dot = sym.find('.'); return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
+    };
     std::unordered_set<std::string> todayStopLossSyms, todayRuleExitSyms;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
@@ -1786,7 +1789,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                     if (trendDown) {
                         OrderRequest exitOrder;
                         // 纯6位数字码(如"600000")，与策略订单格式一致
-                        exitOrder.setSymbol(stripExchange(posSymbol));
+                        exitOrder.setSymbol(stripEx(posSymbol));
                         exitOrder.setSide(OrderSide::Sell);
                         exitOrder.setQuantity(pos.quantity());
                         exitOrder.setOrderType(domain::trading::OrderType::Market);
