@@ -1858,8 +1858,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                 }
                 if (closePrice <= 0.0) continue;
 
-                // ── 混合模式: 因子过滤 + 信号缩放 (先于下单量换算, 最终强度定量) ──
-                if (m_factorSignalProcessor.enabled()) {
+                // ── 混合模式: 因子过滤 + 信号缩放 (仅买入单, 卖出不拦截) ──
+                if (m_factorSignalProcessor.enabled() && order.side() == OrderSide::Buy) {
                     if (!m_factorSignalProcessor.passFilter(order.symbol())) continue;
                     const double factorScale = m_factorSignalProcessor.scaleFactor(order.symbol());
                     if (factorScale != 1.0) {
