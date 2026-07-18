@@ -34,13 +34,42 @@ const RuleLibrary* sharedRuleLibrary()
             INTERNAL_ERROR_STREAM << "[RuleGate] compiled.json 解析失败(工作目录搜索了3个候选路径), 规则库不可用";
             return nullptr;
         }
-        auto lib = loadRuleLibrary(root);
+        // 加载用户参数覆盖 (config/rule_params_user.json)
+        ParamOverrides paramOverrides;
+        static const char* kUserParamsPaths[] = {
+            "config/rule_params_user.json",
+            "../config/rule_params_user.json",
+            "../../config/rule_params_user.json",
+        };
+        for (const char* up : kUserParamsPaths) {
+            auto userRoot = foundation::json::JsonFacade::parseFile(up);
+            if (!userRoot.isNull() && userRoot.has("params")) {
+                auto params = userRoot.get("params");
+                for (const auto& tid : params.keys()) {
+                    auto pmap = params.get(tid);
+                    std::map<std::string, double> overrides;
+                    for (const auto& pkey : pmap.keys())
+                        overrides[pkey] = pmap.get(pkey).asDouble();
+                    paramOverrides[tid] = overrides;
+                }
+                INTERNAL_INFO_STREAM << "[RuleGate] 加载用户规则参数覆盖: " << paramOverrides.size() << " 个模板";
+                break;
+            }
+        }
+
+        auto lib = loadRuleLibrary(root, paramOverrides);
         if (lib) {
             s_sharedLibrary = lib.release();  // 转移所有权到静态指针
             INTERNAL_INFO_STREAM << "[RuleGate] 共享规则库就绪: " << s_sharedLibrary->templates.size() << " 模板";
         }
     }
     return s_sharedLibrary;
+}
+
+void reloadSharedRuleLibrary() {
+    delete s_sharedLibrary;
+    s_sharedLibrary = nullptr;
+    INTERNAL_INFO_STREAM << "[RuleGate] 规则库缓存已清除，下次访问将重新加载";
 }
 
 int RuleGate::configure(const std::vector<std::string>& enabledTemplateIds,

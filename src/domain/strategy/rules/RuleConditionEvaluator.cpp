@@ -155,7 +155,38 @@ RuleAction parseAction(const std::string& result) {
 
 } // namespace
 
-std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade& compiledJson)
+/// 递归遍历条件树，对数值比较节点应用覆盖值
+static void applyOverrides(foundation::json::JsonFacade& node,
+                           const std::map<std::string, double>& tmplOverrides,
+                           int depth = 0) {
+    if (depth > 20 || !node.has("op")) return;
+    std::string op = node.get("op").asString();
+    if (op == "lt" || op == "gt" || op == "le" || op == "ge" || op == "eq") {
+        if (node.has("left") && node.has("right")) {
+            auto left = node.get("left");
+            std::string varPath = left.has("var") ? left.get("var").asString() : "";
+            if (!varPath.empty()) {
+                std::string key = varPath + "__" + op;
+                auto it = tmplOverrides.find(key);
+                if (it != tmplOverrides.end()) {
+                    node.set("right", foundation::json::JsonFacade::createDouble(it->second));
+                }
+            }
+        }
+    }
+    if (node.has("conditions")) {
+        auto conds = node.get("conditions");
+        for (std::size_t i = 0; i < conds.size(); ++i) {
+            auto child = conds.at(i);
+            applyOverrides(child, tmplOverrides, depth + 1);
+            conds.set(std::to_string(i), child);  // 写回修改后的子节点
+        }
+        node.set("conditions", conds);
+    }
+}
+
+std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade& compiledJson,
+                                              const ParamOverrides& paramOverrides)
 {
     if (!compiledJson.has("templates")) {
         INTERNAL_ERROR_STREAM << "[RuleEngine] compiled.json 缺 templates";
@@ -204,8 +235,14 @@ std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade&
                 rule.stage = ruleNode.has("stage") ? ruleNode.get("stage").asString() : "";
                 rule.priority = ruleNode.has("priority") ? ruleNode.get("priority").asInt() : 0;
                 if (ruleNode.has("when")) {
-                    rule.conditionJson = ruleNode.get("when").toString();
-                    rule.evaluateCondition = compileCondition(ruleNode.get("when"));
+                    auto whenNode = ruleNode.get("when");
+                    // 应用用户参数覆盖
+                    auto tmplIt = paramOverrides.find(compiledTemplate.templateId);
+                    if (tmplIt != paramOverrides.end()) {
+                        applyOverrides(whenNode, tmplIt->second);
+                    }
+                    rule.conditionJson = whenNode.toString();
+                    rule.evaluateCondition = compileCondition(whenNode);
                 } else {
                     rule.evaluateCondition = [](const IRuleVariableProvider&) { return TriState::Fail; };
                 }

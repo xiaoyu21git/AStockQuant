@@ -73,4 +73,7 @@ private:
 /// @return 加载失败返回 nullptr (调用方应记日志并禁用规则闸门, 不静默)
 [[nodiscard]] const RuleLibrary* sharedRuleLibrary();
 
+/// @brief 强制重载规则库（参数修改后调用，下次 sharedRuleLibrary() 重新读取文件）
+void reloadSharedRuleLibrary();
+
 } // namespace domain::strategy::rules

@@ -88,8 +88,11 @@ struct RuleLibrary {
     std::map<std::string, const CompiledRuleTemplate*> byId;    // templateId → 模板
 };
 
-/// @brief 加载规则库 (compiled.json); 失败返回 nullptr
+using ParamOverrides = std::map<std::string, std::map<std::string, double>>; // templateId → {paramKey → newValue}
+
+/// @brief 加载规则库; paramOverrides 可选，用于覆盖条件树中数值参数
 [[nodiscard]] std::unique_ptr<RuleLibrary> loadRuleLibrary(
-    const foundation::json::JsonFacade& compiledJson);
+    const foundation::json::JsonFacade& compiledJson,
+    const ParamOverrides& paramOverrides = {});
 
 } // namespace domain::strategy::rules

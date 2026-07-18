@@ -464,6 +464,8 @@ bool StrategyRuleStatsBridge::updateTemplateParams(const QString& templateId,
         tmplOverrides[pit.key()] = pit.value();
     all[templateId] = tmplOverrides;
     saveUserParamsMap(all);
+    // 通知规则引擎重载（下次回测使用新参数）
+    domain::strategy::rules::reloadSharedRuleLibrary();
     emit templateStatsUpdated(templateId);
     return true;
 }
