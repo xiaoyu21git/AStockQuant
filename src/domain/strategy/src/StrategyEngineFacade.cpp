@@ -2084,13 +2084,14 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
             if (benchCol >= 0) {
                 const std::size_t colCount = instrs.size();
-                bmRet.reserve(static_cast<size_t>(totalDays) - 1);
-                for (int r = 1; r < totalDays; ++r) {
+                // 基准收益率：按天遍历，与策略 equityCurve 逐日严格对齐
+                bmRet.reserve(static_cast<size_t>(totalDays));
+                for (int r = 0; r < totalDays; ++r) {
+                    if (r == 0) { bmRet.push_back(0.0); continue; } // 首日无前值，收益为0
                     const std::size_t prevOff = static_cast<std::size_t>(r - 1) * colCount + static_cast<std::size_t>(benchCol);
                     const std::size_t currOff = static_cast<std::size_t>(r)     * colCount + static_cast<std::size_t>(benchCol);
                     double prev = static_cast<double>(closeMat.data[prevOff]);
                     double curr = static_cast<double>(closeMat.data[currOff]);
-                    // 无有效数据时填 0（保持与策略日线对齐）
                     bmRet.push_back(prev > 0.0 ? curr / prev - 1.0 : 0.0);
                 }
             }
@@ -2103,15 +2104,13 @@ StrategyBacktestResult StrategyEngine::backtest(
             result.metrics.trackingError    = benchMetrics.trackingError;
             result.metrics.informationRatio = benchMetrics.informationRatio;
 
-            // 构建基准净值曲线和回撤曲线（叠加到图表）
+            // 构建基准净值曲线和回撤曲线（与 strategy 逐日对齐，totalDays 点）
             const double initialCapital = req.costSpec.initialCapital.value > 0
                 ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
-            result.timeSeries.benchmarkValues.reserve(bmRet.size() + 1);
-            result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size() + 1);
+            result.timeSeries.benchmarkValues.reserve(bmRet.size());
+            result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size());
             double bmEquity = initialCapital;
             double bmPeak = bmEquity;
-            result.timeSeries.benchmarkValues.push_back(bmEquity);
-            result.timeSeries.benchmarkDrawdowns.push_back(0.0);
             for (double r : bmRet) {
                 bmEquity *= (1.0 + r);
                 if (bmEquity > bmPeak) bmPeak = bmEquity;
