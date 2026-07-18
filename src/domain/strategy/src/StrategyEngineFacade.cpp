@@ -373,6 +373,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     riskCfg.stopLossPercent   = params.stopLossPercent;
     riskCfg.takeProfitPercent = params.takeProfitPercent;
     domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
+    engine->m_riskConfig = riskCfg;
 
     // 日频/盘中分类: 仅 HighFrequency 走 drainQueue 持续评估,
     // 其余全部日频 → 盘中只巡检, 盘后触发一次 evaluateEndOfDay
@@ -1860,6 +1861,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         ? pit->second.quantity() : 0);
                 }
 
+                domain::strategy::RiskEvaluator::applyConfig(riskInput, m_riskConfig);
                 auto riskResult = domain::strategy::RiskEvaluator::evaluateOrder(riskInput);
                 if (!riskResult.approved()) {
                     ++riskRejectedCount;

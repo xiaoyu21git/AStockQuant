@@ -7,6 +7,7 @@
 #include "DailyEodScheduler.h"
 #include "FactorSignalProcessor.h"
 #include "RuleGate.h"
+#include "RiskEvaluator.h"
 #include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
@@ -622,6 +623,7 @@ private:
     bool m_needsMarketCapField{false};  ///< 权重方案为市值加权时置位，prepareMarketData 追加 market_cap 字段
     FactorSignalProcessor m_factorSignalProcessor;  ///< 混合模式因子信号处理(过滤+缩放)
     rules::RuleGate m_ruleGate;  ///< 规则管线: 市场闸/信号审核/出场, 绑定规则库+策略模板集
+    RiskConfig m_riskConfig = RiskConfig::defaults();
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
