@@ -1798,7 +1798,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (!ordersOpt.has_value()) ordersOpt = std::move(stopLossExits);
                 else {
                     auto& list = ordersOpt.value();
-                    list.insert(list.end(),
+                    // 止损单优先执行（插到最前面，先于因子卖单）
+                    list.insert(list.begin(),
                                 std::make_move_iterator(stopLossExits.begin()),
                                 std::make_move_iterator(stopLossExits.end()));
                 }
