@@ -368,10 +368,11 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                               << static_cast<int>(params.behaviorKind);
     }
 
-    // 将策略配置的风控参数同步到 TradingSystem
-    domain::strategy::RiskConfig riskCfg = domain::strategy::RiskConfig::defaults();
-    riskCfg.stopLossPercent   = params.stopLossPercent;
-    riskCfg.takeProfitPercent = params.takeProfitPercent;
+    // 将策略配置的风控参数同步到引擎 — 只启用止盈/止损/回撤，其他全关
+    domain::strategy::RiskConfig riskCfg;  // 全零起步，不限制
+    riskCfg.stopLossPercent        = params.stopLossPercent > 0 ? params.stopLossPercent : 0.0;
+    riskCfg.takeProfitPercent      = params.takeProfitPercent > 0 ? params.takeProfitPercent : 0.0;
+    riskCfg.maxDrawdownLimitPercent = 12.0;  // 全局回撤硬限制
     domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
     engine->m_riskConfig = riskCfg;
 
@@ -1605,6 +1606,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     std::unordered_map<std::string, double> symbolPnl;  // 逐标的累计盈亏
     std::vector<double> equityCurve;
     equityCurve.reserve(totalDays);
+    double peakEquity = static_cast<double>(req.costSpec.initialCapital.value);
     // 混合模式各因子实际参与天数(喂入快照成功计数), 回测结束输出
     std::unordered_map<std::string, int> hybridFactorCoveredDays;
     // 规则闸门: 变量提供者 + 当日新开仓许可
@@ -1853,6 +1855,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                 riskInput.setCurrentTotalAsset(accSnap.totalAsset());
                 riskInput.setCurrentMarketValue(accSnap.marketValue());
                 riskInput.setTradingSessionOpen(true);
+                // 当前回撤（用于 maxDrawdownLimit 检查）
+                if (peakEquity > 0.0) {
+                    double drawdownPct = (peakEquity - equity) / peakEquity * 100.0;
+                    riskInput.setCurrentDrawdownPercent(-drawdownPct);  // 负数表示亏损
+                }
                 // 卖出单：填充可卖数量
                 if (!riskInput.isBuyOrder()) {
                     const auto& posMap = backtestPositions;
@@ -1962,6 +1969,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         newAcc.setTotalAsset(equity);
         latestEquity = newAcc.totalAsset();
         equityCurve.push_back(equity);
+        if (equity > peakEquity) peakEquity = equity;
 
         if (onProgress && totalDays > 0) {
             double loopFrac = static_cast<double>(r + 1) / static_cast<double>(totalDays);
