@@ -177,6 +177,22 @@ std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade&
             ? templateNode.get("displayName").asString() : "";
         compiledTemplate.phase = templateNode.has("phase")
             ? templateNode.get("phase").asString() : "";
+        compiledTemplate.summary = templateNode.has("summary")
+            ? templateNode.get("summary").asString() : "";
+        compiledTemplate.ns = templateNode.has("namespace")
+            ? templateNode.get("namespace").asString() : "";
+        compiledTemplate.fileName = templateNode.has("fileName")
+            ? templateNode.get("fileName").asString() : "";
+        if (templateNode.has("tags")) {
+            auto tags = templateNode.get("tags");
+            for (std::size_t ti = 0; ti < tags.size(); ++ti)
+                compiledTemplate.tags.push_back(tags.at(ti).asString());
+        }
+        if (templateNode.has("actions")) {
+            auto acts = templateNode.get("actions");
+            for (std::size_t ai = 0; ai < acts.size(); ++ai)
+                compiledTemplate.actions.push_back(acts.at(ai).asString());
+        }
         if (compiledTemplate.templateId.empty()) continue;
 
         if (templateNode.has("rules")) {
@@ -187,10 +203,12 @@ std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade&
                 rule.ruleId = ruleNode.has("id") ? ruleNode.get("id").asString() : "";
                 rule.stage = ruleNode.has("stage") ? ruleNode.get("stage").asString() : "";
                 rule.priority = ruleNode.has("priority") ? ruleNode.get("priority").asInt() : 0;
-                if (ruleNode.has("when"))
+                if (ruleNode.has("when")) {
+                    rule.conditionJson = ruleNode.get("when").toString();
                     rule.evaluateCondition = compileCondition(ruleNode.get("when"));
-                else
+                } else {
                     rule.evaluateCondition = [](const IRuleVariableProvider&) { return TriState::Fail; };
+                }
 
                 if (ruleNode.has("then")) {
                     auto thenNode = ruleNode.get("then");

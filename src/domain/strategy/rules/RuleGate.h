@@ -15,7 +15,8 @@ namespace domain::strategy::rules {
 
 struct RuleTemplateStats {
     int evaluated{0};      // 规则求值次数
-    int hits{0};           // 动作命中次数(block/exit/reduce/freeze)
+    int hits{0};           // 动作命中次数(block/exit/reduce/freeze/state_switch/candidate_entry)
+    int blockedSignals{0}; // 仅 block 动作命中次数(用于计算拦截率 = blockedSignals/evaluated)
     int dataMissing{0};    // 因变量缺失未判定次数
 };
 

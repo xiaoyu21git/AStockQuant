@@ -162,6 +162,8 @@ qt_add_qml_module(astockquantapp
         Qml/page/strategies/StrategyCreationPagePro.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/DataAnalysis/CacheManagementPage.qml
+        Qml/page/DataAnalysis/CleaningRulesPage.qml
+        Qml/page/DataAnalysis/StrategyRulesPage.qml
             Qml/page/risk/RiskConfigurationPage.qml
         Qml/components/BaseQuantCard.qml
         Qml/components/FactorCard.qml
@@ -234,6 +236,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/EmbeddedWorkflow.qml
         Qml/components/DataAnalysis/RulesConfigModal.qml
         Qml/components/DataAnalysis/RulePaginationBar.qml
+        Qml/components/DataAnalysis/RuleStatsCard.qml
+        Qml/components/DataAnalysis/RuleParamEditor.qml
         Qml/components/DataAnalysis/DataOverviewCard.qml
         Qml/components/DataAnalysis/DataSelectionPanel.qml
         Qml/components/DataAnalysis/DataPreviewPanel.qml
@@ -354,6 +358,16 @@ add_custom_command(TARGET astockquantapp-exe POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         $<TARGET_FILE:astockquantapp>
         $<TARGET_FILE_DIR:astockquantapp-exe>
+)
+
+# 将编译后的规则库拷贝到二进制输出目录，保证运行时 relative-path 能找到
+add_custom_command(TARGET astockquantapp POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        $<TARGET_FILE_DIR:astockquantapp>/config/rules
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/config/rules/compiled.json
+        $<TARGET_FILE_DIR:astockquantapp>/config/rules/compiled.json
+    COMMENT "Copy compiled.json to binary output directory"
 )
 
 

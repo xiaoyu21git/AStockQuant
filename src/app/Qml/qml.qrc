@@ -81,6 +81,8 @@
         <file>components/DataAnalysis/QuickStart.qml</file>
         <file>components/DataAnalysis/RulesConfigModal.qml</file>
         <file>components/DataAnalysis/RulePaginationBar.qml</file>
+        <file>components/DataAnalysis/RuleStatsCard.qml</file>
+        <file>components/DataAnalysis/RuleParamEditor.qml</file>
         <file>components/DataAnalysis/StatsCard.qml</file>
         <file>components/DataAnalysis/TaskCategory.qml</file>
         <file>components/DataAnalysis/WorkflowSteps.qml</file>
@@ -152,6 +154,8 @@
         <file>main.qml</file>
         <file>page/DataAnalysis/Datamain.qml</file>
         <file>page/DataAnalysis/CacheManagementPage.qml</file>
+        <file>page/DataAnalysis/CleaningRulesPage.qml</file>
+        <file>page/DataAnalysis/StrategyRulesPage.qml</file>
         <file>page/FactorWorkbench.qml</file>
         <file>page/FactorPerformancePage.qml</file>
         <file>page/Sidebar.qml</file>

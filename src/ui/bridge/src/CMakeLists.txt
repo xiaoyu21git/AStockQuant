@@ -32,6 +32,7 @@
     CandleDataModel.cpp
     RuleTemplateDetailHelper.cpp
     RuleTemplateSuggestionService.cpp
+    StrategyRuleStatsBridge.cpp
     CrosshairManager.cpp
     BacktestAnalyticsService.cpp
     ../include/BacktestAnalyticsService.h

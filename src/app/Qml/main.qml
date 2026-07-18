@@ -404,6 +404,26 @@ ApplicationWindow {
                         asynchronous: true
                         sourceComponent: factorPerformancePageComponent
                     }
+
+                    // 索引14: 清洗规则页面
+                    Loader {
+                        id: cleaningRulesPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 14 || item !== null
+                        asynchronous: true
+                        sourceComponent: cleaningRulesPageComponent
+                    }
+
+                    // 索引15: 策略规则管理页面
+                    Loader {
+                        id: strategyRulesPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 15 || item !== null
+                        asynchronous: true
+                        sourceComponent: strategyRulesPageComponent
+                    }
                 }
             }
             }
@@ -501,6 +521,18 @@ ApplicationWindow {
         id: factorPerformancePageComponent
 
         FactorPerformancePage {}
+    }
+
+    Component {
+        id: cleaningRulesPageComponent
+
+        CleaningRulesPage {}
+    }
+
+    Component {
+        id: strategyRulesPageComponent
+
+        StrategyRulesPage {}
     }
 
     DepositDialog {
@@ -676,6 +708,8 @@ ApplicationWindow {
             "factor_library": 5,              // 因子库 -> FactorWorkbench (索引5)
             "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
             "factor_performance": 13,         // 因子绩效 -> FactorPerformancePage (索引13)
+            "cleaning_rule": 14,            // 清洗规则 -> CleaningRulesPage (索引14)
+            "strategy_rule": 15,            // 策略规则管理 -> StrategyRulesPage (索引15)
             "risk_configuration": 6,          // 风险配置 -> 风险管理 (索引6)
             "risk_monitoring": 6,             // 风险监控 -> 风险管理 (索引6)
             "stress_testing": 6,              // 压力测试 -> 风险管理 (索引6)

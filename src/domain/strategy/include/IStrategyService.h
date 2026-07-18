@@ -576,6 +576,11 @@ public:
         return m_liveMarketView.get();
     }
 
+    /// @brief 获取规则闸门统计数据（评估/命中/拦截/数据缺失，按模板聚合）
+    [[nodiscard]] const rules::RuleGateStats& ruleGateStats() const noexcept {
+        return m_ruleGate.stats();
+    }
+
 private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);

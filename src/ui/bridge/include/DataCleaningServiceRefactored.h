@@ -75,10 +75,18 @@ public:
     QVariantMap getDefaultRules() const;
     
     // 自定义规则
-    void addCustomRule(const QString& ruleName, 
+    void addCustomRule(const QString& ruleName,
                       const QVariantMap& ruleConfig);
     void removeCustomRule(const QString& ruleName);
     QVariantMap getCustomRules() const;
+
+    // ── 用户规则配置持久化 ──
+    /// @brief 保存用户启停配置到 configDir/cleaning/cleaning_rules_user.json
+    Q_INVOKABLE bool saveUserRuleConfig(const QVariantMap& enabledMap);
+    /// @brief 加载用户启停配置
+    Q_INVOKABLE QVariantMap loadUserRuleConfig() const;
+    /// @brief 获取最近一次清洗的统计快照（遍历 statsByRequest 取 endTime 最大者）
+    Q_INVOKABLE QVariantMap getLatestCleaningStats() const;
     
     // ============ 统计和状态 ============
     

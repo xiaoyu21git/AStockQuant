@@ -16,6 +16,8 @@
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
 
+#include <QDir>
+#include <QFile>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -575,6 +577,64 @@ QVariantMap DataCleaningServiceRefactored::getCustomRules() const {
     return m_impl->customRules;
 }
 
+bool DataCleaningServiceRefactored::saveUserRuleConfig(const QVariantMap& enabledMap) {
+    try {
+        QDir cfgDir(bridge::storage::configDir());
+        if (!cfgDir.exists("cleaning")) {
+            cfgDir.mkpath("cleaning");
+        }
+        QString filePath = cfgDir.filePath("cleaning/cleaning_rules_user.json");
+        QFile f(filePath);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] saveUserRuleConfig: cannot write "
+                                 << filePath.toStdString();
+            return false;
+        }
+        QJsonObject root;
+        root["version"] = 1;
+        QJsonObject rules;
+        for (auto it = enabledMap.begin(); it != enabledMap.end(); ++it) {
+            rules[it.key()] = it.value().toBool();
+        }
+        root["rules"] = rules;
+        QJsonDocument doc(root);
+        f.write(doc.toJson(QJsonDocument::Indented));
+        f.close();
+        return true;
+    } catch (const std::exception& e) {
+        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] saveUserRuleConfig: "
+                             << e.what();
+        return false;
+    }
+}
+
+QVariantMap DataCleaningServiceRefactored::loadUserRuleConfig() const {
+    QVariantMap result;
+    try {
+        QDir cfgDir(bridge::storage::configDir());
+        QString filePath = cfgDir.filePath("cleaning/cleaning_rules_user.json");
+        QFile f(filePath);
+        if (!f.open(QIODevice::ReadOnly)) {
+            return result; // 文件不存在时返回空，由调用方使用默认值
+        }
+        QByteArray data = f.readAll();
+        f.close();
+        QJsonParseError err;
+        QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+        if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+            return result;
+        }
+        QJsonObject rules = doc.object().value("rules").toObject();
+        for (auto it = rules.begin(); it != rules.end(); ++it) {
+            result[it.key()] = it.value().toBool();
+        }
+    } catch (const std::exception& e) {
+        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] loadUserRuleConfig: "
+                             << e.what();
+    }
+    return result;
+}
+
 // ── 统计 ──
 RefactoredCleaningStats DataCleaningServiceRefactored::getLastCleaningStats(const QString& requestId) const {
     QMutexLocker lock(&m_impl->stateMutex);
@@ -589,6 +649,20 @@ QVariantMap DataCleaningServiceRefactored::getAllCleaningStats() const {
         map[key] = stats.toVariantMap();
     }
     return map;
+}
+
+QVariantMap DataCleaningServiceRefactored::getLatestCleaningStats() const {
+    QMutexLocker lock(&m_impl->stateMutex);
+    const RefactoredCleaningStats* latest = nullptr;
+    for (const auto& [key, stats] : m_impl->statsByRequest) {
+        if (!latest || stats.endTime > latest->endTime) {
+            latest = &stats;
+        }
+    }
+    if (latest) {
+        return latest->toVariantMap();
+    }
+    return {};
 }
 
 void DataCleaningServiceRefactored::resetStats() {

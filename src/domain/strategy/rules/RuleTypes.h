@@ -62,6 +62,7 @@ struct CompiledRule {
     std::string ruleId;
     std::string stage;          // market/eligibility/signal/rebalance (YAML 原值)
     int priority{0};            // 越小越高优
+    std::string conditionJson;  // when 子句原始 JSON (供 UI 展示与参数提取)
     std::function<TriState(const IRuleVariableProvider&)> evaluateCondition;
     RuleDecision decision;
 };
@@ -71,6 +72,11 @@ struct CompiledRuleTemplate {
     std::string templateId;
     std::string displayName;
     std::string phase;          // 对应 stage (规则本体内也有 stage, 此处为 catalog 汇总)
+    std::string summary;        // 模板功能简述
+    std::string ns;             // namespace (如 trading.entry.weak_to_strong)
+    std::string fileName;       // 源 YAML 文件名
+    std::vector<std::string> tags;      // 标签列表
+    std::vector<std::string> actions;   // 动作列表 (candidate_entry/block/exit/...)
     std::vector<CompiledRule> rules;
 };
 

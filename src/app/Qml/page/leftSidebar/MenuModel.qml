@@ -24,7 +24,8 @@ QtObject {
             items: [
                 {title: "数据看板", icon: "📈", badge: "", code: "data_dashboard"},
                 {title: "缓存管理", icon: "🗂️", badge: "", code: "cache_management"},
-                {title: "规则管理", icon: "🧩", badge: "", code: "rule_management"},
+                {title: "清洗规则", icon: "🧹", badge: "", code: "cleaning_rule"},
+                {title: "策略规则管理", icon: "🎯", badge: "", code: "strategy_rule"},
                 {title: "数据导出", icon: "📤", badge: "", code: "data_export"}
             ]
         },

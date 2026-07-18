@@ -29,6 +29,8 @@
 #include "SymbolSearchModel.h"
 #include "RuleTemplateDetailHelper.h"
 #include "RuleTemplateSuggestionService.h"
+#include "DataCleaningServiceRefactored.h"
+#include "StrategyRuleStatsBridge.h"
 
 namespace wang{
 
@@ -211,6 +213,22 @@ namespace wang{
              auto* svc = new ui::bridge::BacktestAnalyticsService();
              svc->refreshRunList();
              return svc;
+          });
+
+       // DataCleaningServiceRefactored — 数据清洗服务
+       qmlRegisterSingletonType<DataCleaningServiceRefactored>(
+          url, 1, 0, "DataCleaningServiceRefactored",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             auto* svc = new DataCleaningServiceRefactored();
+             svc->initialize();
+             return svc;
+          });
+
+       // StrategyRuleStatsBridge — 策略规则统计桥接
+       qmlRegisterSingletonType<StrategyRuleStatsBridge>(
+          url, 1, 0, "StrategyRuleStatsBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new StrategyRuleStatsBridge();
           });
 
    }

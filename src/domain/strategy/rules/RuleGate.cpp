@@ -101,6 +101,7 @@ RuleAction RuleGate::runRules(std::vector<BoundRule>& rules,
         if (verdict == TriState::DataMissing) { ++stats.dataMissing; continue; }
         if (verdict == TriState::Pass) {
             ++stats.hits;
+            if (bound.rule->decision.action == RuleAction::Block) ++stats.blockedSignals;
             if (bound.rule->decision.action == RuleAction::Pass) continue;  // 资格确认不计入阻断
             return bound.rule->decision.action;  // Block/Freeze/Exit/Reduce → 立即生效
         }
