@@ -1728,6 +1728,44 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
+        // ── 止损扫描: 持仓浮亏超线自动生成卖单 ──
+        if (m_riskConfig.stopLossPercent > 0.0 && !backtestPositions.empty()) {
+            std::vector<OrderRequest> stopLossExits;
+            for (const auto& kvPos : backtestPositions) {
+                const auto& posSymbol = kvPos.first;
+                const auto& pos = kvPos.second;
+                if (pos.quantity() <= 0) continue;
+                auto bpIt = buyPriceMap.find(posSymbol);
+                if (bpIt == buyPriceMap.end() || bpIt->second <= 0.0) continue;
+                double currentPrice = 0.0;
+                for (const auto& mdp : mdpBatch) {
+                    auto sit = idToSymbol.find(mdp.instrumentId().value);
+                    if (sit != idToSymbol.end() && sit->second == posSymbol) {
+                        currentPrice = mdp.lastPrice(); break;
+                    }
+                }
+                if (currentPrice <= 0.0) continue;
+                double lossPct = (bpIt->second - currentPrice) / bpIt->second * 100.0;
+                if (lossPct >= m_riskConfig.stopLossPercent) {
+                    OrderRequest exitOrder;
+                    exitOrder.setSymbol(posSymbol);
+                    exitOrder.setSide(OrderSide::Sell);
+                    exitOrder.setQuantity(pos.quantity());
+                    exitOrder.setOrderType(domain::trading::OrderType::Market);
+                    stopLossExits.push_back(std::move(exitOrder));
+                }
+            }
+            if (!stopLossExits.empty()) {
+                if (!ordersOpt.has_value()) ordersOpt = std::move(stopLossExits);
+                else {
+                    auto& list = ordersOpt.value();
+                    list.insert(list.end(),
+                                std::make_move_iterator(stopLossExits.begin()),
+                                std::make_move_iterator(stopLossExits.end()));
+                }
+            }
+        }
+
         // ── 混合模式: 喂当日因子快照(因子值首访全量计算并缓存) ──
         if (m_factorSignalProcessor.enabled()) {
             auto* rfsBt = dynamic_cast<RuntimeFactorSvc*>(factorService_.get());
