@@ -79,6 +79,8 @@ struct BacktestRuleVariableProvider::Impl {
 
     RuleMarketSnapshot market;
     bool marketReady{false};
+    // 当日全量龙头排名缓存: symbol(无后缀6位码) → best_rank (越小越强, 0=未上榜)
+    std::unordered_map<std::string, int> leaderRankCache;
     RuleCandidateContext candidate;
 
     // ── 每标的派生量 (按需计算) ──
@@ -500,6 +502,7 @@ void BacktestRuleVariableProvider::setDay(
     m_impl->date = date;
     m_impl->positions = positions;
     m_impl->marketReady = false;
+    m_impl->leaderRankCache.clear();
     if (view) {
         const auto& dates = view->dates();
         m_impl->lastRow = -1;
@@ -509,6 +512,20 @@ void BacktestRuleVariableProvider::setDay(
         if (m_impl->lastRow >= 0) {
             m_impl->market = computeMarketSnapshot(view, m_impl->lastRow, kRecentHighWindow);
             m_impl->marketReady = true;
+            // 加载当日龙头排名缓存
+            char ds[16]; int ly=date/10000, lm=(date/100)%100, ld=date%100;
+            std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
+            try {
+                auto& pool = astock::database::NativePgConnectionPool::instance();
+                auto db = pool.getConnection();
+                if (db && db->isOpen()) {
+                    auto r = db->executeQuery(
+                        "SELECT symbol, rank FROM live.concept_leader_rank WHERE trade_date=$1::date",
+                        {astock::database::SqlParam{std::string(ds)}});
+                    for (auto& row : r.getRows())
+                        m_impl->leaderRankCache[row.getString("symbol")] = row.getInt("rank");
+                }
+            } catch (...) {}
         }
     }
 }
@@ -711,9 +728,13 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "market.high_consensus_collapse_rate") return market.boardBreakRate;
     // 个股级(代理到市场宽度, 真实排名需 per-symbol concept lookup — MVP 阶段代理)
     if (varPath == "theme.emotion_cycle")                 return market.conceptAvgReturn;
-    if (varPath == "candidate.leader_rank_in_theme")      return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.core_theme_reflow_rank")    return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.sector_relative_lag_rank")  return market.breadthAboveMa60Ratio;
+    // 龙头排名: 从 concept_leader_rank 缓存实查 (6位码, 未上榜=0)
+    if (varPath == "candidate.leader_rank_in_theme")
+    { auto it=impl.leaderRankCache.find(impl.candidate.code); return it!=impl.leaderRankCache.end()?std::optional<double>(static_cast<double>(it->second)):std::optional<double>(0.0); }
+    if (varPath == "candidate.core_theme_reflow_rank")
+    { auto it=impl.leaderRankCache.find(impl.candidate.code); return it!=impl.leaderRankCache.end()?std::optional<double>(static_cast<double>(it->second)):std::optional<double>(0.0); }
+    if (varPath == "candidate.sector_relative_lag_rank")
+    { auto it=impl.leaderRankCache.find(impl.candidate.code); return it!=impl.leaderRankCache.end()?std::optional<double>(static_cast<double>(it->second)):std::optional<double>(0.0); }
     if (varPath == "candidate.theme_leader_locked")
     { auto c2m=impl.closeToMaRatio(20); return c2m&&*c2m>1.02?std::optional<double>(1.0):std::optional<double>(0.0); }
     if (varPath == "candidate.theme_heat_rank")           return market.breadthAboveMa60Ratio;

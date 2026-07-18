@@ -1039,7 +1039,22 @@ void PostMarketSyncService::computeConceptDailyStats(int tradingDay)
         "leader_return=EXCLUDED.leader_return",
         {P{dateStr}});
 
-    INTERNAL_DEBUG_STREAM << "[PostMktSync] CONCEPT: 日聚合完成 date=" << dateBuf;
+    // 龙头排名 (TOP5 per concept)
+    db->executeUpdate(
+        "INSERT INTO live.concept_leader_rank "
+        "(concept_code, trade_date, symbol, rank, change_pct) "
+        "SELECT concept_code, $1::date, symbol, rnk, change_pct FROM ("
+        "  SELECT cm.concept_code, si.symbol, d.change_pct, "
+        "  ROW_NUMBER() OVER (PARTITION BY cm.concept_code ORDER BY d.change_pct DESC) AS rnk "
+        "  FROM live.concept_membership cm "
+        "  JOIN ref.symbol_info si ON cm.symbol_id = si.id "
+        "  JOIN mkt.daily_bar d ON d.symbol_id = si.id AND d.trade_date=$1::date"
+        ") sub WHERE rnk <= 5 "
+        "ON CONFLICT(concept_code, trade_date, symbol) DO UPDATE SET "
+        "rank=EXCLUDED.rank, change_pct=EXCLUDED.change_pct",
+        {P{dateStr}});
+
+    INTERNAL_DEBUG_STREAM << "[PostMktSync] CONCEPT: 日聚合+排名完成 date=" << dateBuf;
 }
 
 } // namespace astock::infrastructure::database
