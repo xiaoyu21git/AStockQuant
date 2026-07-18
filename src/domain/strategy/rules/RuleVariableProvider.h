@@ -47,6 +47,12 @@ struct RuleMarketSnapshot {
     // 定性状态(由连续指标编码)
     double regimeState{0.0};           // ruleStringValueCode 编码
     double themeBreadth{0.0};
+
+    // 涨停/打板聚合 (每日全市场统计)
+    double limitUpRatio{0.0};          // 涨停标的占比
+    double oneWordBoardRatio{0.0};     // 一字板占比
+    double resealRate{0.0};            // 炸板回封率 (回封数/炸板数)
+    double boardBreakRate{0.0};        // 炸板率 (炸板数/封板数)
 };
 
 /// @brief 回测实现: 日线+持仓为数据源的 IRuleVariableProvider

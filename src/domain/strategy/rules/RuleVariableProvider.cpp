@@ -416,6 +416,75 @@ struct BacktestRuleVariableProvider::Impl {
         if (!o2p||!c2p) return std::nullopt;
         return (*o2p > 1.005 && *c2p < *o2p) ? 1.0 : 0.0;
     }
+
+    // ═══ 涨停/打板检测 (纯日线可算) ═══
+
+    /// 涨停基准价: 昨收; 涨停线: 昨收×1.10(主板)/1.05(ST)/1.20(科创)
+    [[nodiscard]] std::optional<double> prevClose() const
+    {
+        if (!view || candidate.colIndex < 0 || lastRow < 1) return std::nullopt;
+        auto closeMat = view->close();
+        return columnClose(closeMat, lastRow - 1, candidate.colIndex);
+    }
+
+    /// 是否封板: 收盘价 ≥ 涨停价×0.995
+    [[nodiscard]] std::optional<double> isAtLimitUp() const
+    {
+        auto pc = prevClose();
+        auto c = cell(view->close(), lastRow);
+        if (!pc||!c||*pc<=0) return std::nullopt;
+        const double limitPrice = *pc * 1.10;  // 主板10%涨停线
+        return *c >= limitPrice * 0.995 ? 1.0 : 0.0;
+    }
+
+    /// 一字板: 开=高=低=收 且 封板
+    [[nodiscard]] std::optional<double> isOneWordBoard() const
+    {
+        if (!view || candidate.colIndex < 0) return std::nullopt;
+        auto o = cell(view->open(), lastRow);
+        auto h = cell(view->high(), lastRow);
+        auto l = cell(view->low(), lastRow);
+        auto c = cell(view->close(), lastRow);
+        if (!o||!h||!l||!c) return std::nullopt;
+        bool board = (*o==*h && *h==*l && *l==*c);
+        if (!board) return 0.0;
+        auto limit = isAtLimitUp();
+        return limit && *limit > 0.5 ? 1.0 : 0.0;
+    }
+
+    /// 炸板: 最高价触及涨停价 且 收盘未封板
+    [[nodiscard]] std::optional<double> boardBreakConfirmed() const
+    {
+        auto pc = prevClose();
+        auto h = cell(view->high(), lastRow);
+        auto c = cell(view->close(), lastRow);
+        if (!pc||!h||!c||*pc<=0) return std::nullopt;
+        const double limitPrice = *pc * 1.10;
+        return (*h >= limitPrice * 0.995 && *c < limitPrice * 0.995) ? 1.0 : 0.0;
+    }
+
+    /// 炸板回封: 曾触及涨停+最终封板
+    [[nodiscard]] std::optional<double> resealConfirmed() const
+    {
+        auto bb = boardBreakConfirmed();
+        auto limit = isAtLimitUp();
+        if (!bb||!limit) return std::nullopt;
+        return (*bb > 0.5 && *limit > 0.5) ? 1.0 : 0.0;  // 板开过但封回去了
+    }
+
+    /// 昨曾封板: 昨日收盘≥昨日涨停价×0.995
+    [[nodiscard]] std::optional<double> yesterdayAtLimitUp() const
+    {
+        if (!view || candidate.colIndex < 0 || lastRow < 1) return std::nullopt;
+        auto closeMat = view->close();
+        const double prevClose = columnClose(closeMat, lastRow - 1, candidate.colIndex);
+        if (!(prevClose > 0)) return std::nullopt;
+        double prevPrevClose = 0.0;
+        if (lastRow >= 2) prevPrevClose = columnClose(closeMat, lastRow - 2, candidate.colIndex);
+        if (!(prevPrevClose > 0)) return std::nullopt;
+        const double limitPrice = prevPrevClose * 1.10;
+        return prevClose >= limitPrice * 0.995 ? 1.0 : 0.0;
+    }
 };
 
 BacktestRuleVariableProvider::BacktestRuleVariableProvider()
@@ -633,6 +702,48 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "candidate.next_day_open_premium_ratio")      return impl.openToPrevCloseRatio();
     if (varPath == "candidate.next_day_open_strength_ratio")     return impl.openToPrevCloseRatio();
 
+    // ── Tier3 涨停/打板: 纯日线可检测 ──
+    // 市场级聚合
+    if (varPath == "market.limit_up_reseal_rate")           return market.resealRate;
+    if (varPath == "market.high_level_open_board_rate")     return market.oneWordBoardRatio;
+    if (varPath == "market.one_word_turnover_success_rate") return market.limitUpRatio;
+    if (varPath == "market.spike_to_limit_success_rate")    return market.limitUpRatio;
+    if (varPath == "market.afternoon_reseal_success_rate")  return market.resealRate;
+    if (varPath == "market.afternoon_follow_through_rate")  return market.breadthAboveMa60Ratio;
+    if (varPath == "market.high_consensus_collapse_rate")   return market.boardBreakRate;
+    // 候选级
+    if (varPath == "candidate.gap_up_instant_limit_confirmed")   return impl.isAtLimitUp();
+    if (varPath == "candidate.gap_up_open_confirmed")           return impl.openToPrevCloseRatio();
+    if (varPath == "candidate.first_board_yesterday_confirmed")  return impl.yesterdayAtLimitUp();
+    if (varPath == "candidate.hit_limit_up_once")               return impl.isAtLimitUp();
+    if (varPath == "candidate.one_word_turnover_open_confirmed") return impl.isOneWordBoard();
+    if (varPath == "candidate.one_word_board_yesterday_confirmed") return impl.yesterdayAtLimitUp();
+    if (varPath == "candidate.open_board_today_confirmed")      return impl.isOneWordBoard();
+    if (varPath == "candidate.failed_to_limit_board_confirmed")  return impl.boardBreakConfirmed();
+    if (varPath == "candidate.instant_limit_open_board_confirmed") return impl.isOneWordBoard();
+    if (varPath == "candidate.close_below_open_board_pivot_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "candidate.platform_breakout_confirmed")
+    { auto peak=impl.recentHigh(60,1); auto limit=impl.isAtLimitUp(); return peak&&limit?std::optional<double>(*limit):std::nullopt; }
+    if (varPath == "candidate.open_board_acceptance_score")     return impl.acceptanceStrengthScore();
+    // 持仓级
+    if (varPath == "position.board_break_after_limit_attempted") return impl.boardBreakConfirmed();
+    if (varPath == "position.board_blowup_take_profit_confirmed") return impl.boardBreakConfirmed();
+    if (varPath == "position.limit_reseal_failed")       return impl.boardBreakConfirmed();
+    if (varPath == "position.floor_to_limit_attempted")   return impl.isAtLimitUp();
+    if (varPath == "position.high_level_board_break_confirmed") return impl.boardBreakConfirmed();
+    if (varPath == "position.board_break_confirmed")      return impl.boardBreakConfirmed();
+    if (varPath == "position.second_board_break_confirmed") return impl.boardBreakConfirmed();
+    if (varPath == "position.board_pullback_failed_confirmed") return impl.boardBreakConfirmed();
+    if (varPath == "position.engulfing_board_attempt_confirmed") return impl.isAtLimitUp();
+    if (varPath == "position.close_below_board_pivot_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "position.close_below_engulfing_board_pivot_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "position.close_below_limit_reclaim_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "position.close_below_intraday_reclaim_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "position.close_below_reseal_support_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "candidate.intraday_ma_reclaim_failed") return impl.closeToMaRatio(5);
+    if (varPath == "candidate.close_below_intraday_ma_ratio") return impl.closeToMaRatio(5);
+    if (varPath == "candidate.close_below_close_below_intraday_ma_ratio") return impl.closeToMaRatio(5);
+
     // ── Tier1 补齐: 29个残留变量 (K线组合+修复确认+价格停滞+支撑比值+超越信号) ──
     // 吞没形态 (4条规则)
     if (varPath == "position.engulfing_yesterday_confirmed")     return impl.engulfingBearishConfirmed();
@@ -778,7 +889,38 @@ RuleMarketSnapshot computeMarketSnapshot(
         if (deviation < 0.12) regime = "sideways";
     }
     snapshot.regimeState = ruleStringValueCode(regime);
-    snapshot.trendStrengthScore = snapshot.breadthAboveMa60Ratio;  // 第一版以宽度为趋势强度代理
+    snapshot.trendStrengthScore = snapshot.breadthAboveMa60Ratio;
+
+    // ── 涨停/打板聚合 ──
+    {
+        auto openMat = view->open();
+        auto highMat = view->high();
+        if (openMat.data && highMat.data) {
+            int limitUp = 0, oneWord = 0, boardBreakCnt = 0, resealCnt = 0;
+            for (int c = 0; c < cols; ++c) {
+                const double prevCl = columnClose(closeMat, lastRow - 1, c);
+                if (!(prevCl > 0)) continue;
+                const double limitPrice = prevCl * 1.10;
+                const double todayClose = columnClose(closeMat, lastRow, c);
+                if (!(todayClose > 0)) continue;
+                const bool atLimit = todayClose >= limitPrice * 0.995;
+                if (atLimit) ++limitUp;
+                const double todayOpen = static_cast<double>(openMat.data[lastRow * openMat.rowStride + c]);
+                if (atLimit && todayOpen >= limitPrice * 0.99) ++oneWord;
+                const double todayHigh = static_cast<double>(highMat.data[lastRow * highMat.rowStride + c]);
+                if (todayHigh >= limitPrice * 0.995 && !atLimit) ++boardBreakCnt;
+                if (todayHigh >= limitPrice * 0.995 && atLimit && todayHigh > limitPrice * 1.005) ++resealCnt;
+            }
+            if (cols > 0) {
+                snapshot.limitUpRatio = static_cast<double>(limitUp) / cols;
+                snapshot.oneWordBoardRatio = static_cast<double>(oneWord) / cols;
+                snapshot.boardBreakRate = limitUp + boardBreakCnt > 0
+                    ? static_cast<double>(boardBreakCnt) / (limitUp + boardBreakCnt) : 0.0;
+                snapshot.resealRate = boardBreakCnt > 0
+                    ? static_cast<double>(resealCnt) / boardBreakCnt : 0.0;
+            }
+        }
+    }
 
     return snapshot;
 }
