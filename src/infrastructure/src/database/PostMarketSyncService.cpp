@@ -946,10 +946,18 @@ void PostMarketSyncService::syncConceptMembership()
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return;
 
-    // 1. 拉取全量概念分类 (sector_type="concept")
+    // 1. 拉取全量概念分类 — 尝试多种 sector_type 参数
     auto* cats = ::stk_get_sector_category("concept");
     if (!cats || cats->status()) {
-        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: stk_get_sector_category 失败 status="
+        // 尝试中文参数 / 行业参数 / 其他 sector_type
+        const char* candidates[] = {"概念", "行业", "地域", "板块", nullptr};
+        for (int i = 0; i < 4 && (!cats || cats->status()); ++i) {
+            if (cats) { cats->release(); cats = nullptr; }
+            cats = ::stk_get_sector_category(candidates[i]);
+        }
+    }
+    if (!cats || cats->status()) {
+        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: stk_get_sector_category 失败 (尝试了concept/概念/行业/地域/板块) status="
                              << (cats ? cats->status() : -1);
         if (cats) cats->release();
         return;
