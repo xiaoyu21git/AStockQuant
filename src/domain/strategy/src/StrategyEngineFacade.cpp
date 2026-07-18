@@ -1614,6 +1614,16 @@ StrategyBacktestResult StrategyEngine::backtest(
     rules::BacktestRuleVariableProvider ruleProvider;
     bool ruleAllowEntriesToday = true;
 
+    // 查找基准指数列（用于大盘解冻判断）
+    int bmColIdx = -1;
+    {
+        std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
+        for (size_t ci = 0; ci < view->instruments().size(); ++ci) {
+            auto sit = idToSymbol.find(view->instruments()[ci].value);
+            if (sit != idToSymbol.end() && sit->second == bmSym) { bmColIdx = static_cast<int>(ci); break; }
+        }
+    }
+
     // 数据准备完成 → 0%
     if (onProgress) onProgress(0.0);
 
@@ -2041,6 +2051,28 @@ StrategyBacktestResult StrategyEngine::backtest(
         latestEquity = newAcc.totalAsset();
         equityCurve.push_back(equity);
         if (equity > peakEquity) peakEquity = equity;
+
+        // 大盘回暖解冻: 基准指数站上 20 日均线 → 重置回撤峰值
+        if (bmColIdx >= 0 && r >= 20) {
+            auto closeMat = view->close();
+            const size_t colCount = view->instruments().size();
+            double bmClose = static_cast<double>(closeMat.data[
+                static_cast<size_t>(r) * colCount + static_cast<size_t>(bmColIdx)]);
+            double bmSum20 = 0.0;
+            int bmCnt = 0;
+            for (int back = 1; back <= 20; ++back) {
+                double c = static_cast<double>(closeMat.data[
+                    static_cast<size_t>(r - back) * colCount + static_cast<size_t>(bmColIdx)]);
+                if (c > 0) { bmSum20 += c; ++bmCnt; }
+            }
+            if (bmCnt >= 15 && bmClose > 0 && bmSum20 > 0) {
+                double bmMA20 = bmSum20 / bmCnt;
+                if (bmClose > bmMA20) {
+                    // 指数回暖 → 解冻
+                    peakEquity = equity;
+                }
+            }
+        }
 
         if (onProgress && totalDays > 0) {
             double loopFrac = static_cast<double>(r + 1) / static_cast<double>(totalDays);
