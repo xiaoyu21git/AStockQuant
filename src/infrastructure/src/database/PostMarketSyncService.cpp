@@ -75,6 +75,8 @@ bool PostMarketSyncService::forceSyncToday() {
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 日线+分钟线完成 ======";
             syncWeeklyMonthly(today);
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 周月线完成 ======";
+            // 概念同步: 首次运行需要拉取全量成分股(月度维护), 日常仅聚合
+            // 测试阶段可注释月度判断强制每次同步 → if(true){...}
             if(isMonthlyMaintenanceDay()){syncFinancialData(today);syncConceptMembership();}
             computeConceptDailyStats(today);
         }
