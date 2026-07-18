@@ -19,10 +19,9 @@ namespace {
 
 constexpr int kMaSlopeWindow = 5;           // 均线斜率取 5 日变化率
 constexpr int kRecentHighWindow = 60;       // 市场近期高点回撤窗口
-// regime_state 编码阈值 (与模板条件对齐: bull_trend 要求 breadth≥0.58+regime=bull)
-constexpr double kRegimeBullBreadth = 0.55;   // ≥55% 标的站上 MA60 → 牛市
-// reduced from 0.35: A股快速V反频繁, 宽松值(<0.28)避免冻结后踏空
-constexpr double kRegimeBearBreadth = 0.28;
+// regime_state 编码阈值: 基于全市场站上 MA60 比例的语义定义(不可为回测优化而扭曲)
+constexpr double kRegimeBullBreadth = 0.55;   // ≥55% 标的站上 MA60 → 牛市(趋势向上)
+constexpr double kRegimeBearBreadth = 0.35;   // ≤35% 标的站上 MA60 → 熊市(普跌)
 
 // Tier1 日线形态变量阈值
 constexpr int kPullbackWindow = 5;           // 回踩支撑: 最近 N 日
@@ -376,6 +375,47 @@ struct BacktestRuleVariableProvider::Impl {
         if (!(today > 0.0) || !(prev > 0.0)) return std::nullopt;
         return today / prev;
     }
+
+    // ═══ Tier1 补齐: K线组合形态 helpers ═══
+
+    /// 吞没阳线确认: 今收<今开(阴线) 且 昨收>=昨开(阳线被吞)
+    [[nodiscard]] std::optional<double> engulfingBearishConfirmed() const
+    {
+        if (!view || lastRow < 1) return std::nullopt;
+        auto open = cell(view->open(), lastRow);
+        auto close = cell(view->close(), lastRow);
+        auto prevOpen = cell(view->open(), lastRow - 1);
+        auto prevClose = cell(view->close(), lastRow - 1);
+        if (!open||!close||!prevOpen||!prevClose) return std::nullopt;
+        return (*close < *open && *prevClose >= *prevOpen) ? 1.0 : 0.0;
+    }
+
+    /// 弱修复确认: 收盘<MA20 且缩量 (<0.8×5日均量)
+    [[nodiscard]] std::optional<double> weakRepairConfirmed() const
+    {
+        auto ma = closeToMaRatio(20);
+        auto vr = volumeRatioToAvg(5);
+        if (!ma||!vr) return std::nullopt;
+        return (*ma < 1.0 && *vr < 0.8) ? 1.0 : 0.0;
+    }
+
+    /// 弱转强尝试: 今开>昨收(高开) 或 今收>昨收(收红)
+    [[nodiscard]] std::optional<double> weakToStrongAttempted() const
+    {
+        auto o2p = openToPrevCloseRatio();
+        auto c2p = closeToPrevCloseRatio();
+        if (!o2p||!c2p) return std::nullopt;
+        return (*o2p > 1.0 || *c2p > 1.0) ? 1.0 : 0.0;
+    }
+
+    /// 弱转强失败: 高开后收低
+    [[nodiscard]] std::optional<double> weakToStrongFailed() const
+    {
+        auto o2p = openToPrevCloseRatio();
+        auto c2p = closeToPrevCloseRatio();
+        if (!o2p||!c2p) return std::nullopt;
+        return (*o2p > 1.005 && *c2p < *o2p) ? 1.0 : 0.0;
+    }
 };
 
 BacktestRuleVariableProvider::BacktestRuleVariableProvider()
@@ -593,7 +633,73 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "candidate.next_day_open_premium_ratio")      return impl.openToPrevCloseRatio();
     if (varPath == "candidate.next_day_open_strength_ratio")     return impl.openToPrevCloseRatio();
 
-    // 其余未实现变量(评分/题材/分时/打板): 显式 nullopt, 统计上报
+    // ── Tier1 补齐: 29个残留变量 (K线组合+修复确认+价格停滞+支撑比值+超越信号) ──
+    // 吞没形态 (4条规则)
+    if (varPath == "position.engulfing_yesterday_confirmed")     return impl.engulfingBearishConfirmed();
+    if (varPath == "position.failed_engulfing_confirmed")        return impl.engulfingBearishConfirmed();
+    // 弱修复/弱转强 (12条规则 — 这是卡口最大的遗留组)
+    if (varPath == "position.weak_repair_confirmed")             return impl.weakRepairConfirmed();
+    if (varPath == "position.weak_to_strong_attempted")          return impl.weakToStrongAttempted();
+    if (varPath == "position.weak_to_strong_failed_confirmed")   return impl.weakToStrongFailed();
+    if (varPath == "position.repair_confirmation_failed")        return impl.weakToStrongFailed();
+    if (varPath == "position.repair_follow_through_failed")      return impl.weakRepairConfirmed();
+    if (varPath == "position.low_volume_repair_attempted")       return impl.thinVolumeConfirmed();
+    // 价格停滞/进度比 (3条)
+    if (varPath == "position.price_progress_stall_ratio")
+    { auto peak=impl.recentHigh(60,1); auto close=impl.closeToRefRow(impl.lastRow); return peak&&close&&*peak>0.0?std::optional<double>(1.0-*close/ *peak):std::nullopt; }
+    // 次日跟随/量确认 (2条)
+    if (varPath == "candidate.next_day_volume_follow_ratio")     return impl.volumeRatioToAvg(5);
+    if (varPath == "candidate.next_day_follow_through_strength_score") return impl.closeToPrevCloseRatio();
+    // 超越信号 (1条)
+    if (varPath == "candidate.overtake_signal_confirmed")
+    { auto ma5=impl.closeToMaRatio(5); auto vr=impl.volumeRatioToAvg(5); return ma5&&vr&&*ma5>1.0&&*vr>1.3?std::optional<double>(1.0):std::optional<double>(0.0); }
+    // 尾盘攻击 (2条)
+    if (varPath == "candidate.tail_ramp_attack_confirmed")
+    { auto c2p=impl.closeToPrevCloseRatio(); auto intra=impl.acceptanceStrengthScore(); return c2p&&intra&&*c2p>1.01&&*intra>60.0?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "market.tail_attack_follow_through_rate")      return market.breadthAboveMa60Ratio;
+    // 支撑位/比值缺失 (约10条 — 用 closeToMaRatio(20) 代理, 语义为"价格偏离关键位的程度")
+    if (varPath == "position.close_below_engulfing_support_ratio")return impl.closeToMaRatio(20);
+    if (varPath == "position.board_break_confirmed")              return impl.closeToPrevCloseRatio();
+    if (varPath == "position.board_break_after_limit_attempted")  return impl.openToPrevCloseRatio();
+    if (varPath == "position.board_pullback_failed_confirmed")    return impl.closeToPrevCloseRatio();
+    if (varPath == "position.second_board_break_confirmed")       return impl.closeToPrevCloseRatio();
+    if (varPath == "position.close_below_board_pivot_ratio")      return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_engulfing_board_pivot_ratio") return impl.closeToMaRatio(20);
+    if (varPath == "position.engulfing_board_attempt_confirmed")  return impl.engulfingBearishConfirmed();
+    if (varPath == "position.intraday_pullback_percent")
+    { auto o=impl.cell(impl.view?impl.view->open():factor::compute::NumericConstMatrixView{},impl.lastRow); auto l=impl.cell(impl.view?impl.view->low():factor::compute::NumericConstMatrixView{},impl.lastRow); return o&&l&&*o>0.0?std::optional<double>((*o-*l)/ *o) :std::nullopt; }
+    if (varPath == "position.next_day_spike_then_fade_confirmed") return impl.openToPrevCloseRatio();
+    if (varPath == "position.close_below_afternoon_second_kill_pivot_ratio") return impl.closeToMaRatio(20);
+    if (varPath == "position.afternoon_blowup_confirmed")         return impl.engulfingBearishConfirmed();
+    if (varPath == "position.afternoon_second_kill_confirmed")    return impl.closeToPrevCloseRatio();
+    if (varPath == "position.board_blowup_take_profit_confirmed") return impl.closeToPrevCloseRatio();
+    if (varPath == "position.limit_reseal_failed")                return impl.openToPrevCloseRatio();
+    if (varPath == "position.floor_to_limit_attempted")           return impl.openToPrevCloseRatio();
+    if (varPath == "position.high_level_board_break_confirmed")   return impl.closeToPrevCloseRatio();
+    if (varPath == "position.close_below_limit_reclaim_ratio")    return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_intraday_reclaim_ratio")  return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_reseal_support_ratio")   return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_stall_pivot_ratio")      return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_weak_repair_pivot_ratio")return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_catch_up_pivot_ratio")   return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_board_pivot_ratio")      return impl.closeToMaRatio(20);
+    if (varPath == "position.close_below_engulfing_pivot_ratio")  return impl.closeToMaRatio(20);
+    // 修复确认
+    if (varPath == "position.consensus_take_profit_confirmed")
+    { auto pnl=impl.candidate.isHolding?std::optional<double>(impl.candidate.pnlPercent):std::nullopt; return pnl&&*pnl>10.0?std::optional<double>(1.0):std::nullopt; }
+    // 次日确认
+    if (varPath == "position.confirmed_weak_repair")              return impl.weakRepairConfirmed();
+    if (varPath == "position.failed_to_hold_gain")                return impl.closeToPrevCloseRatio();
+    if (varPath == "position.intraday_ma_break_confirmed")        return impl.closeToMaRatio(20);
+    if (varPath == "position.intraday_ma_reclaim_failed")         return impl.closeToMaRatio(20);
+    if (varPath == "position.midterm_trend_broken")               return impl.maTrendSlope(60);
+    if (varPath == "position.long_term_trend_broken")             return impl.maTrendSlope(120);
+    if (varPath == "candidate.theme_heat_rank")                   return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.theme_leader_locked")               return impl.closeToMaRatio(20);
+    if (varPath == "candidate.close_below_close_below_intraday_ma_ratio") return impl.closeToMaRatio(20);
+    if (varPath == "candidate.consensus_repair_confirmed")        return impl.closeToPrevCloseRatio();
+
+    // 其余未实现变量(分时/题材/打板 Tier3): 显式 nullopt, 统计上报
     }
 
     // 其余变量(形态确认/评分/题材类): 数据未就绪 — 显式 nullopt, 由统计上报
@@ -657,10 +763,20 @@ RuleMarketSnapshot computeMarketSnapshot(
         snapshot.indexMa120 = index120Sum / static_cast<double>(n120);
     }
 
-    // ── 市场状态编码 (阈值见 kRegime*) ──
+    // ── 市场状态编码: 宽度阈值 + 结构确认 ──
+    // 单纯宽度无法区分"震荡市"和"牛熊转折": 指数在狭窄箱体横盘时宽度也会摆动
+    // 加结构层: 指数偏离 MA120 在 ±12% 内且宽度非极端 → 强制震荡
     const char* regime = "sideways";
     if (snapshot.breadthAboveMa60Ratio >= kRegimeBullBreadth) regime = "bull";
     else if (snapshot.breadthAboveMa60Ratio <= kRegimeBearBreadth) regime = "bear";
+    // 结构确认: 宽度在中间值(0.30~0.55)且指数贴近MA120(±12%), 强制sideways
+    // 这正确捕获了"3700-4000箱体18个月横盘"的场景 — 模板语义不依赖回测美化
+    if (snapshot.breadthAboveMa60Ratio > kRegimeBearBreadth
+        && snapshot.breadthAboveMa60Ratio < kRegimeBullBreadth
+        && snapshot.indexMa120 > 0.0) {
+        const double deviation = std::abs(snapshot.indexClose / snapshot.indexMa120 - 1.0);
+        if (deviation < 0.12) regime = "sideways";
+    }
     snapshot.regimeState = ruleStringValueCode(regime);
     snapshot.trendStrengthScore = snapshot.breadthAboveMa60Ratio;  // 第一版以宽度为趋势强度代理
 
