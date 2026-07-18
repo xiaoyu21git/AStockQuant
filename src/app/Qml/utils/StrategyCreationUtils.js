@@ -1004,7 +1004,24 @@ function resolveRuleTemplateFileName(templateId) {
         template_risk_market_bull_trend_allow_entry_v1: "risk_market_bull_trend_allow_entry.yaml",
         template_risk_market_sideways_selective_entry_v1: "risk_market_sideways_selective_entry.yaml",
         template_risk_market_bear_freeze_entry_v1: "risk_market_bear_freeze_entry.yaml",
-        template_risk_market_emotion_repair_allow_entry_v1: "risk_market_emotion_repair_allow_entry.yaml"
+        template_risk_market_emotion_repair_allow_entry_v1: "risk_market_emotion_repair_allow_entry.yaml",
+        template_risk_market_emotion_cooling_freeze_v1: "risk_market_emotion_cooling_freeze.yaml",
+        template_risk_market_high_level_open_board_deterioration_freeze_v1: "risk_market_high_level_open_board_deterioration_freeze.yaml",
+        template_risk_market_reseal_rate_drop_freeze_v1: "risk_market_reseal_rate_drop_freeze.yaml",
+        template_risk_market_theme_cooling_freeze_v1: "risk_market_theme_cooling_freeze.yaml",
+        template_risk_market_reseal_recovery_allow_entry_v1: "risk_market_reseal_recovery_allow_entry.yaml",
+        template_exit_failed_rebound_engulfing_v1: "exit_failed_rebound_engulfing.yaml",
+        template_exit_engulfing_next_day_fade_v1: "exit_engulfing_next_day_fade.yaml",
+        template_exit_thin_volume_rebound_failed_v1: "exit_thin_volume_rebound_failed.yaml",
+        template_exit_low_volume_false_repair_v1: "exit_low_volume_false_repair.yaml",
+        template_exit_broken_board_failed_rebound_v1: "exit_broken_board_failed_rebound.yaml",
+        template_exit_floor_to_limit_failed_v1: "exit_floor_to_limit_failed.yaml",
+        template_exit_reseal_board_break_loss_v1: "exit_reseal_board_break_loss.yaml",
+        template_exit_engulfing_first_down_day_confirmed_v1: "exit_engulfing_first_down_day_confirmed.yaml",
+        template_exit_acceleration_volume_stall_v1: "exit_acceleration_volume_stall.yaml",
+        template_exit_second_wave_repair_failed_v1: "exit_second_wave_repair_failed.yaml",
+        template_entry_weak_to_strong_v1: "entry_weak_to_strong.yaml",
+        template_entry_overtake_rotation_v1: "entry_overtake_rotation.yaml"
     };
     return mapping[key] || "";
 }
@@ -1117,6 +1134,60 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 category: "exit_management",
                 termId: "exit_scale_out_take_profit",
                 termDisplayName: "分批止盈"
+            },
+            // 扩充入场: 回踩均线支撑
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_pullback_ma20_support_v1",
+                templateDisplayName: "回踩20日线支撑模板",
+                summary: "回踩 MA20 获得有效支撑且量价配合时，确认趋势延续入场。",
+                category: "entry_pattern",
+                termId: "entry_pullback_ma20_support",
+                termDisplayName: "回踩MA20支撑"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_pullback_ma60_support_v1",
+                templateDisplayName: "回踩60日线支撑模板",
+                summary: "回踩 MA60 获得有效支撑且量价配合时，确认中期趋势延续入场。",
+                category: "entry_pattern",
+                termId: "entry_pullback_ma60_support",
+                termDisplayName: "回踩MA60支撑"
+            },
+            // 扩充出场: 反弹失败吞没
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_failed_rebound_engulfing_v1",
+                templateDisplayName: "反弹失败吞没退出模板",
+                summary: "反弹后出现吞没形态，执行保护性退出。",
+                category: "exit_pattern",
+                termId: "exit_failed_rebound_engulfing",
+                termDisplayName: "反弹失败吞没退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_engulfing_next_day_fade_v1",
+                templateDisplayName: "吞没次日回落退出模板",
+                summary: "吞没形态次日继续低走，确认弱势。",
+                category: "exit_pattern",
+                termId: "exit_engulfing_next_day_fade",
+                termDisplayName: "吞没次日回落退出"
             }
         ];
     } else if (strategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
@@ -1558,7 +1629,7 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
     var strategyTypeIndex = resolveProfileStrategyTypeIndex(profile);
 
     var gateSpecs = [];
-    var vetoSpec = {
+    var vetoSpecs = [{
         groupId: "market_veto",
         groupTitle: "风险否决组",
         groupRole: "veto",
@@ -1570,7 +1641,31 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
         category: "market_risk",
         termId: "market_bear_freeze_entry",
         termDisplayName: "熊市冻结新开仓"
-    };
+    }, {
+        groupId: "market_veto",
+        groupTitle: "风险否决组",
+        groupRole: "veto",
+        groupOperator: "any",
+        templateId: "template_risk_market_emotion_cooling_freeze_v1",
+        templateDisplayName: "情绪冷却冻结模板",
+        fileName: "risk_market_emotion_cooling_freeze.yaml",
+        summary: "市场情绪冷却、宽度收缩且高位承接恶化时，冻结新增仓位。",
+        category: "market_risk",
+        termId: "market_emotion_cooling_freeze",
+        termDisplayName: "情绪冷却冻结新开仓"
+    }, {
+        groupId: "market_veto",
+        groupTitle: "风险否决组",
+        groupRole: "veto",
+        groupOperator: "any",
+        templateId: "template_risk_market_theme_cooling_freeze_v1",
+        templateDisplayName: "题材冷却冻结模板",
+        fileName: "risk_market_theme_cooling_freeze.yaml",
+        summary: "核心题材广度塌陷、龙头分歧加大时，冻结新增仓位。",
+        category: "market_risk",
+        termId: "market_theme_cooling_freeze",
+        termDisplayName: "题材冷却冻结新开仓"
+    }];
 
     if (isTrendStrategyTypeIndex(strategyTypeIndex) || strategyTypeIndex === StrategyTypeIndex.Momentum) {
         gateSpecs = [
@@ -1612,6 +1707,32 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
                 category: "market_gate",
                 termId: "market_sideways_selective_entry",
                 termDisplayName: "震荡市精选放行"
+            },
+            {
+                groupId: "market_gate",
+                groupTitle: "市场放行组",
+                groupRole: "any_pass",
+                groupOperator: "at_least",
+                templateId: "template_risk_market_emotion_repair_allow_entry_v1",
+                templateDisplayName: "情绪修复放行模板",
+                fileName: "risk_market_emotion_repair_allow_entry.yaml",
+                summary: "情绪修复且高位承接、回封率、题材宽度同步回暖时，放行新增仓位。",
+                category: "market_gate",
+                termId: "market_emotion_repair_allow_entry",
+                termDisplayName: "情绪修复放行新开仓"
+            },
+            {
+                groupId: "market_gate",
+                groupTitle: "市场放行组",
+                groupRole: "any_pass",
+                groupOperator: "at_least",
+                templateId: "template_risk_market_reseal_recovery_allow_entry_v1",
+                templateDisplayName: "回封恢复放行模板",
+                fileName: "risk_market_reseal_recovery_allow_entry.yaml",
+                summary: "炸板回封率恢复且承接回暖时，放行趋势类新增仓位。",
+                category: "market_gate",
+                termId: "market_reseal_recovery_allow_entry",
+                termDisplayName: "回封恢复放行新开仓"
             }
         ];
     } else if (strategyTypeIndex === StrategyTypeIndex.MeanReversion || strategyTypeIndex === StrategyTypeIndex.HighFrequency) {
@@ -1676,7 +1797,9 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
     for (var gateIndex = 0; gateIndex < gateSpecs.length; ++gateIndex) {
         bindings.push(createDefaultRulePackEntry(Object.assign({ stageId: "market" }, gateSpecs[gateIndex])));
     }
-    bindings.push(createDefaultRulePackEntry(Object.assign({ stageId: "market" }, vetoSpec)));
+    for (var vi = 0; vi < vetoSpecs.length; ++vi) {
+        bindings.push(createDefaultRulePackEntry(Object.assign({ stageId: "market" }, vetoSpecs[vi])));
+    }
     return bindings;
 }
 
