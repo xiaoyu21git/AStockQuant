@@ -1914,8 +1914,9 @@ StrategyBacktestResult StrategyEngine::backtest(
                     }
                     order.setQuantity(lots * kSharesPerLot);
                 } else {
-                    // 卖出信号 = 离场: 全平该标的持仓
-                    auto sizingPosIt = backtestPositions.find(symbol);
+                    // 卖出信号 = 离场: 全平该标的持仓 (用 order.symbol() 保证 fullSymbol 匹配)
+                    auto sizingPosIt = backtestPositions.find(order.symbol());
+                    if (sizingPosIt == backtestPositions.end()) sizingPosIt = backtestPositions.find(symbol);
                     const std::int64_t held = (sizingPosIt != backtestPositions.end())
                         ? sizingPosIt->second.quantity() : 0;
                     if (held <= 0) {
@@ -1996,7 +1997,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         backtestPositions[symbol] = pos;
                     }
                 } else {
-                    if (todayStopLossSyms.count(order.symbol())) ++totalStopLossOrders;
+                    if (todayStopLossSyms.count(order.symbol()) || todayStopLossSyms.count(symbol)) ++totalStopLossOrders;
                     const auto& posMap = backtestPositions;
                     auto it = posMap.find(symbol);
                     const std::int64_t held = (it != posMap.end()) ? it->second.quantity() : 0LL;
@@ -2015,8 +2016,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                         double pnl = (fr.income / sellQty - bp) * sellQty;
                         result.tradeLog.push_back({dates[static_cast<std::size_t>(r)].value,
                                                    order.symbol(), false, sellQty, closePrice, pnl});
-                        if (todayStopLossSyms.count(order.symbol())) ++stopLossFilled;
-                        else if (todayRuleExitSyms.count(order.symbol())) ++ruleExitFilled;
+                        if (todayStopLossSyms.count(order.symbol()) || todayStopLossSyms.count(symbol)) ++stopLossFilled;
+                        else if (todayRuleExitSyms.count(order.symbol()) || todayRuleExitSyms.count(symbol)) ++ruleExitFilled;
                         else ++normalSellFilled;
                         if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
                         else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
