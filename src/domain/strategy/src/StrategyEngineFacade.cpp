@@ -1601,6 +1601,7 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     int riskRejectedCount = 0;
     int totalFills = 0, winningFills = 0, losingFills = 0;
+    int stopLossExitCount = 0, ruleExitCount = 0, drawdownBlockCount = 0;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
     std::unordered_map<std::string, double> buySignalScoreMap;  // 买入时因子信号强度
@@ -1783,6 +1784,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         exitOrder.setSide(OrderSide::Sell);
                         exitOrder.setQuantity(pos.quantity());
                         exitOrder.setOrderType(domain::trading::OrderType::Market);
+                        ++stopLossExitCount;
                         stopLossExits.push_back(std::move(exitOrder));
                     }
                 }
@@ -2244,6 +2246,25 @@ StrategyBacktestResult StrategyEngine::backtest(
                          << "  交易日: " << totalDays;
     INTERNAL_INFO_STREAM << "[回测结果] 初始资金: " << req.costSpec.initialCapital.value
                          << "  最终净值: " << (equityCurve.empty() ? 0 : static_cast<int64_t>(equityCurve.back()));
+    INTERNAL_INFO_STREAM << "[交易明细] 止损触发: " << stopLossExitCount
+                         << "  规则出场: " << ruleExitCount
+                         << "  回撤冻结: " << drawdownBlockCount;
+    // 卖单按盈亏排序，打印 top20
+    std::vector<const BacktestTradeRecord*> sells;
+    for (const auto& t : result.tradeLog)
+        if (!t.isBuy) sells.push_back(&t);
+    std::sort(sells.begin(), sells.end(),
+              [](const auto* a, const auto* b) { return a->realizedPnl > b->realizedPnl; });
+    int showN = std::min(20, static_cast<int>(sells.size()));
+    INTERNAL_INFO_STREAM << "[交易明细] === 最佳" << showN << "笔 ===";
+    for (int i = 0; i < showN; ++i)
+        INTERNAL_INFO_STREAM << "[交易明细] " << sells[i]->tradeDate << " " << sells[i]->symbol
+                             << " 盈亏:" << static_cast<int>(sells[i]->realizedPnl);
+    INTERNAL_INFO_STREAM << "[交易明细] === 最差" << showN << "笔 ===";
+    for (int i = 0; i < showN; ++i)
+        INTERNAL_INFO_STREAM << "[交易明细] " << sells[sells.size()-1-i]->tradeDate << " "
+                             << sells[sells.size()-1-i]->symbol
+                             << " 盈亏:" << static_cast<int>(sells[sells.size()-1-i]->realizedPnl);
     INTERNAL_INFO_STREAM << "[回测指标] 总收益率: " << (result.metrics.totalReturn * 100.0) << "%";
     INTERNAL_INFO_STREAM << "[回测指标] 年化收益: " << (result.metrics.annualizedReturn * 100.0) << "%";
     INTERNAL_INFO_STREAM << "[回测指标] 最大回撤: " << (result.metrics.maxDrawdown * 100.0) << "%";
