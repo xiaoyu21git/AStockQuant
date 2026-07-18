@@ -2255,13 +2255,13 @@ StrategyBacktestResult StrategyEngine::backtest(
         if (!t.isBuy) sells.push_back(&t);
     std::sort(sells.begin(), sells.end(),
               [](const auto* a, const auto* b) { return a->realizedPnl > b->realizedPnl; });
-    int showN = std::min(20, static_cast<int>(sells.size()));
-    INTERNAL_INFO_STREAM << "[交易明细] === 最佳" << showN << "笔 ===";
-    for (int i = 0; i < showN; ++i)
+    int showNTrades = (std::min)(20, static_cast<int>(sells.size()));
+    INTERNAL_INFO_STREAM << "[交易明细] === 最佳" << showNTrades << "笔 ===";
+    for (int i = 0; i < showNTrades; ++i)
         INTERNAL_INFO_STREAM << "[交易明细] " << sells[i]->tradeDate << " " << sells[i]->symbol
                              << " 盈亏:" << static_cast<int>(sells[i]->realizedPnl);
-    INTERNAL_INFO_STREAM << "[交易明细] === 最差" << showN << "笔 ===";
-    for (int i = 0; i < showN; ++i)
+    INTERNAL_INFO_STREAM << "[交易明细] === 最差" << showNTrades << "笔 ===";
+    for (int i = 0; i < showNTrades; ++i)
         INTERNAL_INFO_STREAM << "[交易明细] " << sells[sells.size()-1-i]->tradeDate << " "
                              << sells[sells.size()-1-i]->symbol
                              << " 盈亏:" << static_cast<int>(sells[sells.size()-1-i]->realizedPnl);
