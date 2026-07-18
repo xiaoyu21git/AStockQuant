@@ -2123,6 +2123,41 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
     }
 
+    // ── 回测指标全量打印 ──
+    INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
+    INTERNAL_INFO_STREAM << "[回测结果] 策略: " << req.strategyIdentity.strategyCode.text();
+    INTERNAL_INFO_STREAM << "[回测结果] 区间: " << (view->dates().empty() ? 0 : view->dates().front().value)
+                         << " → " << (view->dates().empty() ? 0 : view->dates().back().value)
+                         << "  交易日: " << totalDays;
+    INTERNAL_INFO_STREAM << "[回测结果] 初始资金: " << req.costSpec.initialCapital.value
+                         << "  最终净值: " << (equityCurve.empty() ? 0 : static_cast<int64_t>(equityCurve.back()));
+    INTERNAL_INFO_STREAM << "[回测指标] 总收益率: " << (result.metrics.totalReturn * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 年化收益: " << (result.metrics.annualizedReturn * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 最大回撤: " << (result.metrics.maxDrawdown * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 胜率: " << (result.metrics.winRate * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 盈亏比: " << result.metrics.profitFactor;
+    INTERNAL_INFO_STREAM << "[回测指标] 夏普比率: " << result.metrics.sharpeRatio;
+    INTERNAL_INFO_STREAM << "[回测指标] 索提诺比率: " << result.metrics.sortinoRatio;
+    INTERNAL_INFO_STREAM << "[回测指标] 卡玛比率: " << result.metrics.calmarRatio;
+    INTERNAL_INFO_STREAM << "[回测指标] 年化波动率: " << (result.metrics.volatility * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] Alpha: " << result.metrics.alpha;
+    INTERNAL_INFO_STREAM << "[回测指标] Beta: " << result.metrics.beta;
+    INTERNAL_INFO_STREAM << "[回测指标] 跟踪误差: " << result.metrics.trackingError;
+    INTERNAL_INFO_STREAM << "[回测指标] 信息比率: " << result.metrics.informationRatio;
+    INTERNAL_INFO_STREAM << "[交易统计] 总成交: " << result.tradeStats.totalTrades
+                         << "  盈利: " << result.tradeStats.winningTrades
+                         << "  亏损: " << result.tradeStats.losingTrades;
+    INTERNAL_INFO_STREAM << "[交易统计] 总盈利: " << result.tradeStats.totalProfit.value
+                         << "  总亏损: " << result.tradeStats.totalLoss.value;
+    INTERNAL_INFO_STREAM << "[交易统计] 最大单笔盈利: " << result.tradeStats.largestWin.value
+                         << "  最大单笔亏损: " << result.tradeStats.largestLoss.value;
+    INTERNAL_INFO_STREAM << "[规则闸门] 冻结天数: " << m_ruleGate.stats().frozenDays
+                         << "  信号拒绝: " << m_ruleGate.stats().signalsBlocked
+                         << "  规则出场: " << m_ruleGate.stats().positionExits;
+    INTERNAL_INFO_STREAM << "[基准对比] 基准净值点数: " << result.timeSeries.benchmarkValues.size()
+                         << "  策略净值点数: " << result.timeSeries.portfolioValues.size();
+    INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
+
     if (riskRejectedCount > 0) {
         INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
     }
