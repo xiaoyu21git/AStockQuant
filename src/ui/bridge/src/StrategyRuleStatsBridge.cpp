@@ -464,7 +464,16 @@ bool StrategyRuleStatsBridge::updateTemplateParams(const QString& templateId,
         tmplOverrides[pit.key()] = pit.value();
     all[templateId] = tmplOverrides;
     saveUserParamsMap(all);
-    // 通知规则引擎重载（下次回测使用新参数）
+    // 注入内存 + 通知规则引擎重载
+    domain::strategy::rules::ParamOverrides cppOverrides;
+    for (auto tit = all.begin(); tit != all.end(); ++tit) {
+        QVariantMap m = tit.value().toMap();
+        std::map<std::string, double> inner;
+        for (auto pit = m.begin(); pit != m.end(); ++pit)
+            inner[pit.key().toStdString()] = pit.value().toDouble();
+        cppOverrides[tit.key().toStdString()] = inner;
+    }
+    domain::strategy::rules::setSharedParamOverrides(cppOverrides);
     domain::strategy::rules::reloadSharedRuleLibrary();
     emit templateStatsUpdated(templateId);
     return true;

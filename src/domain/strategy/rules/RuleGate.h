@@ -76,4 +76,7 @@ private:
 /// @brief 强制重载规则库（参数修改后调用，下次 sharedRuleLibrary() 重新读取文件）
 void reloadSharedRuleLibrary();
 
+/// @brief 桥接层注入用户参数覆盖（替代文件搜索，避免 CWD 路径不匹配）
+void setSharedParamOverrides(const ParamOverrides& overrides);
+
 } // namespace domain::strategy::rules

@@ -13,6 +13,7 @@ namespace domain::strategy::rules {
 namespace {
 
 const RuleLibrary* s_sharedLibrary = nullptr;  // 首次加载后全局复用
+ParamOverrides s_paramOverrides;               // 桥接层注入的用户参数覆盖
 
 } // namespace
 
@@ -34,27 +35,31 @@ const RuleLibrary* sharedRuleLibrary()
             INTERNAL_ERROR_STREAM << "[RuleGate] compiled.json 解析失败(工作目录搜索了3个候选路径), 规则库不可用";
             return nullptr;
         }
-        // 加载用户参数覆盖 (config/rule_params_user.json)
-        ParamOverrides paramOverrides;
-        static const char* kUserParamsPaths[] = {
-            "config/rule_params_user.json",
-            "../config/rule_params_user.json",
-            "../../config/rule_params_user.json",
-        };
-        for (const char* up : kUserParamsPaths) {
-            auto userRoot = foundation::json::JsonFacade::parseFile(up);
-            if (!userRoot.isNull() && userRoot.has("params")) {
-                auto params = userRoot.get("params");
-                for (const auto& tid : params.keys()) {
-                    auto pmap = params.get(tid);
-                    std::map<std::string, double> overrides;
-                    for (const auto& pkey : pmap.keys())
-                        overrides[pkey] = pmap.get(pkey).asDouble();
-                    paramOverrides[tid] = overrides;
+        // 加载用户参数覆盖: 优先用桥接层注入的（内存），否则读文件
+        ParamOverrides paramOverrides = s_paramOverrides;
+        if (paramOverrides.empty()) {
+            static const char* kUserParamsPaths[] = {
+                "config/rule_params_user.json",
+                "../config/rule_params_user.json",
+                "../../config/rule_params_user.json",
+            };
+            for (const char* up : kUserParamsPaths) {
+                auto userRoot = foundation::json::JsonFacade::parseFile(up);
+                if (!userRoot.isNull() && userRoot.has("params")) {
+                    auto params = userRoot.get("params");
+                    for (const auto& tid : params.keys()) {
+                        auto pmap = params.get(tid);
+                        std::map<std::string, double> overrides;
+                        for (const auto& pkey : pmap.keys())
+                            overrides[pkey] = pmap.get(pkey).asDouble();
+                        paramOverrides[tid] = overrides;
+                    }
+                    INTERNAL_INFO_STREAM << "[RuleGate] 加载用户规则参数覆盖(文件): " << paramOverrides.size() << " 个模板";
+                    break;
                 }
-                INTERNAL_INFO_STREAM << "[RuleGate] 加载用户规则参数覆盖: " << paramOverrides.size() << " 个模板";
-                break;
             }
+        } else {
+            INTERNAL_INFO_STREAM << "[RuleGate] 加载用户规则参数覆盖(注入): " << paramOverrides.size() << " 个模板";
         }
 
         auto lib = loadRuleLibrary(root, paramOverrides);
@@ -70,6 +75,11 @@ void reloadSharedRuleLibrary() {
     delete s_sharedLibrary;
     s_sharedLibrary = nullptr;
     INTERNAL_INFO_STREAM << "[RuleGate] 规则库缓存已清除，下次访问将重新加载";
+}
+
+void setSharedParamOverrides(const ParamOverrides& overrides) {
+    s_paramOverrides = overrides;
+    INTERNAL_INFO_STREAM << "[RuleGate] 注入用户参数覆盖: " << overrides.size() << " 个模板";
 }
 
 int RuleGate::configure(const std::vector<std::string>& enabledTemplateIds,
