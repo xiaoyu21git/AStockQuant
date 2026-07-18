@@ -1603,6 +1603,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     int totalFills = 0, winningFills = 0, losingFills = 0;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
+    std::unordered_map<std::string, double> buySignalScoreMap;  // 买入时因子信号强度
     std::unordered_map<std::string, double> symbolPnl;  // 逐标的累计盈亏
     std::vector<double> equityCurve;
     equityCurve.reserve(totalDays);
@@ -1728,7 +1729,7 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
-        // ── 止损扫描: 持仓浮亏超线自动生成卖单 ──
+        // ── 止损扫描: 浮亏超线 + 信号确认才卖（避免洗盘）──
         if (m_riskConfig.stopLossPercent > 0.0 && !backtestPositions.empty()) {
             std::vector<OrderRequest> stopLossExits;
             for (const auto& kvPos : backtestPositions) {
@@ -1747,12 +1748,19 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (currentPrice <= 0.0) continue;
                 double lossPct = (bpIt->second - currentPrice) / bpIt->second * 100.0;
                 if (lossPct >= m_riskConfig.stopLossPercent) {
-                    OrderRequest exitOrder;
-                    exitOrder.setSymbol(posSymbol);
-                    exitOrder.setSide(OrderSide::Sell);
-                    exitOrder.setQuantity(pos.quantity());
-                    exitOrder.setOrderType(domain::trading::OrderType::Market);
-                    stopLossExits.push_back(std::move(exitOrder));
+                    // 信号确认：买入时信号强度 * 当前价格/买入价 = 当前有效信号
+                    // 若当前有效信号 < 0.3（弱），确认卖出；否则持有（可能是短暂洗盘）
+                    auto bsIt = buySignalScoreMap.find(posSymbol);
+                    double entrySignal = (bsIt != buySignalScoreMap.end()) ? bsIt->second : 0.5;
+                    double currentSignal = entrySignal * (currentPrice / bpIt->second);  // 价格衰减
+                    if (currentSignal < 0.3) {
+                        OrderRequest exitOrder;
+                        exitOrder.setSymbol(posSymbol);
+                        exitOrder.setSide(OrderSide::Sell);
+                        exitOrder.setQuantity(pos.quantity());
+                        exitOrder.setOrderType(domain::trading::OrderType::Market);
+                        stopLossExits.push_back(std::move(exitOrder));
+                    }
                 }
             }
             if (!stopLossExits.empty()) {
@@ -1940,7 +1948,10 @@ StrategyBacktestResult StrategyEngine::backtest(
                         const auto& buyPosMap = backtestPositions;
                         std::int64_t existingQty = buyPosMap.count(symbol)
                             ? buyPosMap.at(symbol).quantity() : 0LL;
-                        if (existingQty == 0) buyPriceMap[symbol] = closePrice;
+                        if (existingQty == 0) {
+                            buyPriceMap[symbol] = closePrice;
+                            buySignalScoreMap[symbol] = signalScore;
+                        }
                         pos.setQuantity(existingQty + static_cast<std::int64_t>(order.quantity()));
                         pos.setLastPrice(closePrice);
                         backtestPositions[symbol] = pos;
