@@ -1918,7 +1918,10 @@ StrategyBacktestResult StrategyEngine::backtest(
                     auto sizingPosIt = backtestPositions.find(symbol);
                     const std::int64_t held = (sizingPosIt != backtestPositions.end())
                         ? sizingPosIt->second.quantity() : 0;
-                    if (held <= 0) continue;
+                    if (held <= 0) {
+                        if (todayStopLossSyms.count(symbol) || todayStopLossSyms.count(order.symbol())) ++stopLossSkippedNoHeld;
+                        continue;
+                    }
                     order.setQuantity(held);
                 }
 
