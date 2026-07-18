@@ -56,10 +56,15 @@ ColumnLayout {
                 readOnly: !root.editable
                 validator: DoubleValidator {}
                 background: Rectangle { color: "#0F172A"; radius: 3; border.width: 1; border.color: root.editable ? "#334155" : "#334155" }
-                onEditingFinished: {
-                    if (root.editable && modelData && modelData.key && acceptableInput)
+                property string _lastSaved: ""
+                function trySave() {
+                    if (root.editable && modelData && modelData.key && acceptableInput && text !== _lastSaved) {
+                        _lastSaved = text
                         root.paramChanged(modelData.key, parseFloat(text))
+                    }
                 }
+                onEditingFinished: trySave()
+                onActiveFocusChanged: if (!activeFocus) trySave()
                 Binding on text {
                     when: !valueInput.activeFocus
                     value: {
