@@ -1021,7 +1021,16 @@ function resolveRuleTemplateFileName(templateId) {
         template_exit_acceleration_volume_stall_v1: "exit_acceleration_volume_stall.yaml",
         template_exit_second_wave_repair_failed_v1: "exit_second_wave_repair_failed.yaml",
         template_entry_weak_to_strong_v1: "entry_weak_to_strong.yaml",
-        template_entry_overtake_rotation_v1: "entry_overtake_rotation.yaml"
+        template_entry_overtake_rotation_v1: "entry_overtake_rotation.yaml",
+        template_watch_tail_ramp_next_day_weakening_v1: "watch_tail_ramp_next_day_weakening.yaml",
+        template_watch_afternoon_chase_then_fade_v1: "watch_afternoon_chase_then_fade.yaml",
+        template_exit_engulfing_first_down_day_confirmed_v1: "exit_engulfing_first_down_day_confirmed.yaml",
+        template_exit_acceleration_volume_stall_v1: "exit_acceleration_volume_stall.yaml",
+        template_exit_second_wave_repair_failed_v1: "exit_second_wave_repair_failed.yaml",
+        template_exit_high_volume_stall_reversal_v1: "exit_high_volume_stall_reversal.yaml",
+        template_exit_rebound_over_previous_high_failed_v1: "exit_rebound_over_previous_high_failed.yaml",
+        template_risk_market_high_level_open_board_deterioration_freeze_v1: "risk_market_high_level_open_board_deterioration_freeze.yaml",
+        template_risk_market_reseal_rate_drop_freeze_v1: "risk_market_reseal_rate_drop_freeze.yaml"
     };
     return mapping[key] || "";
 }
@@ -1188,6 +1197,113 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 category: "exit_pattern",
                 termId: "exit_engulfing_next_day_fade",
                 termDisplayName: "吞没次日回落退出"
+            },
+            // 二轮扩充信号
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_weak_to_strong_v1",
+                templateDisplayName: "弱转强入场模板",
+                summary: "先弱后强、修复关键价位并重新放量时，输出候选入场。",
+                category: "entry_pattern",
+                termId: "entry_weak_to_strong",
+                termDisplayName: "弱转强入场"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_pullback_ma20_support_candidate_v1",
+                templateDisplayName: "回踩20日线候选模板",
+                summary: "趋势运行中回踩20日线并获支撑时，生成候选并加分。",
+                category: "entry_pattern",
+                termId: "entry_pullback_ma20_support_candidate",
+                termDisplayName: "回踩MA20支撑候选"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_core",
+                groupTitle: "核心确认组",
+                groupRole: "must_pass",
+                groupOperator: "any",
+                templateId: "template_entry_pullback_ma60_support_candidate_v1",
+                templateDisplayName: "回踩60日线候选模板",
+                summary: "趋势运行中回踩60日线并获支撑时，生成候选并加分。",
+                category: "entry_pattern",
+                termId: "entry_pullback_ma60_support_candidate",
+                termDisplayName: "回踩MA60支撑候选"
+            },
+            // 信号否决扩充
+            {
+                stageId: "signal",
+                groupId: "signal_veto",
+                groupTitle: "信号否决组",
+                groupRole: "veto",
+                groupOperator: "any",
+                templateId: "template_watch_tail_ramp_next_day_weakening_v1",
+                templateDisplayName: "尾盘偷袭次日走弱模板",
+                summary: "尾盘拉升次日未延续强度，转为弱势震荡时取消追涨。",
+                category: "watch_invalidation",
+                termId: "tail_ramp_next_day_weakening",
+                termDisplayName: "尾盘偷袭走弱阻断"
+            },
+            {
+                stageId: "signal",
+                groupId: "signal_veto",
+                groupTitle: "信号否决组",
+                groupRole: "veto",
+                groupOperator: "any",
+                templateId: "template_watch_afternoon_chase_then_fade_v1",
+                templateDisplayName: "午后追涨回落模板",
+                summary: "午后追高未守住、晚间攻击结构破坏时阻断追进。",
+                category: "watch_invalidation",
+                termId: "afternoon_chase_then_fade",
+                termDisplayName: "午后追涨回落阻断"
+            },
+            // 二轮扩充出场
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_engulfing_first_down_day_confirmed_v1",
+                templateDisplayName: "吞没首阴确认退出模板",
+                summary: "吞没后首根阴线确认且失去承接位时减仓退出。",
+                category: "exit_pattern",
+                termId: "exit_engulfing_first_down_day",
+                termDisplayName: "吞没首阴确认退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_acceleration_volume_stall_v1",
+                templateDisplayName: "加速后量能停滞退出模板",
+                summary: "加速拉升后量能边际递减、承接弱化时减仓退出。",
+                category: "exit_pattern",
+                termId: "exit_acceleration_volume_stall",
+                termDisplayName: "加速量能停滞退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_high_volume_stall_reversal_v1",
+                templateDisplayName: "高位放量滞涨退出模板",
+                summary: "放量滞涨后价格停滞转为抛压增强时减仓退出。",
+                category: "exit_pattern",
+                termId: "exit_high_volume_stall_reversal",
+                termDisplayName: "高位放量滞涨退出"
             }
         ];
     } else if (strategyTypeIndex === StrategyTypeIndex.TrendBreakout) {
@@ -1665,6 +1781,30 @@ function buildDefaultMarketRuleBindings(strategyProfile) {
         category: "market_risk",
         termId: "market_theme_cooling_freeze",
         termDisplayName: "题材冷却冻结新开仓"
+    }, {
+        groupId: "market_veto",
+        groupTitle: "风险否决组",
+        groupRole: "veto",
+        groupOperator: "any",
+        templateId: "template_risk_market_high_level_open_board_deterioration_freeze_v1",
+        templateDisplayName: "高位炸板率恶化冻结模板",
+        fileName: "risk_market_high_level_open_board_deterioration_freeze.yaml",
+        summary: "高位炸板率持续抬高且回封承接恶化时，冻结高位新增仓位。",
+        category: "market_risk",
+        termId: "market_high_open_board_freeze",
+        termDisplayName: "高位炸板恶化冻结"
+    }, {
+        groupId: "market_veto",
+        groupTitle: "风险否决组",
+        groupRole: "veto",
+        groupOperator: "any",
+        templateId: "template_risk_market_reseal_rate_drop_freeze_v1",
+        templateDisplayName: "回封率下降冻结模板",
+        fileName: "risk_market_reseal_rate_drop_freeze.yaml",
+        summary: "回封成功率持续下降且承接确认不足时，冻结追涨类新增仓位。",
+        category: "market_risk",
+        termId: "market_reseal_rate_drop_freeze",
+        termDisplayName: "回封率下降冻结"
     }];
 
     if (isTrendStrategyTypeIndex(strategyTypeIndex) || strategyTypeIndex === StrategyTypeIndex.Momentum) {
