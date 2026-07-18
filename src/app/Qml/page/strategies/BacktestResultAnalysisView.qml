@@ -49,16 +49,23 @@ Item {
         var bv=tss.benchmarkValues||[]; var bdd=tss.benchmarkDrawdowns||[]
         equityS.clear(); drawdownS.clear(); returnS.clear()
         bmEquityS.clear(); bmDrawdownS.clear()
+
+        // 标准化到同一起点（1.0），首日净值归一
+        var stratBase = pv.length > 0 && pv[0] > 0 ? pv[0] : 1.0
+        var bmBase = bv.length > 0 && bv[0] > 0 ? bv[0] : 1.0
+
         var pMin=1e18,pMax=-1e18,dMin=0,dMax=-1e18,rMin=1e18,rMax=-1e18
         for(var i=0;i<pv.length;i++){
-            equityS.append(i,pv[i]);drawdownS.append(i,dd[i]||0)
-            if(pv[i]>pMax)pMax=pv[i];if(pv[i]<pMin)pMin=pv[i]
+            var sv = pv[i] / stratBase
+            equityS.append(i, sv); drawdownS.append(i, dd[i]||0)
+            if(sv>pMax)pMax=sv;if(sv<pMin)pMin=sv
             if(dd[i]<dMin)dMin=dd[i];if(dd[i]>dMax)dMax=dd[i]
         }
-        // 基准曲线
+        // 基准曲线（归一化到同一起点）
         for(var k=0;k<bv.length;k++){
-            bmEquityS.append(k,bv[k]);bmDrawdownS.append(k,bdd[k]||0)
-            if(bv[k]>pMax)pMax=bv[k];if(bv[k]<pMin)pMin=bv[k]
+            var bmv = bv[k] / bmBase
+            bmEquityS.append(k, bmv); bmDrawdownS.append(k, bdd[k]||0)
+            if(bmv>pMax)pMax=bmv;if(bmv<pMin)pMin=bmv
             if(bdd[k]<dMin)dMin=bdd[k];if(bdd[k]>dMax)dMax=bdd[k]
         }
         var eqN=Math.max(1,Math.max(pv.length,bv.length)-1)

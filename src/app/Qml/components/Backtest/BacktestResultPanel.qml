@@ -1298,8 +1298,13 @@ Rectangle {
 
         chartDateLabels = dates
 
-        // 合并策略和基准值计算轴范围
-        var allValues = portfolioValues.concat(benchmarkValues)
+        // 标准化到同一起点（首日净值归一），策略和基准直接可比
+        var stratBase = portfolioValues.length > 0 && portfolioValues[0] > 0 ? portfolioValues[0] : 1.0
+        var normPV = portfolioValues.map(function(v) { return v / stratBase })
+        var bmBase = benchmarkValues.length > 0 && benchmarkValues[0] > 0 ? benchmarkValues[0] : 1.0
+        var normBV = benchmarkValues.map(function(v) { return v / bmBase })
+
+        var allValues = normPV.concat(normBV)
         var portfolioBounds = calculateAxisBounds(allValues, 0, 1)
         portfolioAxisMin = portfolioBounds.min
         portfolioAxisMax = portfolioBounds.max
@@ -1309,9 +1314,9 @@ Rectangle {
         drawdownAxisMin = Math.min(drawdownBounds.min, -0.001)
         drawdownAxisMax = Math.max(drawdownBounds.max, 0)
 
-        updateLineSeries(netValueSeries, portfolioValues)
+        updateLineSeries(netValueSeries, normPV)
         updateLineSeries(drawdownSeries, drawdowns)
-        updateLineSeries(benchmarkNetValueSeries, benchmarkValues)
+        updateLineSeries(benchmarkNetValueSeries, normBV)
         updateLineSeries(benchmarkDrawdownSeries, benchmarkDrawdowns)
         updateScatterSeries(portfolioBoundarySeries, buildBoundaryPoints(portfolioValues))
         updateScatterSeries(drawdownBoundarySeries, buildBoundaryPoints(drawdowns))
