@@ -53,6 +53,13 @@ struct RuleMarketSnapshot {
     double oneWordBoardRatio{0.0};     // 一字板占比
     double resealRate{0.0};            // 炸板回封率 (回封数/炸板数)
     double boardBreakRate{0.0};        // 炸板率 (炸板数/封板数)
+
+    // 概念/题材聚合 (每日从 concept_daily_stats 加载)
+    double conceptAvgReturn{0.0};      // 全市场概念等权平均涨幅
+    std::string topConceptCode;        // 当日最强概念代码
+    double topConceptReturn{0.0};      // 最强概念涨幅
+    std::string topConceptLeader;      // 最强概念龙头 symbol
+    // (candidate 级变量 leader_rank_in_theme 等需跨表 JOIN, 在 resolve 里实时查询)
 };
 
 /// @brief 回测实现: 日线+持仓为数据源的 IRuleVariableProvider

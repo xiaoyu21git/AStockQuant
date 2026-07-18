@@ -64,6 +64,12 @@ private:
     void syncWeeklyMonthly(int tradingDay);
     void syncFinancialData(int tradingDay);
 
+    /// @brief 从 GM SDK 同步概念/题材板块成分股(首次拉全量, 增量更新)
+    void syncConceptMembership();
+
+    /// @brief 按概念聚合日线统计(avg_return/breadth/leader), 写入 concept_daily_stats
+    void computeConceptDailyStats(int tradingDay);
+
     bool isWeeklyMaintenanceDay();
     bool isMonthlyMaintenanceDay();
 

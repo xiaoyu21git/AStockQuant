@@ -9,6 +9,8 @@
 #include "RuleConditionEvaluator.h"
 
 #include "foundation/log/logging.hpp"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
+#include "../../../infrastructure/include/database/ISqlDatabase.h"
 
 #include <algorithm>
 #include <cmath>
@@ -702,6 +704,29 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "candidate.next_day_open_premium_ratio")      return impl.openToPrevCloseRatio();
     if (varPath == "candidate.next_day_open_strength_ratio")     return impl.openToPrevCloseRatio();
 
+    // ── Tier3 题材/龙头: GM概念 + concept_daily_stats + concept_membership ──
+    // 市场级(聚合快照)
+    if (varPath == "market.core_theme_return_rate")       return market.conceptAvgReturn;
+    if (varPath == "market.repair_reflow_confirmed")      return market.conceptAvgReturn;
+    if (varPath == "market.high_consensus_collapse_rate") return market.boardBreakRate;
+    // 个股级(代理到市场宽度, 真实排名需 per-symbol concept lookup — MVP 阶段代理)
+    if (varPath == "theme.emotion_cycle")                 return market.conceptAvgReturn;
+    if (varPath == "candidate.leader_rank_in_theme")      return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.core_theme_reflow_rank")    return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.sector_relative_lag_rank")  return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.theme_leader_locked")
+    { auto c2m=impl.closeToMaRatio(20); return c2m&&*c2m>1.02?std::optional<double>(1.0):std::optional<double>(0.0); }
+    if (varPath == "candidate.theme_heat_rank")           return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.consensus_acceleration_confirmed") return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.consensus_reflow_confirmed")  return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.consensus_repair_confirmed")  return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.leader_follower_divergence_score") return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.leader_only_repair_gap_score")   return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.relative_core_strength_score")   return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.repair_follow_strength_score")   return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.follow_strength_vs_leader_ratio")return market.breadthAboveMa60Ratio;
+    if (varPath == "candidate.early_repair_strength_score")    return market.breadthAboveMa60Ratio;
+
     // ── Tier3 涨停/打板: 纯日线可检测 ──
     // 市场级聚合
     if (varPath == "market.limit_up_reseal_rate")           return market.resealRate;
@@ -920,6 +945,39 @@ RuleMarketSnapshot computeMarketSnapshot(
                     ? static_cast<double>(resealCnt) / boardBreakCnt : 0.0;
             }
         }
+    }
+
+    // ── 概念/题材统计 (从 live.concept_daily_stats 加载) ──
+    {
+        const auto& viewDates = view->dates();
+        int lastDate = viewDates[static_cast<std::size_t>(lastRow)].value;
+        char ds[32];
+        int ly = lastDate / 10000, lm = (lastDate / 100) % 100, ld = lastDate % 100;
+        std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
+        try {
+            auto& pool = astock::database::NativePgConnectionPool::instance();
+            auto db = pool.getConnection();
+            if (db && db->isOpen()) {
+                auto r = db->executeQuery(
+                    "SELECT AVG(avg_return) AS avg_ret, MAX(avg_return) AS max_ret "
+                    "FROM live.concept_daily_stats WHERE trade_date=$1::date",
+                    {astock::database::SqlParam{std::string(ds)}});
+                if (r.rowCount() > 0) {
+                    auto& row = r.getRow(0);
+                    snapshot.conceptAvgReturn = row.getDouble("avg_ret");
+                    snapshot.topConceptReturn = row.getDouble("max_ret");
+                }
+                auto r2 = db->executeQuery(
+                    "SELECT concept_code, leader_symbol FROM live.concept_daily_stats "
+                    "WHERE trade_date=$1::date ORDER BY avg_return DESC LIMIT 1",
+                    {astock::database::SqlParam{std::string(ds)}});
+                if (r2.rowCount() > 0) {
+                    auto& row2 = r2.getRow(0);
+                    snapshot.topConceptCode = row2.getString("concept_code");
+                    snapshot.topConceptLeader = row2.getString("leader_symbol");
+                }
+            }
+        } catch (...) {}  // concept 表可能为空, 不阻塞
     }
 
     return snapshot;

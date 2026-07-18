@@ -75,7 +75,8 @@ bool PostMarketSyncService::forceSyncToday() {
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 日线+分钟线完成 ======";
             syncWeeklyMonthly(today);
             INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 周月线完成 ======";
-            if(isMonthlyMaintenanceDay())syncFinancialData(today);
+            if(isMonthlyMaintenanceDay()){syncFinancialData(today);syncConceptMembership();}
+            computeConceptDailyStats(today);
         }
         m_lastSyncDay.store(today);saveLastSyncDay(today);
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
@@ -925,4 +926,121 @@ bool PostMarketSyncService::syncFinancial(std::shared_ptr<astock::database::ISql
     return true;
 }
 
+// ═══════════════════════════════════════════════════════════════
+// 概念/题材同步
+// ═══════════════════════════════════════════════════════════════
+
+void PostMarketSyncService::syncConceptMembership()
+{
+    // GM SDK 连接校验
+    auto& gmEng = engine::GmSessionEngine::instance();
+    if (!gmEng.initialized()) {
+        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: GM 未连接, 跳过概念同步";
+        return;
+    }
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) return;
+
+    // 1. 拉取全量概念分类 (sector_type="concept")
+    auto* cats = ::stk_get_sector_category("concept");
+    if (!cats || cats->status()) {
+        INTERNAL_WARN_STREAM << "[PostMktSync] CONCEPT: stk_get_sector_category 失败 status="
+                             << (cats ? cats->status() : -1);
+        if (cats) cats->release();
+        return;
+    }
+    int catCount = cats->count();
+    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 获取概念分类 " << catCount << " 个";
+
+    // 2. 遍历概念, 拉取成分股
+    int totalConcepts = 0, totalMembers = 0;
+    using P = astock::database::SqlParam;
+    for (int i = 0; i < catCount; ++i) {
+        auto& cat = cats->at(i);
+        std::string code(cat.sector_code);
+        std::string name(cat.sector_name);
+        if (code.empty()) continue;
+
+        // 写 catalog
+        db->executeUpdate(
+            "INSERT INTO live.concept_catalog(concept_code,concept_name,sector_type) "
+            "VALUES($1,$2,'concept') ON CONFLICT(concept_code) DO UPDATE SET "
+            "concept_name=EXCLUDED.concept_name,stock_count=EXCLUDED.stock_count,updated_at=NOW()",
+            {P{code}, P{name}});
+
+        // 拉取成分股
+        auto* members = ::stk_get_sector_constituents(code.c_str());
+        if (!members || members->status()) {
+            if (members) members->release();
+            continue;
+        }
+        int n = members->count();
+        // 批量 INSERT (ON CONFLICT 跳过重复)
+        for (int j = 0; j < n; ++j) {
+            auto& m = members->at(j);
+            std::string sym(m.symbol);
+            if (sym.empty()) continue;
+            // symbol 格式 "SHSE.600000" → 提取纯码
+            auto dot = sym.find('.');
+            std::string code6 = dot != std::string::npos ? sym.substr(dot + 1) : sym;
+            db->executeUpdate(
+                "INSERT INTO live.concept_membership(concept_code,symbol_id,symbol) "
+                "VALUES($1,(SELECT id FROM ref.symbol_info WHERE symbol=$2),$2) ON CONFLICT DO NOTHING",
+                {P{code}, P{code6}});
+        }
+        // 更新 catalog 的成分股数量
+        db->executeUpdate(
+            "UPDATE live.concept_catalog SET stock_count=$1,updated_at=NOW() WHERE concept_code=$2",
+            {P{n}, P{code}});
+        totalMembers += n;
+        ++totalConcepts;
+        members->release();
+    }
+    cats->release();
+    INTERNAL_INFO_STREAM << "[PostMktSync] CONCEPT: 同步完成 concepts=" << totalConcepts
+                         << " members=" << totalMembers;
+}
+
+void PostMarketSyncService::computeConceptDailyStats(int tradingDay)
+{
+    char dateBuf[16];
+    int y = tradingDay / 10000, m = (tradingDay / 100) % 100, d = tradingDay % 100;
+    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", y, m, d);
+
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) return;
+
+    // 聚合: 每概念 = 成分股今涨幅等权均值 + 上涨比例(宽度代理) + 龙头
+    // breadth 简化: 成分股中今涨幅>0 的比例 (width>0 是趋势宽度, 语义近似 MA60 宽度)
+    // leader: PG 不支持 FIRST(), 用 DISTINCT ON + 子查询
+    using P = astock::database::SqlParam;
+    std::string dateStr(dateBuf);
+    db->executeUpdate(
+        "WITH concept_daily AS ("
+        "  SELECT cm.concept_code, si.id AS sid, si.symbol, d.change_pct "
+        "  FROM live.concept_membership cm "
+        "  JOIN ref.symbol_info si ON cm.symbol_id = si.id "
+        "  JOIN mkt.daily_bar d ON d.symbol_id = si.id AND d.trade_date=$1::date "
+        "), leader AS ("
+        "  SELECT DISTINCT ON (concept_code) concept_code, sid, symbol, change_pct "
+        "  FROM concept_daily ORDER BY concept_code, change_pct DESC"
+        ") "
+        "INSERT INTO live.concept_daily_stats "
+        "(concept_code, trade_date, avg_return, breadth, leader_id, leader_symbol, leader_return) "
+        "SELECT cd.concept_code, $1::date, "
+        "AVG(cd.change_pct), "
+        "AVG(CASE WHEN cd.change_pct > 0 THEN 1.0 ELSE 0.0 END), "
+        "l.sid, l.symbol, l.change_pct "
+        "FROM concept_daily cd LEFT JOIN leader l ON cd.concept_code = l.concept_code "
+        "GROUP BY cd.concept_code, l.sid, l.symbol, l.change_pct "
+        "ON CONFLICT(concept_code, trade_date) DO UPDATE SET "
+        "avg_return=EXCLUDED.avg_return, breadth=EXCLUDED.breadth, "
+        "leader_id=EXCLUDED.leader_id, leader_symbol=EXCLUDED.leader_symbol, "
+        "leader_return=EXCLUDED.leader_return",
+        {P{dateStr}});
+
+    INTERNAL_DEBUG_STREAM << "[PostMktSync] CONCEPT: 日聚合完成 date=" << dateBuf;
+}
+
 } // namespace astock::infrastructure::database
+
