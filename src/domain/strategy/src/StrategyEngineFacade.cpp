@@ -368,11 +368,11 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                               << static_cast<int>(params.behaviorKind);
     }
 
-    // 将策略配置的风控参数同步到引擎 — 只启用止盈/止损/回撤，其他全关
-    domain::strategy::RiskConfig riskCfg;  // 全零起步，不限制
-    riskCfg.stopLossPercent        = params.stopLossPercent > 0 ? params.stopLossPercent : 0.0;
-    riskCfg.takeProfitPercent      = params.takeProfitPercent > 0 ? params.takeProfitPercent : 0.0;
-    riskCfg.maxDrawdownLimitPercent = 12.0;  // 全局回撤硬限制
+    // 将策略配置的风控参数同步到引擎 — 只启用止盈/止损/回撤
+    domain::strategy::RiskConfig riskCfg;  // 全零起步
+    riskCfg.stopLossPercent        = params.stopLossPercent > 0 ? params.stopLossPercent : 5.0;
+    riskCfg.takeProfitPercent      = params.takeProfitPercent > 0 ? params.takeProfitPercent : 20.0;
+    riskCfg.maxDrawdownLimitPercent = 12.0;
     domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
     engine->m_riskConfig = riskCfg;
 
@@ -1857,15 +1857,23 @@ StrategyBacktestResult StrategyEngine::backtest(
                 riskInput.setTradingSessionOpen(true);
                 // 当前回撤（用于 maxDrawdownLimit 检查）
                 if (peakEquity > 0.0) {
-                    double drawdownPct = (peakEquity - equity) / peakEquity * 100.0;
-                    riskInput.setCurrentDrawdownPercent(-drawdownPct);  // 负数表示亏损
+                    double drawdownPct = (peakEquity - accSnap.totalAsset()) / peakEquity * 100.0;
+                    riskInput.setCurrentDrawdownPercent(-drawdownPct);
                 }
                 // 卖出单：填充可卖数量
+                const auto& posMap = backtestPositions;
+                auto pit = posMap.find(symbol);
                 if (!riskInput.isBuyOrder()) {
-                    const auto& posMap = backtestPositions;
-                    auto pit = posMap.find(symbol);
                     riskInput.setCloseableQuantity(pit != posMap.end()
                         ? pit->second.quantity() : 0);
+                }
+                // 持仓盈亏%（用于止盈止损检查）
+                auto bpit = buyPriceMap.find(symbol);
+                if (bpit != buyPriceMap.end() && bpit->second > 0.0 && closePrice > 0.0) {
+                    double retPct = (closePrice - bpit->second) / bpit->second * 100.0;
+                    riskInput.setSymbolPositionReturnPercent(retPct);
+                    riskInput.setSymbolMarketValue(
+                        closePrice * (pit != posMap.end() ? pit->second.quantity() : 0));
                 }
 
                 domain::strategy::RiskEvaluator::applyConfig(riskInput, m_riskConfig);
