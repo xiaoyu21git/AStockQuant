@@ -297,13 +297,8 @@ Item {
                                 width: parent.width
                                 params: selectedParams; editable: true
                                 onParamChanged: {
-                                    if (_paramInit) return
                                     var cfg = {}; cfg[key] = value
                                     StrategyRuleStatsBridge.updateTemplateParams(selectedTemplateId, cfg, strategyFilterId)
-                                    // 立即刷新显示（flag 防止刷新触发的绑定再次调用本 handler）
-                                    _paramInit = true
-                                    selectedParams = StrategyRuleStatsBridge.extractTunableParams(selectedTemplateId)
-                                    _paramInit = false
                                 }
                             }
                         }
