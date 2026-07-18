@@ -946,6 +946,11 @@ void PostMarketSyncService::syncConceptMembership()
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return;
 
+    // 0. 清掉旧符号格式的数据 (修复 SHSE.600000 → 600000.SH 映射后重新写入)
+    db->executeUpdate("DELETE FROM live.concept_membership");
+    db->executeUpdate("DELETE FROM live.concept_leader_rank");
+    db->executeUpdate("DELETE FROM live.concept_daily_stats");
+
     // 1. 拉取全量概念板块 — sector_type 有效值: "1001"=市场 "1002"=地域 "1003"=概念
     auto* cats = ::stk_get_sector_category("1003");
     if (!cats || cats->status()) {
@@ -984,13 +989,17 @@ void PostMarketSyncService::syncConceptMembership()
             auto& m = members->at(j);
             std::string sym(m.symbol);
             if (sym.empty()) continue;
-            // symbol 格式 "SHSE.600000" → 提取纯码
+            // GM symbol 格式 "SHSE.600000" → DB ref.symbol_info.symbol 格式 "600000.SH"
             auto dot = sym.find('.');
             std::string code6 = dot != std::string::npos ? sym.substr(dot + 1) : sym;
+            std::string exchCode = dot != std::string::npos ? sym.substr(0, dot) : "";
+            std::string exchange = (exchCode == "SHSE") ? "SH" :
+                                   (exchCode == "SZSE") ? "SZ" : "BJ";
+            std::string dbSymbol = code6 + "." + exchange;
             db->executeUpdate(
                 "INSERT INTO live.concept_membership(concept_code,symbol_id,symbol) "
-                "VALUES($1,(SELECT id FROM ref.symbol_info WHERE symbol=$2),$2) ON CONFLICT DO NOTHING",
-                {P{code}, P{code6}});
+                "VALUES($1,(SELECT id FROM ref.symbol_info WHERE symbol=$2 OR symbol=$3),$2) ON CONFLICT DO NOTHING",
+                {P{code}, P{dbSymbol}, P{code6}});
         }
         // 更新 catalog 的成分股数量
         db->executeUpdate(
