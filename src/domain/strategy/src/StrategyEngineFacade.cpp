@@ -1602,6 +1602,8 @@ StrategyBacktestResult StrategyEngine::backtest(
     int riskRejectedCount = 0;
     int totalFills = 0, winningFills = 0, losingFills = 0;
     int stopLossExitCount = 0, ruleExitCount = 0, drawdownBlockCount = 0;
+    int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
+    std::unordered_set<std::string> todayStopLossSyms, todayRuleExitSyms;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
     std::unordered_map<std::string, double> buySignalScoreMap;  // 买入时因子信号强度
@@ -1726,6 +1728,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                     exitOrder.setSide(OrderSide::Sell);
                     exitOrder.setQuantity(exitAction == rules::RuleAction::Exit
                         ? pos.quantity() : (std::max)(static_cast<std::int64_t>(1), pos.quantity() / 2));
+                    ++ruleExitCount;
+                    todayRuleExitSyms.insert(fullSymbol);
                     generatedExits.push_back(std::move(exitOrder));
                 }
             }
@@ -1785,6 +1789,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         exitOrder.setQuantity(pos.quantity());
                         exitOrder.setOrderType(domain::trading::OrderType::Market);
                         ++stopLossExitCount;
+                        todayStopLossSyms.insert(posSymbol);
                         stopLossExits.push_back(std::move(exitOrder));
                     }
                 }
@@ -1999,6 +2004,9 @@ StrategyBacktestResult StrategyEngine::backtest(
                         double pnl = (fr.income / sellQty - bp) * sellQty;
                         result.tradeLog.push_back({dates[static_cast<std::size_t>(r)].value,
                                                    order.symbol(), false, sellQty, closePrice, pnl});
+                        if (todayStopLossSyms.count(order.symbol())) ++stopLossFilled;
+                        else if (todayRuleExitSyms.count(order.symbol())) ++ruleExitFilled;
+                        else ++normalSellFilled;
                         if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
                         else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
                         symbolPnl[symbol] += pnl;
@@ -2052,6 +2060,8 @@ StrategyBacktestResult StrategyEngine::backtest(
         newAcc.setTotalAsset(equity);
         latestEquity = newAcc.totalAsset();
         equityCurve.push_back(equity);
+        todayStopLossSyms.clear();
+        todayRuleExitSyms.clear();
         if (equity > peakEquity) peakEquity = equity;
 
         // 大盘回暖解冻: 基准指数站上 20 日均线 → 重置回撤峰值
@@ -2246,9 +2256,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                          << "  交易日: " << totalDays;
     INTERNAL_INFO_STREAM << "[回测结果] 初始资金: " << req.costSpec.initialCapital.value
                          << "  最终净值: " << (equityCurve.empty() ? 0 : static_cast<int64_t>(equityCurve.back()));
-    INTERNAL_INFO_STREAM << "[交易明细] 止损触发: " << stopLossExitCount
-                         << "  规则出场: " << ruleExitCount
-                         << "  回撤冻结: " << drawdownBlockCount;
+    INTERNAL_INFO_STREAM << "[交易明细] 止损扫描: " << stopLossExitCount << "次"
+                         << "  实际止损卖出: " << stopLossFilled << "笔"
+                         << "  规则出场: " << ruleExitFilled << "笔"
+                         << "  普通卖出: " << normalSellFilled << "笔"
+                         << "  回撤冻结: " << drawdownBlockCount << "次";
     // 卖单按盈亏排序，打印 top20
     std::vector<const BacktestTradeRecord*> sells;
     for (const auto& t : result.tradeLog)
