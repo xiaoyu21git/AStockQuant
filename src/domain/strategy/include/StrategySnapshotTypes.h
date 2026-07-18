@@ -546,6 +546,8 @@ struct TimeSeriesSnapshot final {
     std::vector<double> drawdowns;
     std::vector<double> positions;
     std::vector<double> cash;
+    std::vector<double> benchmarkValues;    // 基准指数净值曲线
+    std::vector<double> benchmarkDrawdowns; // 基准指数回撤曲线
 
     [[nodiscard]] bool isValid() const;
 };

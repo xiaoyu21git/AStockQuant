@@ -418,6 +418,16 @@ Rectangle {
                         axisY: portfolioYAxis
                     }
 
+                    LineSeries {
+                        id: benchmarkNetValueSeries
+                        name: "基准(沪深300)"
+                        color: "#94A3B8"
+                        width: 1
+                        style: Qt.DashLine
+                        axisX: portfolioXAxis
+                        axisY: portfolioYAxis
+                    }
+
                     ScatterSeries {
                         id: portfolioBoundarySeries
                         axisX: portfolioXAxis
@@ -584,6 +594,16 @@ Rectangle {
                         name: "回撤"
                         color: "#F59E0B"
                         width: 2
+                        axisX: drawdownXAxis
+                        axisY: drawdownYAxis
+                    }
+
+                    LineSeries {
+                        id: benchmarkDrawdownSeries
+                        name: "基准回撤"
+                        color: "#94A3B8"
+                        width: 1
+                        style: Qt.DashLine
                         axisX: drawdownXAxis
                         axisY: drawdownYAxis
                     }
@@ -1273,10 +1293,14 @@ Rectangle {
         var dates = timeSeries.dates || []
         var portfolioValues = timeSeries.portfolioValues || []
         var drawdowns = timeSeries.drawdowns || []
+        var benchmarkValues = timeSeries.benchmarkValues || []
+        var benchmarkDrawdowns = timeSeries.benchmarkDrawdowns || []
 
         chartDateLabels = dates
 
-        var portfolioBounds = calculateAxisBounds(portfolioValues, 0, 1)
+        // 合并策略和基准值计算轴范围
+        var allValues = portfolioValues.concat(benchmarkValues)
+        var portfolioBounds = calculateAxisBounds(allValues, 0, 1)
         portfolioAxisMin = portfolioBounds.min
         portfolioAxisMax = portfolioBounds.max
 
@@ -1286,6 +1310,8 @@ Rectangle {
 
         updateLineSeries(netValueSeries, portfolioValues)
         updateLineSeries(drawdownSeries, drawdowns)
+        updateLineSeries(benchmarkNetValueSeries, benchmarkValues)
+        updateLineSeries(benchmarkDrawdownSeries, benchmarkDrawdowns)
         updateScatterSeries(portfolioBoundarySeries, buildBoundaryPoints(portfolioValues))
         updateScatterSeries(drawdownBoundarySeries, buildBoundaryPoints(drawdowns))
 

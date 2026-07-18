@@ -2101,6 +2101,23 @@ StrategyBacktestResult StrategyEngine::backtest(
             result.metrics.alpha            = benchMetrics.alpha;
             result.metrics.trackingError    = benchMetrics.trackingError;
             result.metrics.informationRatio = benchMetrics.informationRatio;
+
+            // 构建基准净值曲线和回撤曲线（叠加到图表）
+            const double initialCapital = req.costSpec.initialCapital.value > 0
+                ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
+            result.timeSeries.benchmarkValues.reserve(bmRet.size() + 1);
+            result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size() + 1);
+            double bmEquity = initialCapital;
+            double bmPeak = bmEquity;
+            result.timeSeries.benchmarkValues.push_back(bmEquity);
+            result.timeSeries.benchmarkDrawdowns.push_back(0.0);
+            for (double r : bmRet) {
+                bmEquity *= (1.0 + r);
+                if (bmEquity > bmPeak) bmPeak = bmEquity;
+                double dd = bmPeak > 0.0 ? (bmPeak - bmEquity) / bmPeak : 0.0;
+                result.timeSeries.benchmarkValues.push_back(bmEquity);
+                result.timeSeries.benchmarkDrawdowns.push_back(dd);
+            }
         }
     }
 

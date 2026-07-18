@@ -292,19 +292,27 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             qResult["trades"] = tradeStats;
 
             QVariantMap timeSeries;
-            QVariantList equityList, dateList, returnList, drawdownList;
+            QVariantList equityList, dateList, returnList, drawdownList,
+                         bmEquityList, bmDrawdownList;
             for (size_t i = 0; i < result.timeSeries.portfolioValues.size(); ++i) {
                 equityList.append(result.timeSeries.portfolioValues[i]);
                 if (i < result.timeSeries.returns.size()) returnList.append(result.timeSeries.returns[i]);
                 if (i < result.timeSeries.drawdowns.size()) drawdownList.append(result.timeSeries.drawdowns[i]);
             }
+            for (size_t i = 0; i < result.timeSeries.benchmarkValues.size(); ++i) {
+                bmEquityList.append(result.timeSeries.benchmarkValues[i]);
+                if (i < result.timeSeries.benchmarkDrawdowns.size())
+                    bmDrawdownList.append(result.timeSeries.benchmarkDrawdowns[i]);
+            }
             for (const auto& d : result.timeSeries.dates) {
                 dateList.append(d.value);
             }
-            timeSeries["portfolioValues"]  = equityList;
-            timeSeries["dates"]            = dateList;
-            timeSeries["returns"]          = returnList;
-            timeSeries["drawdowns"]        = drawdownList;
+            timeSeries["portfolioValues"]     = equityList;
+            timeSeries["dates"]               = dateList;
+            timeSeries["returns"]             = returnList;
+            timeSeries["drawdowns"]           = drawdownList;
+            timeSeries["benchmarkValues"]     = bmEquityList;
+            timeSeries["benchmarkDrawdowns"]  = bmDrawdownList;
             qResult["timeSeries"] = timeSeries;
 
             // 回传参数供面板展示

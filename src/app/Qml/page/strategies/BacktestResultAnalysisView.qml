@@ -46,12 +46,19 @@ Item {
         if (!backtestResult || !backtestResult.timeSeries) return
         var tss = backtestResult.timeSeries
         var pv=tss.portfolioValues||[]; var dd=tss.drawdowns||[]; var ret=tss.returns||[]
+        var bv=tss.benchmarkValues||[]; var bdd=tss.benchmarkDrawdowns||[]
         equityS.clear(); drawdownS.clear(); returnS.clear()
+        bmEquityS.clear(); bmDrawdownS.clear()
         var pMin=1e18,pMax=-1e18,dMin=0,dMax=-1e18,rMin=1e18,rMax=-1e18
         for(var i=0;i<pv.length;i++){
             equityS.append(i,pv[i]);drawdownS.append(i,dd[i]||0)
             if(pv[i]>pMax)pMax=pv[i];if(pv[i]<pMin)pMin=pv[i]
             if(dd[i]<dMin)dMin=dd[i];if(dd[i]>dMax)dMax=dd[i]
+        }
+        // 基准曲线
+        for(var k=0;k<bv.length;k++){
+            bmEquityS.append(k,bv[k]);bmDrawdownS.append(k,bdd[k]||0)
+            if(bv[k]>pMax)pMax=bv[k];if(bv[k]<pMin)pMin=bv[k]
         }
         var n=Math.max(1,pv.length-1); eqX.max=n; ddX.max=n; retX.max=Math.max(1,ret.length-1)
         eqY.min=pMin*0.95;eqY.max=pMax*1.05;ddY.min=dMin*1.1;ddY.max=dMax>0?dMax*1.1:0
@@ -71,8 +78,18 @@ Item {
                 Text{text:"回测分析 · "+(strategyName||strategyId||"");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
                 Item{Layout.fillWidth:true}
                 Text{text:"基准:";font.pixelSize:11;color:"#94A3B8"}
-                ComboBox { id: bmBox; width: 110; font.pixelSize: 11; currentIndex: 0
-                    model: ["全市场","沪深300","中证500","中证1000","创业板指","上证50","科创50"]
+                ComboBox { id: bmBox; width: 140; font.pixelSize: 11
+                    model: ["沪深300","中证500","中证1000","创业板指","上证50","科创50"]
+                    // 根据 backtest 参数设置当前基准
+                    Component.onCompleted: {
+                        var bm = params.benchmarkIndex || "000300.SH"
+                        var map = {"000300.SH":0,"000905.SH":1,"000852.SH":2,"399006.SZ":3,"000016.SH":4,"000688.SH":5}
+                        currentIndex = map[bm] !== undefined ? map[bm] : 0
+                    }
+                    onCurrentIndexChanged: {
+                        // 切换基准需要重新跑回测 — 提示用户
+                        console.log("切换基准到:", currentText, "— 需重新运行回测")
+                    }
                     background: Rectangle { radius: 4; color: "#1E293B"; border.color: "#334155" }
                     contentItem: Text { text: parent.displayText; font.pixelSize: 11; color: "#F1F5F9"; verticalAlignment: Text.AlignVCenter; leftPadding: 6 } }
                 Item{width:12}
@@ -153,7 +170,8 @@ Item {
                     ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
                         ValueAxis{id:eqX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
                         ValueAxis{id:eqY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
-                        LineSeries{id:equityS;axisX:eqX;axisY:eqY;color:"#EF4444";width:2}} } }
+                        LineSeries{id:equityS;axisX:eqX;axisY:eqY;color:"#EF4444";width:2}
+                        LineSeries{id:bmEquityS;axisX:eqX;axisY:eqY;color:"#94A3B8";width:1;style:Qt.DashLine}} } }
 
             // 回撤+收益
             RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 220; spacing: 8
@@ -163,7 +181,8 @@ Item {
                         ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
                             ValueAxis{id:ddX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
                             ValueAxis{id:ddY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
-                            LineSeries{id:drawdownS;axisX:ddX;axisY:ddY;color:"#F59E0B";width:2}} } }
+                            LineSeries{id:drawdownS;axisX:ddX;axisY:ddY;color:"#F59E0B";width:2}
+                            LineSeries{id:bmDrawdownS;axisX:ddX;axisY:ddY;color:"#94A3B8";width:1;style:Qt.DashLine}} } }
                 Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: "#1E293B"
                     ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
                         Text{text:"累计收益";font.pixelSize:11;color:"#94A3B8"}
