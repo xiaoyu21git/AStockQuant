@@ -1785,7 +1785,8 @@ StrategyBacktestResult StrategyEngine::backtest(
                         ? (sum5 / cnt5) < (sum10 / cnt10) : false;
                     if (trendDown) {
                         OrderRequest exitOrder;
-                        exitOrder.setSymbol(posSymbol);
+                        // 用 view 的 instrumentId 数字字符串，匹配订单循环的 stoul 解析
+                        exitOrder.setSymbol(std::to_string(view->instruments()[static_cast<size_t>(colIdx)].value));
                         exitOrder.setSide(OrderSide::Sell);
                         exitOrder.setQuantity(pos.quantity());
                         exitOrder.setOrderType(domain::trading::OrderType::Market);
