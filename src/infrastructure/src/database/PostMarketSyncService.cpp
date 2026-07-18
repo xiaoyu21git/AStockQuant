@@ -360,9 +360,12 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     syncWeekly(db, tradingDay);
     syncMonthly(db, tradingDay);
     INTERNAL_INFO_STREAM << "[PostMktSync] ====== 周月线完成 ======";
+    // 阶段5: 概念同步+日聚合 (forceSyncToday 路径也走这里)
+    syncConceptMembership();
+    computeConceptDailyStats(tradingDay);
 
     INTERNAL_INFO_STREAM << "[PostMktSync] 全部完成 today=" << tradingDay;
-    // 阶段5: 复权因子异步补（耗时，不阻塞完成通知）
+    // 阶段6: 复权因子异步补（耗时，不阻塞完成通知）
     fillAdjFactors();
 }
 
