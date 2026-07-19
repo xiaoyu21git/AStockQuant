@@ -140,6 +140,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         params.maxOrderQuantity = root.has("maxOrderQuantity") ? static_cast<std::uint32_t>(root.get("maxOrderQuantity").asInt()) : 100U;
         params.stopLossPercent   = root.has("stopLossPercent")   ? root.get("stopLossPercent").asDouble()   : 10.0;
         params.takeProfitPercent = root.has("takeProfitPercent") ? root.get("takeProfitPercent").asDouble() : 20.0;
+        params.maxDrawdownLimit  = root.has("maxDrawdownLimit")  ? root.get("maxDrawdownLimit").asDouble()   : 99.0;
         params.fastPeriod   = root.has("fastPeriod")   ? root.get("fastPeriod").asInt()   : 5;
         params.slowPeriod   = root.has("slowPeriod")   ? root.get("slowPeriod").asInt()   : 20;
         params.signalPeriod = root.has("period")       ? root.get("period").asInt()       : 14;
@@ -369,11 +370,16 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     // 将策略配置的风控参数同步到引擎 — 只启用止盈/止损/回撤
     domain::strategy::RiskConfig riskCfg;  // 全零起步
-    riskCfg.stopLossPercent        = params.stopLossPercent > 0 ? params.stopLossPercent : 10.0;
-    riskCfg.takeProfitPercent      = params.takeProfitPercent > 0 ? params.takeProfitPercent : 20.0;
-    riskCfg.maxDrawdownLimitPercent = 12.0;
+    // 内置止损/止盈/回撤风控已由规则模板接管, 此处关闭避免双重触发
+    riskCfg.stopLossPercent        = 0.0;
+    riskCfg.takeProfitPercent      = 0.0;
+    riskCfg.maxDrawdownLimitPercent = 99.0;
     domain::strategy::RiskManager::instance().setRiskConfig(riskCfg);
     engine->m_riskConfig = riskCfg;
+    INTERNAL_INFO_STREAM << "[fromDb] 风控配置: stopLoss=" << riskCfg.stopLossPercent
+                         << " takeProfit=" << riskCfg.takeProfitPercent
+                         << " maxDrawdown=" << riskCfg.maxDrawdownLimitPercent
+                         << " (params: sl=" << params.stopLossPercent << " tp=" << params.takeProfitPercent << ")";
 
     // 日频/盘中分类: 仅 HighFrequency 走 drainQueue 持续评估,
     // 其余全部日频 → 盘中只巡检, 盘后触发一次 evaluateEndOfDay

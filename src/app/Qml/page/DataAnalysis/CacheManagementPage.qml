@@ -124,6 +124,91 @@ Item {
         }
         Rectangle { Layout.fillWidth: true; height: 1; color: "#4b5563" }
 
+        // ── 删除操作行 ──
+        RowLayout {
+            spacing: 8
+            Text { text: "删除:"; color: "#fca5a5"; font.pixelSize: 12; font.bold: true }
+
+            // 删除数据集A
+            Button {
+                text: "删除数据集A"
+                enabled: comboA.currentIndex >= 0
+                onClicked: {
+                    var entry = cacheModel.get(comboA.currentIndex)
+                    if (entry && entry.id > 0) {
+                        if (dfc.removeDataSet(entry.id)) {
+                            refreshAll()
+                            comboA.currentIndex = -1
+                        }
+                    }
+                }
+                background: Rectangle { color: parent.enabled ? "#991b1b" : "#374151"; radius: 4 }
+                contentItem: Text { text: parent.text; color: parent.enabled ? "#fca5a5" : "#666"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                padding: 6
+            }
+
+            // 删除数据集B
+            Button {
+                text: "删除数据集B"
+                enabled: comboB.currentIndex >= 0
+                onClicked: {
+                    var entry = cacheModel.get(comboB.currentIndex)
+                    if (entry && entry.id > 0) {
+                        if (dfc.removeDataSet(entry.id)) {
+                            refreshAll()
+                            comboB.currentIndex = -1
+                        }
+                    }
+                }
+                background: Rectangle { color: parent.enabled ? "#991b1b" : "#374151"; radius: 4 }
+                contentItem: Text { text: parent.text; color: parent.enabled ? "#fca5a5" : "#666"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                padding: 6
+            }
+
+            Rectangle { width: 1; height: 20; color: "#4b5563" }
+
+            // 删除所有原始缓存
+            Button {
+                text: "清空原始缓存"
+                onClicked: {
+                    var removed = 0
+                    for (var i = cacheModel.count - 1; i >= 0; i--) {
+                        var entry = cacheModel.get(i)
+                        if (entry.sourceType !== "cleaning" && entry.id > 0) {
+                            if (dfc.removeDataSet(entry.id)) removed++
+                        }
+                    }
+                    refreshAll()
+                    comboA.currentIndex = -1; comboB.currentIndex = -1
+                }
+                background: Rectangle { color: "#7f1d1d"; radius: 4 }
+                contentItem: Text { text: parent.text; color: "#fca5a5"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                padding: 6
+            }
+
+            // 删除所有清洗缓存
+            Button {
+                text: "清空清洗缓存"
+                onClicked: {
+                    var removed = 0
+                    for (var i = cacheModel.count - 1; i >= 0; i--) {
+                        var entry = cacheModel.get(i)
+                        if (entry.sourceType === "cleaning" && entry.id > 0) {
+                            if (dfc.removeDataSet(entry.id)) removed++
+                        }
+                    }
+                    refreshAll()
+                    comboA.currentIndex = -1; comboB.currentIndex = -1
+                }
+                background: Rectangle { color: "#7f1d1d"; radius: 4 }
+                contentItem: Text { text: parent.text; color: "#fca5a5"; font.pixelSize: 11; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                padding: 6
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+        Rectangle { Layout.fillWidth: true; height: 1; color: "#4b5563" }
+
         // 对比控制行
         RowLayout {
             spacing: 8

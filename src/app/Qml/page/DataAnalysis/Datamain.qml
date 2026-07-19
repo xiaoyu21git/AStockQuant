@@ -29,7 +29,7 @@ Item {
         { ruleId: "financialMetricSanitize", ruleName: "财务指标净化", icon: "📈", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "reportDateAlignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "survivorBias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "adjustedPrice", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "adjustedPrice", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "newStockFilter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "stFilter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "priceValidity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
@@ -161,7 +161,7 @@ Item {
                 }
             case "adjustedPrice":
                 return {
-                    "enabled": true,
+                    "enabled": false,
                     "preferAdjustedFields": true,
                     "applyFactorFallback": true
                 }

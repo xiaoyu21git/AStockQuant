@@ -515,6 +515,7 @@ struct StrategyCreationParams final {
     std::uint32_t maxOrderQuantity{100};
     double stopLossPercent{10.0};
     double takeProfitPercent{20.0};
+    double maxDrawdownLimit{99.0};
     int fastPeriod{5};
     int slowPeriod{20};
     int signalPeriod{14};

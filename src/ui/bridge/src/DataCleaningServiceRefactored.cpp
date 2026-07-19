@@ -124,7 +124,7 @@ QVariantMap DataCleaningServiceRefactored::getDefaultRules() const {
     rules[QStringLiteral("financialMetricSanitize")]= on(true);
     rules[QStringLiteral("suspensionFill")]         = on(true);
     rules[QStringLiteral("missingValueFill")]       = on(true);
-    rules[QStringLiteral("adjustedPrice")]          = on(true);
+    rules[QStringLiteral("adjustedPrice")]          = on(false);  // 关闭管线复权: 因子内部有独立复权, 策略回测需原始价算PnL
     rules[QStringLiteral("priceValidity")]          = on(true);
     rules[QStringLiteral("volumeFilter")]           = on(true);
     rules[QStringLiteral("valuationSanitize")]      = on(true);
