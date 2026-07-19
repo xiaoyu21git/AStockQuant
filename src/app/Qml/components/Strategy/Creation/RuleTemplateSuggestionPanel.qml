@@ -944,7 +944,10 @@ Rectangle {
         resolvedTermId = ""
         resolvedTermDisplayName = ""
         hintMessage = "正在查询规则模板建议..."
-        activeRequestId = ruleTemplateSuggestionService.suggestTemplatesRequestAsync({
+        // 先生成请求 ID 并赋值 activeRequestId, 确保 C++ 同步信号到达时已可匹配
+        var reqId = "req_" + Date.now() + "_" + Math.floor(Math.random() * 10000)
+        activeRequestId = reqId
+        ruleTemplateSuggestionService.suggestTemplatesRequestAsync(reqId, {
             text: queryText,
             phase: phaseValue,
             action: root.contextualActionFilter(),

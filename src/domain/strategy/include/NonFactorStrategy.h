@@ -72,13 +72,16 @@ public:
                 closePrices[i] = static_cast<double>(
                     closeMat.data[(lastRow - lookback + 1 + i) * rowStride + c]);
 
-            // 注入当日实时收盘价（替代 DB 视图中的最后一行）
+            // 列必须能映射到真实完整代码, 否则无法产生可执行信号
             std::string fullSymbol;
-            if (view && !view->symbolStrings().empty()) {
+            {
                 const auto& syms = view->symbolStrings();
                 if (c < static_cast<int>(syms.size())) fullSymbol = syms[static_cast<size_t>(c)];
             }
-            if (!fullSymbol.empty()) {
+            if (fullSymbol.empty()) continue;
+
+            // 注入当日实时收盘价（替代 DB 视图中的最后一行）
+            {
                 auto& d = domain::market::MarketDataService::instance().liveData(fullSymbol);
                 if (d.valid()) {
                     double liveC = d.dailyBar().close();
@@ -89,21 +92,16 @@ public:
             SignalResult sig = evaluateSymbol(closePrices, instruments[c].value,
                                                context, m_commonCfg);
             if (sig.valid) {
-                // 去掉交易所后缀用于输出: "300097.SZ" → "300097"
-                std::string realSymbol = fullSymbol;
-                auto dot = realSymbol.find('.');
-                if (dot != std::string::npos)
-                    realSymbol = realSymbol.substr(0, dot);
-
                 // 策略只输出纯信号: (symbol, side, targetWeight, score)
                 // 意图(OPEN/ADD/REDUCE/CLOSE)由调度层 buildPositionAwareOrders 根据持仓对比确定
                 // 目标权重由信号强度在 [minWeight, maxWeight] 区间插值
+                // 信号契约: 携带与视图逐字节一致的真实完整代码 (如 "300097.SZ")
                 auto signal = StrategySignal(
                     context.strategyInstanceId(),
                     InstrumentId{sig.instrumentId},
                     sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
                     sig.score, weightForSignalScore(sig.score),
-                    realSymbol);
+                    fullSymbol);
                 allSignals.push_back(std::move(signal));
             }
         }

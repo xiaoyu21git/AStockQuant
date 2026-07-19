@@ -334,7 +334,7 @@ private:
     double targetWeight_{0.0};
     double currentWeight_{0.0};
     SignalIntent intent_{SignalIntent::KEEP};
-    std::string symbolCode_{};
+    std::string fullSymbol_{};
 
 public:
     StrategySignal() = default;
@@ -343,13 +343,13 @@ public:
                    RuntimeOrderSide side,
                    double score,
                    double targetWeight,
-                   std::string symbolCode = {})
+                   std::string fullSymbol)
         : strategyInstanceId_(strategyInstanceId)
         , instrumentId_(instrumentId)
         , side_(side)
         , score_(score)
         , targetWeight_(targetWeight)
-        , symbolCode_(std::move(symbolCode))
+        , fullSymbol_(std::move(fullSymbol))
     {
     }
 
@@ -378,9 +378,10 @@ public:
         return targetWeight_;
     }
 
-    [[nodiscard]] const std::string& symbolCode() const noexcept
+    /// 真实完整代码 (如 "300767.SZ"), 与行情视图 symbolStrings 逐字节一致 — 信号必填
+    [[nodiscard]] const std::string& fullSymbol() const noexcept
     {
-        return symbolCode_;
+        return fullSymbol_;
     }
 
     [[nodiscard]] double currentWeight() const noexcept { return currentWeight_; }
@@ -389,11 +390,9 @@ public:
     [[nodiscard]] SignalIntent intent() const noexcept { return intent_; }
     void setIntent(SignalIntent v) noexcept { intent_ = v; }
 
-    void setSymbolCode(std::string code) { symbolCode_ = std::move(code); }
-
     [[nodiscard]] bool isValid() const noexcept
     {
-        return strategyInstanceId_ > 0 && instrumentId_.isValid();
+        return strategyInstanceId_ > 0 && instrumentId_.isValid() && !fullSymbol_.empty();
     }
 };
 

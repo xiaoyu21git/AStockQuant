@@ -15,7 +15,6 @@
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/IMarketDataView.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
-#include "../../factor/include/factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "../../factor/include/FactorMetricsCalculator.h"
 #include "../../trading/TradingTypes.h"
 #include "../include/EventRiskSubscriber.h"
@@ -1562,19 +1561,18 @@ StrategyBacktestResult StrategyEngine::backtest(
         return result;
     }
 
-    // 2. 构建 symbol 映射 + 账户初始化
-    std::unordered_map<std::uint32_t, std::string> idToSymbol;
+    // 2. 构建 symbol→列号映射 + 账户初始化
+    // 契约: 全链路 symbol 均为真实完整代码 (如 "300767.SZ"), 与视图 symbolStrings/数据列逐位对齐
+    std::unordered_map<std::string, int> symbolToCol;
     {
-        auto batch0 = dataSvc->loadBatch(0);
-        const auto* v0 = batch0.marketView;
-        if (v0) {
-            factor::compute::CachedMarketDataViewHistoricalAdapter adapter(*v0);
-            auto symbols = adapter.getAvailableSymbols("");
-            const auto& instrs = v0->instruments();
-            for (size_t i = 0; i < instrs.size() && i < symbols.size(); ++i) {
-                idToSymbol[instrs[i].value] = symbols[i];
-            }
+        const auto& symStrs = view->symbolStrings();
+        if (symStrs.size() != view->instruments().size()) {
+            result.errorMessage = "Symbol/instrument column mismatch";
+            return result;
         }
+        symbolToCol.reserve(symStrs.size());
+        for (std::size_t c = 0; c < symStrs.size(); ++c)
+            symbolToCol[symStrs[c]] = static_cast<int>(c);
     }
 
     double latestEquity = req.costSpec.initialCapital.value;  // 最新总资产(现金+持仓市值)
@@ -1604,9 +1602,6 @@ StrategyBacktestResult StrategyEngine::backtest(
     int stopLossExitCount = 0, ruleExitCount = 0, drawdownBlockCount = 0;
     int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
     int stopLossSkippedNoHeld = 0, totalStopLossOrders = 0;
-    auto stripEx = [](const std::string& sym) -> std::string {
-        auto dot = sym.find('.'); return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
-    };
     std::unordered_set<std::string> todayStopLossSyms, todayRuleExitSyms;
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
@@ -1621,14 +1616,12 @@ StrategyBacktestResult StrategyEngine::backtest(
     rules::BacktestRuleVariableProvider ruleProvider;
     bool ruleAllowEntriesToday = true;
 
-    // 查找基准指数列（用于大盘解冻判断）
+    // 查找基准指数列（用于大盘解冻判断）— 不在视图内则保持 -1, 下游跳过解冻判断
     int bmColIdx = -1;
     {
-        std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
-        for (size_t ci = 0; ci < view->instruments().size(); ++ci) {
-            auto sit = idToSymbol.find(view->instruments()[ci].value);
-            if (sit != idToSymbol.end() && sit->second == bmSym) { bmColIdx = static_cast<int>(ci); break; }
-        }
+        const std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
+        const auto bmIt = symbolToCol.find(bmSym);
+        if (bmIt != symbolToCol.end()) bmColIdx = bmIt->second;
     }
 
     // 数据准备完成 → 0%
@@ -1711,17 +1704,9 @@ StrategyBacktestResult StrategyEngine::backtest(
                 posCtx.holdDays = 0.0;
                 auto bpIt = buyPriceMap.find(fullSymbol);
                 posCtx.entryPrice = bpIt != buyPriceMap.end() ? bpIt->second : 0.0;
-                double currentPrice = 0.0;
-                for (std::size_t cc = 0; cc < view->instruments().size(); ++cc) {
-                    auto sit = idToSymbol.find(view->instruments()[cc].value);
-                    if (sit != idToSymbol.end() && sit->second == fullSymbol) {
-                        posCtx.colIndex = static_cast<int>(cc);
-                        for (const auto& mdp : mdpBatch)
-                            if (mdp.instrumentId().value == view->instruments()[cc].value)
-                                { currentPrice = mdp.lastPrice(); break; }
-                        break;
-                    }
-                }
+                posCtx.colIndex = symbolToCol.at(fullSymbol);
+                const double currentPrice = static_cast<double>(closeMat.data[
+                    rowOffset + static_cast<std::size_t>(posCtx.colIndex)]);
                 if (posCtx.entryPrice > 0.0 && currentPrice > 0.0)
                     posCtx.pnlPercent = (currentPrice - posCtx.entryPrice) / posCtx.entryPrice * 100.0;  // 百分数口径, 与规则阈值(如 ≥12)一致
                 ruleProvider.setCandidate(posCtx);
@@ -1757,28 +1742,19 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (pos.quantity() <= 0) continue;
                 auto bpIt = buyPriceMap.find(posSymbol);
                 if (bpIt == buyPriceMap.end() || bpIt->second <= 0.0) continue;
-                double currentPrice = 0.0;
-                int colIdx = -1;
-                for (size_t ci = 0; ci < view->instruments().size(); ++ci) {
-                    auto sit = idToSymbol.find(view->instruments()[ci].value);
-                    if (sit != idToSymbol.end() && sit->second == posSymbol) { colIdx = static_cast<int>(ci); break; }
-                }
-                for (const auto& mdp : mdpBatch) {
-                    if (colIdx >= 0 && mdp.instrumentId().value == view->instruments()[static_cast<size_t>(colIdx)].value) {
-                        currentPrice = mdp.lastPrice(); break;
-                    }
-                }
-                if (currentPrice <= 0.0 || colIdx < 0) continue;
+                const int colIdx = symbolToCol.at(posSymbol);
+                const double currentPrice = static_cast<double>(closeMat.data[
+                    rowOffset + static_cast<std::size_t>(colIdx)]);
+                if (currentPrice <= 0.0) continue;  // 当日停牌无价, 无法止损
                 double lossPct = (bpIt->second - currentPrice) / bpIt->second * 100.0;
                 if (lossPct >= m_riskConfig.stopLossPercent) {
                     // 均线破位确认: 5日均线 < 10日均线（趋势已经转弱），才确认止损
-                    auto closeMat = view->close();
-                    const size_t colCount = view->instruments().size();
                     double sum5 = 0.0, sum10 = 0.0;
                     int cnt5 = 0, cnt10 = 0;
                     for (int back = 0; back < 10 && (r - back) >= 0; ++back) {
                         double c = static_cast<double>(closeMat.data[
-                            static_cast<size_t>(r - back) * colCount + static_cast<size_t>(colIdx)]);
+                            static_cast<size_t>(r - back) * static_cast<size_t>(colCount)
+                            + static_cast<size_t>(colIdx)]);
                         if (c > 0) {
                             if (back < 5) { sum5 += c; ++cnt5; }
                             sum10 += c; ++cnt10;
@@ -1788,8 +1764,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         ? (sum5 / cnt5) < (sum10 / cnt10) : false;
                     if (trendDown) {
                         OrderRequest exitOrder;
-                        // 纯6位数字码(如"600000")，与策略订单格式一致
-                        exitOrder.setSymbol(stripEx(posSymbol));
+                        exitOrder.setSymbol(posSymbol);  // 契约: 真实完整代码, 与持仓键一致
                         exitOrder.setSide(OrderSide::Sell);
                         exitOrder.setQuantity(pos.quantity());
                         exitOrder.setOrderType(domain::trading::OrderType::Market);
@@ -1839,24 +1814,12 @@ StrategyBacktestResult StrategyEngine::backtest(
             double dayBuyAmount = 0.0;
             std::int64_t dayMinQty = 0, dayMaxQty = 0;
             for (auto& order : orderList) {
-                // symbol 在策略层已填为纯数字码 (如 "600000")
-                const std::string& symStr = order.symbol();
-                const std::uint32_t instrumentId = static_cast<std::uint32_t>(
-                    std::stoul(symStr.empty() ? "0" : symStr));
-                const std::string symbol = idToSymbol.count(instrumentId)
-                    ? idToSymbol.at(instrumentId) : symStr;
-
-                // 补齐 symbol 后缀
-                char codeBuf[16];
-                std::snprintf(codeBuf, sizeof(codeBuf), "%06u", instrumentId);
-                order.setSymbol(foundation::market::AStockSymbol::fromCode(codeBuf).fullSymbol());
-                double closePrice = 0.0;
-                for (const auto& mdp : mdpBatch) {
-                    if (mdp.instrumentId().value == instrumentId) {
-                        closePrice = mdp.lastPrice(); break;
-                    }
-                }
-                if (closePrice <= 0.0) continue;
+                // 契约: order.symbol() 为真实完整代码 — 策略单由信号携带, 止损/规则出场单生成即完整
+                const std::string& symbol = order.symbol();
+                const int col = symbolToCol.at(symbol);
+                const double closePrice = static_cast<double>(closeMat.data[
+                    rowOffset + static_cast<std::size_t>(col)]);
+                if (closePrice <= 0.0) continue;  // 当日停牌无价, 无法成交
 
                 // ── 混合模式: 因子过滤 + 信号缩放 (仅买入单, 卖出不拦截) ──
                 if (m_factorSignalProcessor.enabled() && order.side() == OrderSide::Buy) {
@@ -1878,15 +1841,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (m_ruleGate.enabled() && order.side() == OrderSide::Buy) {
                     if (!ruleAllowEntriesToday) continue;  // 市场冻结
                     rules::RuleCandidateContext signalCtx;
-                    signalCtx.symbol = order.symbol();
+                    signalCtx.symbol = symbol;
                     auto dot = signalCtx.symbol.find('.');
                     signalCtx.code = dot != std::string::npos
                         ? signalCtx.symbol.substr(0, dot) : signalCtx.symbol;
-                    for (std::size_t cc = 0; cc < view->instruments().size(); ++cc) {
-                        auto sit = idToSymbol.find(view->instruments()[cc].value);
-                        if (sit != idToSymbol.end() && sit->second == signalCtx.symbol)
-                            { signalCtx.colIndex = static_cast<int>(cc); break; }
-                    }
+                    signalCtx.colIndex = col;
                     ruleProvider.setCandidate(signalCtx);
                     if (!m_ruleGate.allowSignal(ruleProvider)) continue;  // 规则拒绝
                 }
@@ -1914,13 +1873,12 @@ StrategyBacktestResult StrategyEngine::backtest(
                     }
                     order.setQuantity(lots * kSharesPerLot);
                 } else {
-                    // 卖出信号 = 离场: 全平该标的持仓 (用 order.symbol() 保证 fullSymbol 匹配)
-                    auto sizingPosIt = backtestPositions.find(order.symbol());
-                    if (sizingPosIt == backtestPositions.end()) sizingPosIt = backtestPositions.find(symbol);
+                    // 卖出信号 = 离场: 全平该标的持仓
+                    const auto sizingPosIt = backtestPositions.find(symbol);
                     const std::int64_t held = (sizingPosIt != backtestPositions.end())
                         ? sizingPosIt->second.quantity() : 0;
                     if (held <= 0) {
-                        if (todayStopLossSyms.count(symbol) || todayStopLossSyms.count(order.symbol())) ++stopLossSkippedNoHeld;
+                        if (todayStopLossSyms.count(symbol)) ++stopLossSkippedNoHeld;
                         continue;
                     }
                     order.setQuantity(held);
@@ -1981,7 +1939,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (dayMinQty == 0 || filledQty < dayMinQty) dayMinQty = filledQty;
                         if (filledQty > dayMaxQty) dayMaxQty = filledQty;
                         result.tradeLog.push_back({dates[static_cast<std::size_t>(r)].value,
-                                                   order.symbol(), true, filledQty, closePrice, 0.0});
+                                                   symbol, true, filledQty, closePrice, 0.0});
                         domain::trading::Position pos;
                         pos.setSymbol(symbol);
                         pos.setSide(domain::trading::PositionSide::Long);
@@ -1997,13 +1955,13 @@ StrategyBacktestResult StrategyEngine::backtest(
                         backtestPositions[symbol] = pos;
                     }
                 } else {
-                    if (todayStopLossSyms.count(order.symbol()) || todayStopLossSyms.count(symbol)) ++totalStopLossOrders;
+                    if (todayStopLossSyms.count(symbol)) ++totalStopLossOrders;
                     const auto& posMap = backtestPositions;
                     auto it = posMap.find(symbol);
                     const std::int64_t held = (it != posMap.end()) ? it->second.quantity() : 0LL;
                     const std::int64_t qty = static_cast<std::int64_t>(order.quantity());
                     const std::int64_t sellQty = qty < held ? qty : held;
-                    if (sellQty <= 0 && todayStopLossSyms.count(order.symbol()))
+                    if (sellQty <= 0 && todayStopLossSyms.count(symbol))
                         ++stopLossSkippedNoHeld;
                     if (sellQty > 0) {
                         auto fr = fillSim.simulateSell(closePrice, sellQty);
@@ -2015,9 +1973,9 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (bpIt != buyPriceMap.end()) { bp = bpIt->second; buyPriceMap.erase(bpIt); }
                         double pnl = (fr.income / sellQty - bp) * sellQty;
                         result.tradeLog.push_back({dates[static_cast<std::size_t>(r)].value,
-                                                   order.symbol(), false, sellQty, closePrice, pnl});
-                        if (todayStopLossSyms.count(order.symbol()) || todayStopLossSyms.count(symbol)) ++stopLossFilled;
-                        else if (todayRuleExitSyms.count(order.symbol()) || todayRuleExitSyms.count(symbol)) ++ruleExitFilled;
+                                                   symbol, false, sellQty, closePrice, pnl});
+                        if (todayStopLossSyms.count(symbol)) ++stopLossFilled;
+                        else if (todayRuleExitSyms.count(symbol)) ++ruleExitFilled;
                         else ++normalSellFilled;
                         if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
                         else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
@@ -2052,18 +2010,13 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
-        // 更新账户
+        // 更新账户: 持仓按当日收盘价估值, 停牌无价日不计入市值
         double marketValue = 0.0;
         for (const auto& [sym, pos] : backtestPositions) {
-            if (pos.quantity() > 0) {
-                for (const auto& mdp : mdpBatch) {
-                    auto symIt = idToSymbol.find(mdp.instrumentId().value);
-                    if (symIt != idToSymbol.end() && symIt->second == sym) {
-                        marketValue += mdp.lastPrice() * static_cast<double>(pos.quantity());
-                        break;
-                    }
-                }
-            }
+            if (pos.quantity() <= 0) continue;
+            const double px = static_cast<double>(closeMat.data[
+                rowOffset + static_cast<std::size_t>(symbolToCol.at(sym))]);
+            if (px > 0.0) marketValue += px * static_cast<double>(pos.quantity());
         }
         double equity = cash + marketValue;
         domain::trading::AccountSnapshot newAcc;
@@ -2166,8 +2119,10 @@ StrategyBacktestResult StrategyEngine::backtest(
 
         using Metrics = ::factor::FactorBacktestMetricsCalculator;
         result.metrics.maxDrawdown   = Metrics::calculateMaxDrawdown(dailyReturns);
-        result.metrics.winRate       = Metrics::calculateWinRate(dailyReturns);
-        result.metrics.profitFactor  = Metrics::calculateProfitFactor(dailyReturns);
+        // 胜率/盈亏比为按笔口径: 盈利笔数/总卖出笔数, 总盈利/总亏损
+        result.metrics.winRate       = totalFills > 0
+            ? static_cast<double>(winningFills) / static_cast<double>(totalFills) : 0.0;
+        result.metrics.profitFactor  = totalLoss > 0.0 ? totalProfit / totalLoss : 0.0;
         result.metrics.volatility       = Metrics::calculateVolatility(dailyReturns);
         result.metrics.annualizedReturn = Metrics::calculateAnnualizedReturn(
             equityCurve.back(), initialCapital, totalDays);
@@ -2220,19 +2175,20 @@ StrategyBacktestResult StrategyEngine::backtest(
                     try { d = std::stoi(ds); } catch (...) { continue; }
                     if (d > 0 && r.close > 0) dateClose[d] = r.close;
                 }
-                // 逐回测日计算基准收益
+                // 逐回测日计算基准收益 — 与 dailyReturns 逐下标对齐:
+                // bmRet[k] 与 dailyReturns[k] 同为第 k+1 个交易日相对前一交易日的收益
                 std::vector<double> bmRet;
-                bmRet.reserve(dates.size());
+                bmRet.reserve(dates.size() - 1);
                 double prevClose = 0.0;
-                for (size_t i = 0; i < dates.size(); ++i) {
-                    int d = dates[i].value;
-                    auto it = dateClose.find(d);
-                    double currClose = (it != dateClose.end()) ? it->second : 0.0;
-                    if (i == 0 || prevClose <= 0.0 || currClose <= 0.0) {
-                        bmRet.push_back(0.0);
-                    } else {
-                        bmRet.push_back(currClose / prevClose - 1.0);
-                    }
+                {
+                    auto it0 = dateClose.find(dates.front().value);
+                    if (it0 != dateClose.end()) prevClose = it0->second;
+                }
+                for (size_t i = 1; i < dates.size(); ++i) {
+                    auto it = dateClose.find(dates[i].value);
+                    const double currClose = (it != dateClose.end()) ? it->second : 0.0;
+                    bmRet.push_back((prevClose > 0.0 && currClose > 0.0)
+                        ? currClose / prevClose - 1.0 : 0.0);  // 缺数据日记 0 收益
                     if (currClose > 0.0) prevClose = currClose;
                 }
                 // 指标计算
@@ -2242,13 +2198,15 @@ StrategyBacktestResult StrategyEngine::backtest(
                 result.metrics.alpha            = benchMetrics.alpha;
                 result.metrics.trackingError    = benchMetrics.trackingError;
                 result.metrics.informationRatio = benchMetrics.informationRatio;
-                // 净值曲线 + 回撤曲线
+                // 净值曲线 + 回撤曲线 — 与 portfolioValues 同长: 首点为初始资金
                 const double initialCapital = req.costSpec.initialCapital.value > 0
                     ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
-                result.timeSeries.benchmarkValues.reserve(bmRet.size());
-                result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size());
+                result.timeSeries.benchmarkValues.reserve(bmRet.size() + 1);
+                result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size() + 1);
                 double bmEquity = initialCapital;
                 double bmPeak = bmEquity;
+                result.timeSeries.benchmarkValues.push_back(bmEquity);
+                result.timeSeries.benchmarkDrawdowns.push_back(0.0);
                 for (double r : bmRet) {
                     bmEquity *= (1.0 + r);
                     if (bmEquity > bmPeak) bmPeak = bmEquity;

@@ -884,7 +884,6 @@ Rectangle {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.minimumHeight: root.ruleComposerMinHeight
-                        Layout.preferredHeight: root.ruleComposerMinHeight
                         spacing: root.ruleComposerSpacing
 
                         StrategyProfilePanel {
@@ -1692,16 +1691,16 @@ Rectangle {
     // ============ 功能函数 ============
     
     // 加载参数配置
-    function loadParamConfigs() {
+    function loadParamConfigs(initialValues) {
         var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyTypeIndex)
         var separatedConfigs = splitParameterConfigs(paramConfigs)
         root.commonParameterConfigs = separatedConfigs.common
         root.personalizedParameterConfigs = separatedConfigs.personalized
         if (commonDynamicGenerator) {
-            commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [])
+            commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [], initialValues)
         }
         if (personalizedDynamicGenerator) {
-            personalizedDynamicGenerator.reloadConfigs(root.personalizedParameterConfigs, [])
+            personalizedDynamicGenerator.reloadConfigs(root.personalizedParameterConfigs, [], initialValues)
         }
         root.personalizedCardExpanded = root.hasPersonalizedParameterConfigs
         root.commonParametersValid = true
@@ -3433,7 +3432,12 @@ Rectangle {
             filePath: suggestion.filePath || "",
             stageId: normalizedRuleTemplatePhase(targetLocation.stageId || suggestion.stageId || "signal"),
             category: suggestion.category || "",
-            summary: suggestion.summary || ""
+            summary: suggestion.summary || "",
+            rules: suggestion.rules || [],
+            meta: {
+                name: suggestion.templateDisplayName || suggestion.templateName || "",
+                description: suggestion.summary || ""
+            }
         }
         var nextBindings = normalizeRuleTemplateBindings(boundRuleTemplateBindings)
         var nextEntries = normalizeRuleTemplateBindingEntries(boundRuleTemplateBindingEntries)
@@ -3573,7 +3577,12 @@ Rectangle {
 
         root.suppressRuleComposerReset = true
         root.selectedStrategyTypeIndex = normalizedStrategyTypeIndex
-        loadParamConfigs()
+        if (commonDynamicGenerator) {
+            commonDynamicGenerator.setValues(mappedValues)
+        }
+        if (personalizedDynamicGenerator) {
+            personalizedDynamicGenerator.setValues(mappedValues)
+        }
         var persistedFactorOverlay = normalizeStructuredValue(sourceParams.factor_overlay) || ({})
         var hasPersistedComposerStages = true
         var persistedBindingEntries = normalizeRuleTemplateBindingEntries(
@@ -3703,15 +3712,15 @@ Rectangle {
             rebuildRuleComposerState(true)
         }
 
-        // 加载初始参数配置
-        loadParamConfigs()
+        // 加载初始参数配置 (新建策略无已保存值, 传空对象用默认值)
+        loadParamConfigs({})
     }
-    
+
     onSelectedStrategyTypeIndexChanged: {
-        loadParamConfigs()
         if (root.suppressRuleComposerReset) {
             return
         }
+        loadParamConfigs({})
         root.forbidDefaultRuleBuildInEdit = false
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         rebuildRuleComposerState(true)

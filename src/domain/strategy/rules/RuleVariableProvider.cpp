@@ -738,10 +738,10 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     // market 情绪/冷却 (14模板卡 emotion_cycle)
     if (varPath == "market.emotion_cycle")                  return impl.marketEmotionCycle();
     if (varPath == "market.emotion_repair_confirmed")       return impl.emotionRepairConfirmed();
-    // 波动冲击评分: 近期回撤越深→冲击越大, 范围 0~1 (sideways 模板要求 ≤0.58)
-    // (原错误代理到 marketEmotionCycle 返回字符串编码值, 永远 >0.58)
+    // 波动冲击评分: 恐慌时等权指数短期波动率 / 长期均值波动率, 范围 0~1
+    // 在 computeMarketSnapshot 中真实计算, 不代理到其他变量
     if (varPath == "market.volatility_shock_score")
-        return market.indexDrawdownFromRecentHigh;
+        return market.volatilityShockScore;
     if (varPath == "market.cooling_mid_confirmed")
     { auto ec=impl.marketEmotionCycle(); auto c=ruleStringValueCode("cooling"); return std::optional<double>(ec&&*ec==c?std::optional<double>(1.0):std::optional<double>(0.0)); }
     if (varPath == "market.cooling_end_confirmed")
@@ -1015,9 +1015,11 @@ RuleMarketSnapshot computeMarketSnapshot(
         snapshot.breadthAboveMa60Ratio = static_cast<double>(above) / counted;
 
     // ── 等权市场指数: 每日全市场平均收益累积, 近 lookback 高点回撤 ──
-    // (从 lastRow-lookback 起点归一为 1.0)
+    // (从 lastRow-lookback 起点归一为 1.0, 同时收集日收益用于波动率冲击评分)
     const int startRow = (std::max)(1, lastRow - lookback);
     double index = 1.0, peak = 1.0;
+    std::vector<double> indexDailyReturns;
+    indexDailyReturns.reserve(static_cast<std::size_t>(lastRow - startRow + 1));
     for (int r = startRow; r <= lastRow; ++r) {
         double sumRet = 0.0; int n = 0;
         for (int c = 0; c < cols; ++c) {
@@ -1025,11 +1027,39 @@ RuleMarketSnapshot computeMarketSnapshot(
             const double prev = columnClose(closeMat, r - 1, c);
             if (today > 0.0 && prev > 0.0) { sumRet += today / prev - 1.0; ++n; }
         }
-        if (n > 0) index *= (1.0 + sumRet / n);
+        const double dailyRet = n > 0 ? sumRet / n : 0.0;
+        indexDailyReturns.push_back(dailyRet);
+        index *= (1.0 + dailyRet);
         if (index > peak) peak = index;
     }
     snapshot.indexClose = index;
     snapshot.indexDrawdownFromRecentHigh = peak > 0.0 ? 1.0 - index / peak : 0.0;
+
+    // ── 波动率冲击评分: 恐慌时短期波动率飙升, 范围 0~1 ──
+    // 近5日年化vol / 近60日年化vol → 极端恐慌时日波动率可达均值3~5倍, 顶盖 1.0
+    {
+        const int nDays = static_cast<int>(indexDailyReturns.size());
+        if (nDays >= 5) {
+            auto annualizedVol = [&](int window) -> double {
+                const int start = nDays - window;
+                if (start < 0) return 0.0;
+                double mean = 0.0;
+                for (int i = start; i < nDays; ++i) mean += indexDailyReturns[i];
+                mean /= static_cast<double>(window);
+                double var = 0.0;
+                for (int i = start; i < nDays; ++i) {
+                    const double d = indexDailyReturns[i] - mean;
+                    var += d * d;
+                }
+                var /= static_cast<double>(window);
+                return std::sqrt(var) * std::sqrt(250.0);
+            };
+            const double vol5 = annualizedVol(5);
+            const double vol60 = annualizedVol((std::min)(60, nDays));
+            if (vol60 > 1e-9)
+                snapshot.volatilityShockScore = (std::min)(1.0, vol5 / vol60);
+        }
+    }
 
     // 等权指数 MA120: 逐日重放指数序列, 取近120日均值 (bull_trend 依赖此字段)
     {

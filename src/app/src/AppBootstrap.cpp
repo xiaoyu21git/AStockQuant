@@ -1,21 +1,30 @@
 #include "AppBootstrap.h"
 
-// #include "InlineExecutor.h"
-// #include "IExecutor.h"
 #include "foundation.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "Event/EventBus.hpp"
 #include "GlobalEventBusRegistry.h"
-// 下面这些现在可以是空头文件或 forward declare
-// #include "engine/Engine.h"
 
+#include <QRegularExpression>
 #include <iostream>
+
+namespace {
+QRegularExpression s_pureNumber("^\\s*-?\\d+(\\.\\d+)?\\s*$");
+
+void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg)
+{
+    if (type == QtDebugMsg && s_pureNumber.match(msg.trimmed()).hasMatch())
+        return;
+    std::cerr << msg.toStdString() << std::endl;
+}
+}
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QIcon>
 #include <QObject>
 #include <QQmlApplicationEngine>
+#include <QLoggingCategory>
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QTimer>
@@ -384,6 +393,7 @@ bool AppBootstrap::initQmlEngine()
     INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing QML engine...";
 
     try {
+        qInstallMessageHandler(filteredMessageHandler);
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
         applyRootWindowIcon(m_engine.get());

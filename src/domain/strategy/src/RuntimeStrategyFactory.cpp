@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <unordered_map>
@@ -265,14 +266,30 @@ public:
         auto rawWeights = buildRawWeights(*strategyDefinition_, candidates);
         if (candidates.empty() || rawWeights.size() != candidates.size()) return;
 
+        // 信号契约: 必携真实完整代码 — 由行情视图 instruments↔symbolStrings 逐列映射解析
+        // (InstrumentId 是视图内部顺序编号, 不含代码语义)
+        const auto* mdView = static_cast<const factor::compute::IMarketDataView*>(
+            context.historicalViewPtr());
+        if (!mdView) return;
+        const auto& viewInstruments = mdView->instruments();
+        const auto& viewSymbols = mdView->symbolStrings();
+        if (viewInstruments.size() != viewSymbols.size()) return;
+        std::unordered_map<std::uint32_t, const std::string*> idToFullSymbol;
+        idToFullSymbol.reserve(viewInstruments.size());
+        for (std::size_t c = 0; c < viewInstruments.size(); ++c)
+            idToFullSymbol[viewInstruments[c].value] = &viewSymbols[c];
+
         outputSignals.reserve(outputSignals.size() + candidates.size());
         for (std::size_t i = 0; i < candidates.size(); ++i) {
             const double bw = std::max(wMin, std::min(rawWeights[i], wCap));
+            // 因子池可能宽于行情视图 — 视图外候选无法定位标的, 不产生信号
+            const auto symIt = idToFullSymbol.find(candidates[i].instrumentId.value);
+            if (symIt == idToFullSymbol.end()) continue;
             // 策略只输出纯信号: (symbol, side, targetWeight, score)
             // 意图由调度层 buildPositionAwareOrders 根据持仓对比确定
             auto sig = domain::strategy::StrategySignal(
                 strategyInstanceId_, candidates[i].instrumentId,
-                candidates[i].side, candidates[i].score, bw);
+                candidates[i].side, candidates[i].score, bw, *symIt->second);
             outputSignals.push_back(std::move(sig));
         }
     }

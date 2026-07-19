@@ -577,11 +577,18 @@ Rectangle {
                 root._suppressUpdates = true
                 root.value = floatVal
                 root._suppressUpdates = false
-                
-                // 验证并发出信号
                 validate()
                 root.paramValueChanged(root.paramId, floatVal)
             }
+        } else {
+            var intVal = root._intValue
+            if (Math.abs(root.value - intVal) > 0.000000001) {
+                root._suppressUpdates = true
+                root.value = intVal
+                root._suppressUpdates = false
+            }
+            validate()
+            root.paramValueChanged(root.paramId, intVal)
         }
     }
 }
