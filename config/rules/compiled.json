@@ -412,7 +412,7 @@
       "displayName": "分批止盈模板",
       "fileName": "exit_scale_out_take_profit.yaml",
       "phase": "rebalance",
-      "summary": "结构止盈: 前高压力->超涨->动能衰减->支撑破位. 纯市场结构, 无PnL百分比.",
+      "summary": "结构止盈: 前高85%减30->超涨MA110%减30->回撤6%清仓->动能<50减30->支撑破位清仓",
       "actions": [
         "reduce",
         "exit"
@@ -429,7 +429,6 @@
           "name": "前高压力减仓",
           "stage": "rebalance",
           "priority": 86,
-          "description": "收盘接近60日前高(>=88%), 阻力位先减仓30%. 趋势反转或突破后再定.",
           "when": {
             "op": "all",
             "conditions": [
@@ -445,7 +444,7 @@
                 "left": {
                   "var": "position.previous_high_breakout_ratio"
                 },
-                "right": 0.88
+                "right": 0.85
               }
             ]
           },
@@ -464,7 +463,6 @@
           "name": "超涨减仓",
           "stage": "rebalance",
           "priority": 83,
-          "description": "收盘远超MA20(>=115%), 均值回归压力大, 减30%.",
           "when": {
             "op": "all",
             "conditions": [
@@ -480,7 +478,7 @@
                 "left": {
                   "var": "position.close_below_rebound_pivot_ratio"
                 },
-                "right": 1.15
+                "right": 1.1
               }
             ]
           },
@@ -496,10 +494,9 @@
         },
         {
           "id": "trailing-protect",
-          "name": "利润回撤保护(动态)",
+          "name": "动态回撤保护",
           "stage": "rebalance",
           "priority": 81,
-          "description": "利润>=8%且从持仓高点回撤>=8%, 动态追踪止损线随价格上移。利润越大锁得越紧.",
           "when": {
             "op": "all",
             "conditions": [
@@ -515,14 +512,14 @@
                 "left": {
                   "var": "position.trailing_drawdown_ratio"
                 },
-                "right": 0.08
+                "right": 0.06
               }
             ]
           },
           "then": {
             "result": "exit",
-            "reason_code": "trailing_protect",
-            "message": "利润回撤8%, 动态止损清仓",
+            "reason_code": "trailing",
+            "message": "回撤6%, 清仓锁利",
             "payload": {
               "reduce_ratio": 1.0,
               "state": "trail_exit"
@@ -534,7 +531,6 @@
           "name": "动能衰减减仓",
           "stage": "rebalance",
           "priority": 80,
-          "description": "趋势健康<40, 上升动能衰竭, 减30%.",
           "when": {
             "op": "all",
             "conditions": [
@@ -550,7 +546,7 @@
                 "left": {
                   "var": "position.trend_health_score"
                 },
-                "right": 40
+                "right": 50
               }
             ]
           },
@@ -569,7 +565,6 @@
           "name": "支撑破位清仓",
           "stage": "rebalance",
           "priority": 77,
-          "description": "有利可锁但跌破MA20, 上涨结构受损, 清仓.",
           "when": {
             "op": "all",
             "conditions": [
@@ -1520,7 +1515,7 @@
       "displayName": "承接走弱退出模板",
       "fileName": "exit_acceptance_breakdown.yaml",
       "phase": "rebalance",
-      "summary": "极简止损: 硬止损-8% + 支撑破位退出. 无递进回撤保护.",
+      "summary": "硬止损-8% + 支撑破位",
       "actions": [
         "reduce",
         "exit"

@@ -640,6 +640,9 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "position.pnl_percent")
         return impl.candidate.isHolding ? std::optional<double>(impl.candidate.pnlPercent)
                                         : std::nullopt;
+    if (varPath == "position.hold_days")
+        return impl.candidate.isHolding ? std::optional<double>(static_cast<double>(impl.candidate.holdDays))
+                                        : std::nullopt;
     if (varPath == "position.close_below_ma120_ratio") return impl.closeToMaRatio(120);
     if (varPath == "position.ma120_trend_slope")       return impl.maTrendSlope(120);
     if (varPath == "position.trailing_drawdown_ratio") return impl.trailingDrawdownRatio();
