@@ -412,7 +412,7 @@
       "displayName": "分批止盈模板",
       "fileName": "exit_scale_out_take_profit.yaml",
       "phase": "rebalance",
-      "summary": "超涨修边: 极端偏离均线才触发.",
+      "summary": "超涨修边",
       "actions": [
         "reduce",
         "exit"
@@ -425,11 +425,10 @@
       "namespace": "trading.exit.scale_out_take_profit",
       "rules": [
         {
-          "id": "overextend-reduce",
+          "id": "overextend",
           "name": "极端超涨减仓",
           "stage": "rebalance",
           "priority": 80,
-          "description": "利润20%+且远超MA20(>=125%), 极端均值回归, 减半仓.",
           "when": {
             "op": "all",
             "conditions": [
@@ -438,24 +437,24 @@
                 "left": {
                   "var": "position.pnl_percent"
                 },
-                "right": 20
+                "right": 15
               },
               {
                 "op": "ge",
                 "left": {
                   "var": "position.close_below_rebound_pivot_ratio"
                 },
-                "right": 1.25
+                "right": 1.3
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "overextend_reduce",
+            "reason_code": "overextend",
             "message": "极端超涨, 减半仓",
             "payload": {
               "reduce_ratio": 0.5,
-              "state": "overextend_reduced"
+              "state": "overextend"
             }
           }
         }
@@ -1380,7 +1379,7 @@
       "displayName": "承接走弱退出模板",
       "fileName": "exit_acceptance_breakdown.yaml",
       "phase": "rebalance",
-      "summary": "动态递进止损: 利润越高回撤容忍越小, 止损线随价格上涨上移",
+      "summary": "硬止损-8% + 四级递进回撤保护 + 支撑破位退出",
       "actions": [
         "reduce",
         "exit"
@@ -1394,7 +1393,7 @@
       "rules": [
         {
           "id": "hard-stop",
-          "name": "硬止损(-5%)",
+          "name": "硬止损(-8%)",
           "stage": "rebalance",
           "priority": 97,
           "when": {
@@ -1402,12 +1401,12 @@
             "left": {
               "var": "position.pnl_percent"
             },
-            "right": -5
+            "right": -8
           },
           "then": {
             "result": "exit",
             "reason_code": "hard_stop",
-            "message": "亏损-5%, 清仓",
+            "message": "亏损-8%, 清仓",
             "payload": {
               "reduce_ratio": 1.0,
               "state": "hard_stopped"
@@ -1415,11 +1414,10 @@
           }
         },
         {
-          "id": "trail-5pct",
-          "name": "回撤止损(利润>=20%)",
+          "id": "trail-20",
+          "name": "回撤保护(利润>=20%)",
           "stage": "rebalance",
           "priority": 93,
-          "description": "利润丰厚, 从高点回撤5%就减半仓锁利, 止损线上移.",
           "when": {
             "op": "all",
             "conditions": [
@@ -1435,26 +1433,25 @@
                 "left": {
                   "var": "position.trailing_drawdown_ratio"
                 },
-                "right": 0.05
+                "right": 0.03
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "trail_5",
-            "message": "利润20%+回撤5%, 减半仓",
+            "reason_code": "trail_20",
+            "message": "利润20%+回撤3%, 减半仓",
             "payload": {
               "reduce_ratio": 0.5,
-              "state": "trail_tight"
+              "state": "trail_big"
             }
           }
         },
         {
-          "id": "trail-8pct",
-          "name": "回撤止损(利润>=15%)",
+          "id": "trail-12",
+          "name": "回撤保护(利润>=12%)",
           "stage": "rebalance",
           "priority": 91,
-          "description": "利润可观, 从高点回撤6%减半仓锁利.",
           "when": {
             "op": "all",
             "conditions": [
@@ -1463,21 +1460,21 @@
                 "left": {
                   "var": "position.pnl_percent"
                 },
-                "right": 15
+                "right": 12
               },
               {
                 "op": "ge",
                 "left": {
                   "var": "position.trailing_drawdown_ratio"
                 },
-                "right": 0.06
+                "right": 0.03
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "trail_8",
-            "message": "利润15%+回撤6%, 减半仓",
+            "reason_code": "trail_12",
+            "message": "利润12%+回撤3%, 减半仓",
             "payload": {
               "reduce_ratio": 0.5,
               "state": "trail_mid"
@@ -1485,11 +1482,10 @@
           }
         },
         {
-          "id": "trail-5pct2",
-          "name": "回撤止损(利润>=10%)",
+          "id": "trail-8",
+          "name": "回撤保护(利润>=8%)",
           "stage": "rebalance",
           "priority": 89,
-          "description": "利润适中, 从高点回撤5%减30%锁利.",
           "when": {
             "op": "all",
             "conditions": [
@@ -1498,21 +1494,21 @@
                 "left": {
                   "var": "position.pnl_percent"
                 },
-                "right": 10
+                "right": 8
               },
               {
                 "op": "ge",
                 "left": {
                   "var": "position.trailing_drawdown_ratio"
                 },
-                "right": 0.05
+                "right": 0.02
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "trail_5m",
-            "message": "利润10%+回撤5%, 减30%",
+            "reason_code": "trail_8",
+            "message": "利润8%+回撤2%, 减30%",
             "payload": {
               "reduce_ratio": 0.3,
               "state": "trail_loose"
@@ -1520,11 +1516,10 @@
           }
         },
         {
-          "id": "trail-3pct",
-          "name": "回撤止损(利润>=5%)",
+          "id": "trail-5",
+          "name": "回撤保护(利润>=5%)",
           "stage": "rebalance",
           "priority": 87,
-          "description": "小有利润, 从高点回撤4%减30%, 止损线紧跟上移.",
           "when": {
             "op": "all",
             "conditions": [
@@ -1540,14 +1535,14 @@
                 "left": {
                   "var": "position.trailing_drawdown_ratio"
                 },
-                "right": 0.04
+                "right": 0.02
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "trail_3",
-            "message": "利润5%+回撤4%, 减30%",
+            "reason_code": "trail_5",
+            "message": "利润5%+回撤2%, 减30%",
             "payload": {
               "reduce_ratio": 0.3,
               "state": "trail_early"
@@ -1555,11 +1550,10 @@
           }
         },
         {
-          "id": "support-break-exit",
+          "id": "support-break",
           "name": "支撑破位退出",
           "stage": "rebalance",
           "priority": 85,
-          "description": "有利可锁但跌破MA20, 上涨结构已坏, 清仓锁利.",
           "when": {
             "op": "all",
             "conditions": [
@@ -1582,7 +1576,7 @@
           "then": {
             "result": "exit",
             "reason_code": "support_break",
-            "message": "有利润但破MA20, 清仓锁利",
+            "message": "有利但破MA20, 清仓",
             "payload": {
               "reduce_ratio": 1.0,
               "state": "support_exit"
