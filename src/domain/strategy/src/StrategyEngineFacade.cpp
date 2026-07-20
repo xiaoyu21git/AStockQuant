@@ -196,8 +196,9 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     }
 
     // ── 根据策略类型判断是否需要因子 ──
-    const bool isFactorType = params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
-                           || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MachineLearning;
+    const bool isFactorType = !params.factorIds.empty()
+        || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
+        || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MachineLearning;
 
     if (isFactorType && !factorSvc) {
         INTERNAL_WARN_STREAM << "[fromDb] ABORT: factor strategy but factorSvc is null";

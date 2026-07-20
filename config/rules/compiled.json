@@ -412,7 +412,7 @@
       "displayName": "分批止盈模板",
       "fileName": "exit_scale_out_take_profit.yaml",
       "phase": "rebalance",
-      "summary": "超涨修边",
+      "summary": "结构止盈: 前高压力->超涨->动能衰减->支撑破位. 纯市场结构, 无PnL百分比.",
       "actions": [
         "reduce",
         "exit"
@@ -425,10 +425,11 @@
       "namespace": "trading.exit.scale_out_take_profit",
       "rules": [
         {
-          "id": "overextend",
-          "name": "极端超涨减仓",
+          "id": "pressure-reduce",
+          "name": "前高压力减仓",
           "stage": "rebalance",
-          "priority": 80,
+          "priority": 86,
+          "description": "收盘接近60日前高(>=88%), 阻力位先减仓30%. 趋势反转或突破后再定.",
           "when": {
             "op": "all",
             "conditions": [
@@ -437,24 +438,164 @@
                 "left": {
                   "var": "position.pnl_percent"
                 },
-                "right": 15
+                "right": 3
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.previous_high_breakout_ratio"
+                },
+                "right": 0.88
+              }
+            ]
+          },
+          "then": {
+            "result": "reduce",
+            "reason_code": "pressure",
+            "message": "前高压力, 减30%",
+            "payload": {
+              "reduce_ratio": 0.3,
+              "state": "pressure"
+            }
+          }
+        },
+        {
+          "id": "overextend-reduce",
+          "name": "超涨减仓",
+          "stage": "rebalance",
+          "priority": 83,
+          "description": "收盘远超MA20(>=115%), 均值回归压力大, 减30%.",
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.pnl_percent"
+                },
+                "right": 5
               },
               {
                 "op": "ge",
                 "left": {
                   "var": "position.close_below_rebound_pivot_ratio"
                 },
-                "right": 1.3
+                "right": 1.15
               }
             ]
           },
           "then": {
             "result": "reduce",
             "reason_code": "overextend",
-            "message": "极端超涨, 减半仓",
+            "message": "超涨, 减30%",
             "payload": {
-              "reduce_ratio": 0.5,
+              "reduce_ratio": 0.3,
               "state": "overextend"
+            }
+          }
+        },
+        {
+          "id": "trailing-protect",
+          "name": "利润回撤保护(动态)",
+          "stage": "rebalance",
+          "priority": 81,
+          "description": "利润>=8%且从持仓高点回撤>=8%, 动态追踪止损线随价格上移。利润越大锁得越紧.",
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.pnl_percent"
+                },
+                "right": 8
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.trailing_drawdown_ratio"
+                },
+                "right": 0.08
+              }
+            ]
+          },
+          "then": {
+            "result": "exit",
+            "reason_code": "trailing_protect",
+            "message": "利润回撤8%, 动态止损清仓",
+            "payload": {
+              "reduce_ratio": 1.0,
+              "state": "trail_exit"
+            }
+          }
+        },
+        {
+          "id": "momentum-fade-reduce",
+          "name": "动能衰减减仓",
+          "stage": "rebalance",
+          "priority": 80,
+          "description": "趋势健康<40, 上升动能衰竭, 减30%.",
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.pnl_percent"
+                },
+                "right": 3
+              },
+              {
+                "op": "lt",
+                "left": {
+                  "var": "position.trend_health_score"
+                },
+                "right": 40
+              }
+            ]
+          },
+          "then": {
+            "result": "reduce",
+            "reason_code": "momentum_fade",
+            "message": "动能衰减, 减30%",
+            "payload": {
+              "reduce_ratio": 0.3,
+              "state": "momentum_fade"
+            }
+          }
+        },
+        {
+          "id": "support-break-exit",
+          "name": "支撑破位清仓",
+          "stage": "rebalance",
+          "priority": 77,
+          "description": "有利可锁但跌破MA20, 上涨结构受损, 清仓.",
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.pnl_percent"
+                },
+                "right": 2
+              },
+              {
+                "op": "lt",
+                "left": {
+                  "var": "position.close_below_rebound_pivot_ratio"
+                },
+                "right": 1.0
+              }
+            ]
+          },
+          "then": {
+            "result": "exit",
+            "reason_code": "support_break",
+            "message": "破MA20, 清仓",
+            "payload": {
+              "reduce_ratio": 1.0,
+              "state": "support_exit"
             }
           }
         }
