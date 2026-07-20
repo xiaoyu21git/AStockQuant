@@ -1379,7 +1379,7 @@
       "displayName": "承接走弱退出模板",
       "fileName": "exit_acceptance_breakdown.yaml",
       "phase": "rebalance",
-      "summary": "硬止损-8% + 四级递进回撤保护 + 支撑破位退出",
+      "summary": "极简止损: 硬止损-8% + 支撑破位退出. 无递进回撤保护.",
       "actions": [
         "reduce",
         "exit"
@@ -1410,142 +1410,6 @@
             "payload": {
               "reduce_ratio": 1.0,
               "state": "hard_stopped"
-            }
-          }
-        },
-        {
-          "id": "trail-20",
-          "name": "回撤保护(利润>=20%)",
-          "stage": "rebalance",
-          "priority": 93,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 20
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.trailing_drawdown_ratio"
-                },
-                "right": 0.03
-              }
-            ]
-          },
-          "then": {
-            "result": "reduce",
-            "reason_code": "trail_20",
-            "message": "利润20%+回撤3%, 减半仓",
-            "payload": {
-              "reduce_ratio": 0.5,
-              "state": "trail_big"
-            }
-          }
-        },
-        {
-          "id": "trail-12",
-          "name": "回撤保护(利润>=12%)",
-          "stage": "rebalance",
-          "priority": 91,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 12
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.trailing_drawdown_ratio"
-                },
-                "right": 0.03
-              }
-            ]
-          },
-          "then": {
-            "result": "reduce",
-            "reason_code": "trail_12",
-            "message": "利润12%+回撤3%, 减半仓",
-            "payload": {
-              "reduce_ratio": 0.5,
-              "state": "trail_mid"
-            }
-          }
-        },
-        {
-          "id": "trail-8",
-          "name": "回撤保护(利润>=8%)",
-          "stage": "rebalance",
-          "priority": 89,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 8
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.trailing_drawdown_ratio"
-                },
-                "right": 0.02
-              }
-            ]
-          },
-          "then": {
-            "result": "reduce",
-            "reason_code": "trail_8",
-            "message": "利润8%+回撤2%, 减30%",
-            "payload": {
-              "reduce_ratio": 0.3,
-              "state": "trail_loose"
-            }
-          }
-        },
-        {
-          "id": "trail-5",
-          "name": "回撤保护(利润>=5%)",
-          "stage": "rebalance",
-          "priority": 87,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 5
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.trailing_drawdown_ratio"
-                },
-                "right": 0.02
-              }
-            ]
-          },
-          "then": {
-            "result": "reduce",
-            "reason_code": "trail_5",
-            "message": "利润5%+回撤2%, 减30%",
-            "payload": {
-              "reduce_ratio": 0.3,
-              "state": "trail_early"
             }
           }
         },
@@ -9750,7 +9614,7 @@
       "displayName": "熊市冻结新开仓模板",
       "fileName": "risk_market_bear_freeze_entry.yaml",
       "phase": "market",
-      "summary": "仅熊市体制冻结: regime==bear 时冻结新开仓, 取消准熊市和恐慌波动冻结以增加交易机会",
+      "summary": "熊市体制冻结: regime==bear冻结新开仓",
       "actions": [
         "freeze"
       ],
@@ -9766,13 +9630,6 @@
           "name": "熊市体制冻结",
           "stage": "market",
           "priority": 99,
-          "description": "市场进入熊市体制(全市场站上MA60比例<=35%)即冻结新开仓。准熊市和恐慌波动不再冻结, 由因子自行判断。",
-          "tags": [
-            "market",
-            "risk",
-            "bear_market",
-            "freeze"
-          ],
           "when": {
             "op": "eq",
             "left": {
@@ -9791,7 +9648,7 @@
                 "candidate_entry",
                 "open"
               ],
-              "focus": "熊市不买, 等待系统性企稳"
+              "focus": "熊市不买"
             }
           }
         }
