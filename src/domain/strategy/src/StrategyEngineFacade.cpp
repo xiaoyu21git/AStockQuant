@@ -369,10 +369,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         commonCfg.bbPeriod     = params.bbPeriod;
         commonCfg.bbStdDev     = params.bbStdDev;
 
-        auto [evalFn, lookback] = NonFactorStrategy::makeIndicator(params.behaviorKind, commonCfg);
-        auto runtimeStrategy = std::make_unique<NonFactorStrategy>(
-            kDefaultInstanceId, params.behaviorKind, commonCfg,
-            std::move(evalFn), lookback);
+        auto runtimeStrategy = NonFactorStrategy::create(
+            kDefaultInstanceId, params.behaviorKind, commonCfg);
 
         if (!engine->registerStrategy(std::move(runtimeStrategy), ctx).isOk())
             return nullptr;

@@ -1,11 +1,12 @@
 #include "../include/NonFactorStrategy.h"
+#include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include <ta_libc.h>
+#include <unordered_set>
 
 namespace domain::strategy {
 namespace {
 
 using SignalResult = NonFactorStrategy::SignalResult;
-using EvaluateFn = NonFactorStrategy::EvaluateFn;
 using StrategyCommonConfig = ::domain::strategies::StrategyCommonConfig;
 
 // ── 共享工具函数 ──
@@ -19,6 +20,127 @@ double computeRSI(const std::vector<double>& prices, int period) {
         return -1.0;
     return out[n-1];
 }
+
+} // anonymous namespace
+
+// ═════════════════════════════════════════════════════════════════════════
+// 引擎层: 遍历行情 → evaluateSymbol → 排序限流
+// ═════════════════════════════════════════════════════════════════════════
+void NonFactorStrategy::evaluateSignals(NonFactorStrategy& self,
+                                        const RuntimeStrategyContext& context,
+                                        std::vector<StrategySignal>& outputSignals)
+{
+    const auto* view = static_cast<const factor::compute::IMarketDataView*>(
+        context.historicalViewPtr());
+    if (!view) return;
+
+    auto closeMat = view->close();
+    auto instruments = view->instruments();
+    auto dates = view->dates();
+    int rows = static_cast<int>(dates.size());
+    int cols = static_cast<int>(instruments.size());
+    if (rows < self.requiredLookbackBars() || cols == 0) return;
+
+    int rowStride = closeMat.rowStride;
+    int evalRow = context.currentEvaluationRow();
+    int lastRow = (evalRow >= 0) ? evalRow : (rows - 1);
+    int lookback = std::min(self.requiredLookbackBars(), lastRow + 1);
+    const int kMaxDailySignals = std::max(1, self.m_commonCfg.maxPositions);
+
+    std::vector<StrategySignal> allSignals;
+    allSignals.reserve(cols);
+    for (int c = 0; c < cols; ++c) {
+        std::vector<double> closePrices(lookback);
+        for (int i = 0; i < lookback; ++i)
+            closePrices[i] = static_cast<double>(
+                closeMat.data[(lastRow - lookback + 1 + i) * rowStride + c]);
+
+        std::string fullSymbol;
+        {
+            const auto& syms = view->symbolStrings();
+            if (c < static_cast<int>(syms.size())) fullSymbol = syms[static_cast<size_t>(c)];
+        }
+        if (fullSymbol.empty()) continue;
+
+        {
+            auto& d = domain::market::MarketDataService::instance().liveData(fullSymbol);
+            if (d.valid()) {
+                double liveC = d.dailyBar().close();
+                if (liveC > 0) closePrices.push_back(liveC);
+            }
+        }
+
+        SignalResult sig = self.evaluateSymbol(closePrices, instruments[c].value,
+                                                context, self.m_commonCfg);
+        if (sig.valid) {
+            auto signal = StrategySignal(
+                context.strategyInstanceId(),
+                InstrumentId{sig.instrumentId},
+                sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
+                sig.score, self.weightForSignalScore(sig.score),
+                fullSymbol);
+            allSignals.push_back(std::move(signal));
+        }
+    }
+
+    std::sort(allSignals.begin(), allSignals.end(),
+        [](const StrategySignal& a, const StrategySignal& b) {
+            if (a.side() == RuntimeOrderSide::Sell && b.side() == RuntimeOrderSide::Buy) return true;
+            if (a.side() == RuntimeOrderSide::Buy && b.side() == RuntimeOrderSide::Sell) return false;
+            return a.score() > b.score();
+        });
+
+    int buyCount = 0;
+    for (auto& s : allSignals) {
+        if (s.side() == RuntimeOrderSide::Buy) {
+            if (buyCount >= kMaxDailySignals) continue;
+            ++buyCount;
+        }
+        outputSignals.push_back(std::move(s));
+    }
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// 子类 evaluateSymbol 实现
+// ═════════════════════════════════════════════════════════════════════════
+
+SignalResult TrendFollowingStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
+{
+    SignalResult sig;
+    sig.instrumentId = instrumentId;
+    int N = static_cast<int>(closePrices.size());
+    if (N < cfg.slowPeriod + 1) return sig;
+
+    std::vector<double> fma(N, 0), sma(N, 0);
+    int b = 0, n = 0;
+    if (TA_SMA(0, N-1, closePrices.data(), cfg.fastPeriod, &b, &n, fma.data()) != TA_SUCCESS || n < 2) return sig;
+    if (TA_SMA(0, N-1, closePrices.data(), cfg.slowPeriod, &b, &n, sma.data()) != TA_SUCCESS || n < 2) return sig;
+
+    int p = n-2, c = n-1;
+    bool golden = (fma[p] <= sma[p] && fma[c] > sma[c]);
+    bool dead   = (fma[p] >= sma[p] && fma[c] < sma[c]);
+
+    double strength = sma[c] > 0.0 ? (fma[c] - sma[c]) / sma[c] : 0.0;
+    if (golden) { sig.valid = true; sig.isBuy = true;  sig.score = 0.5 + std::min(0.45, std::abs(strength) * 10.0); }
+    if (dead)   { sig.valid = true; sig.isBuy = false; sig.score = 0.3 + std::min(0.35, std::abs(strength) * 10.0); }
+    return sig;
+}
+
+SignalResult MeanReversionStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
+{
+    SignalResult sig;
+    sig.instrumentId = instrumentId;
+    double rsi = computeRSI(closePrices, cfg.signalPeriod);
+    if (rsi < 30.0) { sig.valid = true; sig.isBuy = true;  sig.score = 0.70; }
+    if (rsi > 70.0) { sig.valid = true; sig.isBuy = false; sig.score = 0.65; }
+    return sig;
+}
+
+namespace {
 
 bool checkMACD(const std::vector<double>& prices, bool up,
                int fast, int slow, int sigPeriod) {
@@ -34,21 +156,22 @@ bool checkMACD(const std::vector<double>& prices, bool up,
               : (macd[p] >= sig[p] && macd[c] < sig[c]);
 }
 
-bool checkMACross(const std::vector<double>& prices, int fast, int slow, bool up) {
-    int N = static_cast<int>(prices.size());
-    if (N < slow + 1) return false;
-    std::vector<double> fma(N, 0), sma(N, 0);
-    int b = 0, n = 0;
-    if (TA_SMA(0, N-1, prices.data(), fast, &b, &n, fma.data()) != TA_SUCCESS || n < 2) return false;
-    if (TA_SMA(0, N-1, prices.data(), slow, &b, &n, sma.data()) != TA_SUCCESS || n < 2) return false;
-    return up ? (fma[n-2] <= sma[n-2] && fma[n-1] > sma[n-1])
-              : (fma[n-2] >= sma[n-2] && fma[n-1] < sma[n-1]);
+} // anonymous namespace
+
+SignalResult MomentumStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
+{
+    SignalResult sig;
+    sig.instrumentId = instrumentId;
+    bool golden = checkMACD(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
+    bool dead   = checkMACD(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
+    if (golden) { sig.valid = true; sig.isBuy = true;  sig.score = 0.80; }
+    if (dead)   { sig.valid = true; sig.isBuy = false; sig.score = 0.60; }
+    return sig;
 }
 
-bool checkMACDSignal(const std::vector<double>& prices, bool up,
-                     int fast, int slow, int sigPeriod) {
-    return checkMACD(prices, up, fast, slow, sigPeriod);
-}
+namespace {
 
 struct BBResult { bool valid = false; double upper = 0, middle = 0, lower = 0; };
 
@@ -70,70 +193,17 @@ double computeATR(const std::vector<double>& prices, int period) {
     if (N < period + 1) return 0.0;
     std::vector<double> tr(N-1);
     for (int i = 1; i < N; ++i) tr[i-1] = std::abs(prices[i] - prices[i-1]);
-    for (int i = period-1; i < N-1; ++i) {
-        double sum = 0;
-        for (int j = i-period+1; j <= i; ++j) sum += tr[j];
-    }
     double sum = 0;
     for (int j = N-1-period+1; j <= N-2; ++j) sum += tr[j];
     return sum / period;
 }
 
-// ── 各策略指标实现 ──
+} // anonymous namespace
 
-SignalResult trendFollowingEval(const std::vector<double>& closePrices,
-                                std::uint32_t instrumentId,
-                                const RuntimeStrategyContext&,
-                                const StrategyCommonConfig& cfg) {
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    int N = static_cast<int>(closePrices.size());
-    if (N < cfg.slowPeriod + 1) return sig;
-
-    std::vector<double> fma(N, 0), sma(N, 0);
-    int b = 0, n = 0;
-    if (TA_SMA(0, N-1, closePrices.data(), cfg.fastPeriod, &b, &n, fma.data()) != TA_SUCCESS || n < 2) return sig;
-    if (TA_SMA(0, N-1, closePrices.data(), cfg.slowPeriod, &b, &n, sma.data()) != TA_SUCCESS || n < 2) return sig;
-
-    int p = n-2, c = n-1;
-    bool golden = (fma[p] <= sma[p] && fma[c] > sma[c]);
-    bool dead   = (fma[p] >= sma[p] && fma[c] < sma[c]);
-
-    double strength = sma[c] > 0.0 ? (fma[c] - sma[c]) / sma[c] : 0.0;
-    if (golden) { sig.valid = true; sig.isBuy = true;  sig.score = 0.5 + std::min(0.45, std::abs(strength) * 10.0); }
-    if (dead)   { sig.valid = true; sig.isBuy = false; sig.score = 0.3 + std::min(0.35, std::abs(strength) * 10.0); }
-    return sig;
-}
-
-SignalResult meanReversionEval(const std::vector<double>& closePrices,
-                               std::uint32_t instrumentId,
-                               const RuntimeStrategyContext&,
-                               const StrategyCommonConfig& cfg) {
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    double rsi = computeRSI(closePrices, cfg.signalPeriod);
-    if (rsi < 30.0) { sig.valid = true; sig.isBuy = true;  sig.score = 0.70; }
-    if (rsi > 70.0) { sig.valid = true; sig.isBuy = false; sig.score = 0.65; }
-    return sig;
-}
-
-SignalResult momentumEval(const std::vector<double>& closePrices,
-                          std::uint32_t instrumentId,
-                          const RuntimeStrategyContext&,
-                          const StrategyCommonConfig& cfg) {
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    bool golden = checkMACD(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-    bool dead   = checkMACD(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-    if (golden) { sig.valid = true; sig.isBuy = true;  sig.score = 0.80; }
-    if (dead)   { sig.valid = true; sig.isBuy = false; sig.score = 0.60; }
-    return sig;
-}
-
-SignalResult arbitrageEval(const std::vector<double>& closePrices,
-                           std::uint32_t instrumentId,
-                           const RuntimeStrategyContext&,
-                           const StrategyCommonConfig& cfg) {
+SignalResult ArbitrageStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
+{
     SignalResult sig;
     sig.instrumentId = instrumentId;
     auto bb = computeBBands(closePrices, cfg.bbPeriod, cfg.bbStdDev);
@@ -145,10 +215,10 @@ SignalResult arbitrageEval(const std::vector<double>& closePrices,
     return sig;
 }
 
-SignalResult eventDrivenEval(const std::vector<double>& closePrices,
-                             std::uint32_t instrumentId,
-                             const RuntimeStrategyContext&,
-                             const StrategyCommonConfig&) {
+SignalResult EventDrivenStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig&)
+{
     SignalResult sig;
     sig.instrumentId = instrumentId;
     int N = static_cast<int>(closePrices.size());
@@ -175,10 +245,10 @@ SignalResult eventDrivenEval(const std::vector<double>& closePrices,
     return sig;
 }
 
-SignalResult highFrequencyEval(const std::vector<double>& closePrices,
-                               std::uint32_t instrumentId,
-                               const RuntimeStrategyContext&,
-                               const StrategyCommonConfig&) {
+SignalResult HighFrequencyStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig&)
+{
     SignalResult sig;
     sig.instrumentId = instrumentId;
     int N = static_cast<int>(closePrices.size());
@@ -198,10 +268,25 @@ SignalResult highFrequencyEval(const std::vector<double>& closePrices,
     return sig;
 }
 
-SignalResult customEval(const std::vector<double>& closePrices,
-                        std::uint32_t instrumentId,
-                        const RuntimeStrategyContext&,
-                        const StrategyCommonConfig& cfg) {
+namespace {
+
+bool checkMACross(const std::vector<double>& prices, int fast, int slow, bool up) {
+    int N = static_cast<int>(prices.size());
+    if (N < slow + 1) return false;
+    std::vector<double> fma(N, 0), sma(N, 0);
+    int b = 0, n = 0;
+    if (TA_SMA(0, N-1, prices.data(), fast, &b, &n, fma.data()) != TA_SUCCESS || n < 2) return false;
+    if (TA_SMA(0, N-1, prices.data(), slow, &b, &n, sma.data()) != TA_SUCCESS || n < 2) return false;
+    return up ? (fma[n-2] <= sma[n-2] && fma[n-1] > sma[n-1])
+              : (fma[n-2] >= sma[n-2] && fma[n-1] < sma[n-1]);
+}
+
+} // anonymous namespace
+
+SignalResult CustomStrategy::evaluateSymbol(
+    const std::vector<double>& closePrices, std::uint32_t instrumentId,
+    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
+{
     SignalResult sig;
     sig.instrumentId = instrumentId;
     int N = static_cast<int>(closePrices.size());
@@ -210,8 +295,8 @@ SignalResult customEval(const std::vector<double>& closePrices,
     auto trendUp   = checkMACross(closePrices, cfg.fastPeriod, cfg.slowPeriod, true);
     auto trendDown = checkMACross(closePrices, cfg.fastPeriod, cfg.slowPeriod, false);
     double rsi = computeRSI(closePrices, cfg.signalPeriod);
-    auto macdUp   = checkMACDSignal(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-    auto macdDown = checkMACDSignal(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
+    auto macdUp   = checkMACD(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
+    auto macdDown = checkMACD(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
 
     int buyVotes = (trendUp ? 1 : 0) + (rsi > 0 && rsi < 40 ? 1 : 0) + (macdUp ? 1 : 0);
     int sellVotes = (trendDown ? 1 : 0) + (rsi > 60 ? 1 : 0) + (macdDown ? 1 : 0);
@@ -221,31 +306,31 @@ SignalResult customEval(const std::vector<double>& closePrices,
     return sig;
 }
 
-} // anonymous namespace
-
-std::pair<NonFactorStrategy::EvaluateFn, int> NonFactorStrategy::makeIndicator(
+// ═════════════════════════════════════════════════════════════════════════
+// 工厂
+// ═════════════════════════════════════════════════════════════════════════
+std::unique_ptr<NonFactorStrategy> NonFactorStrategy::create(
+    StrategyInstanceId instanceId,
     ::domain::strategies::StrategyBehaviorKind kind,
     const ::domain::strategies::StrategyCommonConfig& cfg)
 {
-    constexpr int kSafetyMargin = 5;
     switch (kind) {
     case ::domain::strategies::StrategyBehaviorKind::TrendFollowing:
-        return {trendFollowingEval, cfg.slowPeriod + 1 + kSafetyMargin};
+        return std::make_unique<TrendFollowingStrategy>(instanceId, kind, cfg);
     case ::domain::strategies::StrategyBehaviorKind::MeanReversion:
-        return {meanReversionEval, cfg.signalPeriod + 1 + kSafetyMargin};
+        return std::make_unique<MeanReversionStrategy>(instanceId, kind, cfg);
     case ::domain::strategies::StrategyBehaviorKind::Momentum:
-        return {momentumEval, cfg.macdSlow + cfg.macdSignal + kSafetyMargin};
+        return std::make_unique<MomentumStrategy>(instanceId, kind, cfg);
     case ::domain::strategies::StrategyBehaviorKind::Arbitrage:
-        return {arbitrageEval, cfg.bbPeriod + 1 + kSafetyMargin};
+        return std::make_unique<ArbitrageStrategy>(instanceId, kind, cfg);
     case ::domain::strategies::StrategyBehaviorKind::EventDriven:
-        return {eventDrivenEval, 22 + kSafetyMargin};
+        return std::make_unique<EventDrivenStrategy>(instanceId, kind, cfg);
     case ::domain::strategies::StrategyBehaviorKind::HighFrequency:
-        return {highFrequencyEval, 12 + kSafetyMargin};
+        return std::make_unique<HighFrequencyStrategy>(instanceId, kind, cfg);
     case ::domain::strategies::StrategyBehaviorKind::Custom:
-        return {customEval,
-            std::max({26, cfg.slowPeriod + 1, cfg.macdSlow + cfg.macdSignal, cfg.signalPeriod + 1}) + kSafetyMargin};
+        return std::make_unique<CustomStrategy>(instanceId, kind, cfg);
     default:
-        return {trendFollowingEval, cfg.slowPeriod + 1 + kSafetyMargin};
+        return std::make_unique<TrendFollowingStrategy>(instanceId, kind, cfg);
     }
 }
 
