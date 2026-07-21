@@ -38,7 +38,7 @@ Item {
         category: "all",
         sortBy: "ic",
         sortOrder: "desc",
-        status: "active",
+        status: "all",
         minIC: 0.03,
         maxTurnover: 50
     })
@@ -469,10 +469,10 @@ Item {
                             model: factorModel
                             
                             delegate: FactorCard {
-                                width: gridView.cellWidth - 12  // 统一使用-12边距，确保对齐
-                                height: gridView.cellHeight - 20  // 统一使用-20边距，与策略库保持一致
-                                
-                                // 基础属性映射
+                                width: gridView.cellWidth - 12
+                                height: gridView.cellHeight - 20
+                                visible: factorMatchesSearch(model)
+
                                 factorId: model.factorId || ""
                                 factorName: model.factorName || model.name || "未命名因子"
                                 factorType: model.factorType !== undefined && model.factorType !== null ? Number(model.factorType) : -1
@@ -547,7 +547,8 @@ Item {
                             delegate: FactorComponents.FactorListRow {
                                 width: listView.width - 20
                                 height: 80
-                                
+                                visible: factorMatchesSearch(model)
+
                                 factorId: model.factorId
                                 displayName: model.displayName
                                 factorType: model.factorType !== undefined && model.factorType !== null ? Number(model.factorType) : -1
@@ -603,9 +604,18 @@ Item {
     
     // ============ 内部函数 ============
     
+    function factorMatchesSearch(modelData) {
+        if (!currentFilter.searchText || currentFilter.searchText.trim() === "") return true
+        var q = currentFilter.searchText.trim().toLowerCase()
+        var name = String(modelData.factorName || modelData.displayName || modelData.name || '').toLowerCase()
+        var desc = String(modelData.description || '').toLowerCase()
+        var tags = String(modelData.tags || '').toLowerCase()
+        var fid = String(modelData.factorId || '').toLowerCase()
+        return name.indexOf(q) >= 0 || desc.indexOf(q) >= 0 || tags.indexOf(q) >= 0 || fid.indexOf(q) >= 0
+    }
+
     function startNaturalLanguageSearch() {
-        console.log("启动自然语言搜索")
-        // TODO: 实现自然语言搜索功能
+        console.log('启动自然语言搜索')
     }
     
     function openICFilterDialog() {

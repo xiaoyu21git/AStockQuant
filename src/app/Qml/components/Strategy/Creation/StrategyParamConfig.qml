@@ -883,55 +883,89 @@ Rectangle {
 
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
                         Layout.minimumHeight: root.ruleComposerMinHeight
                         spacing: root.ruleComposerSpacing
 
-                        StrategyProfilePanel {
-                            Layout.preferredWidth: root.ruleComposerProfileWidth
-                            Layout.minimumWidth: root.ruleComposerProfileMinWidth
-                            Layout.maximumWidth: root.ruleComposerProfileMaxWidth
-                            Layout.fillHeight: true
-                            selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
-                            strategyProfile: root.strategyProfile
-                            onProfileEdited: function(profile) {
-                                root.strategyProfile = profile
-                                root.rebuildRuleComposerState(false)
-                                root.syncDecoratedParameters()
-                            }
-                        }
+                        // StrategyProfilePanel removed — 策略画像已删除
 
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             spacing: 12
 
-                            RuleComposerSummaryBar {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: implicitHeight
-                                stages: root.ruleComposerStages
-                                strategyProfile: root.strategyProfile
-                                validationSummary: root.ruleComposerValidation
-                            }
+                                Layout.fillHeight: true
+                                spacing: 4
 
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Layout.minimumHeight: root.ruleComposerMinHeight - 108
-                                Layout.preferredHeight: root.ruleComposerMinHeight - 108
-                                spacing: root.ruleComposerSpacing
-
-                                RuleStageNavigator {
-                                    Layout.preferredWidth: root.ruleComposerNavigatorWidth
-                                    Layout.minimumWidth: root.ruleComposerNavigatorMinWidth
-                                    Layout.maximumWidth: root.ruleComposerNavigatorMaxWidth
-                                    Layout.fillHeight: true
-                                    stages: root.ruleComposerStages
-                                    selectedStageId: root.selectedRuleComposerStageId
-                                    onStageSelected: function(stageId) {
-                                        root.selectedRuleComposerStageId = stageId
-                                        root.ensureSelectedRuleComposerGroup()
+                                // ── 标签切换栏 ──
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Repeater {
+                                        model: Array.isArray(root.ruleComposerStages) ? root.ruleComposerStages : []
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            readonly property bool isActive: root.selectedRuleComposerStageId === modelData.stageId
+                                            implicitWidth: tabRow.implicitWidth + 28; implicitHeight: 38; radius: 8
+                                            color: isActive ? "#1e3a5f" : "#111827"
+                                            border.width: 1; border.color: isActive ? (modelData.accentColor || "#2563eb") : "#1f2937"
+                                            RowLayout {
+                                                id: tabRow; anchors.centerIn: parent; spacing: 6
+                                                Rectangle { width: 8; height: 8; radius: 4; color: modelData.accentColor || "#475569" }
+                                                Text { text: modelData.title || modelData.stageId; font.pixelSize: 14; font.weight: isActive ? Font.DemiBold : Font.Normal; color: isActive ? "#dbeafe" : "#94a3b8" }
+                                                Text {
+                                                    visible: root.countStageRules(modelData) > 0
+                                                    text: root.countStageRules(modelData); font.pixelSize: 11; color: "#64748b"
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.selectRuleComposerStage(modelData.stageId)
+                                            }
+                                            // 删除按钮
+                                            Rectangle {
+                                                anchors.right: parent.right; anchors.top: parent.top
+                                                anchors.margins: 2
+                                                width: 16; height: 16; radius: 8
+                                                color: "#1f2937"
+                                                visible: isActive
+                                                Text { anchors.centerIn: parent; text: "×"; font.pixelSize: 11; color: "#f87171" }
+                                                MouseArea {
+                                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.removeRuleComposerStage(modelData.stageId)
+                                                }
+                                            }
+                                        }
                                     }
+
+                                    // 添加阶段
+                                    Rectangle {
+                                        implicitWidth: 38; implicitHeight: 38; radius: 8
+                                        color: "#111827"; border.width: 1; border.color: "#1f2937"
+                                        Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 18; color: "#60a5fa" }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: addStageMenu.open()
+                                        }
+                                        Menu {
+                                            id: addStageMenu; y: parent.height + 2
+                                            Instantiator {
+                                                model: root.availableRuleStages
+                                                MenuItem {
+                                                    text: modelData.title; height: 28
+                                                    onTriggered: root.addRuleComposerStage(modelData.stageId)
+                                                }
+                                                onObjectAdded: (idx, obj) => addStageMenu.insertItem(idx, obj)
+                                                onObjectRemoved: (idx, obj) => addStageMenu.removeItem(obj)
+                                            }
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
                                 }
 
+                                // ── 规则看板 ──
                                 RuleStageBoard {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
@@ -3307,6 +3341,52 @@ Rectangle {
         }
     }
 
+    function countStageRules(stageData) {
+        var n = 0
+        var gs = Array.isArray(stageData && stageData.groups) ? stageData.groups : []
+        for (var i = 0; i < gs.length; i++)
+            n += Array.isArray(gs[i].rules) ? gs[i].rules.length : 0
+        return n
+    }
+
+    function selectRuleComposerStage(stageId) {
+        root.selectedRuleComposerStageId = stageId
+        root.ensureSelectedRuleComposerGroup()
+    }
+
+    // ── 阶段增删 ──
+    readonly property var availableRuleStages: [
+        { stageId: "market", title: "市场", accentColor: "#f59e0b" },
+        { stageId: "eligibility", title: "入场过滤", accentColor: "#10b981" },
+        { stageId: "signal", title: "入场信号", accentColor: "#3b82f6" },
+        { stageId: "rebalance", title: "出场", accentColor: "#ef4444" },
+        { stageId: "portfolio", title: "组合", accentColor: "#8b5cf6" }
+    ]
+
+    function addRuleComposerStage(stageId) {
+        var nextStages = cloneRuleComposerStages()
+        var def = root.availableRuleStages.find(function(s) { return s.stageId === stageId })
+        if (!def) return
+        nextStages.push({
+            stageId: def.stageId, title: def.title, accentColor: def.accentColor,
+            groups: [{ groupId: def.stageId + "_core", title: "默认组", role: "must_pass", operator: "any", rules: [] }]
+        })
+        root.ruleComposerStages = nextStages
+        root.selectedRuleComposerStageId = def.stageId
+        root.ensureSelectedRuleComposerGroup()
+        syncDecoratedParameters()
+    }
+
+    function removeRuleComposerStage(stageId) {
+        var nextStages = cloneRuleComposerStages().filter(function(s) { return s.stageId !== stageId })
+        if (nextStages.length === 0) return
+        root.ruleComposerStages = nextStages
+        if (root.selectedRuleComposerStageId === stageId)
+            root.selectedRuleComposerStageId = nextStages[0].stageId
+        root.ensureSelectedRuleComposerGroup()
+        syncDecoratedParameters()
+    }
+
     function removeRuleComposerInstance(stageId, groupId, instanceId) {
         var nextStages = cloneRuleComposerStages()
         for (var stageIndex = 0; stageIndex < nextStages.length; ++stageIndex) {
@@ -3629,6 +3709,10 @@ Rectangle {
 
         root.strategyParameters = decorateParameters(mappedValues)
         root.parametersChanged(root.strategyParameters)
+        // 读取凯利仓位并更新单票上限滑块
+        var fk = Number(sourceParams.fullKelly || 0)
+        var hk = Number(sourceParams.halfKelly || 0)
+        if (hk > 0) root.updateMaxWeightByKelly(fk, hk)
         if (commonDynamicGenerator) {
             commonDynamicGenerator.setValues(mappedValues)
             root.commonParametersValid = commonDynamicGenerator.validateAll()
@@ -3664,6 +3748,20 @@ Rectangle {
         emitValidationState(currentParameterValidationErrors())
     }
     
+    // ── 凯利仓位更新(仅改默认值, 不改上下限) ──
+    function updateMaxWeightByKelly(fullKelly, halfKelly) {
+        var hk = Number(halfKelly) || 0
+        if (hk <= 0) return
+        hk = Math.max(0.0, Math.min(0.50, hk))
+        for (var i = 0; i < root.commonParameterConfigs.length; i++) {
+            if (root.commonParameterConfigs[i].id === "maxWeightPerStock") {
+                root.commonParameterConfigs[i].default = hk
+                if (commonDynamicGenerator) commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [], {})
+                break
+            }
+        }
+    }
+
     // 重置表单
     function reset() {
         if (commonDynamicGenerator) {

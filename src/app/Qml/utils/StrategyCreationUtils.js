@@ -583,6 +583,13 @@ function buildCompleteStrategyData(context) {
     var dateStr = currentDate.toISOString().split('T')[0];
     var selectedStrategyTypeIndex = normalizeStrategyTypeIndex(context.selectedStrategyTypeIndex);
     var strategyBehaviorKind = strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex);
+    // 有因子配置时强制使用MultiFactor(4) — 因子主导选股
+    var params = context.strategyParameters || ({})
+    var hasFactorOverlay = !!(params.factor_overlay && params.factor_overlay.enabled && Array.isArray(params.factor_overlay.allocations) && params.factor_overlay.allocations.length > 0)
+    var hasFactorIds = !!(params.factorIds && Array.isArray(params.factorIds) && params.factorIds.length > 0)
+    if (hasFactorOverlay || hasFactorIds) {
+        strategyBehaviorKind = StrategyBehaviorKind.MultiFactor  // 4
+    }
     var normalizedParameters = normalizeStrategyParameters(selectedStrategyTypeIndex, context.strategyParameters);
     
     var strategyData = {
@@ -762,10 +769,10 @@ function getPositionSizingDescription(method) {
             id: "maxWeightPerStock",
             type: "slider",
             label: "单票最大权重",
-            description: "每个标的最大仓位权重",
-            default: 0.1,
-            min: 0.01,
-            max: 1.0,
+            description: "单票仓位上限(50%), 回测后凯利公式自动更新默认值",
+            default: 0.05,
+            min: 0.0,
+            max: 0.50,
             step: 0.01,
             decimals: 2,
             unit: "",
@@ -778,7 +785,7 @@ function getPositionSizingDescription(method) {
             description: "每个标的最小仓位权重",
             default: 0.0,
             min: 0.0,
-            max: 0.5,
+            max: 0.10,
             step: 0.01,
             decimals: 2,
             unit: "",
@@ -2381,7 +2388,7 @@ function validateRuleComposerConfiguration(strategyProfile, stages) {
         var positiveSignalRules = countPositiveRules("signal", "signal_core") + countPositiveRules("eligibility", "eligibility_core");
         if (positiveSignalRules === 0) {
             pushIssue(
-                "error",
+                "warning",
                 "signal",
                 "signal_core",
                 "missing_positive_entry_rules",

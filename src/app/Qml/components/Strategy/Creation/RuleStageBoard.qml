@@ -19,16 +19,10 @@ Rectangle {
 
     readonly property bool showAllStages: width >= 900
 
-    function displayedStages() {
+    readonly property var displayedStages: {
         var list = Array.isArray(stages) ? stages : []
-        if (showAllStages) {
-            return list
-        }
-        for (var index = 0; index < list.length; ++index) {
-            if (list[index].stageId === selectedStageId) {
-                return [list[index]]
-            }
-        }
+        for (var i = 0; i < list.length; ++i)
+            if (list[i].stageId === selectedStageId) return [list[i]]
         return list.length > 0 ? [list[0]] : []
     }
 
@@ -72,7 +66,7 @@ Rectangle {
                 spacing: 10
 
                 Repeater {
-                    model: root.displayedStages()
+                    model: root.displayedStages
 
                     delegate: RuleStageCard {
                         Layout.fillWidth: true

@@ -984,11 +984,15 @@ Rectangle {
         var sharpe = Number(m.sharpeRatio || 0).toFixed(2)
         var dd = (Number(m.maxDrawdown || 0) * 100).toFixed(1)
         var win = (Number(m.winRate || 0) * 100).toFixed(1)
-        var msg = "年化 " + ann + "% | 夏普 " + sharpe + " | 回撤 " + dd + "% | 胜率 " + win + "%"
+        var fullK = Number(m.fullKelly || 0)
+        var halfK = Number(m.halfKelly || 0)
+        var msg = "年化 " + ann + "% | 夏普 " + sharpe + " | 回撤 " + dd + "% | 胜率 " + win + "% | 半凯 " + (halfK * 100).toFixed(1) + "%"
         console.log("策略回测完成: " + msg)
         showActionFeedback(msg, false)
         showPerformance = false
         showBacktestWorkbench = true
+        // 刷新策略列表, 使回测指标显示在策略卡片上
+        if (strategyService && strategyService.init) strategyService.init()
         backtestWorkbenchMode = "analysis"
         backtestWorkbenchLoadedOnce = true
         if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
