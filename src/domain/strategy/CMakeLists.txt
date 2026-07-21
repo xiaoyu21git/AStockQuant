@@ -14,6 +14,7 @@ target_sources(domain_strategy_runtime PRIVATE
     src/RiskEvaluator.cpp
     src/EventRiskSubscriber.cpp
     src/FactorSignalProcessor.cpp
+    src/NonFactorStrategy.cpp
     src/RiskManager.cpp
     src/RiskControl.cpp
     src/StrategyFactory.cpp

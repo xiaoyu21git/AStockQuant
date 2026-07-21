@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 
 namespace domain::strategy {
 
@@ -62,6 +63,7 @@ void FactorSignalProcessor::updateSnapshot(
 
 bool FactorSignalProcessor::passFilter(const std::string& symbol) const
 {
+    // 交集(AND): 所有因子全部通过才返回 true
     for (const auto& f : m_filters) {
         auto it = m_snapshot.find(f.factorId);
         if (it == m_snapshot.end() || !it->second.hasThreshold) continue;
@@ -72,6 +74,51 @@ bool FactorSignalProcessor::passFilter(const std::string& symbol) const
         if (vi->second < stats.filterThreshold) return false;
     }
     return true;
+}
+
+bool FactorSignalProcessor::passAnyFilter(const std::string& symbol) const
+{
+    // 并集(OR): 任一因子通过即返回 true; 无过滤器也视为通过
+    if (m_filters.empty()) return true;
+    bool anyPassed = false;
+    for (const auto& f : m_filters) {
+        auto it = m_snapshot.find(f.factorId);
+        if (it == m_snapshot.end() || !it->second.hasThreshold) {
+            anyPassed = true;  // 无此因子快照 → 等效通过
+            continue;
+        }
+        const auto& stats = it->second;
+        auto vi = stats.values.find(symbol);
+        if (vi == stats.values.end()) {
+            anyPassed = true;  // 无此标的因子数据 → 等效通过
+            continue;
+        }
+        if (vi->second >= stats.filterThreshold) return true;
+    }
+    return anyPassed;
+}
+
+double FactorSignalProcessor::compositeScore(const std::string& symbol) const
+{
+    double score = 0.0;
+    for (const auto& s : m_scalers) {
+        auto it = m_snapshot.find(s.factorId);
+        if (it == m_snapshot.end()) return 0.0;
+        const auto& stats = it->second;
+        auto vi = stats.values.find(symbol);
+        if (vi == stats.values.end()) return 0.0;
+        if (stats.stdev < 1e-12) continue;
+
+        // Z-score → clamp [-3, 3] → normalize [0, 1]
+        double z = (vi->second - stats.mean) / stats.stdev;
+        z = std::max(-3.0, std::min(3.0, z));
+        double normalized = (z + 3.0) / 6.0;
+        double infl = 1.0;
+        auto iit = m_factorInfluence.find(s.factorId);
+        if (iit != m_factorInfluence.end()) infl = iit->second;
+        score += normalized * infl;
+    }
+    return score;
 }
 
 double FactorSignalProcessor::scaleFactor(const std::string& symbol) const
@@ -93,6 +140,15 @@ double FactorSignalProcessor::scaleFactor(const std::string& symbol) const
         result *= std::max(0.1, weighted);                       // 不低于0.1
     }
     return result;
+}
+
+std::vector<std::string> FactorSignalProcessor::allSymbols() const
+{
+    std::unordered_set<std::string> symbols;
+    for (const auto& [fid, snap] : m_snapshot)
+        for (const auto& [sym, val] : snap.values)
+            symbols.insert(sym);
+    return {symbols.begin(), symbols.end()};
 }
 
 } // namespace domain::strategy

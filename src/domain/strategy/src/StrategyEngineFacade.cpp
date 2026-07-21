@@ -79,17 +79,6 @@ public:
     }
 };
 
-std::vector<std::string> parseFactorIds(const std::string& json) {
-    std::vector<std::string> ids;
-    if (json.empty()) return ids;
-    try {
-        auto root = foundation::json::JsonFacade::parse(json);
-        for (std::size_t i = 0; i < root.size(); ++i) {
-            ids.push_back(root.at(i).asString());
-        }
-    } catch(...) {}
-    return ids;
-}
 } // anonymous namespace
 
 std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId,
@@ -121,12 +110,14 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     params.behaviorKind   = meta.has("behaviorKind")
         ? static_cast<::domain::strategies::StrategyBehaviorKind>(meta.get("behaviorKind").asInt())
         : ::domain::strategies::StrategyBehaviorKind::Custom;
-    params.factorIds = parseFactorIds(meta.has("factorIds") ? meta.get("factorIds").toString() : "");
+    // ── 因子存在性: 唯一权威来源 = factor_overlay.enabled (DB字段) ──
+    bool factorOverlayEnabled = false;
+    int  factorTargetPositionCount = 10;
+    double factorMinCompositeScore = 0.0;
+    FactorCombineMode factorCombineMode = FactorCombineMode::RankOnly;
+    double factorStrategyBlendWeight = 0.5;  // 策略信号权重(剩余为因子权重)
 
     // 解析 parameters JSON
-    // ── 混合模式因子叠加: parameters.factor_overlay 为权威来源(含配置权重) ──
-    // (factor_id, weight_percent) 列表; enabled=false 或缺失时为空
-    std::vector<std::pair<std::string, double>> overlayFactors;
     // ── 规则模板: 策略勾选的 templateId 列表 ──
     std::vector<std::string> enabledRuleTemplates;
     std::string paramJson = row.getString("parameters");
@@ -154,21 +145,45 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         if (root.has("rebalanceFrequency"))
             params.rebalanceFrequency = static_cast<::domain::strategies::RebalanceFrequency>(root.get("rebalanceFrequency").asInt());
 
+        // ── 因子覆盖层: factor_overlay.enabled 是因子存在性的唯一权威来源 ──
         if (root.has("factor_overlay")) {
             auto overlay = root.get("factor_overlay");
-            if (overlay.has("enabled") && overlay.get("enabled").asBool()
-                && overlay.has("allocations")) {
-                auto allocations = overlay.get("allocations");
-                for (std::size_t i = 0; i < allocations.size(); ++i) {
-                    auto allocation = allocations.at(i);
-                    std::string fid = allocation.has("factor_id")
-                        ? allocation.get("factor_id").asString() : "";
-                    double weightPercent = allocation.has("weight_percent")
-                        ? allocation.get("weight_percent").asDouble() : 0.0;
-                    if (!fid.empty()) overlayFactors.push_back({fid, weightPercent});
+            factorOverlayEnabled = overlay.has("enabled") && overlay.get("enabled").asBool();
+            if (factorOverlayEnabled) {
+                factorTargetPositionCount = overlay.has("targetPositionCount")
+                    ? overlay.get("targetPositionCount").asInt() : 10;
+                factorMinCompositeScore = overlay.has("minimumCompositeScore")
+                    ? overlay.get("minimumCompositeScore").asDouble() : 0.0;
+                if (overlay.has("combineMode")) {
+                    std::string cm = overlay.get("combineMode").asString();
+                    if (cm == "intersection") factorCombineMode = FactorCombineMode::Intersection;
+                    else if (cm == "union") factorCombineMode = FactorCombineMode::Union;
+                    // else 保持默认 RankOnly
+                }
+                factorStrategyBlendWeight = overlay.has("strategyBlendWeight")
+                    ? overlay.get("strategyBlendWeight").asDouble() : 0.5;
+                // selectionScope 解析供将来扩展(universe 全市场扫描)
+                if (overlay.has("allocations")) {
+                    auto allocations = overlay.get("allocations");
+                    for (std::size_t i = 0; i < allocations.size(); ++i) {
+                        auto allocation = allocations.at(i);
+                        std::string fid = allocation.has("factor_id")
+                            ? allocation.get("factor_id").asString() : "";
+                        double weightPercent = allocation.has("weight_percent")
+                            ? allocation.get("weight_percent").asDouble() : 0.0;
+                        if (!fid.empty() && weightPercent > 0.0)
+                            params.factorWeights.push_back({fid, weightPercent});
+                    }
                 }
             }
         }
+        // 从 factorWeights 派生 factorIds
+        params.factorIds.clear();
+        for (const auto& fw : params.factorWeights)
+            params.factorIds.push_back(fw.factorId);
+        INTERNAL_INFO_STREAM << "[fromDb] factorOverlayEnabled=" << factorOverlayEnabled
+                             << " 因子数=" << params.factorWeights.size()
+                             << " factorIds=" << params.factorIds.size();
 
         // ── 规则模板勾选: rule_composer_state.stages[].groups[].rules[].templateId ──
         if (root.has("rule_composer_state")) {
@@ -195,13 +210,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         }
     }
 
-    // ── 根据策略类型判断是否需要因子 ──
-    const bool isFactorType = !params.factorIds.empty()
-        || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
-        || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MachineLearning;
-
-    if (isFactorType && !factorSvc) {
-        INTERNAL_WARN_STREAM << "[fromDb] ABORT: factor strategy but factorSvc is null";
+    // ── factorOverlayEnabled 是因子存在性的唯一权威来源 ──
+    // 所有策略类型均支持因子; MultiFactor/MachineLearning 仅决定策略子类, 不参与因子存在性判断
+    if (factorOverlayEnabled && !factorSvc) {
+        INTERNAL_WARN_STREAM << "[fromDb] ABORT: factorOverlay enabled but factorSvc is null";
         return nullptr;
     }
 
@@ -209,13 +221,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     if (factorSvc) {
         auto* rfsPtr = dynamic_cast<RuntimeFactorSvc*>(factorSvc.get());
         if (rfsPtr) {
-            // 因子策略的 factorIds ∪ 混合模式 overlay 因子, 供因子服务计算
-            std::vector<std::string> allFactorIds = params.factorIds;
-            for (const auto& [fid, weight] : overlayFactors) {
-                if (std::find(allFactorIds.begin(), allFactorIds.end(), fid) == allFactorIds.end())
-                    allFactorIds.push_back(fid);
-            }
-            if (!allFactorIds.empty()) rfsPtr->setFactorIds(allFactorIds);
+            if (!params.factorIds.empty()) rfsPtr->setFactorIds(params.factorIds);
         }
         engineBuilder.withFactorService(std::move(factorSvc));
     }
@@ -247,23 +253,41 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
 
-    if (isFactorType) {//策略中因子的开关。true 表示策略中使用了因子，false 表示策略中不使用因子
+    const bool isFactorType = factorOverlayEnabled
+        || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
+        || params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::MachineLearning;
+
+    if (isFactorType) {
         // 市值加权需要 market_cap 字段, prepareMarketData 查询时追加
         engine->m_needsMarketCapField =
             (params.weightScheme == ::domain::strategies::WeightScheme::MARKET_CAP);
 
-        // ── 混合模式: 因子辅助策略(过滤+缩放) ──
-        // factorIds 为空时因子层零开销跳过; 非空时初始化过滤/缩放配置
-        if (!params.factorIds.empty()) {
+        // ── 混合模式: 因子辅助策略(过滤+缩放), 影响力按配置权重归一化 ──
+        if (factorOverlayEnabled) {
+            double totalWeight = 0.0;
+            for (const auto& fw : params.factorWeights) totalWeight += fw.weight;
             std::vector<FactorFilterConfig> filterCfgs;
             std::vector<FactorScaleConfig> scaleCfgs;
-            for (const auto& fid : params.factorIds) {
-                // 默认: 所有因子同时做过滤(分位数0.1)和缩放(影响力1.0)
-                filterCfgs.push_back({fid, 0.1});
-                scaleCfgs.push_back({fid, 1.0});
+            std::unordered_map<std::string, double> factorInf;
+            for (const auto& fw : params.factorWeights) {
+                filterCfgs.push_back({fw.factorId, 0.1});
+                scaleCfgs.push_back({fw.factorId, 1.0});  // scaleFactor 用 1.0, 不参与 compositeScore
+                double inf = totalWeight > 0.0 ? fw.weight / totalWeight : 1.0;
+                factorInf[fw.factorId] = inf;
             }
             engine->m_factorSignalProcessor.setFilters(filterCfgs);
             engine->m_factorSignalProcessor.setScalers(scaleCfgs);
+            engine->m_factorSignalProcessor.setFactorInfluence(factorInf);
+            engine->m_factorSignalProcessor.setTargetPositionCount(factorTargetPositionCount);
+            engine->m_factorSignalProcessor.setMinimumCompositeScore(factorMinCompositeScore);
+            engine->m_factorSignalProcessor.setCombineMode(factorCombineMode);
+            engine->m_factorSignalProcessor.setStrategyBlendWeight(factorStrategyBlendWeight);
+            INTERNAL_INFO_STREAM << "[fromDb] 因子模式权重: 策略=" << factorStrategyBlendWeight
+                                 << " 因子=" << (1.0 - factorStrategyBlendWeight);
+            for (const auto& fw : params.factorWeights)
+                INTERNAL_INFO_STREAM << "[fromDb]   因子=" << fw.factorId
+                                     << " 配置权重=" << fw.weight
+                                     << " 归一化影响=" << factorInf[fw.factorId];
         }
 
         ::domain::strategies::StrategyCommonConfig commonCfg;
@@ -284,10 +308,12 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         ::domain::strategies::MultiFactorSelectionStrategySpec spec;
         spec.topN           = params.topN > 0 ? params.topN : params.maxPositions;
         spec.industryNeutral = false;
-        if (!params.factorIds.empty()) {
-            double equalWeight = 1.0 / static_cast<double>(params.factorIds.size());
-            for (const auto& fid : params.factorIds) {
-                spec.factorWeights.push_back({fid, equalWeight});
+        if (factorOverlayEnabled) {
+            double totalWeight = 0.0;
+            for (const auto& fw : params.factorWeights) totalWeight += fw.weight;
+            for (const auto& fw : params.factorWeights) {
+                spec.factorWeights.push_back({fw.factorId,
+                    totalWeight > 0.0 ? fw.weight / totalWeight : 0.0});
             }
         }
 
@@ -302,19 +328,28 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     } else {
         // ── 非因子策略 — 按 behaviorKind 创建对应子类 ──
         // 混合模式: factor_overlay 因子对策略信号做过滤+缩放, 影响力=配置权重占比
-        if (!overlayFactors.empty()) {
-            constexpr double kDefaultFilterPercentile = 0.1;  // 剔除因子值后10%的标的
+        if (factorOverlayEnabled) {
+            constexpr double kDefaultFilterPercentile = 0.1;
             double totalWeight = 0.0;
-            for (const auto& [fid, weight] : overlayFactors) totalWeight += weight;
+            for (const auto& fw : params.factorWeights) totalWeight += fw.weight;
             std::vector<FactorFilterConfig> filterCfgs;
             std::vector<FactorScaleConfig> scaleCfgs;
-            for (const auto& [fid, weight] : overlayFactors) {
-                filterCfgs.push_back({fid, kDefaultFilterPercentile});
-                scaleCfgs.push_back({fid, totalWeight > 0.0 ? weight / totalWeight : 1.0});
+            for (const auto& fw : params.factorWeights) {
+                filterCfgs.push_back({fw.factorId, kDefaultFilterPercentile});
+                scaleCfgs.push_back({fw.factorId, totalWeight > 0.0 ? fw.weight / totalWeight : 1.0});
             }
             engine->m_factorSignalProcessor.setFilters(filterCfgs);
             engine->m_factorSignalProcessor.setScalers(scaleCfgs);
-            INTERNAL_INFO_STREAM << "[fromDb] 混合模式启用: overlay 因子=" << overlayFactors.size();
+            engine->m_factorSignalProcessor.setTargetPositionCount(factorTargetPositionCount);
+            engine->m_factorSignalProcessor.setMinimumCompositeScore(factorMinCompositeScore);
+            engine->m_factorSignalProcessor.setCombineMode(factorCombineMode);
+            engine->m_factorSignalProcessor.setStrategyBlendWeight(factorStrategyBlendWeight);
+            INTERNAL_INFO_STREAM << "[fromDb] 混合模式权重: 策略=" << factorStrategyBlendWeight
+                                 << " 因子=" << (1.0 - factorStrategyBlendWeight);
+            for (const auto& fw : params.factorWeights)
+                INTERNAL_INFO_STREAM << "[fromDb]   因子=" << fw.factorId
+                                     << " 配置权重=" << fw.weight
+                                     << " 归一化影响=" << (totalWeight > 0.0 ? fw.weight / totalWeight : 1.0);
         }
 
         ::domain::strategies::StrategyCommonConfig commonCfg;
@@ -334,39 +369,13 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         commonCfg.bbPeriod     = params.bbPeriod;
         commonCfg.bbStdDev     = params.bbStdDev;
 
-        std::unique_ptr<NonFactorStrategy> runtimeStrategy;
-        switch (params.behaviorKind) {
-        case ::domain::strategies::StrategyBehaviorKind::TrendFollowing:
-            runtimeStrategy = std::make_unique<TrendFollowingStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        case ::domain::strategies::StrategyBehaviorKind::MeanReversion:
-            runtimeStrategy = std::make_unique<MeanReversionStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        case ::domain::strategies::StrategyBehaviorKind::Momentum:
-            runtimeStrategy = std::make_unique<MomentumStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        case ::domain::strategies::StrategyBehaviorKind::Arbitrage:
-            runtimeStrategy = std::make_unique<ArbitrageStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        case ::domain::strategies::StrategyBehaviorKind::EventDriven:
-            runtimeStrategy = std::make_unique<EventDrivenStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        case ::domain::strategies::StrategyBehaviorKind::HighFrequency:
-            runtimeStrategy = std::make_unique<HighFrequencyStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        case ::domain::strategies::StrategyBehaviorKind::Custom:
-            runtimeStrategy = std::make_unique<CustomStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        default:
-            runtimeStrategy = std::make_unique<NonFactorStrategy>(
-                kDefaultInstanceId, params.behaviorKind, commonCfg); break;
-        }
+        auto [evalFn, lookback] = NonFactorStrategy::makeIndicator(params.behaviorKind, commonCfg);
+        auto runtimeStrategy = std::make_unique<NonFactorStrategy>(
+            kDefaultInstanceId, params.behaviorKind, commonCfg,
+            std::move(evalFn), lookback);
 
         if (!engine->registerStrategy(std::move(runtimeStrategy), ctx).isOk())
             return nullptr;
-
-        INTERNAL_DEBUG_STREAM << "[fromDb] registered non-factor strategy, kind="
-                              << static_cast<int>(params.behaviorKind);
     }
 
     // 将策略配置的风控参数同步到引擎 — 只启用止盈/止损/回撤
@@ -384,8 +393,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     // 日频/盘中分类: 仅 HighFrequency 走 drainQueue 持续评估,
     // 其余全部日频 → 盘中只巡检, 盘后触发一次 evaluateEndOfDay
-    engine->m_isDailyFrequency = (params.behaviorKind
-        != ::domain::strategies::StrategyBehaviorKind::HighFrequency);
+    engine->m_isDailyFrequency = true;  // 全策略日频, 频率由 rebalanceFrequency 决定
 
     engine->m_rebalanceInterval =
         ::domain::strategies::rebalanceFrequencyStepInterval(params.rebalanceFrequency);
@@ -590,24 +598,98 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
 {
     try {
         auto orders = collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
-        // 混合模式: 因子辅助(过滤+缩放) — 非因子策略 + factor_overlay 时启用
-        if (m_factorSignalProcessor.enabled() && orders.has_value()) {
-            for (auto it = orders->begin(); it != orders->end(); ) {
-                const std::string& sym = it->symbol();
-                if (!sym.empty() && !m_factorSignalProcessor.passFilter(sym)) {
-                    it = orders->erase(it); continue;
+        // ── 因子主导选股: 因子扫全市场 → 策略参与打分 → 融合排名 → 选 top N ──
+        if (m_factorSignalProcessor.enabled()) {
+            // 1. 构建策略意见映射: symbol → strategySignalScore
+            std::unordered_map<std::string, double> strategyOpinion;
+            std::unordered_map<std::string, OrderRequest> strategyOrderMap;
+            if (orders.has_value()) {
+                for (auto& o : *orders) {
+                    double ss = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
+                    strategyOpinion[o.symbol()] = ss;
+                    strategyOrderMap[o.symbol()] = std::move(o);
                 }
-                if (!sym.empty()) {
-                    double scale = m_factorSignalProcessor.scaleFactor(sym);
-                    if (scale != 1.0) {
-                        double orig = it->extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
-                        it->setExtension(domain::trading::ExtKey::kSignalScore, orig * scale);
-                    }
-                }
-                ++it;
             }
+            // 2. 因子扫全市场: compositeScore + combineMode 过滤
+            const auto allSyms = m_factorSignalProcessor.allSymbols();
+            const auto mode = m_factorSignalProcessor.combineMode();
+            struct Candidate { std::string sym; double factorScore; };
+            std::vector<Candidate> pool;
+            pool.reserve(allSyms.size());
+            double maxSS = 0.0, minSS = 1e12;
+            for (const auto& sym : allSyms) {
+                if (mode == FactorCombineMode::Intersection && !m_factorSignalProcessor.passFilter(sym))
+                    continue;
+                if (mode == FactorCombineMode::Union && !m_factorSignalProcessor.passAnyFilter(sym))
+                    continue;
+                double cs = m_factorSignalProcessor.compositeScore(sym);
+                if (cs < m_factorSignalProcessor.minimumCompositeScore()) continue;
+                double ss = 0.5;  // 无策略意见默认中性
+                auto it = strategyOpinion.find(sym);
+                if (it != strategyOpinion.end()) ss = it->second;
+                if (ss > maxSS) maxSS = ss;
+                if (ss < minSS) minSS = ss;
+                pool.push_back({sym, cs});
+            }
+            if (pool.empty()) return std::nullopt;
+            // 3. 因子分排名 → 取宽口候选池 (targetPositionCount × 3)
+            std::sort(pool.begin(), pool.end(),
+                [](const Candidate& a, const Candidate& b) { return a.factorScore > b.factorScore; });
+            const int topN = m_factorSignalProcessor.targetPositionCount();
+            const int poolSize = (std::min)(static_cast<int>(pool.size()), topN * 3);
+            // 4. 策略分归一化 + 加权融合
+            const double stratW = m_factorSignalProcessor.strategyBlendWeight();
+            const double factorW = 1.0 - stratW;
+            const double ssRange = (maxSS > minSS) ? (maxSS - minSS) : 1.0;
+            std::vector<std::pair<std::string, double>> blended;  // (symbol, finalScore)
+            blended.reserve(poolSize);
+            for (int i = 0; i < poolSize; ++i) {
+                double ss = 0.5;
+                auto it = strategyOpinion.find(pool[i].sym);
+                if (it != strategyOpinion.end()) ss = it->second;
+                double normSS = (ss - minSS) / ssRange;
+                double finalScore = normSS * stratW + pool[i].factorScore * factorW;
+                blended.push_back({pool[i].sym, finalScore});
+            }
+            // 5. 融合分排名 → 选最终 top N
+            std::sort(blended.begin(), blended.end(),
+                [](const auto& a, const auto& b) { return a.second > b.second; });
+            if (static_cast<int>(blended.size()) > topN)
+                blended.resize(topN);
+            // 6. 生成订单: 复用策略已有订单, 否则新建 Buy 订单
+            std::vector<OrderRequest> result;
+            result.reserve(blended.size());
+            for (const auto& [sym, finalScore] : blended) {
+                OrderRequest o;
+                auto mit = strategyOrderMap.find(sym);
+                if (mit != strategyOrderMap.end()) {
+                    o = std::move(mit->second);
+                } else {
+                    o.setSymbol(sym);
+                    o.setSide(OrderSide::Buy);
+                }
+                o.setExtension(domain::trading::ExtKey::kSignalScore, finalScore);
+                result.push_back(std::move(o));
+            }
+            // 打印 top3 融合明细
+            if (!result.empty()) {
+                INTERNAL_INFO_STREAM << "[step] 策略权重=" << m_factorSignalProcessor.strategyBlendWeight()
+                                      << " 因子权重=" << (1.0 - m_factorSignalProcessor.strategyBlendWeight());
+                for (int i = 0; i < (std::min)(3, static_cast<int>(result.size())); ++i) {
+                    double ss = 0.5;
+                    auto it = strategyOpinion.find(result[i].symbol());
+                    if (it != strategyOpinion.end()) ss = it->second;
+                    double cs = m_factorSignalProcessor.compositeScore(result[i].symbol());
+                    double final = result[i].extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+                    INTERNAL_INFO_STREAM << "[step]   #" << (i+1) << " " << result[i].symbol()
+                                          << " 策略分=" << ss
+                                          << " 因子分=" << cs
+                                          << " 融合分=" << final;
+                }
+            }
+            orders = std::move(result);
         }
-        // ── 规则闸门: 分钟频信号审核(因子过滤后) ──
+        // ── 规则闸门: 分钟频信号审核(因子选股后) ──
         if (m_ruleGate.enabled() && orders.has_value() && liveMarketView()) {
             const auto* view = liveMarketView();
             const std::int64_t today = domain::market::MarketDataService::instance()
@@ -1816,6 +1898,57 @@ StrategyBacktestResult StrategyEngine::backtest(
             if (r == 0 || r % 100 == 0) {
                 INTERNAL_INFO_STREAM << "[backtest] day " << r << " orders=" << orderList.size();
             }
+            // ── 因子主导选股: 当天买入单预排名, 只保留 top N ──
+            if (m_factorSignalProcessor.enabled()) {
+                const auto mode = m_factorSignalProcessor.combineMode();
+                const int topN = m_factorSignalProcessor.targetPositionCount();
+                const double stratW = m_factorSignalProcessor.strategyBlendWeight();
+                const double factorW = 1.0 - stratW;
+                // 收集当天所有买入单, 计算融合分
+                std::vector<std::pair<size_t, double>> buyIdx;  // (orderList索引, 融合分)
+                double maxSS = 0.0, minSS = 1e12;
+                for (size_t oi = 0; oi < orderList.size(); ++oi) {
+                    auto& o = orderList[oi];
+                    if (o.side() != OrderSide::Buy) continue;
+                    const std::string& sym = o.symbol();
+                    if (mode == FactorCombineMode::Intersection && !m_factorSignalProcessor.passFilter(sym))
+                        continue;
+                    if (mode == FactorCombineMode::Union && !m_factorSignalProcessor.passAnyFilter(sym))
+                        continue;
+                    double cs = m_factorSignalProcessor.compositeScore(sym);
+                    if (cs < m_factorSignalProcessor.minimumCompositeScore()) continue;
+                    double ss = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
+                    if (ss > maxSS) maxSS = ss;
+                    if (ss < minSS) minSS = ss;
+                    buyIdx.push_back({oi, cs});
+                }
+                // 归一化 + 融合
+                const double ssRange = (maxSS > minSS) ? (maxSS - minSS) : 1.0;
+                for (auto& [oi, cs] : buyIdx) {
+                    double ss = orderList[oi].extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
+                    double normSS = (ss - minSS) / ssRange;
+                    cs = normSS * stratW + cs * factorW;
+                }
+                // 按融合分降序, 取 top N
+                std::sort(buyIdx.begin(), buyIdx.end(),
+                    [](const auto& a, const auto& b) { return a.second > b.second; });
+                if (static_cast<int>(buyIdx.size()) > topN)
+                    buyIdx.resize(topN);
+                // 构建入选标记
+                std::vector<bool> keepBuy(orderList.size(), false);
+                for (const auto& [oi, score] : buyIdx) {
+                    keepBuy[oi] = true;
+                    orderList[oi].setExtension(domain::trading::ExtKey::kSignalScore, score);
+                }
+                // 剔除未入选的买入单
+                std::vector<OrderRequest> filtered;
+                filtered.reserve(orderList.size());
+                for (size_t oi = 0; oi < orderList.size(); ++oi) {
+                    if (orderList[oi].side() == OrderSide::Buy && !keepBuy[oi]) continue;
+                    filtered.push_back(std::move(orderList[oi]));
+                }
+                orderList = std::move(filtered);
+            }
             // 当日真实成交统计 (换算后的最终下单量, 采样日输出)
             int dayBuys = 0, daySells = 0, dayCashShort = 0, dayBudgetSmall = 0;
             double dayBuyAmount = 0.0;
@@ -1827,22 +1960,6 @@ StrategyBacktestResult StrategyEngine::backtest(
                 const double closePrice = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<std::size_t>(col)]);
                 if (closePrice <= 0.0) continue;  // 当日停牌无价, 无法成交
-
-                // ── 混合模式: 因子过滤 + 信号缩放 (仅买入单, 卖出不拦截) ──
-                if (m_factorSignalProcessor.enabled() && order.side() == OrderSide::Buy) {
-                    if (!m_factorSignalProcessor.passFilter(order.symbol())) continue;
-                    const double factorScale = m_factorSignalProcessor.scaleFactor(order.symbol());
-                    if (factorScale != 1.0) {
-                        const double scaledScore = order.extensionAs<double>(
-                            domain::trading::ExtKey::kSignalScore, 0.5) * factorScale;
-                        order.setExtension(domain::trading::ExtKey::kSignalScore, scaledScore);
-                        // 因子增强/减弱直接作用于目标权重(仓位), 上限 1.0 防超配
-                        const double scaledWeight = (std::min)(1.0,
-                            order.extensionAs<double>(
-                                domain::trading::ExtKey::kTargetWeight, 0.0) * factorScale);
-                        order.setExtension(domain::trading::ExtKey::kTargetWeight, scaledWeight);
-                    }
-                }
 
                 // ── 规则闸门: 买入候选审核 ──
                 if (m_ruleGate.enabled() && order.side() == OrderSide::Buy) {
@@ -2273,6 +2390,27 @@ StrategyBacktestResult StrategyEngine::backtest(
                          << "  总亏损: " << result.tradeStats.totalLoss.value;
     INTERNAL_INFO_STREAM << "[交易统计] 最大单笔盈利: " << result.tradeStats.largestWin.value
                          << "  最大单笔亏损: " << result.tradeStats.largestLoss.value;
+    // ── 凯利公式: f* = p - (1-p)/b, b = avgWin/avgLoss ──
+    if (result.tradeStats.winningTrades > 0 && result.tradeStats.losingTrades > 0
+        && result.tradeStats.totalLoss.value > 0.0) {
+        double winRate = static_cast<double>(result.tradeStats.winningTrades)
+            / static_cast<double>(result.tradeStats.totalTrades);
+        double avgWin  = result.tradeStats.totalProfit.value
+            / static_cast<double>(result.tradeStats.winningTrades);
+        double avgLoss = result.tradeStats.totalLoss.value
+            / static_cast<double>(result.tradeStats.losingTrades);
+        double odds = avgWin / avgLoss;
+        double fullKelly = winRate - (1.0 - winRate) / odds;
+        double halfKelly = fullKelly * 0.5;
+        INTERNAL_INFO_STREAM << "[仓位建议] 胜率=" << (winRate * 100.0)
+                             << "% 均盈=" << avgWin
+                             << " 均亏=" << avgLoss
+                             << " 赔率=" << odds;
+        INTERNAL_INFO_STREAM << "[仓位建议] 全凯=" << (fullKelly * 100.0)
+                             << "% 半凯(建议)=" << (halfKelly * 100.0) << "%";
+        result.fullKelly = fullKelly;
+        result.halfKelly = halfKelly;
+    }
     INTERNAL_INFO_STREAM << "[规则闸门] 冻结天数: " << m_ruleGate.stats().frozenDays
                          << "  信号拒绝: " << m_ruleGate.stats().signalsBlocked
                          << "  规则出场: " << m_ruleGate.stats().positionExits;
