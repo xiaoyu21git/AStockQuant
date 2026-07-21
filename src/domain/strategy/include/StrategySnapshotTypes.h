@@ -473,7 +473,7 @@ struct UniverseSpec final {
 
 struct FactorOverlaySpec final {
     bool enabled{false};
-    int targetPositionCount{10};
+    int targetPositionCount{50};
     double minimumCompositeScore{0.0};
     std::vector<FactorOverlayAllocation> allocations;
     std::vector<FactorId> selectedFactors;
@@ -601,6 +601,16 @@ struct StrategyBacktestResult final {
     std::string errorMessage;
     int riskRejectedCount{0};
     std::unordered_map<int, int> riskRejectionStats;  // RiskRejectCode → count
+    double fullKelly{0.0};
+    double halfKelly{0.0};
+    // 诊断(持久化用)
+    int stopLossFills{0};
+    int ruleExitFills{0};
+    int normalSellFills{0};
+    double avgHoldingDays{0.0};
+    double avgPositions{0.0};
+    double avgPoolSize{0.0};
+    double rankIC{0.0};
 };
 
 } // namespace domain::strategy

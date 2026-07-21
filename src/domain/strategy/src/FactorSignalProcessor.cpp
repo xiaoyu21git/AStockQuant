@@ -121,25 +121,18 @@ double FactorSignalProcessor::compositeScore(const std::string& symbol) const
     return score;
 }
 
-double FactorSignalProcessor::scaleFactor(const std::string& symbol) const
+std::vector<std::string> FactorSignalProcessor::rankedSymbols(const std::string& factorId) const
 {
-    double result = 1.0;
-    for (const auto& s : m_scalers) {
-        auto it = m_snapshot.find(s.factorId);
-        if (it == m_snapshot.end()) continue;
-        const auto& stats = it->second;
-        auto vi = stats.values.find(symbol);
-        if (vi == stats.values.end()) continue;
-        if (stats.stdev < 1e-12) continue;
-
-        // Z-score → clamp to [-3,3] → map to [0.5, 1.5]
-        double z = (vi->second - stats.mean) / stats.stdev;
-        z = std::max(-3.0, std::min(3.0, z));
-        double mapped = 0.5 + (z + 3.0) / 6.0 * (1.5 - 0.5); // [-3,3]→[0.5,1.5]
-        double weighted = 1.0 + (mapped - 1.0) * s.influence;   // 影响力系数
-        result *= std::max(0.1, weighted);                       // 不低于0.1
-    }
-    return result;
+    auto it = m_snapshot.find(factorId);
+    if (it == m_snapshot.end()) return {};
+    const auto& values = it->second.values;
+    std::vector<std::pair<std::string, double>> ranked(values.begin(), values.end());
+    std::sort(ranked.begin(), ranked.end(),
+        [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::vector<std::string> symbols;
+    symbols.reserve(ranked.size());
+    for (const auto& [sym, _] : ranked) symbols.push_back(sym);
+    return symbols;
 }
 
 std::vector<std::string> FactorSignalProcessor::allSymbols() const

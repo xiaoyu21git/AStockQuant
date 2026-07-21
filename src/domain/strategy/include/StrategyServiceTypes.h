@@ -9,6 +9,7 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace domain::strategy {
@@ -133,6 +134,7 @@ private:
     const void* m_historicalView{nullptr};
     int m_currentEvaluationRow{-1};  // -1 = 实盘/未设置, 使用最后一行
     std::unordered_map<std::string, double> m_currentWeights;  // symbol→当前持仓权重
+    std::unordered_set<std::string> m_candidatePool;  // 因子候选池(空=扫全市场)
 
 public:
     RuntimeStrategyContext() = default;
@@ -164,6 +166,11 @@ public:
 
     void setCurrentWeights(std::unordered_map<std::string, double> w) { m_currentWeights = std::move(w); }
     [[nodiscard]] const std::unordered_map<std::string, double>& currentWeights() const noexcept { return m_currentWeights; }
+
+    /// @brief 因子候选池: 策略只评估池内标的; 空池 = 扫全市场
+    void setCandidatePool(std::unordered_set<std::string> pool) { m_candidatePool = std::move(pool); }
+    [[nodiscard]] const std::unordered_set<std::string>& candidatePool() const noexcept { return m_candidatePool; }
+    [[nodiscard]] bool hasCandidatePool() const noexcept { return !m_candidatePool.empty(); }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
     {

@@ -92,7 +92,7 @@ void RuntimeFactorSvc::setFactorIds(const std::vector<std::string>& factorIds) {
 }
 
 const std::map<std::string, double>* RuntimeFactorSvc::backtestValuesBySymbol(
-    const std::string& instanceId, std::int32_t date)
+    const std::string& instanceId, std::int32_t date) const
 {
     if (!m_dataSvc || !m_engine) return nullptr;
     // 与 getValues 回测分支共享同一份缓存: 首次访问全量计算

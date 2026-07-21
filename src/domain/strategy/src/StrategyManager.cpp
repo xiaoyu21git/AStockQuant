@@ -23,6 +23,12 @@ StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
 
     const std::lock_guard<std::mutex> lock(m_mutex);
     auto* ptr = engine.get();
+    // 移除旧引擎（参数可能已变更），用新引擎替换
+    auto old = m_engines.find(strategyId);
+    if (old != m_engines.end() && old->second) {
+        old->second->stopLiveLoop();
+        m_engines.erase(old);
+    }
     m_engines[strategyId] = std::move(engine);
     INTERNAL_INFO_STREAM << "[SM] createEngine: stored, count=" << m_engines.size();
     return ptr;

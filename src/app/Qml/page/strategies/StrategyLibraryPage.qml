@@ -1117,7 +1117,7 @@ Rectangle {
             id: scrollView
             visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
@@ -1711,7 +1711,7 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: strategyLibraryPage.showBacktestWorkbench
             visible: strategyLibraryPage.showBacktestWorkbench
 
             Loader {
@@ -1803,6 +1803,26 @@ Rectangle {
                     wrapMode: Text.WordWrap
                     font.pixelSize: 12
                     color: warningAmber
+                }
+            }
+        }
+
+        // ── 绩效分页 ──
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: strategyLibraryPage.showPerformance
+            visible: strategyLibraryPage.showPerformance
+
+            Loader {
+                id: performanceLoader
+                anchors.fill: parent
+                active: strategyLibraryPage.showPerformance
+                source: "qrc:/components/Strategy/PerformanceHistoryList.qml"
+
+                onLoaded: {
+                    if (item) {
+                        item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                    }
                 }
             }
         }
@@ -2117,27 +2137,4 @@ Rectangle {
     }
 
     property var strategyService: StrategyBridge
-
-    // ── 绩效分页 ──
-    Item {
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        visible: strategyLibraryPage.showPerformance
-
-        Loader {
-            id: performanceLoader
-            anchors.fill: parent
-            active: strategyLibraryPage.showPerformance
-            source: "qrc:/components/Strategy/PerformanceHistoryList.qml"
-
-            onLoaded: {
-                if (item) {
-                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
-                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary()
-                        ? (strategyLibraryPage.getSelectedStrategySummary().strategyName
-                           || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
-                }
-            }
-        }
-    }
 }

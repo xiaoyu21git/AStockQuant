@@ -276,7 +276,6 @@ void StrategyBridge::applyReq(const BridgeUpsertRequest& request,
         ? strategy_view::StrategyLifecycleStatus::Active
         : strategy_view::StrategyLifecycleStatus::Inactive;
     target.metadata.enabled = request.status();
-    if (request.factorIds().provided) target.metadata.factorIds = request.factorIds().values;
     if (request.ruleIds().provided) target.metadata.ruleIds = request.ruleIds().values;
     target.parameters = request.parameters();
     if (request.strategyType().valid) {

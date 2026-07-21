@@ -12,6 +12,7 @@
 #include <thread>
 #include <unordered_map>
 
+namespace foundation::thread { class ThreadPoolExecutor; }
 namespace astock::database { class ISqlDatabase; }
 namespace astock::infrastructure::database {
 
@@ -104,6 +105,7 @@ private:
     std::string toGmSymbol(const std::string& sym);
 
     std::unique_ptr<std::thread> m_scheduler;
+    std::shared_ptr<foundation::thread::ThreadPoolExecutor> m_executor;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_syncRunning{false};  // 手动同步正在执行，防止并发
     std::atomic<int> m_lastSyncDay{0};

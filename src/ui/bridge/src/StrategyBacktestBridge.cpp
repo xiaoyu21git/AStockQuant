@@ -183,31 +183,28 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 return;
             }
 
-            // ─── 2. 获取或创建引擎（含 DB 查询 — 现在在工作线程中）───
+            // ─── 2. 重建引擎（每次回测重新读 DB，参数变更即刻生效）───
             auto& mgr = domain::strategy::StrategyManager::instance();
-            auto* engine = mgr.get(capturedStrategyId);
-            if (!engine) {
-                std::unique_ptr<domain::strategy::RuntimeFactorSvc> factorSvc;
-                auto* factorSvcBridge = FactorService::instance();
-                if (factorSvcBridge && factorSvcBridge->isInitialized()) {
-                    auto* instanceMgr = factorSvcBridge->instanceManager();
-                    if (instanceMgr) {
-                        auto symbolResolver = [](std::uint32_t id) -> std::string {
-                            char buf[16];
-                            std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
-                            return buf;
-                        };
-                        auto factorNameResolver = [](std::uint64_t fid) -> std::string {
-                            return std::to_string(fid);
-                        };
-                        factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
-                            *instanceMgr,
-                            std::move(symbolResolver),
-                            std::move(factorNameResolver));
-                    }
+            std::unique_ptr<domain::strategy::RuntimeFactorSvc> factorSvc;
+            auto* factorSvcBridge = FactorService::instance();
+            if (factorSvcBridge && factorSvcBridge->isInitialized()) {
+                auto* instanceMgr = factorSvcBridge->instanceManager();
+                if (instanceMgr) {
+                    auto symbolResolver = [](std::uint32_t id) -> std::string {
+                        char buf[16];
+                        std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
+                        return buf;
+                    };
+                    auto factorNameResolver = [](std::uint64_t fid) -> std::string {
+                        return std::to_string(fid);
+                    };
+                    factorSvc = std::make_unique<domain::strategy::RuntimeFactorSvc>(
+                        *instanceMgr,
+                        std::move(symbolResolver),
+                        std::move(factorNameResolver));
                 }
-                engine = mgr.createEngine(capturedStrategyId, std::move(factorSvc));
             }
+            auto* engine = mgr.createEngine(capturedStrategyId, std::move(factorSvc));
             if (!engine) {
                 QMetaObject::invokeMethod(this, [this]() {
                     m_isRunning.store(false);
@@ -270,6 +267,8 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             metricsMap["beta"]             = result.metrics.beta;
             metricsMap["informationRatio"] = result.metrics.informationRatio;
             metricsMap["trackingError"]    = result.metrics.trackingError;
+            metricsMap["fullKelly"]        = result.fullKelly;
+            metricsMap["halfKelly"]        = result.halfKelly;
             // 混合模式因子参与统计: 落库后可精确回答"该次回测跑了几个因子"
             QVariantList hybridFactorList;
             for (const auto& coverage : result.hybridFactorCoverage) {
@@ -325,7 +324,29 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             qParams["commissionRate"]  = params.value("commissionRate");
             qParams["slippageRate"]    = params.value("slippageRate");
             qParams["dataFrequency"]   = params.value("dataFrequency");
-            qResult["parameters"] = qParams;
+            // ── 策略参数快照(因子/模式/仓位) — 回答"哪次回测用的什么配置" ──
+            QVariantMap strategyParamsSnapshot;
+            {
+                auto& pool = astock::database::NativePgConnectionPool::instance();
+                if (pool.isInitialized()) {
+                    auto db = pool.getConnection();
+                    if (db && db->isOpen()) {
+                        auto paramResult = db->executeQuery(
+                            "SELECT parameters FROM live.strategy WHERE strategy_id = ?",
+                            {astock::database::SqlParam{capturedStrategyId}});
+                        if (!paramResult.isEmpty()) {
+                            auto paramJson = QJsonDocument::fromJson(
+                                QString::fromStdString(paramResult.getRow(0).getString("parameters")).toUtf8());
+                            if (paramJson.isObject()) strategyParamsSnapshot = paramJson.object().toVariantMap();
+                        }
+                    }
+                }
+            }
+            // 合并: 回测请求参数 + 策略配置快照
+            QVariantMap mergedParams = strategyParamsSnapshot;
+            for (auto it = qParams.begin(); it != qParams.end(); ++it)
+                mergedParams[it.key()] = it.value();
+            qResult["parameters"] = mergedParams;
 
             // 风险指标 + 拒绝统计
             QVariantMap riskMap;
@@ -350,12 +371,58 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         domain::backtest::StoredStrategyBacktest record;
                         record.id = foundation::utils::Uuid::generate_v4().to_string();
                         record.strategyId = capturedStrategyId;
-                        record.metricsJson = QJsonDocument(QJsonObject::fromVariantMap(
-                            qResult["performance"].toMap())).toJson(QJsonDocument::Compact).toStdString();
-                        record.timeSeriesJson = QJsonDocument(QJsonObject::fromVariantMap(
+                        record.dataStartDate = params.value("startDate").toString().toStdString();
+                        record.dataEndDate   = params.value("endDate").toString().toStdString();
+                        // 策略参数
+                        auto po = strategyParamsSnapshot;
+                        auto fo = po.value("factor_overlay").toMap();
+                        record.combineMode       = fo.value("combineMode").toString().toStdString();
+                        record.targetPositionCount = fo.value("targetPositionCount").toInt();
+                        record.maxPositions      = po.value("maxPositions").toInt();
+                        record.fastPeriod        = po.value("fastPeriod").toInt();
+                        record.slowPeriod        = po.value("slowPeriod").toInt();
+                        record.signalPeriod      = po.value("signalPeriod").toInt();
+                        auto allocs = fo.value("allocations").toList();
+                        record.factorCount = allocs.size();
+                        QStringList fids, fws;
+                        for (const auto& a : allocs) {
+                            auto am = a.toMap();
+                            fids << am.value("factor_id").toString();
+                            fws << QString("%1:%2").arg(am.value("factor_id").toString()).arg(am.value("weight_percent").toDouble());
+                        }
+                        record.factorIds = fids.join(",").toStdString();
+                        record.factorWeights = fws.join(";").toStdString();
+                        // 绩效
+                        auto perf = qResult["performance"].toMap();
+                        record.totalReturn      = perf.value("totalReturn").toDouble();
+                        record.annualizedReturn = perf.value("annualizedReturn").toDouble();
+                        record.sharpeRatio      = perf.value("sharpeRatio").toDouble();
+                        record.maxDrawdown      = perf.value("maxDrawdown").toDouble();
+                        record.winRate          = perf.value("winRate").toDouble();
+                        record.profitFactor     = perf.value("profitFactor").toDouble();
+                        record.sortinoRatio     = perf.value("sortinoRatio").toDouble();
+                        record.calmarRatio      = perf.value("calmarRatio").toDouble();
+                        record.volatility       = perf.value("volatility").toDouble();
+                        record.alpha            = perf.value("alpha").toDouble();
+                        record.beta             = perf.value("beta").toDouble();
+                        auto ts = qResult["trades"].toMap();
+                        record.totalTrades      = ts.value("totalTrades").toInt();
+                        record.winningTrades    = ts.value("winningTrades").toInt();
+                        record.losingTrades     = ts.value("losingTrades").toInt();
+                        record.totalProfit      = ts.value("totalProfit").toDouble();
+                        record.totalLoss        = ts.value("totalLoss").toDouble();
+                        record.maxWin           = ts.value("largestWin").toDouble();
+                        record.maxLoss          = ts.value("largestLoss").toDouble();
+                        // 诊断
+                        // 诊断
+                        record.stopLossFills   = result.stopLossFills;
+                        record.ruleExitFills   = result.ruleExitFills;
+                        record.normalSellFills = result.normalSellFills;
+                        record.riskRejected    = result.riskRejectedCount;
+                        record.avgHoldingDays  = result.avgHoldingDays;
+                        record.avgPositions    = result.avgPositions;
+                        record.equityCurveJson = QJsonDocument(QJsonObject::fromVariantMap(
                             qResult["timeSeries"].toMap())).toJson(QJsonDocument::Compact).toStdString();
-                        record.tradeStatsJson = QJsonDocument(QJsonObject::fromVariantMap(
-                            qResult["trades"].toMap())).toJson(QJsonDocument::Compact).toStdString();
                         if (repo.saveStrategyBacktest(record)) {
                             std::vector<domain::backtest::StoredStrategyTrade> storedTrades;
                             storedTrades.reserve(result.tradeLog.size());
@@ -373,6 +440,53 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                                                  << " trades=" << storedTrades.size();
                         }
                     }
+                }
+            }
+
+            // ── 回测指标写入策略卡片 ──
+            {
+                try {
+                    auto& pool = astock::database::NativePgConnectionPool::instance();
+                    if (pool.isInitialized()) {
+                        auto db = pool.getConnection();
+                        if (db && db->isOpen()) {
+                            std::ostringstream js;
+                            js << "{\"returns\":\"" << (result.metrics.totalReturn * 100.0)
+                               << "%\",\"sharpeRatio\":\"" << result.metrics.sharpeRatio
+                               << "\",\"maxDrawdown\":\"-" << (result.metrics.maxDrawdown * 100.0)
+                               << "%\",\"winRate\":\"" << (result.metrics.winRate * 100.0)
+                               << "%\",\"annualizedReturn\":\"" << (result.metrics.annualizedReturn * 100.0) << "%\"}";
+                            db->executeUpdate(
+                                "UPDATE strategy SET metadata_json = COALESCE(metadata_json,'{}'::jsonb) || ?::jsonb WHERE strategy_id = ?",
+                                {astock::database::SqlParam{js.str()}, astock::database::SqlParam{capturedStrategyId}});
+                            INTERNAL_INFO_STREAM << "[StrategyBacktest] 回测指标已写入策略卡片";
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    INTERNAL_WARN_STREAM << "[StrategyBacktest] 指标写入失败: " << e.what();
+                }
+            }
+
+            // ── 凯利公式更新策略单票上限(负值写0, 禁止使用) ──
+            {
+                double fk = result.fullKelly > 0.0 ? result.fullKelly : 0.0;
+                double hk = result.halfKelly > 0.0 ? result.halfKelly : 0.0;
+                try {
+                    auto& pool = astock::database::NativePgConnectionPool::instance();
+                    if (pool.isInitialized()) {
+                        auto db = pool.getConnection();
+                        if (db && db->isOpen()) {
+                            std::string kellyJson = "{\"fullKelly\":" + std::to_string(fk)
+                                + ",\"halfKelly\":" + std::to_string(hk) + "}";
+                            db->executeUpdate(
+                                "UPDATE strategy SET parameters = COALESCE(parameters,'{}'::jsonb) || ?::jsonb WHERE strategy_id = ?",
+                                {astock::database::SqlParam{kellyJson}, astock::database::SqlParam{capturedStrategyId}});
+                            INTERNAL_INFO_STREAM << "[StrategyBacktest] 凯利仓位已更新: fullKelly="
+                                                 << fk << " halfKelly=" << hk;
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    INTERNAL_WARN_STREAM << "[StrategyBacktest] 凯利仓位更新失败: " << e.what();
                 }
             }
 

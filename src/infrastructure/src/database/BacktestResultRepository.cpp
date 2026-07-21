@@ -33,15 +33,51 @@ bool BacktestResultRepository::ensureTables()
         }
     }
 
+    // 旧版 JSONB/TEXT 表 → 重建为普通列
+    m_db.executeUpdate("DROP TABLE IF EXISTS live.strategy_backtest_results CASCADE");
+
     const char* kCreateStrategyBacktest = R"SQL(
         CREATE TABLE IF NOT EXISTS live.strategy_backtest_results (
-            id            VARCHAR(36) PRIMARY KEY,
-            strategy_id   VARCHAR(64) NOT NULL,
-            run_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            behavior_kind INT DEFAULT 0,
-            metrics_json  TEXT,
-            time_series_json TEXT,
-            trade_stats_json  TEXT
+            id              VARCHAR(36) PRIMARY KEY,
+            strategy_id     VARCHAR(64) NOT NULL,
+            run_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            behavior_kind   INT DEFAULT 0,
+            data_start_date DATE,
+            data_end_date   DATE,
+            combine_mode        VARCHAR(16),
+            target_position_count INT,
+            max_positions       INT,
+            fast_period         INT,
+            slow_period         INT,
+            signal_period       INT,
+            factor_count        INT,
+            factor_ids          TEXT,
+            factor_weights      TEXT,
+            total_return        DOUBLE PRECISION,
+            annualized_return   DOUBLE PRECISION,
+            sharpe_ratio        DOUBLE PRECISION,
+            max_drawdown        DOUBLE PRECISION,
+            win_rate            DOUBLE PRECISION,
+            profit_factor       DOUBLE PRECISION,
+            sortino_ratio       DOUBLE PRECISION,
+            calmar_ratio        DOUBLE PRECISION,
+            volatility          DOUBLE PRECISION,
+            alpha               DOUBLE PRECISION,
+            beta                DOUBLE PRECISION,
+            total_trades        INT,
+            winning_trades      INT,
+            losing_trades       INT,
+            total_profit        DOUBLE PRECISION,
+            total_loss          DOUBLE PRECISION,
+            max_win             DOUBLE PRECISION,
+            max_loss            DOUBLE PRECISION,
+            avg_holding_days    DOUBLE PRECISION,
+            avg_positions       DOUBLE PRECISION,
+            stop_loss_fills     INT DEFAULT 0,
+            rule_exit_fills     INT DEFAULT 0,
+            normal_sell_fills   INT DEFAULT 0,
+            risk_rejected       INT DEFAULT 0,
+            equity_curve_json   TEXT
         ))SQL";
     const char* kIdxStrategyBacktest =
         "CREATE INDEX IF NOT EXISTS idx_strategy_backtest_results_sid "
@@ -101,16 +137,48 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
 {
     ensureTables();
     using P = astock::database::SqlParam;
-    // 参数化写入 (旧实现字符串拼接 JSON, 含引号即炸且错误被吞)
     const int affected = m_db.executeUpdate(
-        "INSERT INTO live.strategy_backtest_results "
-        "(id, strategy_id, behavior_kind, metrics_json, time_series_json, trade_stats_json) "
-        "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
-        "strategy_id=EXCLUDED.strategy_id, run_at=NOW(), "
-        "behavior_kind=EXCLUDED.behavior_kind, metrics_json=EXCLUDED.metrics_json, "
-        "time_series_json=EXCLUDED.time_series_json, trade_stats_json=EXCLUDED.trade_stats_json",
+        "INSERT INTO live.strategy_backtest_results ("
+        "id, strategy_id, behavior_kind, "
+        "data_start_date, data_end_date, "
+        "combine_mode, target_position_count, max_positions, fast_period, slow_period, signal_period, "
+        "factor_count, factor_ids, factor_weights, "
+        "total_return, annualized_return, sharpe_ratio, max_drawdown, win_rate, profit_factor, "
+        "sortino_ratio, calmar_ratio, volatility, alpha, beta, "
+        "total_trades, winning_trades, losing_trades, total_profit, total_loss, max_win, max_loss, "
+        "avg_holding_days, avg_positions, "
+        "stop_loss_fills, rule_exit_fills, normal_sell_fills, risk_rejected, "
+        "equity_curve_json"
+        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        "strategy_id=EXCLUDED.strategy_id, run_at=NOW(), behavior_kind=EXCLUDED.behavior_kind, "
+        "data_start_date=EXCLUDED.data_start_date, data_end_date=EXCLUDED.data_end_date, "
+        "combine_mode=EXCLUDED.combine_mode, target_position_count=EXCLUDED.target_position_count, "
+        "max_positions=EXCLUDED.max_positions, fast_period=EXCLUDED.fast_period, "
+        "slow_period=EXCLUDED.slow_period, signal_period=EXCLUDED.signal_period, "
+        "factor_count=EXCLUDED.factor_count, factor_ids=EXCLUDED.factor_ids, factor_weights=EXCLUDED.factor_weights, "
+        "total_return=EXCLUDED.total_return, annualized_return=EXCLUDED.annualized_return, "
+        "sharpe_ratio=EXCLUDED.sharpe_ratio, max_drawdown=EXCLUDED.max_drawdown, "
+        "win_rate=EXCLUDED.win_rate, profit_factor=EXCLUDED.profit_factor, "
+        "sortino_ratio=EXCLUDED.sortino_ratio, calmar_ratio=EXCLUDED.calmar_ratio, "
+        "volatility=EXCLUDED.volatility, alpha=EXCLUDED.alpha, beta=EXCLUDED.beta, "
+        "total_trades=EXCLUDED.total_trades, winning_trades=EXCLUDED.winning_trades, "
+        "losing_trades=EXCLUDED.losing_trades, total_profit=EXCLUDED.total_profit, "
+        "total_loss=EXCLUDED.total_loss, max_win=EXCLUDED.max_win, max_loss=EXCLUDED.max_loss, "
+        "avg_holding_days=EXCLUDED.avg_holding_days, avg_positions=EXCLUDED.avg_positions, "
+        "stop_loss_fills=EXCLUDED.stop_loss_fills, rule_exit_fills=EXCLUDED.rule_exit_fills, "
+        "normal_sell_fills=EXCLUDED.normal_sell_fills, risk_rejected=EXCLUDED.risk_rejected, "
+        "equity_curve_json=EXCLUDED.equity_curve_json",
         {P{r.id}, P{r.strategyId}, P{r.behaviorKind},
-         P{r.metricsJson}, P{r.timeSeriesJson}, P{r.tradeStatsJson}});
+         P{r.dataStartDate}, P{r.dataEndDate},
+         P{r.combineMode}, P{r.targetPositionCount}, P{r.maxPositions}, P{r.fastPeriod}, P{r.slowPeriod}, P{r.signalPeriod},
+         P{r.factorCount}, P{r.factorIds}, P{r.factorWeights},
+         P{r.totalReturn}, P{r.annualizedReturn}, P{r.sharpeRatio}, P{r.maxDrawdown}, P{r.winRate}, P{r.profitFactor},
+         P{r.sortinoRatio}, P{r.calmarRatio}, P{r.volatility}, P{r.alpha}, P{r.beta},
+         P{r.totalTrades}, P{r.winningTrades}, P{r.losingTrades}, P{r.totalProfit}, P{r.totalLoss}, P{r.maxWin}, P{r.maxLoss},
+         P{r.avgHoldingDays}, P{r.avgPositions},
+         P{r.stopLossFills}, P{r.ruleExitFills}, P{r.normalSellFills}, P{r.riskRejected},
+         P{r.equityCurveJson}});
     if (affected <= 0) {
         INTERNAL_ERROR_STREAM << "[BacktestRepo] saveStrategyBacktest failed id=" << r.id
                               << " error=" << m_db.lastError();
@@ -145,8 +213,7 @@ std::vector<StoredStrategyBacktest> BacktestResultRepository::loadStrategyBackte
 {
     ensureTables();
     std::ostringstream sql;
-    sql << "SELECT id, strategy_id, run_at, behavior_kind, metrics_json, time_series_json, trade_stats_json "
-           "FROM live.strategy_backtest_results WHERE strategy_id='"
+    sql << "SELECT * FROM live.strategy_backtest_results WHERE strategy_id='"
         << strategyId << "' ORDER BY run_at DESC LIMIT " << limit;
 
     auto result = m_db.executeQuery(sql.str());
@@ -154,13 +221,46 @@ std::vector<StoredStrategyBacktest> BacktestResultRepository::loadStrategyBackte
     for (int i = 0; i < result.rowCount(); ++i) {
         const auto& row = result.getRow(i);
         StoredStrategyBacktest r;
-        r.id           = row.getString("id");
-        r.strategyId   = row.getString("strategy_id");
-        r.runAt        = row.getString("run_at");
-        r.behaviorKind = row.getInt("behavior_kind");
-        r.metricsJson  = row.getString("metrics_json");
-        r.timeSeriesJson = row.getString("time_series_json");
-        r.tradeStatsJson = row.getString("trade_stats_json");
+        r.id                = row.getString("id");
+        r.strategyId        = row.getString("strategy_id");
+        r.runAt             = row.getString("run_at");
+        r.behaviorKind      = row.getInt("behavior_kind");
+        r.dataStartDate     = row.getString("data_start_date");
+        r.dataEndDate       = row.getString("data_end_date");
+        r.combineMode       = row.getString("combine_mode");
+        r.targetPositionCount = row.getInt("target_position_count");
+        r.maxPositions      = row.getInt("max_positions");
+        r.fastPeriod        = row.getInt("fast_period");
+        r.slowPeriod        = row.getInt("slow_period");
+        r.signalPeriod      = row.getInt("signal_period");
+        r.factorCount       = row.getInt("factor_count");
+        r.factorIds         = row.getString("factor_ids");
+        r.factorWeights     = row.getString("factor_weights");
+        r.totalReturn       = row.getDouble("total_return");
+        r.annualizedReturn  = row.getDouble("annualized_return");
+        r.sharpeRatio       = row.getDouble("sharpe_ratio");
+        r.maxDrawdown       = row.getDouble("max_drawdown");
+        r.winRate           = row.getDouble("win_rate");
+        r.profitFactor      = row.getDouble("profit_factor");
+        r.sortinoRatio      = row.getDouble("sortino_ratio");
+        r.calmarRatio       = row.getDouble("calmar_ratio");
+        r.volatility        = row.getDouble("volatility");
+        r.alpha             = row.getDouble("alpha");
+        r.beta              = row.getDouble("beta");
+        r.totalTrades       = row.getInt("total_trades");
+        r.winningTrades     = row.getInt("winning_trades");
+        r.losingTrades      = row.getInt("losing_trades");
+        r.totalProfit       = row.getDouble("total_profit");
+        r.totalLoss         = row.getDouble("total_loss");
+        r.maxWin            = row.getDouble("max_win");
+        r.maxLoss           = row.getDouble("max_loss");
+        r.avgHoldingDays    = row.getDouble("avg_holding_days");
+        r.avgPositions      = row.getDouble("avg_positions");
+        r.stopLossFills     = row.getInt("stop_loss_fills");
+        r.ruleExitFills     = row.getInt("rule_exit_fills");
+        r.normalSellFills   = row.getInt("normal_sell_fills");
+        r.riskRejected      = row.getInt("risk_rejected");
+        r.equityCurveJson   = row.getString("equity_curve_json");
         records.push_back(std::move(r));
     }
     return records;

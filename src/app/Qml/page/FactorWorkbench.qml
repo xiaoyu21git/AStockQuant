@@ -692,7 +692,7 @@ Item {
                 },
                 factor_overlay: {
                     enabled: factorId.length > 0,
-                    targetPositionCount: 10,
+                    targetPositionCount: 50,
                     minimumCompositeScore: 0,
                     combineMode: "rank_only",
                     selectionScope: "rule_eligible",

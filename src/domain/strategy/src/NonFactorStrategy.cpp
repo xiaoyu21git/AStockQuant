@@ -1,336 +1,139 @@
 #include "../include/NonFactorStrategy.h"
-#include "../../factor/include/factor_compute/CachedMarketDataView.h"
+#include "../include/RuntimeStrategyFactory.h"
+#include "../../strategies/include/MultiFactorSelectionStrategy.h"
 #include <ta_libc.h>
-#include <unordered_set>
+#include <cmath>
+#include <memory>
 
 namespace domain::strategy {
 namespace {
+using Sig = StrategyBase::SignalResult;
 
-using SignalResult = NonFactorStrategy::SignalResult;
-using StrategyCommonConfig = ::domain::strategies::StrategyCommonConfig;
-
-// ── 共享工具函数 ──
-
-double computeRSI(const std::vector<double>& prices, int period) {
-    int N = static_cast<int>(prices.size());
-    if (N < period + 1) return -1.0;
-    std::vector<double> out(N, 0);
-    int b = 0, n = 0;
-    if (TA_RSI(0, N-1, prices.data(), period, &b, &n, out.data()) != TA_SUCCESS || n == 0)
-        return -1.0;
-    return out[n-1];
+double rsi(const std::vector<double>& p, int per) {
+    int N=(int)p.size(); if (N<per+1) return -1; std::vector<double> o(N); int b=0,n=0;
+    if (TA_RSI(0,N-1,p.data(),per,&b,&n,o.data())!=TA_SUCCESS||n==0) return -1; return o[n-1];
 }
-
-} // anonymous namespace
-
-// ═════════════════════════════════════════════════════════════════════════
-// 引擎层: 遍历行情 → evaluateSymbol → 排序限流
-// ═════════════════════════════════════════════════════════════════════════
-void NonFactorStrategy::evaluateSignals(NonFactorStrategy& self,
-                                        const RuntimeStrategyContext& context,
-                                        std::vector<StrategySignal>& outputSignals)
-{
-    const auto* view = static_cast<const factor::compute::IMarketDataView*>(
-        context.historicalViewPtr());
-    if (!view) return;
-
-    auto closeMat = view->close();
-    auto instruments = view->instruments();
-    auto dates = view->dates();
-    int rows = static_cast<int>(dates.size());
-    int cols = static_cast<int>(instruments.size());
-    if (rows < self.requiredLookbackBars() || cols == 0) return;
-
-    int rowStride = closeMat.rowStride;
-    int evalRow = context.currentEvaluationRow();
-    int lastRow = (evalRow >= 0) ? evalRow : (rows - 1);
-    int lookback = std::min(self.requiredLookbackBars(), lastRow + 1);
-    const int kMaxDailySignals = std::max(1, self.m_commonCfg.maxPositions);
-
-    std::vector<StrategySignal> allSignals;
-    allSignals.reserve(cols);
-    for (int c = 0; c < cols; ++c) {
-        std::vector<double> closePrices(lookback);
-        for (int i = 0; i < lookback; ++i)
-            closePrices[i] = static_cast<double>(
-                closeMat.data[(lastRow - lookback + 1 + i) * rowStride + c]);
-
-        std::string fullSymbol;
-        {
-            const auto& syms = view->symbolStrings();
-            if (c < static_cast<int>(syms.size())) fullSymbol = syms[static_cast<size_t>(c)];
-        }
-        if (fullSymbol.empty()) continue;
-
-        {
-            auto& d = domain::market::MarketDataService::instance().liveData(fullSymbol);
-            if (d.valid()) {
-                double liveC = d.dailyBar().close();
-                if (liveC > 0) closePrices.push_back(liveC);
-            }
-        }
-
-        SignalResult sig = self.evaluateSymbol(closePrices, instruments[c].value,
-                                                context, self.m_commonCfg);
-        if (sig.valid) {
-            auto signal = StrategySignal(
-                context.strategyInstanceId(),
-                InstrumentId{sig.instrumentId},
-                sig.isBuy ? RuntimeOrderSide::Buy : RuntimeOrderSide::Sell,
-                sig.score, self.weightForSignalScore(sig.score),
-                fullSymbol);
-            allSignals.push_back(std::move(signal));
-        }
-    }
-
-    std::sort(allSignals.begin(), allSignals.end(),
-        [](const StrategySignal& a, const StrategySignal& b) {
-            if (a.side() == RuntimeOrderSide::Sell && b.side() == RuntimeOrderSide::Buy) return true;
-            if (a.side() == RuntimeOrderSide::Buy && b.side() == RuntimeOrderSide::Sell) return false;
-            return a.score() > b.score();
-        });
-
-    int buyCount = 0;
-    for (auto& s : allSignals) {
-        if (s.side() == RuntimeOrderSide::Buy) {
-            if (buyCount >= kMaxDailySignals) continue;
-            ++buyCount;
-        }
-        outputSignals.push_back(std::move(s));
-    }
+bool macd(const std::vector<double>& p, bool up, int f, int s, int sp) {
+    int N=(int)p.size(); if (N<s+1) return false;
+    std::vector<double> m(N),g(N),h(N); int b=0,n=0;
+    if (TA_MACD(0,N-1,p.data(),f,s,sp,&b,&n,m.data(),g.data(),h.data())!=TA_SUCCESS||n<2) return false;
+    int pp=n-2,cc=n-1; return up?(m[pp]<=g[pp]&&m[cc]>g[cc]):(m[pp]>=g[pp]&&m[cc]<g[cc]);
 }
-
-// ═════════════════════════════════════════════════════════════════════════
-// 子类 evaluateSymbol 实现
-// ═════════════════════════════════════════════════════════════════════════
-
-SignalResult TrendFollowingStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
-{
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    int N = static_cast<int>(closePrices.size());
-    if (N < cfg.slowPeriod + 1) return sig;
-
-    std::vector<double> fma(N, 0), sma(N, 0);
-    int b = 0, n = 0;
-    if (TA_SMA(0, N-1, closePrices.data(), cfg.fastPeriod, &b, &n, fma.data()) != TA_SUCCESS || n < 2) return sig;
-    if (TA_SMA(0, N-1, closePrices.data(), cfg.slowPeriod, &b, &n, sma.data()) != TA_SUCCESS || n < 2) return sig;
-
-    int p = n-2, c = n-1;
-    bool golden = (fma[p] <= sma[p] && fma[c] > sma[c]);
-    bool dead   = (fma[p] >= sma[p] && fma[c] < sma[c]);
-
-    double strength = sma[c] > 0.0 ? (fma[c] - sma[c]) / sma[c] : 0.0;
-    if (golden) { sig.valid = true; sig.isBuy = true;  sig.score = 0.5 + std::min(0.45, std::abs(strength) * 10.0); }
-    if (dead)   { sig.valid = true; sig.isBuy = false; sig.score = 0.3 + std::min(0.35, std::abs(strength) * 10.0); }
-    return sig;
+bool maCross(const std::vector<double>& p, int f, int s, bool up) {
+    int N=(int)p.size(); if (N<s+1) return false;
+    std::vector<double> fm(N),sm(N); int b=0,n=0;
+    if (TA_SMA(0,N-1,p.data(),f,&b,&n,fm.data())!=TA_SUCCESS||n<2) return false;
+    if (TA_SMA(0,N-1,p.data(),s,&b,&n,sm.data())!=TA_SUCCESS||n<2) return false;
+    return up?(fm[n-2]<=sm[n-2]&&fm[n-1]>sm[n-1]):(fm[n-2]>=sm[n-2]&&fm[n-1]<sm[n-1]);
 }
-
-SignalResult MeanReversionStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
-{
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    double rsi = computeRSI(closePrices, cfg.signalPeriod);
-    if (rsi < 30.0) { sig.valid = true; sig.isBuy = true;  sig.score = 0.70; }
-    if (rsi > 70.0) { sig.valid = true; sig.isBuy = false; sig.score = 0.65; }
-    return sig;
+struct BB { bool ok=false; double u=0,m=0,l=0; };
+BB bb(const std::vector<double>& p, int per, double nd) {
+    int N=(int)p.size(); if (N<per+1) return {};
+    std::vector<double> u(N),m(N),l(N); int b=0,n=0;
+    if (TA_BBANDS(0,N-1,p.data(),per,nd,nd,TA_MAType_SMA,&b,&n,u.data(),m.data(),l.data())!=TA_SUCCESS||n==0) return {};
+    return {true,u[n-1],m[n-1],l[n-1]};
 }
-
-namespace {
-
-bool checkMACD(const std::vector<double>& prices, bool up,
-               int fast, int slow, int sigPeriod) {
-    int N = static_cast<int>(prices.size());
-    if (N < slow + 1) return false;
-    std::vector<double> macd(N, 0), sig(N, 0), hist(N, 0);
-    int b = 0, n = 0;
-    if (TA_MACD(0, N-1, prices.data(), fast, slow, sigPeriod, &b, &n,
-                macd.data(), sig.data(), hist.data()) != TA_SUCCESS || n < 2)
-        return false;
-    int p = n-2, c = n-1;
-    return up ? (macd[p] <= sig[p] && macd[c] > sig[c])
-              : (macd[p] >= sig[p] && macd[c] < sig[c]);
+double atr(const std::vector<double>& p, int per) {
+    int N=(int)p.size(); if (N<per+1) return 0;
+    std::vector<double> t(N-1); for (int i=1;i<N;++i) t[i-1]=std::abs(p[i]-p[i-1]);
+    double s=0; for (int j=N-1-per+1;j<=N-2;++j) s+=t[j]; return s/per;
 }
+} // anon
 
-} // anonymous namespace
-
-SignalResult MomentumStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
-{
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    bool golden = checkMACD(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-    bool dead   = checkMACD(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-    if (golden) { sig.valid = true; sig.isBuy = true;  sig.score = 0.80; }
-    if (dead)   { sig.valid = true; sig.isBuy = false; sig.score = 0.60; }
-    return sig;
-}
-
-namespace {
-
-struct BBResult { bool valid = false; double upper = 0, middle = 0, lower = 0; };
-
-BBResult computeBBands(const std::vector<double>& prices, int period, double nbDev) {
-    int N = static_cast<int>(prices.size());
-    if (N < period + 1) return {};
-    std::vector<double> upper(N, 0), middle(N, 0), lower(N, 0);
-    int b = 0, n = 0;
-    if (TA_BBANDS(0, N-1, prices.data(), period, nbDev, nbDev, TA_MAType_SMA,
-                  &b, &n, upper.data(), middle.data(), lower.data()) != TA_SUCCESS || n == 0)
-        return {};
-    BBResult r;
-    r.valid = true; r.upper = upper[n-1]; r.middle = middle[n-1]; r.lower = lower[n-1];
+Sig TrendFollowingStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; auto& c=m_commonCfg; int N=(int)p.size(); if (N<c.slowPeriod+1) return r;
+    std::vector<double> fm(N),sm(N); int b=0,n=0;
+    if (TA_SMA(0,N-1,p.data(),c.fastPeriod,&b,&n,fm.data())!=TA_SUCCESS||n<2) return r;
+    if (TA_SMA(0,N-1,p.data(),c.slowPeriod,&b,&n,sm.data())!=TA_SUCCESS||n<2) return r;
+    int pp=n-2,cc=n-1;
+    bool g=(fm[pp]<=sm[pp]&&fm[cc]>sm[cc]), d=(fm[pp]>=sm[pp]&&fm[cc]<sm[cc]);
+    double st=sm[cc]>0?(fm[cc]-sm[cc])/sm[cc]:0;
+    if (g) { r.valid=true; r.isBuy=true;  r.score=0.5+std::min(0.45,std::abs(st)*10.0); }
+    if (d) { r.valid=true; r.isBuy=false; r.score=0.3+std::min(0.35,std::abs(st)*10.0); }
     return r;
 }
-
-double computeATR(const std::vector<double>& prices, int period) {
-    int N = static_cast<int>(prices.size());
-    if (N < period + 1) return 0.0;
-    std::vector<double> tr(N-1);
-    for (int i = 1; i < N; ++i) tr[i-1] = std::abs(prices[i] - prices[i-1]);
-    double sum = 0;
-    for (int j = N-1-period+1; j <= N-2; ++j) sum += tr[j];
-    return sum / period;
+Sig MeanReversionStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; double v=rsi(p,m_commonCfg.signalPeriod);
+    if (v<30.0) { r.valid=true; r.isBuy=true;  r.score=0.70; }
+    if (v>70.0) { r.valid=true; r.isBuy=false; r.score=0.65; } return r;
+}
+Sig MomentumStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; auto& c=m_commonCfg;
+    bool g=macd(p,true,c.macdFast,c.macdSlow,c.macdSignal), d=macd(p,false,c.macdFast,c.macdSlow,c.macdSignal);
+    if (g) { r.valid=true; r.isBuy=true;  r.score=0.80; }
+    if (d) { r.valid=true; r.isBuy=false; r.score=0.60; } return r;
+}
+Sig ArbitrageStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; auto& c=m_commonCfg; auto b=bb(p,c.bbPeriod,c.bbStdDev); if (!b.ok) return r;
+    double pb=(b.u>b.l)?(p.back()-b.l)/(b.u-b.l):0.5;
+    if (pb<0.1) { r.valid=true; r.isBuy=true;  r.score=0.70; }
+    if (pb>0.9) { r.valid=true; r.isBuy=false; r.score=0.65; } return r;
+}
+Sig EventDrivenStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; int N=(int)p.size(); if (N<22) return r;
+    double ra=0,pa=0,pv=0;
+    for (int i=N-5;i<N;++i) ra+=p[i]; for (int i=N-22;i<N-5;++i) pa+=p[i]; ra/=5.0; pa/=17.0;
+    for (int i=N-22;i<N-5;++i) pv+=(p[i]-pa)*(p[i]-pa); pv=std::sqrt(pv/17.0);
+    double pc=(ra-pa)/(pa>0?pa:1.0), av=atr(p,14);
+    if (pc>0.03&&av>pv*1.5) { r.valid=true; r.isBuy=true;  r.score=0.75; }
+    if (pc<-0.03&&av>pv*1.5) { r.valid=true; r.isBuy=false; r.score=0.60; } return r;
+}
+Sig HighFrequencyStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; int N=(int)p.size(); if (N<12) return r;
+    double r3=(p[N-1]-p[N-4])/(p[N-4]>0?p[N-4]:1.0), r6=(p[N-1]-p[N-7])/(p[N-7]>0?p[N-7]:1.0);
+    int ub=0; for (int i=N-5;i<N;++i) if (p[i]>p[i-1]) ++ub;
+    if (r3>0.002&&r6>0.001&&ub>=4) { r.valid=true; r.isBuy=true;  r.score=0.80; }
+    if (r3<-0.002&&r6<-0.001&&ub<=1) { r.valid=true; r.isBuy=false; r.score=0.75; } return r;
+}
+Sig CustomStrategy::evaluateSymbol(const std::vector<double>& p, std::uint32_t id, const RuntimeStrategyContext&) {
+    Sig r; r.instrumentId=id; int N=(int)p.size(); if (N<26) return r; auto& c=m_commonCfg;
+    auto tu=maCross(p,c.fastPeriod,c.slowPeriod,true), td=maCross(p,c.fastPeriod,c.slowPeriod,false);
+    double rv=rsi(p,c.signalPeriod);
+    auto mu=macd(p,true,c.macdFast,c.macdSlow,c.macdSignal), md=macd(p,false,c.macdFast,c.macdSlow,c.macdSignal);
+    int bv=(tu?1:0)+(rv>0&&rv<40?1:0)+(mu?1:0), sv=(td?1:0)+(rv>60?1:0)+(md?1:0);
+    if (bv>=2) { r.valid=true; r.isBuy=true;  r.score=0.70+bv*0.05; }
+    if (sv>=2) { r.valid=true; r.isBuy=false; r.score=0.65+sv*0.05; } return r;
 }
 
-} // anonymous namespace
+static ::domain::strategies::StrategyCommonConfig makeCommonCfg(const StrategyCreationParams& p) {
+    ::domain::strategies::StrategyCommonConfig c;
+    c.allowShort=p.allowShort; c.maxPositions=p.maxPositions;
+    c.maxWeightPerStock=p.maxWeightPerStock; c.minWeightPerStock=p.minWeightPerStock;
+    c.weightScheme=p.weightScheme; c.rebalanceFrequency=p.rebalanceFrequency;
+    c.fastPeriod=p.fastPeriod; c.slowPeriod=p.slowPeriod; c.signalPeriod=p.signalPeriod;
+    c.macdFast=p.macdFast; c.macdSlow=p.macdSlow; c.macdSignal=p.macdSignal;
+    c.bbPeriod=p.bbPeriod; c.bbStdDev=p.bbStdDev;
+    return c;
+}
 
-SignalResult ArbitrageStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
+std::shared_ptr<IRuntimeStrategy> StrategyBase::create(
+    StrategyInstanceId id, const StrategyCreationParams& p)
 {
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    auto bb = computeBBands(closePrices, cfg.bbPeriod, cfg.bbStdDev);
-    if (!bb.valid) return sig;
-    double lastPrice = closePrices.back();
-    double pctB = (bb.upper > bb.lower) ? (lastPrice - bb.lower) / (bb.upper - bb.lower) : 0.5;
-    if (pctB < 0.1) { sig.valid = true; sig.isBuy = true;  sig.score = 0.70; }
-    if (pctB > 0.9) { sig.valid = true; sig.isBuy = false; sig.score = 0.65; }
-    return sig;
-}
-
-SignalResult EventDrivenStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig&)
-{
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    int N = static_cast<int>(closePrices.size());
-    if (N < 22) return sig;
-
-    double recentAvg = 0, priorAvg = 0, priorVol = 0;
-    for (int i = N-5; i < N; ++i)  recentAvg += closePrices[i];
-    for (int i = N-22; i < N-5; ++i) priorAvg += closePrices[i];
-    recentAvg /= 5.0; priorAvg /= 17.0;
-
-    double priorMean = priorAvg;
-    for (int i = N-22; i < N-5; ++i)
-        priorVol += (closePrices[i] - priorMean) * (closePrices[i] - priorMean);
-    priorVol = std::sqrt(priorVol / 17.0);
-
-    double priceChg = (recentAvg - priorAvg) / (priorAvg > 0 ? priorAvg : 1.0);
-    double atr = computeATR(closePrices, 14);
-
-    bool eventUp   = priceChg > 0.03 && atr > priorVol * 1.5;
-    bool eventDown = priceChg < -0.03 && atr > priorVol * 1.5;
-
-    if (eventUp)   { sig.valid = true; sig.isBuy = true;  sig.score = 0.75; }
-    if (eventDown) { sig.valid = true; sig.isBuy = false; sig.score = 0.60; }
-    return sig;
-}
-
-SignalResult HighFrequencyStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig&)
-{
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    int N = static_cast<int>(closePrices.size());
-    if (N < 12) return sig;
-
-    double roc3 = (closePrices[N-1] - closePrices[N-4]) / (closePrices[N-4] > 0 ? closePrices[N-4] : 1.0);
-    double roc6 = (closePrices[N-1] - closePrices[N-7]) / (closePrices[N-7] > 0 ? closePrices[N-7] : 1.0);
-
-    int upBars = 0;
-    for (int i = N-5; i < N; ++i)
-        if (closePrices[i] > closePrices[i-1]) ++upBars;
-
-    if (roc3 > 0.002 && roc6 > 0.001 && upBars >= 4)
-        { sig.valid = true; sig.isBuy = true;  sig.score = 0.80; }
-    if (roc3 < -0.002 && roc6 < -0.001 && upBars <= 1)
-        { sig.valid = true; sig.isBuy = false; sig.score = 0.75; }
-    return sig;
-}
-
-namespace {
-
-bool checkMACross(const std::vector<double>& prices, int fast, int slow, bool up) {
-    int N = static_cast<int>(prices.size());
-    if (N < slow + 1) return false;
-    std::vector<double> fma(N, 0), sma(N, 0);
-    int b = 0, n = 0;
-    if (TA_SMA(0, N-1, prices.data(), fast, &b, &n, fma.data()) != TA_SUCCESS || n < 2) return false;
-    if (TA_SMA(0, N-1, prices.data(), slow, &b, &n, sma.data()) != TA_SUCCESS || n < 2) return false;
-    return up ? (fma[n-2] <= sma[n-2] && fma[n-1] > sma[n-1])
-              : (fma[n-2] >= sma[n-2] && fma[n-1] < sma[n-1]);
-}
-
-} // anonymous namespace
-
-SignalResult CustomStrategy::evaluateSymbol(
-    const std::vector<double>& closePrices, std::uint32_t instrumentId,
-    const RuntimeStrategyContext&, const StrategyCommonConfig& cfg)
-{
-    SignalResult sig;
-    sig.instrumentId = instrumentId;
-    int N = static_cast<int>(closePrices.size());
-    if (N < 26) return sig;
-
-    auto trendUp   = checkMACross(closePrices, cfg.fastPeriod, cfg.slowPeriod, true);
-    auto trendDown = checkMACross(closePrices, cfg.fastPeriod, cfg.slowPeriod, false);
-    double rsi = computeRSI(closePrices, cfg.signalPeriod);
-    auto macdUp   = checkMACD(closePrices, true, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-    auto macdDown = checkMACD(closePrices, false, cfg.macdFast, cfg.macdSlow, cfg.macdSignal);
-
-    int buyVotes = (trendUp ? 1 : 0) + (rsi > 0 && rsi < 40 ? 1 : 0) + (macdUp ? 1 : 0);
-    int sellVotes = (trendDown ? 1 : 0) + (rsi > 60 ? 1 : 0) + (macdDown ? 1 : 0);
-
-    if (buyVotes >= 2)  { sig.valid = true; sig.isBuy = true;  sig.score = 0.70 + buyVotes * 0.05; }
-    if (sellVotes >= 2) { sig.valid = true; sig.isBuy = false; sig.score = 0.65 + sellVotes * 0.05; }
-    return sig;
-}
-
-// ═════════════════════════════════════════════════════════════════════════
-// 工厂
-// ═════════════════════════════════════════════════════════════════════════
-std::unique_ptr<NonFactorStrategy> NonFactorStrategy::create(
-    StrategyInstanceId instanceId,
-    ::domain::strategies::StrategyBehaviorKind kind,
-    const ::domain::strategies::StrategyCommonConfig& cfg)
-{
+    auto kind = p.behaviorKind;
+    auto cfg = makeCommonCfg(p);
+    if (kind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
+        || kind == ::domain::strategies::StrategyBehaviorKind::MachineLearning) {
+        ::domain::strategies::StrategyMetadata meta;
+        meta.name=p.strategyName; meta.description=p.description;
+        meta.behaviorKind=p.behaviorKind; meta.factorIds=p.factorIds; meta.enabled=true;
+        ::domain::strategies::MultiFactorSelectionStrategySpec spec;
+        spec.topN = p.topN > 0 ? p.topN : p.maxPositions;
+        if (!p.factorWeights.empty()) {
+            double tw=0; for (auto& fw:p.factorWeights) tw+=fw.weight;
+            for (auto& fw:p.factorWeights) spec.factorWeights.push_back({fw.factorId,tw>0?fw.weight/tw:0});
+        }
+        auto def = std::make_shared<::domain::strategies::MultiFactorSelectionStrategy>(cfg, meta, spec);
+        return createMultiFactorSelectionRuntimeStrategy(def, id);
+    }
     switch (kind) {
-    case ::domain::strategies::StrategyBehaviorKind::TrendFollowing:
-        return std::make_unique<TrendFollowingStrategy>(instanceId, kind, cfg);
-    case ::domain::strategies::StrategyBehaviorKind::MeanReversion:
-        return std::make_unique<MeanReversionStrategy>(instanceId, kind, cfg);
-    case ::domain::strategies::StrategyBehaviorKind::Momentum:
-        return std::make_unique<MomentumStrategy>(instanceId, kind, cfg);
-    case ::domain::strategies::StrategyBehaviorKind::Arbitrage:
-        return std::make_unique<ArbitrageStrategy>(instanceId, kind, cfg);
-    case ::domain::strategies::StrategyBehaviorKind::EventDriven:
-        return std::make_unique<EventDrivenStrategy>(instanceId, kind, cfg);
-    case ::domain::strategies::StrategyBehaviorKind::HighFrequency:
-        return std::make_unique<HighFrequencyStrategy>(instanceId, kind, cfg);
-    case ::domain::strategies::StrategyBehaviorKind::Custom:
-        return std::make_unique<CustomStrategy>(instanceId, kind, cfg);
-    default:
-        return std::make_unique<TrendFollowingStrategy>(instanceId, kind, cfg);
+    case ::domain::strategies::StrategyBehaviorKind::TrendFollowing: return std::make_shared<TrendFollowingStrategy>(id,cfg);
+    case ::domain::strategies::StrategyBehaviorKind::MeanReversion: return std::make_shared<MeanReversionStrategy>(id,cfg);
+    case ::domain::strategies::StrategyBehaviorKind::Momentum:      return std::make_shared<MomentumStrategy>(id,cfg);
+    case ::domain::strategies::StrategyBehaviorKind::Arbitrage:     return std::make_shared<ArbitrageStrategy>(id,cfg);
+    case ::domain::strategies::StrategyBehaviorKind::EventDriven:   return std::make_shared<EventDrivenStrategy>(id,cfg);
+    case ::domain::strategies::StrategyBehaviorKind::HighFrequency: return std::make_shared<HighFrequencyStrategy>(id,cfg);
+    case ::domain::strategies::StrategyBehaviorKind::Custom:        return std::make_shared<CustomStrategy>(id,cfg);
+    default: return std::make_shared<TrendFollowingStrategy>(id,cfg);
     }
 }
 

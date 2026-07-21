@@ -31,7 +31,8 @@ public:
         CalmarRatioRole,
         ProfitFactorRole,
         BehaviorKindRole,
-        ResultIdRole
+        ResultIdRole,
+        ParametersRole       ///< 策略参数快照 JSON
     };
 
     explicit StrategyPerformanceModel(QObject* parent = nullptr);
@@ -46,7 +47,12 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     Q_INVOKABLE void refresh();
+    /// @brief 加载指定行的完整回测详情（含时间序列、交易统计、参数快照）
     Q_INVOKABLE QVariantMap loadResultDetail(int row);
+    /// @brief 加载指定回测 run_id 的逐笔成交明细
+    Q_INVOKABLE QVariantList loadTrades(const QString& runId, int offset = 0, int limit = 200);
+    /// @brief 加载指定回测 run_id 的每日持仓快照
+    Q_INVOKABLE QVariantList loadDailyPositions(const QString& runId);
 
 signals:
     void strategyIdChanged();

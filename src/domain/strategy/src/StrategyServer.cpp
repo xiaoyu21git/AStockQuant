@@ -589,4 +589,13 @@ void StrategyService::updateCurrentWeights(
     // 策略不再感知持仓权重，意图由调度层 buildPositionAwareOrders 确定
 }
 
+void StrategyService::updateCandidatePool(
+    const std::unordered_set<std::string>& pool)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCandidatePool(pool);
+    }
+}
+
 } // namespace domain::strategy

@@ -14,7 +14,9 @@ target_sources(domain_strategy_runtime PRIVATE
     src/RiskEvaluator.cpp
     src/EventRiskSubscriber.cpp
     src/FactorSignalProcessor.cpp
+    src/SignalBlendCompositor.cpp
     src/NonFactorStrategy.cpp
+    src/OrderGenerator.cpp
     src/RiskManager.cpp
     src/RiskControl.cpp
     src/StrategyFactory.cpp
@@ -22,6 +24,7 @@ target_sources(domain_strategy_runtime PRIVATE
     rules/RuleConditionEvaluator.cpp
     rules/RuleVariableProvider.cpp
     rules/RuleGate.cpp
+    src/RulePipeline.cpp
 )
 
 target_include_directories(domain_strategy_runtime

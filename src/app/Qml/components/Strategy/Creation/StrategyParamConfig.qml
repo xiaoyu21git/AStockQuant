@@ -75,7 +75,7 @@ Rectangle {
         ruleComposerWidthBudget * (useRuleComposerColumns ? 0.26 : 0.27),
         ruleComposerSuggestionMaxWidth)
     readonly property bool hasPersonalizedParameterConfigs: (root.personalizedParameterConfigs || []).length > 0
-    property var factorOverlay: ({ enabled: false, targetPositionCount: 10, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
+    property var factorOverlay: ({ enabled: false, targetPositionCount: 50, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
     property var factorSelectorDialog: null
     
     function factorOverlayCardWidth(containerWidth) {
@@ -546,12 +546,63 @@ Rectangle {
 
                             GridLayout {
                                 Layout.fillWidth: true
-                                columns: 1
+                                columns: 3
                                 columnSpacing: 12
                                 rowSpacing: 10
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
+                                    spacing: 4
+
+                                    Text {
+                                        text: "因子组合模式"
+                                        font.pixelSize: 11
+                                        color: "#cbd5e1"
+                                    }
+
+                                    ComboBox {
+                                        id: combineModeCombo
+                                        Layout.fillWidth: true
+                                        textRole: "label"
+                                        valueRole: "value"
+                                        model: [
+                                            { label: "纯排名 (RankOnly)", value: "rank_only" },
+                                            { label: "交集 (Intersection)", value: "intersection" },
+                                            { label: "并集 (Union)", value: "union" },
+                                            { label: "配额 (Quota)", value: "quota" }
+                                        ]
+                                        currentIndex: {
+                                            var mode = String(root.factorOverlay.combineMode || "rank_only")
+                                            if (mode === "intersection") return 1
+                                            if (mode === "union") return 2
+                                            if (mode === "quota") return 3
+                                            return 0
+                                        }
+                                        onCurrentIndexChanged: {
+                                            var item = model[currentIndex]
+                                            if (item) {
+                                                root.factorOverlay.combineMode = item.value
+                                                root.syncDecoratedParameters()
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: currentIndex === 0
+                                              ? "所有标的按因子分排名"
+                                              : currentIndex === 1
+                                                ? "所有因子条件都满足才进池"
+                                                : currentIndex === 2
+                                                  ? "任一因子条件满足即可进池"
+                                                  : "各因子独立排名, 按权重比例分池"
+                                        font.pixelSize: 10
+                                        color: "#64748b"
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.preferredWidth: 100
                                     spacing: 4
 
                                     Text {
@@ -564,13 +615,43 @@ Rectangle {
                                         id: factorMinimumScoreField
                                         Layout.fillWidth: true
                                         text: String(root.factorOverlay.minimumCompositeScore || 0)
-                                        placeholderText: "默认 0"
+                                        placeholderText: "0"
                                         onEditingFinished: {
                                             var parsed = Number(text)
                                             root.factorOverlay.minimumCompositeScore = isNaN(parsed) ? 0 : parsed
                                             text = String(root.factorOverlay.minimumCompositeScore)
                                             root.syncDecoratedParameters()
                                         }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.preferredWidth: 110
+                                    spacing: 4
+
+                                    Text {
+                                        text: "目标持仓数"
+                                        font.pixelSize: 11
+                                        color: "#cbd5e1"
+                                    }
+
+                                    TextField {
+                                        id: targetPositionField
+                                        Layout.fillWidth: true
+                                        text: String(root.factorOverlay.targetPositionCount || 50)
+                                        placeholderText: "50"
+                                        onEditingFinished: {
+                                            var parsed = parseInt(text, 10)
+                                            root.factorOverlay.targetPositionCount = (isNaN(parsed) || parsed < 1) ? 50 : parsed
+                                            text = String(root.factorOverlay.targetPositionCount)
+                                            root.syncDecoratedParameters()
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "候选池大小"
+                                        font.pixelSize: 10
+                                        color: "#64748b"
                                     }
                                 }
                             }
@@ -1806,7 +1887,7 @@ Rectangle {
     function defaultFactorOverlay() {
         return {
             enabled: false,
-            targetPositionCount: 10,
+            targetPositionCount: 50,
             minimumCompositeScore: 0,
             combineMode: "rank_only",
             selectionScope: "rule_eligible",

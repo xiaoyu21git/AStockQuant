@@ -15,6 +15,7 @@ enum class FactorCombineMode : std::uint8_t {
     RankOnly = 0,      // 纯加权排名 — 不做硬过滤, 直接 compositeScore 排名选 top N
     Intersection = 1,  // 交集 — 所有因子 passFilter 才进入排名
     Union = 2,         // 并集 — 任一因子 passFilter 即可进入排名
+    Quota = 3,         // 配额制 — 各因子独立排名, 按权重比例分池, 合并去重
 };
 
 struct FactorFilterConfig {
@@ -35,12 +36,10 @@ public:
     void setTargetPositionCount(int n) { m_targetPositionCount = n; }
     void setMinimumCompositeScore(double s) { m_minimumCompositeScore = s; }
     void setCombineMode(FactorCombineMode mode) { m_combineMode = mode; }
-    void setStrategyBlendWeight(double w) { m_strategyBlendWeight = w; }
     void setFactorInfluence(const std::unordered_map<std::string, double>& inf) { m_factorInfluence = inf; }
     [[nodiscard]] int targetPositionCount() const { return m_targetPositionCount; }
     [[nodiscard]] double minimumCompositeScore() const { return m_minimumCompositeScore; }
     [[nodiscard]] FactorCombineMode combineMode() const { return m_combineMode; }
-    [[nodiscard]] double strategyBlendWeight() const { return m_strategyBlendWeight; }
     bool enabled() const { return !m_filters.empty() || !m_scalers.empty(); }
 
     /// 配置涉及的全部因子 ID (filters ∪ scalers, 去重)
@@ -62,11 +61,16 @@ public:
     /// 多因子按配置权重汇总为单一排名分数，因子数据缺失返回 0.0
     [[nodiscard]] double compositeScore(const std::string& symbol) const;
 
-    /// 缩放：返回乘数(默认1.0，无因子时为1.0)
-    [[nodiscard]] double scaleFactor(const std::string& symbol) const;
-
     /// 快照中全部标的集合 — 因子独立选股的候选池
     [[nodiscard]] std::vector<std::string> allSymbols() const;
+
+    /// @brief 配额制: 按单因子原始值降序排名 (值越大越优)
+    [[nodiscard]] std::vector<std::string> rankedSymbols(const std::string& factorId) const;
+
+    /// @brief 配额制: 因子影响力权重 (factorId → influence, Σ=1.0)
+    [[nodiscard]] const std::unordered_map<std::string, double>& factorInfluences() const noexcept {
+        return m_factorInfluence;
+    }
 
 private:
     /// 单因子快照 + 预计算统计量
@@ -83,8 +87,7 @@ private:
     // compositeScore 专用: factorId → 归一化权重(Σ=1.0), 与 scaleFactor 的 influence 分离
     std::unordered_map<std::string, double> m_factorInfluence;
     FactorCombineMode m_combineMode{FactorCombineMode::RankOnly};
-    double m_strategyBlendWeight{0.5};  // 策略信号在最终分数中的权重(0.5=策略50%+因子50%)
-    int m_targetPositionCount{10};
+    int m_targetPositionCount{50};
     double m_minimumCompositeScore{0.0};
     // factorId → 快照与统计量
     std::unordered_map<std::string, FactorSnapshotStats> m_snapshot;

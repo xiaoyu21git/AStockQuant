@@ -5,6 +5,7 @@
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/config/ConfigManager.hpp"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <algorithm>
 #include <chrono>
@@ -22,7 +23,11 @@ PostMarketSyncService& PostMarketSyncService::instance() {
     return s;
 }
 
-PostMarketSyncService::PostMarketSyncService() = default;
+PostMarketSyncService::PostMarketSyncService()
+    : m_executor(std::make_shared<foundation::thread::ThreadPoolExecutor>(
+          1, 2, std::chrono::seconds(120), "PostMktSync"))
+{
+}
 
 PostMarketSyncService::~PostMarketSyncService() {
     m_running.store(false);
@@ -43,7 +48,8 @@ void PostMarketSyncService::start() {
 
 bool PostMarketSyncService::forceSyncToday() {
     int today = getCurrentTradingDay();
-    std::thread([this, today]() {
+    if (!m_executor) return false;
+    m_executor->post([this, today]() {
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) { INTERNAL_ERROR_STREAM << "[PostMktSync] DB不可用"; return; }
         auto calRes = db->executeQuery(
@@ -84,13 +90,14 @@ bool PostMarketSyncService::forceSyncToday() {
         INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
         // 复权因子异步补（耗时，不阻塞同步完成通知）
         fillAdjFactors();
-    }).detach();
+    });
     return true;
 }
 
 void PostMarketSyncService::forceSyncDate(int tradingDay) {
     INTERNAL_INFO_STREAM<<"[PostMktSync] 手动补同步 tradingDay="<<tradingDay;
-    std::thread([this,tradingDay](){
+    if (!m_executor) return;
+    m_executor->post([this,tradingDay](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen())return;
         auto res=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
@@ -98,12 +105,13 @@ void PostMarketSyncService::forceSyncDate(int tradingDay) {
         for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
         if(syncDaily(db,s2i,syms,tradingDay))syncMinute(db,s2i,syms,tradingDay);
         syncWeekly(db,tradingDay);syncMonthly(db,tradingDay);
-    }).detach();
+    });
 }
 
 void PostMarketSyncService::forceSyncMissingDays(int lookbackDays) {
     INTERNAL_INFO_STREAM<<"[PostMktSync] 扫描缺口 lookbackDays="<<lookbackDays;
-    std::thread([this,lookbackDays](){
+    if (!m_executor) return;
+    m_executor->post([this,lookbackDays](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen())return;
         auto cal=db->executeQuery("SELECT trade_date::text AS dt FROM ref.trade_calendar WHERE is_trading_day=true AND trade_date>=CURRENT_DATE-"+std::to_string(lookbackDays)+" AND trade_date<=CURRENT_DATE ORDER BY trade_date");
@@ -121,7 +129,7 @@ void PostMarketSyncService::forceSyncMissingDays(int lookbackDays) {
         for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();
             if(syncDaily(db,s2i,syms,td))syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] 补齐 "<<md.size()<<" 天";
-    }).detach();
+    });
 }
 
 void PostMarketSyncService::probeGmCoverage(const std::string& symbol, const std::vector<std::string>& dates) {
@@ -138,8 +146,9 @@ void PostMarketSyncService::probeGmCoverage(const std::string& symbol, const std
 }
 
 void PostMarketSyncService::fillAdjFactors() {
-    INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 开始";
-    std::thread([this](){
+    INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 开始(线程池异步)";
+    if (!m_executor) { INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors executor不可用"; return; }
+    m_executor->post([this](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen()){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors DB不可用";return;}
 
@@ -188,8 +197,7 @@ void PostMarketSyncService::fillAdjFactors() {
 
         // 保存本次同步日期
         {std::ofstream f("post_market_adj_factor_last.txt");if(f)f<<endDate;}
-        INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors 完成 "<<ok<<" 条更新, "<<total<<" 只标的, 下次since="<<endDate;
-    }).detach();
+    });
 }
 
 std::string PostMarketSyncService::getSyncStatus(int tradingDay) const {
