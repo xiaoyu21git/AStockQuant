@@ -71,6 +71,9 @@ public:
     /// @brief 单行刷新 — 仅重新查询并更新指定策略在 listModel 中的行，不触发全量 replaceAll
     Q_INVOKABLE void refreshSingleStrategy(const QString& strategyId);
 
+    /// @brief symbol → "股票中文名 代码" (如 "平安银行 000001.SZ")
+    Q_INVOKABLE QString stockDisplayName(const QString& symbol) const;
+
     /// @brief C++ 内部获取单例，供 backtest bridge 等内部组件使用
     static StrategyBridge* instance();
 

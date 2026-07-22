@@ -220,14 +220,14 @@ Item {
                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                 onClicked: { selSymbol=modelData.symbol; buildSymbolChart() }}
                             Row { anchors.verticalCenter: parent.verticalCenter
-                                Text{width:72;text:modelData.symbol;font.pixelSize:9;color:selSymbol===modelData.symbol?"#F59E0B":"#F1F5F9"}
+                                Text{width:72;text:StrategyBridge.stockDisplayName(modelData.symbol);font.pixelSize:9;color:selSymbol===modelData.symbol?"#F59E0B":"#F1F5F9";elide:Text.ElideRight}
                                 Text{width:44;text:modelData.buys;font.pixelSize:9;color:"#94A3B8"}
                                 Text{width:44;text:modelData.sells;font.pixelSize:9;color:"#94A3B8"}
                                 Text{width:48;text:modelData.winRate;font.pixelSize:9;color:modelData.winRate>=50?"#FCA5A5":"#86EFAC"}
                                 Text{width:72;text:fn(modelData.totalPnl,0);font.pixelSize:9;color:modelData.totalPnl>=0?"#FCA5A5":"#86EFAC"}}}}}
                 ColumnLayout { Layout.fillWidth: true; Layout.fillHeight: true; spacing: 4
                     RowLayout {
-                        Text{text:selSymbol?"买卖点 · "+selSymbol:"← 点击标的查看";font.pixelSize:11;color:"#94A3B8"}
+                        Text{text:selSymbol?"买卖点 · "+StrategyBridge.stockDisplayName(selSymbol):"← 点击标的查看";font.pixelSize:11;color:"#94A3B8";elide:Text.ElideRight}
                         Item{Layout.fillWidth:true}
                         Text{text:selPnLTotal>=0?"盈":"亏";font.pixelSize:11;color:selPnLTotal>=0?"#FCA5A5":"#86EFAC"}
                         Text{text:selPnLTotal?fn(selPnLTotal,0):"";font.pixelSize:11;color:selPnLTotal>=0?"#FCA5A5":"#86EFAC"}}
@@ -238,6 +238,7 @@ Item {
                             Text{text:"→";font.pixelSize:14;color:"#64748B"}
                             Text{text:"卖 "+selSellInfo.date+" · "+fn(selSellInfo.price,2);font.pixelSize:10;color:selSellInfo.pnl>=0?"#10B981":"#EF4444"}
                             Item{Layout.fillWidth:true}
+                            Text{text:selSymbol?StrategyBridge.stockDisplayName(selSymbol):"";font.pixelSize:9;color:"#64748B"}
                             Text{text:"持仓 "+selPairStats.days+"天";font.pixelSize:11;color:"#F1F5F9";font.weight:Font.Bold}
                             Text{text:"盈亏 "+fn(selPairStats.pnl,0);font.pixelSize:11;color:selPairStats.pnl>=0?"#10B981":"#EF4444";font.weight:Font.Bold}
                             Text{text:selPairStats.ratio;font.pixelSize:10;color:"#94A3B8"}}}

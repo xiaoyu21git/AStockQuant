@@ -5,6 +5,7 @@ StrategyBridge* StrategyBridge::s_instance = nullptr;
 
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"
+#include "StockNameResolver.h"
 
 #include "database/MarketDataRepository.h"
 #include "database/NativePgConnectionPool.h"
@@ -779,4 +780,9 @@ void StrategyBridge::refreshSingleStrategy(const QString& strategyId)
     map["displayStatus"] = m_runtimeStatus.value(sid, QStringLiteral("已停止"));
     m_listModel->upsertOne(map);
     emit strategiesChanged();
+}
+
+QString StrategyBridge::stockDisplayName(const QString& symbol) const
+{
+    return StockNameResolver::displayName(symbol);
 }
