@@ -365,7 +365,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 auto& pool = astock::database::NativePgConnectionPool::instance();
                 if (pool.isInitialized()) {
                     auto db = pool.getConnection();
-                    if (db && db->isOpen()) {
+                    if (db) {
                         domain::backtest::BacktestResultRepository repo(*db);
                         repo.ensureTables();
                         domain::backtest::StoredStrategyBacktest record;
@@ -423,6 +423,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         record.avgPositions    = result.avgPositions;
                         record.equityCurveJson = QJsonDocument(QJsonObject::fromVariantMap(
                             qResult["timeSeries"].toMap())).toJson(QJsonDocument::Compact).toStdString();
+                        INTERNAL_INFO_STREAM << "[StrategyBacktest] 准备写入回测结果 id=" << record.id << " strategy=" << record.strategyId;
                         if (repo.saveStrategyBacktest(record)) {
                             std::vector<domain::backtest::StoredStrategyTrade> storedTrades;
                             storedTrades.reserve(result.tradeLog.size());

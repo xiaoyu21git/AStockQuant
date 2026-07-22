@@ -18,6 +18,7 @@ class BacktestResultRepository;
 class StrategyPerformanceModel : public QAbstractListModel {
     Q_OBJECT
     Q_PROPERTY(QString strategyId READ strategyId WRITE setStrategyId NOTIFY strategyIdChanged)
+    Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
 public:
     enum Roles {
         RunAtRole = Qt::UserRole + 1,
@@ -56,6 +57,7 @@ public:
 
 signals:
     void strategyIdChanged();
+    void countChanged();
     void errorOccurred(const QString& message);
 
 private:

@@ -111,6 +111,7 @@ void StrategyPerformanceModel::refresh() {
         }
     }
     endResetModel();
+    emit countChanged();
 }
 
 QVariantMap StrategyPerformanceModel::loadResultDetail(int row) {

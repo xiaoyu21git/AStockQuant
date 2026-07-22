@@ -82,8 +82,29 @@ std::vector<domain::trading::OrderRequest> OrderGenerator::generate(
         OrderRequest order = m_orderBuilder->buildSignalOrder(
             raw.symbol(), side, 0, deltaQty, signalScore);
         order.setExtension(domain::trading::ExtKey::kSignalIntent, static_cast<std::uint64_t>(intent));
+        order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);  // 保留原始权重用于上限压缩
         result.push_back(std::move(order));
     }
+
+    // ── 总敞口上限: 超出100%时按比例压缩全部买单 ──
+    {
+        double totalWeight = 0.0;
+        for (const auto& o : result) {
+            if (o.side() != OrderSide::Buy) continue;
+            totalWeight += o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+        }
+        if (totalWeight > 1.0) {
+            double scale = 1.0 / totalWeight;
+            for (auto& o : result) {
+                if (o.side() != OrderSide::Buy) continue;
+                double w = o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+                std::int64_t newQty = static_cast<std::int64_t>(o.quantity() * scale / kMinLot) * kMinLot;
+                if (newQty >= kMinLot) o.setQuantity(newQty);
+                o.setExtension(domain::trading::ExtKey::kTargetWeight, w * scale);
+            }
+        }
+    }
+
     return result;
 }
 

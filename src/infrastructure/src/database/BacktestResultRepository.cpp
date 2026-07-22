@@ -149,7 +149,7 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
         "avg_holding_days, avg_positions, "
         "stop_loss_fills, rule_exit_fills, normal_sell_fills, risk_rejected, "
         "equity_curve_json"
-        ") VALUES (?,?,?,?::date,?::date,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        ") VALUES (?,?,?,to_date(?,'YYYY-MM-DD'),to_date(?,'YYYY-MM-DD'),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "strategy_id=EXCLUDED.strategy_id, run_at=NOW(), behavior_kind=EXCLUDED.behavior_kind, "
         "data_start_date=EXCLUDED.data_start_date, data_end_date=EXCLUDED.data_end_date, "
@@ -180,10 +180,13 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
          P{r.stopLossFills}, P{r.ruleExitFills}, P{r.normalSellFills}, P{r.riskRejected},
          P{r.equityCurveJson}});
     if (affected <= 0) {
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveStrategyBacktest failed id=" << r.id
-                              << " error=" << m_db.lastError();
+        auto err = m_db.lastError();
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveStrategyBacktest FAILED id=" << r.id
+                              << " affected=" << affected << " error=" << err;
+        std::cerr << "[BacktestRepo] SAVE FAILED: " << err << std::endl;
         return false;
     }
+    INTERNAL_INFO_STREAM << "[BacktestRepo] saveStrategyBacktest OK id=" << r.id;
     return true;
 }
 
