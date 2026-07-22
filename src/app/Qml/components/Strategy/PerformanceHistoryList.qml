@@ -128,8 +128,8 @@ Item {
                     model: perfModel; spacing: 4
                     header: Row {
                         width: historyList.width
-                        Text { width: 120; text: "时间"; font.pixelSize: 10; color: "#64748B" }
-                        Text { width: 55; text: "总收益"; font.pixelSize: 10; color: "#64748B" }
+                        Text { width: 105; text: "回测时间"; font.pixelSize: 10; color: "#64748B" }
+                        Text { width: 100; text: "数据区间"; font.pixelSize: 10; color: "#64748B" }
                         Text { width: 55; text: "年化"; font.pixelSize: 10; color: "#64748B" }
                         Text { width: 45; text: "夏普"; font.pixelSize: 10; color: "#64748B" }
                         Text { width: 50; text: "回撤"; font.pixelSize: 10; color: "#64748B" }
@@ -145,8 +145,8 @@ Item {
                             onClicked: { root.selectedRow = index; root.selectedResult = perfModel.loadResultDetail(index); root.resultSelected(root.selectedResult) }
                         }
                         Row { anchors.verticalCenter: parent.verticalCenter
-                            Text { width: 120; text: (runAt||"").substring(0,16); font.pixelSize: 11; color: "#CBD5E1" }
-                            Text { width: 55; text: (totalReturn*100).toFixed(1)+"%"; font.pixelSize: 11; color: totalReturn>=0?"#EF4444":"#22C55E" }
+                            Text { width: 105; text: (runAt||"").substring(0,16); font.pixelSize: 11; color: "#CBD5E1" }
+                            Text { width: 100; text: dateRange(parameters); font.pixelSize: 10; color: "#64748B" }
                             Text { width: 55; text: (annualizedReturn*100).toFixed(2)+"%"; font.pixelSize: 11; color: annualizedReturn>=0?"#EF4444":"#22C55E" }
                             Text { width: 45; text: sharpeRatio.toFixed(2); font.pixelSize: 11; color: "#F1F5F9" }
                             Text { width: 50; text: (maxDrawdown*100).toFixed(1)+"%"; font.pixelSize: 11; color: "#22C55E" }
@@ -262,6 +262,13 @@ Item {
                 Text { anchors.horizontalCenter: parent.horizontalCenter; text: cardLabel; font.pixelSize: 10; color: "#94A3B8" }
             }
         }
+    }
+    function dateRange(p) {
+        if (!p) return "-"
+        var s = (p.dataStartDate||"").toString().substring(0,10)
+        var e = (p.dataEndDate||"").toString().substring(0,10)
+        if (s.length < 4) return "-"
+        return s + "~" + e
     }
     function detailCard(l, v, e) { return detailCardComp.createObject(detailRow, { cardLabel: l, cardValue: v, cardEmphasize: e }) }
 }

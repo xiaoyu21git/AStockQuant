@@ -62,7 +62,7 @@ std::vector<PgParam> buildParams(const std::vector<SqlParam>& params) {
             std::snprintf(buf, sizeof(buf), "%.15g", std::get<double>(p));
             result.push_back({buf, PG_FLOAT8});
         } else if (std::holds_alternative<std::string>(p)) {
-            result.push_back({std::get<std::string>(p), PG_TEXT});
+            result.push_back({std::get<std::string>(p), 0});  // OID=0 让 PG 自动推断类型
         }
     }
     return result;

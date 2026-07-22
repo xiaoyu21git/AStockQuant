@@ -360,14 +360,13 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             riskMap["rejectionDetails"] = rejectionMap;
             qResult["risk"] = riskMap;
 
-            // 持久化到 DB (结果 + 逐笔成交明细, 供独立重放验证)
+            // 持久化到 DB
             {
                 auto& pool = astock::database::NativePgConnectionPool::instance();
-                if (pool.isInitialized()) {
-                    auto db = pool.getConnection();
-                    if (db) {
-                        domain::backtest::BacktestResultRepository repo(*db);
-                        repo.ensureTables();
+                auto db = pool.getConnection();
+                if (db) {
+                    domain::backtest::BacktestResultRepository repo(*db);
+                    repo.ensureTables();
                         domain::backtest::StoredStrategyBacktest record;
                         record.id = foundation::utils::Uuid::generate_v4().to_string();
                         record.strategyId = capturedStrategyId;
@@ -441,7 +440,6 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                                                  << " trades=" << storedTrades.size();
                         }
                     }
-                }
             }
 
             // ── 回测指标写入策略卡片 ──
