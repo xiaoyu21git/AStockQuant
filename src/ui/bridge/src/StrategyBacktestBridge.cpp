@@ -370,12 +370,10 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         domain::backtest::StoredStrategyBacktest record;
                         record.id = foundation::utils::Uuid::generate_v4().to_string();
                         record.strategyId = capturedStrategyId;
-                        auto sd = params.value("startDate").toString();
-                        auto ed = params.value("endDate").toString();
-                        if (sd.length() == 8 && !sd.contains("-")) sd = sd.left(4) + "-" + sd.mid(4,2) + "-" + sd.right(2);
-                        if (ed.length() == 8 && !ed.contains("-")) ed = ed.left(4) + "-" + ed.mid(4,2) + "-" + ed.right(2);
-                        record.dataStartDate = sd.toStdString();
-                        record.dataEndDate   = ed.toStdString();
+                        record.dataStartDate = foundation::utils::Timestamp::from_string(
+                            params.value("startDate").toString().toStdString(), "%Y%m%d").to_string("%Y-%m-%d");
+                        record.dataEndDate   = foundation::utils::Timestamp::from_string(
+                            params.value("endDate").toString().toStdString(), "%Y%m%d").to_string("%Y-%m-%d");
                         // 策略参数
                         auto po = strategyParamsSnapshot;
                         auto fo = po.value("factor_overlay").toMap();
