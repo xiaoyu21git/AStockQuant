@@ -137,11 +137,11 @@ Item {
         equityS.clear();drawdownS.clear();returnS.clear();bmEquityS.clear();bmDrawdownS.clear()
         var pM=-1e18,pm=1e18,tFirst=Infinity,tLast=-Infinity
         for(var i=0;i<pv.length;i++){
-            var d=i<dates.length?new Date(parseInt(String(dates[i]).substr(0,4)),parseInt(String(dates[i]).substr(4,2))-1,parseInt(String(dates[i]).substr(6,2))):new Date(2020,0,1+i)
+            var d=i<dates.length?new Date(parseInt(String(dates[i]).substr(0,4)),parseInt(String(dates[i]).substr(4,2))-1,parseInt(String(dates[i]).substr(6,2))):new Date(2020,0,1+i);
             var ms=d.getTime();if(ms<tFirst)tFirst=ms;if(ms>tLast)tLast=ms
             var sv=isFinite(pv[i])?pv[i]:pv[0]||1;equityS.append(ms,sv);drawdownS.append(ms,isFinite(dd[i])?dd[i]:0);if(sv>pM)pM=sv;if(sv<pm)pm=sv}
         for(var k=0;k<bv.length;k++){
-            var d2=k<dates.length?new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2))):new Date(2020,0,1+k)
+            var d2=k<dates.length?new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2))):new Date(2020,0,1+k);
             var ms2=d2.getTime();if(ms2<tFirst)tFirst=ms2;if(ms2>tLast)tLast=ms2
             var bmv=isFinite(bv[k])?bv[k]:bv[0]||1;bmEquityS.append(ms2,bmv);bmDrawdownS.append(ms2,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv)}
         if(isFinite(tFirst)){eqX.min=new Date(tFirst);eqX.max=new Date(tLast);ddX.min=new Date(tFirst);ddX.max=new Date(tLast);retX.min=new Date(tFirst);retX.max=new Date(tLast)}
@@ -150,7 +150,7 @@ Item {
         for(var dk2=0;dk2<bdd.length;dk2++){var bv2=isFinite(bdd[dk2])?bdd[dk2]:0;if(bv2<ddMinAll)ddMinAll=bv2}
         ddY.min=Math.min(0,ddMinAll*1.05);ddY.max=0
         var cum=0,rM=-1e18;for(var j=0;j<ret.length;j++){
-            var d3=j<dates.length?new Date(parseInt(String(dates[j]).substr(0,4)),parseInt(String(dates[j]).substr(4,2))-1,parseInt(String(dates[j]).substr(6,2))):new Date(2020,0,1+j)
+            var d3=j<dates.length?new Date(parseInt(String(dates[j]).substr(0,4)),parseInt(String(dates[j]).substr(4,2))-1,parseInt(String(dates[j]).substr(6,2))):new Date(2020,0,1+j);
             var ms3=d3.getTime();cum+=ret[j];returnS.append(ms3,cum);if(cum>rM)rM=cum}
         retY.min=-0.5;retY.max=rM*1.1
         var m={},td=dates;for(var di=0;di<td.length;di++)m[td[di]]=di;ddIndexByDate=m
