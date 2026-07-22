@@ -991,8 +991,7 @@ Rectangle {
         showActionFeedback(msg, false)
         showPerformance = false
         showBacktestWorkbench = true
-        // 刷新策略列表, 使回测指标显示在策略卡片上
-        if (strategyService && strategyService.init) strategyService.init()
+        // 策略卡片数据由 C++ StrategyBacktestBridge 直接更新 StrategyListModel 单行，QML 不再调 init()
         backtestWorkbenchMode = "analysis"
         backtestWorkbenchLoadedOnce = true
         if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
@@ -2122,6 +2121,13 @@ Rectangle {
     onVisibleChanged: {
         if (visible && !pageServicesReady) {
             ensurePageServicesReady()
+        }
+    }
+
+    onShowPerformanceChanged: {
+        if (showPerformance && performanceLoader.item
+                && typeof performanceLoader.item.refreshPerformance === "function") {
+            performanceLoader.item.refreshPerformance()
         }
     }
 

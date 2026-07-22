@@ -46,13 +46,29 @@ Item {
         a.sort(function(a,b){return b.totalPnl-a.totalPnl});return a}
 
     function buildSymbolChart(){
-        buyPoints.clear();sellWin.clear();sellLoss.clear();selPnLTotal=0.0
-        for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i]
-        if(selSymbol&&t.symbol!==selSymbol)continue
-        var d=new Date(parseInt(t.date.toString().substr(0,4)),parseInt(t.date.toString().substr(4,2))-1,parseInt(t.date.toString().substr(6,2)))
-        if(t.isBuy){buyPoints.append(d.getTime(),t.price)}
-        else{var p=t.realizedPnl||0;selPnLTotal+=p
-        if(p>=0)sellWin.append(d.getTime(),t.price);else sellLoss.append(d.getTime(),t.price)}}}
+        buyPoints.clear();sellWin.clear();sellLoss.clear();priceLine.clear();selPnLTotal=0.0
+        var tMin=Infinity,tMax=-Infinity,pMin=Infinity,pMax=-Infinity
+        // 1. 日线收盘价走势
+        var sp=backtestResult.symbolPrices[selSymbol]
+        for(var di=0;di<sp.dates.length;di++){
+            var dd=sp.dates[di],dc=sp.closes[di]
+            var dObj=new Date(parseInt(String(dd).substr(0,4)),parseInt(String(dd).substr(4,2))-1,parseInt(String(dd).substr(6,2)))
+            var ms=dObj.getTime();if(ms<tMin)tMin=ms;if(ms>tMax)tMax=ms;if(dc<pMin)pMin=dc;if(dc>pMax)pMax=dc
+            priceLine.append(ms,dc)
+        }
+        // 2. 买卖点叠加
+        var pts=[];for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i]
+        if(selSymbol&&t.symbol!==selSymbol)continue;pts.push(t)}
+        pts.sort(function(a,b){return a.date-b.date})
+        for(var j=0;j<pts.length;j++){var t=pts[j]
+        var d2=new Date(parseInt(t.date.toString().substr(0,4)),parseInt(t.date.toString().substr(4,2))-1,parseInt(t.date.toString().substr(6,2)))
+        var ms2=d2.getTime();if(ms2<tMin)tMin=ms2;if(ms2>tMax)tMax=ms2;if(t.price<pMin)pMin=t.price;if(t.price>pMax)pMax=t.price
+        if(t.isBuy){buyPoints.append(ms2,t.price)}
+        else{var pp=t.realizedPnl||0;selPnLTotal+=pp
+        if(pp>=0){sellWin.append(ms2,t.price)}else{sellLoss.append(ms2,t.price)}}}
+        if(isFinite(tMin)){symAxisX.min=new Date(tMin-86400000*30);symAxisX.max=new Date(tMax+86400000*30)}
+        if(isFinite(pMin)){var pad=(pMax-pMin)*0.1||pMax*0.02;symAxisY.min=pMin-pad;symAxisY.max=pMax+pad}
+    }
 
     // 比例显示
     function fp(v,d){var n=Number(v);return isNaN(n)?"--":(n*100).toFixed(d||2)+"%"}
@@ -64,6 +80,23 @@ Item {
     property var params: (backtestResult&&backtestResult.parameters)?backtestResult.parameters:({})
     property var risk: (backtestResult&&backtestResult.risk)?backtestResult.risk:({})
     property var ddIndexByDate: ({})
+
+    // 空仓统计: 按标的汇总所有持仓日期, 统计空仓天数
+    property var positionDaysSet: {
+        var s=new Set()
+        for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i];s.add(t.date)}
+        // 简化: 用首笔买入到末笔卖出之间的天数估算
+        var sorted=Array.from(s).sort()
+        if(sorted.length<2)return{totalDays:0,positionDays:0,emptyDays:0}
+        var first=parseInt(sorted[0]),last=parseInt(sorted[sorted.length-1])
+        var total=Math.ceil((new Date(parseInt(last.toString().substr(0,4)),parseInt(last.toString().substr(4,2))-1,parseInt(last.toString().substr(6,2)))
+                              -new Date(parseInt(first.toString().substr(0,4)),parseInt(first.toString().substr(4,2))-1,parseInt(first.toString().substr(6,2))))/86400000)+1
+        return{totalDays:total,positionDays:s.size,emptyDays:total-s.size}
+    }
+    property var tradeMeta: {
+        var tsd=ts.dates||[]
+        return{tradingDays:tsd.length,totalTrades:tradeRows.length}
+    }
 
     function fmtDate(v){var s=String(v||"");return s.length===8?s.substr(0,4)+"-"+s.substr(4,2)+"-"+s.substr(6,2):(s||"--")}
     function tradeReturnRatio(row){var c=(row.amount||0)-(row.realizedPnl||0);return c>0?(row.realizedPnl||0)/c:NaN}
@@ -84,7 +117,10 @@ Item {
         var pM=-1e18,pm=1e18;for(var i=0;i<pv.length;i++){var sv=isFinite(pv[i])&&sB>0?pv[i]/sB:1.0;equityS.append(i,sv);drawdownS.append(i,isFinite(dd[i])?dd[i]:0);if(sv>pM)pM=sv;if(sv<pm)pm=sv}
         for(var k=0;k<bv.length;k++){var bmv=isFinite(bv[k])&&bB>0?bv[k]/bB:1.0;bmEquityS.append(k,bmv);bmDrawdownS.append(k,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv}
         var eN=Math.max(1,Math.max(pv.length,bv.length)-1);eqX.max=eN;ddX.max=eN;retX.max=Math.max(1,ret.length-1)
-        eqY.min=pm*0.95;eqY.max=pM*1.05;ddY.min=0;ddY.max=1
+        eqY.min=pm*0.95;eqY.max=pM*1.05
+        var ddMinAll=0;for(var di2=0;di2<dd.length;di2++){var dv2=isFinite(dd[di2])?dd[di2]:0;if(dv2<ddMinAll)ddMinAll=dv2}
+        for(var dk2=0;dk2<bdd.length;dk2++){var bv2=isFinite(bdd[dk2])?bdd[dk2]:0;if(bv2<ddMinAll)ddMinAll=bv2}
+        ddY.min=Math.min(0,ddMinAll*1.05);ddY.max=0
         var cum=0,rM=-1e18;for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum);if(cum>rM)rM=cum}
         retY.min=-0.5;retY.max=rM*1.1
         var m={},td=tss.dates||[];for(var di=0;di<td.length;di++)m[td[di]]=di;ddIndexByDate=m
@@ -113,9 +149,13 @@ Item {
                 Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"利润因子";value:fn(perf.profitFactor,2);accent:"#EF4444"}
                 Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"Alpha";value:fn(perf.alpha,3);accent:"#F1F5F9"}
                 Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"Beta";value:fn(perf.beta,2);accent:"#F1F5F9"}
-                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"总交易";value:fn(trades.totalTrades,0);accent:"#64748B"}}}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"总交易";value:fn(trades.totalTrades,0);accent:"#64748B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"交易日";value:fn(tradeMeta.tradingDays,0);accent:"#F1F5F9"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"持仓日";value:fn(tradeMeta.tradingDays-positionDaysSet.emptyDays,0);accent:"#F59E0B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"空仓日";value:fn(positionDaysSet.emptyDays,0);accent:"#64748B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"持仓比";value: tradeMeta.tradingDays>0?fn((tradeMeta.tradingDays-positionDaysSet.emptyDays)/tradeMeta.tradingDays*100,0)+"%":"--";accent:"#38BDF8"}}}
 
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 250; radius: 8; color: "#1E293B"
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 300; radius: 8; color: "#1E293B"
             ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
                 Text{text:"净值曲线";font.pixelSize:11;color:"#94A3B8"}
                 ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
@@ -124,7 +164,7 @@ Item {
                     LineSeries{id:equityS;axisX:eqX;axisY:eqY;color:"#EF4444";width:2}
                     LineSeries{id:bmEquityS;axisX:eqX;axisY:eqY;color:"#94A3B8";width:1;style:Qt.DashLine}}}}
 
-        RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 200; spacing: 8
+        RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 240; spacing: 8
             Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: "#1E293B"
                 ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
                     Text{text:"回撤曲线";font.pixelSize:11;color:"#94A3B8"}
@@ -142,7 +182,7 @@ Item {
                         LineSeries{id:returnS;axisX:retX;axisY:retY;color:"#38BDF8";width:2}}}}}
 
         // 个股统计 + 买卖点图表
-        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 320; radius: 8; color: "#1E293B"
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 420; radius: 8; color: "#1E293B"
             RowLayout { anchors.fill: parent; anchors.margins: 8; spacing: 12
                 ColumnLayout { Layout.fillWidth: true; Layout.fillHeight: true; spacing: 2
                     Text{text:"持仓标的统计";font.pixelSize:11;color:"#94A3B8"}
@@ -173,9 +213,10 @@ Item {
                         backgroundColor: "#0B1220"; plotAreaColor: "#0B1220"
                         DateTimeAxis { id: symAxisX; format: "yy/MM"; labelsColor: "#64748B"; gridVisible: false; labelsFont.pixelSize: 8 }
                         ValueAxis { id: symAxisY; labelsColor: "#64748B"; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8 }
-                        ScatterSeries { id: buyPoints; color: "#EF4444"; markerSize: 8 }
-                        ScatterSeries { id: sellWin; color: "#FCA5A5"; markerSize: 10 }
-                        ScatterSeries { id: sellLoss; color: "#86EFAC"; markerSize: 10 }}}}}
+                        LineSeries { id: priceLine; axisX: symAxisX; axisY: symAxisY; color: "#94A3B8"; width: 2 }
+                        ScatterSeries { id: buyPoints; axisX: symAxisX; axisY: symAxisY; color: "#F59E0B"; markerSize: 9; borderColor: "#F59E0B" }
+                        ScatterSeries { id: sellWin;  axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10 }
+                        ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#EF4444"; markerSize: 10 }}}}}
 
         Item { Layout.preferredHeight: 10 }}}
 

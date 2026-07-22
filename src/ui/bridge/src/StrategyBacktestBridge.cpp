@@ -26,6 +26,8 @@
 #include <QJsonDocument>
 #include <QMetaObject>
 
+#include <set>
+
 namespace {
 
 using domain::backtest::BacktestRequest;
@@ -290,6 +292,62 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             tradeStats["largestLoss"]   = result.tradeStats.largestLoss.value;
             qResult["trades"] = tradeStats;
 
+            // 将逐笔成交记录直传 QML，分析页无需等 DB 落盘
+            QVariantList tradeLogList;
+            tradeLogList.reserve(static_cast<int>(result.tradeLog.size()));
+            for (const auto& trade : result.tradeLog) {
+                QVariantMap tradeRow;
+                tradeRow["date"]        = trade.tradeDate;
+                tradeRow["symbol"]      = QString::fromStdString(trade.symbol);
+                tradeRow["isBuy"]       = trade.isBuy;
+                tradeRow["quantity"]    = static_cast<qint64>(trade.quantity);
+                tradeRow["price"]       = trade.price;
+                tradeRow["realizedPnl"] = trade.realizedPnl;
+                tradeLogList.append(tradeRow);
+            }
+            qResult["tradeLog"] = tradeLogList;
+
+            // 每只标的的日线收盘价序列，供 QML 画日线走势 + 买卖点叠加
+            if (m_strategyDataSvc && m_strategyDataSvc->close().isValid()) {
+                QVariantMap symbolPrices;
+                const auto& syms = m_strategyDataSvc->symbolStrings();
+                const auto& dates = m_strategyDataSvc->dates();
+                auto closeMat = m_strategyDataSvc->close();
+                const int nRows = closeMat.rowCount;
+                const int nCols = closeMat.columnCount;
+                const int stride = closeMat.rowStride;
+                const auto* data = closeMat.data;
+
+                // 收集出现过的标的
+                std::set<std::string> tradedSyms;
+                for (const auto& t : result.tradeLog) tradedSyms.insert(t.symbol);
+
+                for (const auto& sym : tradedSyms) {
+                    int col = -1;
+                    for (int c = 0; c < nCols; ++c) {
+                        if (c < static_cast<int>(syms.size()) && syms[c] == sym) { col = c; break; }
+                    }
+                    if (col < 0) continue;
+
+                    QVariantList priceDates, priceCloses;
+                    for (int r = 0; r < nRows; ++r) {
+                        float price = data[r * stride + col];
+                        if (price > 0 && std::isfinite(price)) {
+                            priceDates.append(r < static_cast<int>(dates.size()) ? dates[r].value : 0);
+                            priceCloses.append(static_cast<double>(price));
+                        }
+                    }
+                    if (!priceDates.isEmpty()) {
+                        QVariantMap symData;
+                        symData["dates"] = priceDates;
+                        symData["closes"] = priceCloses;
+                        symbolPrices[QString::fromStdString(sym)] = symData;
+                    }
+                }
+                if (!symbolPrices.isEmpty())
+                    qResult["symbolPrices"] = symbolPrices;
+            }
+
             QVariantMap timeSeries;
             QVariantList equityList, dateList, returnList, drawdownList,
                          bmEquityList, bmDrawdownList;
@@ -360,8 +418,63 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             riskMap["rejectionDetails"] = rejectionMap;
             qResult["risk"] = riskMap;
 
-            // 持久化到 DB
+            // ── 策略卡片指标 & 凯利仓位先落库（快），然后 refreshSingleStrategy 才能读到新数据 ──
             {
+                try {
+                    auto& pool = astock::database::NativePgConnectionPool::instance();
+                    if (pool.isInitialized()) {
+                        auto db = pool.getConnection();
+                        if (db && db->isOpen()) {
+                            std::ostringstream js;
+                            js << "{\"returns\":\"" << (result.metrics.totalReturn * 100.0)
+                               << "%\",\"sharpeRatio\":\"" << result.metrics.sharpeRatio
+                               << "\",\"maxDrawdown\":\"-" << (result.metrics.maxDrawdown * 100.0)
+                               << "%\",\"winRate\":\"" << (result.metrics.winRate * 100.0)
+                               << "%\",\"annualizedReturn\":\"" << (result.metrics.annualizedReturn * 100.0) << "%\"}";
+                            db->executeUpdate(
+                                "UPDATE strategy SET metadata_json = COALESCE(metadata_json,'{}'::jsonb) || ?::jsonb WHERE strategy_id = ?",
+                                {astock::database::SqlParam{js.str()}, astock::database::SqlParam{capturedStrategyId}});
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    INTERNAL_WARN_STREAM << "[StrategyBacktest] 指标写入失败: " << e.what();
+                }
+            }
+            {
+                double fk = result.fullKelly > 0.0 ? result.fullKelly : 0.0;
+                double hk = result.halfKelly > 0.0 ? result.halfKelly : 0.0;
+                try {
+                    auto& pool = astock::database::NativePgConnectionPool::instance();
+                    if (pool.isInitialized()) {
+                        auto db = pool.getConnection();
+                        if (db && db->isOpen()) {
+                            std::string kellyJson = "{\"fullKelly\":" + std::to_string(fk)
+                                + ",\"halfKelly\":" + std::to_string(hk) + "}";
+                            db->executeUpdate(
+                                "UPDATE strategy SET parameters = COALESCE(parameters,'{}'::jsonb) || ?::jsonb WHERE strategy_id = ?",
+                                {astock::database::SqlParam{kellyJson}, astock::database::SqlParam{capturedStrategyId}});
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    INTERNAL_WARN_STREAM << "[StrategyBacktest] 凯利仓位更新失败: " << e.what();
+                }
+            }
+
+            // ── 通知 UI 切换到分析页（数据来自内存 qResult，无需等 DB）──
+            QMetaObject::invokeMethod(this, [this, qResult, capturedStrategyId]() {
+                m_isRunning.store(false); m_progress = 100.0;
+                m_statusText = QStringLiteral("Complete");
+                emit isRunningChanged(); emit progressChanged(); emit statusChanged();
+                emit backtestCompleted(qResult);
+
+                // DB 已落库，单行刷新策略列表卡片上的回测指标
+                if (auto* sb = StrategyBridge::instance()) {
+                    sb->refreshSingleStrategy(QString::fromStdString(capturedStrategyId));
+                }
+            }, Qt::QueuedConnection);
+
+            // ── 回测结果 & 逐笔成交持久化（后台执行，不阻塞 UI）──
+            try {
                 auto& pool = astock::database::NativePgConnectionPool::instance();
                 auto db = pool.getConnection();
                 if (db) {
@@ -370,10 +483,8 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         domain::backtest::StoredStrategyBacktest record;
                         record.id = foundation::utils::Uuid::generate_v4().to_string();
                         record.strategyId = capturedStrategyId;
-                        record.dataStartDate = foundation::utils::Timestamp::from_string(
-                            params.value("startDate").toString().toStdString(), "%Y%m%d").to_string("%Y-%m-%d");
-                        record.dataEndDate   = foundation::utils::Timestamp::from_string(
-                            params.value("endDate").toString().toStdString(), "%Y%m%d").to_string("%Y-%m-%d");
+                        record.dataStartDate = params.value("startDate").toString().toStdString();
+                        record.dataEndDate   = params.value("endDate").toString().toStdString();
                         // 策略参数
                         auto po = strategyParamsSnapshot;
                         auto fo = po.value("factor_overlay").toMap();
@@ -415,7 +526,6 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         record.maxWin           = ts.value("largestWin").toDouble();
                         record.maxLoss          = ts.value("largestLoss").toDouble();
                         // 诊断
-                        // 诊断
                         record.stopLossFills   = result.stopLossFills;
                         record.ruleExitFills   = result.ruleExitFills;
                         record.normalSellFills = result.normalSellFills;
@@ -442,61 +552,9 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                                                  << " trades=" << storedTrades.size();
                         }
                     }
+            } catch (const std::exception& e) {
+                INTERNAL_WARN_STREAM << "[StrategyBacktest] 回测结果持久化失败: " << e.what();
             }
-
-            // ── 回测指标写入策略卡片 ──
-            {
-                try {
-                    auto& pool = astock::database::NativePgConnectionPool::instance();
-                    if (pool.isInitialized()) {
-                        auto db = pool.getConnection();
-                        if (db && db->isOpen()) {
-                            std::ostringstream js;
-                            js << "{\"returns\":\"" << (result.metrics.totalReturn * 100.0)
-                               << "%\",\"sharpeRatio\":\"" << result.metrics.sharpeRatio
-                               << "\",\"maxDrawdown\":\"-" << (result.metrics.maxDrawdown * 100.0)
-                               << "%\",\"winRate\":\"" << (result.metrics.winRate * 100.0)
-                               << "%\",\"annualizedReturn\":\"" << (result.metrics.annualizedReturn * 100.0) << "%\"}";
-                            db->executeUpdate(
-                                "UPDATE strategy SET metadata_json = COALESCE(metadata_json,'{}'::jsonb) || ?::jsonb WHERE strategy_id = ?",
-                                {astock::database::SqlParam{js.str()}, astock::database::SqlParam{capturedStrategyId}});
-                            INTERNAL_INFO_STREAM << "[StrategyBacktest] 回测指标已写入策略卡片";
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    INTERNAL_WARN_STREAM << "[StrategyBacktest] 指标写入失败: " << e.what();
-                }
-            }
-
-            // ── 凯利公式更新策略单票上限(负值写0, 禁止使用) ──
-            {
-                double fk = result.fullKelly > 0.0 ? result.fullKelly : 0.0;
-                double hk = result.halfKelly > 0.0 ? result.halfKelly : 0.0;
-                try {
-                    auto& pool = astock::database::NativePgConnectionPool::instance();
-                    if (pool.isInitialized()) {
-                        auto db = pool.getConnection();
-                        if (db && db->isOpen()) {
-                            std::string kellyJson = "{\"fullKelly\":" + std::to_string(fk)
-                                + ",\"halfKelly\":" + std::to_string(hk) + "}";
-                            db->executeUpdate(
-                                "UPDATE strategy SET parameters = COALESCE(parameters,'{}'::jsonb) || ?::jsonb WHERE strategy_id = ?",
-                                {astock::database::SqlParam{kellyJson}, astock::database::SqlParam{capturedStrategyId}});
-                            INTERNAL_INFO_STREAM << "[StrategyBacktest] 凯利仓位已更新: fullKelly="
-                                                 << fk << " halfKelly=" << hk;
-                        }
-                    }
-                } catch (const std::exception& e) {
-                    INTERNAL_WARN_STREAM << "[StrategyBacktest] 凯利仓位更新失败: " << e.what();
-                }
-            }
-
-            QMetaObject::invokeMethod(this, [this, qResult]() {
-                m_isRunning.store(false); m_progress = 100.0;
-                m_statusText = QStringLiteral("Complete");
-                emit isRunningChanged(); emit progressChanged(); emit statusChanged();
-                emit backtestCompleted(qResult);
-            }, Qt::QueuedConnection);
 
         } catch (const std::exception& e) {
             QMetaObject::invokeMethod(this, [this, msg = QString::fromUtf8(e.what())]() {

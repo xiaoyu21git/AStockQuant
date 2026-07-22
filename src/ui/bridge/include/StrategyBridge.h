@@ -68,6 +68,12 @@ public:
 
     [[nodiscard]] Q_INVOKABLE domain::strategy::StrategyEngine* backtestEngineProvider(const QString& strategyId);
 
+    /// @brief 单行刷新 — 仅重新查询并更新指定策略在 listModel 中的行，不触发全量 replaceAll
+    Q_INVOKABLE void refreshSingleStrategy(const QString& strategyId);
+
+    /// @brief C++ 内部获取单例，供 backtest bridge 等内部组件使用
+    static StrategyBridge* instance();
+
 signals:
     void busyChanged();
     void errMsgChanged();
@@ -207,4 +213,6 @@ private:
 
     // 策略运行时状态（内存单向控制，不查 DB/引擎）
     QHash<QString, QString> m_runtimeStatus;
+
+    static StrategyBridge* s_instance;
 };

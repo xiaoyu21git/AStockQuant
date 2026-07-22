@@ -1,5 +1,7 @@
 #include "../include/StrategyBridge.h"
 
+// 静态单例指针
+StrategyBridge* StrategyBridge::s_instance = nullptr;
 
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"
@@ -310,9 +312,13 @@ StrategyBridge::StrategyBridge(QObject* parent)
     , m_listModel(new StrategyListModel(this))
 {
     INTERNAL_INFO_STREAM << "[Bridge] CTOR";
+    s_instance = this;
 }
 
-StrategyBridge::~StrategyBridge() = default;
+StrategyBridge::~StrategyBridge()
+{
+    if (s_instance == this) s_instance = nullptr;
+}
 
 void StrategyBridge::init()
 {
@@ -752,5 +758,25 @@ void StrategyBridge::refreshModel()
     const QVariantList strategies = list();
     if (m_listModel != nullptr) m_listModel->replaceAll(strategies);
     if (!m_cacheOk) { m_cacheOk = true; emit cacheOkChanged(); }
+    emit strategiesChanged();
+}
+
+StrategyBridge* StrategyBridge::instance()
+{
+    return s_instance;
+}
+
+void StrategyBridge::refreshSingleStrategy(const QString& strategyId)
+{
+    init();  // 确保 m_inited，不等 initAsync 的延迟队列
+    if (!m_inited || !m_listModel || strategyId.isEmpty()) return;
+
+    auto data = m_repo->findById(strategyId);
+    if (!data.has_value()) return;
+
+    auto map = data->toVariantMap();
+    QString sid = QString::fromStdString(data->strategyId);
+    map["displayStatus"] = m_runtimeStatus.value(sid, QStringLiteral("已停止"));
+    m_listModel->upsertOne(map);
     emit strategiesChanged();
 }

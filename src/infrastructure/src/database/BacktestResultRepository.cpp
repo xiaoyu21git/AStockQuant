@@ -33,8 +33,7 @@ bool BacktestResultRepository::ensureTables()
         }
     }
 
-    // 旧版 JSONB/TEXT 表 → 重建为普通列
-    m_db.executeUpdate("DROP TABLE IF EXISTS live.strategy_backtest_results CASCADE");
+    // 旧版 JSONB/TEXT 表已在上面按需重建，不再每次回测无条件 DROP CASCADE
 
     const char* kCreateStrategyBacktest = R"SQL(
         CREATE TABLE IF NOT EXISTS live.strategy_backtest_results (
@@ -149,7 +148,7 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
         "avg_holding_days, avg_positions, "
         "stop_loss_fills, rule_exit_fills, normal_sell_fills, risk_rejected, "
         "equity_curve_json"
-        ") VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        ") VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "strategy_id=EXCLUDED.strategy_id, run_at=NOW(), behavior_kind=EXCLUDED.behavior_kind, "
         "data_start_date=EXCLUDED.data_start_date, data_end_date=EXCLUDED.data_end_date, "
@@ -194,6 +193,7 @@ bool BacktestResultRepository::saveStrategyTrades(const std::vector<StoredStrate
 {
     ensureTables();
     using P = astock::database::SqlParam;
+    m_db.beginTransaction();
     for (const auto& trade : trades) {
         const int affected = m_db.executeUpdate(
             "INSERT INTO live.strategy_backtest_trades "
@@ -205,9 +205,11 @@ bool BacktestResultRepository::saveStrategyTrades(const std::vector<StoredStrate
         if (affected <= 0) {
             INTERNAL_ERROR_STREAM << "[BacktestRepo] saveStrategyTrades failed run=" << trade.runId
                                   << " error=" << m_db.lastError();
+            m_db.rollbackTransaction();
             return false;
         }
     }
+    m_db.commitTransaction();
     return true;
 }
 
