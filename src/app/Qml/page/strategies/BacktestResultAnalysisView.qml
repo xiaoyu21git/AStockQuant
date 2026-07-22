@@ -129,23 +129,29 @@ Item {
         if(!backtestResult||!backtestResult.timeSeries)return
         // 自动选第一个标的
         if(tradeRows.length>0){selSymbol=tradeRows[0].symbol;buildSymbolChart()}
-        // 填充图表
+        // 填充图表 — 使用真实日期作为 X 轴
         var tss=backtestResult.timeSeries
         var pv=tss.portfolioValues||[],dd=tss.drawdowns||[],ret=tss.returns||[]
         var bv=tss.benchmarkValues||[],bdd=tss.benchmarkDrawdowns||[]
+        var dates=tss.dates||[]
         equityS.clear();drawdownS.clear();returnS.clear();bmEquityS.clear();bmDrawdownS.clear()
-        var sB=pv.length>0&&isFinite(pv[0])&&pv[0]>0?pv[0]:1.0
         var bB=bv.length>0&&isFinite(bv[0])&&bv[0]>0?bv[0]:1.0
-        var pM=-1e18,pm=1e18;for(var i=0;i<pv.length;i++){var sv=isFinite(pv[i])&&sB>0?pv[i]/sB:1.0;equityS.append(i,sv);drawdownS.append(i,isFinite(dd[i])?dd[i]:0);if(sv>pM)pM=sv;if(sv<pm)pm=sv}
-        for(var k=0;k<bv.length;k++){var bmv=isFinite(bv[k])&&bB>0?bv[k]/bB:1.0;bmEquityS.append(k,bmv);bmDrawdownS.append(k,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv}
-        var eN=Math.max(1,Math.max(pv.length,bv.length)-1);eqX.max=eN;ddX.max=eN;retX.max=Math.max(1,ret.length-1)
+        var pM=-1e18,pm=1e18
+        for(var i=0;i<pv.length;i++){
+            var ms=i<dates.length?(new Date(parseInt(String(dates[i]).substr(0,4)),parseInt(String(dates[i]).substr(4,2))-1,parseInt(String(dates[i]).substr(6,2)))).getTime():i*86400000
+            var sv=isFinite(pv[i])?pv[i]:pv[0]||1;equityS.append(ms,sv);drawdownS.append(ms,isFinite(dd[i])?dd[i]:0);if(sv>pM)pM=sv;if(sv<pm)pm=sv}
+        for(var k=0;k<bv.length;k++){
+            var ms2=k<dates.length?(new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2)))).getTime():k*86400000
+            var bmv=isFinite(bv[k])?bv[k]:bv[0]||1;bmEquityS.append(ms2,bmv);bmDrawdownS.append(ms2,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv)}
         eqY.min=pm*0.95;eqY.max=pM*1.05
         var ddMinAll=0;for(var di2=0;di2<dd.length;di2++){var dv2=isFinite(dd[di2])?dd[di2]:0;if(dv2<ddMinAll)ddMinAll=dv2}
         for(var dk2=0;dk2<bdd.length;dk2++){var bv2=isFinite(bdd[dk2])?bdd[dk2]:0;if(bv2<ddMinAll)ddMinAll=bv2}
         ddY.min=Math.min(0,ddMinAll*1.05);ddY.max=0
-        var cum=0,rM=-1e18;for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum);if(cum>rM)rM=cum}
+        var cum=0,rM=-1e18;for(var j=0;j<ret.length;j++){
+            var ms3=j<dates.length?(new Date(parseInt(String(dates[j]).substr(0,4)),parseInt(String(dates[j]).substr(4,2))-1,parseInt(String(dates[j]).substr(6,2)))).getTime():j*86400000
+            cum+=ret[j];returnS.append(ms3,cum);if(cum>rM)rM=cum}
         retY.min=-0.5;retY.max=rM*1.1
-        var m={},td=tss.dates||[];for(var di=0;di<td.length;di++)m[td[di]]=di;ddIndexByDate=m
+        var m={},td=dates;for(var di=0;di<td.length;di++)m[td[di]]=di;ddIndexByDate=m
     }
 
     Flickable { anchors.fill: parent; contentWidth: parent.width; contentHeight: content.implicitHeight+20; clip: true
@@ -181,8 +187,8 @@ Item {
             ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
                 Text{text:"净值曲线";font.pixelSize:11;color:"#94A3B8"}
                 ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
-                    ValueAxis{id:eqX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
-                    ValueAxis{id:eqY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
+                    DateTimeAxis{id:eqX;format:"yy/MM";labelsColor:"#64748B";gridLineColor:"#1E293B";labelsFont.pixelSize:8}
+                    ValueAxis{id:eqY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.0f"}
                     LineSeries{id:equityS;axisX:eqX;axisY:eqY;color:"#EF4444";width:2}
                     LineSeries{id:bmEquityS;axisX:eqX;axisY:eqY;color:"#94A3B8";width:1;style:Qt.DashLine}}}}
 
@@ -191,7 +197,7 @@ Item {
                 ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
                     Text{text:"回撤曲线";font.pixelSize:11;color:"#94A3B8"}
                     ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
-                        ValueAxis{id:ddX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
+                        DateTimeAxis{id:ddX;format:"yy/MM";labelsColor:"#64748B";gridLineColor:"#1E293B";labelsFont.pixelSize:8}
                         ValueAxis{id:ddY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
                         LineSeries{id:drawdownS;axisX:ddX;axisY:ddY;color:"#F59E0B";width:2}
                         LineSeries{id:bmDrawdownS;axisX:ddX;axisY:ddY;color:"#94A3B8";width:1;style:Qt.DashLine}}}}
@@ -199,7 +205,7 @@ Item {
                 ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
                     Text{text:"累计收益";font.pixelSize:11;color:"#94A3B8"}
                     ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
-                        ValueAxis{id:retX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
+                        DateTimeAxis{id:retX;format:"yy/MM";labelsColor:"#64748B";gridLineColor:"#1E293B";labelsFont.pixelSize:8}
                         ValueAxis{id:retY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
                         LineSeries{id:returnS;axisX:retX;axisY:retY;color:"#38BDF8";width:2}}}}}
 
