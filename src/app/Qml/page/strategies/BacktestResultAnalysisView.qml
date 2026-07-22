@@ -135,21 +135,23 @@ Item {
         var bv=tss.benchmarkValues||[],bdd=tss.benchmarkDrawdowns||[]
         var dates=tss.dates||[]
         equityS.clear();drawdownS.clear();returnS.clear();bmEquityS.clear();bmDrawdownS.clear()
-        var bB=bv.length>0&&isFinite(bv[0])&&bv[0]>0?bv[0]:1.0
-        var pM=-1e18,pm=1e18
+        var pM=-1e18,pm=1e18,tFirst=Infinity,tLast=-Infinity
         for(var i=0;i<pv.length;i++){
-            var ms=i<dates.length?(new Date(parseInt(String(dates[i]).substr(0,4)),parseInt(String(dates[i]).substr(4,2))-1,parseInt(String(dates[i]).substr(6,2)))).getTime():i*86400000;
+            var d=i<dates.length?new Date(parseInt(String(dates[i]).substr(0,4)),parseInt(String(dates[i]).substr(4,2))-1,parseInt(String(dates[i]).substr(6,2))):new Date(2020,0,1+i)
+            var ms=d.getTime();if(ms<tFirst)tFirst=ms;if(ms>tLast)tLast=ms
             var sv=isFinite(pv[i])?pv[i]:pv[0]||1;equityS.append(ms,sv);drawdownS.append(ms,isFinite(dd[i])?dd[i]:0);if(sv>pM)pM=sv;if(sv<pm)pm=sv}
         for(var k=0;k<bv.length;k++){
-            var ms2=k<dates.length?(new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2)))).getTime():k*86400000;
-            var bmv=isFinite(bv[k])?bv[k]:bv[0]||1;bmEquityS.append(ms2,bmv);bmDrawdownS.append(ms2,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv}
+            var d2=k<dates.length?new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2))):new Date(2020,0,1+k)
+            var ms2=d2.getTime();if(ms2<tFirst)tFirst=ms2;if(ms2>tLast)tLast=ms2
+            var bmv=isFinite(bv[k])?bv[k]:bv[0]||1;bmEquityS.append(ms2,bmv);bmDrawdownS.append(ms2,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv)}
+        if(isFinite(tFirst)){eqX.min=new Date(tFirst);eqX.max=new Date(tLast);ddX.min=new Date(tFirst);ddX.max=new Date(tLast);retX.min=new Date(tFirst);retX.max=new Date(tLast)}
         eqY.min=pm*0.95;eqY.max=pM*1.05
         var ddMinAll=0;for(var di2=0;di2<dd.length;di2++){var dv2=isFinite(dd[di2])?dd[di2]:0;if(dv2<ddMinAll)ddMinAll=dv2}
         for(var dk2=0;dk2<bdd.length;dk2++){var bv2=isFinite(bdd[dk2])?bdd[dk2]:0;if(bv2<ddMinAll)ddMinAll=bv2}
         ddY.min=Math.min(0,ddMinAll*1.05);ddY.max=0
         var cum=0,rM=-1e18;for(var j=0;j<ret.length;j++){
-            var ms3=j<dates.length?(new Date(parseInt(String(dates[j]).substr(0,4)),parseInt(String(dates[j]).substr(4,2))-1,parseInt(String(dates[j]).substr(6,2)))).getTime():j*86400000;
-            cum+=ret[j];returnS.append(ms3,cum);if(cum>rM)rM=cum}
+            var d3=j<dates.length?new Date(parseInt(String(dates[j]).substr(0,4)),parseInt(String(dates[j]).substr(4,2))-1,parseInt(String(dates[j]).substr(6,2))):new Date(2020,0,1+j)
+            var ms3=d3.getTime();cum+=ret[j];returnS.append(ms3,cum);if(cum>rM)rM=cum}
         retY.min=-0.5;retY.max=rM*1.1
         var m={},td=dates;for(var di=0;di<td.length;di++)m[td[di]]=di;ddIndexByDate=m
     }
@@ -238,7 +240,8 @@ Item {
                         Text{text:selPnLTotal>=0?"盈":"亏";font.pixelSize:11;color:selPnLTotal>=0?"#EF4444":"#10B981"}
                         Text{text:selPnLTotal?fn(selPnLTotal,0):"";font.pixelSize:11;color:selPnLTotal>=0?"#EF4444":"#10B981"}}
                     // 买卖点选中对比
-                    Loader { Layout.fillWidth: true; active: selBuyInfo&&selSellInfo; sourceComponent: Rectangle { width:parent.width; height:44; radius:6; color:"#0F172A"; border.color:"#334155"; border.width:1
+                    Loader { Layout.fillWidth: true; Layout.preferredHeight: selBuyInfo&&selSellInfo?44:0; active: selBuyInfo&&selSellInfo
+                        sourceComponent: Rectangle { width:parent.width; height:44; radius:6; color:"#0F172A"; border.color:"#334155"; border.width:1
                         RowLayout { anchors.fill:parent; anchors.margins:8; spacing:16
                             Text{text:selBuyInfo?"买 "+selBuyInfo.date+" · "+fn(selBuyInfo.price,2):"";font.pixelSize:10;color:"#F59E0B"}
                             Text{text:"→";font.pixelSize:14;color:"#64748B"}
