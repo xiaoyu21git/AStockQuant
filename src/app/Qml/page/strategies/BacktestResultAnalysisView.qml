@@ -250,8 +250,8 @@ Item {
                             Text{text:selPairStats.ratio;font.pixelSize:10;color:"#94A3B8"}}}
                     ChartView { Layout.fillWidth: true; Layout.fillHeight: true; antialiasing: true; legend.visible: false
                         backgroundColor: "#0B1220"; plotAreaColor: "#0B1220"
-                        DateTimeAxis { id: symAxisX; format: "yy/MM"; labelsColor: "#64748B"; gridVisible: false; labelsFont.pixelSize: 8 }
-                        ValueAxis { id: symAxisY; labelsColor: "#64748B"; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8 }
+                        DateTimeAxis { id: symAxisX; format: "yy/MM"; labelsColor: "#64748B"; gridVisible: true; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8 }
+                        ValueAxis { id: symAxisY; labelsColor: "#64748B"; gridVisible: true; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8; labelFormat: "%.2f" }
                         LineSeries { id: priceLine; axisX: symAxisX; axisY: symAxisY; color: "#94A3B8"; width: 2 }
                         ScatterSeries { id: buyPoints; axisX: symAxisX; axisY: symAxisY; color: "#F59E0B"; markerSize: 9; borderColor: "#F59E0B"
                             onClicked: { selBuyInfo=findTradeInfo(point,true); if(selBuyInfo)selSellInfo=null } }
