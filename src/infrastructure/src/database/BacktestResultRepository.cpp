@@ -149,7 +149,7 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
         "avg_holding_days, avg_positions, "
         "stop_loss_fills, rule_exit_fills, normal_sell_fills, risk_rejected, "
         "equity_curve_json"
-        ") VALUES (?,?,?,?::date,?::date,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "strategy_id=EXCLUDED.strategy_id, run_at=NOW(), behavior_kind=EXCLUDED.behavior_kind, "
         "data_start_date=EXCLUDED.data_start_date, data_end_date=EXCLUDED.data_end_date, "
@@ -198,7 +198,7 @@ bool BacktestResultRepository::saveStrategyTrades(const std::vector<StoredStrate
         const int affected = m_db.executeUpdate(
             "INSERT INTO live.strategy_backtest_trades "
             "(run_id, trade_date, symbol, side, quantity, price, realized_pnl) "
-            "VALUES (?, ?::date, ?, ?, ?, ?, ?)",
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
             {P{trade.runId}, P{trade.tradeDate}, P{trade.symbol},
              P{std::string(trade.isBuy ? "B" : "S")},
              P{static_cast<std::int64_t>(trade.quantity)}, P{trade.price}, P{trade.realizedPnl}});
