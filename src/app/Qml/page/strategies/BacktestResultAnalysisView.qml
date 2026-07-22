@@ -71,8 +71,8 @@ Item {
         buyPoints.clear();sellWin.clear();sellLoss.clear();priceLine.clear();selPnLTotal=0.0
         var tMin=Infinity,tMax=-Infinity,pMin=Infinity,pMax=-Infinity
         // 1. 日线收盘价走势
-        var sp=backtestResult.symbolPrices[selSymbol]
-        for(var di=0;di<sp.dates.length;di++){
+        var sp=backtestResult&&backtestResult.symbolPrices?backtestResult.symbolPrices[selSymbol]:null
+        if(sp&&sp.dates) for(var di=0;di<sp.dates.length;di++){
             var dd=sp.dates[di],dc=sp.closes[di]
             var dObj=new Date(parseInt(String(dd).substr(0,4)),parseInt(String(dd).substr(4,2))-1,parseInt(String(dd).substr(6,2)))
             var ms=dObj.getTime();if(ms<tMin)tMin=ms;if(ms>tMax)tMax=ms;if(dc<pMin)pMin=dc;if(dc>pMax)pMax=dc
@@ -142,7 +142,7 @@ Item {
             var sv=isFinite(pv[i])?pv[i]:pv[0]||1;equityS.append(ms,sv);drawdownS.append(ms,isFinite(dd[i])?dd[i]:0);if(sv>pM)pM=sv;if(sv<pm)pm=sv}
         for(var k=0;k<bv.length;k++){
             var ms2=k<dates.length?(new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2)))).getTime():k*86400000;
-            var bmv=isFinite(bv[k])?bv[k]:bv[0]||1;bmEquityS.append(ms2,bmv);bmDrawdownS.append(ms2,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv)}
+            var bmv=isFinite(bv[k])?bv[k]:bv[0]||1;bmEquityS.append(ms2,bmv);bmDrawdownS.append(ms2,isFinite(bdd[k])?bdd[k]:0);if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv}
         eqY.min=pm*0.95;eqY.max=pM*1.05
         var ddMinAll=0;for(var di2=0;di2<dd.length;di2++){var dv2=isFinite(dd[di2])?dd[di2]:0;if(dv2<ddMinAll)ddMinAll=dv2}
         for(var dk2=0;dk2<bdd.length;dk2++){var bv2=isFinite(bdd[dk2])?bdd[dk2]:0;if(bv2<ddMinAll)ddMinAll=bv2}
@@ -216,49 +216,49 @@ Item {
                     Text{text:"持仓标的统计";font.pixelSize:11;color:"#94A3B8"}
                     Rectangle { Layout.fillWidth: true; height: 20; color: "transparent"
                         Row { anchors.verticalCenter: parent.verticalCenter
-                            Text{width:72;text:"标的";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:44;text:"买";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:44;text:"卖";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:48;text:"胜率";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:72;text:"盈亏";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}}}
+                            Text{width:120;text:"标的";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:36;text:"买";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:36;text:"卖";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:40;text:"胜率";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:68;text:"盈亏";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}}}
                     ListView { Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: stockSummary
                         delegate: Rectangle { width: ListView.view.width; height: 22; color: index%2?"transparent":"#0B1220"
                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                 onClicked: { selSymbol=modelData.symbol; buildSymbolChart() }}
                             Row { anchors.verticalCenter: parent.verticalCenter
-                                Text{width:72;text:StrategyBridge.stockDisplayName(modelData.symbol);font.pixelSize:9;color:selSymbol===modelData.symbol?"#F59E0B":"#F1F5F9";elide:Text.ElideRight}
-                                Text{width:44;text:modelData.buys;font.pixelSize:9;color:"#94A3B8"}
-                                Text{width:44;text:modelData.sells;font.pixelSize:9;color:"#94A3B8"}
-                                Text{width:48;text:modelData.winRate;font.pixelSize:9;color:modelData.winRate>=50?"#FCA5A5":"#86EFAC"}
-                                Text{width:72;text:fn(modelData.totalPnl,0);font.pixelSize:9;color:modelData.totalPnl>=0?"#FCA5A5":"#86EFAC"}}}}}
+                                Text{width:120;text:StrategyBridge.stockDisplayName(modelData.symbol);font.pixelSize:9;color:selSymbol===modelData.symbol?"#F59E0B":"#F1F5F9";elide:Text.ElideRight}
+                                Text{width:36;text:modelData.buys;font.pixelSize:9;color:"#94A3B8"}
+                                Text{width:36;text:modelData.sells;font.pixelSize:9;color:"#94A3B8"}
+                                Text{width:40;text:modelData.winRate;font.pixelSize:9;color:parseFloat(modelData.winRate)>=50?"#EF4444":"#10B981"}
+                                Text{width:68;text:fn(modelData.totalPnl,0);font.pixelSize:9;color:modelData.totalPnl>=0?"#EF4444":"#10B981"}}}}}
                 ColumnLayout { Layout.fillWidth: true; Layout.fillHeight: true; spacing: 4
                     RowLayout {
                         Text{text:selSymbol?"买卖点 · "+StrategyBridge.stockDisplayName(selSymbol):"← 点击标的查看";font.pixelSize:11;color:"#94A3B8";elide:Text.ElideRight}
                         Item{Layout.fillWidth:true}
-                        Text{text:selPnLTotal>=0?"盈":"亏";font.pixelSize:11;color:selPnLTotal>=0?"#FCA5A5":"#86EFAC"}
-                        Text{text:selPnLTotal?fn(selPnLTotal,0):"";font.pixelSize:11;color:selPnLTotal>=0?"#FCA5A5":"#86EFAC"}}
+                        Text{text:selPnLTotal>=0?"盈":"亏";font.pixelSize:11;color:selPnLTotal>=0?"#EF4444":"#10B981"}
+                        Text{text:selPnLTotal?fn(selPnLTotal,0):"";font.pixelSize:11;color:selPnLTotal>=0?"#EF4444":"#10B981"}}
                     // 买卖点选中对比
-                    Rectangle { Layout.fillWidth: true; height: selBuyInfo&&selSellInfo?44:0; visible: selBuyInfo&&selSellInfo; radius:6; color:"#0F172A"; border.color:"#334155"; border.width:1
+                    Loader { Layout.fillWidth: true; active: selBuyInfo&&selSellInfo; sourceComponent: Rectangle { width:parent.width; height:44; radius:6; color:"#0F172A"; border.color:"#334155"; border.width:1
                         RowLayout { anchors.fill:parent; anchors.margins:8; spacing:16
-                            Text{text:"买 "+selBuyInfo.date+" · "+fn(selBuyInfo.price,2);font.pixelSize:10;color:"#F59E0B"}
+                            Text{text:selBuyInfo?"买 "+selBuyInfo.date+" · "+fn(selBuyInfo.price,2):"";font.pixelSize:10;color:"#F59E0B"}
                             Text{text:"→";font.pixelSize:14;color:"#64748B"}
-                            Text{text:"卖 "+selSellInfo.date+" · "+fn(selSellInfo.price,2);font.pixelSize:10;color:selSellInfo.pnl>=0?"#10B981":"#EF4444"}
+                            Text{text:selSellInfo?"卖 "+selSellInfo.date+" · "+fn(selSellInfo.price,2):"";font.pixelSize:10;color:selSellInfo&&selSellInfo.pnl>=0?"#EF4444":"#10B981"}
                             Item{Layout.fillWidth:true}
                             Text{text:selSymbol?StrategyBridge.stockDisplayName(selSymbol):"";font.pixelSize:9;color:"#64748B"}
                             Text{text:"持仓 "+selPairStats.days+"天";font.pixelSize:11;color:"#F1F5F9";font.weight:Font.Bold}
-                            Text{text:"盈亏 "+fn(selPairStats.pnl,0);font.pixelSize:11;color:selPairStats.pnl>=0?"#10B981":"#EF4444";font.weight:Font.Bold}
-                            Text{text:selPairStats.ratio;font.pixelSize:10;color:"#94A3B8"}}}
+                            Text{text:"盈亏 "+fn(selPairStats.pnl,0);font.pixelSize:11;color:selPairStats.pnl>=0?"#EF4444":"#10B981";font.weight:Font.Bold}
+                            Text{text:selPairStats.ratio;font.pixelSize:10;color:"#94A3B8"}}}}
                     ChartView { Layout.fillWidth: true; Layout.fillHeight: true; antialiasing: true; legend.visible: false
                         backgroundColor: "#0B1220"; plotAreaColor: "#0B1220"
                         DateTimeAxis { id: symAxisX; format: "yy/MM"; labelsColor: "#64748B"; gridVisible: true; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8 }
                         ValueAxis { id: symAxisY; labelsColor: "#64748B"; gridVisible: true; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8; labelFormat: "%.2f" }
                         LineSeries { id: priceLine; axisX: symAxisX; axisY: symAxisY; color: "#94A3B8"; width: 2 }
                         ScatterSeries { id: buyPoints; axisX: symAxisX; axisY: symAxisY; color: "#F59E0B"; markerSize: 9; borderColor: "#F59E0B"
-                            onClicked: { selBuyInfo=findTradeInfo(point,true); if(selBuyInfo)selSellInfo=null } }
-                        ScatterSeries { id: sellWin;  axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10
-                            onClicked: { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }
-                        ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#EF4444"; markerSize: 10
-                            onClicked: { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }}}}}
+                            onClicked: function(point) { selBuyInfo=findTradeInfo(point,true); if(selBuyInfo)selSellInfo=null } }
+                        ScatterSeries { id: sellWin;  axisX: symAxisX; axisY: symAxisY; color: "#EF4444"; markerSize: 10
+                            onClicked: function(point) { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }
+                        ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10
+                            onClicked: function(point) { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }}}}}
 
         Item { Layout.preferredHeight: 10 }}}
 
