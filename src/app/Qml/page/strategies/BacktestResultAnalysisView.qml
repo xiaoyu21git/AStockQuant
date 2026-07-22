@@ -45,7 +45,29 @@ Item {
         for(var k in m){var x=m[k];x.winRate=x.sells>0?(x.wins/x.sells*100).toFixed(1)+"%":"--";a.push(x)}
         a.sort(function(a,b){return b.totalPnl-a.totalPnl});return a}
 
+    // 买卖点选中对比
+    property var selBuyInfo: null; property var selSellInfo: null
+    property var selPairStats: {
+        if(!selBuyInfo||!selSellInfo)return{days:"--",pnl:0,ratio:"--"}
+        var bd=selBuyInfo.dateD,sd=selSellInfo.dateD
+        var days=Math.round((sd-bd)/86400000)
+        var pnl=selSellInfo.pnl||0
+        var ratio=selBuyInfo.price>0?(pnl/selBuyInfo.price*100).toFixed(2)+"%":"--"
+        return{days:days,pnl:pnl,ratio:ratio}
+    }
+    function fmtTradeDate(d){var s=String(d||"");return s.length===8?s.substr(0,4)+"-"+s.substr(4,2)+"-"+s.substr(6,2):s}
+    function findTradeInfo(pt,isBuy){
+        for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i]
+        if(selSymbol&&t.symbol!==selSymbol)continue
+        if(t.isBuy!==isBuy)continue
+        var d2=new Date(parseInt(t.date.toString().substr(0,4)),parseInt(t.date.toString().substr(4,2))-1,parseInt(t.date.toString().substr(6,2)))
+        if(Math.abs(d2.getTime()-pt.x)<86400000&&Math.abs(t.price-pt.y)<t.price*0.02)
+            return{date:fmtTradeDate(t.date),dateD:d2,price:t.price,pnl:t.realizedPnl||0,isBuy:t.isBuy}}
+        return null
+    }
+
     function buildSymbolChart(){
+        selBuyInfo=null;selSellInfo=null
         buyPoints.clear();sellWin.clear();sellLoss.clear();priceLine.clear();selPnLTotal=0.0
         var tMin=Infinity,tMax=-Infinity,pMin=Infinity,pMax=-Infinity
         // 1. 日线收盘价走势
@@ -209,14 +231,27 @@ Item {
                         Item{Layout.fillWidth:true}
                         Text{text:selPnLTotal>=0?"盈":"亏";font.pixelSize:11;color:selPnLTotal>=0?"#FCA5A5":"#86EFAC"}
                         Text{text:selPnLTotal?fn(selPnLTotal,0):"";font.pixelSize:11;color:selPnLTotal>=0?"#FCA5A5":"#86EFAC"}}
+                    // 买卖点选中对比
+                    Rectangle { Layout.fillWidth: true; height: selBuyInfo&&selSellInfo?44:0; visible: selBuyInfo&&selSellInfo; radius:6; color:"#0F172A"; border.color:"#334155"; border.width:1
+                        RowLayout { anchors.fill:parent; anchors.margins:8; spacing:16
+                            Text{text:"买 "+selBuyInfo.date+" · "+fn(selBuyInfo.price,2);font.pixelSize:10;color:"#F59E0B"}
+                            Text{text:"→";font.pixelSize:14;color:"#64748B"}
+                            Text{text:"卖 "+selSellInfo.date+" · "+fn(selSellInfo.price,2);font.pixelSize:10;color:selSellInfo.pnl>=0?"#10B981":"#EF4444"}
+                            Item{Layout.fillWidth:true}
+                            Text{text:"持仓 "+selPairStats.days+"天";font.pixelSize:11;color:"#F1F5F9";font.weight:Font.Bold}
+                            Text{text:"盈亏 "+fn(selPairStats.pnl,0);font.pixelSize:11;color:selPairStats.pnl>=0?"#10B981":"#EF4444";font.weight:Font.Bold}
+                            Text{text:selPairStats.ratio;font.pixelSize:10;color:"#94A3B8"}}}
                     ChartView { Layout.fillWidth: true; Layout.fillHeight: true; antialiasing: true; legend.visible: false
                         backgroundColor: "#0B1220"; plotAreaColor: "#0B1220"
                         DateTimeAxis { id: symAxisX; format: "yy/MM"; labelsColor: "#64748B"; gridVisible: false; labelsFont.pixelSize: 8 }
                         ValueAxis { id: symAxisY; labelsColor: "#64748B"; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8 }
                         LineSeries { id: priceLine; axisX: symAxisX; axisY: symAxisY; color: "#94A3B8"; width: 2 }
-                        ScatterSeries { id: buyPoints; axisX: symAxisX; axisY: symAxisY; color: "#F59E0B"; markerSize: 9; borderColor: "#F59E0B" }
-                        ScatterSeries { id: sellWin;  axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10 }
-                        ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#EF4444"; markerSize: 10 }}}}}
+                        ScatterSeries { id: buyPoints; axisX: symAxisX; axisY: symAxisY; color: "#F59E0B"; markerSize: 9; borderColor: "#F59E0B"
+                            onClicked: { selBuyInfo=findTradeInfo(point,true); if(selBuyInfo)selSellInfo=null } }
+                        ScatterSeries { id: sellWin;  axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10
+                            onClicked: { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }
+                        ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#EF4444"; markerSize: 10
+                            onClicked: { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }}}}}
 
         Item { Layout.preferredHeight: 10 }}}
 

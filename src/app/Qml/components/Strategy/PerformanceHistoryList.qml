@@ -49,7 +49,10 @@ Item {
             for (var yk in years) { labels.push(yk); values.push(years[yk].sum) }
         }
         var bar = statsChart.createSeries(ChartView.SeriesTypeBar, "", statsX, statsY)
-        bar.barSets[0].values = values; bar.barSets[0].color = "#DC2626"
+        if (bar) {
+            bar.append("收益", values)
+            if (bar.barSets && bar.barSets.length > 0) bar.barSets[0].color = "#DC2626"
+        }
         statsX.categories = labels
     }
 
