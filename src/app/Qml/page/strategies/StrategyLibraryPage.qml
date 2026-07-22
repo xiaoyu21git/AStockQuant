@@ -1821,6 +1821,9 @@ Rectangle {
                 onLoaded: {
                     if (item) {
                         item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                        if (typeof item.refreshPerformance === "function") {
+                            item.refreshPerformance()
+                        }
                     }
                 }
             }
@@ -2125,11 +2128,14 @@ Rectangle {
     }
 
     onShowPerformanceChanged: {
-        if (showPerformance && performanceLoader.item
-                && typeof performanceLoader.item.refreshPerformance === "function") {
+        if (showPerformance) perfRefreshDelay.start()
+    }
+
+    Timer { id: perfRefreshDelay; interval: 50; repeat: false; onTriggered: {
+        if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
             performanceLoader.item.refreshPerformance()
         }
-    }
+    }}
 
     onStrategyLibrarySearchTextChanged: {
         rebuildStrategyVisibleModel()
