@@ -70,6 +70,9 @@ Item {
 
     Component.onCompleted: {
         strategyCombo.model = StrategyBridge.listModel
+        StrategyBridge.strategiesChanged.connect(function() {
+            if (root.selectedStrategyId) perfModel.refresh()
+        })
     }
 
     onSelectedStrategyIdChanged: {

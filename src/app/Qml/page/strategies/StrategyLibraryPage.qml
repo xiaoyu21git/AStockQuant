@@ -994,9 +994,7 @@ Rectangle {
         // 策略卡片数据由 C++ StrategyBacktestBridge 直接更新 StrategyListModel 单行，QML 不再调 init()
         backtestWorkbenchMode = "analysis"
         backtestWorkbenchLoadedOnce = true
-        if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
-            performanceLoader.item.refreshPerformance()
-        }
+        // 绩效页数据由 StrategyBridge.strategiesChanged 信号驱动刷新，无需主动调用
     }
 
 
@@ -1821,9 +1819,6 @@ Rectangle {
                 onLoaded: {
                     if (item) {
                         item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
-                        if (typeof item.refreshPerformance === "function") {
-                            item.refreshPerformance()
-                        }
                     }
                 }
             }
@@ -2126,16 +2121,6 @@ Rectangle {
             ensurePageServicesReady()
         }
     }
-
-    onShowPerformanceChanged: {
-        if (showPerformance) perfRefreshDelay.start()
-    }
-
-    Timer { id: perfRefreshDelay; interval: 50; repeat: false; onTriggered: {
-        if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
-            performanceLoader.item.refreshPerformance()
-        }
-    }}
 
     onStrategyLibrarySearchTextChanged: {
         rebuildStrategyVisibleModel()
