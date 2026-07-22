@@ -139,7 +139,7 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
     using P = astock::database::SqlParam;
     const int affected = m_db.executeUpdate(
         "INSERT INTO live.strategy_backtest_results ("
-        "id, strategy_id, behavior_kind, "
+        "id, strategy_id, run_at, behavior_kind, "
         "data_start_date, data_end_date, "
         "combine_mode, target_position_count, max_positions, fast_period, slow_period, signal_period, "
         "factor_count, factor_ids, factor_weights, "
@@ -149,7 +149,7 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
         "avg_holding_days, avg_positions, "
         "stop_loss_fills, rule_exit_fills, normal_sell_fills, risk_rejected, "
         "equity_curve_json"
-        ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+        ") VALUES (?,?,NOW(),?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(id) DO UPDATE SET "
         "strategy_id=EXCLUDED.strategy_id, run_at=NOW(), behavior_kind=EXCLUDED.behavior_kind, "
         "data_start_date=EXCLUDED.data_start_date, data_end_date=EXCLUDED.data_end_date, "
