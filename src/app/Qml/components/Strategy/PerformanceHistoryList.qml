@@ -81,6 +81,7 @@ Item {
     onSelectedStrategyIdChanged: {
         selectedRow = -1; selectedResult = null
         autoSelectTimer.start()
+        scatterSeries.clear()
     }
 
     Timer { id: autoSelectTimer; interval: 200; onTriggered: {
@@ -93,6 +94,7 @@ Item {
         id: perfModel
         strategyId: root.selectedStrategyId
         onErrorOccurred: function(msg) { console.warn("绩效查询:", msg) }
+        onCountChanged: { rebuildScatterChart() }
     }
 
     RowLayout {
@@ -141,7 +143,7 @@ Item {
                         Text { width: 50; text: "回撤"; font.pixelSize: 10; color: "#64748B" }
                         Text { width: 45; text: "胜率"; font.pixelSize: 10; color: "#64748B" }
                         Text { width: 50; text: "盈亏比"; font.pixelSize: 10; color: "#64748B" }
-                        Text { width: 40; text: "因子"; font.pixelSize: 10; color: "#64748B" }
+                        Text { width: 55; text: "因子"; font.pixelSize: 10; color: "#64748B" }
                         Text { width: 40; text: "持仓"; font.pixelSize: 10; color: "#64748B" }
                     }
                     delegate: Rectangle {
@@ -158,7 +160,7 @@ Item {
                             Text { width: 50; text: (maxDrawdown*100).toFixed(1)+"%"; font.pixelSize: 11; color: "#22C55E" }
                             Text { width: 45; text: (winRate*100).toFixed(1)+"%"; font.pixelSize: 11; color: "#F1F5F9" }
                             Text { width: 50; text: profitFactor.toFixed(2); font.pixelSize: 11; color: "#F1F5F9" }
-                            Text { width: 40; text: parameters?(parameters.factorCount||0):"-"; font.pixelSize: 10; color: "#94A3B8" }
+                            Text { width: 55; text: perfModel.rowFactorNames(index); font.pixelSize: 9; color: "#93c5fd"; elide: Text.ElideRight }
                             Text { width: 40; text: parameters?(parameters.maxPositions||0):"-"; font.pixelSize: 10; color: "#CBD5E1" }
                         }
                     }
@@ -252,6 +254,49 @@ Item {
                     }
                 }
             }
+        }
+    }
+
+    // ── 回测收益散点图 ──
+    Rectangle {
+        Layout.fillWidth: true; Layout.fillHeight: true
+        radius: 12; color: "#1E293B"; border.width: 1; border.color: "#334155"
+        ColumnLayout { anchors.fill: parent; anchors.margins: 10; spacing: 4
+            Text { text: "回测收益分布"; font.pixelSize: 12; font.weight: Font.DemiBold; color: "#F1F5F9" }
+            ChartView {
+                id: scatterChart; Layout.fillWidth: true; Layout.fillHeight: true
+                antialiasing: true; legend.visible: false
+                backgroundColor: "#1E293B"; plotAreaColor: "#1E293B"
+                ValueAxis { id: scX; min: -1; labelsColor: "#64748B"; gridLineColor: "#334155"; labelFormat: "%.0f" }
+                ValueAxis { id: scY; labelsColor: "#94A3B8"; gridLineColor: "#334155"; labelFormat: "%.1f" }
+                ScatterSeries { id: scatterSeries; markerSize: 12; color: "#3B82F6"; borderColor: "#60A5FA" }
+            }
+        }
+    }
+
+    function rebuildScatterChart() {
+        scatterSeries.clear()
+        var records = []
+        for (var i = 0; i < perfModel.count; i++) {
+            var r = perfModel.loadResultDetail(i) || ({})
+            var tr = Number(r.totalReturn || 0)
+            var fn = perfModel.rowFactorNames(i)
+            if (isFinite(tr)) records.push({ idx: i, y: tr * 100, label: fn || ("#" + (i+1)) })
+        }
+        if (records.length === 0) return
+        var mx = -Infinity, mn = Infinity
+        for (var j = 0; j < records.length; j++) {
+            if (records[j].y > mx) mx = records[j].y; if (records[j].y < mn) mn = records[j].y
+        }
+        scX.min = -1; scX.max = records.length
+        var pd = (mx - mn) * 0.1 || 5
+        scY.min = Math.min(0, mn - pd); scY.max = mx + pd
+        for (var k = 0; k < records.length; k++)
+            scatterSeries.append(records[k].idx, records[k].y, records[k].label)
+        for (var m = 0; m < scatterSeries.count; m++) {
+            var p = scatterSeries.at(m)
+            if (p.y >= 0) { p.color = "#EF4444"; p.borderColor = "#FCA5A5" }
+            else { p.color = "#22C55E"; p.borderColor = "#86EFAC" }
         }
     }
 

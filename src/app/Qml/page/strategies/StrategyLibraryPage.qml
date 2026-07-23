@@ -1708,6 +1708,27 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
+            Layout.fillHeight: strategyLibraryPage.showPerformance
+            visible: strategyLibraryPage.showPerformance
+
+            Loader {
+                id: performanceLoader
+                anchors.fill: parent
+                asynchronous: true
+                active: strategyLibraryPage.showPerformance
+                visible: status === Loader.Ready && strategyLibraryPage.showPerformance
+                source: "../../components/Strategy/PerformanceHistoryList.qml"
+                onLoaded: {
+                    if (!item) return
+                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary()
+                        ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                }
+            }
+        }
+
+        Item {
+            Layout.fillWidth: true
             Layout.fillHeight: strategyLibraryPage.showBacktestWorkbench
             visible: strategyLibraryPage.showBacktestWorkbench
 
@@ -1811,7 +1832,7 @@ Rectangle {
             visible: strategyLibraryPage.showPerformance
 
             Loader {
-                id: performanceLoader
+                id: performanceHistoryLoader
                 anchors.fill: parent
                 active: strategyLibraryPage.showPerformance
                 source: "qrc:/components/Strategy/PerformanceHistoryList.qml"
