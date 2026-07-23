@@ -77,6 +77,10 @@ public:
 
     [[nodiscard]] std::optional<double> resolve(const std::string& varPath) const override;
 
+    /// @brief 启用/禁用 TA-Lib 蜡烛形态计算 (默认关闭)
+    /// 关闭时 candle.* 变量统一返回 nullopt
+    void setCandlePatternsEnabled(bool enabled);
+
 private:
     struct Impl;
     std::shared_ptr<Impl> m_impl;

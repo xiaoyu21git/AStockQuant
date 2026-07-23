@@ -11,12 +11,38 @@
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
+#include <unordered_map>
 
 namespace domain::strategy::rules {
 
 namespace {
 
 constexpr double kTruthyEpsilon = 1e-9;
+
+// ── 条件编译缓存 ──
+// 进程级, 以条件树 JSON 的 FNV-1a hash 为键
+// 有参数覆盖时绕过缓存 (覆盖值不同则结果不同)
+
+using CacheKey = std::uint64_t;
+using CachedFn = std::function<TriState(const IRuleVariableProvider&)>;
+std::mutex s_compileCacheMutex;
+std::unordered_map<CacheKey, CachedFn> s_compileCache;
+
+CacheKey hashCondition(const std::string& json) {
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (unsigned char c : json) {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+void clearCompileCache() {
+    std::lock_guard<std::mutex> lock(s_compileCacheMutex);
+    s_compileCache.clear();
+}
+
 // 字符串枚举变量(如 market.emotion_cycle="repair")经 provider 以哈希槽位编码:
 // provider 对该类变量按字符串字典返回编码值, eq 比较字符串时同样编码后对数值比较
 // (编码约定见 IRuleVariableProvider 实现方)
@@ -49,8 +75,8 @@ double ruleStringValueCode(const std::string& text) { return encodeStringValue(t
 using OverrideMap = std::map<std::string, double>; // paramKey → newValue
 
 std::function<TriState(const IRuleVariableProvider&)>
-compileCondition(const foundation::json::JsonFacade& node,
-                 const OverrideMap* overrides)
+compileConditionImpl(const foundation::json::JsonFacade& node,
+                     const OverrideMap* overrides)
 {
     if (!node.has("op")) {
         // 裸 {var: x} 视为 truthy (not.value 的隐式形态)
@@ -153,6 +179,31 @@ compileCondition(const foundation::json::JsonFacade& node,
     return makeFailAlways("未知 op: " + op);
 }
 
+// ── 公开接口: 编译条件树 (带缓存) ──
+
+std::function<TriState(const IRuleVariableProvider&)>
+compileCondition(const foundation::json::JsonFacade& node,
+                 const OverrideMap* overrides)
+{
+    // 有参数覆盖时不走缓存 (覆盖值不同则结果不同)
+    if (overrides && !overrides->empty()) {
+        return compileConditionImpl(node, overrides);
+    }
+    const std::string conditionJson = node.toString();
+    const CacheKey key = hashCondition(conditionJson);
+    {
+        std::lock_guard<std::mutex> lock(s_compileCacheMutex);
+        auto it = s_compileCache.find(key);
+        if (it != s_compileCache.end()) return it->second;
+    }
+    auto fn = compileConditionImpl(node, nullptr);
+    {
+        std::lock_guard<std::mutex> lock(s_compileCacheMutex);
+        s_compileCache.try_emplace(key, fn);
+    }
+    return fn;
+}
+
 namespace {
 
 RuleAction parseAction(const std::string& result) {
@@ -170,6 +221,9 @@ RuleAction parseAction(const std::string& result) {
 std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade& compiledJson,
                                               const ParamOverrides& paramOverrides)
 {
+    // 重载时清空编译缓存, 保证缓存与规则内容一致
+    clearCompileCache();
+
     if (!compiledJson.has("templates")) {
         INTERNAL_ERROR_STREAM << "[RuleEngine] compiled.json 缺 templates";
         return nullptr;

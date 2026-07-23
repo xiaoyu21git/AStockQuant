@@ -32,9 +32,11 @@ public:
     /// @brief 绑定策略启用的模板集 (来自 parameters.rule_composer_state 的勾选)
     /// @param enabledTemplateIds 策略勾选的 templateId 列表
     /// @param library 已加载的规则库 (生命周期须长于本对象)
+    /// @param ablatedTemplateIds 消融测试: 跳过这些 templateId (不参与评估, 仅统计)
     /// @return 成功绑定的模板数
     int configure(const std::vector<std::string>& enabledTemplateIds,
-                  const RuleLibrary& library);
+                  const RuleLibrary& library,
+                  const std::vector<std::string>& ablatedTemplateIds = {});
 
     [[nodiscard]] bool enabled() const noexcept
     {
@@ -53,6 +55,11 @@ public:
     [[nodiscard]] const RuleGateStats& stats() const noexcept { return m_stats; }
     [[nodiscard]] int boundTemplateCount() const noexcept { return m_boundTemplates; }
 
+    /// @brief 最近一次命中规则的 templateId (供归因记录)
+    [[nodiscard]] const std::string& lastHitTemplateId() const noexcept { return m_lastHitTemplateId; }
+    /// @brief 最近一次命中规则的 ruleId (供归因记录)
+    [[nodiscard]] const std::string& lastHitRuleId() const noexcept { return m_lastHitRuleId; }
+
 private:
     struct BoundRule {
         const CompiledRule* rule{nullptr};
@@ -67,16 +74,8 @@ private:
     std::vector<BoundRule> m_positionRules;
     RuleGateStats m_stats;
     int m_boundTemplates{0};
+    std::string m_lastHitTemplateId;
+    std::string m_lastHitRuleId;
 };
-
-/// @brief 进程级共享规则库 (首次调用加载 config/rules/compiled.json)
-/// @return 加载失败返回 nullptr (调用方应记日志并禁用规则闸门, 不静默)
-[[nodiscard]] const RuleLibrary* sharedRuleLibrary();
-
-/// @brief 强制重载规则库（参数修改后调用，下次 sharedRuleLibrary() 重新读取文件）
-void reloadSharedRuleLibrary();
-
-/// @brief 桥接层注入用户参数覆盖（替代文件搜索，避免 CWD 路径不匹配）
-void setSharedParamOverrides(const ParamOverrides& overrides);
 
 } // namespace domain::strategy::rules

@@ -1,6 +1,7 @@
 #include "RuleTemplateSuggestionService.h"
 
-#include "RuleGate.h"     // sharedRuleLibrary (via domain_strategy_runtime PUBLIC rules/)
+#include "RuleGate.h"
+#include "RuleLibrary.h"
 #include "RuleTypes.h"    // RuleLibrary, CompiledRuleTemplate, RuleDecision
 
 #include <yaml-cpp/yaml.h>

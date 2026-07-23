@@ -48,6 +48,11 @@ public:
     /// @brief 强制刷新（从 sharedRuleLibrary 重新读取）
     Q_INVOKABLE void refresh();
 
+    // ── 规则归因 (回测后数据) ──
+    /// @brief 获取指定策略下某模板的规则级归因数据
+    Q_INVOKABLE QVariantList getRuleAttribution(const QString& strategyId,
+                                                 const QString& templateId);
+
     // ── 状态查询 ──
     bool hasData() const { return m_hasData; }
     bool isLoading() const { return m_isLoading; }

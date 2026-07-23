@@ -15,6 +15,7 @@ Item {
     property var templates: []
     property var aggregateStats: ({})
     property string selectedTemplateId: ""
+    property var ruleAttribution: []
     property var selectedDetail: ({})
     property var selectedStats: ({})
     property var selectedParams: []
@@ -76,6 +77,8 @@ Item {
                 selectedDetail = StrategyRuleStatsBridge.getTemplateDetail(templateId)
                 selectedStats = StrategyRuleStatsBridge.getTemplateStats(templateId, strategyFilterId)
                 selectedParams = StrategyRuleStatsBridge.extractTunableParams(templateId)
+                if (strategyFilterId)
+                    ruleAttribution = StrategyRuleStatsBridge.getRuleAttribution(strategyFilterId, templateId)
                 _paramInit = false  // 初始化完成，允许保存
             } catch (e) { console.warn("[StrategyRules] 加载详情失败:", e); _paramInit = false }
         })
@@ -255,7 +258,7 @@ Item {
                         Text { anchors.centerIn: parent; text: qsTr("← 点击左侧模板查看详情"); font.pixelSize: 13; color: "#64748B" }
                     }
 
-                    // 详情
+                    // 详情 (单列滚动)
                     Flickable {
                         id: detailFlick
                         anchors.fill: parent; anchors.margins: 10
@@ -271,7 +274,6 @@ Item {
 
                             Rectangle { width: parent.width; height: 1; color: "#334155" }
 
-                            // 统计
                             Row { spacing: 6
                                 DAComponents.RuleStatsCard { label: qsTr("评估"); value: selectedStats.evaluated || 0; cardColor: "#38BDF8" }
                                 DAComponents.RuleStatsCard { label: qsTr("命中"); value: selectedStats.hits || 0; cardColor: "#10B981" }
@@ -281,7 +283,7 @@ Item {
 
                             Rectangle { width: parent.width; height: 1; color: "#334155" }
 
-                            // 条件树
+                            // 规则结构
                             StrategyCreation.RuleTemplateStructureView {
                                 width: parent.width; compact: true; showTemplateHeader: false
                                 bindingData: {
@@ -301,6 +303,31 @@ Item {
                                     StrategyRuleStatsBridge.updateTemplateParams(selectedTemplateId, cfg, strategyFilterId)
                                 }
                             }
+
+                            Rectangle { width: parent.width; height: 1; color: "#334155" }
+
+                            // ── 规则归因 ──
+                            Text { text: qsTr("归因"); font.pixelSize: 12; font.weight: Font.DemiBold; color: "#F8FAFC" }
+                            Repeater {
+                                model: ruleAttribution
+                                delegate: Column {
+                                    width: parent.width; spacing: 2
+                                    RowLayout {
+                                        width: parent.width
+                                        Text { text: modelData.ruleId || ""; color: "#94A3B8"; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
+                                        Text { text: "拦截 " + (modelData.preventedTrades || 0); color: "#38BDF8"; font.pixelSize: 10; Layout.preferredWidth: 55 }
+                                        Text {
+                                            text: (modelData.preventedPnL||0) >= 0 ? "+" + (modelData.preventedPnL||0).toFixed(1) + "%" : (modelData.preventedPnL||0).toFixed(1) + "%"
+                                            color: (modelData.preventedPnL||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 10; Layout.preferredWidth: 55
+                                        }
+                                        Text {
+                                            text: (modelData.netContribution||0) >= 0 ? "✅" : ((modelData.netContribution||0) < -2 ? "❌" : "⚪")
+                                            color: (modelData.netContribution||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 10; Layout.preferredWidth: 20
+                                        }
+                                    }
+                                }
+                            }
+                            Text { visible: ruleAttribution.length === 0; text: qsTr("回测后显示归因数据"); color: "#64748B"; font.pixelSize: 10 }
                         }
                     }
                 }

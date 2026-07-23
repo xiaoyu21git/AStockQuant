@@ -1,3 +1,5 @@
+add_subdirectory(rules)
+
 add_library(domain_strategy_runtime STATIC)
 
 target_sources(domain_strategy_runtime PRIVATE
@@ -21,9 +23,6 @@ target_sources(domain_strategy_runtime PRIVATE
     src/RiskControl.cpp
     src/StrategyFactory.cpp
     src/StrategyLifecycleManager.cpp
-    rules/RuleConditionEvaluator.cpp
-    rules/RuleVariableProvider.cpp
-    rules/RuleGate.cpp
     src/RulePipeline.cpp
 )
 
@@ -42,6 +41,7 @@ target_include_directories(domain_strategy_runtime
 target_link_libraries(domain_strategy_runtime
     PUBLIC
         foundation
+        astock_rule_engine
     PRIVATE
         factor
         domain_strategies

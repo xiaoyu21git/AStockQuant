@@ -360,15 +360,7 @@ add_custom_command(TARGET astockquantapp-exe POST_BUILD
         $<TARGET_FILE_DIR:astockquantapp-exe>
 )
 
-# 将编译后的规则库拷贝到二进制输出目录，保证运行时 relative-path 能找到
-add_custom_command(TARGET astockquantapp POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E make_directory
-        $<TARGET_FILE_DIR:astockquantapp>/config/rules
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        ${CMAKE_SOURCE_DIR}/config/rules/compiled.json
-        $<TARGET_FILE_DIR:astockquantapp>/config/rules/compiled.json
-    COMMENT "Copy compiled.json to binary output directory"
-)
+# 内置规则已编译进二进制 (astock_rule_engine), 不再需要拷贝 compiled.json
 
 
 # 濞村鐦?

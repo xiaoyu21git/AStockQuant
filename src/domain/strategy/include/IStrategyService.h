@@ -512,7 +512,9 @@ struct FactorOverlayConfig {
 /// @brief 规则闸门配置 — 纯值类型
 struct RuleGateConfig {
     std::vector<std::string> templateIds;
-    // 由 Builder::build() 解析绑定；这里只是透传
+    std::vector<std::string> ablatedTemplateIds;  // 消融测试: 跳过的模板
+    bool ablationEnabled{false};                   // 是否启用消融模式
+    bool enableCandlePatterns{false};              // 是否启用 TA-Lib 蜡烛形态计算
 
     [[nodiscard]] bool enabled() const noexcept { return !templateIds.empty(); }
 };
@@ -687,6 +689,7 @@ private:
     std::unique_ptr<ICandidatePoolSelector> m_poolSelector;  ///< 因子候选池选择器(因子定池,策略选点)
     rules::RuleGate m_ruleGate;  ///< 规则管线: 市场闸/信号审核/出场, 绑定规则库+策略模板集
     RulePipeline m_rulePipeline{m_ruleGate};  ///< 规则编排器(封装上下文构建+迭代样板代码)
+    bool m_enableCandlePatterns{false};       ///< 是否启用 TA-Lib 蜡烛形态计算
     RiskConfig m_riskConfig = RiskConfig::defaults();
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日

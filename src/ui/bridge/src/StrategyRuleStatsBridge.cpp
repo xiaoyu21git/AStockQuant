@@ -2,6 +2,7 @@
 #include "../include/StrategyBridge.h"
 #include "../include/StrategyPerformanceModel.h"
 #include "../../domain/strategy/rules/RuleGate.h"
+#include "../../domain/strategy/rules/RuleLibrary.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/IStrategyService.h"
 #include "foundation/json/json_facade.h"
@@ -59,43 +60,23 @@ const domain::strategy::rules::RuleLibrary* getLib() {
 }
 
 // ── 用户参数持久化 (foundation::json::JsonFacade + std::fstream) ──
-static QString userParamsPath() {
-    return QCoreApplication::applicationDirPath() + "/config/rule_params_user.json";
-}
-
 static QVariantMap loadUserParamsMap() {
     QVariantMap result;
-    std::ifstream f(userParamsPath().toStdString());
-    if (!f.is_open()) return result;
-    std::stringstream buf; buf << f.rdbuf();
-    auto root = JsonFacade::parse(buf.str());
-    if (root.isNull() || !root.has("params")) return result;
-    auto params = root.get("params");
-    for (const auto& tid : params.keys()) {
-        auto pmap = params.get(tid);
-        QVariantMap overrides;
-        for (const auto& pkey : pmap.keys())
-            overrides[QString::fromStdString(pkey)] = pmap.get(pkey).asDouble();
-        result[QString::fromStdString(tid)] = overrides;
-    }
+    try {
+        auto& pool = astock::database::NativePgConnectionPool::instance();
+        auto db = pool.getConnection();
+        if (db && db->isOpen()) {
+            auto rows = db->executeQuery(
+                "SELECT template_id, param_key, param_value FROM live.rule_param_overrides");
+            for (auto& row : rows.getRows()) {
+                QString tid = QString::fromStdString(row.getString("template_id"));
+                QVariantMap overrides = result.value(tid).toMap();
+                overrides[QString::fromStdString(row.getString("param_key"))] = row.getDouble("param_value");
+                result[tid] = overrides;
+            }
+        }
+    } catch (...) {}
     return result;
-}
-
-static void saveUserParamsMap(const QVariantMap& allOverrides) {
-    auto root = JsonFacade::createObject();
-    root.set("version", JsonFacade::createInt(1));
-    auto paramsObj = JsonFacade::createObject();
-    for (auto tit = allOverrides.begin(); tit != allOverrides.end(); ++tit) {
-        QVariantMap overrides = tit.value().toMap();
-        auto tObj = JsonFacade::createObject();
-        for (auto pit = overrides.begin(); pit != overrides.end(); ++pit)
-            tObj.set(pit.key().toStdString(), JsonFacade::createDouble(pit.value().toDouble()));
-        paramsObj.set(tit.key().toStdString(), tObj);
-    }
-    root.set("params", paramsObj);
-    QDir().mkpath(QFileInfo(userParamsPath()).path());
-    std::ofstream f(userParamsPath().toStdString());
-    f << root.toString();
 }
 
 static QString translateSuffix(const std::string& suffix);
@@ -463,7 +444,6 @@ bool StrategyRuleStatsBridge::updateTemplateParams(const QString& templateId,
     for (auto pit = params.begin(); pit != params.end(); ++pit)
         tmplOverrides[pit.key()] = pit.value();
     all[templateId] = tmplOverrides;
-    saveUserParamsMap(all);
     // 注入内存 + 通知规则引擎重载
     domain::strategy::rules::ParamOverrides cppOverrides;
     for (auto tit = all.begin(); tit != all.end(); ++tit) {
@@ -477,4 +457,33 @@ bool StrategyRuleStatsBridge::updateTemplateParams(const QString& templateId,
     domain::strategy::rules::reloadSharedRuleLibrary();
     emit templateStatsUpdated(templateId);
     return true;
+}
+
+QVariantList StrategyRuleStatsBridge::getRuleAttribution(
+    const QString& strategyId, const QString& templateId)
+{
+    QVariantList result;
+
+    auto* engine = domain::strategy::StrategyManager::instance()
+        .get(strategyId.toStdString());
+    if (!engine) return result;
+
+    // 从 RuleGate 运行时统计获取基础命中数据
+    const auto& gateStats = engine->ruleGateStats();
+    auto tmplIt = gateStats.byTemplate.find(templateId.toStdString());
+    if (tmplIt == gateStats.byTemplate.end()) return result;
+
+    const auto& stats = tmplIt->second;
+
+    QVariantMap item;
+    item["ruleId"] = QString::fromStdString(templateId.toStdString());
+    item["evaluated"] = stats.evaluated;
+    item["hits"] = stats.hits;
+    item["blockedSignals"] = stats.blockedSignals;
+    item["dataMissing"] = stats.dataMissing;
+    // 归因数据从回测日志填充 (backtest 完成后 AttributionCollector 写入)
+    // 当前先返回基础统计, 待归因持久化后补充
+    result.append(item);
+
+    return result;
 }

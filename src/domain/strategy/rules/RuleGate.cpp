@@ -2,88 +2,17 @@
 
 #include "RuleGate.h"
 #include "RuleConditionEvaluator.h"
+#include "RuleLibrary.h"
 
-#include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
 
 namespace domain::strategy::rules {
 
-namespace {
-
-const RuleLibrary* s_sharedLibrary = nullptr;  // 首次加载后全局复用
-ParamOverrides s_paramOverrides;               // 桥接层注入的用户参数覆盖
-
-} // namespace
-
-const RuleLibrary* sharedRuleLibrary()
-{
-    if (!s_sharedLibrary) {
-        // 运行时工作目录可能是 build/bin/Release/, 尝试多个候选路径
-        static const char* kCandidatePaths[] = {
-            "config/rules/compiled.json",             // 项目根 (开发/测试)
-            "../config/rules/compiled.json",           // bin/Release → 项目根
-            "../../config/rules/compiled.json",        // bin/Release/config → 项目根
-        };
-        foundation::json::JsonFacade root;
-        for (const char* path : kCandidatePaths) {
-            auto candidate = foundation::json::JsonFacade::parseFile(path);
-            if (!candidate.isNull()) { root = std::move(candidate); break; }
-        }
-        if (root.isNull()) {
-            INTERNAL_ERROR_STREAM << "[RuleGate] compiled.json 解析失败(工作目录搜索了3个候选路径), 规则库不可用";
-            return nullptr;
-        }
-        // 加载用户参数覆盖: 优先用桥接层注入的（内存），否则读文件
-        ParamOverrides paramOverrides = s_paramOverrides;
-        if (paramOverrides.empty()) {
-            static const char* kUserParamsPaths[] = {
-                "config/rule_params_user.json",
-                "../config/rule_params_user.json",
-                "../../config/rule_params_user.json",
-            };
-            for (const char* up : kUserParamsPaths) {
-                auto userRoot = foundation::json::JsonFacade::parseFile(up);
-                if (!userRoot.isNull() && userRoot.has("params")) {
-                    auto params = userRoot.get("params");
-                    for (const auto& tid : params.keys()) {
-                        auto pmap = params.get(tid);
-                        std::map<std::string, double> overrides;
-                        for (const auto& pkey : pmap.keys())
-                            overrides[pkey] = pmap.get(pkey).asDouble();
-                        paramOverrides[tid] = overrides;
-                    }
-                    INTERNAL_INFO_STREAM << "[RuleGate] 加载用户规则参数覆盖(文件): " << paramOverrides.size() << " 个模板";
-                    break;
-                }
-            }
-        } else {
-            INTERNAL_INFO_STREAM << "[RuleGate] 加载用户规则参数覆盖(注入): " << paramOverrides.size() << " 个模板";
-        }
-
-        auto lib = loadRuleLibrary(root, paramOverrides);
-        if (lib) {
-            s_sharedLibrary = lib.release();  // 转移所有权到静态指针
-            INTERNAL_INFO_STREAM << "[RuleGate] 共享规则库就绪: " << s_sharedLibrary->templates.size() << " 模板";
-        }
-    }
-    return s_sharedLibrary;
-}
-
-void reloadSharedRuleLibrary() {
-    delete s_sharedLibrary;
-    s_sharedLibrary = nullptr;
-    INTERNAL_INFO_STREAM << "[RuleGate] 规则库缓存已清除，下次访问将重新加载";
-}
-
-void setSharedParamOverrides(const ParamOverrides& overrides) {
-    s_paramOverrides = overrides;
-    INTERNAL_INFO_STREAM << "[RuleGate] 注入用户参数覆盖: " << overrides.size() << " 个模板";
-}
-
 int RuleGate::configure(const std::vector<std::string>& enabledTemplateIds,
-                        const RuleLibrary& library)
+                        const RuleLibrary& library,
+                        const std::vector<std::string>& ablatedTemplateIds)
 {
     m_marketRules.clear(); m_signalRules.clear(); m_positionRules.clear();
     m_boundTemplates = 0;
@@ -92,6 +21,12 @@ int RuleGate::configure(const std::vector<std::string>& enabledTemplateIds,
         auto it = library.byId.find(tid);
         if (it == library.byId.end()) {
             INTERNAL_DEBUG_STREAM << "[RuleGate] 模板不存在于库, 跳过: " << tid;
+            continue;
+        }
+        // 消融测试: 跳过黑名单模板
+        if (std::find(ablatedTemplateIds.begin(), ablatedTemplateIds.end(), tid)
+            != ablatedTemplateIds.end()) {
+            INTERNAL_INFO_STREAM << "[RuleGate] 消融测试: 跳过模板 " << tid;
             continue;
         }
         const auto& compiledTemplate = *it->second;
@@ -142,6 +77,8 @@ RuleAction RuleGate::runRules(std::vector<BoundRule>& rules,
             ++stats.hits;
             if (bound.rule->decision.action == RuleAction::Block) ++stats.blockedSignals;
             if (bound.rule->decision.action == RuleAction::Pass) continue;  // 资格确认不计入阻断
+            m_lastHitTemplateId = bound.templateId;
+            m_lastHitRuleId = bound.rule->ruleId;
             return bound.rule->decision.action;  // Block/Freeze/Exit/Reduce → 立即生效
         }
         // Fail: 本条规则条件不满足, 继续下一条

@@ -21,6 +21,8 @@
 #include "RuleGate.h"
 #include "RuleVariableProvider.h"
 #include "RuleConditionEvaluator.h"
+#include "RuleAttribution.h"
+#include "RuleLibrary.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
 #include "../../../engine/include/AccountEngine.h"
@@ -1367,12 +1369,19 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     }
 
     // ── 规则闸门配置 ──
+    engine->m_enableCandlePatterns = ruleGateCfg_.enableCandlePatterns;
     if (ruleGateCfg_.enabled()) {
         const auto* ruleLibrary = rules::sharedRuleLibrary();
         if (ruleLibrary) {
-            const int bound = engine->m_ruleGate.configure(ruleGateCfg_.templateIds, *ruleLibrary);
+            const auto& ablated = ruleGateCfg_.ablationEnabled
+                ? ruleGateCfg_.ablatedTemplateIds
+                : std::vector<std::string>{};
+            const int bound = engine->m_ruleGate.configure(
+                ruleGateCfg_.templateIds, *ruleLibrary, ablated);
             INTERNAL_INFO_STREAM << "[Builder] 规则闸门: 勾选 " << ruleGateCfg_.templateIds.size()
-                                 << " 个模板, 绑定 " << bound << " 个";
+                                 << " 个模板, 绑定 " << bound
+                                 << " 消融=" << ablated.size()
+                                 << " candle=" << ruleGateCfg_.enableCandlePatterns;
         } else {
             INTERNAL_WARN_STREAM << "[Builder] 规则库不可用, 策略勾选的 "
                                  << ruleGateCfg_.templateIds.size() << " 个规则模板不生效";
@@ -1540,6 +1549,14 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     // 第一步会触发惰性因子计算（FactorEngine::compute），我们不知道它占总时间的比例
     // 但它是真实工作，后续逐日循环也是真实工作
+    // ── 规则归因收集器 ──
+    rules::AttributionCollector attributionCollector;
+    ruleProvider.setCandlePatternsEnabled(m_enableCandlePatterns);
+
+    // 回测日期窗口: 截断到请求的 startDate ~ endDate
+    const int kWindowStartDay = req.window.startDate.to_yyyymmdd();
+    const int kWindowEndDay   = req.window.endDate.to_yyyymmdd();
+
     const double kSetupFrac  = 0.0;
     const double kLoopStart  = 0.0;
     const double kLoopEnd    = 90.0;
@@ -1556,6 +1573,10 @@ StrategyBacktestResult StrategyEngine::backtest(
         if (strategyService_) strategyService_->setContextEvaluationRow(r);
 
         const auto& dates = view->dates();
+        const int currentDay = dates[static_cast<std::size_t>(r)].value;
+        // 跳过不在回测窗口内的日期 (用于样本内/样本外切分)
+        if (currentDay < kWindowStartDay || currentDay > kWindowEndDay) continue;
+
         const auto& instruments = view->instruments();
         auto closeMat = view->close();
         auto volumeMat = view->volume();
@@ -1634,6 +1655,17 @@ StrategyBacktestResult StrategyEngine::backtest(
                 ruleProvider.setCandidate(posCtx);
                 const rules::RuleAction exitAction = m_ruleGate.positionAction(ruleProvider);
                 if (exitAction == rules::RuleAction::Exit || exitAction == rules::RuleAction::Reduce) {
+                    // 归因记录: 规则触发的出场
+                    const double exitPrice = static_cast<double>(closeMat.data[
+                        rowOffset + static_cast<std::size_t>(posCtx.colIndex)]);
+                    attributionCollector.recordExit({
+                        fullSymbol,
+                        m_ruleGate.lastHitTemplateId(),
+                        m_ruleGate.lastHitRuleId(),
+                        exitPrice, posCtx.entryPrice,
+                        (exitPrice - posCtx.entryPrice) / posCtx.entryPrice * 100.0,
+                        -1, r
+                    });
                     OrderRequest exitOrder;
                     exitOrder.setSymbol(fullSymbol);
                     exitOrder.setSide(OrderSide::Sell);
@@ -1734,7 +1766,16 @@ StrategyBacktestResult StrategyEngine::backtest(
                         ? signalCtx.symbol.substr(0, dot) : signalCtx.symbol;
                     signalCtx.colIndex = col;
                     ruleProvider.setCandidate(signalCtx);
-                    if (!m_ruleGate.allowSignal(ruleProvider)) continue;  // 规则拒绝
+                    if (!m_ruleGate.allowSignal(ruleProvider)) {
+                        // 归因记录: 被封堵的买入信号
+                        attributionCollector.recordBlocked({
+                            symbol,
+                            m_ruleGate.lastHitTemplateId(),
+                            m_ruleGate.lastHitRuleId(),
+                            closePrice, r
+                        });
+                        continue;
+                    }
                 }
 
                 // ── 下单量换算: 昨日总资产 × 最终目标权重, 整百股 ──
@@ -2194,6 +2235,17 @@ StrategyBacktestResult StrategyEngine::backtest(
                              << "% 半凯(建议)=" << (halfKelly * 100.0) << "%";
         result.fullKelly = fullKelly;
         result.halfKelly = halfKelly;
+    }
+    // ── 规则归因: 计算后输出 ──
+    attributionCollector.compute(view);
+    const auto& attrResults = attributionCollector.results();
+    for (const auto& [tid, attr] : attrResults) {
+        INTERNAL_INFO_STREAM << "[规则归因] 模板=" << tid
+                             << " 封堵=" << attr.preventedTrades
+                             << " 假设盈亏=" << attr.preventedHypotheticalPnL << "%"
+                             << " 封堵胜率=" << (attr.preventedWinRate * 100.0) << "%"
+                             << " 出场=" << attr.triggeredExits
+                             << " 已实现盈亏=" << attr.exitRealizedPnL << "%";
     }
     INTERNAL_INFO_STREAM << "[规则闸门] 冻结天数: " << m_ruleGate.stats().frozenDays
                          << "  信号拒绝: " << m_ruleGate.stats().signalsBlocked

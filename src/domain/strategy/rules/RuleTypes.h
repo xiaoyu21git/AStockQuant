@@ -90,6 +90,26 @@ struct RuleLibrary {
 
 using ParamOverrides = std::map<std::string, std::map<std::string, double>>; // templateId → {paramKey → newValue}
 
+// ── 错误处理约定 ──
+
+/// @brief 规则引擎错误码 — 绝不抛出异常跨越模块边界
+enum class RuleErrorCode : std::uint8_t {
+    Ok = 0,
+    LibraryNotLoaded,        // compiled.json 未成功加载
+    TemplateNotFound,        // configure 引用了不存在的 templateId
+    TemplateIdConflict,      // 用户模板 templateId 与内置规则冲突
+    ConditionParseError,     // when 子句 JSON 格式非法
+    VariableNotProvided,     // resolve() 返回 nullopt (DataMissing)
+    EvaluationInternalError  // 求值过程异常 (如 TA-Lib 失败)
+};
+
+/// @brief 错误回调 — 消费者注册以接收非致命错误
+/// detail 必须包含结构化上下文: {templateId, ruleId, conditionIndex, variableName}
+using RuleErrorCallback = std::function<void(RuleErrorCode, const std::string& detail)>;
+
+/// @brief 规则来源标签 — 为内置/用户规则区分提供类型基础
+enum class RuleSource : std::uint8_t { BuiltIn, UserFile };
+
 /// @brief 加载规则库; paramOverrides 可选，用于覆盖条件树中数值参数
 [[nodiscard]] std::unique_ptr<RuleLibrary> loadRuleLibrary(
     const foundation::json::JsonFacade& compiledJson,

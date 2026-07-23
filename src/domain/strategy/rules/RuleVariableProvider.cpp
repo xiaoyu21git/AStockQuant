@@ -12,8 +12,11 @@
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 
+#include <ta_libc.h>
+
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 
 namespace domain::strategy::rules {
 
@@ -90,6 +93,25 @@ struct BacktestRuleVariableProvider::Impl {
     };
     std::unordered_map<std::string, MinuteBarAgg> minuteBarCache;
     RuleCandidateContext candidate;
+
+    // ── 蜡烛形态缓存 (惰性批量计算) ──
+    bool candlePatternsEnabled{false};
+    mutable std::unordered_map<std::string, std::optional<double>> candleCache;
+    mutable int candleCacheColIndex{-1};
+    mutable int candleCacheLastRow{-1};
+    static std::once_flag s_taInitFlag;
+
+    void ensureCandleCache() const {
+        if (!candlePatternsEnabled || !view || candidate.colIndex < 0) return;
+        if (candleCacheColIndex == candidate.colIndex && candleCacheLastRow == lastRow)
+            return;  // 缓存命中
+        candleCache.clear();
+        candleCacheColIndex = candidate.colIndex;
+        candleCacheLastRow = lastRow;
+        computeCandlePatterns();
+    }
+
+    void computeCandlePatterns() const;
 
     // ── 每标的派生量 (按需计算) ──
     [[nodiscard]] std::optional<double> closeToMaRatio(int window) const
@@ -537,8 +559,141 @@ struct BacktestRuleVariableProvider::Impl {
     }
 };
 
+// 静态成员外部定义 (MSVC 要求)
+std::once_flag BacktestRuleVariableProvider::Impl::s_taInitFlag;
+
 BacktestRuleVariableProvider::BacktestRuleVariableProvider()
     : m_impl(std::make_shared<Impl>()) {}
+
+void BacktestRuleVariableProvider::setCandlePatternsEnabled(bool enabled)
+{
+    m_impl->candlePatternsEnabled = enabled;
+    if (!enabled) m_impl->candleCache.clear();
+}
+
+// ── 蜡烛形态批量计算 ──
+// 使用宏内联展开避免 TA-Lib CDL 函数签名不统一的问题
+// 大部分 CDL 函数无 penetration 参数，少数(约6个)有
+
+namespace {
+
+#define EVAL_CDL_8(NAME, FUNC) \
+    do { \
+        int _beg = 0, _nb = 0; \
+        std::vector<int> _out(nRows); \
+        TA_RetCode _ret = FUNC(0, nRows-1, _o.data(), _h.data(), _l.data(), _c.data(), &_beg, &_nb, _out.data()); \
+        if (_ret == TA_SUCCESS && _nb > 0) { \
+            int _last = _beg + _nb - 1; \
+            if (_last >= 0 && _last < static_cast<int>(_out.size())) \
+                candleCache[NAME] = static_cast<double>(_out[static_cast<std::size_t>(_last)]); \
+            else candleCache[NAME] = std::nullopt; \
+        } else { candleCache[NAME] = std::nullopt; } \
+    } while(0)
+
+#define EVAL_CDL_9(NAME, FUNC, PEN) \
+    do { \
+        int _beg = 0, _nb = 0; \
+        std::vector<int> _out(nRows); \
+        TA_RetCode _ret = FUNC(0, nRows-1, _o.data(), _h.data(), _l.data(), _c.data(), PEN, &_beg, &_nb, _out.data()); \
+        if (_ret == TA_SUCCESS && _nb > 0) { \
+            int _last = _beg + _nb - 1; \
+            if (_last >= 0 && _last < static_cast<int>(_out.size())) \
+                candleCache[NAME] = static_cast<double>(_out[static_cast<std::size_t>(_last)]); \
+            else candleCache[NAME] = std::nullopt; \
+        } else { candleCache[NAME] = std::nullopt; } \
+    } while(0)
+
+} // namespace
+
+void BacktestRuleVariableProvider::Impl::computeCandlePatterns() const
+{
+    if (!view || candidate.colIndex < 0 || lastRow < 1) return;
+
+    std::call_once(s_taInitFlag, []() { TA_Initialize(); });
+
+    const int nRows = lastRow + 1;
+    const int col = candidate.colIndex;
+    auto openMat  = view->open();
+    auto highMat  = view->high();
+    auto lowMat   = view->low();
+    auto closeMat = view->close();
+    const std::size_t colStride = static_cast<std::size_t>(col);
+
+    std::vector<double> _o(nRows), _h(nRows), _l(nRows), _c(nRows);
+    for (int r = 0; r < nRows; ++r) {
+        const std::size_t offset = static_cast<std::size_t>(r) * openMat.rowStride + colStride;
+        _o[r] = static_cast<double>(openMat.data[offset]);
+        _h[r] = static_cast<double>(highMat.data[offset]);
+        _l[r] = static_cast<double>(lowMat.data[offset]);
+        _c[r] = static_cast<double>(closeMat.data[offset]);
+    }
+
+    // ── 61 CDL patterns ──
+    // 8-param (no penetration): majority
+    EVAL_CDL_8("candle.cdl_2crows",            TA_CDL2CROWS);
+    EVAL_CDL_8("candle.cdl_3blackcrows",       TA_CDL3BLACKCROWS);
+    EVAL_CDL_8("candle.cdl_3inside",           TA_CDL3INSIDE);
+    EVAL_CDL_8("candle.cdl_3linestrike",       TA_CDL3LINESTRIKE);
+    EVAL_CDL_8("candle.cdl_3outside",          TA_CDL3OUTSIDE);
+    EVAL_CDL_8("candle.cdl_3starsinsouth",     TA_CDL3STARSINSOUTH);
+    EVAL_CDL_8("candle.cdl_3whitesoldiers",    TA_CDL3WHITESOLDIERS);
+    EVAL_CDL_8("candle.cdl_advanceblock",      TA_CDLADVANCEBLOCK);
+    EVAL_CDL_8("candle.cdl_belthold",          TA_CDLBELTHOLD);
+    EVAL_CDL_8("candle.cdl_breakaway",         TA_CDLBREAKAWAY);
+    EVAL_CDL_8("candle.cdl_closingmarubozu",   TA_CDLCLOSINGMARUBOZU);
+    EVAL_CDL_8("candle.cdl_concealbabyswall",  TA_CDLCONCEALBABYSWALL);
+    EVAL_CDL_8("candle.cdl_counterattack",     TA_CDLCOUNTERATTACK);
+    EVAL_CDL_8("candle.cdl_doji",              TA_CDLDOJI);
+    EVAL_CDL_8("candle.cdl_dojistar",          TA_CDLDOJISTAR);
+    EVAL_CDL_8("candle.cdl_dragonflydoji",     TA_CDLDRAGONFLYDOJI);
+    EVAL_CDL_8("candle.cdl_engulfing",         TA_CDLENGULFING);
+    EVAL_CDL_8("candle.cdl_gapsidesidewhite",  TA_CDLGAPSIDESIDEWHITE);
+    EVAL_CDL_8("candle.cdl_gravestonedoji",    TA_CDLGRAVESTONEDOJI);
+    EVAL_CDL_8("candle.cdl_hammer",            TA_CDLHAMMER);
+    EVAL_CDL_8("candle.cdl_hangingman",        TA_CDLHANGINGMAN);
+    EVAL_CDL_8("candle.cdl_harami",            TA_CDLHARAMI);
+    EVAL_CDL_8("candle.cdl_haramicross",       TA_CDLHARAMICROSS);
+    EVAL_CDL_8("candle.cdl_highwave",          TA_CDLHIGHWAVE);
+    EVAL_CDL_8("candle.cdl_hikkake",           TA_CDLHIKKAKE);
+    EVAL_CDL_8("candle.cdl_hikkakemod",        TA_CDLHIKKAKEMOD);
+    EVAL_CDL_8("candle.cdl_homingpigeon",      TA_CDLHOMINGPIGEON);
+    EVAL_CDL_8("candle.cdl_identical3crows",   TA_CDLIDENTICAL3CROWS);
+    EVAL_CDL_8("candle.cdl_inneck",            TA_CDLINNECK);
+    EVAL_CDL_8("candle.cdl_invertedhammer",    TA_CDLINVERTEDHAMMER);
+    EVAL_CDL_8("candle.cdl_kicking",           TA_CDLKICKING);
+    EVAL_CDL_8("candle.cdl_kickingbylength",   TA_CDLKICKINGBYLENGTH);
+    EVAL_CDL_8("candle.cdl_ladderbottom",      TA_CDLLADDERBOTTOM);
+    EVAL_CDL_8("candle.cdl_longleggeddoji",    TA_CDLLONGLEGGEDDOJI);
+    EVAL_CDL_8("candle.cdl_longline",          TA_CDLLONGLINE);
+    EVAL_CDL_8("candle.cdl_marubozu",          TA_CDLMARUBOZU);
+    EVAL_CDL_8("candle.cdl_matchinglow",       TA_CDLMATCHINGLOW);
+    EVAL_CDL_8("candle.cdl_onneck",            TA_CDLONNECK);
+    EVAL_CDL_8("candle.cdl_piercing",          TA_CDLPIERCING);
+    EVAL_CDL_8("candle.cdl_rickshawman",       TA_CDLRICKSHAWMAN);
+    EVAL_CDL_8("candle.cdl_risefall3methods",  TA_CDLRISEFALL3METHODS);
+    EVAL_CDL_8("candle.cdl_separatinglines",   TA_CDLSEPARATINGLINES);
+    EVAL_CDL_8("candle.cdl_shootingstar",      TA_CDLSHOOTINGSTAR);
+    EVAL_CDL_8("candle.cdl_shortline",         TA_CDLSHORTLINE);
+    EVAL_CDL_8("candle.cdl_spinningtop",       TA_CDLSPINNINGTOP);
+    EVAL_CDL_8("candle.cdl_stalledpattern",    TA_CDLSTALLEDPATTERN);
+    EVAL_CDL_8("candle.cdl_sticksandwich",     TA_CDLSTICKSANDWICH);
+    EVAL_CDL_8("candle.cdl_takuri",            TA_CDLTAKURI);
+    EVAL_CDL_8("candle.cdl_tasukigap",         TA_CDLTASUKIGAP);
+    EVAL_CDL_8("candle.cdl_thrusting",         TA_CDLTHRUSTING);
+    EVAL_CDL_8("candle.cdl_tristar",           TA_CDLTRISTAR);
+    EVAL_CDL_8("candle.cdl_unique3river",      TA_CDLUNIQUE3RIVER);
+    EVAL_CDL_8("candle.cdl_upsidegap2crows",   TA_CDLUPSIDEGAP2CROWS);
+    EVAL_CDL_8("candle.cdl_xsidegap3methods",  TA_CDLXSIDEGAP3METHODS);
+
+    // 9-param (with penetration): ~6 functions
+    EVAL_CDL_9("candle.cdl_abandonedbaby",     TA_CDLABANDONEDBABY,     0.3);
+    EVAL_CDL_9("candle.cdl_darkcloudcover",    TA_CDLDARKCLOUDCOVER,    0.3);
+    EVAL_CDL_9("candle.cdl_eveningdojistar",   TA_CDLEVENINGDOJISTAR,   0.3);
+    EVAL_CDL_9("candle.cdl_eveningstar",       TA_CDLEVENINGSTAR,       0.3);
+    EVAL_CDL_9("candle.cdl_morningdojistar",   TA_CDLMORNINGDOJISTAR,   0.3);
+    EVAL_CDL_9("candle.cdl_morningstar",       TA_CDLMORNINGSTAR,       0.3);
+    EVAL_CDL_9("candle.cdl_mathold",           TA_CDLMATHOLD,           0.3);
+}
 
 void BacktestRuleVariableProvider::setDay(
     const factor::compute::IMarketDataView* view, std::int32_t date,
@@ -988,6 +1143,15 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     { auto it=impl.leaderRankCache.find(impl.candidate.code); return it!=impl.leaderRankCache.end()?std::optional<double>(static_cast<double>(it->second)):std::optional<double>(0.0); }
 
     // 其余未实现变量(分时/题材 Tier3): 显式 nullopt, 统计上报
+    }
+
+    // ── TA-Lib 蜡烛形态 (61 个, 惰性批量求值) ──
+    // 开关关闭时统一返回 nullopt
+    if (varPath.rfind("candle.", 0) == 0) {
+        if (!impl.candlePatternsEnabled) return std::nullopt;
+        impl.ensureCandleCache();
+        auto it = impl.candleCache.find(varPath);
+        return (it != impl.candleCache.end()) ? it->second : std::nullopt;
     }
 
     // 其余变量(形态确认/评分/题材类): 数据未就绪 — 显式 nullopt, 由统计上报
