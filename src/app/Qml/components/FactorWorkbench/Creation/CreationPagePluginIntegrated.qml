@@ -55,68 +55,56 @@ Rectangle {
     signal toastRequested(string message)
     
     // ============ 主布局 ============
-    
-    ScrollView {
-        id: scrollView
+
+    ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 5
-        clip: true
-        
-        // 隐藏滚动条
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        
-        ColumnLayout {
-            width: scrollView.width - 20
-            spacing: 10
-            
-            // 标题
-            Text {
-                text: root.editMode ? "✏️ 编辑因子" : "📝 创建新因子"
-                font.pixelSize: 22
-                font.weight: Font.Bold
-                color: "#F1F5F9"
-                Layout.alignment: Qt.AlignHCenter
-                Layout.topMargin: 5
-            }
-            
-            
-            
-            // 内容区域
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.minimumHeight: 420
-                radius: 10
-                color: "#1E293B"
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 15
-                    spacing: 15
-                    
-                    // 步骤标题
-                    Text {
-                        text: getStepTitle(currentStep)
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        color: "#F1F5F9"
-                    }
-                    
-                    // 步骤描述
-                    Text {
-                        text: getStepDescription(currentStep)
-                        font.pixelSize: 13
-                        color: "#94A3B8"
-                        wrapMode: Text.WordWrap
-                    }
-                    
-                    // 步骤内容
-                    Loader {
-                        id: stepContentLoader
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        sourceComponent: getStepComponent(currentStep)
-                    }
+        anchors.margins: 10
+        spacing: 10
+
+        // 标题
+        Text {
+            text: root.editMode ? "✏️ 编辑因子" : "📝 创建新因子"
+            font.pixelSize: 22
+            font.weight: Font.Bold
+            color: "#F1F5F9"
+            Layout.alignment: Qt.AlignHCenter
+        }
+
+        // 内容区域
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            radius: 10
+            color: "#1E293B"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 15
+                spacing: 15
+
+                // 步骤标题
+                Text {
+                    text: getStepTitle(currentStep)
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                    color: "#F1F5F9"
+                }
+
+                // 步骤描述
+                Text {
+                    text: getStepDescription(currentStep)
+                    font.pixelSize: 13
+                    color: "#94A3B8"
+                    wrapMode: Text.WordWrap
+                }
+
+                // 步骤内容
+                Loader {
+                    id: stepContentLoader
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    sourceComponent: getStepComponent(currentStep)
+                }
                     
                     // 导航按钮 - 使用项目标准按钮样式
                     RowLayout {
@@ -218,8 +206,7 @@ Rectangle {
                 }
             }
         }
-    }
-    
+
     // ============ 步骤组件 ============
     
     // 步骤1: 选择因子类型

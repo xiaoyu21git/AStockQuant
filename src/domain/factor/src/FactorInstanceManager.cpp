@@ -357,10 +357,30 @@ bool FactorInstanceManager::updateInstanceConfig(
     const foundation::json::JsonFacade& newConfig) {
 
     try {
+        // 提取 instance_name
+        std::string instanceName = newConfig.has("instance_name")
+            ? newConfig.get("instance_name").asString() : instanceId;
+        std::string description = newConfig.has("description")
+            ? newConfig.get("description").asString() : "";
+
+        using P = astock::database::SqlParam;
+        std::string configStr = newConfig.toString();
+        // 先确保 alpha.factors 存在 (FK 约束)
+        db_->executeUpdate(
+            "INSERT INTO alpha.factors (factor_id, factor_name, display_name) "
+            "VALUES ($1, $2, $2) "
+            "ON CONFLICT (factor_id) DO NOTHING",
+            {P{instanceId}, P{instanceName}}
+        );
         const int affectedRows = db_->executeUpdate(
-            "UPDATE alpha.factor_instance SET full_config = ?::jsonb, updated_at = CURRENT_TIMESTAMP "
-            "WHERE instance_id = ?",
-            buildParams(newConfig.toString(), instanceId)
+            "INSERT INTO alpha.factor_instance (instance_id, factor_id, instance_name, description, full_config) "
+            "VALUES ($1, $2, $3, $4, $5::jsonb) "
+            "ON CONFLICT (instance_id) DO UPDATE SET "
+            "  full_config = EXCLUDED.full_config, "
+            "  instance_name = EXCLUDED.instance_name, "
+            "  description = EXCLUDED.description, "
+            "  updated_at = CURRENT_TIMESTAMP",
+            {P{instanceId}, P{instanceId}, P{instanceName}, P{description}, P{configStr}}
         );
 
         if (affectedRows > 0) {

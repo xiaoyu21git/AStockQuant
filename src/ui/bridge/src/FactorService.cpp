@@ -415,6 +415,12 @@ QString FactorService::addFactor(const QVariantMap& factorData)
 
         INTERNAL_DEBUG_STREAM << "[FactorService] 添加因子:" << factorId.toStdString() << factorName.toStdString();
 
+        bool persisted = m_instanceManager->updateInstanceConfig(toStd(factorId), config);
+        if (!persisted) {
+            endMutation(false, QStringLiteral("因子持久化失败"));
+            return {};
+        }
+
         if (m_viewModel) {
             ensureViewModelPopulated();
         }
