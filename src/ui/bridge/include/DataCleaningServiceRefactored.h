@@ -48,6 +48,8 @@ class DataCleaningServiceRefactored : public QObject {
 public:
     explicit DataCleaningServiceRefactored(QObject* parent = nullptr);
     ~DataCleaningServiceRefactored();
+
+    static DataCleaningServiceRefactored* instance() { return s_instance; }
     
     // ============ 初始化 ============
     Q_INVOKABLE bool initialize();
@@ -132,6 +134,7 @@ private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
     bool m_initialized{false};
+    static DataCleaningServiceRefactored* s_instance;
 };
 
 Q_DECLARE_METATYPE(RefactoredCleaningStats)

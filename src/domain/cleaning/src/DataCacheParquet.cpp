@@ -572,12 +572,9 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
         if (it != m_index.end()) {
             it->second.rowCount = static_cast<int>(totalRows);
             if (!maxTradeDate.empty() && maxTradeDate > it->second.endDate) {
-                // 同步更新 displayName 中的日期(格式: name:source:start:end)
-                auto pos = it->second.endDate.rfind(':');
+                auto pos = it->second.displayName.rfind(it->second.endDate);
                 if (pos != std::string::npos)
-                    it->second.displayName = it->second.displayName.substr(0, pos+1) + maxTradeDate;
-                else
-                    it->second.displayName += "~" + maxTradeDate;
+                    it->second.displayName.replace(pos, it->second.endDate.size(), maxTradeDate);
                 it->second.endDate = maxTradeDate;
             }
             saveCatalog();

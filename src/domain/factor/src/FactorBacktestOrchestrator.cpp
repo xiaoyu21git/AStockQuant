@@ -263,10 +263,10 @@ void FactorBacktestOrchestrator::run(
             return result;
         };
         m_dataService->setDbFallback(std::move(dbFn));
-        INTERNAL_INFO_STREAM << "[MEM] dbCache created, captured in dbFallback (use_count="
-            << dbCache.use_count() << ")"
-            << " range=[" << minReportDate << "," << cacheStartDate << "]"
-            << " maxLookback=" << maxLookback;
+        INTERNAL_INFO_STREAM << "[MEM] DB回退查询范围: ["
+            << minReportDate << " ~ " << cacheStartDate << "]"
+            << " (Arrow首日" << cacheStartDate << " - maxLookback" << maxLookback << " - 60)"
+            << " use_count=" << dbCache.use_count();
     }
     std::vector<factor::compute::DateKey> filteredDatesStorage;
     const std::vector<factor::compute::DateKey>* effectiveDatesPtr = &arrowDates;
@@ -317,9 +317,42 @@ void FactorBacktestOrchestrator::run(
     constexpr int kChunkDates = 60;
     const size_t totalDates = allDates.size();
     const size_t totalChunks = (totalDates + kChunkDates - 1) / kChunkDates;
+    const int fwdDays = std::max(1, config.forwardDays);
+    const int rbDays = std::max(1, config.rebalanceDays);
+
+    // ── 日期链路诊断 ──
+    {
+        auto fmtDate = [](int32_t v) -> std::string {
+            if (v <= 0) return "N/A";
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", v / 10000, (v / 100) % 100, v % 100);
+            return buf;
+        };
+        int rebalanceCount = 0;
+        std::string firstRb, lastRb;
+        for (size_t di = 0; di + static_cast<size_t>(fwdDays) < totalDates; di += rbDays) {
+            if (rebalanceCount == 0)
+                firstRb = fmtDate(allDates[di].value);
+            lastRb = fmtDate(allDates[di].value);
+            ++rebalanceCount;
+        }
+        INTERNAL_INFO_STREAM << "[MEM] 日期链路诊断:"
+            << " arrowRawDates=" << arrowDates.size()
+            << " effectiveDates=" << totalDates
+            << " first=" << fmtDate(allDates.empty() ? 0 : allDates.front().value)
+            << " last=" << fmtDate(allDates.empty() ? 0 : allDates.back().value)
+            << " dateFilterStart=" << fmtDate(config.cacheStartDate.isValid() ? config.cacheStartDate.value : 0)
+            << " dateFilterEnd=" << fmtDate(config.cacheEndDate.isValid() ? config.cacheEndDate.value : 0)
+            << " fwdDays=" << fwdDays
+            << " rbDays=" << rbDays
+            << " rebalanceDates=" << rebalanceCount
+            << " firstRb=" << firstRb
+            << " lastRb=" << lastRb
+            << " expectedTradingPeriods~=" << rebalanceCount;
+    }
+
     INTERNAL_INFO_STREAM << "[回测流程] 分块: totalDates=" << totalDates
         << " chunkSize=" << kChunkDates << " totalChunks=" << totalChunks;
-    const int fwdDays = std::max(1, config.forwardDays);
 
     // 分块加载列名：核心 5 列 + 因子字段 + 基类中性化字段
     std::vector<std::string> chunkColumns = {"open", "high", "low", "close", "volume"};
@@ -352,9 +385,7 @@ void FactorBacktestOrchestrator::run(
     // ── 预建 rebalance 日期集合（仅这些日期需要保留 factorValues 供 SimulatedTrading）──
     std::unordered_set<std::string> rebalanceDates;
     {
-        const int rbDays = std::max(1, config.rebalanceDays);
-        const int fwd = std::max(1, config.forwardDays);
-        for (size_t di = 0; di + static_cast<size_t>(fwd) < allDates.size(); di += rbDays) {
+        for (size_t di = 0; di + static_cast<size_t>(fwdDays) < allDates.size(); di += rbDays) {
             int dv = allDates[di].value;
             char buf[16];
             std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
@@ -717,6 +748,10 @@ void FactorBacktestOrchestrator::run(
         m_executor = std::make_unique<factor::compute::SimulatedTradingExecutor>(params);
         auto sortedDates = sortedDatesFrom(reporterInput.factorValuesByDate);
 
+        INTERNAL_INFO_STREAM << "[MEM] 交易输入: sortedDates=" << sortedDates.size()
+            << " firstDate=" << (sortedDates.empty() ? "N/A" : sortedDates.front())
+            << " lastDate=" << (sortedDates.empty() ? "N/A" : sortedDates.back());
+
         // 构建 instrumentIds
         std::unordered_map<uint32_t, std::string> instrumentIdToSymbol;
         std::vector<factor::compute::InstrumentId> instrumentIds;
@@ -775,11 +810,6 @@ void FactorBacktestOrchestrator::run(
         INTERNAL_INFO_STREAM << "[回测流程] 模拟交易结束: periods=" << tradingResult.validSampleCount
             << " totalReturn=" << tradingResult.totalReturn;
 
-        // 释放交易模拟输入数据
-        reporterInput.factorValuesByDate.clear();
-        fvByDate.clear();
-        INTERNAL_INFO_STREAM << "[MEM] factorValuesByDate + fvByDate cleared";
-
         if (onProgress) onProgress(80.0, "trading simulated");
 
         // ── Reporter 分析 ──
@@ -792,6 +822,11 @@ void FactorBacktestOrchestrator::run(
             reporterInput.riskFreeRate   = config.riskFreeRate;
             reporterOutput = m_reporter->analyze(reporterInput);
         }
+
+        // 释放交易模拟输入数据
+        reporterInput.factorValuesByDate.clear();
+        fvByDate.clear();
+        INTERNAL_INFO_STREAM << "[MEM] factorValuesByDate + fvByDate cleared";
 
         // ── 构建 JSON 结果（复用原有逻辑）──
         if (onComplete) {

@@ -75,11 +75,12 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     double equity = params_.initialCapital;
     double maxEquity = params_.initialCapital;
 
+    // sortedDates 已是调仓日列表(上游按 rebalanceDays 过滤), 此处按 1 步进逐日调仓
     const size_t totalSteps = sortedDates.size() > static_cast<size_t>(forwardDays)
-        ? (sortedDates.size() - forwardDays + rebalanceDays - 1) / rebalanceDays : 0;
+        ? sortedDates.size() - forwardDays : 0;
     size_t stepIndex = 0;
 
-    for (size_t di = 0; di + forwardDays < sortedDates.size(); di += rebalanceDays) {
+    for (size_t di = 0; di + forwardDays < sortedDates.size(); di += 1) {
         if (params_.onProgress && totalSteps > 0)
             params_.onProgress(static_cast<double>(stepIndex) / static_cast<double>(totalSteps));
 

@@ -89,15 +89,19 @@ public:
 };
 
 // ── 构造/析构 ──
+DataCleaningServiceRefactored* DataCleaningServiceRefactored::s_instance = nullptr;
+
 DataCleaningServiceRefactored::DataCleaningServiceRefactored(QObject* parent)
     : QObject(parent)
     , m_impl(std::make_unique<Impl>())
     , m_initialized(false)
 {
+    s_instance = this;
     qRegisterMetaType<RefactoredCleaningStats>("RefactoredCleaningStats");
 }
 
 DataCleaningServiceRefactored::~DataCleaningServiceRefactored() {
+    if (s_instance == this) s_instance = nullptr;
     if (m_impl->executor) {
         m_impl->executor->shutdown(false);
     }

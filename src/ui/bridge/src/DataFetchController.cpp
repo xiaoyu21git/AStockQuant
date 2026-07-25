@@ -82,7 +82,7 @@ DataFetchController::DataFetchController(QObject* parent)
             this, [this](int id, bool ok, int newRows, const QString& msg) {
         m_operationInProgress = false; emit operationInProgressChanged();
         m_progress = ok ? 100 : m_progress; emit progressChanged();
-        if (ok && newRows > 0) { refreshDataSetInfos(); refreshCleanedDataSetInfos(); } // 新数据落盘后刷新列表
+        if (ok && newRows > 0) { refreshDataSetInfos(); refreshCleanedDataSetInfos(); }
         emit datasetUpdateFinished(id, ok, newRows, msg);
     });
     QTimer::singleShot(0, this, [this]() { refreshDataSetInfos(); refreshCleanedDataSetInfos(); });

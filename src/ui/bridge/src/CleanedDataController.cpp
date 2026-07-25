@@ -1,5 +1,6 @@
 #include "CleanedDataController.h"
 #include "DataCacheAdapter.h"
+#include "DataCleaningServiceRefactored.h"
 #include "AppStoragePaths.h"
 #include <QMetaObject>
 #include <QPointer>
@@ -110,9 +111,17 @@ bool CleanedDataController::initialize()
             }
         );
         
+        // 监听增量更新完成 → 自动刷新数据集列表
+        if (auto* svc = DataCleaningServiceRefactored::instance()) {
+            connect(svc, &DataCleaningServiceRefactored::incrementalUpdateFinished,
+                    this, [this](int, bool ok, int newRows, const QString&) {
+                if (ok && newRows > 0) refreshDatasets();
+            });
+        }
+
         // 刷新数据集列表
         refreshDatasets();
-        
+
         INTERNAL_DEBUG_STREAM << "✅ CleanedDataController: Initialized successfully";
         
         emit availabilityChanged(true);

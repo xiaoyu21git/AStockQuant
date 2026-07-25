@@ -1170,8 +1170,7 @@ Item {
                 var info = infos[i]
                 cleanedCacheModel.append({
                     id: info.id,
-                    displayName: (info.displayName || ("清洗集 #" + info.id))
-                        + "  [" + (info.startDate || "?") + "~" + (info.endDate || "?") + "]",
+                    displayName: (info.displayName || ("清洗集 #" + info.id)),
                     rowCount: info.rowCount || 0,
                     startDate: info.startDate || "",
                     endDate: info.endDate || ""

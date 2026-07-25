@@ -363,47 +363,48 @@ def phase4_aggregate_bars(c, target_date: str):
     t0 = time.time()
     total = 0
 
-    # 周线
-    sql_weekly = """
-        INSERT INTO mkt.weekly_bar (symbol_id, trade_date, open, high, low, close, volume, turnover)
-        SELECT symbol_id, date_trunc('week', trade_date)::date,
-               (ARRAY_AGG(open ORDER BY trade_date))[1],
-               MAX(high), MIN(low),
-               (ARRAY_AGG(close ORDER BY trade_date DESC))[1],
-               SUM(volume), SUM(turnover)
-        FROM mkt.daily_bar
-        WHERE trade_date >= date_trunc('week', %s::date)::date - INTERVAL '1 week'
-        GROUP BY symbol_id, date_trunc('week', trade_date)::date
-        ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
-            open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
-            volume=EXCLUDED.volume, turnover=EXCLUDED.turnover
-    """
+    # 周线 (聚合上一完整周, trade_date=周日) + 历史缺口补齐
     with c.cursor() as cur:
-        cur.execute(sql_weekly, (target_date,))
-        total += cur.rowcount
-    c.commit()
-    print(f"[{now()}] 周线 → {cur.rowcount} 行", flush=True)
+        # 查询缺口
+        cur.execute("SELECT COALESCE(MAX(trade_date),'1900-01-01')::date FROM mkt.weekly_bar")
+        last_weekly = cur.fetchone()[0]
+        need_weeks = []
+        d = last_weekly + dt.timedelta(days=7)
+        # 取目标日期的上一完整周(上周日)
+        last_wanted = target_date - dt.timedelta(days=target_date.isoweekday() % 7)
+        while d <= last_wanted:
+            need_weeks.append(d)
+            d += dt.timedelta(days=7)
+        if need_weeks:
+            print(f"[{now()}] 周线缺口: {last_weekly} → {need_weeks[-1]}, 补{len(need_weeks)}周")
+        for sun in need_weeks:
+            cur.execute(sql_weekly, (sun,))
+            total += cur.rowcount
+        c.commit()
+    print(f"[{now()}] 周线 → {total} 行", flush=True)
 
-    # 月线
-    sql_monthly = """
-        INSERT INTO mkt.monthly_bar (symbol_id, trade_date, open, high, low, close, volume, turnover)
-        SELECT symbol_id, date_trunc('month', trade_date)::date,
-               (ARRAY_AGG(open ORDER BY trade_date))[1],
-               MAX(high), MIN(low),
-               (ARRAY_AGG(close ORDER BY trade_date DESC))[1],
-               SUM(volume), SUM(turnover)
-        FROM mkt.daily_bar
-        WHERE trade_date >= date_trunc('month', %s::date)::date - INTERVAL '1 month'
-        GROUP BY symbol_id, date_trunc('month', trade_date)::date
-        ON CONFLICT (symbol_id, trade_date) DO UPDATE SET
-            open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close,
-            volume=EXCLUDED.volume, turnover=EXCLUDED.turnover
-    """
+    # 月线 (聚合上一完整月, trade_date=月末) + 历史缺口补齐
     with c.cursor() as cur:
-        cur.execute(sql_monthly, (target_date,))
-        total += cur.rowcount
-    c.commit()
-    print(f"[{now()}] 月线 → {cur.rowcount} 行", flush=True)
+        cur.execute("SELECT COALESCE(MAX(trade_date),'1900-01-01')::date FROM mkt.monthly_bar")
+        last_monthly = cur.fetchone()[0]
+        need_months = []
+        d = last_monthly + dt.timedelta(days=1)
+        d = d.replace(day=1) + dt.timedelta(days=32)
+        d = d.replace(day=1) - dt.timedelta(days=1)  # 下一个月末
+        # 取目标日期的上一完整月(上月月末)
+        last_wanted = target_date.replace(day=1) - dt.timedelta(days=1)
+        while d <= last_wanted:
+            need_months.append(d)
+            d += dt.timedelta(days=32)
+            d = d.replace(day=1) + dt.timedelta(days=32)
+            d = d.replace(day=1) - dt.timedelta(days=1)
+        if need_months:
+            print(f"[{now()}] 月线缺口: {last_monthly} → {need_months[-1]}, 补{len(need_months)}月")
+        for last_day in need_months:
+            cur.execute(sql_monthly, (last_day,))
+            total += cur.rowcount
+        c.commit()
+    print(f"[{now()}] 月线 → {total} 行", flush=True)
 
     phase_done("4", total, time.time()-t0)
 

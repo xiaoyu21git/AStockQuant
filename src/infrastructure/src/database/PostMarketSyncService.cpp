@@ -512,19 +512,20 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
 
 bool PostMarketSyncService::syncWeekly(std::shared_ptr<astock::database::ISqlDatabase> db, int tradingDay) {
     logTaskStart("WEEKLY", tradingDay);
-    // 聚合并upsert本周数据
+    // 聚合上一完整周(上周一~上周日)
+    // 聚合上一完整周，trade_date 取当周最后交易日
     std::string sql = R"(
         INSERT INTO mkt.weekly_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source)
         SELECT d.symbol_id,
-               (date_trunc('week', d.trade_date) + interval '6 days')::date AS trade_date,
+               MAX(d.trade_date) AS trade_date,
                (array_agg(d.open ORDER BY d.trade_date))[1] AS open,
                MAX(d.high) AS high, MIN(d.low) AS low,
                (array_agg(d.close ORDER BY d.trade_date))[array_upper(array_agg(d.close ORDER BY d.trade_date),1)] AS close,
                SUM(d.volume) AS volume, SUM(d.turnover) AS turnover,
                NULL::numeric AS pre_close, 'GMSDK' AS data_source
         FROM mkt.daily_bar d
-        WHERE d.trade_date >= date_trunc('week', $1::date)::date
-          AND d.trade_date <= (date_trunc('week', $1::date) + interval '6 days')::date
+        WHERE d.trade_date >= date_trunc('week', $1::date)::date - interval '7 days'
+          AND d.trade_date <= (date_trunc('week', $1::date)::date - interval '1 day')
         GROUP BY d.symbol_id, date_trunc('week', d.trade_date)::date
         ON CONFLICT(symbol_id,trade_date) DO UPDATE SET
           open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
@@ -543,18 +544,19 @@ bool PostMarketSyncService::syncWeekly(std::shared_ptr<astock::database::ISqlDat
 
 bool PostMarketSyncService::syncMonthly(std::shared_ptr<astock::database::ISqlDatabase> db, int tradingDay) {
     logTaskStart("MONTHLY", tradingDay);
+    // 聚合上一完整月，trade_date 取当月最后交易日
     std::string sql = R"(
         INSERT INTO mkt.monthly_bar(symbol_id,trade_date,open,high,low,close,volume,turnover,pre_close,data_source)
         SELECT d.symbol_id,
-               (date_trunc('month', d.trade_date) + interval '1 month - 1 day')::date AS trade_date,
+               MAX(d.trade_date) AS trade_date,
                (array_agg(d.open ORDER BY d.trade_date))[1] AS open,
                MAX(d.high) AS high, MIN(d.low) AS low,
                (array_agg(d.close ORDER BY d.trade_date))[array_upper(array_agg(d.close ORDER BY d.trade_date),1)] AS close,
                SUM(d.volume) AS volume, SUM(d.turnover) AS turnover,
                NULL::numeric AS pre_close, 'GMSDK' AS data_source
         FROM mkt.daily_bar d
-        WHERE d.trade_date >= date_trunc('month', $1::date)::date
-          AND d.trade_date <= (date_trunc('month', $1::date) + interval '1 month - 1 day')::date
+        WHERE d.trade_date >= date_trunc('month', $1::date)::date - interval '1 month'
+          AND d.trade_date <= (date_trunc('month', $1::date)::date - interval '1 day')
         GROUP BY d.symbol_id, date_trunc('month', d.trade_date)::date
         ON CONFLICT(symbol_id,trade_date) DO UPDATE SET
           open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
@@ -892,7 +894,72 @@ void PostMarketSyncService::syncValuation(std::shared_ptr<astock::database::ISql
 
 void PostMarketSyncService::syncWeeklyMonthly(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
-    if(db&&db->isOpen()){syncWeekly(db,tradingDay);syncMonthly(db,tradingDay);}
+    if(!db||!db->isOpen())return;
+
+    char buf[16];
+    int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
+    snprintf(buf,sizeof(buf),"%04d-%02d-%02d",y,m,d);
+    std::string today(buf);
+
+    // ── 周线缺口补齐 ──
+    {
+        auto res=db->executeQuery("SELECT MAX(trade_date)::text FROM mkt.weekly_bar");
+        if(res.rowCount()>0){
+            std::string last=res.getRow(0).getString(0);
+            int filled=0;
+            while(!last.empty() && last < today){
+                // last 的下一个周日
+                auto nr=db->executeQuery(
+                    "SELECT (date_trunc('week',$1::date+interval'8 days')+interval'4 days')::date::text",
+                    {astock::database::SqlParam{last}});
+                if(nr.rowCount()==0)break;
+                std::string nextSun=nr.getRow(0).getString(0);
+                if(nextSun > today) break;
+                // 该周日落在一个完整周内，取该周日作为 tradingDay
+                auto cnt=db->executeQuery(
+                    "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date<=$1::date"
+                    " AND trade_date>=date_trunc('week',$1::date)::date",
+                    {astock::database::SqlParam{nextSun}});
+                if(cnt.rowCount()>0 && cnt.getRow(0).getInt(0)>0){
+                    int ny,nm,nd; sscanf(nextSun.c_str(),"%d-%d-%d",&ny,&nm,&nd);
+                    syncWeekly(db,ny*10000+nm*100+nd); ++filled;
+                }
+                last=nextSun;
+            }
+            if(filled>0) INTERNAL_INFO_STREAM<<"[PostMktSync] weekly backfill "<<filled<<" weeks";
+        }
+    }
+
+    // ── 月线缺口补齐 ──
+    {
+        auto res=db->executeQuery("SELECT MAX(trade_date)::text FROM mkt.monthly_bar");
+        if(res.rowCount()>0){
+            std::string last=res.getRow(0).getString(0);
+            int filled=0;
+            while(!last.empty() && last < today){
+                // last 的下一个月末
+                auto nr=db->executeQuery(
+                    "SELECT (date_trunc('month',$1::date+interval'1 month')+interval'1 month-1 day')::date::text",
+                    {astock::database::SqlParam{last}});
+                if(nr.rowCount()==0)break;
+                std::string nextEnd=nr.getRow(0).getString(0);
+                if(nextEnd > today) break;
+                auto cnt=db->executeQuery(
+                    "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date<=$1::date"
+                    " AND trade_date>=date_trunc('month',$1::date)::date",
+                    {astock::database::SqlParam{nextEnd}});
+                if(cnt.rowCount()>0 && cnt.getRow(0).getInt(0)>0){
+                    int ny,nm,nd; sscanf(nextEnd.c_str(),"%d-%d-%d",&ny,&nm,&nd);
+                    syncMonthly(db,ny*10000+nm*100+nd); ++filled;
+                }
+                last=nextEnd;
+            }
+            if(filled>0) INTERNAL_INFO_STREAM<<"[PostMktSync] monthly backfill "<<filled<<" months";
+        }
+    }
+
+    syncWeekly(db,tradingDay);
+    syncMonthly(db,tradingDay);
 }
 
 void PostMarketSyncService::syncFinancialData(int tradingDay) {
