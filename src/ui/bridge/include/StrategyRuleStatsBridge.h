@@ -49,9 +49,21 @@ public:
     Q_INVOKABLE void refresh();
 
     // ── 规则归因 (回测后数据) ──
-    /// @brief 获取指定策略下某模板的规则级归因数据
     Q_INVOKABLE QVariantList getRuleAttribution(const QString& strategyId,
                                                  const QString& templateId);
+
+    // ── 跨策略对比 ──
+    Q_INVOKABLE QVariantList getCrossStrategyRuleStats(const QString& templateId);
+
+    // ── 规则调试 ──
+    /// @brief 单规则条件求值 (给定标的+日期, 不产生交易)
+    Q_INVOKABLE QVariantMap testSingleRule(const QString& templateId, int ruleIndex,
+                                            const QString& symbol, const QString& date);
+
+    /// @brief 历史条件覆盖率 (逐日求值, 异步返回)
+    Q_INVOKABLE void startCoverageCalc(const QString& templateId, int ruleIndex,
+                                        const QString& symbol, int lookbackDays);
+    Q_SIGNAL void coverageReady(const QVariantMap& result);
 
     // ── 状态查询 ──
     bool hasData() const { return m_hasData; }

@@ -1825,25 +1825,6 @@ Rectangle {
             }
         }
 
-        // ── 绩效分页 ──
-        Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: strategyLibraryPage.showPerformance
-            visible: strategyLibraryPage.showPerformance
-
-            Loader {
-                id: performanceHistoryLoader
-                anchors.fill: parent
-                active: strategyLibraryPage.showPerformance
-                source: "qrc:/components/Strategy/PerformanceHistoryList.qml"
-
-                onLoaded: {
-                    if (item) {
-                        item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
-                    }
-                }
-            }
-        }
     }
     
     // 新建策略对话框

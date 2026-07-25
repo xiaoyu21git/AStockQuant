@@ -2236,9 +2236,16 @@ StrategyBacktestResult StrategyEngine::backtest(
         result.fullKelly = fullKelly;
         result.halfKelly = halfKelly;
     }
-    // ── 规则归因: 计算后输出 ──
+    // ── 规则归因: 计算后输出 + 存到 engine ──
     attributionCollector.compute(view);
-    const auto& attrResults = attributionCollector.results();
+    m_ruleAttribution = attributionCollector.results();
+    // 存储回测日期区间
+    {
+        const auto& d = view->dates();
+        if (!d.empty())
+            m_backtestDateRange = std::to_string(d.front().value) + "-" + std::to_string(d.back().value);
+    }
+    const auto& attrResults = m_ruleAttribution;
     for (const auto& [tid, attr] : attrResults) {
         INTERNAL_INFO_STREAM << "[规则归因] 模板=" << tid
                              << " 封堵=" << attr.preventedTrades

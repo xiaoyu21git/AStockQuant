@@ -19,6 +19,10 @@ struct RuleAttribution {
     double preventedWinRate{0.0};        // 被封堵信号中本可盈利的比例 (0.0-1.0)
     int triggeredExits{0};              // 触发的出场次数
     double exitRealizedPnL{0.0};        // 出场交易的已实现 P&L (百分比累计)
+    // 交易质量指标
+    int topBoughtCount{0};     // 挑顶买入: 买入后5日跌 >5%
+    int missedGainCount{0};    // 卖飞: 卖出后5日涨 >5%
+    int stopLossCount{0};      // 止损出场次数 (规则触发, 非止损系统)
 };
 
 /// @brief 被封堵的买入信号记录

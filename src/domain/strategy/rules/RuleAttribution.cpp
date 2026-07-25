@@ -67,11 +67,47 @@ void AttributionCollector::compute(const factor::compute::IMarketDataView* view,
             attr.preventedWinRate /= static_cast<double>(attr.preventedTrades);
     }
 
-    // ── 处理出场信号: 已实现 P&L 直接累加 ──
+    // ── 处理出场信号: 已实现 P&L + 交易质量 ──
     for (const auto& rec : m_exitRecords) {
         auto& attr = aggregated[rec.templateId];
         ++attr.triggeredExits;
         attr.exitRealizedPnL += rec.realizedPnL;
+
+        // 卖飞检测: 出场后 5 日涨 >5%
+        auto colIt2 = symToCol.find(rec.symbol);
+        if (colIt2 != symToCol.end()) {
+            int col2 = colIt2->second;
+            const int fwdRow = rec.exitRow + 5;
+            if (fwdRow >= 0 && fwdRow < totalRows) {
+                double fwdPrice = static_cast<double>(
+                    closeMat.data[static_cast<std::size_t>(fwdRow) * closeMat.rowStride
+                                  + static_cast<std::size_t>(col2)]);
+                if (fwdPrice > 0 && rec.exitPrice > 0 && (fwdPrice - rec.exitPrice) / rec.exitPrice > 0.05)
+                    ++attr.missedGainCount;
+            }
+        }
+
+        // 止损检测: 出场时浮亏 >5%
+        if (rec.entryPrice > 0 && rec.exitPrice > 0 && (rec.exitPrice - rec.entryPrice) / rec.entryPrice < -0.05)
+            ++attr.stopLossCount;
+    }
+
+    // ── 处理被封堵信号: 挑顶检测 ──
+    for (const auto& rec : m_blockedRecords) {
+        auto colIt2 = symToCol.find(rec.symbol);
+        if (colIt2 != symToCol.end()) {
+            int col2 = colIt2->second;
+            const int fwdRow = rec.dayRow + 5;
+            if (fwdRow >= 0 && fwdRow < totalRows) {
+                double fwdPrice = static_cast<double>(
+                    closeMat.data[static_cast<std::size_t>(fwdRow) * closeMat.rowStride
+                                  + static_cast<std::size_t>(col2)]);
+                if (fwdPrice > 0 && rec.price > 0 && (rec.price - fwdPrice) / rec.price > 0.05) {
+                    auto& attr = aggregated[rec.templateId];
+                    ++attr.topBoughtCount;
+                }
+            }
+        }
     }
 
     // ── 输出日志 ──

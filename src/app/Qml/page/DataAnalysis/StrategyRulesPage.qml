@@ -67,19 +67,26 @@ Item {
 
     property bool _paramInit: false  // 防止初始化绑定触发保存
 
+    onStrategyFilterIdChanged: refreshDetail()
+
     function selectTemplate(templateId) {
         selectedTemplateId = templateId
         _paramInit = true
+        refreshDetail()
+    }
+
+    function refreshDetail() {
+        if (!selectedTemplateId) return
+        var tid = selectedTemplateId
         var reqId = ++pendingRequestId
         Qt.callLater(function() {
             if (reqId !== pendingRequestId) return
             try {
-                selectedDetail = StrategyRuleStatsBridge.getTemplateDetail(templateId)
-                selectedStats = StrategyRuleStatsBridge.getTemplateStats(templateId, strategyFilterId)
-                selectedParams = StrategyRuleStatsBridge.extractTunableParams(templateId)
-                if (strategyFilterId)
-                    ruleAttribution = StrategyRuleStatsBridge.getRuleAttribution(strategyFilterId, templateId)
-                _paramInit = false  // 初始化完成，允许保存
+                selectedDetail = StrategyRuleStatsBridge.getTemplateDetail(tid)
+                selectedStats = StrategyRuleStatsBridge.getTemplateStats(tid, strategyFilterId)
+                selectedParams = StrategyRuleStatsBridge.extractTunableParams(tid)
+                ruleAttribution = StrategyRuleStatsBridge.getRuleAttribution(strategyFilterId, tid)
+                _paramInit = false
             } catch (e) { console.warn("[StrategyRules] 加载详情失败:", e); _paramInit = false }
         })
     }
@@ -116,9 +123,35 @@ Item {
                 ComboBox {
                     id: strategySelector
                     Layout.preferredWidth: 160
-                    model: [qsTr("全部策略")]
+                    textRole: "name"
                     background: Rectangle { color: "#1E293B"; radius: 5; border.width: 1; border.color: "#334155" }
-                    contentItem: Text { text: strategySelector.currentText; color: "#F8FAFC"; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; leftPadding: 8 }
+                    contentItem: Text { text: strategySelector.currentText || "选择策略"; color: "#F8FAFC"; font.pixelSize: 12; verticalAlignment: Text.AlignVCenter; leftPadding: 8 }
+                    onCurrentIndexChanged: {
+                        var m = strategySelector.model
+                        if (currentIndex >= 0 && m && m[currentIndex]) {
+                            strategyFilterId = m[currentIndex].strategyId || ""
+                            refreshDetail()
+                        }
+                    }
+                    Component.onCompleted: {
+                        rebuildStrategyCombo()
+                        if (strategySelector.model && strategySelector.model.length > 1)
+                            strategySelector.currentIndex = 1
+                    }
+
+                    function rebuildStrategyCombo() {
+                        var model = [{name: "全部策略", strategyId: ""}]
+                        try {
+                            var vm = StrategyBridge.listModel
+                            if (vm && vm.count > 0) {
+                                for (var i = 0; i < vm.count; i++) {
+                                    var row = vm.getRow(i)
+                                    model.push({name: row.strategyName || row.name || "", strategyId: row.strategyId || ""})
+                                }
+                            }
+                        } catch (e) { console.warn("加载策略列表失败:", e) }
+                        strategySelector.model = model
+                    }
                 }
                 Shared.ButtonSmall { text: qsTr("刷新"); onClicked: { templates = StrategyRuleStatsBridge.loadAllTemplates() } }
             }
@@ -239,7 +272,7 @@ Item {
                         DAComponents.RulePaginationBar {
                             Layout.fillWidth: true
                             currentPage: root.currentPage; totalPages: root.totalPages
-                            onPageChanged: { root.currentPage = page }
+                            onPageChanged: function(p) { root.currentPage = p }
                         }
                     }
                 }
@@ -269,7 +302,14 @@ Item {
                         Column {
                             id: detailCol; width: detailFlick.width; spacing: 8
 
-                            Text { width: parent.width; text: selectedDetail.displayName || ""; font.pixelSize: 14; font.weight: Font.Bold; color: "#F8FAFC"; elide: Text.ElideRight }
+                            RowLayout {
+                                width: parent.width
+                                Text { text: selectedDetail.displayName || ""; font.pixelSize: 14; font.weight: Font.Bold; color: "#F8FAFC"; elide: Text.ElideRight; Layout.fillWidth: true }
+                                Rectangle { Layout.preferredWidth: 40; Layout.preferredHeight: 20; radius: 3; color: "#1E293B"
+                                    Text { anchors.centerIn: parent; text: "刷新"; color: "#94A3B8"; font.pixelSize: 10 }
+                                    MouseArea { anchors.fill: parent; onClicked: refreshDetail() }
+                                }
+                            }
                             Text { width: parent.width; text: selectedDetail.summary || ""; font.pixelSize: 11; color: "#94A3B8"; wrapMode: Text.WordWrap; maximumLineCount: 3; elide: Text.ElideRight }
 
                             Rectangle { width: parent.width; height: 1; color: "#334155" }
@@ -307,27 +347,55 @@ Item {
                             Rectangle { width: parent.width; height: 1; color: "#334155" }
 
                             // ── 规则归因 ──
-                            Text { text: qsTr("归因"); font.pixelSize: 12; font.weight: Font.DemiBold; color: "#F8FAFC" }
+                            RowLayout {
+                                width: parent.width
+                                Text { text: qsTr("归因"); font.pixelSize: 12; font.weight: Font.DemiBold; color: "#F8FAFC"; Layout.fillWidth: true }
+                                Text {
+                                    text: ruleAttribution.length > 0 && ruleAttribution[0].dateRange ? ruleAttribution[0].dateRange : ""
+                                    color: "#64748B"; font.pixelSize: 9
+                                }
+                            }
+
+                            // 表头
+                            RowLayout {
+                                width: parent.width
+                                Text { text: ""; Layout.preferredWidth: 60 }
+                                Text { text: "评估"; color: "#38BDF8"; font.pixelSize: 9; Layout.preferredWidth: 40 }
+                                Text { text: "命中"; color: "#10B981"; font.pixelSize: 9; Layout.preferredWidth: 35 }
+                                Text { text: "拦截盈"; color: "#F59E0B"; font.pixelSize: 9; Layout.preferredWidth: 50 }
+                                Text { text: "出场盈"; color: "#EF4444"; font.pixelSize: 9; Layout.preferredWidth: 50 }
+                                Text { text: "挑顶"; color: "#94A3B8"; font.pixelSize: 9; Layout.preferredWidth: 30 }
+                                Text { text: "卖飞"; color: "#94A3B8"; font.pixelSize: 9; Layout.preferredWidth: 30 }
+                            }
+
                             Repeater {
                                 model: ruleAttribution
                                 delegate: Column {
                                     width: parent.width; spacing: 2
                                     RowLayout {
                                         width: parent.width
-                                        Text { text: modelData.ruleId || ""; color: "#94A3B8"; font.pixelSize: 10; Layout.fillWidth: true; elide: Text.ElideRight }
-                                        Text { text: "拦截 " + (modelData.preventedTrades || 0); color: "#38BDF8"; font.pixelSize: 10; Layout.preferredWidth: 55 }
+                                        Text { text: (modelData.ruleId || "").substring(0, 20); color: "#94A3B8"; font.pixelSize: 9; Layout.preferredWidth: 60; elide: Text.ElideRight }
+                                        Text { text: modelData.evaluated || 0; color: "#38BDF8"; font.pixelSize: 9; Layout.preferredWidth: 40 }
+                                        Text { text: modelData.hits || 0; color: "#10B981"; font.pixelSize: 9; Layout.preferredWidth: 35 }
                                         Text {
-                                            text: (modelData.preventedPnL||0) >= 0 ? "+" + (modelData.preventedPnL||0).toFixed(1) + "%" : (modelData.preventedPnL||0).toFixed(1) + "%"
-                                            color: (modelData.preventedPnL||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 10; Layout.preferredWidth: 55
+                                            text: (modelData.preventedPnL||0) >= 0 ? "+" + (modelData.preventedPnL||0).toFixed(1) : (modelData.preventedPnL||0).toFixed(1)
+                                            color: (modelData.preventedPnL||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 9; Layout.preferredWidth: 50
                                         }
+                                        Text {
+                                            text: (modelData.exitPnL||0) >= 0 ? "+" + (modelData.exitPnL||0).toFixed(1) : (modelData.exitPnL||0).toFixed(1)
+                                            color: (modelData.exitPnL||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 9; Layout.preferredWidth: 50
+                                        }
+                                        Text { text: modelData.topBoughtCount || 0; color: "#F59E0B"; font.pixelSize: 9; Layout.preferredWidth: 30 }
+                                        Text { text: modelData.missedGainCount || 0; color: "#EF4444"; font.pixelSize: 9; Layout.preferredWidth: 30 }
                                         Text {
                                             text: (modelData.netContribution||0) >= 0 ? "✅" : ((modelData.netContribution||0) < -2 ? "❌" : "⚪")
-                                            color: (modelData.netContribution||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 10; Layout.preferredWidth: 20
+                                            color: (modelData.netContribution||0) >= 0 ? "#10B981" : "#EF4444"; font.pixelSize: 10; Layout.preferredWidth: 16
                                         }
                                     }
+                                    Rectangle { width: parent.width; height: 1; color: "#1E293B" }
                                 }
                             }
-                            Text { visible: ruleAttribution.length === 0; text: qsTr("回测后显示归因数据"); color: "#64748B"; font.pixelSize: 10 }
+                            Text { visible: ruleAttribution.length === 0; text: qsTr("选中策略后显示归因数据"); color: "#64748B"; font.pixelSize: 10 }
                         }
                     }
                 }

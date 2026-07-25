@@ -17,6 +17,8 @@ bool BacktestResultRepository::ensureTables()
 {
     if (m_tablesEnsured) return true;
 
+    m_db.executeUpdate("SET client_min_messages = WARNING");
+
     // 旧版 strategy_backtest_results 是 (id, data) 两列, 与当前 schema 不兼容;
     // 检测到缺少 strategy_id 列时重建 (该表仅为回测结果缓存, 可安全重建)
     {

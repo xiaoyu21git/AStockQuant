@@ -8,6 +8,7 @@
 #include "FactorSignalProcessor.h"
 #include "SignalBlendCompositor.h"
 #include "RuleGate.h"
+#include "RuleAttribution.h"
 #include "RulePipeline.h"
 #include "RiskEvaluator.h"
 #include "OrderGenerator.h"
@@ -652,6 +653,13 @@ public:
         return m_ruleGate.stats();
     }
 
+    /// @brief 获取最近一次回测的规则归因 (P&L 影响)
+    [[nodiscard]] const std::map<std::string, rules::RuleAttribution>& ruleAttribution() const noexcept {
+        return m_ruleAttribution;
+    }
+    /// @brief 最近一次回测的日期区间
+    [[nodiscard]] std::string backtestDateRange() const noexcept { return m_backtestDateRange; }
+
 private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
@@ -690,6 +698,8 @@ private:
     rules::RuleGate m_ruleGate;  ///< 规则管线: 市场闸/信号审核/出场, 绑定规则库+策略模板集
     RulePipeline m_rulePipeline{m_ruleGate};  ///< 规则编排器(封装上下文构建+迭代样板代码)
     bool m_enableCandlePatterns{false};       ///< 是否启用 TA-Lib 蜡烛形态计算
+    std::map<std::string, rules::RuleAttribution> m_ruleAttribution;  ///< 最近一次回测的规则归因
+    std::string m_backtestDateRange;  ///< 最近一次回测的日期区间 (如 "20200102-20260717")
     RiskConfig m_riskConfig = RiskConfig::defaults();
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日

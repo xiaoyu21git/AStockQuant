@@ -969,10 +969,7 @@ Rectangle {
             || hasValue(root.executionPolicy().rebalanceDays)
     }
 
-    function hasRuleTemplateSummary() {
-        var summary = root.backtestResult.ruleTemplateSummary || {}
-        return !!summary.hasTemplate || Number(summary.triggeredCount || 0) > 0
-    }
+    function hasRuleTemplateSummary() { return false }
 
     function resultStatusText() {
         if (root.isBacktesting) {

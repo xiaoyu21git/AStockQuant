@@ -3,19 +3,19 @@
 #include "../include/StrategyPerformanceModel.h"
 #include "../../domain/strategy/rules/RuleGate.h"
 #include "../../domain/strategy/rules/RuleLibrary.h"
+#include "../../domain/strategy/rules/RuleConditionEvaluator.h"
+#include "../../domain/strategy/rules/RuleAttribution.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
+#include "../../../infrastructure/include/database/ISqlDatabase.h"
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/IStrategyService.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
-#include <QCoreApplication>
-#include <QDir>
-#include <QFileInfo>
 #include <QMutexLocker>
+#include <QtConcurrent>
 
-#include <fstream>
 #include <map>
-#include <sstream>
 
 namespace {
 
@@ -26,40 +26,10 @@ double safeDiv(double num, double den) {
     return num / den;
 }
 
-/// @brief 唯一入口: 获取规则库。
-/// 先走 sharedRuleLibrary()（domain 层已缓存），
-/// 若空则桥接层用 binary-adjacent 路径加载（CMake POST_BUILD 已拷贝 compiled.json）。
 const domain::strategy::rules::RuleLibrary* getLib() {
-    auto* lib = domain::strategy::rules::sharedRuleLibrary();
-    if (lib) return lib;
-
-    // domain 层未缓存 → 桥接层从 appDir 加载
-    static std::unique_ptr<domain::strategy::rules::RuleLibrary> s_cached;
-    static bool s_attempted = false;
-    if (s_attempted) return s_cached.get();
-    s_attempted = true;
-
-    // 二进制旁 config/rules/ (CMake POST_BUILD 拷贝) + 兜底相对路径
-    QStringList paths = {
-        QCoreApplication::applicationDirPath() + "/config/rules/compiled.json",
-        QCoreApplication::applicationDirPath() + "/../../config/rules/compiled.json",
-        QDir::currentPath() + "/config/rules/compiled.json",
-    };
-    for (const auto& p : paths) {
-        auto root = JsonFacade::parseFile(p.toStdString());
-        if (root.isNull()) continue;
-        auto loaded = domain::strategy::rules::loadRuleLibrary(root);
-        if (loaded) {
-            INTERNAL_INFO_STREAM << "[StrategyRuleStatsBridge] 规则库加载自: " << p.toStdString()
-                                 << " (" << loaded->templates.size() << " 模板)";
-            s_cached = std::move(loaded);
-            return s_cached.get();
-        }
-    }
-    return nullptr;
+    return domain::strategy::rules::sharedRuleLibrary();
 }
 
-// ── 用户参数持久化 (foundation::json::JsonFacade + std::fstream) ──
 static QVariantMap loadUserParamsMap() {
     QVariantMap result;
     try {
@@ -459,30 +429,250 @@ bool StrategyRuleStatsBridge::updateTemplateParams(const QString& templateId,
     return true;
 }
 
+QVariantMap StrategyRuleStatsBridge::testSingleRule(
+    const QString& templateId, int ruleIndex,
+    const QString& symbol, const QString& date)
+{
+    QVariantMap result;
+    result["verdict"] = "Error";
+
+    auto lib = domain::strategy::rules::sharedRuleLibrary();
+    if (!lib) { result["reason"] = "规则库未加载"; return result; }
+    auto it = lib->byId.find(templateId.toStdString());
+    if (it == lib->byId.end()) { result["reason"] = "模板不存在"; return result; }
+    const auto& rules = it->second->rules;
+    if (ruleIndex < 0 || ruleIndex >= static_cast<int>(rules.size())) {
+        result["reason"] = "规则索引越界"; return result;
+    }
+    const auto& rule = rules[static_cast<std::size_t>(ruleIndex)];
+
+    int y = date.left(4).toInt(), m = date.mid(4,2).toInt(), d = date.right(2).toInt();
+    char ds[32]; snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
+
+    std::vector<double> closes;
+    try {
+        auto& pool = astock::database::NativePgConnectionPool::instance();
+        auto db = pool.getConnection();
+        if (db && db->isOpen()) {
+            auto rows = db->executeQuery(
+                "SELECT d.close FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id "
+                "WHERE si.symbol=$1 AND d.trade_date<=$2::date ORDER BY d.trade_date DESC LIMIT 60",
+                {astock::database::SqlParam{symbol.toStdString()},
+                 astock::database::SqlParam{std::string(ds)}});
+            for (auto& row : rows.getRows()) closes.push_back(row.getDouble("close"));
+            std::reverse(closes.begin(), closes.end());
+        }
+    } catch (...) {}
+
+    if (closes.size() < 20) { result["reason"] = "数据不足"; return result; }
+
+    struct SP : domain::strategy::rules::IRuleVariableProvider {
+        const std::vector<double>& c; int last;
+        SP(const std::vector<double>& cl, int l) : c(cl), last(l) {}
+        std::optional<double> resolve(const std::string& vp) const override {
+            if (last < 0 || c[last] <= 0) return std::nullopt;
+            auto ma = [&](int w) -> std::optional<double> {
+                if (last + 1 < w) return std::nullopt;
+                double s = 0; for (int i = last; i > last - w; --i) s += c[i];
+                return s / w;
+            };
+            if (vp == "candidate.close_to_ma20_ratio") { auto m20 = ma(20); return m20 ? std::optional(c[last] / *m20) : std::nullopt; }
+            if (vp == "candidate.close_to_ma60_ratio") { auto m60 = ma(60); return m60 ? std::optional(c[last] / *m60) : std::nullopt; }
+            if (vp == "candidate.close_to_ma120_ratio") { auto m120 = ma(120); return m120 ? std::optional(c[last] / *m120) : std::nullopt; }
+            if (vp == "candidate.volume_ratio_to_5d_avg") return 1.5;
+            if (vp == "candidate.change_percent") {
+                if (last < 1 || c[last-1] <= 0) return std::nullopt;
+                return (c[last]/c[last-1] - 1.0) * 100.0;
+            }
+            return std::nullopt;
+        }
+    };
+    SP provider(closes, static_cast<int>(closes.size()) - 1);
+
+    auto fn = domain::strategy::rules::compileCondition(
+        foundation::json::JsonFacade::parse(rule.conditionJson), nullptr);
+    auto verdict = fn(provider);
+    result["verdict"] = verdict == domain::strategy::rules::TriState::Pass ? "Pass"
+        : (verdict == domain::strategy::rules::TriState::Fail ? "Fail" : "DataMissing");
+    result["ruleId"] = QString::fromStdString(rule.ruleId);
+    result["stage"] = QString::fromStdString(rule.stage);
+    return result;
+}
+
+void StrategyRuleStatsBridge::startCoverageCalc(
+    const QString& templateId, int ruleIndex,
+    const QString& symbol, int lookbackDays)
+{
+    QtConcurrent::run([this, templateId, ruleIndex, symbol, lookbackDays]() {
+        QVariantMap result;
+        result["totalDays"] = lookbackDays;
+        result["passCount"] = 0;
+
+        auto lib = domain::strategy::rules::sharedRuleLibrary();
+        if (!lib) { emit coverageReady(result); return; }
+        auto it = lib->byId.find(templateId.toStdString());
+        if (it == lib->byId.end()) { emit coverageReady(result); return; }
+        if (ruleIndex < 0 || ruleIndex >= static_cast<int>(it->second->rules.size())) {
+            emit coverageReady(result); return;
+        }
+        const auto& rule = it->second->rules[static_cast<std::size_t>(ruleIndex)];
+
+        std::vector<double> closes;
+        try {
+            auto& pool = astock::database::NativePgConnectionPool::instance();
+            auto db = pool.getConnection();
+            if (db && db->isOpen()) {
+                auto rows = db->executeQuery(
+                    "SELECT d.close FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id=si.id "
+                    "WHERE si.symbol=$1 ORDER BY d.trade_date DESC LIMIT $2",
+                    {astock::database::SqlParam{symbol.toStdString()},
+                     astock::database::SqlParam{lookbackDays + 60}});
+                for (auto& row : rows.getRows()) closes.push_back(row.getDouble("close"));
+                std::reverse(closes.begin(), closes.end());
+            }
+        } catch (...) { emit coverageReady(result); return; }
+        if (closes.size() < 60) { emit coverageReady(result); return; }
+
+        struct SP : domain::strategy::rules::IRuleVariableProvider {
+            const std::vector<double>& c; int last;
+            SP(const std::vector<double>& cl, int l) : c(cl), last(l) {}
+            std::optional<double> resolve(const std::string& vp) const override {
+                if (last < 0 || c[last] <= 0) return std::nullopt;
+                auto ma = [&](int w) -> std::optional<double> {
+                    if (last + 1 < w) return std::nullopt;
+                    double s = 0; for (int i = last; i > last - w; --i) s += c[i];
+                    return s / w;
+                };
+                if (vp == "candidate.close_to_ma20_ratio") { auto m20 = ma(20); return m20 ? std::optional(c[last] / *m20) : std::nullopt; }
+                if (vp == "candidate.change_percent") {
+                    if (last < 1 || c[last-1] <= 0) return std::nullopt;
+                    return (c[last]/c[last-1] - 1.0) * 100.0;
+                }
+                return std::nullopt;
+            }
+        };
+
+        auto fn = domain::strategy::rules::compileCondition(
+            foundation::json::JsonFacade::parse(rule.conditionJson), nullptr);
+        int passCount = 0, evalStart = std::max(0, static_cast<int>(closes.size()) - 1 - lookbackDays);
+        for (int i = evalStart; i < static_cast<int>(closes.size()); ++i) {
+            SP provider(closes, i);
+            if (fn(provider) == domain::strategy::rules::TriState::Pass) ++passCount;
+        }
+        result["passCount"] = passCount;
+        result["passRate"] = lookbackDays > 0 ? static_cast<double>(passCount) / lookbackDays : 0.0;
+        emit coverageReady(result);
+    });
+}
+
+QVariantList StrategyRuleStatsBridge::getCrossStrategyRuleStats(const QString& templateId)
+{
+    QVariantList result;
+    auto& mgr = domain::strategy::StrategyManager::instance();
+    for (std::size_t i = 0; i < mgr.count(); ++i) {
+        // StrategyManager 不支持索引遍历，改用 DB 查询
+    }
+    // 从 DB 查所有使用该模板的策略及其回测结果
+    try {
+        auto& pool = astock::database::NativePgConnectionPool::instance();
+        auto db = pool.getConnection();
+        if (db && db->isOpen()) {
+            auto rows = db->executeQuery(
+                "SELECT s.strategy_id, s.parameters FROM live.strategy s "
+                "WHERE s.parameters IS NOT NULL");
+            for (auto& row : rows.getRows()) {
+                std::string paramsJson;
+                // parameters 是 text, 需要转成字符串
+                try { paramsJson = row.getString("parameters"); } catch (...) { continue; }
+                // 简单字符串匹配: 检查是否包含 templateId
+                if (paramsJson.find(templateId.toStdString()) == std::string::npos) continue;
+
+                QString sid = QString::fromStdString(row.getString("strategy_id"));
+                QVariantMap item;
+                item["strategyId"] = sid;
+                item["strategyName"] = sid.left(8);
+
+                // 读该策略的归因
+                auto* engine = mgr.get(row.getString("strategy_id"));
+                if (engine) {
+                    const auto& attr = engine->ruleAttribution();
+                    auto it = attr.find(templateId.toStdString());
+                    if (it != attr.end()) {
+                        item["preventedTrades"] = it->second.preventedTrades;
+                        item["preventedPnL"] = it->second.preventedHypotheticalPnL;
+                        item["triggeredExits"] = it->second.triggeredExits;
+                        item["exitPnL"] = it->second.exitRealizedPnL;
+                        double net = it->second.preventedHypotheticalPnL + it->second.exitRealizedPnL;
+                        item["netContribution"] = net;
+                    }
+                }
+                // 获取命中统计
+                if (engine) {
+                    const auto& gs = engine->ruleGateStats();
+                    auto tIt = gs.byTemplate.find(templateId.toStdString());
+                    if (tIt != gs.byTemplate.end()) {
+                        item["hits"] = tIt->second.hits;
+                        item["evaluated"] = tIt->second.evaluated;
+                    }
+                }
+                if (!item.contains("hits")) continue;
+                result.append(item);
+            }
+        }
+    } catch (...) {}
+    return result;
+}
+
 QVariantList StrategyRuleStatsBridge::getRuleAttribution(
     const QString& strategyId, const QString& templateId)
 {
     QVariantList result;
 
-    auto* engine = domain::strategy::StrategyManager::instance()
-        .get(strategyId.toStdString());
+    auto& mgr = domain::strategy::StrategyManager::instance();
+    domain::strategy::StrategyEngine* engine = mgr.get(strategyId.toStdString());
     if (!engine) return result;
 
-    // 从 RuleGate 运行时统计获取基础命中数据
     const auto& gateStats = engine->ruleGateStats();
+    const auto& attrMap = engine->ruleAttribution();
     auto tmplIt = gateStats.byTemplate.find(templateId.toStdString());
-    if (tmplIt == gateStats.byTemplate.end()) return result;
+    auto attrIt = attrMap.find(templateId.toStdString());
 
-    const auto& stats = tmplIt->second;
+    if (tmplIt == gateStats.byTemplate.end() && attrIt == attrMap.end()) return result;
 
     QVariantMap item;
     item["ruleId"] = QString::fromStdString(templateId.toStdString());
-    item["evaluated"] = stats.evaluated;
-    item["hits"] = stats.hits;
-    item["blockedSignals"] = stats.blockedSignals;
-    item["dataMissing"] = stats.dataMissing;
-    // 归因数据从回测日志填充 (backtest 完成后 AttributionCollector 写入)
-    // 当前先返回基础统计, 待归因持久化后补充
+    item["dateRange"] = QString::fromStdString(engine->backtestDateRange());
+
+    if (tmplIt != gateStats.byTemplate.end()) {
+        const auto& stats = tmplIt->second;
+        item["evaluated"] = stats.evaluated;
+        item["hits"] = stats.hits;
+        item["blockedSignals"] = stats.blockedSignals;
+        item["dataMissing"] = stats.dataMissing;
+    } else {
+        item["evaluated"] = 0;
+        item["hits"] = 0;
+        item["blockedSignals"] = 0;
+        item["dataMissing"] = 0;
+    }
+
+    // P&L 归因 + 交易质量
+    if (attrIt != attrMap.end()) {
+        item["preventedTrades"] = attrIt->second.preventedTrades;
+        item["preventedPnL"] = attrIt->second.preventedHypotheticalPnL;
+        item["preventedWinRate"] = attrIt->second.preventedWinRate;
+        item["triggeredExits"] = attrIt->second.triggeredExits;
+        item["exitPnL"] = attrIt->second.exitRealizedPnL;
+        double net = attrIt->second.preventedHypotheticalPnL + attrIt->second.exitRealizedPnL;
+        item["netContribution"] = net;
+        item["topBoughtCount"] = attrIt->second.topBoughtCount;
+        item["missedGainCount"] = attrIt->second.missedGainCount;
+        item["stopLossCount"] = attrIt->second.stopLossCount;
+    } else {
+        item["preventedTrades"] = 0; item["preventedPnL"] = 0.0; item["preventedWinRate"] = 0.0;
+        item["triggeredExits"] = 0; item["exitPnL"] = 0.0; item["netContribution"] = 0.0;
+        item["topBoughtCount"] = 0; item["missedGainCount"] = 0; item["stopLossCount"] = 0;
+    }
     result.append(item);
 
     return result;
