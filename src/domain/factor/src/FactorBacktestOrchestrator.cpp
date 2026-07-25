@@ -70,6 +70,18 @@ void FactorBacktestOrchestrator::run(
         if (onComplete) onComplete(err.toString());
     };
 
+    // ── RAII: 确保任何退出路径都清理 dbFallback（避免 dbCache 泄漏）──
+    struct DbFallbackGuard {
+        factor::compute::BacktestDataService* svc;
+        ~DbFallbackGuard() {
+            if (svc) {
+                svc->setDbFallback({});
+                INTERNAL_INFO_STREAM << "[MEM] DbFallbackGuard: dbFallback cleared";
+            }
+        }
+    } dbGuard{m_dataService};
+
+
     if (!m_scheduler) { emitError("scheduler not set"); return; }
     if (!m_engine)   { emitError("factor engine not set"); return; }
     if (!m_engine->hasInstanceManager()) {
@@ -159,13 +171,13 @@ void FactorBacktestOrchestrator::run(
             cacheStartDate = buf;
         }
 
+        auto dbCache = std::make_shared<std::unordered_map<std::string,
+            std::unordered_map<std::string, std::map<std::string, double>>>>();
         factor::compute::BacktestDataService::DbFallbackFn dbFn =
-            [minReportDate, cacheStartDate](const std::string& date, const std::string& field,
+            [minReportDate, cacheStartDate, dbCache](const std::string& date, const std::string& field,
                const std::vector<std::string>& symbols)
             -> std::unordered_map<std::string, double> {
-            static std::unordered_map<std::string,
-                std::unordered_map<std::string, std::map<std::string, double>>> s_fullCache;
-            auto& fieldCache = s_fullCache[field];
+            auto& fieldCache = (*dbCache)[field];
 
             // ── 统一查库：缓存有什么表，DB 就查什么表 ──
             auto cacheIt = fieldCache.find("__loaded__");
@@ -251,7 +263,8 @@ void FactorBacktestOrchestrator::run(
             return result;
         };
         m_dataService->setDbFallback(std::move(dbFn));
-        INTERNAL_INFO_STREAM << "[回测流程] DB回退已配置"
+        INTERNAL_INFO_STREAM << "[MEM] dbCache created, captured in dbFallback (use_count="
+            << dbCache.use_count() << ")"
             << " range=[" << minReportDate << "," << cacheStartDate << "]"
             << " maxLookback=" << maxLookback;
     }
@@ -336,6 +349,19 @@ void FactorBacktestOrchestrator::run(
             symToCol[syms[si]] = static_cast<int32_t>(si);
     }
 
+    // ── 预建 rebalance 日期集合（仅这些日期需要保留 factorValues 供 SimulatedTrading）──
+    std::unordered_set<std::string> rebalanceDates;
+    {
+        const int rbDays = std::max(1, config.rebalanceDays);
+        const int fwd = std::max(1, config.forwardDays);
+        for (size_t di = 0; di + static_cast<size_t>(fwd) < allDates.size(); di += rbDays) {
+            int dv = allDates[di].value;
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
+            rebalanceDates.insert(std::string(buf));
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // 分块回测主循环
     // ══════════════════════════════════════════════════════════════════════
@@ -357,6 +383,7 @@ void FactorBacktestOrchestrator::run(
                 : 0;
 
             std::unique_ptr<factor::compute::IMarketDataView> chunkView;
+            size_t computeSkip = 0;
             if (warmupRowCount > 0) {
                 const auto warmupFields = chunkColumns;
                 // 回看日期：从缓存首日往前，data.trade_calendar 查 maxLookback 个交易日
@@ -382,6 +409,7 @@ void FactorBacktestOrchestrator::run(
                         }
                     }
                 }
+                computeSkip = warmupDates.size();
                 INTERNAL_INFO_STREAM << "[DB补数据] 开始查库: warmupDays=" << warmupDates.size()
                     << " (requested=" << warmupRowCount << ")"
                     << " fields=" << warmupFields.size()
@@ -443,7 +471,7 @@ void FactorBacktestOrchestrator::run(
                 for (const auto& child : config.compositeChildren) {
                     factor::compute::FactorCacheKey cacheKey;
                     cacheKey.factorName = child.instanceId;
-                    auto factorResult = m_engine->compute(chunkBatch, cacheKey);
+                    auto factorResult = m_engine->compute(chunkBatch, cacheKey, computeSkip);
                     childResults.push_back(std::move(factorResult.factorValues));
                     totalWeight += child.weight;
                 }
@@ -487,7 +515,7 @@ void FactorBacktestOrchestrator::run(
                 for (const auto& factorId : factorIdList) {
                     factor::compute::FactorCacheKey cacheKey;
                     cacheKey.factorName = factorId;
-                    auto factorResult = m_engine->compute(chunkBatch, cacheKey);
+                    auto factorResult = m_engine->compute(chunkBatch, cacheKey, computeSkip);
 
                     for (const auto& [date, symbolValues] : factorResult.factorValues) {
                         for (const auto& [symbol, value] : symbolValues) {
@@ -580,7 +608,6 @@ void FactorBacktestOrchestrator::run(
                 for (const auto& [sym, fv] : itNow->second) {
                     if (!std::isfinite(fv)) continue;
 
-                    // 获取当前和前向 close 价格
                     auto closeView = chunkView->close();
                     auto itSym = symToCol.find(sym);
                     if (itSym == symToCol.end()) continue;
@@ -597,6 +624,16 @@ void FactorBacktestOrchestrator::run(
                         }
                     }
                 }
+            }
+
+            // ── 释放非 rebalance 日的因子值 ──
+            for (size_t di = 0; di < chunkDates.size(); ++di) {
+                int dv = chunkDates[di].value;
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
+                std::string dateStr(buf);
+                if (!rebalanceDates.count(dateStr))
+                    reporterInput.factorValuesByDate.erase(dateStr);
             }
 
             // chunkView 在此出作用域 → 该块数据释放
@@ -635,6 +672,23 @@ void FactorBacktestOrchestrator::run(
             icir.icPositiveRatio = static_cast<double>(pos) / icSeries.size();
         }
         if (onProgress) onProgress(60.0, "factors computed (per-date IC)");
+
+        // ── 提前采样 scatterData 并释放 icByDate ──
+        foundation::json::JsonFacade scatterArr = foundation::json::JsonFacade::createArray();
+        for (const auto& [date, pairs] : icByDate) {
+            if (pairs.size() < 10) continue;
+            size_t step = std::max(size_t(1), pairs.size() / 200);
+            for (size_t si = 0; si < pairs.size(); si += step) {
+                auto pt = foundation::json::JsonFacade::createObject();
+                pt.set("date", foundation::json::JsonFacade::createString(date));
+                pt.set("factorValue", foundation::json::JsonFacade::createDouble(pairs[si].first));
+                pt.set("forwardRet", foundation::json::JsonFacade::createDouble(pairs[si].second));
+                scatterArr.push_back(pt);
+            }
+        }
+        icByDate.clear();
+        INTERNAL_INFO_STREAM << "[MEM] icByDate cleared";
+
         INTERNAL_INFO_STREAM << "[回测流程] IC计算完成: icSeries.size=" << icir.icSeries.size()
             << " icMean=" << icir.icMean
             << " icWinRate=" << icir.icPositiveRatio;
@@ -720,6 +774,11 @@ void FactorBacktestOrchestrator::run(
                                              instrumentIds, instrumentIdToSymbol);
         INTERNAL_INFO_STREAM << "[回测流程] 模拟交易结束: periods=" << tradingResult.validSampleCount
             << " totalReturn=" << tradingResult.totalReturn;
+
+        // 释放交易模拟输入数据
+        reporterInput.factorValuesByDate.clear();
+        fvByDate.clear();
+        INTERNAL_INFO_STREAM << "[MEM] factorValuesByDate + fvByDate cleared";
 
         if (onProgress) onProgress(80.0, "trading simulated");
 
@@ -839,33 +898,8 @@ void FactorBacktestOrchestrator::run(
             if (!config.compositeName.empty())
                 root.set("factorName", J::createString(config.compositeName));
 
-            // factorValues — 每日每标的因子值, 供散点图/IC 分析
-            auto fvArr = J::createArray();
-            for (const auto& [date, symMap] : reporterInput.factorValuesByDate) {
-                for (const auto& [sym, fv] : symMap) {
-                    if (!std::isfinite(fv)) continue;
-                    auto fvObj = J::createObject();
-                    fvObj.set("date",   J::createString(date));
-                    fvObj.set("symbol", J::createString(sym));
-                    fvObj.set("value",  J::createDouble(fv));
-                    fvArr.push_back(fvObj);
-                }
-            }
-            root.set("factorValues", fvArr);
-
-            // scatterData — 因子值 vs 前向收益散点 (采样 icByDate, 每期最多200点)
-            auto scatterArr = J::createArray();
-            for (const auto& [date, pairs] : icByDate) {
-                if (pairs.size() < 10) continue;
-                size_t step = std::max(size_t(1), pairs.size() / 200);
-                for (size_t si = 0; si < pairs.size(); si += step) {
-                    auto pt = J::createObject();
-                    pt.set("date",       J::createString(date));
-                    pt.set("factorValue", J::createDouble(pairs[si].first));
-                    pt.set("forwardRet", J::createDouble(pairs[si].second));
-                    scatterArr.push_back(pt);
-                }
-            }
+            // factorValues — 结果仅需指标，原始数据不输出
+            // scatterData — 已在 IC 计算后提前采样并释放 icByDate
             root.set("scatterData", scatterArr);
 
             if (!allSortedDates.empty()) {
@@ -1042,6 +1076,9 @@ void FactorBacktestOrchestrator::run(
             onComplete(root.toString());
         }
         if (onProgress) onProgress(100.0, "completed");
+
+    // (dbFallback 由 scope guard DbFallbackGuard 在函数退出时自动清理)
+    INTERNAL_INFO_STREAM << "[MEM] Orchestrator::run() exiting — DbFallbackGuard + dbCache release next";
 }
 
 } // namespace Factor::backtest

@@ -115,7 +115,11 @@ public:
     /// @brief 设置 DataSvc 引用 (compute() 中按需构建 MarketView 用)
     void setDataService(class BacktestDataService* dataSvc);
 
-    FactorMatrix compute(const MarketMatrixBatch& marketData, const FactorCacheKey& cacheKey);
+    /// @brief 清除 SignalCache 中的所有缓存条目
+    void clearSignalCache();
+
+    FactorMatrix compute(const MarketMatrixBatch& marketData, const FactorCacheKey& cacheKey,
+                         size_t skipDates = 0);
 
     /// @brief 单日因子计算（实盘 / 逐 tick 路径用）
     /// @param factorName  因子实例 ID

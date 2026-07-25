@@ -16,6 +16,12 @@
 #include <cstdio>
 #include <cmath>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#pragma comment(lib, "psapi.lib")
+#endif
+
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "../../domain/factor/include/FactorBacktestOrchestrator.h"
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
@@ -250,7 +256,7 @@ bool FactorBacktestBridge::initialize()
     // 1) 创建四个下层域组件
     m_scheduler       = std::make_unique<domain::scheduler::BacktestScheduler>(0ULL);
     m_backtestDataSvc = std::make_unique<factor::compute::BacktestDataService>();
-m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(0ULL);
+m_factorEngine    = std::make_unique<factor::compute::FactorEngine>(512ULL * 1024ULL * 1024ULL);
     m_reporter        = std::make_unique<factor::compute::BacktestReporter>();
 
     if (!m_scheduler || !m_backtestDataSvc || !m_factorEngine || !m_reporter) {
@@ -701,6 +707,10 @@ void FactorBacktestBridge::publishBatchResults(const QVariantList& results)
         m_backtestResult = batchResult;
         emit backtestResultChanged();
     }
+
+    // 信号已发送，释放 C++ 侧持有的结果副本以回收内存
+    m_backtestResult.clear();
+    m_resultMetrics.clear();
 }
 
 void FactorBacktestBridge::startBacktestWithFactors(
@@ -820,20 +830,37 @@ void FactorBacktestBridge::startBacktestWithFactors(
     // 异步: 全部重操作移到 worker 线程，不阻塞 UI
     int capturedDatasetId = m_selectedDatasetId;
     m_workerPool->post([this, runConfigs, capturedDatasetId]() {
+        // ── RAII scope guard: 确保任何退出路径都释放 dbFallback ──
+        struct BacktestCleanup {
+            FactorBacktestBridge* bridge;
+            ~BacktestCleanup() {
+                if (!bridge || !bridge->m_backtestDataSvc) {
+                    INTERNAL_INFO_STREAM << "[MEM] BacktestCleanup SKIP: bridge or dataSvc null";
+                    return;
+                }
+                bridge->m_backtestDataSvc->setDbFallback({});
+                INTERNAL_INFO_STREAM << "[MEM] BacktestCleanup: dbFallback cleared";
+            }
+        } cleanup{this};
+
         // 初始化阶段进度
         QMetaObject::invokeMethod(this, [this]() {
             m_progress = 2.0; m_statusText = QStringLiteral("初始化中...");
             emit progressChanged(); emit backtestProgress(m_progress, m_statusText);
         }, Qt::QueuedConnection);
 
-        // ① 直接注入 Arrow 列式视图，零拷贝
+        // ① Arrow 列式视图 — 每次回测从 Arrow 文件新建 mmap + 索引
         if (capturedDatasetId > 0 && m_backtestDataSvc) {
+            // 回测完成后 ArrowView 已在主线程 reset();
+            // 此处防御性清理旧视图 (取消/异常路径残留)
+            m_arrowView.reset();
             std::string arrowPath = cleaning::DataCache::instance().dataFilePath(capturedDatasetId);
             auto arrowView = std::make_unique<factor::compute::ArrowMarketDataView>(arrowPath);
             m_arrowView = std::move(arrowView);
             m_backtestDataSvc->setMarketView(m_arrowView.get());
+            m_loadedDatasetId = capturedDatasetId;
             m_backtestDataSvc->buildViewForFields({});
-            INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] Arrow view injected, ID=" << capturedDatasetId;
+            INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] Arrow view created, ID=" << capturedDatasetId;
             if (!m_arrowView || m_arrowView->instruments().empty()) {
                 QMetaObject::invokeMethod(this, [this]() {
                     emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));
@@ -931,15 +958,62 @@ void FactorBacktestBridge::startBacktestWithFactors(
         }
 
         // ── 全部完成: 统一放出全部结果 ──
+        // 释放 ArrowView mmap (回收到 ~200MB 基线):
+        //   懒加载列 float 数组 → clearColumnCaches()
+        //   mmap 物理页 + 索引 → reset() 关闭 mmap
+        //   Orchestrator/Engine/Scheduler/Reporter 保留 (轻量, 避免重建开销)
         QMetaObject::invokeMethod(this, [this, batchResults]() {
+            INTERNAL_INFO_STREAM << "[MEM] main-thread completion START";
             m_progress = 100.0;
             m_statusText = QStringLiteral("回测完成");
             m_isRunning.store(false);
             emit progressChanged(); emit statusChanged();
             emit isRunningChanged();
             publishBatchResults(batchResults);
+            INTERNAL_INFO_STREAM << "[MEM] publishBatchResults done";
+            // 清除 SignalCache, 防止跨回测累积
+            if (m_factorEngine) {
+                m_factorEngine->clearSignalCache();
+                INTERNAL_INFO_STREAM << "[MEM] SignalCache cleared";
+            }
+            // 释放 ArrowView mmap
+            if (m_arrowView) {
+                m_arrowView->clearColumnCaches();
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView columnCaches cleared";
+                m_arrowView.reset();
+                m_loadedDatasetId = 0;
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView reset (mmap closed)";
+            } else {
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView already null, skip reset";
+            }
+#ifdef _WIN32
+            // 强制 trim 进程工作集: 释放 C++ heap 中已 free 但未归还 OS 的物理页
+            {
+                PROCESS_MEMORY_COUNTERS_EX pmc{};
+                pmc.cb = sizeof(pmc);
+                if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+                    SIZE_T wsBefore = pmc.WorkingSetSize;
+                    INTERNAL_INFO_STREAM << "[MEM] WorkingSet BEFORE trim: "
+                        << (wsBefore / (1024.0 * 1024.0)) << " MB";
+                    if (SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1)) {
+                        GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
+                        SIZE_T wsAfter = pmc.WorkingSetSize;
+                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet AFTER trim: "
+                            << (wsAfter / (1024.0 * 1024.0)) << " MB"
+                            << " (released " << ((wsBefore - wsAfter) / (1024.0 * 1024.0)) << " MB)";
+                    } else {
+                        INTERNAL_INFO_STREAM << "[MEM] SetProcessWorkingSetSize failed";
+                    }
+                }
+            }
+#endif
             emit backtestProgress(100.0, m_statusText);
+            INTERNAL_INFO_STREAM << "[MEM] main-thread completion END";
         }, Qt::QueuedConnection);
+
+        // 释放工作线程内剩余的大块内存
+        batchResults.clear();
+        INTERNAL_INFO_STREAM << "[MEM] worker-thread batchResults cleared, lambda exiting";
     });
 }
 
@@ -963,6 +1037,20 @@ void FactorBacktestBridge::startCompositeBacktest(const QVariantMap& compositeDr
 
 void FactorBacktestBridge::cancelBacktest()
 { m_isRunning.store(false); emit isRunningChanged(); m_statusText = QStringLiteral("已取消"); emit statusChanged(); emit backtestCancelled(); }
+
+void FactorBacktestBridge::clearBacktestResult()
+{
+    m_backtestResult.clear();
+    m_resultMetrics.clear();
+    if (m_factorEngine) {
+        m_factorEngine->clearSignalCache();
+    }
+    if (m_arrowView) {
+        m_arrowView->clearColumnCaches();
+        m_arrowView.reset();
+        m_loadedDatasetId = 0;
+    }
+}
 
 QVariantMap FactorBacktestBridge::getDefaultConfig() const { QVariantMap c; c["numGroups"] = 10; return c; }
 QVariantList FactorBacktestBridge::getAvailableDataSets() const { return {}; }
@@ -1162,7 +1250,7 @@ double FactorBacktestBridge::progress() const { return m_progress; }
 QString FactorBacktestBridge::status() const { return m_statusText; }
 QVariantMap FactorBacktestBridge::factorSupportMapCache() const { return m_factorSupportMapCache; }
 int    FactorBacktestBridge::selectedDatasetId() const { return m_selectedDatasetId; }
-void   FactorBacktestBridge::setSelectedDatasetId(int id) { if (m_selectedDatasetId != id) { m_selectedDatasetId = id; m_engineReady = false; emit selectedDatasetIdChanged(); } }
+void   FactorBacktestBridge::setSelectedDatasetId(int id) { if (m_selectedDatasetId != id) { m_selectedDatasetId = id; m_arrowView.reset(); m_loadedDatasetId = 0; emit selectedDatasetIdChanged(); } }
 QString FactorBacktestBridge::dataSourceMode() const { return m_dataSourceMode; }
 void   FactorBacktestBridge::setDataSourceMode(const QString& m) { if (m_dataSourceMode != m) { m_dataSourceMode = m; emit dataSourceModeChanged(); } }
 QVariantMap FactorBacktestBridge::selectedDatasetBenchmarkMetadata() const { return m_selectedDatasetBenchmarkMetadata; }

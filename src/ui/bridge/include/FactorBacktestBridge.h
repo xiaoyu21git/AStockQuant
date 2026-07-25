@@ -87,6 +87,7 @@ public:
     Q_INVOKABLE void startBacktestWithFactors(const QVariantList& factorIds, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot, const QVariantList& compositeChildren = {}, const QString& compositeName = {});
     Q_INVOKABLE void startCompositeBacktest(const QVariantMap& compositeDraft, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot);
     Q_INVOKABLE void cancelBacktest();
+    Q_INVOKABLE void clearBacktestResult();
     Q_INVOKABLE QVariantMap getDefaultConfig() const;
     Q_INVOKABLE QVariantList getAvailableDataSets() const;
     Q_INVOKABLE QVariantList buildBacktestDatasetOptions(const QVariantList& datasetList) const;
@@ -186,6 +187,10 @@ private:
     QVariantList m_lastPreflightFailures;
     std::atomic<bool> m_supportMapRequestInFlight{false};
     QTimer* m_timeoutTimer{nullptr};
+
+    // 跟踪当前 ArrowMarketDataView 加载的数据集 ID
+    // 回测复用时若 ID 相同则跳过 mmap + 索引重建
+    int m_loadedDatasetId{0};
 
     // 工作线程池（foundation::thread，替代 QtConcurrent）
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_workerPool;

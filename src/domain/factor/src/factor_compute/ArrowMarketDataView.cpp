@@ -18,20 +18,15 @@ namespace factor::compute {
 
 namespace {
 
-/// @brief 解析日期字符串 → YYYYMMDD int，基于项目 Timestamp 类
+/// @brief 解析日期字符串 → YYYYMMDD int（直接字符运算，避免 Timestamp::from_string 开销）
 inline int32_t parseDateInt(const std::string& s) {
-    if (s.empty()) return 0;
-    // 尝试 "YYYY-MM-DD"
-    try {
-        auto ts = foundation::utils::Timestamp::from_string(s, "%Y-%m-%d");
-        return ts.to_yyyymmdd();
-    } catch (...) {}
-    // 尝试 "YYYYMMDD"
-    try {
-        auto ts = foundation::utils::Timestamp::from_string(s, "%Y%m%d");
-        return ts.to_yyyymmdd();
-    } catch (...) {}
-    return 0;
+    if (s.size() < 8) return 0;
+    if (s.size() >= 10 && s[4] == '-') {
+        return (s[0]-'0')*10000000 + (s[1]-'0')*1000000 + (s[2]-'0')*100000 + (s[3]-'0')*10000
+             + (s[5]-'0')*1000 + (s[6]-'0')*100 + (s[8]-'0')*10 + (s[9]-'0');
+    }
+    return (s[0]-'0')*10000000 + (s[1]-'0')*1000000 + (s[2]-'0')*100000 + (s[3]-'0')*10000
+         + (s[4]-'0')*1000 + (s[5]-'0')*100 + (s[6]-'0')*10 + (s[7]-'0');
 }
 
 NumericConstMatrixView buildMatrixView(
@@ -329,7 +324,6 @@ public:
     }
 
     // ── 分块视图：只加载指定日期区间 + 指定列 ──
-    // 内外循环交换：batch → row 只扫一次，所有列同时填充，避免每列重复读 symbol/date
     std::unique_ptr<IMarketDataView> makeChunkView(
         const std::vector<DateKey>& dateRange,
         const std::vector<std::string>& columns) const
@@ -337,6 +331,7 @@ public:
         if (!indexReady_ || dateRange.empty() || columns.empty())
             return nullptr;
 
+        // 构建 dateRange → 行索引 映射（按值查找，因为 dateRange 是 dateKeys_ 的子集）
         std::unordered_map<int32_t, int> dateValToChunkRow;
         for (size_t i = 0; i < dateRange.size(); ++i)
             dateValToChunkRow[dateRange[i].value] = static_cast<int>(i);
@@ -349,60 +344,68 @@ public:
             std::vector<InstrumentId>(instruments_),
             std::vector<std::string>(symbolStrings_));
 
-        // ── 预分配所有列 ──
-        struct ColBuf {
-            std::string name;
-            ColumnData cd;
-            std::shared_ptr<arrow::DoubleArray> arr;
-        };
-        std::vector<ColBuf> colBufs;
-        colBufs.reserve(columns.size());
-        for (const auto& colName : columns) {
-            ColBuf cb;
-            cb.name = colName;
-            cb.cd.values.resize(static_cast<size_t>(chunkDates) * chunkInsts,
-                                std::numeric_limits<signal_value_t>::quiet_NaN());
-            cb.cd.length = chunkDates * chunkInsts;
-            cb.cd.ptr = cb.cd.values.data();
-            colBufs.push_back(std::move(cb));
-        }
-
-        // ── 单次 batch 扫描，多列同时填充 ──
         const int nBatches = reader_->num_record_batches();
-        for (int bi = 0; bi < nBatches; ++bi) {
-            auto batchRes = reader_->ReadRecordBatch(bi);
-            if (!batchRes.ok()) continue;
-            auto batch = batchRes.ValueOrDie();
+        for (const auto& colName : columns) {
+            ColumnData cd;
+            cd.values.resize(static_cast<size_t>(chunkDates) * chunkInsts,
+                             std::numeric_limits<signal_value_t>::quiet_NaN());
+            cd.length = chunkDates * chunkInsts;
+            cd.ptr = cd.values.data();
 
-            auto symArr = batchStringColumn(batch, "symbol");
-            auto dateArr = batchStringColumn(batch, "trade_date");
-            if (!symArr || !dateArr) continue;
+            for (int bi = 0; bi < nBatches; ++bi) {
+                auto batchRes = reader_->ReadRecordBatch(bi);
+                if (!batchRes.ok()) continue;
+                auto batch = batchRes.ValueOrDie();
 
-            // 预取所有列数组
-            for (auto& cb : colBufs)
-                cb.arr = batchDoubleColumn(batch, cb.name);
+                auto symArr = batchStringColumn(batch, "symbol");
+                auto dateArr = batchStringColumn(batch, "trade_date");
+                auto colArr = batchDoubleColumn(batch, colName);
+                if (!symArr || !dateArr || !colArr) continue;
 
-            for (int64_t j = 0; j < batch->num_rows(); ++j) {
-                std::string sym = symArr->IsNull(j) ? "" : symArr->GetString(j);
-                std::string dt = dateArr->IsNull(j) ? "" : dateArr->GetString(j);
-                auto si = localSymbolToInst_.find(sym);
-                if (si == localSymbolToInst_.end()) continue;
+                for (int64_t j = 0; j < batch->num_rows(); ++j) {
+                    if (colArr->IsNull(j)) continue;
+                    std::string sym = symArr->IsNull(j) ? "" : symArr->GetString(j);
+                    std::string dt = dateArr->IsNull(j) ? "" : dateArr->GetString(j);
+                    auto si = localSymbolToInst_.find(sym);
+                    if (si == localSymbolToInst_.end()) continue;
 
-                int32_t dateVal = parseDateInt(dt);
-                auto ri = dateValToChunkRow.find(dateVal);
-                if (ri == dateValToChunkRow.end()) continue;
+                    int32_t dateVal = parseDateInt(dt);
 
-                size_t idx = static_cast<size_t>(ri->second) * chunkInsts + si->second;
-                for (auto& cb : colBufs) {
-                    if (cb.arr && !cb.arr->IsNull(j))
-                        cb.cd.values[idx] = static_cast<signal_value_t>(cb.arr->Value(j));
+                    auto ri = dateValToChunkRow.find(dateVal);
+                    if (ri == dateValToChunkRow.end()) continue;
+
+                    cd.values[static_cast<size_t>(ri->second) * chunkInsts + si->second] =
+                        static_cast<signal_value_t>(colArr->Value(j));
                 }
             }
+            view->setColumn(colName, std::move(cd));
+        }
+        return view;
+    }
+
+    // ── 清除懒加载列缓存 ──
+    void clearColumnCaches() {
+        size_t coreCols = coreColumns_.size();
+        size_t extraCols = extraFields_.size();
+        size_t coreLoadedCount = coreLoaded_.size();
+
+        // 估算释放内存
+        size_t freedBytes = 0;
+        for (auto& [name, cd] : coreColumns_) {
+            freedBytes += cd.values.size() * sizeof(signal_value_t);
+        }
+        for (auto& [name, cd] : extraFields_) {
+            freedBytes += cd.values.size() * sizeof(signal_value_t);
         }
 
-        for (auto& cb : colBufs)
-            view->setColumn(cb.name, std::move(cb.cd));
-        return view;
+        coreLoaded_.clear();
+        coreColumns_.clear();
+        extraFields_.clear();
+
+        INTERNAL_INFO_STREAM << "[MEM] ArrowView::clearColumnCaches: freed "
+            << (freedBytes / (1024.0 * 1024.0)) << " MB"
+            << " (coreCols=" << coreCols << " extraCols=" << extraCols
+            << " coreLoaded=" << coreLoadedCount << ")";
     }
 
     // ── 日期查找辅助 ──
@@ -498,6 +501,10 @@ void ArrowMarketDataView::ensureColumns(const std::vector<std::string>& names) c
             impl_->availableFields_.erase(n);
         }
     }
+}
+
+void ArrowMarketDataView::clearColumnCaches() const {
+    impl_->clearColumnCaches();
 }
 
 std::vector<std::string> ArrowMarketDataView::fieldNames() const {

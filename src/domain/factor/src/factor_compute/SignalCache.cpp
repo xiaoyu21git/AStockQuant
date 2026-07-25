@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "foundation/log/logging.hpp"
 #include "xxhash.h"
 
 namespace factor::compute {
@@ -246,6 +247,18 @@ size_t SignalCache::entryCount() const noexcept
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return storage_.size();
+}
+
+void SignalCache::clear() noexcept
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t entryCount = storage_.size();
+    uint64_t freedBytes = currentMemoryBytes_;
+    storage_.clear();
+    lruList_.clear();
+    currentMemoryBytes_ = 0U;
+    INTERNAL_INFO_STREAM << "[MEM] SignalCache::clear: freed "
+        << (freedBytes / (1024.0 * 1024.0)) << " MB, entries=" << entryCount;
 }
 
 } // namespace factor::compute

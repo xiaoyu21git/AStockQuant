@@ -63,8 +63,15 @@ void FactorEngine::setDataService(BacktestDataService* dataSvc) {
     m_dataSvc = dataSvc;
 }
 
+void FactorEngine::clearSignalCache() {
+    if (m_signalCache) {
+        m_signalCache->clear();
+    }
+}
+
 FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
-                                            const FactorCacheKey& cacheKey) {
+                                            const FactorCacheKey& cacheKey,
+                                            size_t skipDates) {
     FactorMatrix result;
     result.batchIndex = marketData.batchIndex;
 
@@ -131,8 +138,11 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
     }
     auto symbols = adapter.getAvailableSymbols("");
     int dateCount = 0, valueCount = 0;
-    INTERNAL_INFO_STREAM << "[FE] compute: symbols=" << symbols.size();
-    for (const auto& date : view->dates()) {
+    INTERNAL_INFO_STREAM << "[FE] compute: symbols=" << symbols.size()
+        << " skipDates=" << skipDates;
+    const auto& allDates = view->dates();
+    for (size_t di = skipDates; di < allDates.size(); ++di) {
+        const auto& date = allDates[di];
         // date.value 是 YYYYMMDD int，转为 "YYYY-MM-DD" 以匹配 getValues 的查找格式
         const int dv = date.value;
         char dateBuf[16];
