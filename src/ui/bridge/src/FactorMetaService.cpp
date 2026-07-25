@@ -959,7 +959,8 @@ const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCat
         {factor::FactorType::INDUSTRY, appendConfigs(buildCommonConfigs(), industryConfigs())},
         {factor::FactorType::SENTIMENT, appendConfigs(buildCommonConfigs(), sentimentConfigs())},
         {factor::FactorType::CUSTOM, appendConfigs(buildCommonConfigs(), customConfigs())},
-        {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(), lowVolatilityConfigs())}
+        {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(), lowVolatilityConfigs())},
+        {factor::FactorType::COMPOSITE, buildCommonConfigs()}
     };
     return kCatalog;
 }
@@ -1083,7 +1084,16 @@ const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
             QStringLiteral("描述低波因子的计算方法、应用场景等..."),
             QStringLiteral("#06B6D4"),
             QStringLiteral("📉"),
-            QStringLiteral("波动率"))}
+            QStringLiteral("波动率"))},
+        {factor::FactorType::COMPOSITE, buildFactorUiMeta(QStringLiteral("composite"), 13,
+            QStringLiteral("组合因子"),
+            QStringLiteral("多因子加权组合"),
+            QStringLiteral("多个子因子按权重组合而成的复合因子"),
+            QStringLiteral("例如：价值+动量双因子组合"),
+            QStringLiteral("描述组合因子的计算方法、权重配置等..."),
+            QStringLiteral("#A78BFA"),
+            QStringLiteral("🧩"),
+            QStringLiteral("多因子组合"))}
     };
     return kCatalog;
 }

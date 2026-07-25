@@ -12,7 +12,8 @@ import "./components" as PluginComponents
 Rectangle {
     id: root
     color: "#0F172A"
-    
+    anchors.fill: parent
+
     // ============ 页面属性 ============
     
     property var factorParamController

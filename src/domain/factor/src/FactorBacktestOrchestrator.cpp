@@ -328,6 +328,14 @@ void FactorBacktestOrchestrator::run(
     factor::compute::BacktestReporterInput reporterInput;
     std::map<std::string, std::vector<std::pair<double, double>>> icByDate; // date→{(fv, fwdRet)}
 
+    // ── 预建 symbol → column index 映射 (IC 查找 O(1)) ──
+    std::unordered_map<std::string, int32_t> symToCol;
+    {
+        const auto& syms = arrowView->symbolStrings();
+        for (size_t si = 0; si < syms.size(); ++si)
+            symToCol[syms[si]] = static_cast<int32_t>(si);
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     // 分块回测主循环
     // ══════════════════════════════════════════════════════════════════════
@@ -338,8 +346,7 @@ void FactorBacktestOrchestrator::run(
         }
 
         size_t chunkStart = ci * kChunkDates;
-        size_t warmup = static_cast<size_t>(maxLookback);
-        size_t loadStart = (chunkStart > warmup) ? (chunkStart - warmup) : 0;
+        size_t loadStart = chunkStart;
         size_t loadEnd = std::min(chunkStart + kChunkDates + static_cast<size_t>(fwdDays), totalDates);
         std::vector<factor::compute::DateKey> chunkDates(
             allDates.begin() + loadStart, allDates.begin() + loadEnd);
@@ -351,7 +358,7 @@ void FactorBacktestOrchestrator::run(
 
             std::unique_ptr<factor::compute::IMarketDataView> chunkView;
             if (warmupRowCount > 0) {
-                const auto allCacheFields = arrowView->fieldNames();
+                const auto warmupFields = chunkColumns;
                 // 回看日期：从缓存首日往前，data.trade_calendar 查 maxLookback 个交易日
                 std::vector<factor::compute::DateKey> warmupDates;
                 {
@@ -377,12 +384,12 @@ void FactorBacktestOrchestrator::run(
                 }
                 INTERNAL_INFO_STREAM << "[DB补数据] 开始查库: warmupDays=" << warmupDates.size()
                     << " (requested=" << warmupRowCount << ")"
-                    << " fields=" << allCacheFields.size()
+                    << " fields=" << warmupFields.size()
                     << " symbols=" << arrowView->symbolStrings().size();
 
                 auto extendedDates = warmupDates;
                 extendedDates.insert(extendedDates.end(), chunkDates.begin(), chunkDates.end());
-                chunkView = arrowView->makeChunkView(extendedDates, allCacheFields);
+                chunkView = arrowView->makeChunkView(extendedDates, warmupFields);
 
                 if (chunkView) {
                     const auto& dbFn = m_dataService->dbFallback();
@@ -395,7 +402,7 @@ void FactorBacktestOrchestrator::run(
                             std::snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d",
                                           wv / 10000, (wv / 100) % 100, wv % 100);
                             std::string dateStr(dbuf);
-                            for (const auto& col : allCacheFields) {
+                            for (const auto& col : warmupFields) {
                                 auto* data = chunkView->mutableFieldData(col);
                                 if (!data) continue;
                                 auto dbRes = dbFn(dateStr, col,
@@ -411,7 +418,7 @@ void FactorBacktestOrchestrator::run(
                             }
                         }
                         INTERNAL_INFO_STREAM << "[DB补数据] 查库结束: dates=" << warmupDates.size()
-                            << " fields=" << allCacheFields.size()
+                            << " fields=" << warmupFields.size()
                             << " symbols=" << nInsts
                             << " validCells=" << totalCells;
                     }
@@ -575,15 +582,9 @@ void FactorBacktestOrchestrator::run(
 
                     // 获取当前和前向 close 价格
                     auto closeView = chunkView->close();
-                    // 查找 symbol 的列索引
-                    int32_t symCol = -1;
-                    {
-                        auto syms = arrowView->symbolStrings();
-                        for (size_t si = 0; si < syms.size(); ++si) {
-                            if (syms[si] == sym) { symCol = static_cast<int32_t>(si); break; }
-                        }
-                    }
-                    if (symCol < 0) continue;
+                    auto itSym = symToCol.find(sym);
+                    if (itSym == symToCol.end()) continue;
+                    int32_t symCol = itSym->second;
 
                     double priceNow  = static_cast<double>(closeView.data[static_cast<size_t>(di) * closeView.rowStride + symCol]);
                     double priceFwd  = static_cast<double>(closeView.data[static_cast<size_t>(di + fwdDays) * closeView.rowStride + symCol]);

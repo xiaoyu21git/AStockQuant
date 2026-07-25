@@ -62,6 +62,7 @@ QString resolveFactorTypeDisplayName(factor::FactorType type)
     case factor::FactorType::INDUSTRY:     return QStringLiteral("行业因子");
     case factor::FactorType::SENTIMENT:    return QStringLiteral("情绪因子");
     case factor::FactorType::CUSTOM:       return QStringLiteral("自定义因子");
+    case factor::FactorType::COMPOSITE:    return QStringLiteral("组合因子");
     default:                               return QStringLiteral("未知因子");
     }
 }
@@ -82,6 +83,7 @@ QString factorTypeId(factor::FactorType type)
     case factor::FactorType::INDUSTRY:     return QStringLiteral("industry");
     case factor::FactorType::SENTIMENT:    return QStringLiteral("sentiment");
     case factor::FactorType::CUSTOM:       return QStringLiteral("custom");
+    case factor::FactorType::COMPOSITE:    return QStringLiteral("composite");
     default:                               return QStringLiteral("unknown");
     }
 }
@@ -413,6 +415,9 @@ QString FactorService::addFactor(const QVariantMap& factorData)
 
         INTERNAL_DEBUG_STREAM << "[FactorService] 添加因子:" << factorId.toStdString() << factorName.toStdString();
 
+        if (m_viewModel) {
+            ensureViewModelPopulated();
+        }
         endMutation(true, QStringLiteral("因子创建成功"));
         emit factorAdded(factorId, factorData);
 
@@ -524,6 +529,9 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
 
         if (updated) {
             INTERNAL_DEBUG_STREAM << "[FactorService] 更新因子:" << factorId.toStdString();
+            if (m_viewModel) {
+                ensureViewModelPopulated();
+            }
             endMutation(true, QStringLiteral("因子更新成功"));
             emit factorUpdated(factorId, factorData);
         } else {
