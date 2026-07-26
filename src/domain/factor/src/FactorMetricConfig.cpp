@@ -45,6 +45,7 @@ void CommonParams::fromJson(const foundation::json::JsonFacade& json)
     }
     if (json.has("window")) window = static_cast<uint16_t>(json.get("window").asInt());
     if (json.has("lookbackWindow")) lookbackWindow = static_cast<uint16_t>(json.get("lookbackWindow").asInt());
+    if (json.has("ascending")) ascending = json.get("ascending").asBool();
 }
 
 } // namespace factor

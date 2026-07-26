@@ -18,6 +18,7 @@ namespace factor {
 void EventDrivenFactor::Params::fromJson(
     const foundation::json::JsonFacade& json)
 {
+    CommonParams::fromJson(json);
     if (json.has("sentimentWeight"))
         sentimentWeight = json.get("sentimentWeight").asDouble();
     if (json.has("superExpectedBonus"))
@@ -28,11 +29,6 @@ void EventDrivenFactor::Params::fromJson(
         maxEventAgeHours = json.get("maxEventAgeHours").asInt();
     if (json.has("maxRecordsPerSymbol"))
         maxRecordsPerSymbol = json.get("maxRecordsPerSymbol").asInt();
-    if (json.has("lookbackWindow"))
-        lookbackWindow = json.get("lookbackWindow").asInt();
-    if (json.has("standardization"))
-        standardization = static_cast<StandardizationMethod>(
-            json.get("standardization").asInt());
 }
 
 void EventDrivenFactor::loadConfig(

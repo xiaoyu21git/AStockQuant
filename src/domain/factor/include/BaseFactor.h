@@ -292,7 +292,8 @@ protected:
                                                       DataFrequency frequency,
                                                       StandardizationMethod standardization,
                                                       bool neutralizationEnabled,
-                                                      uint8_t lagPeriods = 1);
+                                                      uint8_t lagPeriods = 1,
+                                                      bool ascending = true);
 
     static void appendRequiredField(DataRequirements& requirements,
                                     const std::string& field);
@@ -338,6 +339,9 @@ protected:
         const std::string& date, int limit) const;
     std::unordered_map<std::string, std::string> industryBySymbol(
         const CalculationContext& context) const;
+
+    // 线程安全的日历日减法（仅用 std::mktime 归一化，无 localtime）
+    static std::string subtractCalendarDays(const std::string& isoDate, int days);
 
 private:
     bool applyCommonNeutralization(const CalculationContext& context,

@@ -160,7 +160,8 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
             ++dateCount;
         }
     }
-    INTERNAL_INFO_STREAM << "[FE] compute DONE: dates=" << view->dates().size()
+    INTERNAL_INFO_STREAM << "[FE] compute DONE: " << cacheKey.factorName
+        << " dates=" << view->dates().size()
         << " symbols=" << symbols.size() << " validDates=" << dateCount << " values=" << valueCount;
 
     return result;
@@ -195,8 +196,15 @@ std::unordered_map<std::string, double> FactorEngine::computeOneDay(
     }
     if (cr.values.empty()) {
         std::string firstSym = symbols.empty() ? "(none)" : symbols[0];
+        std::string diag;
+        if (cr.metadata.has("emptyReason")) {
+            diag = cr.metadata.get("emptyReason").asString();
+        } else if (cr.metadata.has("error")) {
+            diag = cr.metadata.get("error").asString();
+        }
         INTERNAL_WARN_STREAM << "[FE] 因子计算空: date=" << dateStr << " sym=" << firstSym
-                             << " nan=" << nanCount;
+                             << " nan=" << nanCount
+                             << (diag.empty() ? "" : " reason=" + diag);
     }
     return result;
 }

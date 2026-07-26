@@ -4,6 +4,7 @@
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
 #include <ta_libc.h>
+#include "foundation/log/logging.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -82,26 +83,6 @@ bool parseIsoDate(const std::string& text, std::tm& out)
     } catch (...) {
         return false;
     }
-}
-
-std::string formatIsoDate(const std::tm& value)
-{
-    char buffer[11] = {};
-    std::strftime(buffer, sizeof(buffer), "%Y-%m-%d", &value);
-    return std::string(buffer);
-}
-
-std::string earliestLowVolSeriesDate(const std::string& anchorDate, int window)
-{
-    std::tm parsedDate = {};
-    if (!parseIsoDate(anchorDate, parsedDate)) {
-        return "";
-    }
-    const int lookbackDays = std::max(45, (window + 10) * 2);
-    parsedDate.tm_mday -= lookbackDays;
-    parsedDate.tm_isdst = -1;
-    std::mktime(&parsedDate);
-    return formatIsoDate(parsedDate);
 }
 
 std::string trimAsciiWhitespace(std::string text)
@@ -242,7 +223,9 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled);
+        params_.neutralizationEnabled,
+        1,
+        params_.ascending);
 
     return executeWithCommonParams(
         context,
@@ -273,29 +256,21 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                 return;
             }
 
-            const std::string startDate = earliestLowVolSeriesDate(runtime.effectiveDate, params_.window);
-            if (startDate.empty()) {
-                failWithMessage(std::string("低波因子无法计算回看起始日期 ") + runtime.effectiveDate);
-                return;
-            }
-            const std::vector<LowVolComponent> components = selectedComponentsOrDefault(params_.components);
-            const bool needsBeta = hasSelectedComponent(components, LowVolComponent::BETA);
-            const bool needsVolatility = hasSelectedComponent(components, LowVolComponent::VOLATILITY);
-            const bool needsDrawdown = hasSelectedComponent(components, LowVolComponent::DRAWDOWN);
+            const int lookback = params_.window;
             const std::string benchmarkSymbol = resolveBenchmarkSymbol(params_);
 
-            std::vector<HistoricalDataPoint> benchmarkSeries;
-            if (needsBeta) {
-                benchmarkSeries = context.historicalView->getSeries(
-                    benchmarkSymbol,
-                    startDate,
-                    runtime.effectiveDate,
-                    "close");
+            std::vector<LowVolComponent> components = selectedComponentsOrDefault(params_.components);
+            const bool needsBeta     = hasSelectedComponent(components, LowVolComponent::BETA);
+            const bool needsVolatility = hasSelectedComponent(components, LowVolComponent::VOLATILITY);
+            const bool needsDrawdown   = hasSelectedComponent(components, LowVolComponent::DRAWDOWN);
 
-                if (benchmarkSeries.size() < 2) {
-                    failWithMessage("低波因子需要基准指数 " + benchmarkSymbol + " 的收盘价序列，HistoricalView 未提供该基准数据");
-                    return;
+            // 记录实际使用的组件
+            {
+                auto actualComponentsJson = foundation::json::JsonFacade::createArray();
+                for (const LowVolComponent c : components) {
+                    actualComponentsJson.push_back(json_helper::toJsonValue(static_cast<int>(c)));
                 }
+                result.metadata.set("actualComponents", actualComponentsJson);
             }
 
             double activeWeightSum = 0.0;
@@ -315,10 +290,44 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             std::map<std::string, std::vector<HistoricalDataPoint>> seriesBySymbol;
             for (const auto& symbol : symbols) {
                 seriesBySymbol[symbol] = context.historicalView->getSeries(
-                    symbol,
-                    startDate,
-                    runtime.effectiveDate,
-                    "close");
+                    symbol, runtime.effectiveDate, lookback, "close");
+            }
+
+            std::vector<HistoricalDataPoint> benchmarkSeries;
+            if (needsBeta) {
+                benchmarkSeries = context.historicalView->getSeries(
+                    benchmarkSymbol, runtime.effectiveDate, lookback, "close");
+                if (benchmarkSeries.size() < 2) {
+                    // ═══════════════════════════════════════════════════════════════
+                    // FIXME: 缓存中缺少沪深300指数日线数据，Beta 被迫用个股等权
+                    // 均价合成市场代理。后续必须保证数据管线将 000300.SH（沪深300）
+                    // 的日线 OHLCV 纳入缓存，届时删除此合成逻辑，直接用指数序列。
+                    // ═══════════════════════════════════════════════════════════════
+                    // 合成市场代理：逐日取所有个股收盘价的等权均值
+                    std::map<std::string, std::pair<double, int>> dateAcc;
+                    for (const auto& [sym, series] : seriesBySymbol) {
+                        (void)sym;
+                        for (const auto& dp : series) {
+                            if (std::isfinite(dp.value) && dp.value > 0.0) {
+                                auto& acc = dateAcc[dp.date];
+                                acc.first += dp.value;
+                                acc.second += 1;
+                            }
+                        }
+                    }
+                    benchmarkSeries.clear();
+                    benchmarkSeries.reserve(dateAcc.size());
+                    for (const auto& [date, acc] : dateAcc) {
+                        if (acc.second > 0) {
+                            benchmarkSeries.push_back({date, acc.first / static_cast<double>(acc.second)});
+                        }
+                    }
+                    result.metadata.set("betaBenchmarkSource",
+                        json_helper::toJsonValue("synthetic"));
+                } else {
+                    result.metadata.set("betaBenchmarkSource",
+                        json_helper::toJsonValue(benchmarkSymbol));
+                }
             }
 
             std::map<std::string, SymbolMetrics> metricsBySymbol;
@@ -586,21 +595,25 @@ std::optional<double> LowVolFactor::computeBeta(
     symbolReturns.reserve(symbolSeries.size() - 1);
     benchmarkReturns.reserve(symbolSeries.size() - 1);
 
+    int invVal = 0, dateMis = 0, benchInv = 0;
     for (size_t i = 1; i < symbolSeries.size(); ++i) {
         const auto& previousSymbol = symbolSeries[i - 1];
         const auto& currentSymbol = symbolSeries[i];
         if (!std::isfinite(previousSymbol.value) || !std::isfinite(currentSymbol.value)
             || previousSymbol.value <= 0.0 || currentSymbol.value <= 0.0) {
+            ++invVal;
             continue;
         }
 
         const auto previousBenchmark = benchmarkLookup.find(previousSymbol.date);
         const auto currentBenchmark = benchmarkLookup.find(currentSymbol.date);
         if (previousBenchmark == benchmarkLookup.end() || currentBenchmark == benchmarkLookup.end()) {
+            ++dateMis;
             continue;
         }
 
         if (previousBenchmark->second <= 0.0 || currentBenchmark->second <= 0.0) {
+            ++benchInv;
             continue;
         }
 
@@ -609,20 +622,29 @@ std::optional<double> LowVolFactor::computeBeta(
     }
 
     if (symbolReturns.size() < 2 || benchmarkReturns.size() < 2) {
+        INTERNAL_WARN_STREAM << "[LowVol] Beta fail: symPts=" << symbolSeries.size()
+                             << " benchPts=" << benchmarkSeries.size()
+                             << " blkup=" << benchmarkLookup.size()
+                             << " pairs=" << symbolReturns.size()
+                             << " invVal=" << invVal << " dateMis=" << dateMis << " bInv=" << benchInv
+                             << " symD0=" << (symbolSeries.empty() ? "?" : symbolSeries.front().date)
+                             << " bmkD0=" << (benchmarkSeries.empty() ? "?" : benchmarkSeries.front().date);
         return std::nullopt;
     }
 
     std::lock_guard<std::mutex> lock(taLibExecutionMutex());
     ensureTaLibInitialized();
-    const int period = static_cast<int>(std::min(symbolReturns.size(), benchmarkReturns.size()));
-    std::vector<double> output(static_cast<size_t>(period), std::numeric_limits<double>::quiet_NaN());
+    const int nbElements = static_cast<int>(std::min(symbolReturns.size(), benchmarkReturns.size()));
+    // optInTimePeriod 必须 < nbElements，否则滚动窗口等于全量，outNBElement=0 导致零输出
+    const int timePeriod = std::min(5, nbElements);
+    std::vector<double> output(static_cast<size_t>(nbElements), std::numeric_limits<double>::quiet_NaN());
     int outBegIdx = 0;
     int outNBElement = 0;
     const TA_RetCode ret = TA_BETA(0,
-                                   period - 1,
+                                   nbElements - 1,
                                    symbolReturns.data(),
                                    benchmarkReturns.data(),
-                                   period,
+                                   timePeriod,
                                    &outBegIdx,
                                    &outNBElement,
                                    output.data());

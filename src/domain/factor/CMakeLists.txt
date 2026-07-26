@@ -160,6 +160,7 @@ set(FACTOR_SOURCES
     src/GrowthFactor.cpp
     src/LiquidityFactor.cpp
     src/TechnicalFactor.cpp
+    src/batch_technical_indicators.cpp
     src/DividendFactor.cpp
     src/MacroFactor.cpp
     src/IndustryFactor.cpp
@@ -167,6 +168,9 @@ set(FACTOR_SOURCES
     src/CustomFactor.cpp
     src/CompositeFactor.cpp
     src/EventDrivenFactor.cpp
+    src/ReversalFactor.cpp
+    src/HighFreqFactor.cpp
+    src/DLFactor.cpp
     src/FactorConfigAccess.cpp
     src/FactorInstanceManager.cpp
     src/FactorRatingEngine.cpp
@@ -216,6 +220,9 @@ set(FACTOR_HEADERS
     include/CustomFactor.h
     include/CompositeFactor.h
     include/EventDrivenFactor.h
+    include/ReversalFactor.h
+    include/HighFreqFactor.h
+    include/DLFactor.h
     include/CompositeFactorConfig.h
     include/IFactorResolver.h
     include/FactorConfigAccess.h

@@ -63,6 +63,9 @@ QString resolveFactorTypeDisplayName(factor::FactorType type)
     case factor::FactorType::SENTIMENT:    return QStringLiteral("情绪因子");
     case factor::FactorType::CUSTOM:       return QStringLiteral("自定义因子");
     case factor::FactorType::COMPOSITE:    return QStringLiteral("组合因子");
+    case factor::FactorType::REVERSAL:     return QStringLiteral("反转因子");
+    case factor::FactorType::HIGH_FREQ:    return QStringLiteral("高频因子");
+    case factor::FactorType::DL:           return QStringLiteral("AI因子");
     default:                               return QStringLiteral("未知因子");
     }
 }
@@ -84,6 +87,9 @@ QString factorTypeId(factor::FactorType type)
     case factor::FactorType::SENTIMENT:    return QStringLiteral("sentiment");
     case factor::FactorType::CUSTOM:       return QStringLiteral("custom");
     case factor::FactorType::COMPOSITE:    return QStringLiteral("composite");
+    case factor::FactorType::REVERSAL:     return QStringLiteral("reversal");
+    case factor::FactorType::HIGH_FREQ:    return QStringLiteral("high_freq");
+    case factor::FactorType::DL:           return QStringLiteral("dl");
     default:                               return QStringLiteral("unknown");
     }
 }

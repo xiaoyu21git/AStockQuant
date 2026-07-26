@@ -4,28 +4,38 @@
 #include "FactorMetricConfig.h"
 #include "factor_enums.h"
 
-#include <vector>
 #include <string>
 
 namespace factor {
 
-class GrowthFactor final : public BaseFactor {
+class DLFactor final : public BaseFactor {
 public:
     struct Params : CommonParams {
-        std::vector<GrowthMetric> growthMetrics;
-        std::vector<double> growthWeights;
+        DLModelType modelType{DLModelType::LSTM};
+        int hiddenLayers = 3;
+        int hiddenUnits = 128;
+        int featureCount = 64;
+        int predictionHorizon = 5;         // 预测未来N日收益
+        double learningRate = 0.001;
+        int batchSize = 512;
+        int epochs = 100;
+        DLOptimizer optimizer{DLOptimizer::ADAM};
+        double dropoutRate = 0.2;
+        bool orthogonalConstraint = false;
+        bool ascending = true;             // 实际方向由训练目标决定，UI可调
+        std::string modelPath;             // 预训练权重文件路径
 
         void fromJson(const foundation::json::JsonFacade& json);
     };
 
-    GrowthFactor();
+    DLFactor();
 
     CalculationResult calculate(const CalculationContext& context) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
     int getLookbackDays() const override { return params_.lookbackWindow; }
 
-    static std::shared_ptr<GrowthFactor> create(
+    static std::shared_ptr<DLFactor> create(
         const FactorInstanceInfo& info,
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
 

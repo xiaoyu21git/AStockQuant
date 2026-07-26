@@ -66,11 +66,6 @@ QualityFactor::Params qualityParamsFromJson(const foundation::json::JsonFacade& 
     return params;
 }
 
-double normalizeThreshold(double threshold)
-{
-    return threshold > 1.0 ? threshold / 100.0 : threshold;
-}
-
 }
 
 std::string QualityFactor::resolveMetricColumn(QualityMetric metric) {
@@ -95,7 +90,7 @@ QualityFactor::QualityFactor() {
 
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     const QualityMetric metric = params_.metric;
-    const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
+    const double qualityThreshold = params_.qualityThreshold;
     const std::string netProfitField = F_NET_PROFIT;
     const std::string operatingCashFlowField = F_OPERATING_CASH_FLOW;
 
@@ -120,7 +115,9 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
         params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled);
+        params_.neutralizationEnabled,
+        1,
+        params_.ascending);
 
     return executeWithCommonParams(
         context,
@@ -192,27 +189,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 result.metadata.set("emptyReason", json_helper::toJsonValue("质量因子字段存在但没有满足条件的可用数值"));
             }
         },
-        [](const CommonRuntimeState&, CalculationResult& result) {
-            std::vector<double> finiteValues;
-            finiteValues.reserve(result.values.size());
-            for (const auto& [symbol, value] : result.values) {
-                (void)symbol;
-                if (std::isfinite(value)) {
-                    finiteValues.push_back(value);
-                }
-            }
-
-            if (finiteValues.size() >= 16) {
-                const double lower = BaseFactor::calculatePercentileValue(finiteValues, 0.05);
-                const double upper = BaseFactor::calculatePercentileValue(finiteValues, 0.95);
-                if (upper > lower) {
-                    for (auto& [symbol, value] : result.values) {
-                        (void)symbol;
-                        value = (std::max)(lower, (std::min)(upper, value));
-                    }
-                }
-            }
-        },
+        [](const CommonRuntimeState&, CalculationResult&) {},
         [this, &context, metric, qualityThreshold](const CommonRuntimeState&, CalculationResult& result) {
             if (!result.values.empty()) {
                 result.values = handleOutliers(applyBoundaryRules(result.values, context));

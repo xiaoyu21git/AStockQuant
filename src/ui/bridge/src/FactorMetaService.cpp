@@ -32,7 +32,10 @@ const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_ID = {
     {factor::FactorType::MACRO, "macro"},
     {factor::FactorType::INDUSTRY, "industry"},
     {factor::FactorType::SENTIMENT, "sentiment"},
-    {factor::FactorType::CUSTOM, "custom"}
+    {factor::FactorType::CUSTOM, "custom"},
+    {factor::FactorType::REVERSAL, "reversal"},
+    {factor::FactorType::HIGH_FREQ, "high_freq"},
+    {factor::FactorType::DL, "dl"}
 };
 
 const QMap<QString, factor::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
@@ -48,7 +51,10 @@ const QMap<QString, factor::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
     {"macro", factor::FactorType::MACRO},
     {"industry", factor::FactorType::INDUSTRY},
     {"sentiment", factor::FactorType::SENTIMENT},
-    {"custom", factor::FactorType::CUSTOM}
+    {"custom", factor::FactorType::CUSTOM},
+    {"reversal", factor::FactorType::REVERSAL},
+    {"high_freq", factor::FactorType::HIGH_FREQ},
+    {"dl", factor::FactorType::DL}
 };
 
 const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLAY_NAME = {
@@ -64,7 +70,10 @@ const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLA
     {factor::FactorType::MACRO, "宏观因子"},
     {factor::FactorType::INDUSTRY, "行业因子"},
     {factor::FactorType::SENTIMENT, "情绪因子"},
-    {factor::FactorType::CUSTOM, "自定义因子"}
+    {factor::FactorType::CUSTOM, "自定义因子"},
+    {factor::FactorType::REVERSAL, "反转因子"},
+    {factor::FactorType::HIGH_FREQ, "高频因子"},
+    {factor::FactorType::DL, "AI因子"}
 };
 
 namespace {
@@ -944,6 +953,138 @@ QList<ParamConfigSpec> customConfigs()
     };
 }
 
+QList<ParamConfigSpec> reversalConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("splitMethod"),
+                          QStringLiteral("反转方式"),
+                          QStringLiteral("传统反转或W式切割理想反转"),
+                          enumValue(factor::ReversalSplitMethod::NONE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::ReversalSplitMethod::NONE), QStringLiteral("传统反转")),
+                              buildOption(enumValue(factor::ReversalSplitMethod::W_CUT), QStringLiteral("W式切割"))
+                          })),
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("回顾窗口"),
+                          QStringLiteral("回溯交易日数（W式切割需偶数）"),
+                          20, 5, 60, 1, QStringLiteral("天"), 0,
+                          buildIntList({5, 10, 20, 40, 60})),
+        buildInputConfig(QStringLiteral("splitMetric"),
+                         QStringLiteral("切割指标"),
+                         QStringLiteral("W式切割使用的字段名"),
+                         QStringLiteral("avg_trade_amount"),
+                         QStringLiteral("avg_trade_amount")),
+        buildToggleConfig(QStringLiteral("useHighOnly"),
+                          QStringLiteral("仅用高D组"),
+                          QStringLiteral("仅使用高D组收益率作为因子值"),
+                          false, QStringLiteral("是"), QStringLiteral("否"))
+    };
+}
+
+QList<ParamConfigSpec> highFreqConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSliderConfig(QStringLiteral("frequency"),
+                          QStringLiteral("分钟频率"),
+                          QStringLiteral("数据频率（分钟）"),
+                          5, 1, 60, 1, QStringLiteral("分钟"), 0,
+                          buildIntList({1, 5, 10, 30})),
+        buildSliderConfig(QStringLiteral("lookbackDays"),
+                          QStringLiteral("回顾天数"),
+                          QStringLiteral("回顾天数"),
+                          10, 1, 60, 1, QStringLiteral("天"), 0),
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("聚合天数"),
+                          QStringLiteral("月度因子聚合天数"),
+                          20, 5, 60, 1, QStringLiteral("天"), 0,
+                          buildIntList({5, 10, 20})),
+        buildSelectConfig(QStringLiteral("aggregation"),
+                          QStringLiteral("聚合方式"),
+                          QStringLiteral("聚合方式"),
+                          enumValue(factor::HFAggregation::MEAN),
+                          buildOptionList({
+                              buildOption(enumValue(factor::HFAggregation::MEAN), QStringLiteral("均值")),
+                              buildOption(enumValue(factor::HFAggregation::CUMULATIVE), QStringLiteral("累计")),
+                              buildOption(enumValue(factor::HFAggregation::MAX), QStringLiteral("最大值"))
+                          })),
+        buildSliderConfig(QStringLiteral("percentile"),
+                          QStringLiteral("百分位阈值"),
+                          QStringLiteral("聪明钱识别阈值"),
+                          0.2, 0.01, 0.5, 0.01, QStringLiteral(""), 2),
+        buildSelectConfig(QStringLiteral("momentType"),
+                          QStringLiteral("矩类型"),
+                          QStringLiteral("已实现高阶矩类型"),
+                          enumValue(factor::HFMomentType::VARIANCE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::HFMomentType::VARIANCE), QStringLiteral("已实现方差")),
+                              buildOption(enumValue(factor::HFMomentType::SKEWNESS), QStringLiteral("已实现偏度")),
+                              buildOption(enumValue(factor::HFMomentType::KURTOSIS), QStringLiteral("已实现峰度"))
+                          }))
+    };
+}
+
+QList<ParamConfigSpec> dlConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("modelType"),
+                          QStringLiteral("模型类型"),
+                          QStringLiteral("深度学习模型架构"),
+                          enumValue(factor::DLModelType::LSTM),
+                          buildOptionList({
+                              buildOption(enumValue(factor::DLModelType::RNN), QStringLiteral("RNN")),
+                              buildOption(enumValue(factor::DLModelType::LSTM), QStringLiteral("LSTM")),
+                              buildOption(enumValue(factor::DLModelType::GRU), QStringLiteral("GRU")),
+                              buildOption(enumValue(factor::DLModelType::CNN), QStringLiteral("CNN")),
+                              buildOption(enumValue(factor::DLModelType::TRANSFORMER), QStringLiteral("Transformer"))
+                          })),
+        buildSliderConfig(QStringLiteral("hiddenLayers"),
+                          QStringLiteral("隐藏层数"),
+                          QStringLiteral("隐藏层数量"),
+                          3, 1, 6, 1, QStringLiteral("层"), 0),
+        buildSliderConfig(QStringLiteral("hiddenUnits"),
+                          QStringLiteral("神经元数"),
+                          QStringLiteral("每层神经元数量"),
+                          128, 16, 672, 16, QStringLiteral("个"), 0),
+        buildSliderConfig(QStringLiteral("featureCount"),
+                          QStringLiteral("输入特征数"),
+                          QStringLiteral("输入特征数量"),
+                          64, 16, 176, 8, QStringLiteral("个"), 0),
+        buildSliderConfig(QStringLiteral("predictionHorizon"),
+                          QStringLiteral("预测周期"),
+                          QStringLiteral("预测未来N日收益"),
+                          5, 1, 20, 1, QStringLiteral("天"), 0,
+                          buildIntList({1, 5, 10, 20})),
+        buildSliderConfig(QStringLiteral("learningRate"),
+                          QStringLiteral("学习率"),
+                          QStringLiteral("学习率"),
+                          0.001, 0.0001, 0.01, 0.0001, QStringLiteral(""), 4),
+        buildSliderConfig(QStringLiteral("batchSize"),
+                          QStringLiteral("批量大小"),
+                          QStringLiteral("批量大小"),
+                          512, 128, 1024, 128, QStringLiteral(""), 0),
+        buildSliderConfig(QStringLiteral("epochs"),
+                          QStringLiteral("训练轮数"),
+                          QStringLiteral("训练轮数"),
+                          100, 50, 200, 10, QStringLiteral("轮"), 0),
+        buildSelectConfig(QStringLiteral("optimizer"),
+                          QStringLiteral("优化器"),
+                          QStringLiteral("优化器"),
+                          enumValue(factor::DLOptimizer::ADAM),
+                          buildOptionList({
+                              buildOption(enumValue(factor::DLOptimizer::ADAM), QStringLiteral("Adam")),
+                              buildOption(enumValue(factor::DLOptimizer::SGD), QStringLiteral("SGD"))
+                          })),
+        buildSliderConfig(QStringLiteral("dropoutRate"),
+                          QStringLiteral("Dropout比率"),
+                          QStringLiteral("Dropout比率"),
+                          0.2, 0.1, 0.5, 0.05, QStringLiteral(""), 2),
+        buildToggleConfig(QStringLiteral("orthogonalConstraint"),
+                          QStringLiteral("正交化"),
+                          QStringLiteral("是否剥离风格/行业暴露"),
+                          false, QStringLiteral("是"), QStringLiteral("否"))
+    };
+}
+
 const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCatalog()
 {
     static const QMap<factor::FactorType, QList<ParamConfigSpec>> kCatalog = {
@@ -957,6 +1098,9 @@ const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCat
         {factor::FactorType::LIQUIDITY, appendConfigs(buildCommonConfigs(), liquidityConfigs())},
         {factor::FactorType::MACRO, appendConfigs(buildCommonConfigs(), macroConfigs())},
         {factor::FactorType::INDUSTRY, appendConfigs(buildCommonConfigs(), industryConfigs())},
+        {factor::FactorType::REVERSAL, appendConfigs(buildCommonConfigs(), reversalConfigs())},
+        {factor::FactorType::HIGH_FREQ, appendConfigs(buildCommonConfigs(), highFreqConfigs())},
+        {factor::FactorType::DL, appendConfigs(buildCommonConfigs(), dlConfigs())},
         {factor::FactorType::SENTIMENT, appendConfigs(buildCommonConfigs(), sentimentConfigs())},
         {factor::FactorType::CUSTOM, appendConfigs(buildCommonConfigs(), customConfigs())},
         {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(), lowVolatilityConfigs())},
@@ -1093,7 +1237,34 @@ const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
             QStringLiteral("描述组合因子的计算方法、权重配置等..."),
             QStringLiteral("#A78BFA"),
             QStringLiteral("🧩"),
-            QStringLiteral("多因子组合"))}
+            QStringLiteral("多因子组合"))},
+        {factor::FactorType::REVERSAL, buildFactorUiMeta(QStringLiteral("reversal"), 15,
+            QStringLiteral("反转因子"),
+            QStringLiteral("短期反转与理想反转"),
+            QStringLiteral("基于均值回归逻辑，捕捉短期过度涨跌后的反转效应"),
+            QStringLiteral("传统反转：-Return(20) ｜ 理想反转：W式切割大单成交"),
+            QStringLiteral("传统反转取过去N日收益率负值；理想反转按日均单笔成交额切割高低组"),
+            QStringLiteral("#EF4444"),
+            QStringLiteral("🔄"),
+            QStringLiteral("反转,均值回归"))},
+        {factor::FactorType::HIGH_FREQ, buildFactorUiMeta(QStringLiteral("high_freq"), 16,
+            QStringLiteral("高频因子"),
+            QStringLiteral("分钟级微观结构"),
+            QStringLiteral("基于分钟级量价数据捕捉日内交易微观结构信号"),
+            QStringLiteral("聪明钱因子、已实现方差/偏度/峰度、量价相关性"),
+            QStringLiteral("需分钟/逐笔数据管线支持，当前为骨架实现"),
+            QStringLiteral("#F59E0B"),
+            QStringLiteral("⚡"),
+            QStringLiteral("高频,微观结构,聪明钱"))},
+        {factor::FactorType::DL, buildFactorUiMeta(QStringLiteral("dl"), 17,
+            QStringLiteral("AI因子"),
+            QStringLiteral("深度学习自动特征"),
+            QStringLiteral("利用神经网络从海量量价数据中自动提取非线性特征"),
+            QStringLiteral("LSTM/GRU/CNN/Transformer 架构，离线训练+在线推理"),
+            QStringLiteral("需预训练模型权重文件，推理引擎建议 libtorch / ONNX Runtime"),
+            QStringLiteral("#8B5CF6"),
+            QStringLiteral("🧠"),
+            QStringLiteral("AI,深度学习,神经网络"))}
     };
     return kCatalog;
 }

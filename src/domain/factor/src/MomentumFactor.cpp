@@ -107,42 +107,8 @@ bool parseDateYyyyMmDd(const std::string& dateText, std::tm& dateValue)
     return !input.fail();
 }
 
-std::string formatDateYyyyMmDd(const std::tm& dateValue)
-{
-    std::ostringstream output;
-    output << std::put_time(&dateValue, "%Y-%m-%d");
-    return output.str();
-}
 
-std::string shiftDateByDays(const std::string& anchorDate, int dayOffset)
-{
-    std::tm parsedDate{};
-    if (!parseDateYyyyMmDd(anchorDate, parsedDate)) {
-        throw std::runtime_error("非法计算日期");
-    }
 
-    parsedDate.tm_isdst = -1;
-    std::time_t timeValue = std::mktime(&parsedDate);
-    if (timeValue == static_cast<std::time_t>(-1)) {
-        throw std::runtime_error("非法计算日期");
-    }
-
-    constexpr std::time_t kSecondsPerDay = 24 * 60 * 60;
-    timeValue += static_cast<std::time_t>(dayOffset) * kSecondsPerDay;
-
-    const std::tm* shiftedDate = std::localtime(&timeValue);
-    if (shiftedDate == nullptr) {
-        throw std::runtime_error("非法计算日期");
-    }
-    return formatDateYyyyMmDd(*shiftedDate);
-}
-
-}
-
-std::string MomentumFactor::earliestMomentumSeriesDate(const std::string& anchorDate, int window, int skipRecent)
-{
-    const int lookbackDays = std::max(365, (window + skipRecent + 10) * 2);
-    return shiftDateByDays(anchorDate, -lookbackDays);
 }
 
 /// 将回测配置中的 adjustPriceType 解析为实际使用的复权因子字段名
@@ -218,7 +184,9 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled);
+        params_.neutralizationEnabled,
+        1,
+        params_.ascending);
 
     try {
         std::vector<std::string> dateResolutionFields{F_CLOSE};
@@ -362,12 +330,13 @@ double MomentumFactor::calculateSymbolMomentum(const std::string& symbol,
     }
 
     if (params_.useVolume) {
+        const int requiredPoints = params_.window + params_.skipRecent + 1;
         std::vector<double> volumes;
         if (context.historicalView && context.historicalView->hasField("volume")) {
             const auto series = context.historicalView->getSeries(
                 symbol,
-                earliestMomentumSeriesDate(context.date, params_.window, params_.skipRecent),
                 context.date,
+                requiredPoints,
                 "volume"
             );
             for (const auto& point : series) {
@@ -503,20 +472,12 @@ std::vector<double> MomentumFactor::getAdjustedPriceSeries(const std::string& sy
             throw std::runtime_error("动量因子在 " + adjustField + " 价格模式下要求 HistoricalView 同时提供 close 和 " + adjustField + " 字段");
         }
 
-        const std::string startDate = earliestMomentumSeriesDate(context.date, params_.window, params_.skipRecent);
+        const int requiredPoints = params_.window + params_.skipRecent + 1;
 
         const auto closeSeries = context.historicalView->getSeries(
-            symbol,
-            startDate,
-            context.date,
-            "close"
-        );
+            symbol, context.date, requiredPoints, "close");
         const auto factorSeries = context.historicalView->getSeries(
-            symbol,
-            startDate,
-            context.date,
-            adjustField
-        );
+            symbol, context.date, requiredPoints, adjustField);
         const size_t pairCount = std::min(closeSeries.size(), factorSeries.size());
         adjustedSeries.reserve(pairCount);
         for (size_t index = 0; index < pairCount; ++index) {

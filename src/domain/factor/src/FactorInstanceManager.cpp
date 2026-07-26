@@ -3,6 +3,9 @@
 #include "CustomFactor.h"
 #include "EventDrivenFactor.h"
 #include "DividendFactor.h"
+#include "ReversalFactor.h"
+#include "HighFreqFactor.h"
+#include "DLFactor.h"
 #include "GrowthFactor.h"
 #include "IndustryFactor.h"
 #include "LiquidityFactor.h"
@@ -168,6 +171,27 @@ std::shared_ptr<BaseFactor> createEventDrivenFactorEntry(const FactorInstanceInf
     return EventDrivenFactor::create(info, std::move(dataChecker));
 }
 
+std::shared_ptr<BaseFactor> createReversalFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                       FactorInstanceManager&)
+{
+    return ReversalFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createHighFreqFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                       FactorInstanceManager&)
+{
+    return HighFreqFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createDLFactorEntry(const FactorInstanceInfo& info,
+                                                 std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                 FactorInstanceManager&)
+{
+    return DLFactor::create(info, std::move(dataChecker));
+}
+
 const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::MOMENTUM, &createMomentumFactorEntry},
     {FactorType::VALUE, &createValueFactorEntry},
@@ -184,6 +208,9 @@ const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::CUSTOM, &createCustomFactorEntry},
     {FactorType::COMPOSITE, &createCompositeFactorEntry},
     {FactorType::EVENT_DRIVEN, &createEventDrivenFactorEntry},
+    {FactorType::REVERSAL, &createReversalFactorEntry},
+    {FactorType::HIGH_FREQ, &createHighFreqFactorEntry},
+    {FactorType::DL, &createDLFactorEntry},
 };
 
 FactorCreator resolveFactorCreator(FactorType factorType)

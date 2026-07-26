@@ -61,6 +61,19 @@ function normalizeCategoryKey(category) {
     case "自定义":
     case "自定义因子":
         return "自定义因子"
+    case "reversal":
+    case "反转类":
+    case "反转因子":
+        return "反转因子"
+    case "high_freq":
+    case "高频类":
+    case "高频因子":
+        return "高频因子"
+    case "dl":
+    case "ai":
+    case "ai因子":
+    case "AI因子":
+        return "AI因子"
     default:
         return rawCategory || "动量因子"
     }
@@ -82,7 +95,10 @@ var COLOR_MAP = {
     "行业因子": "#EA580C",   // 深橙色
     "情绪因子": "#EC4899",     // 粉色
     "自定义因子": "#94A3B8",   // 灰色
-    
+    "反转因子": "#EF4444",     // 红色
+    "高频因子": "#F59E0B",     // 橙色
+    "AI因子": "#8B5CF6",       // 紫色
+
     // 状态颜色
     "ACTIVE": "#10B981",     // 活跃 - 绿色
     "EXPERIMENTAL": "#F59E0B", // 实验 - 橙色
@@ -107,7 +123,10 @@ var ICON_MAP = {
     "宏观因子": "🌦️",
     "行业因子": "🏭",
     "情绪因子": "🧠",
-    "自定义因子": "🧩"
+    "自定义因子": "🧩",
+    "反转因子": "🔄",
+    "高频因子": "⚡",
+    "AI因子": "🧠"
 };
 
 /**
@@ -218,7 +237,10 @@ function getDefaultTags(majorCategory) {
         "宏观因子": ["宏观", "周期", "利率"],
         "行业因子": ["行业", "景气度", "轮动"],
         "情绪因子": ["情绪", "市场心理", "舆情"],
-        "自定义因子": ["量化", "自定义", "表达式"]
+        "自定义因子": ["量化", "自定义", "表达式"],
+        "反转因子": ["反转", "均值回归", "W式切割"],
+        "高频因子": ["高频", "微观结构", "聪明钱"],
+        "AI因子": ["AI", "深度学习", "神经网络"]
     };
     
     return tagMap[normalizedCategory] || ["量化", "因子"];

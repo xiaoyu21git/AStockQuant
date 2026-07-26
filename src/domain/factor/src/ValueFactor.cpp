@@ -421,7 +421,9 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
         params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled);
+        params_.neutralizationEnabled,
+        1,
+        params_.ascending);
 
     const std::vector<ValuationMetric> metrics = selectedMetricsFromParams(params_);
     const std::vector<std::string> dateResolutionFields = collectDateResolutionFields(metrics);
@@ -506,9 +508,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 return;
             }
         },
-        [](const CommonRuntimeState&, CalculationResult& result) {
-            winsorizeTopBottom5Percent(result.values);
-        },
+        [](const CommonRuntimeState&, CalculationResult&) {},
         [this, metrics](const CommonRuntimeState&, CalculationResult& result) {
             auto valuationMetricsJson = foundation::json::JsonFacade::createArray();
             auto valuationWeightsJson = foundation::json::JsonFacade::createArray();

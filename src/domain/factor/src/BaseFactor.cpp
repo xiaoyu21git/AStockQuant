@@ -254,16 +254,21 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
             return left.second < right.second;
         });
-        const double denominator = static_cast<double>(ranked.size());
+        // Percentile: rank / N   (范围 0 ~ (N-1)/N)
+        // Rank:       rank / (N-1) (范围 0 ~ 1)，与 CompositeFactor::applyRankLike 一致
+        const bool isPercentile = (standardization == StandardizationMethod::Percentile);
+        const double denominator = isPercentile
+            ? static_cast<double>(ranked.size())
+            : (ranked.size() > 1 ? static_cast<double>(ranked.size() - 1) : 1.0);
         for (size_t index = 0; index < ranked.size();) {
             size_t groupEnd = index + 1;
             while (groupEnd < ranked.size() && ranked[groupEnd].second == ranked[index].second) {
                 ++groupEnd;
             }
 
-            const double precedingFraction = static_cast<double>(index) / denominator;
+            const double rankValue = static_cast<double>(index) / denominator;
             for (size_t groupIndex = index; groupIndex < groupEnd; ++groupIndex) {
-                values[ranked[groupIndex].first] = precedingFraction;
+                values[ranked[groupIndex].first] = rankValue;
             }
             index = groupEnd;
         }
@@ -408,6 +413,13 @@ CalculationResult BaseFactor::executeWithCommonParams(
 
     rawCalculator(runtime, result);
 
+    // 方向翻转：ascending=false 时对所有原始值取反（与中性化/标准化可交换，放在最前面语义最清晰）
+    if (!params.ascending && !result.values.empty()) {
+        for (auto& [symbol, value] : result.values) {
+            value = -value;
+        }
+    }
+
     if (result.dataStatus.isValid() && !result.values.empty()) {
         applyCommonNeutralization(context, params, runtime, result, runtime.neutralizationMode);
     }
@@ -502,7 +514,8 @@ CommonMetricParams BaseFactor::buildCommonMetricParams(int lookbackWindow,
                                                        DataFrequency frequency,
                                                        StandardizationMethod standardization,
                                                        bool neutralizationEnabled,
-                                                       uint8_t lagPeriods)
+                                                       uint8_t lagPeriods,
+                                                       bool ascending)
 {
     CommonMetricParams params;
     params.lookbackWindow = static_cast<uint16_t>((std::max)(1, lookbackWindow));
@@ -511,6 +524,7 @@ CommonMetricParams BaseFactor::buildCommonMetricParams(int lookbackWindow,
     params.frequency = frequency;
     params.standardization = standardization;
     params.neutralizationEnabled = neutralizationEnabled;
+    params.ascending = ascending;
     return params;
 }
 
@@ -772,6 +786,22 @@ std::unordered_map<std::string, std::string> BaseFactor::industryBySymbol(
         }
     }
     return result;
+}
+
+std::string BaseFactor::subtractCalendarDays(const std::string& isoDate, int days)
+{
+    if (days < 0) days = 0;
+    std::tm tm = {};
+    int y = 0, m = 0, d = 0;
+    if (sscanf(isoDate.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return isoDate;
+    tm.tm_year = y - 1900;
+    tm.tm_mon  = m - 1;
+    tm.tm_mday = d - days;
+    if (std::mktime(&tm) == static_cast<std::time_t>(-1)) return isoDate;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    return std::string(buf);
 }
 
 } // namespace factor

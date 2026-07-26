@@ -429,6 +429,7 @@ Item {
                 onDeleteRequested: function(factorId) {
                     console.log("FactorLibraryPage 请求删除因子:", factorId)
                     factorService.deleteFactor(factorId)
+                    gc()
                 }
                 onCreateRequested: openCreateMode()
                 
@@ -654,8 +655,8 @@ Item {
         var updateSuccess = factorService.writeBacktestMetrics(factorId, activeReport)
         if (updateSuccess) {
             showToast("已写入回测指标: " + factorId)
-            // 刷新 ViewModel, 使因子选择列表中立即显示最新的 IC/IR/评级
             root.factorViewModel = factorService.getViewModel()
+            gc()
         } else {
             showToast("写入回测指标失败: " + factorId)
         }

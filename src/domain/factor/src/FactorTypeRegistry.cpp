@@ -17,6 +17,9 @@ std::string FactorTypeRegistry::displayName(FactorType type) {
     case FactorType::Industry: return "industry";
     case FactorType::Sentiment: return "sentiment";
     case FactorType::Custom: return "custom";
+    case FactorType::Reversal: return "reversal";
+    case FactorType::HighFreq: return "high_freq";
+    case FactorType::DL: return "dl";
     default: return "unknown";
     }
 }
@@ -36,6 +39,9 @@ std::string FactorTypeRegistry::typeId(FactorType type) {
     case FactorType::Industry: return "industry";
     case FactorType::Sentiment: return "sentiment";
     case FactorType::Custom: return "custom";
+    case FactorType::Reversal: return "reversal";
+    case FactorType::HighFreq: return "high_freq";
+    case FactorType::DL: return "dl";
     default: return "unknown";
     }
 }
@@ -54,6 +60,9 @@ FactorType FactorTypeRegistry::fromIndex(int index) {
     case 9: return FactorType::Macro;
     case 10: return FactorType::Industry;
     case 11: return FactorType::Sentiment;
+    case 12: return FactorType::Reversal;
+    case 13: return FactorType::HighFreq;
+    case 14: return FactorType::DL;
     default: return FactorType::Custom;
     }
 }
