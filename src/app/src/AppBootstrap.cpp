@@ -454,7 +454,14 @@ void AppBootstrap::initializeDeferredDomainServices()
         return;
     }
 
-    // 启动盘后数据同步服务
+    // 注入实盘数据持久化路径，再启动盘后数据同步服务
+    {
+        auto dirs = runtimeDirectories();
+        QString livePath = QDir(dirs.filesDir).filePath("live");
+        ensureDirectoryExists(livePath, "live");
+        astock::infrastructure::database::PostMarketSyncService::instance()
+            .setLiveDataPath(livePath.toStdString());
+    }
     astock::infrastructure::database::PostMarketSyncService::instance().start();
 
     initializeDeferredTradingServices();

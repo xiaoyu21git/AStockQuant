@@ -6,6 +6,7 @@
 #include "foundation/log/logging.hpp"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "foundation/json/json_facade.h"
 
 #include <algorithm>
 #include <chrono>
@@ -38,7 +39,9 @@ PostMarketSyncService::~PostMarketSyncService() {
 void PostMarketSyncService::start() {
     if (m_started) return;
     m_started = true;
-    m_persistPath = "post_market_sync_last.txt";
+    m_persistPath = m_liveDataPath.empty()
+        ? "app_state.json"
+        : m_liveDataPath + "/app_state.json";
     loadLastSyncDay();
     m_running.store(true);
     m_scheduler = std::make_unique<std::thread>(&PostMarketSyncService::schedulerLoop, this);
@@ -155,8 +158,11 @@ void PostMarketSyncService::fillAdjFactors() {
         // 读取上次复权因子同步日期，只拉该日期之后的新复权事件
         std::string lastAdjDate = "2000-01-01";
         {
-            std::ifstream f("post_market_adj_factor_last.txt");
-            if(f){std::string l;std::getline(f,l);if(l.size()>=10)lastAdjDate=l;}
+            auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
+            if (!json.isNull() && json.isObject() && json.has("lastAdjFactorDate")) {
+                auto val = json.get("lastAdjFactorDate").asString();
+                if (val.size() >= 10) lastAdjDate = val;
+            }
         }
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors lastSync="<<lastAdjDate;
 
@@ -195,8 +201,20 @@ void PostMarketSyncService::fillAdjFactors() {
             if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<" fail="<<fail<<")";
         }
 
-        // 保存本次同步日期
-        {std::ofstream f("post_market_adj_factor_last.txt");if(f)f<<endDate;}
+        // 保存本次同步日期到统一 JSON
+        {
+            auto root = foundation::json::JsonFacade::createObject();
+            auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
+            if (!existing.isNull() && existing.isObject()) {
+                for (const auto& key : existing.keys()) {
+                    if (key != "lastAdjFactorDate") root.set(key, existing.get(key));
+                }
+            }
+            root.set("lastAdjFactorDate", foundation::json::JsonFacade::createString(endDate));
+            std::string tmpPath = m_persistPath + ".tmp";
+            { std::ofstream f(tmpPath, std::ios::trunc); if (f) f << root.toString() << "\n"; }
+            std::rename(tmpPath.c_str(), m_persistPath.c_str());
+        }
     });
 }
 
@@ -648,22 +666,33 @@ std::string PostMarketSyncService::toGmSymbol(const std::string& sym) {
 
 void PostMarketSyncService::loadLastSyncDay() {
     if (m_persistPath.empty()) return;
-    std::ifstream f(m_persistPath);
-    if (!f.is_open()) return;
-    std::string line;
-    if (std::getline(f, line)) {
-        try { m_lastSyncDay.store(std::stoi(line)); } catch (...) {}
+    auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
+    if (json.isNull() || !json.isObject()) return;
+    if (json.has("lastSyncDay")) {
+        try { m_lastSyncDay.store(json.get("lastSyncDay").asInt()); } catch (...) {}
     }
     INTERNAL_INFO_STREAM << "[PostMktSync] 加载 lastSyncDay=" << m_lastSyncDay.load();
 }
 
 void PostMarketSyncService::saveLastSyncDay(int tradingDay) {
     if (m_persistPath.empty()) return;
+    // 读取现有 JSON，保留 adjFactorDate 等字段
+    auto root = foundation::json::JsonFacade::createObject();
+    {
+        auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
+        if (!existing.isNull() && existing.isObject()) {
+            for (const auto& key : existing.keys()) {
+                if (key != "lastSyncDay") root.set(key, existing.get(key));
+            }
+        }
+    }
+    root.set("lastSyncDay", foundation::json::JsonFacade::createInt(tradingDay));
+    // 原子写入
     std::string tmpPath = m_persistPath + ".tmp";
     {
         std::ofstream f(tmpPath, std::ios::trunc);
         if (!f.is_open()) return;
-        f << tradingDay << "\n";
+        f << root.toString() << "\n";
     }
     std::rename(tmpPath.c_str(), m_persistPath.c_str());
 }

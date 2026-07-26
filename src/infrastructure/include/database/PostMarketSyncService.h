@@ -47,6 +47,9 @@ public:
     /// @brief 补全 GMSDK 数据的复权因子（pre_adjust_factor / post_adjust_factor）
     void fillAdjFactors();
 
+    /// @brief 设置实盘数据持久化目录（由 AppBootstrap 注入）
+    void setLiveDataPath(const std::string& path) { m_liveDataPath = path; }
+
 private:
     void schedulerLoop();
 
@@ -118,7 +121,8 @@ private:
     void syncIndexConstituents();
     void loadLastSyncDay();
     void saveLastSyncDay(int tradingDay);
-    std::string m_persistPath;  // 持久化文件路径
+    std::string m_liveDataPath;   // 实盘数据目录（由 AppBootstrap 注入）
+    std::string m_persistPath;    // 统一 JSON 文件全路径 (post_market_state.json)
 };
 
 } // namespace astock::infrastructure::database

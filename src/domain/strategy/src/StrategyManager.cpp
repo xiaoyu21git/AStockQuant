@@ -177,6 +177,11 @@ void StrategyManager::startStrategy(const std::string& strategyId)
         engine->setOrderListener(m_defaultOrderListener);
     }
 
+    // 注入实盘数据持久化路径（lastEvalDay JSON 等）
+    if (!m_liveDataPath.empty()) {
+        engine->setLiveDataPath(m_liveDataPath);
+    }
+
     // 启动实盘循环
     engine->startLiveLoop();
 

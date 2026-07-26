@@ -6,6 +6,7 @@ StrategyBridge* StrategyBridge::s_instance = nullptr;
 #include "../include/StrategyLifecycleStatus.h"
 #include "../include/StrategyListModel.h"
 #include "StockNameResolver.h"
+#include "AppStoragePaths.h"
 
 #include "database/MarketDataRepository.h"
 #include "database/NativePgConnectionPool.h"
@@ -340,6 +341,14 @@ void StrategyBridge::init()
         auto* factorSvcBridge = FactorService::instance();
         if (factorSvcBridge && factorSvcBridge->isInitialized()) {
             mgr.setFactorInstanceManager(factorSvcBridge->instanceManager());
+        }
+
+        // 注入实盘数据持久化目录 (lastEvalDay JSON 等)
+        {
+            QString livePath = bridge::storage::absolutePathInAppDir("files/live");
+            bridge::storage::ensureDirectoryExists(livePath);
+            mgr.setLiveDataPath(livePath.toStdString());
+            INTERNAL_INFO_STREAM << "[Bridge] liveDataPath=" << livePath.toStdString();
         }
 
         // 初始化 TradingSystem（交易 facade）

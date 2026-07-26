@@ -629,6 +629,9 @@ public:
     /// @brief 设置策略ID（止损单必填）
     void setStrategyId(std::string id) { m_strategyId = std::move(id); }
 
+    /// @brief 设置实盘数据目录（lastEvalDay JSON 持久化路径前缀）
+    void setLiveDataPath(std::string path) { m_liveDataPath = std::move(path); }
+
     /// @brief 距上次处理 tick 的毫秒数（>5000 可能卡死）
     [[nodiscard]] std::int64_t lastProcessedMsAgo() const noexcept {
         auto last = m_lastProcessedAt.load(std::memory_order_acquire);
@@ -688,6 +691,7 @@ private:
     IOrderListener* m_orderListener{nullptr};
     std::string m_accountId;
     std::string m_strategyId;
+    std::string m_liveDataPath;     // 实盘数据目录, 用于统一 JSON 持久化
     domain::trading::OrderBuilder m_orderBuilder;
     OrderGenerator m_orderGenerator{m_orderBuilder};  ///< 持仓感知建单器
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;

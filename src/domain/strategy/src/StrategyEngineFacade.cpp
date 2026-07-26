@@ -602,8 +602,10 @@ void StrategyEngine::startLiveLoop()
         INTERNAL_INFO_STREAM << "[启动] 日频策略 — DailyEodScheduler";
 
         if (!m_dailyScheduler) {
-            // 持久化路径: 策略数据目录下 strategy_<id>_last_eval.txt
-            std::string persistPath = "strategy_" + m_strategyId + "_last_eval.txt";
+            // 统一持久化: 所有策略共用 m_liveDataPath/app_state.json
+            std::string persistPath = m_liveDataPath.empty()
+                ? "app_state.json"
+                : m_liveDataPath + "/app_state.json";
             m_dailyScheduler = std::make_unique<DailyEodScheduler>(
                 [this](std::function<void()> fn) {
                     if (m_dedicatedExecutor && m_loopRunning.load(std::memory_order_acquire))
@@ -611,6 +613,7 @@ void StrategyEngine::startLiveLoop()
                 },
                 persistPath
             );
+            m_dailyScheduler->setStrategyId(m_strategyId);
             // 从 TradingConnectionConfig 读取 EOD 触发时间(默认 15:00)
             {
                 auto& cfgMgr = foundation::config::ConfigManager::instance();

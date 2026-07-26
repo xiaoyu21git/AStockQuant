@@ -2,6 +2,7 @@
 #include "../../market/include/MarketDataService.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/json/json_facade.h"
 
 #include <chrono>
 #include <cstdio>
@@ -203,22 +204,52 @@ std::int64_t DailyEodScheduler::getCurrentTradingDay() {
 // ═══════════════════════════════════════════════════════════════════
 
 void DailyEodScheduler::loadLastEvalDay() {
-    if (m_persistPath.empty()) return;
-    std::ifstream f(m_persistPath);
-    if (!f.is_open()) return;
-    std::string line;
-    if (std::getline(f, line)) {
-        try {
-            m_lastEvalDay = std::stoll(line);
-            INTERNAL_INFO_STREAM << "[DailyEod] 加载 lastEvalDay=" << m_lastEvalDay;
-        } catch (...) {
-            m_lastEvalDay = 0;
-        }
+    if (m_persistPath.empty() || m_strategyId.empty()) return;
+
+    // 从统一 JSON 读取 strategyLastEval.<strategyId>
+    auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
+    if (json.isNull() || !json.isObject()) return;
+    if (!json.has("strategyLastEval")) return;
+    auto evalMap = json.get("strategyLastEval");
+    if (!evalMap.isObject() || !evalMap.has(m_strategyId)) return;
+
+    try {
+        m_lastEvalDay = static_cast<std::int64_t>(evalMap.get(m_strategyId).asInt());
+        INTERNAL_INFO_STREAM << "[DailyEod] 加载 lastEvalDay=" << m_lastEvalDay
+                             << " strategyId=" << m_strategyId;
+    } catch (...) {
+        m_lastEvalDay = 0;
     }
 }
 
 void DailyEodScheduler::persistLastEvalDay() {
-    if (m_persistPath.empty()) return;
+    if (m_persistPath.empty() || m_strategyId.empty()) return;
+
+    // 读取现有 JSON，保留非 strategyLastEval 的顶层键
+    auto root = foundation::json::JsonFacade::createObject();
+    auto evalMap = foundation::json::JsonFacade::createObject();
+    {
+        auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
+        if (!existing.isNull() && existing.isObject()) {
+            for (const auto& key : existing.keys()) {
+                if (key == "strategyLastEval") {
+                    // 保留其他策略的条目
+                    auto oldMap = existing.get(key);
+                    if (oldMap.isObject()) {
+                        for (const auto& sk : oldMap.keys())
+                            evalMap.set(sk, oldMap.get(sk));
+                    }
+                } else {
+                    root.set(key, existing.get(key));
+                }
+            }
+        }
+    }
+    // 更新当前策略
+    evalMap.set(m_strategyId, foundation::json::JsonFacade::createInt(
+        static_cast<int>(m_lastEvalDay)));
+    root.set("strategyLastEval", evalMap);
+
     // 原子写入: 先写临时文件, 再重命名
     std::string tmpPath = m_persistPath + ".tmp";
     {
@@ -227,7 +258,7 @@ void DailyEodScheduler::persistLastEvalDay() {
             INTERNAL_WARN_STREAM << "[DailyEod] 无法写入持久化文件: " << tmpPath;
             return;
         }
-        f << m_lastEvalDay << "\n";
+        f << root.toString() << "\n";
         f.close();
     }
     // Windows rename 不覆盖已有文件, 先删再rename
