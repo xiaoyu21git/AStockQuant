@@ -100,6 +100,17 @@ elseif(TARGET arrow_shared)
             $<TARGET_FILE_DIR:astockquantapp>
     )
 endif()
+# ONNX Runtime DLL（DLFactor 运行时依赖）
+if(HAS_ONNX_RUNTIME)
+    add_custom_command(TARGET astockquantapp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+            $<TARGET_FILE_DIR:astockquantapp>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime_providers_shared.dll"
+            $<TARGET_FILE_DIR:astockquantapp>
+    )
+endif()
 
 if(ENABLE_JUJIN_MARKET)
     target_link_libraries(astockquantapp

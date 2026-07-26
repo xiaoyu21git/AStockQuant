@@ -354,6 +354,21 @@ else()
     message(FATAL_ERROR "Arrow C++ target not found after FetchContent population")
 endif()
 
+# ONNX Runtime（可选，DLFactor AI 推理引擎）
+if(HAS_ONNX_RUNTIME)
+    target_link_libraries(factor PUBLIC onnxruntime::onnxruntime)
+    target_compile_definitions(factor PUBLIC HAS_ONNX_RUNTIME)
+    # 将 DLL 复制到输出目录
+    add_custom_command(TARGET factor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+        "$<TARGET_FILE_DIR:factor>/onnxruntime.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime_providers_shared.dll"
+        "$<TARGET_FILE_DIR:factor>/onnxruntime_providers_shared.dll"
+    )
+endif()
+
 # 安装
 install(TARGETS factor
     ARCHIVE DESTINATION lib

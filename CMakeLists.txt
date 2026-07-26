@@ -192,6 +192,29 @@ set(BOOST_ROOT "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost source root" FORCE)
 set(BOOST_INCLUDEDIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
 set(Boost_INCLUDE_DIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
 set(Boost_INCLUDE_DIRS "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+    # ==================== ONNX Runtime（可选，DLFactor AI 推理引擎） ====================
+    option(USE_ONNX_RUNTIME "Enable ONNX Runtime inference for DLFactor" ON)
+    if(USE_ONNX_RUNTIME)
+        set(ONNXRUNTIME_LOCAL_DIR "${CMAKE_SOURCE_DIR}/../lib/onnxruntime-win-x64-1.18.0")
+        if(EXISTS "${ONNXRUNTIME_LOCAL_DIR}/include/onnxruntime_c_api.h")
+            if(NOT TARGET onnxruntime::onnxruntime)
+                add_library(onnxruntime::onnxruntime SHARED IMPORTED)
+                set_target_properties(onnxruntime::onnxruntime PROPERTIES
+                    IMPORTED_LOCATION "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+                    IMPORTED_IMPLIB   "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.lib"
+                    INTERFACE_INCLUDE_DIRECTORIES "${ONNXRUNTIME_LOCAL_DIR}/include"
+                )
+            endif()
+            set(HAS_ONNX_RUNTIME TRUE CACHE BOOL "ONNX Runtime available" FORCE)
+            message(STATUS "ONNX Runtime found at: ${ONNXRUNTIME_LOCAL_DIR}")
+        else()
+            set(HAS_ONNX_RUNTIME FALSE CACHE BOOL "ONNX Runtime not found" FORCE)
+            message(WARNING "ONNX Runtime not found at ${ONNXRUNTIME_LOCAL_DIR}. DLFactor will return all-zero values.")
+        endif()
+    else()
+        set(HAS_ONNX_RUNTIME FALSE CACHE BOOL "ONNX Runtime disabled by user" FORCE)
+    endif()
+
 message(STATUS "Using local Boost source directory: ${BOOST_LOCAL_SOURCE_DIR}")
 
 if(NOT TARGET boost_headers)
