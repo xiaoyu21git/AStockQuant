@@ -432,16 +432,14 @@ Item {
                     gc()
                 }
                 onCreateRequested: openCreateMode()
-                
+
                 Component.onCompleted: {
                     console.log("FactorLibraryPage 初始化完成，factorModel:", factorModel ? "有效" : "无效")
                 }
-                
-                // 页面激活时不需要刷新数据，因为deleteFactor会自动更新
+
                 onVisibleChanged: {
                     if (visible) {
                         console.log("FactorLibraryPage 变为可见")
-                        // 不需要调用refreshFactorLibrary，因为deleteFactor会自动更新视图模型
                     }
                 }
             }

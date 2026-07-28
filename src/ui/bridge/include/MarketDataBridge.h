@@ -79,6 +79,7 @@ public:
     Q_INVOKABLE QString forceSyncToday();
     Q_INVOKABLE QString forceSyncDate(int tradingDay);  // tradingDay 格式: YYYYMMDD
     Q_INVOKABLE QString forceSyncMissingDays(int lookbackDays = 30);  // 自动补齐近N天缺口
+    Q_INVOKABLE QString forceSyncHistory();  // 从2015回补日线+分钟线历史数据
     Q_INVOKABLE QString probeGmCoverage(const QString& symbol, const QVariantList& dates);  // 探测掘金覆盖
     Q_INVOKABLE QString fillAdjFactors();  // 补全复权因子
 

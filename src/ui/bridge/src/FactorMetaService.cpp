@@ -319,7 +319,14 @@ QList<ParamConfigSpec> appendConfigs(const QList<ParamConfigSpec>& first, const 
 {
     QList<ParamConfigSpec> merged = first;
     for (const ParamConfigSpec& item : second) {
-        merged.append(item);
+        // 同名 id 后者覆盖前者，避免 UI 出现重复控件
+        auto it = std::find_if(merged.begin(), merged.end(),
+            [&](const ParamConfigSpec& m) { return m.id == item.id; });
+        if (it != merged.end()) {
+            *it = item;
+        } else {
+            merged.append(item);
+        }
     }
     return merged;
 }
@@ -327,6 +334,7 @@ QList<ParamConfigSpec> appendConfigs(const QList<ParamConfigSpec>& first, const 
 QVariantList commonFrequencyOptions()
 {
     return buildOptionList({
+        buildOption(enumValue(factor::DataFrequency::Minute), QStringLiteral("分钟频")),
         buildOption(enumValue(factor::DataFrequency::Daily), QStringLiteral("日频")),
         buildOption(enumValue(factor::DataFrequency::Weekly), QStringLiteral("周频")),
         buildOption(enumValue(factor::DataFrequency::Monthly), QStringLiteral("月频")),
@@ -380,7 +388,13 @@ QList<ParamConfigSpec> buildCommonConfigs()
                           QStringLiteral("是否消除行业/市值影响"),
                           true,
                           QStringLiteral("启用"),
-                          QStringLiteral("禁用"))
+                          QStringLiteral("禁用")),
+        buildToggleConfig(QStringLiteral("ascending"),
+                          QStringLiteral("因子方向"),
+                          QStringLiteral("因子值越大越好"),
+                          true,
+                          QStringLiteral("升序(值大=好)"),
+                          QStringLiteral("降序(值小=好)"))
     };
 }
 
@@ -984,9 +998,14 @@ QList<ParamConfigSpec> reversalConfigs()
 QList<ParamConfigSpec> highFreqConfigs()
 {
     return QList<ParamConfigSpec>{
-        buildSliderConfig(QStringLiteral("frequency"),
-                          QStringLiteral("分钟频率"),
-                          QStringLiteral("数据频率（分钟）"),
+        buildSelectConfig(QStringLiteral("frequency"),
+                          QStringLiteral("数据频率"),
+                          QStringLiteral("因子计算的数据频率"),
+                          enumValue(factor::DataFrequency::Minute),
+                          commonFrequencyOptions()),
+        buildSliderConfig(QStringLiteral("barFrequency"),
+                          QStringLiteral("K线周期"),
+                          QStringLiteral("分钟K线周期（分钟/根）"),
                           5, 1, 60, 1, QStringLiteral("分钟"), 0,
                           buildIntList({1, 5, 10, 30})),
         buildSliderConfig(QStringLiteral("lookbackDays"),
@@ -1003,8 +1022,8 @@ QList<ParamConfigSpec> highFreqConfigs()
                           QStringLiteral("聚合方式"),
                           enumValue(factor::HFAggregation::MEAN),
                           buildOptionList({
-                              buildOption(enumValue(factor::HFAggregation::MEAN), QStringLiteral("均值")),
-                              buildOption(enumValue(factor::HFAggregation::CUMULATIVE), QStringLiteral("累计")),
+                              buildOption(enumValue(factor::HFAggregation::MEAN), QStringLiteral("加权平均(VWAP)")),
+                              buildOption(enumValue(factor::HFAggregation::CUMULATIVE), QStringLiteral("累计求和")),
                               buildOption(enumValue(factor::HFAggregation::MAX), QStringLiteral("最大值"))
                           })),
         buildSliderConfig(QStringLiteral("percentile"),
@@ -1019,7 +1038,20 @@ QList<ParamConfigSpec> highFreqConfigs()
                               buildOption(enumValue(factor::HFMomentType::VARIANCE), QStringLiteral("已实现方差")),
                               buildOption(enumValue(factor::HFMomentType::SKEWNESS), QStringLiteral("已实现偏度")),
                               buildOption(enumValue(factor::HFMomentType::KURTOSIS), QStringLiteral("已实现峰度"))
-                          }))
+                          })),
+        buildSelectConfig(QStringLiteral("method"),
+                          QStringLiteral("计算方法"),
+                          QStringLiteral("因子内部计算方法"),
+                          enumValue(factor::HFMethod::SMART_MONEY),
+                          buildOptionList({
+                              buildOption(enumValue(factor::HFMethod::SMART_MONEY), QStringLiteral("聪明钱")),
+                              buildOption(enumValue(factor::HFMethod::REALIZED_MOMENTS), QStringLiteral("已实现高阶矩")),
+                              buildOption(enumValue(factor::HFMethod::VOLUME_PRICE), QStringLiteral("量价关系"))
+                          })),
+        buildSliderConfig(QStringLiteral("threshold"),
+                          QStringLiteral("弱信号过滤"),
+                          QStringLiteral("绝对值小于此阈值的信号视为噪声丢弃"),
+                          0.0, 0.0, 0.1, 0.001, QStringLiteral(""), 3)
     };
 }
 
@@ -1252,7 +1284,7 @@ const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
             QStringLiteral("分钟级微观结构"),
             QStringLiteral("基于分钟级量价数据捕捉日内交易微观结构信号"),
             QStringLiteral("聪明钱因子、已实现方差/偏度/峰度、量价相关性"),
-            QStringLiteral("需分钟/逐笔数据管线支持，当前为骨架实现"),
+            QStringLiteral("支持聪明钱、已实现高阶矩、量价关系三种计算方法"),
             QStringLiteral("#F59E0B"),
             QStringLiteral("⚡"),
             QStringLiteral("高频,微观结构,聪明钱"))},

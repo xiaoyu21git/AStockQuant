@@ -227,6 +227,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             infoMap["displayName"] = QString("cleaning:%1:%2:%3")
                 .arg(info.value("sourceType").toString(), info.value("startDate").toString(), info.value("endDate").toString());
             infoMap["sourceType"] = "cleaning";
+            infoMap["sourceDataSetId"] = dataSetId;  // 溯源: 此清洗结果来自哪个原始数据集
             infoMap["stockCodes"] = info.value("stockCodes");
             infoMap["startDate"] = info.value("startDate");
             infoMap["endDate"] = info.value("endDate");
@@ -234,6 +235,17 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             QStringList fields;
             for (const auto& f : fieldNames) fields.append(QString::fromStdString(f));
             infoMap["availableFields"] = fields;
+
+            // 删除同一原始数据源的旧清洗结果(避免 dataset_X 目录堆积)
+            {
+                auto& cppCache = cleaning::DataCache::instance();
+                for (const auto& ds : cppCache.listDataSets()) {
+                    if (ds.sourceType == "cleaning" && ds.sourceDataSetId == dataSetId) {
+                        cppCache.removeDataSet(ds.id);
+                    }
+                }
+            }
+
             resultId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
             auto token = DataCacheAdapter::instance().beginArrowWrite(resultId, fieldNames, numericFields);
 
@@ -441,12 +453,15 @@ void DataCleaningServiceRefactored::incrementalUpdateDataSet(int dataSetId,
             const std::string endDate = cache.getMaxTradeDate(dataSetId);
             if (endDate.empty()) { emitFinished(false, 0, QStringLiteral("无法从缓存文件读取 trade_date")); return; }
 
-            // 2. 从文件字段集推断 dataTypes（kline_daily 恒有；含财务列则加 financial）
+            // 2. 从文件字段集推断 dataTypes（kline_daily 恒有；含财务列则加 financial；含分钟日聚合列则加 minute_data）
             std::vector<std::string> dataTypes = {"kline_daily"};
             {
                 std::unordered_set<std::string> fileFields(existingFields.begin(), existingFields.end());
                 for (const auto& fc : cleaning::financial_columns::names()) {
                     if (fileFields.count(fc)) { dataTypes.push_back("financial"); break; }
+                }
+                for (const auto& mc : cleaning::minute_daily_columns::names()) {
+                    if (fileFields.count(mc)) { dataTypes.push_back("minute_data"); break; }
                 }
             }
 

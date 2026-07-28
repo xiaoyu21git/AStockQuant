@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -31,6 +32,7 @@ struct DataSetInfo {
     int64_t createdAt{0};         // unix timestamp
     int rowCount{0};
     int schemaVersion{2};
+    int sourceDataSetId{-1};       // 来源数据集ID（清洗结果指向原始raw数据集，拉取结果指向配置ID）
     std::vector<std::string> availableFields;
     std::vector<std::string> stockCodes;
     std::string startDate;        // "YYYY-MM-DD"
@@ -47,6 +49,7 @@ struct DataSetInfo {
         obj.set("createdAt", JCache::createDouble(static_cast<double>(createdAt)));
         obj.set("rowCount", JCache::createDouble(static_cast<double>(rowCount)));
         obj.set("schemaVersion", JCache::createDouble(static_cast<double>(schemaVersion)));
+        if (sourceDataSetId > 0) obj.set("sourceDataSetId", JCache::createDouble(static_cast<double>(sourceDataSetId)));
         auto fieldsArr = JCache::createArray();
         for (const auto& f : availableFields) fieldsArr.push_back(JCache::createString(f));
         obj.set("availableFields", std::move(fieldsArr));
@@ -78,6 +81,7 @@ struct DataSetInfo {
         }
         if (obj.has("rowCount")) info.rowCount = static_cast<int>(obj.get("rowCount").asDouble());
         if (obj.has("schemaVersion")) info.schemaVersion = static_cast<int>(obj.get("schemaVersion").asDouble());
+        if (obj.has("sourceDataSetId")) info.sourceDataSetId = static_cast<int>(obj.get("sourceDataSetId").asDouble());
         if (obj.has("availableFields") && obj.get("availableFields").isArray()) {
             auto arr = obj.get("availableFields");
             for (size_t i = 0; i < arr.size(); ++i) info.availableFields.push_back(arr.at(i).asString());
@@ -186,26 +190,42 @@ public:
     }
 
     // ── 删除数据集 ──
+    /// @brief 删除数据集（递归删除整个 dataset_X/ 目录树 + 清理索引）
     bool removeDataSet(int dataId) {
         std::lock_guard<std::mutex> lock(m_mutex);
         auto it = m_index.find(dataId);
         if (it == m_index.end()) return false;
-        std::remove(infoFilePath(dataId).c_str());
-        std::remove(binFilePath(dataId).c_str());
-        std::remove(dataFilePath(dataId).c_str());
-        std::remove(jsonDataFilePath(dataId).c_str());
+        std::string dir = datasetDir(dataId);
         m_index.erase(it);
         saveCatalog();
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        if (ec) {
+            INTERNAL_ERROR_STREAM << "[DataCache] removeDataSet " << dataId
+                << " dir cleanup failed: " << ec.message() << " (index already removed)";
+            return false;
+        }
+        INTERNAL_INFO_STREAM << "[DataCache] removed dataset " << dataId << " dir=" << dir;
         return true;
     }
 
-    /// @brief 按 sourceType 批量删除数据集
+    /// @brief 按 sourceType 批量删除数据集（递归删除整个目录树）
     int removeDataSetsBySourceType(const std::string& sourceType) {
         std::lock_guard<std::mutex> lock(m_mutex);
         int removed = 0; std::vector<int> ids;
         for (const auto& [id, info] : m_index) if (info.sourceType == sourceType) ids.push_back(id);
-        for (int id : ids) { std::remove(infoFilePath(id).c_str()); std::remove(dataFilePath(id).c_str()); std::remove(jsonDataFilePath(id).c_str()); m_index.erase(id); ++removed; }
+        for (int id : ids) {
+            std::error_code ec;
+            std::filesystem::remove_all(datasetDir(id), ec);
+            m_index.erase(id);
+            ++removed;
+            if (ec) {
+                INTERNAL_ERROR_STREAM << "[DataCache] removeDataSetsBySourceType: "
+                    << "dir cleanup failed for " << id << ": " << ec.message();
+            }
+        }
         if (removed > 0) saveCatalog();
+        INTERNAL_INFO_STREAM << "[DataCache] removed " << removed << " datasets by sourceType=" << sourceType;
         return removed;
     }
 
@@ -365,8 +385,8 @@ private:
                         FILE* ftest = fopen(apath.c_str(), "rb");
                         if (!ftest) {
                             INTERNAL_WARN_STREAM << "[DataCache] skip stale dataset " << info.id << " (no file)";
-                            std::remove(infoFilePath(info.id).c_str());
-                            std::remove(jsonDataFilePath(info.id).c_str());
+                            std::error_code ec;
+                            std::filesystem::remove_all(datasetDir(info.id), ec);
                             m_indexStale = true;
                             continue;
                         }

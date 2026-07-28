@@ -111,6 +111,40 @@ RawMarketDataAssembler::Result RawMarketDataAssembler::assemble(
             MarketDataRepository repo(std::move(db2));
             auto rows = repo.queryDailyBarJoined(chunk, ms, me);
             if (rows.empty()) continue;
+
+            // ── 分钟日聚合：如果选了 minute_data，按 (symbol, trade_date) 注入分钟列 ──
+            bool hasMinute = std::find(dataTypes.begin(), dataTypes.end(), "minute_data") != dataTypes.end();
+            if (hasMinute) {
+                auto mRows = repo.queryMinuteDailyAgg(chunk, ms, me);
+                // 构建 (symbol, trade_date) → {分钟列值} 索引
+                std::map<std::pair<std::string, std::string>, std::unordered_map<std::string, std::string>> minIdx;
+                const auto& minCols = cleaning::minute_daily_columns::names();
+                for (const auto& mr : mRows) {
+                    const auto& mv = mr.getValues();
+                    auto si = mv.find("symbol");
+                    auto ti = mv.find("trade_date");
+                    if (si == mv.end() || ti == mv.end()) continue;
+                    std::unordered_map<std::string, std::string> colVals;
+                    for (const auto& cn : minCols) {
+                        auto it = mv.find(cn);
+                        if (it != mv.end()) colVals[cn] = it->second;
+                    }
+                    minIdx[{si->second, ti->second}] = std::move(colVals);
+                }
+                // 注入日线 rows
+                for (auto& row : rows) {
+                    const auto& rv = row.getValues();
+                    auto si = rv.find("symbol");
+                    auto ti = rv.find("trade_date");
+                    if (si == rv.end() || ti == rv.end()) continue;
+                    auto it = minIdx.find({si->second, ti->second});
+                    if (it == minIdx.end()) continue;
+                    for (const auto& [cn, cv] : it->second) {
+                        row.setValue(cn, cv);
+                    }
+                }
+            }
+
             int64_t nRows = static_cast<int64_t>(rows.size());
 
             // ── 委托领域层构建 Arrow Table ──

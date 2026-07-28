@@ -18,6 +18,7 @@ struct SimulatedTradingParams final {
     double maxFwdRetAbsLimit{0.5};
     double winsorizeQuantile{0.005}; // 双侧缩尾分位数，0.0=不缩尾，默认 0.5%/99.5%
     std::string adjustPriceType{"pre"}; // "pre"=前复权 "post"=后复权
+    bool ascending{true};  // 因子方向: true=值越大越好, false=值越小越好
     std::function<void(double)> onProgress; // 进度回调 (0.0-1.0)
 };
 

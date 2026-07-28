@@ -3,9 +3,14 @@
 // 职责: 管理下单窗口、交易日计算、EOD回调订阅、m_lastEvalDay持久化
 // 零定时器, MarketDataService EOD 回调驱动
 
+#include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
+
+namespace foundation::thread { class ThreadPoolExecutor; }
 
 namespace domain::strategy {
 
@@ -64,6 +69,9 @@ private:
     std::string  m_strategyId;    // 当前策略 ID，JSON 中的键
     bool m_eodRegistered = false;
     int m_eodTriggerMinute{900};         // EOD 触发时间(分钟, 默认 15:00)
+    std::atomic<bool> m_polling{false};
+    std::shared_ptr<foundation::thread::ThreadPoolExecutor> m_pollExecutor;
+    void schedulePollCheck();            // 向线程池投递下次轮询检查
     static constexpr int kCompensationEnd = 570;
 };
 

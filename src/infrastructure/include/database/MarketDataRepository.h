@@ -230,6 +230,13 @@ public:
         const std::string& startTime,
         const std::string& endTime);
 
+    /// 分钟线日聚合（按 (symbol_id, trade_ts::date) GROUP BY 派生日频列）
+    /// 返回列: symbol, trade_date, open_minute, high_minute, low_minute, close_minute, volume_minute
+    std::vector<astock::database::SqlQueryResultRow> queryMinuteDailyAgg(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
     /// 获取所有活跃标的列表
     std::vector<std::string> queryActiveSymbols();
 

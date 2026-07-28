@@ -790,6 +790,24 @@ void FactorBacktestBridge::startBacktestWithFactors(
     config.adjustPriceType = m_backtestRuntimeParams.value("adjustPriceType", "pre").toString().toStdString();
     config.winsorizeQuantile = m_backtestRuntimeParams.value("winsorizeQuantile", 0.005).toDouble();
     config.marketEnvironmentProfile = m_backtestRuntimeParams.value("marketEnvironmentProfile", 0).toInt();
+    // ── ascending 从因子参数读取 ──
+    {
+        bool foundAscending = false;
+        auto* svc = FactorService::instance();
+        if (svc && svc->isInitialized()) {
+            for (const auto& fid : config.factorIds) {
+                auto infoMap = svc->getFactorById(QString::fromStdString(fid));
+                auto params = infoMap.value(QStringLiteral("parameters")).toMap();
+                if (params.contains(QStringLiteral("ascending"))) {
+                    config.ascending = params.value(QStringLiteral("ascending")).toBool();
+                    foundAscending = true;
+                    break;
+                }
+            }
+        }
+        if (!foundAscending)
+            config.ascending = true;
+    }
     for (const QVariant& id : factorIds) {
         config.factorIds.push_back(id.toString().toStdString());
     }

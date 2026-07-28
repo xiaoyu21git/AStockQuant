@@ -55,6 +55,7 @@ struct BacktestRunConfig {
     std::string adjustPriceType = "pre";   // "pre" / "post"
     double winsorizeQuantile{0.005};       // 因子值双侧缩尾分位数（0.0=不缩尾），传递给 Orchestrator
     int marketEnvironmentProfile = 0;
+    bool ascending{true};                   // 因子方向: true=值越大越好, false=值越小越好
 
     // ── 预检预注入字段 (从预检结果传入，避免 Orchestrator 重复 createInstance) ──
     std::vector<std::string> preResolvedExtraFields;  // 已排除核心5字段的额外字段列表

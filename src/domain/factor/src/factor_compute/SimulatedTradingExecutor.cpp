@@ -157,9 +157,16 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         }
 
         // ═══ 本期多空篮子 ═══
+        // ranked 按因子值升序排列; ascending=true → 值大=好 → long 尾部(高分) short 头部(低分)
+        // ascending=false → 值小=好 → long 头部(低分) short 尾部(高分)
         std::unordered_set<std::string> newLong, newShort;
-        for (size_t i = 0; i < groupSize; ++i) newLong.insert(ranked[i].first);
-        for (size_t i = N - groupSize; i < N; ++i) newShort.insert(ranked[i].first);
+        if (params_.ascending) {
+            for (size_t i = N - groupSize; i < N; ++i) newLong.insert(ranked[i].first);
+            for (size_t i = 0; i < groupSize; ++i) newShort.insert(ranked[i].first);
+        } else {
+            for (size_t i = 0; i < groupSize; ++i) newLong.insert(ranked[i].first);
+            for (size_t i = N - groupSize; i < N; ++i) newShort.insert(ranked[i].first);
+        }
 
         // 首期建仓
         if (longHolding.empty() && shortHolding.empty()) {
@@ -311,10 +318,14 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     }
 
     // ── 分组指标 ──
+    // ranked[0..] = 低因子值, ranked[..N-1] = 高因子值; g=0=低值, g=n-1=高值
+    // ascending=true: 高值=好 → G1=尾部(g=n-1), G5=头部(g=0)
+    // ascending=false: 低值=好 → G1=头部(g=0), G5=尾部(g=n-1)
     result.groups.resize(nGroups);
     for (int32_t g = 0; g < nGroups; ++g) {
-        GroupBacktestMetrics& gm = result.groups[g];
-        gm.groupIndex = g + 1;
+        const int32_t displayIdx = params_.ascending ? (nGroups - 1 - g) : g;
+        GroupBacktestMetrics& gm = result.groups[static_cast<size_t>(displayIdx)];
+        gm.groupIndex = displayIdx + 1;  // G1=最好(displayIdx=0), G5=最差(displayIdx=4)
         gm.stockCount = groupPeriodCount[g] > 0
             ? static_cast<int32_t>(groupTotalStocks[g] / groupPeriodCount[g]) : 0;
         if (groupValidDays[g] > 0) {
@@ -369,15 +380,16 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
             for (const auto& [_, fv] : symMap)
                 if (std::isfinite(fv)) allFiniteVals.push_back(fv);
         if (!allFiniteVals.empty()) {
-            std::sort(allFiniteVals.begin(), allFiniteVals.end(), std::greater<double>());
+            std::sort(allFiniteVals.begin(), allFiniteVals.end());  // 升序，与 ranked 对齐
             const size_t Nvals = allFiniteVals.size();
             const size_t gSize = Nvals / nGroups;
             for (int32_t g = 0; g < nGroups; ++g) {
+                const int32_t displayIdx = params_.ascending ? (nGroups - 1 - g) : g;
                 size_t startIdx = g * gSize;
                 size_t endIdx = (g + 1 == nGroups) ? Nvals - 1 : startIdx + gSize - 1;
                 if (startIdx < Nvals) {
-                    result.groups[g].maxFactorValue = allFiniteVals[startIdx];        // 降序排列，startIdx 是组内最大
-                    result.groups[g].minFactorValue = allFiniteVals[std::min(endIdx, Nvals - 1)]; // endIdx 是组内最小
+                    result.groups[static_cast<size_t>(displayIdx)].minFactorValue = allFiniteVals[startIdx];     // 升序，startIdx 是组内最小
+                    result.groups[static_cast<size_t>(displayIdx)].maxFactorValue = allFiniteVals[std::min(endIdx, Nvals - 1)]; // endIdx 是组内最大
                 }
             }
 

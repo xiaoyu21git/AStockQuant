@@ -281,18 +281,49 @@ void ReversalFactor::Params::fromJson(const foundation::json::JsonFacade& json)
 void HighFreqFactor::Params::fromJson(const foundation::json::JsonFacade& json)
 {
     CommonParams::fromJson(json);
-    if (json.has("frequency")) frequency = json.get("frequency").asInt();
-    if (json.has("lookbackDays")) lookbackDays = json.get("lookbackDays").asInt();
-    if (json.has("window")) window = json.get("window").asInt();
+    if (json.has("barFrequency")) barFrequency = json.get("barFrequency").asInt();
+    if (json.has("lookbackDays")) {
+        lookbackDays = json.get("lookbackDays").asInt();
+        if (lookbackDays < 1)
+            throw std::runtime_error("HighFreqFactor: lookbackDays 必须 >= 1");
+    }
+    if (json.has("window")) {
+        window = json.get("window").asInt();
+        if (window < 2)
+            throw std::runtime_error("HighFreqFactor: window 必须 >= 2");
+    }
     if (json.has("aggregation")) {
         const auto& value = json.get("aggregation");
-        if (value.isNumber()) aggregation = static_cast<HFAggregation>(value.asInt());
+        if (!value.isNumber())
+            throw std::runtime_error("HighFreqFactor: aggregation 不是枚举数值字段");
+        const int v = value.asInt();
+        if (v < 0 || v > 2)
+            throw std::runtime_error("HighFreqFactor: aggregation 枚举值无效 (0-2)");
+        aggregation = static_cast<HFAggregation>(v);
     }
     if (json.has("threshold")) threshold = json.get("threshold").asDouble();
-    if (json.has("percentile")) percentile = json.get("percentile").asDouble();
+    if (json.has("percentile")) {
+        percentile = json.get("percentile").asDouble();
+        if (percentile <= 0.0 || percentile > 1.0)
+            throw std::runtime_error("HighFreqFactor: percentile 必须在 (0,1]");
+    }
     if (json.has("momentType")) {
         const auto& value = json.get("momentType");
-        if (value.isNumber()) momentType = static_cast<HFMomentType>(value.asInt());
+        if (!value.isNumber())
+            throw std::runtime_error("HighFreqFactor: momentType 不是枚举数值字段");
+        const int v = value.asInt();
+        if (v < 0 || v > 2)
+            throw std::runtime_error("HighFreqFactor: momentType 枚举值无效 (0-2)");
+        momentType = static_cast<HFMomentType>(v);
+    }
+    if (json.has("method")) {
+        const auto& value = json.get("method");
+        if (!value.isNumber())
+            throw std::runtime_error("HighFreqFactor: method 不是枚举数值字段");
+        const int v = value.asInt();
+        if (v < 0 || v > 2)
+            throw std::runtime_error("HighFreqFactor: method 枚举值无效 (0-2)");
+        method = static_cast<HFMethod>(v);
     }
 }
 

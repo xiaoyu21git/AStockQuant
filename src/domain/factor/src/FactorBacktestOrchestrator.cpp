@@ -190,11 +190,13 @@ void FactorBacktestOrchestrator::run(
                     const auto& symInfoNames = cleaning::symbol_info_columns::names();
                     const auto& finNames = cleaning::financial_columns::names();
                     const auto& idxNames = cleaning::index_columns::names();
+                    const auto& minNames = cleaning::minute_daily_columns::names();
 
                     const bool isSymInfo = std::find(symInfoNames.begin(), symInfoNames.end(), field) != symInfoNames.end();
                     const bool isFin = std::find(finNames.begin(), finNames.end(), field) != finNames.end();
                     const bool isKline = std::find(klineNames.begin(), klineNames.end(), field) != klineNames.end();
                     const bool isIndex = std::find(idxNames.begin(), idxNames.end(), field) != idxNames.end();
+                    const bool isMinute = std::find(minNames.begin(), minNames.end(), field) != minNames.end();
 
                     if (isSymInfo) {
                         auto rows = db->executeQuery(
@@ -215,6 +217,16 @@ void FactorBacktestOrchestrator::run(
                         auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
                         for (const auto& r : rows)
                             fieldCache[r.symbol][r.tradeDate] = r.value;
+                    } else if (isMinute) {
+                        auto rows = repo.queryMinuteDailyAgg(symbols, minReportDate, cacheStartDate);
+                        for (const auto& mr : rows) {
+                            const auto& mv = mr.getValues();
+                            auto si = mv.find("symbol");
+                            auto ti = mv.find("trade_date");
+                            auto fi = mv.find(field);
+                            if (si != mv.end() && ti != mv.end() && fi != mv.end())
+                                fieldCache[si->second][ti->second] = std::stod(fi->second);
+                        }
                     } else if (isIndex) {
                         // index_code — 与日期无关，从 ref.symbol_info 获取
                         auto rows = db->executeQuery(
@@ -229,7 +241,7 @@ void FactorBacktestOrchestrator::run(
                         }
                     } else {
                         INTERNAL_WARN_STREAM << "[DB查库] 未知字段 '" << field
-                            << "' — 不在 kline/symbol_info/financial 中";
+                            << "' — 不在 kline/symbol_info/financial/minute_daily 中";
                     }
                     fieldCache["__loaded__"]["_"] = 1.0;
                 }
@@ -741,6 +753,7 @@ void FactorBacktestOrchestrator::run(
         params.initialCapital  = config.initialCapital;
         params.adjustPriceType = config.adjustPriceType;
         params.winsorizeQuantile = config.winsorizeQuantile;
+        params.ascending       = config.ascending;
         params.onProgress      = [&](double pct) {
             if (onProgress) onProgress(60.0 + pct * 15.0, "simulating trades");
         };

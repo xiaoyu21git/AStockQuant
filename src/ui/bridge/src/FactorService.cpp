@@ -133,6 +133,30 @@ QVariantMap buildFactorInfoMap(const factor::FactorInstanceInfo& info)
     result[QStringLiteral("isRecommended")] = false;
     result[QStringLiteral("isFavorite")] = false;
     result[QStringLiteral("groupReturns")] = QVariantMap();
+
+    // ── 提取参数配置 (优先 calculation, 兼容旧 parameters) ──
+    {
+        QVariantMap params;
+        auto extractParams = [&params](const foundation::json::JsonFacade& src) {
+            for (const auto& key : src.keys()) {
+                auto v = src.get(key);
+                if (v.isNumber()) {
+                    if (v.isInteger()) params[toQString(key)] = v.asInt();
+                    else               params[toQString(key)] = v.asDouble();
+                } else if (v.isBool()) {
+                    params[toQString(key)] = v.asBool();
+                } else if (v.isString()) {
+                    params[toQString(key)] = toQString(v.asString());
+                }
+            }
+        };
+        if (info.config.has("calculation"))
+            extractParams(info.config.get("calculation"));
+        else if (info.config.has("parameters"))
+            extractParams(info.config.get("parameters"));
+        result[QStringLiteral("parameters")] = params;
+    }
+
     return result;
 }
 
@@ -414,7 +438,7 @@ QString FactorService::addFactor(const QVariantMap& factorData)
                     paramsJson.set(key.toStdString(), foundation::json::JsonFacade::createString(toStd(value.toString())));
                 }
             }
-            config.set("parameters", paramsJson);
+            config.set("calculation", paramsJson);
         }
 
         factor::config::setSerializedConfig(config, config);
@@ -498,7 +522,7 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
                     paramsJson.set(key.toStdString(), foundation::json::JsonFacade::createString(toStd(value.toString())));
                 }
             }
-            config.set("parameters", paramsJson);
+            config.set("calculation", paramsJson);
         }
 
         // ── 回测指标写入 (QML 回测完成后回调) ──

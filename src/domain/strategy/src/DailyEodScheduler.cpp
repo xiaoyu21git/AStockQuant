@@ -3,6 +3,7 @@
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/json/json_facade.h"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <chrono>
 #include <cstdio>
@@ -52,7 +53,14 @@ void DailyEodScheduler::start() {
         }
     }
 
-    // 注册 MarketDataService EOD 回调 (gmsdk 15:00-15:30 触发, onEodTrigger 时间门控)
+    // 启动轮询检查: 不依赖 gmsdk, 到 m_eodTriggerMinute 即触发
+    if (!m_polling.load()) {
+        m_polling.store(true);
+        m_pollExecutor = std::make_shared<foundation::thread::ThreadPoolExecutor>(1);
+        m_pollExecutor->post([this]() { schedulePollCheck(); });
+    }
+
+    // 注册 MarketDataService EOD 回调 (兜底)
     if (!m_eodRegistered) {
         domain::market::MarketDataService::instance()
             .registerEndOfDayCallback([this](const std::string& tradingDay) {
@@ -64,12 +72,39 @@ void DailyEodScheduler::start() {
 }
 
 void DailyEodScheduler::stop() {
-    // EOD 回调注销由 MarketDataService 生命周期管理，这里仅设标志
     m_eodRegistered = false;
+    m_polling.store(false);
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// EOD 触发 (gmsdk 线程)
+// 轮询检查: 到 m_eodTriggerMinute 即投递评估, 不依赖 gmsdk
+// ═══════════════════════════════════════════════════════════════════
+
+void DailyEodScheduler::schedulePollCheck() {
+    if (!m_polling.load()) return;
+    int mins = getCurrentLocalMinutes();
+    auto today = getCurrentTradingDay();
+    if (mins >= m_eodTriggerMinute && today > m_lastEvalDay) {
+        std::string todayStr = std::to_string(today);
+        INTERNAL_INFO_STREAM << "[DailyEod] 轮询触发 " << todayStr
+                             << " (" << mins << "min >= " << m_eodTriggerMinute << "min)";
+        m_post([this, todayStr]() { doEvaluate(todayStr); });
+        // 当天已触发, 60分钟后恢复检查
+        m_pollExecutor->post([this]() {
+            std::this_thread::sleep_for(std::chrono::minutes(60));
+            schedulePollCheck();
+        });
+    } else {
+        // 未到时间, 30秒后重试
+        m_pollExecutor->post([this]() {
+            std::this_thread::sleep_for(std::chrono::seconds(30));
+            schedulePollCheck();
+        });
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// EOD 触发 (gmsdk 线程, 保留作为兜底)
 // ═══════════════════════════════════════════════════════════════════
 
 void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {

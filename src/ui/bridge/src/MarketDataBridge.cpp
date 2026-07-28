@@ -893,6 +893,12 @@ QString MarketDataBridge::forceSyncToday() {
     return QStringLiteral("同步失败或已在运行中");
 }
 
+QString MarketDataBridge::forceSyncHistory() {
+    auto& s = astock::infrastructure::database::PostMarketSyncService::instance();
+    s.forceSyncHistory();
+    return QStringLiteral("历史回补已启动 (日线+分钟线, 从2015至今), 查看日志");
+}
+
 QString MarketDataBridge::forceSyncDate(int tradingDay) {
     auto& s = astock::infrastructure::database::PostMarketSyncService::instance();
     s.forceSyncDate(tradingDay);

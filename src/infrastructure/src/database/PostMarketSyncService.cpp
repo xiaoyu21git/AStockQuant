@@ -52,46 +52,39 @@ void PostMarketSyncService::start() {
 bool PostMarketSyncService::forceSyncToday() {
     int today = getCurrentTradingDay();
     if (!m_executor) return false;
+
+    bool expected = false;
+    if (!m_syncRunning.compare_exchange_strong(expected, true)) {
+        INTERNAL_INFO_STREAM << "[PostMktSync] 已有同步在运行, 跳过手动触发";
+        return false;
+    }
+
     m_executor->post([this, today]() {
+        struct Guard { std::atomic<bool>& flag; ~Guard() { flag.store(false); } };
+        Guard g{m_syncRunning};
+
+        // 盘中禁止同步：GM SDK 日线/分钟线 API 在交易时段调用可能崩溃
+        const SyncWindow window = resolveSyncWindow();
+        int mins = getCurrentLocalMinutes();
+        if (mins >= window.blockStartMin && mins < window.triggerMin) {
+            INTERNAL_WARN_STREAM << "[PostMktSync] 盘中禁止同步 ("
+                << mins << "min, 屏蔽" << window.blockStartMin << "-" << window.triggerMin << ")";
+            return;
+        }
+
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) { INTERNAL_ERROR_STREAM << "[PostMktSync] DB不可用"; return; }
-        auto calRes = db->executeQuery(
-            "SELECT trade_date::text AS dt FROM ref.trade_calendar "
-            "WHERE is_trading_day=true AND trade_date>=CURRENT_DATE-365 AND trade_date<=CURRENT_DATE ORDER BY trade_date");
-        std::vector<std::string> tds; for(auto&r:calRes.getRows())tds.push_back(r.getString("dt"));
-        if(tds.empty())return;
-        auto symRes=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-        std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
-        for(auto&r:symRes.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 同步启动, 活跃标的: "<<syms.size();
-        auto covRes=db->executeQuery("SELECT trade_date::text AS dt,COUNT(DISTINCT symbol_id) AS cnt FROM mkt.daily_bar WHERE trade_date>=CURRENT_DATE-365 GROUP BY trade_date");
-        std::unordered_map<std::string,int> cov;int mc=0;
-        for(auto&r:covRes.getRows()){int c=r.getInt("cnt");cov[r.getString("dt")]=c;if(c>mc)mc=c;}
-        std::vector<std::string> md;
-        for(auto&d:tds){int c=cov.count(d)?cov[d]:0;if(c<mc*90/100)md.push_back(d);}
-        // 缺口补齐 + PE回填: 扫描日线缺口和PE缺失的日期, 统一走syncDailyMinute
-        {
-            auto peGapRes=db->executeQuery("SELECT trade_date::text FROM mkt.daily_bar WHERE pe_ratio=0 GROUP BY trade_date HAVING COUNT(*)>100");
-            for(auto&r:peGapRes.getRows()){std::string d=r.getString("trade_date");if(std::find(md.begin(),md.end(),d)==md.end())md.push_back(d);}
+        if (m_lastSyncDay.load() == today) {
+            INTERNAL_INFO_STREAM << "[PostMktSync] 今日已同步, 跳过";
+            return;
         }
-        if(!md.empty()){
-            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 补齐 "<<md.size()<<" 天 (日线缺口+PE缺口): "<<md.front()<<" ~ "<<md.back()<<" ======";
-            for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();syncDailyMinute(td);}
-        }
-        // 手动触发不检查时间窗口和交易日
-        if(m_lastSyncDay.load()!=today){
-            syncDailyMinute(today);
-            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 日线+分钟线完成 ======";
-            syncWeeklyMonthly(today);
-            INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 周月线完成 ======";
-            // 概念同步: 每次盘后都拉取(首次全量,后续增量; GM成分股每日有变化)
-            syncConceptMembership();
-            if(isMonthlyMaintenanceDay())syncFinancialData(today);
-            computeConceptDailyStats(today);
-        }
-        m_lastSyncDay.store(today);saveLastSyncDay(today);
-        INTERNAL_INFO_STREAM<<"[PostMktSync] ====== 同步完成 ======";
-        // 复权因子异步补（耗时，不阻塞同步完成通知）
+        syncDailyMinute(today);
+        syncWeeklyMonthly(today);
+        syncConceptMembership();
+        if (isMonthlyMaintenanceDay()) syncFinancialData(today);
+        computeConceptDailyStats(today);
+        m_lastSyncDay.store(today); saveLastSyncDay(today);
+        INTERNAL_INFO_STREAM << "[PostMktSync] ====== 同步完成 ======";
         fillAdjFactors();
     });
     return true;
@@ -108,6 +101,62 @@ void PostMarketSyncService::forceSyncDate(int tradingDay) {
         for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
         if(syncDaily(db,s2i,syms,tradingDay))syncMinute(db,s2i,syms,tradingDay);
         syncWeekly(db,tradingDay);syncMonthly(db,tradingDay);
+    });
+}
+
+void PostMarketSyncService::forceSyncHistory(
+    std::function<void(int,int,std::string)> onProgress) {
+    INTERNAL_ERROR_STREAM << "[PostMktSync] forceSyncHistory — 从2015回补日线+分钟线";
+    if (!m_executor) return;
+
+    bool expected = false;
+    if (!m_syncRunning.compare_exchange_strong(expected, true)) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] forceSyncHistory 已有同步在运行, 跳过";
+        return;
+    }
+
+    m_executor->post([this, onProgress = std::move(onProgress)]() {
+        struct Guard { std::atomic<bool>& flag; ~Guard() { flag.store(false); } };
+        Guard g{m_syncRunning};
+
+        auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+        if (!db || !db->isOpen()) return;
+
+        auto symRes = db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
+        std::unordered_map<std::string, int> s2i;
+        std::vector<std::string> syms;
+        for (auto& r : symRes.getRows()) {
+            s2i[r.getString("symbol")] = r.getInt("id");
+            syms.push_back(r.getString("symbol"));
+        }
+        // 从日线最早日期补到分钟线最早日期，不逐日检测缺口
+        auto sdRes = db->executeQuery("SELECT COALESCE(MIN(trade_date),'2015-01-01')::text AS sd FROM mkt.daily_bar");
+        auto edRes = db->executeQuery("SELECT COALESCE(MIN(trade_ts::date),CURRENT_DATE)::text AS ed FROM mkt.minute_bar");
+        std::string sd = sdRes.rowCount() > 0 ? sdRes.getRow(0).getString("sd") : "2015-01-01";
+        std::string ed = edRes.rowCount() > 0 ? edRes.getRow(0).getString("ed") : "2026-07-27";
+        INTERNAL_ERROR_STREAM << "[PostMktSync] 分钟回补范围: " << sd << " ~ " << ed;
+
+        auto calRes = db->executeQuery(
+            "SELECT trade_date::text AS dt FROM ref.trade_calendar "
+            "WHERE is_trading_day=true AND trade_date>='" + sd + "' AND trade_date<='" + ed + "' "
+            "ORDER BY trade_date");
+        std::vector<std::string> days;
+        for (auto& r : calRes.getRows()) days.push_back(r.getString("dt"));
+        int total = static_cast<int>(days.size());
+        for (int i = 0; i < total; ++i) {
+            int td = 0;
+            { int y, m, d; if (sscanf(days[i].c_str(), "%d-%d-%d", &y, &m, &d) == 3) td = y * 10000 + m * 100 + d; }
+            if (td == 0) continue;
+            syncMinute(db, s2i, syms, td);
+            if (i % 5 == 4) std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (i % 50 == 0 || i == total - 1) {
+                INTERNAL_ERROR_STREAM << "[PostMktSync] 分钟 " << (i+1) << "/" << total;
+                if (onProgress) onProgress(i + 1, total, "分钟线 " + std::to_string(i + 1) + "/" + std::to_string(total));
+            }
+        }
+
+        if (onProgress) onProgress(1, 1, "历史回补完成");
+        INTERNAL_INFO_STREAM << "[PostMktSync] history 完成";
     });
 }
 
@@ -277,6 +326,17 @@ void PostMarketSyncService::schedulerLoop() {
                 std::this_thread::sleep_for(std::chrono::hours(1));
                 continue;
             }
+            // 防并发：GM SDK 非线程安全，调度与手动同步互斥
+            {
+                bool expected = false;
+                if (!m_syncRunning.compare_exchange_strong(expected, true)) {
+                    INTERNAL_INFO_STREAM << "[PostMktSync] 手动同步进行中, 调度跳过";
+                    std::this_thread::sleep_for(std::chrono::minutes(10));
+                    continue;
+                }
+            }
+            struct SchedulerGuard { std::atomic<bool>& flag; ~SchedulerGuard() { flag.store(false); } };
+            SchedulerGuard sg{m_syncRunning};
             syncAll(today);
             m_lastSyncDay.store(today);
             saveLastSyncDay(today);
@@ -481,8 +541,8 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
 
     char sDate[32], eDate[32];
     { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-      snprintf(sDate,sizeof(sDate),"%04d-%02d-%02d 09:30:00",y,m,d);
-      snprintf(eDate,sizeof(eDate),"%04d-%02d-%02d 15:00:00",y,m,d); }
+      snprintf(sDate,sizeof(sDate),"%04d-%02d-%02d",y,m,d);
+      snprintf(eDate,sizeof(eDate),"%04d-%02d-%02d",y,m,d); }
 
     std::unordered_map<std::string,std::string> gmToSym;
     std::vector<std::string> gmList;
@@ -501,7 +561,7 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
         size_t end=std::min(i+kBatchSize,gmList.size());
         std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
         auto* bars=::history_bars(gmBatch.c_str(),"60s",sDate,eDate,0,nullptr,true,nullptr);
-        if(i==0){int st=bars?bars->status():-1;int ct=bars?bars->count():0;INTERNAL_INFO_STREAM<<"[PostMktSync] MINUTE 首批 bar: status="<<st<<" count="<<ct<<" sDate="<<sDate<<" eDate="<<eDate;}
+        if(i==0){int st=bars?bars->status():-1;int ct=bars?bars->count():0;INTERNAL_ERROR_STREAM<<"[PostMktSync] MINUTE 首批 bar: status="<<st<<" count="<<ct<<" sDate="<<sDate<<" eDate="<<eDate<<" gmBatch[0]="<<(gmList.empty()?"EMPTY":gmList[0]);}
         if(!bars||bars->status()||bars->count()<=0){if(bars)bars->release();err+=static_cast<int>(end-i);continue;}
         for(size_t k=0;k<bars->count();++k){
             auto&b=bars->at(k);if(b.close<=0)continue;
@@ -520,8 +580,103 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
         if(i%500==0||end>=gmList.size())INTERNAL_INFO_STREAM<<"[PostMktSync] MINUTE "<<(std::min(end,gmList.size())*100/gmTotal)<<"% "<<std::min(end,gmList.size())<<"/"<<gmTotal<<" (ok="<<ok<<")";
     }
     flush();
+    if (ok == 0) INTERNAL_ERROR_STREAM << "[PostMktSync] MINUTE 无数据入库 " << tradingDay;
     logTaskEnd("MINUTE", tradingDay, true, ok);
     return true;
+}
+
+// ═════════════════════════════════════════════════
+// syncMinuteRange — 批量回补分钟线
+// ═════════════════════════════════════════════════
+bool PostMarketSyncService::syncMinuteRange(int startDay, int endDay)
+{
+    INTERNAL_INFO_STREAM << "[PostMktSync] syncMinuteRange " << startDay << " ~ " << endDay;
+
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] syncMinuteRange DB 不可用";
+        return false;
+    }
+
+    // 获取交易日历
+    char sBuf[16], eBuf[16];
+    {
+        int y = startDay / 10000, m = (startDay % 10000) / 100, d = startDay % 100;
+        snprintf(sBuf, sizeof(sBuf), "%04d-%02d-%02d", y, m, d);
+    }
+    {
+        int y = endDay / 10000, m = (endDay % 10000) / 100, d = endDay % 100;
+        snprintf(eBuf, sizeof(eBuf), "%04d-%02d-%02d", y, m, d);
+    }
+
+    auto calRes = db->executeQuery(
+        "SELECT trade_date::text AS dt FROM ref.trade_calendar "
+        "WHERE is_trading_day=true AND trade_date BETWEEN $1::date AND $2::date "
+        "ORDER BY trade_date",
+        {astock::database::SqlParam{std::string(sBuf)},
+         astock::database::SqlParam{std::string(eBuf)}});
+
+    std::vector<std::string> tradingDays;
+    for (auto& r : calRes.getRows()) tradingDays.push_back(r.getString("dt"));
+    if (tradingDays.empty()) {
+        INTERNAL_INFO_STREAM << "[PostMktSync] syncMinuteRange 无交易日";
+        return true;
+    }
+
+    // 获取活跃标的
+    auto symRes = db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
+    std::unordered_map<std::string, int> s2i;
+    std::vector<std::string> syms;
+    for (auto& r : symRes.getRows()) {
+        s2i[r.getString("symbol")] = r.getInt("id");
+        syms.push_back(r.getString("symbol"));
+    }
+
+    int total = static_cast<int>(tradingDays.size());
+    int filled = 0, skipped = 0, failed = 0;
+
+    for (int i = 0; i < total; ++i) {
+        const auto& dt = tradingDays[static_cast<size_t>(i)];
+        // 检查当日分钟线覆盖
+        auto covRes = db->executeQuery(
+            "SELECT COUNT(DISTINCT symbol_id) FROM mkt.minute_bar WHERE trade_ts::date=$1::date",
+            {astock::database::SqlParam{dt}});
+        int cov = (covRes.rowCount() > 0) ? covRes.getRow(0).getInt(0) : 0;
+        int expected = static_cast<int>(syms.size());
+        if (cov >= expected * 90 / 100) {
+            ++skipped;
+            continue;
+        }
+
+        // 解析 tradingDay
+        int td = 0;
+        {
+            int y, m, d;
+            if (sscanf(dt.c_str(), "%d-%d-%d", &y, &m, &d) == 3)
+                td = y * 10000 + m * 100 + d;
+        }
+        if (td == 0) { ++failed; continue; }
+
+        INTERNAL_INFO_STREAM << "[PostMktSync] syncMinuteRange " << dt
+                             << " (" << (i + 1) << "/" << total << ") cov=" << cov
+                             << "/" << expected;
+
+        if (syncMinute(db, s2i, syms, td)) {
+            ++filled;
+        } else {
+            ++failed;
+        }
+
+        // 速率控制：掘金 API 限流，每批间休息 200ms
+        if (i % 5 == 4) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+    }
+
+    INTERNAL_INFO_STREAM << "[PostMktSync] syncMinuteRange 完成: filled=" << filled
+                         << " skipped=" << skipped << " failed=" << failed
+                         << " / total=" << total;
+    return failed == 0;
 }
 
 // ═════════════════════════════════════════════════

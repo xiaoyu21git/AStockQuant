@@ -894,6 +894,33 @@ MarketDataRepository::queryAllMarketMinuteBar(
     return rows;
 }
 
+// ═══ queryMinuteDailyAgg ═══
+
+std::vector<astock::database::SqlQueryResultRow>
+MarketDataRepository::queryMinuteDailyAgg(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    if (symbols.empty()) return {};
+    std::ostringstream sql;
+    sql << "SELECT si.symbol, mb.trade_ts::date AS trade_date, "
+        << cleaning::minute_daily_columns::sqlSelect()
+        << " FROM mkt.minute_bar mb"
+        << " JOIN ref.symbol_info si ON mb.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
+        << " AND mb.trade_ts >= " << safeStr(startDate + " 00:00:00")
+        << " AND mb.trade_ts <= " << safeStr(endDate + " 23:59:59")
+        << " GROUP BY si.symbol, mb.trade_ts::date"
+        << " ORDER BY si.symbol, mb.trade_ts::date ASC";
+    auto result = db_->executeQuery(sql.str());
+    std::vector<astock::database::SqlQueryResultRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i)
+        rows.push_back(result.getRow(i));
+    return rows;
+}
+
 // ═══ queryCleanedDailyBar ═══
 
 std::vector<astock::database::SqlQueryResultRow>

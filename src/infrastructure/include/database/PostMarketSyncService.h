@@ -33,6 +33,10 @@ public:
     /// 用于补历史缺口，不检查 m_lastSyncDay
     void forceSyncDate(int tradingDay);
 
+    /// @brief 一次性回补历史数据：日线 + 分钟线，从 2015-01-01 至今
+    /// @param onProgress 进度回调 (done, total, message)
+    void forceSyncHistory(std::function<void(int,int,std::string)> onProgress = {});
+
     /// @brief 自动检测并补齐最近 N 天的历史缺口
     /// 扫描交易日历与 daily_bar 的差异，对缺失/不完整的日期逐一调用 syncDailyMinute
     /// @param lookbackDays 回溯天数，默认 30
@@ -88,6 +92,9 @@ private:
     bool syncMinute(std::shared_ptr<astock::database::ISqlDatabase> db,
                     const std::unordered_map<std::string,int>& symToId,
                     const std::vector<std::string>& symbols, int tradingDay);
+    /// @brief 批量回补分钟线 (startDay ~ endDay 内所有交易日)
+    /// 逐日检测 minute_bar 覆盖，缺则调用掘金 history_bars("60s") 拉取
+    bool syncMinuteRange(int startDay, int endDay);
     bool syncWeekly(std::shared_ptr<astock::database::ISqlDatabase> db, int tradingDay);
     bool syncMonthly(std::shared_ptr<astock::database::ISqlDatabase> db, int tradingDay);
     bool syncFinancial(std::shared_ptr<astock::database::ISqlDatabase> db,

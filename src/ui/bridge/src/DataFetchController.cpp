@@ -205,6 +205,22 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         infoMap["stockCodes"] = allSymbols;
         infoMap["startDate"] = startDate;
         infoMap["endDate"] = endDate;
+        // 来源配置 ID: 用 qHash 生成(数据源+类型+日期), 与 cleaning 的 sourceDataSetId 语义一致
+        int configHash = qHash(dataSource) ^ qHash(dataTypes.join(",")) ^ qHash(startDate) ^ qHash(endDate);
+        if (configHash == 0) configHash = 1;  // 0 表示未设置
+        infoMap["sourceDataSetId"] = configHash;
+
+        // 删除同一配置的旧拉取结果(避免 dataset_X 目录堆积)
+        {
+            auto& cppCache = cleaning::DataCache::instance();
+            for (const auto& ds : cppCache.listDataSets()) {
+                if (ds.sourceType == dataSource.toStdString()
+                    && ds.sourceDataSetId == configHash) {
+                    cppCache.removeDataSet(ds.id);
+                }
+            }
+        }
+
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
         auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId, allFields, numericFields) : nullptr;
         if (!token) { /* error handling */ return; }

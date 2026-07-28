@@ -9,6 +9,7 @@ namespace foundation::json { class JsonFacade; }
 namespace factor {
 
 enum class DataFrequency : uint8_t {
+    Minute = 0,   // 分钟频（高频因子专用）
     Daily,
     Weekly,
     Monthly,

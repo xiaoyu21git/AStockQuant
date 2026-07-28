@@ -400,4 +400,22 @@ if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
     endif()
 endif()
 
+set(HF_FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_high_freq_factor.cpp")
+if(EXISTS "${HF_FACTOR_TEST_SOURCE}")
+    add_executable(test_high_freq_factor
+        ${HF_FACTOR_TEST_SOURCE}
+    )
+
+    target_link_libraries(test_high_freq_factor
+        factor
+    )
+
+    if(BUILD_TESTS)
+        add_test(NAME test_high_freq_factor
+            COMMAND test_high_freq_factor
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    endif()
+endif()
+
 

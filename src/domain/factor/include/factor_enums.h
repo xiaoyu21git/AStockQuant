@@ -434,6 +434,13 @@ enum class HFMomentType : uint8_t {
     UNKNOWN = 255
 };
 
+enum class HFMethod : uint8_t {
+    SMART_MONEY = 0,      // 聪明钱: |R|/V^0.25 排序取 Top N% VWAP
+    REALIZED_MOMENTS = 1, // 已实现高阶矩: RV/RSkew/RKurt
+    VOLUME_PRICE = 2,     // 量价关系: 相关性 + 相对成交量 + 振幅比
+    UNKNOWN = 255
+};
+
 // ── AI 因子 ──
 enum class DLModelType : uint8_t {
     RNN = 0,

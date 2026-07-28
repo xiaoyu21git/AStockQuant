@@ -201,6 +201,31 @@ inline std::string sqlSelect() {
 }
 } // namespace minute_bar_columns
 
+// 分钟线日聚合派生列（从 mkt.minute_bar GROUP BY trade_ts::date 派生）
+// 与日线并列，注入同一 Arrow 文件，供 HighFreqFactor 使用
+namespace minute_daily_columns {
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "open_minute","high_minute","low_minute","close_minute","volume_minute"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {
+        "open_minute","high_minute","low_minute","close_minute","volume_minute"
+    };
+    return s;
+}
+inline std::string sqlSelect() {
+    return "(array_agg(mb.open  ORDER BY mb.trade_ts))[1]            AS open_minute,"
+           "MAX(mb.high)                                            AS high_minute,"
+           "MIN(mb.low)                                             AS low_minute,"
+           "(array_agg(mb.close ORDER BY mb.trade_ts))"
+           "[array_upper(array_agg(mb.close),1)]                    AS close_minute,"
+           "SUM(mb.volume)                                          AS volume_minute";
+}
+} // namespace minute_daily_columns
+
 // ═══════════════════════════════════════════════════════════════════
 // 数据源接口与实现
 // ═══════════════════════════════════════════════════════════════════
@@ -369,7 +394,9 @@ inline FieldSchema mergeSchemas(const std::vector<FieldSchema>& schemas) {
 ///        自动附加 symbol_info 元数据和 index_code
 inline FieldSchema fullSchemaForTypes(const std::vector<std::string>& typeNames) {
     std::vector<FieldSchema> parts;
+    bool hasMinute = false;
     for (const auto& t : typeNames) {
+        if (t == "minute_data") { hasMinute = true; continue; }
         auto* src = sourceByName(t);
         if (!src) continue;
         FieldSchema s = src->detectSchema(nullptr, {}, {});
@@ -380,6 +407,13 @@ inline FieldSchema fullSchemaForTypes(const std::vector<std::string>& typeNames)
         // 财务查询时也通过 si.symbol JOIN 了 symbol_info
         // 但财务行不 JOIN 元数据列，元数据从 K线行带入
         parts.push_back(std::move(s));
+    }
+    // 分钟日聚合列：与日线并列，注入同一 Arrow 文件
+    if (hasMinute) {
+        FieldSchema ms;
+        ms.names = minute_daily_columns::names();
+        ms.numeric = minute_daily_columns::numeric();
+        parts.push_back(ms);
     }
     // 添加通用元数据 + 指数代码
     FieldSchema meta;

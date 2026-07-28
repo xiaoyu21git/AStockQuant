@@ -219,6 +219,7 @@ cleaning::DataSetInfo DataCacheAdapter::mapToCppInfo(const QVariantMap& m) {
     info.createdAt = m.value("createdAt", 0).toLongLong();
     info.rowCount = m.value("rowCount", 0).toInt();
     info.schemaVersion = m.value("schemaVersion", 2).toInt();
+    info.sourceDataSetId = m.value("sourceDataSetId", -1).toInt();
     for (const auto& f : m.value("availableFields").toStringList())
         info.availableFields.push_back(f.toStdString());
     for (const auto& s : m.value("stockCodes").toStringList())
@@ -240,6 +241,7 @@ QVariantMap DataCacheAdapter::cppInfoToMap(const cleaning::DataSetInfo& info) {
     m["createdAt"] = QVariant::fromValue(qint64(info.createdAt));
     m["rowCount"] = info.rowCount;
     m["schemaVersion"] = info.schemaVersion;
+    if (info.sourceDataSetId > 0) m["sourceDataSetId"] = info.sourceDataSetId;
     QStringList fields, codes, tgs;
     for (const auto& f : info.availableFields) fields.append(QString::fromStdString(f));
     for (const auto& s : info.stockCodes) codes.append(QString::fromStdString(s));

@@ -12,7 +12,7 @@ void CommonParams::fromJson(const foundation::json::JsonFacade& json)
         const auto& value = json.get("frequency");
         if (!value.isNumber()) throw std::runtime_error("frequency 不是枚举数值字段");
         const int v = value.asInt();
-        if (v < static_cast<int>(DataFrequency::Daily) || v > static_cast<int>(DataFrequency::Yearly))
+        if (v < static_cast<int>(DataFrequency::Minute) || v > static_cast<int>(DataFrequency::Yearly))
             throw std::runtime_error("frequency 不是有效的枚举值");
         frequency = static_cast<DataFrequency>(v);
     }
