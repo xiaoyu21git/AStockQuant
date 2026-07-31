@@ -19,21 +19,9 @@ Item {
     Component.onCompleted: { if (page.strategyId) histModel.refresh() }
 
     property var tradeRows: {
-        if (backtestResult && backtestResult.tradeLog && backtestResult.tradeLog.length > 0)
+        if (backtestResult && backtestResult.tradeLog)
             return backtestResult.tradeLog
-        if (histModel.count > 0 && page.strategyId) {
-            var detail = histModel.loadResultDetail(0)
-            if (detail && detail.id) {
-                var tlist = histModel.loadTrades(detail.id, 0, 10000)
-                var a = []
-                for (var j = 0; j < tlist.length; j++) {
-                    var t = tlist[j]
-                    a.push({date:parseInt((t.date||"").replace(/-/g,""))||0,symbol:t.symbol||"",isBuy:(t.side||"")==="B",quantity:t.qty||0,price:t.price||0,amount:(t.qty||0)*(t.price||0),realizedPnl:t.pnl||0})
-                }
-                return a
-            }
-        }
-        return backtestResult&&backtestResult.tradeLog?backtestResult.tradeLog:[]
+        return []
     }
 
     property var stockSummary: {
@@ -171,7 +159,7 @@ Item {
     ColumnLayout { id: content; width: parent.width; spacing:10
 
         RowLayout { Layout.fillWidth: true
-            Text{text:"回测分析 · "+(backtestResult&&backtestResult.strategyName?backtestResult.strategyName:strategyName||strategyId||"");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
+            Text{text:"回测分析 · "+(backtestResult?backtestResult.strategyName||strategyId||"":"--");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
             Item{Layout.fillWidth:true}
             Rectangle{width:55;height:24;radius:4;color:"#475569";Text{anchors.centerIn:parent;text:"返回";font.pixelSize:10;color:"#F1F5F9"}MouseArea{anchors.fill:parent;onClicked:backToWorkbench()}}}
 
