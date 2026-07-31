@@ -1373,11 +1373,25 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     if (factorOverlayCfg_.enabled) {
         engine->m_factorSignalProcessor.setFilters(factorOverlayCfg_.filters);
         engine->m_factorSignalProcessor.setScalers(factorOverlayCfg_.scalers);
-        engine->m_factorSignalProcessor.setFactorInfluence(factorOverlayCfg_.factorInfluence);
         engine->m_factorSignalProcessor.setTargetPositionCount(factorOverlayCfg_.targetPositionCount);
         engine->m_factorSignalProcessor.setMinimumCompositeScore(factorOverlayCfg_.minimumCompositeScore);
         engine->m_factorSignalProcessor.setCombineMode(factorOverlayCfg_.combineMode);
         engine->m_needsMarketCapField = factorOverlayCfg_.needsMarketCapField;
+        // v2.1: 规则形态分自动注入因子权重 (因子50% + 规则50%)
+        if (ruleGateCfg_.enabled()) {
+            auto influence = factorOverlayCfg_.factorInfluence;
+            double totalWeight = 0.0;
+            for (const auto& [fid, w] : influence) totalWeight += w;
+            // 归一化: 因子权重总和缩放到 50%, rule_score 占 50%
+            if (totalWeight > 0.0) {
+                double scale = 0.5 / totalWeight;
+                for (auto& [fid, w] : influence) w *= scale;
+            }
+            influence["rule_score"] = 0.5;
+            engine->m_factorSignalProcessor.setFactorInfluence(influence);
+        } else {
+            engine->m_factorSignalProcessor.setFactorInfluence(factorOverlayCfg_.factorInfluence);
+        }
         engine->m_poolSelector = createPoolSelector(factorOverlayCfg_.combineMode);
     } else {
         engine->m_poolSelector = std::make_unique<NullPoolSelector>();

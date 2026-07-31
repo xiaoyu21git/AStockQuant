@@ -58,18 +58,33 @@ public:
         int lookback = std::min(required, lastRow + 1);
         int kMax = std::max(1, m_commonCfg.maxPositions);
 
-        // ── 因子候选池: 只评估池内标的 ──
+        // ── 因子候选池: 池内标的全评估, 持仓股即使出池也评估卖出 ──
         const bool usePool = ctx.hasCandidatePool();
         const auto& pool = ctx.candidatePool();
+        const auto& currentWeights = ctx.currentWeights();
 
         std::vector<StrategySignal> all;
-        all.reserve(usePool ? pool.size() : cols);
+        all.reserve(usePool ? pool.size() + currentWeights.size() : cols);
         for (int c=0; c<cols; ++c) {
             std::string sym;
             { const auto& ss = view->symbolStrings(); if (c<(int)ss.size()) sym=ss[c]; }
             if (sym.empty()) continue;
-            if (usePool && !pool.count(sym)) continue;  // 不在候选池 → 跳过
-
+            const bool inPool = !usePool || pool.count(sym);
+            const bool isHolding = currentWeights.count(sym) && currentWeights.at(sym) > 0.0;
+            if (!inPool && !isHolding) continue;  // 不在池内且无持仓 → 跳过
+            if (!inPool && isHolding) {
+                // 持仓但已出候选池: 仅评估卖出, 不生成买入
+                std::vector<double> prices(lookback);
+                for (int i=0; i<lookback; ++i)
+                    prices[i] = static_cast<double>(closeMat.data[(lastRow-lookback+1+i)*rowStride + c]);
+                auto sig = evaluateSymbol(prices, instruments[c].value, ctx);
+                if (sig.valid && !sig.isBuy) {
+                    all.push_back(StrategySignal(ctx.strategyInstanceId(),InstrumentId{sig.instrumentId},
+                        RuntimeOrderSide::Sell, sig.score, 0.0, sym));
+                }
+                continue;
+            }
+            // 在候选池内: 正常评估
             std::vector<double> prices(lookback);
             for (int i=0; i<lookback; ++i)
                 prices[i] = static_cast<double>(closeMat.data[(lastRow-lookback+1+i)*rowStride + c]);

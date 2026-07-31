@@ -256,6 +256,40 @@ public:
 
         auto scores = strategyDefinition_->computeCompositeScores(factorSnapshots);
         auto candidates = buildCandidateSignals(*strategyDefinition_, scores);
+
+        // v2.1: 生成持仓卖出信号 — 因子分跌破阈值则卖出
+        {
+            constexpr double kExitThreshold = 0.2;
+            std::unordered_map<std::uint32_t, double> scoreById;
+            for (const auto& sc : scores)
+                if (sc.symbolId != 0) scoreById[sc.symbolId] = sc.score;
+
+            const auto& weights = context.currentWeights();
+            const auto* mdView = static_cast<const factor::compute::IMarketDataView*>(
+                context.historicalViewPtr());
+            if (mdView) {
+                const auto& viewSymbols = mdView->symbolStrings();
+                for (const auto& [sym, w] : weights) {
+                    if (w <= 0.0) continue;
+                    // 从 symbol 查找 instrumentId
+                    std::uint32_t symId = 0;
+                    for (std::size_t c = 0; c < viewSymbols.size(); ++c) {
+                        if (viewSymbols[c] == sym) {
+                            symId = mdView->instruments()[c].value;
+                            break;
+                        }
+                    }
+                    if (symId == 0) continue;
+                    auto it = scoreById.find(symId);
+                    if (it != scoreById.end() && it->second < kExitThreshold) {
+                        auto sellSig = domain::strategy::StrategySignal(
+                            strategyInstanceId_, domain::strategy::InstrumentId{symId},
+                            domain::strategy::RuntimeOrderSide::Sell, it->second, 0.0, sym);
+                        outputSignals.push_back(std::move(sellSig));
+                    }
+                }
+            }
+        }
         // 市值加权/风险平价需要行情参考数据(市值/波动率), 从上下文行情视图填充
         if (needsMarketRefData(*strategyDefinition_)) {
             fillMarketRefData(candidates,
