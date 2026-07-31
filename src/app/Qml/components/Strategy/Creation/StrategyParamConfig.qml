@@ -3847,7 +3847,7 @@ Rectangle {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === 4Selection || normalizedStrategyTypeIndex === 4) {
+        } else if (normalizedStrategyTypeIndex === 4 || normalizedStrategyTypeIndex === 6) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
