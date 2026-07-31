@@ -801,16 +801,16 @@ QString StrategyBridge::stockDisplayName(const QString& symbol) const
 using SBK = ::domain::strategies::StrategyBehaviorKind;
 
 static const std::vector<std::tuple<int, QString, QString, QString>> kStrategyTypeMeta = {
-    // {typeIndex, name, icon, brief}
     {0, QStringLiteral("趋势跟随"), QStringLiteral("📈"), QStringLiteral("基于双均线金叉死叉的趋势跟踪策略")},
     {1, QStringLiteral("均值回归"), QStringLiteral("🔄"), QStringLiteral("捕捉超买超卖后的价格回归机会")},
     {2, QStringLiteral("动量"),       QStringLiteral("🚀"), QStringLiteral("追踪强势股的持续上涨趋势")},
     {3, QStringLiteral("套利"),       QStringLiteral("⚖️"), QStringLiteral("利用价差偏离进行统计套利")},
     {4, QStringLiteral("多因子"),     QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
     {5, QStringLiteral("机器学习"),   QStringLiteral("🤖"), QStringLiteral("ML模型驱动的智能选股")},
-    {6, QStringLiteral("事件驱动"),   QStringLiteral("📰"), QStringLiteral("基于财报/公告事件的交易策略")},
-    {7, QStringLiteral("高频"),       QStringLiteral("⚡"), QStringLiteral("分钟级别高频交易策略")},
-    {8, QStringLiteral("自定义"),     QStringLiteral("🛠"), QStringLiteral("用户自定义参数的灵活策略")},
+    {6, QStringLiteral("多因子"),     QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
+    {7, QStringLiteral("事件驱动"),   QStringLiteral("📰"), QStringLiteral("基于财报/公告事件的交易策略")},
+    {8, QStringLiteral("高频"),       QStringLiteral("⚡"), QStringLiteral("分钟级别高频交易策略")},
+    {9, QStringLiteral("自定义"),     QStringLiteral("🛠"), QStringLiteral("用户自定义参数的灵活策略")},
 };
 
 static const std::vector<std::tuple<int, QString, QString>> kRiskLevelMeta = {
@@ -828,9 +828,10 @@ static int toBk(int typeIndex) {
     case 3: return (int)SBK::Arbitrage;
     case 4: return (int)SBK::MultiFactor;
     case 5: return (int)SBK::MachineLearning;
-    case 6: return (int)SBK::EventDriven;
-    case 7: return (int)SBK::HighFrequency;
-    case 8: return (int)SBK::Custom;
+    case 6: return (int)SBK::MultiFactor;    // 兼容旧JS: StrategyTypeIndex.MultiFactor=6
+    case 7: return (int)SBK::EventDriven;
+    case 8: return (int)SBK::HighFrequency;
+    case 9: return (int)SBK::Custom;
     default: return (int)SBK::Custom;
     }
 }
