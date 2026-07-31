@@ -15,9 +15,6 @@ Item {
     property string selSymbol: ""
     property double selPnLTotal: 0.0
 
-    StrategyPerformanceModel { id: histModel; strategyId: page.strategyId }
-    Component.onCompleted: { if (page.strategyId) histModel.refresh() }
-
     property var tradeRows: {
         if (backtestResult && backtestResult.tradeLog)
             return backtestResult.tradeLog
