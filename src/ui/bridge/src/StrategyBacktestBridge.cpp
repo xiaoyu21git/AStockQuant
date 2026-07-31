@@ -253,6 +253,8 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 
             // ─── 5. 序列化结果到 QVariantMap ───
             QVariantMap qResult;
+            qResult["strategyId"] = QString::fromStdString(capturedStrategyId);
+            qResult["strategyName"] = params.value("strategyName", QStringLiteral("未命名"));
             qResult["status"] = QStringLiteral("SUCCESS");
 
             QVariantMap metricsMap;
