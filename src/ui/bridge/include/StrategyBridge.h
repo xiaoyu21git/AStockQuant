@@ -74,6 +74,31 @@ public:
     /// @brief symbol → "股票中文名 代码" (如 "平安银行 000001.SZ")
     Q_INVOKABLE QString stockDisplayName(const QString& symbol) const;
 
+    // ── 策略类型枚举 (替代 JS StrategyCreationUtils 的数字映射) ──
+    /// @brief 策略类型索引 → 中文名
+    Q_INVOKABLE QString strategyTypeName(int typeIndex) const;
+    /// @brief 策略类型索引 → 图标
+    Q_INVOKABLE QString strategyTypeIcon(int typeIndex) const;
+    /// @brief 策略类型索引 → 简短描述
+    Q_INVOKABLE QString strategyTypeBrief(int typeIndex) const;
+    /// @brief 策略类型索引 → behaviorKind
+    Q_INVOKABLE int strategyBehaviorKindFromTypeIndex(int typeIndex) const;
+    /// @brief behaviorKind → 策略类型索引
+    Q_INVOKABLE int strategyTypeIndexFromBehaviorKind(int behaviorKind) const;
+    /// @brief 标准化策略类型索引 (接受 display/behavior 两种编号)
+    Q_INVOKABLE int normalizeStrategyTypeIndex(int raw) const;
+    /// @brief 风险等级索引 → 中文名
+    Q_INVOKABLE QString riskLevelName(int index) const;
+    /// @brief 风险等级索引 → 颜色
+    Q_INVOKABLE QString riskLevelColor(int index) const;
+
+    /// @brief 策略参数配置表单 (替代 JS buildParamConfigs)
+    Q_INVOKABLE QVariantList buildParamConfigs(int typeIndex) const;
+    /// @brief 组装完整策略创建数据 (替代 JS buildCompleteStrategyData)
+    Q_INVOKABLE QVariantMap buildCompleteStrategyData(const QVariantMap& context) const;
+    /// @brief 重置表单数据默认值 (替代 JS resetFormData)
+    Q_INVOKABLE QVariantMap resetFormData() const;
+
     /// @brief C++ 内部获取单例，供 backtest bridge 等内部组件使用
     static StrategyBridge* instance();
 

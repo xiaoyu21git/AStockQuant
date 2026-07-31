@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include "foundation/log/logging.hpp"
 #include <unordered_map>
 #include <utility>
 #include <vector>

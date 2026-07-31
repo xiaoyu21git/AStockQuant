@@ -795,3 +795,237 @@ QString StrategyBridge::stockDisplayName(const QString& symbol) const
 {
     return StockNameResolver::displayName(symbol);
 }
+
+// ── 策略类型枚举 (替代 JS StrategyCreationUtils 数字映射) ──
+
+using SBK = ::domain::strategies::StrategyBehaviorKind;
+
+static const std::vector<std::tuple<int, QString, QString, QString>> kStrategyTypeMeta = {
+    // {typeIndex, name, icon, brief}
+    {0, QStringLiteral("趋势跟随"), QStringLiteral("📈"), QStringLiteral("基于双均线金叉死叉的趋势跟踪策略")},
+    {1, QStringLiteral("均值回归"), QStringLiteral("🔄"), QStringLiteral("捕捉超买超卖后的价格回归机会")},
+    {2, QStringLiteral("动量"),       QStringLiteral("🚀"), QStringLiteral("追踪强势股的持续上涨趋势")},
+    {3, QStringLiteral("套利"),       QStringLiteral("⚖️"), QStringLiteral("利用价差偏离进行统计套利")},
+    {4, QStringLiteral("多因子"),     QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
+    {5, QStringLiteral("机器学习"),   QStringLiteral("🤖"), QStringLiteral("ML模型驱动的智能选股")},
+    {6, QStringLiteral("事件驱动"),   QStringLiteral("📰"), QStringLiteral("基于财报/公告事件的交易策略")},
+    {7, QStringLiteral("高频"),       QStringLiteral("⚡"), QStringLiteral("分钟级别高频交易策略")},
+    {8, QStringLiteral("自定义"),     QStringLiteral("🛠"), QStringLiteral("用户自定义参数的灵活策略")},
+};
+
+static const std::vector<std::tuple<int, QString, QString>> kRiskLevelMeta = {
+    {1, QStringLiteral("低风险"), QStringLiteral("#10B981")},
+    {2, QStringLiteral("中风险"), QStringLiteral("#F59E0B")},
+    {3, QStringLiteral("高风险"), QStringLiteral("#EF4444")},
+    {4, QStringLiteral("激进"),   QStringLiteral("#8B5CF6")},
+};
+
+static int toBk(int typeIndex) {
+    switch (typeIndex) {
+    case 0: return (int)SBK::TrendFollowing;
+    case 1: return (int)SBK::MeanReversion;
+    case 2: return (int)SBK::Momentum;
+    case 3: return (int)SBK::Arbitrage;
+    case 4: return (int)SBK::MultiFactor;
+    case 5: return (int)SBK::MachineLearning;
+    case 6: return (int)SBK::EventDriven;
+    case 7: return (int)SBK::HighFrequency;
+    case 8: return (int)SBK::Custom;
+    default: return (int)SBK::Custom;
+    }
+}
+
+static int fromBk(int bk) {
+    switch (bk) {
+    case (int)SBK::TrendFollowing:  return 0;
+    case (int)SBK::MeanReversion:   return 1;
+    case (int)SBK::Momentum:        return 2;
+    case (int)SBK::Arbitrage:       return 3;
+    case (int)SBK::MultiFactor:     return 4;
+    case (int)SBK::MachineLearning: return 5;
+    case (int)SBK::EventDriven:     return 6;
+    case (int)SBK::HighFrequency:   return 7;
+    case (int)SBK::Custom:          return 8;
+    default: return 0;
+    }
+}
+
+static const auto* findMeta(int typeIndex) {
+    for (auto& m : kStrategyTypeMeta)
+        if (std::get<0>(m) == typeIndex) return &m;
+    return &kStrategyTypeMeta[0];  // fallback TrendFollowing
+}
+
+int StrategyBridge::normalizeStrategyTypeIndex(int raw) const {
+    if (raw >= 0 && raw <= 10) return raw;           // display range 0-10
+    if (raw == 100) return 0;                        // Common → TrendFollowing
+    // Try behaviorKind range
+    int ti = fromBk(raw);
+    if (ti >= 0) return ti;
+    return 0;  // fallback
+}
+
+QString StrategyBridge::strategyTypeName(int typeIndex) const {
+    return std::get<1>(*findMeta(normalizeStrategyTypeIndex(typeIndex)));
+}
+
+QString StrategyBridge::strategyTypeIcon(int typeIndex) const {
+    return std::get<2>(*findMeta(normalizeStrategyTypeIndex(typeIndex)));
+}
+
+QString StrategyBridge::strategyTypeBrief(int typeIndex) const {
+    return std::get<3>(*findMeta(normalizeStrategyTypeIndex(typeIndex)));
+}
+
+int StrategyBridge::strategyBehaviorKindFromTypeIndex(int typeIndex) const {
+    return toBk(normalizeStrategyTypeIndex(typeIndex));
+}
+
+int StrategyBridge::strategyTypeIndexFromBehaviorKind(int behaviorKind) const {
+    return fromBk(behaviorKind);
+}
+
+QString StrategyBridge::riskLevelName(int index) const {
+    for (auto& m : kRiskLevelMeta)
+        if (std::get<0>(m) == index) return std::get<1>(m);
+    return QStringLiteral("中风险");
+}
+
+QString StrategyBridge::riskLevelColor(int index) const {
+    for (auto& m : kRiskLevelMeta)
+        if (std::get<0>(m) == index) return std::get<2>(m);
+    return QStringLiteral("#F59E0B");
+}
+
+// ── 策略参数配置 + 数据组装 (替代 JS buildParamConfigs / buildCompleteStrategyData / resetFormData) ──
+
+static auto slider(const QString& id, const QString& label, double def, double min, double max,
+                    double step, const QString& unit, int decimals = 0) {
+    QVariantMap m;
+    m["id"] = id; m["label"] = label; m["type"] = "slider";
+    m["default"] = def; m["min"] = min; m["max"] = max; m["step"] = step;
+    m["unit"] = unit; m["decimals"] = decimals;
+    return m;
+}
+
+static auto select(const QString& id, const QString& label, int def, const QVariantList& options) {
+    QVariantMap m;
+    m["id"] = id; m["label"] = label; m["type"] = "select";
+    m["default"] = def; m["options"] = options;
+    return m;
+}
+
+static auto toggle(const QString& id, const QString& label, bool def) {
+    QVariantMap m;
+    m["id"] = id; m["label"] = label; m["type"] = "toggle";
+    m["default"] = def;
+    return m;
+}
+
+static auto input(const QString& id, const QString& label, const QString& def,
+                  const QString& placeholder, bool multiline = false) {
+    QVariantMap m;
+    m["id"] = id; m["label"] = label; m["type"] = "input";
+    m["default"] = def; m["placeholder"] = placeholder; m["multiline"] = multiline;
+    return m;
+}
+
+static auto option(int val, const QString& label) {
+    QVariantMap m;
+    m["value"] = val; m["label"] = label;
+    return m;
+}
+
+QVariantList StrategyBridge::buildParamConfigs(int typeIndex) const {
+    int ti = normalizeStrategyTypeIndex(typeIndex);
+    QVariantList configs;
+
+    // ── 公共参数 ──
+    configs << slider("maxPositions", QStringLiteral("最大持仓数"), 20, 1, 100, 1, QStringLiteral("只"), 0);
+    configs << select("weightScheme", QStringLiteral("权重方案"), 0, QVariantList{
+        option(0, QStringLiteral("等权")),
+        option(1, QStringLiteral("市值加权")),
+        option(2, QStringLiteral("信号强度")),
+        option(3, QStringLiteral("风险平价"))
+    });
+    configs << slider("maxWeightPerStock", QStringLiteral("单票最大权重"), 0.1, 0.01, 0.5, 0.01, QStringLiteral(""), 2);
+    configs << slider("minWeightPerStock", QStringLiteral("单票最小权重"), 0.01, 0, 0.05, 0.005, QStringLiteral(""), 3);
+    configs << slider("stopLossPercent", QStringLiteral("止损线(%)"), 10, 0, 30, 1, QStringLiteral("%"), 0);
+    configs << slider("takeProfitPercent", QStringLiteral("止盈线(%)"), 20, 5, 100, 1, QStringLiteral("%"), 0);
+    configs << slider("maxDrawdownLimit", QStringLiteral("最大回撤限制(%)"), 99, 5, 99, 1, QStringLiteral("%"), 0);
+    configs << select("rebalanceFrequency", QStringLiteral("调仓频率"), 0, QVariantList{
+        option(0, QStringLiteral("每日")), option(1, QStringLiteral("每周")),
+        option(2, QStringLiteral("每月")), option(3, QStringLiteral("每季度"))
+    });
+    configs << toggle("allowShort", QStringLiteral("允许做空"), false);
+
+    // ── 类型专属参数 ──
+    if (ti == 0 || ti == 1) {  // TrendFollowing / TrendBreakout
+        configs << slider("fastPeriod", QStringLiteral("快线周期"), 5, 2, 60, 1, QStringLiteral("天"), 0);
+        configs << slider("slowPeriod", QStringLiteral("慢线周期"), 30, 5, 120, 1, QStringLiteral("天"), 0);
+    }
+    if (ti == 2 || ti == 3) {  // MeanReversion / RsiMeanReversion
+        configs << slider("period", QStringLiteral("RSI周期"), 14, 5, 50, 1, QStringLiteral("天"), 0);
+    }
+    if (ti == 2) {  // Momentum
+        configs << slider("macdFast", QStringLiteral("MACD快线"), 12, 2, 60, 1, QStringLiteral("天"), 0);
+        configs << slider("macdSlow", QStringLiteral("MACD慢线"), 26, 3, 120, 1, QStringLiteral("天"), 0);
+        configs << slider("macdSignal", QStringLiteral("MACD信号"), 9, 2, 30, 1, QStringLiteral("天"), 0);
+    }
+    if (ti == 6) {  // Arbitrage/BollingerBand
+        configs << slider("bbPeriod", QStringLiteral("布林带周期"), 20, 5, 60, 1, QStringLiteral("天"), 0);
+        configs << slider("bbStdDev", QStringLiteral("标准差倍数"), 2.0, 1.0, 4.0, 0.1, QStringLiteral("倍"), 1);
+    }
+    return configs;
+}
+
+QVariantMap StrategyBridge::buildCompleteStrategyData(const QVariantMap& context) const {
+    QVariantMap data;
+    int ti = context.value("strategyTypeIndex", 0).toInt();
+    data["strategyTypeIndex"] = ti;
+    data["behaviorKind"] = strategyBehaviorKindFromTypeIndex(ti);
+    data["name"] = context.value("name", QStringLiteral("新策略"));
+    data["description"] = context.value("description", "");
+    data["maxPositions"] = context.value("maxPositions", 20);
+    data["maxWeightPerStock"] = context.value("maxWeightPerStock", 0.1);
+    data["minWeightPerStock"] = context.value("minWeightPerStock", 0.01);
+    data["weightScheme"] = context.value("weightScheme", 0);
+    data["rebalanceFrequency"] = context.value("rebalanceFrequency", 0);
+    data["allowShort"] = context.value("allowShort", false);
+    data["stopLossPercent"] = context.value("stopLossPercent", 10.0);
+    data["takeProfitPercent"] = context.value("takeProfitPercent", 20.0);
+    data["maxDrawdownLimit"] = context.value("maxDrawdownLimit", 99.0);
+
+    // 类型专属参数
+    int bk = data["behaviorKind"].toInt();
+    if (bk == 0 || bk == 1) {  // TrendFollowing/TrendBreakout
+        data["fastPeriod"] = context.value("fastPeriod", 5);
+        data["slowPeriod"] = context.value("slowPeriod", 30);
+    }
+    if (bk == 1 || bk == 2) {
+        data["period"] = context.value("period", 14);
+    }
+    data["parameters"] = context.value("parameters", QVariantMap());
+    data["rule_profile"] = context.value("rule_profile", QVariantMap());
+    return data;
+}
+
+QVariantMap StrategyBridge::resetFormData() const {
+    QVariantMap data;
+    data["strategyTypeIndex"] = 0;
+    data["name"] = "";
+    data["description"] = "";
+    data["maxPositions"] = 20;
+    data["maxWeightPerStock"] = 0.1;
+    data["minWeightPerStock"] = 0.01;
+    data["weightScheme"] = 0;
+    data["rebalanceFrequency"] = 0;
+    data["allowShort"] = false;
+    data["stopLossPercent"] = 10.0;
+    data["takeProfitPercent"] = 20.0;
+    data["maxDrawdownLimit"] = 99.0;
+    data["fastPeriod"] = 5;
+    data["slowPeriod"] = 30;
+    data["period"] = 14;
+    return data;
+}
