@@ -1298,6 +1298,18 @@ StrategyEngine::Builder& StrategyEngine::Builder::withRebalanceConfig(const Reba
     return *this;
 }
 
+StrategyEngine::Builder& StrategyEngine::Builder::withTimingGate(const MarketTimingGate& gate)
+{
+    timingGate_ = gate;
+    return *this;
+}
+
+StrategyEngine::Builder& StrategyEngine::Builder::withCircuitBreaker(const TimedCircuitBreaker& breaker)
+{
+    circuitBreaker_ = breaker;
+    return *this;
+}
+
 std::string StrategyEngine::Builder::validate() const
 {
     if (factorOverlayCfg_.enabled && !factorOverlayCfg_.isValid())
@@ -1394,6 +1406,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     // ── 风控配置 ──
     engine->m_riskConfig = riskCfg_;
     RiskManager::instance().setRiskConfig(riskCfg_);
+
+    // ── 择时闸门 + 风控熔断器 (v0.13) ──
+    engine->m_timingGate = timingGate_;
+    engine->m_circuitBreaker = circuitBreaker_;
 
     // ── 调仓频率配置 ──
     engine->m_isDailyFrequency = rebalanceCfg_.isDailyFrequency;
@@ -1609,6 +1625,107 @@ StrategyBacktestResult StrategyEngine::backtest(
             ruleAllowEntriesToday = true;
         }
 
+        // ── 择时闸门 (v0.13): 每日盘前判断大盘状态 → 决定仓位比例 ──
+        TimingResult timing;
+        {
+            MarketTimingSnapshot ts;
+            // 从 Benchmark 指数列提取快照
+            if (bmColIdx >= 0 && r > 60) {
+                const double idxClose = static_cast<double>(closeMat.data[
+                    static_cast<size_t>(r) * static_cast<size_t>(colCount) + static_cast<size_t>(bmColIdx)]);
+                if (idxClose > 0.0) {
+                    ts.indexClose = idxClose;
+                    // MA20
+                    double sum20 = 0.0; int cnt20 = 0;
+                    for (int back = 0; back < 20 && (r - back) >= 0; ++back) {
+                        double c = static_cast<double>(closeMat.data[
+                            static_cast<size_t>(r - back) * static_cast<size_t>(colCount)
+                            + static_cast<size_t>(bmColIdx)]);
+                        if (c > 0.0) { sum20 += c; ++cnt20; }
+                    }
+                    ts.ma20 = cnt20 > 0 ? sum20 / cnt20 : idxClose;
+                    // MA60
+                    double sum60 = 0.0; int cnt60 = 0;
+                    for (int back = 0; back < 60 && (r - back) >= 0; ++back) {
+                        double c = static_cast<double>(closeMat.data[
+                            static_cast<size_t>(r - back) * static_cast<size_t>(colCount)
+                            + static_cast<size_t>(bmColIdx)]);
+                        if (c > 0.0) { sum60 += c; ++cnt60; }
+                    }
+                    ts.ma60 = cnt60 > 0 ? sum60 / cnt60 : idxClose;
+                    ts.ma20AboveMa60 = ts.ma20 > ts.ma60;
+                    // MA20 斜率: 比较当前MA20 vs 5日前MA20
+                    double sum20_5 = 0.0; int cnt20_5 = 0;
+                    for (int back = 5; back < 25 && (r - back) >= 0; ++back) {
+                        double c = static_cast<double>(closeMat.data[
+                            static_cast<size_t>(r - back) * static_cast<size_t>(colCount)
+                            + static_cast<size_t>(bmColIdx)]);
+                        if (c > 0.0) { sum20_5 += c; ++cnt20_5; }
+                    }
+                    double ma20_5dAgo = cnt20_5 > 0 ? sum20_5 / cnt20_5 : ts.ma20;
+                    ts.ma20Rising = ts.ma20 > ma20_5dAgo;
+                    // 宽度: 统计当日上涨股票占比 (从全市场close推算)
+                    if (colCount > 0) {
+                        int upCnt = 0, totalCnt = 0;
+                        for (int c = 0; c < colCount; ++c) {
+                            double todayC = static_cast<double>(closeMat.data[rowOffset + static_cast<size_t>(c)]);
+                            if (r > 0) {
+                                double prevC = static_cast<double>(closeMat.data[
+                                    static_cast<size_t>(r - 1) * static_cast<size_t>(colCount) + static_cast<size_t>(c)]);
+                                if (todayC > 1e-9 && prevC > 1e-9) {
+                                    if (todayC > prevC) ++upCnt;
+                                    ++totalCnt;
+                                }
+                            }
+                        }
+                        ts.advanceRatio = totalCnt > 0 ? static_cast<double>(upCnt) / totalCnt : 0.5;
+                    }
+                    // 波动: 默认值 (ATR单独计算成本高, 用中性值)
+                    ts.atrPercent = 0.02;
+                }
+            }
+            timing = m_timingGate.evaluate(ts);
+            if (r == 0 || r % 100 == 0) {
+                INTERNAL_INFO_STREAM << "[backtest] day " << r
+                    << " 择时: exposure=" << timing.targetExposure
+                    << " allowNew=" << timing.allowNewEntries
+                    << " liquidate=" << timing.forceLiquidate
+                    << " reason=" << timing.reason;
+            }
+        }
+
+        // ── 风控熔断检查 (v0.13) ──
+        bool circuitHalted = m_circuitBreaker.isHalted();
+        bool forceLiquidate = timing.forceLiquidate && !circuitHalted;
+        std::optional<std::vector<OrderRequest>> ordersOpt;
+        double equity = 0.0;
+
+        if (circuitHalted || forceLiquidate) {
+            // 熔断或择时空仓: 只平仓不开仓
+            std::vector<OrderRequest> exitOrders;
+            for (const auto& kvPos : backtestPositions) {
+                if (kvPos.second.quantity() > 0) {
+                    OrderRequest exitOrder;
+                    exitOrder.setSymbol(kvPos.first);
+                    exitOrder.setSide(OrderSide::Sell);
+                    exitOrder.setQuantity(kvPos.second.quantity());
+                    exitOrder.setOrderType(domain::trading::OrderType::Market);
+                    exitOrders.push_back(std::move(exitOrder));
+                }
+            }
+            if (!exitOrders.empty()) ordersOpt = std::move(exitOrders);
+            strategyService_->updateCandidatePool({});  // 禁止新品种进入候选池
+            // 计算熔断日的基础净值 (用于后续 peakEquity 更新)
+            double mv = 0.0;
+            for (const auto& kvPos : backtestPositions) {
+                const auto& sym = kvPos.first;
+                if (kvPos.second.quantity() <= 0) continue;
+                const double px = static_cast<double>(closeMat.data[
+                    rowOffset + static_cast<size_t>(symbolToCol.at(sym))]);
+                if (px > 0.0) mv += px * static_cast<double>(kvPos.second.quantity());
+            }
+            equity = cash + mv;
+        } else {
         // ── 因子定池: 喂快照 → 选候选池 → 注入策略上下文 → 策略只在池内判买点 ──
         if (m_factorSignalProcessor.enabled() && m_poolSelector) {
             const std::int32_t dayValue = dates[static_cast<std::size_t>(r)].value;
@@ -1633,7 +1750,7 @@ StrategyBacktestResult StrategyEngine::backtest(
             strategyService_->updateCandidatePool({});
         }
 
-        auto ordersOpt = stepBatch(mdpBatch);
+        ordersOpt = stepBatch(mdpBatch);
 
         // ── 规则闸门: 命中退出的持仓生成卖出订单(stepBatch 后注入) ──
         if (m_ruleGate.enabled() && !backtestPositions.empty()) {
@@ -1963,13 +2080,24 @@ StrategyBacktestResult StrategyEngine::backtest(
                 rowOffset + static_cast<std::size_t>(symbolToCol.at(sym))]);
             if (px > 0.0) marketValue += px * static_cast<double>(pos.quantity());
         }
-        double equity = cash + marketValue;
+        equity = cash + marketValue;
         domain::trading::AccountSnapshot newAcc;
         newAcc.setAvailableCash(cash);
         newAcc.setMarketValue(marketValue);
         newAcc.setTotalAsset(equity);
         latestEquity = newAcc.totalAsset();
         equityCurve.push_back(equity);
+
+        // ── 择时过滤 (v0.13): 不允许新开仓时剔除买单 ──
+        if (!timing.allowNewEntries && ordersOpt.has_value()) {
+            auto& list = ordersOpt.value();
+            list.erase(std::remove_if(list.begin(), list.end(),
+                [](const OrderRequest& o) { return o.side() == OrderSide::Buy; }), list.end());
+        }
+
+        // ── 风控熔断器每日更新 (v0.13) ──
+        m_circuitBreaker.updateEndOfDay(equity);
+
         // ── 每日持仓/资金诊断 ──
         {
             int posCount = static_cast<int>(backtestPositions.size());
@@ -1979,6 +2107,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
         todayStopLossSyms.clear();
         todayRuleExitSyms.clear();
+        }  // else (非熔断/清仓路径)
         if (equity > peakEquity) peakEquity = equity;
 
         // 大盘回暖解冻: 基准指数站上 20 日均线 → 重置回撤峰值

@@ -1,281 +1,197 @@
-# AI 策略分层架构 — 详细设计文档 v1.0
+# AI 策略分层架构 — 详细设计文档 v2.1
 
-> 基于需求文档 v2.0 | 基于现有策略系统代码审计 | 2026-07-31
-
----
-
-## 一、现有架构复用分析
-
-策略系统 (`StrategyEngine`) 已经提供了三层管线：
-
-```
-StrategyEngine::backtest()
-  │
-  ├─ Phase 1: 因子候选池
-  │   FactorSignalProcessor::updateSnapshot(factorValues)
-  │   ICandidatePoolSelector::selectPool() → Top-N 候选池
-  │
-  ├─ Phase 2: 策略评估
-  │   IRuntimeStrategy::evaluate() → 候选池内单股打分
-  │   RulePipeline::filterBuySignals() → 规则过滤
-  │   OrderGenerator::generate() → 目标仓位
-  │
-  └─ Phase 3: 风控扫描
-      RiskEvaluator::evaluate() → 止损/止盈检查
-```
-
-| v0.13 分层 | 复用现有组件 | 新增 |
-|------------|------------|------|
-| 选股层 | `FactorSignalProcessor` + `RankOnlyPoolSelector` | 无需新增 |
-| 过滤层 | `RuleGate(filterTemplates)` | ST/流动性规则模板 |
-| **择时层** | — | **`MarketTimingGate`** |
-| 配仓层 | `OrderGenerator::generate()` | 无需新增 |
-| **风控层** | `RiskEvaluator`(部分) | **回撤熔断 + 单日止损扩展** |
-
-**核心工作量：两个新类 + 规则模板，不破坏现有管线。**
+> 核心变化 (v2.0→v2.1): 规则从"闸门过滤"升级为"信号评分工"
+> 因子和规则共同决定买卖信号，不再一层拦一层
 
 ---
 
-## 二、新增类设计
+## 一、问题诊断 (v2.0 架构缺陷)
 
-### 2.1 MarketTimingGate — 择时闸门
+v2.0 架构的三层各自独立，互不通信:
 
-**职责**：判断当前市场是否允许开仓，输出目标仓位比例。
+```
+因子 → 候选池 (Top-200, 只管"哪只好")
+策略 → MA金叉打分 (不看因子值, 技术指标)
+规则 → 过/不过 (二值闸门, 不"加分")
+```
 
-**位置**：`src/domain/strategy/include/MarketTimingGate.h`
+**根因**: 策略的 `evaluateSymbol()` 只读 `closePrices`, 完全不知道因子值。规则只做二值判断 (Pass/Block), 形态命中不增加信号强度。
+
+**结果**: 用户看到"全是规则在跑, 策略本身没发出信号"——策略的输出就是MA金叉, 跟AI因子无关。
+
+---
+
+## 二、v2.1 信号模型
+
+### 核心改动
+
+```
+旧: 因子→候选池 → 策略(MA打分) → 规则(过/不过) → 信号
+新: 因子→候选池 → 综合评分工(因子分+规则分) → 信号
+                        ↑                    ↑
+                   AI因子+传统因子       所有形态规则命中数
+```
+
+规则不再是"拦路的闸门", 而是"加分的评委"。
+
+### 评分公式
+
+```
+factorScore  = compositeScore(symbol)              // 0~1, 因子加权排名分
+ruleScore    = ruleHitCount / ruleCount            // 0~1, 形态命中占比
+entryScore   = w_factor × factorScore + w_rule × ruleScore
+
+if entryScore > entryThreshold  → Buy  (权重基于得分)
+if entryScore < exitThreshold   → Sell
+```
+
+| 参数 | 默认值 | 含义 |
+|------|--------|------|
+| `w_factor` | 0.5 | 因子权重 |
+| `w_rule` | 0.5 | 规则形态权重 |
+| `entryThreshold` | 0.6 | 买入最低分 |
+| `exitThreshold` | 0.3 | 持仓跌破此分则卖出 |
+
+### 规则评分的具体逻辑
+
+每只候选标的, 遍历所有入口类规则模板:
+
+```
+buyHitCount = 0
+buyRuleCount = 0
+
+for each template in enabledEntryTemplates:
+    for each rule in template:
+        result = rule.evaluate(candidateCtx, marketSnapshot)
+        if result == Pass:
+            buyHitCount += 1
+        buyRuleCount += 1
+    // 同一模板内多条规则: 全部命中才算该模板命中 (加重权重)
+    // 或: 每条规则独立计数 (简单方案, 先采用)
+
+ruleScore = min(buyHitCount / max(buyRuleCount, 1), 1.0)
+```
+
+出场用同一逻辑:
+
+```
+for each template in enabledExitTemplates:
+    if positionTemplateHits > threshold:
+        exitScoreBoost += 1
+
+if entryScore < exitThreshold OR exitScoreBoost > 0:
+    → Sell
+```
+
+---
+
+## 三、规则保留的硬闸门
+
+以下规则仍保持**二进制否决权**, 不参与评分:
+
+| 规则类型 | 行为 | 原因 |
+|----------|------|------|
+| ST/\*ST | 直接剔除候选池 | 法规风险 |
+| 当日涨跌停 | 无法买入/卖出 | 物理限制 |
+| 停牌 | 跳过 | 无法交易 |
+| 日成交额 < 2000万 | 剔除 | 流动性 |
+| 一字板 | 剔除 | 无法成交 |
+| 基本面暴雷 (净利润<0) | 剔除 | 信用风险 |
+
+这些规则在**评分工之前**运行, 命中直接移除候选资格, 不进入评分。
+
+---
+
+## 四、策略实体: CompositeScoringStrategy
+
+替代现有的 `TrendFollowingStrategy` 等纯技术指标策略:
 
 ```cpp
-namespace domain::strategy {
-
-struct TimingResult {
-    bool allowNewEntries = true;   // false = 当日禁止开新仓
-    bool forceLiquidate = false;   // true = 当日强制清仓
-    double targetExposure = 1.0;  // 目标仓位比例 [0.0, 1.0]
-    std::string reason;            // 诊断信息
-};
-
-class MarketTimingGate {
+class CompositeScoringStrategy : public IRuntimeStrategy {
 public:
-    /// @brief 输入当日大盘快照 → 输出择时决策
-    /// @param snapshot 市场截面数据 (指数价格, 均线, 宽度, 波动率)
-    TimingResult evaluate(const MarketTimingSnapshot& snapshot) const;
+    void evaluate(const std::vector<RuntimeFactorSnapshot>& snapshots,
+                  const RuntimeStrategyContext& ctx,
+                  std::vector<StrategySignal>& out) override
+    {
+        // 1. 从因子处理器取候选池 + 综合因子分
+        auto symbols = m_processor->allSymbols();
 
-    /// 配置择时规则 (v1: 固定规则, v2: 模型权重)
-    void setRules(const TimingRuleConfig& config);
-    void setModel(std::shared_ptr<ITimingModel> model);  // v0.14 AI升级
+        // 2. 对每个候选标的: 计算规则分 → 综合分 → 信号
+        for (const auto& sym : symbols) {
+            double factorScore = m_processor->compositeScore(sym);
+
+            // 规则评分: 所有入口形态规则对当前标的打分
+            double ruleScore = computeRuleScore(sym, RulePhase::Entry, ctx);
+
+            double finalScore = m_cfg.wFactor * factorScore + m_cfg.wRule * ruleScore;
+
+            if (finalScore >= m_cfg.entryThreshold) {
+                double w = scoreToWeight(finalScore);  // 分越高仓位越重
+                out.push_back(BuySignal(sym, finalScore, w));
+            }
+        }
+
+        // 3. 持仓检查: 规则出场评分
+        for (auto& pos : ctx.positions()) {
+            double exitScore = computeRuleScore(pos.symbol, RulePhase::Exit, ctx);
+            if (m_processor->compositeScore(pos.symbol) < m_cfg.exitThreshold
+                || exitScore > 0.3) {
+                out.push_back(SellSignal(pos.symbol, exitScore));
+            }
+        }
+    }
 
 private:
-    TimingRuleConfig m_rules;
-    std::shared_ptr<ITimingModel> m_model;  // v0.14
+    double computeRuleScore(const std::string& symbol,
+                            RulePhase phase,
+                            const RuntimeStrategyContext& ctx) {
+        int hits = 0, total = 0;
+        for (const auto& tpl : m_entryTemplates) {
+            for (const auto& rule : tpl.rules) {
+                ++total;
+                if (rule.evaluate(symbol, ctx) == RuleResult::Pass) ++hits;
+            }
+        }
+        return total > 0 ? static_cast<double>(hits) / total : 0.0;
+    }
 };
-
-// ── 市场快照 (每日回测开始时由 StrategyEngine 填充) ──
-struct MarketTimingSnapshot {
-    // 大盘指数
-    double indexClose = 0.0;
-    double ma20 = 0.0;
-    double ma60 = 0.0;
-    double ma20Slope = 0.0;   // MA20 斜率 (上升/下降趋势)
-
-    // 市场宽度
-    double advanceRatio = 0.0;   // 上涨家数占比
-    double newHighRatio = 0.0;   // 创 N 日新高占比
-    double limitUpCount = 0;     // 涨停家数
-
-    // 波动
-    double atrPercent = 0.0;     // ATR / close
-    double vixProxy = 0.0;       // 截面波动率 (≈ market_volatility from v9)
-
-    // 成交额
-    double volumeRatio = 0.0;    // 当日成交额 / 20日均成交额
-
-    std::string date;
-};
-
-} // namespace domain::strategy
 ```
 
-**v1 规则逻辑**（硬编码在 `evaluate()` 内）：
+---
 
-```
-若 indexClose > ma60 且 ma20 > ma60 且 advanceRatio > 0.5:
-    → targetExposure = 1.0  (满仓进攻)
+## 五、实施计划
 
-若 indexClose > ma60 且 advanceRatio < 0.35:
-    → targetExposure = 0.5  (半仓谨慎)
+### Step 1: RuleGate 增加评分接口
 
-若 indexClose < ma60 且 indexClose >= ma20:
-    → targetExposure = 0.2  (防御仓位)
-
-若 indexClose < ma20 且 ma20Slope < 0 且 advanceRatio < 0.3:
-    → targetExposure = 0.0, forceLiquidate = true  (空仓)
-
-默认:
-    → targetExposure = 0.5 (中性)
-```
-
-### 2.2 TimedCircuitBreaker — 风控扩展
-
-**职责**：回撤熔断 + 单日亏损限制（独立于 `RiskEvaluator` 的止损止盈）。
-
-**位置**：`src/domain/strategy/include/TimedCircuitBreaker.h`
+在现有 `RuleGate` 上新增方法, 不影响现有功能:
 
 ```cpp
-namespace domain::strategy {
+// 新增: 计算规则形态命中得分 (0~1)
+double RuleGate::entryScore(const RuleCandidateContext& ctx,
+                            const RuleMarketSnapshot& snapshot) const;
 
-struct CircuitBreakerState {
-    bool tradingHalted = false;      // 禁止交易
-    int haltDaysRemaining = 0;       // 剩余熔断交易日
-    double peakEquity = 0.0;         // 历史最高净值
-    double dailyStartEquity = 0.0;   // 当日开盘净值
-};
-
-class TimedCircuitBreaker {
-public:
-    /// @brief 每日开盘前检查
-    bool isHalted() const { return m_state.tradingHalted; }
-
-    /// @brief 每日收盘后更新状态 (传入当日净值)
-    void updateEndOfDay(double endOfDayEquity);
-
-    /// @brief 日内实时检查 (传入当前净值)
-    /// @return true = 触发熔断, 需立即减仓
-    bool checkIntraday(double currentEquity);
-
-    void reset();
-
-private:
-    CircuitBreakerState m_state;
-    // 参数
-    double m_maxDrawdown = 0.15;      // 回撤 15% 熔断
-    int    m_haltDays = 5;            // 熔断天数
-    double m_dailyLossLimit = 0.03;   // 单日亏损 3% 减仓
-    double m_reduceTo = 0.5;          // 减仓至 50%
-};
-
-} // namespace domain::strategy
+// 新增: 计算持仓出场的规则得分 (0~1)
+double RuleGate::exitScore(const RuleCandidateContext& ctx,
+                           const RuleMarketSnapshot& snapshot) const;
 ```
 
----
+现有 `allowSignal()` 和 `positionAction()` 保持不变, 策略可按需调用评分或闸门。
 
-## 三、集成方案
+### Step 2: CompositeScoringStrategy 实现
 
-### 3.1 StrategyEngine::backtest() 改动
+新增策略类型, 使用 `entryScore()` + `factorScore` 综合打分。
 
-在现有管线中插入择时和风控逻辑（改动量约 30 行）：
+### Step 3: 回归验证
 
-```cpp
-// StrategyEngine::backtest() 伪代码
-for (each trading date) {
-    // 1. 更新候选池 (现有)
-    factorSignalProcessor.updateSnapshot(factorValues);
-    auto pool = poolSelector->selectPool(factorSignalProcessor);
+| 测试 | 对照 |
+|------|------|
+| v9 因子满仓 | 基线 IC=0.27, 收益为负 |
+| v2.0 分层 | 规则择时 + 因子选股 |
+| **v2.1 评分工** | **因子分 + 规则分 综合打分** |
 
-    // 2. 择时判断 (新增) ← MarketTimingGate
-    MarketTimingSnapshot timingSnapshot = buildTimingSnapshot(view, date);
-    TimingResult timing = m_timingGate.evaluate(timingSnapshot);
-
-    // 3. 风控检查 (新增) ← TimedCircuitBreaker
-    if (m_circuitBreaker.isHalted()) {
-        m_circuitBreaker.updateEndOfDay(todayEquity);
-        continue;  // 跳过今天
-    }
-    if (timing.forceLiquidate) {
-        generateLiquidationOrders();  // 全清
-        continue;
-    }
-
-    // 4. 策略评估 (现有)
-    auto orders = stepBatch(marketDataBatch);
-
-    // 5. 择时仓位缩放 (新增)
-    if (!timing.allowNewEntries) {
-        orders = filterOutBuyOrders(orders);  // 只保留卖出
-    }
-    orders = scalePositionSizes(orders, timing.targetExposure);
-
-    // 6. 规则闸门 (现有)
-    orders = rulePipeline.filterBuySignals(orders, ...);
-
-    // 7. 执行 + 更新净值 (现有)
-    executeOrders(orders);
-    m_circuitBreaker.updateEndOfDay(todayEquity);
-    if (m_circuitBreaker.checkIntraday(todayEquity)) {
-        emergencyReduce();
-    }
-}
-```
-
-### 3.2 MarketTimingSnapshot 构建
-
-`buildTimingSnapshot(view, date)` 复用现有 `BacktestRuleVariableProvider` 里的市场统计量——它已经计算了 97 个市场变量（`RuleMarketSnapshot`），包括指数收盘价、MA、涨跌比、宽度、新高新低等。择时快照直接从它取值。
-
-### 3.3 需要改动的文件清单
-
-| 文件 | 改动类型 | 说明 |
-|------|----------|------|
-| `MarketTimingGate.h/.cpp` | **新增** | 择时闸门类 |
-| `TimedCircuitBreaker.h/.cpp` | **新增** | 风控熔断类 |
-| `StrategyEngineFacade.cpp` | 修改 | 插入择时/风控逻辑 |
-| `IStrategyService.h` | 修改 | Builder 增 `setTimingConfig` / `setBreakerConfig` |
-| CMakeLists | 修改 | 添加新文件 |
-| 规则模板 JSON | **新增** | ST/涨跌停/流动性过滤规则 |
+验收: 年化收益转正, G1 显著跑赢 G5, 买卖信号日志中能看到因子+规则各贡献的比例。
 
 ---
 
-## 四、数据流 (盘后时序)
-
-```
-15:30 盘后
-  │
-  ├─ 1. AI因子计算   C++ FeatureTensorBuilder + ONNX → factorValues
-  ├─ 2. 传统因子计算 已有 C++ FactorEngine → factorValues
-  ├─ 3. 选股层       FactorSignalProcessor.compositeScore() → 排序
-  │                  RankOnlyPoolSelector → Top-200 候选池
-  ├─ 4. 过滤层       RuleGate.filterBuySignals()
-  │                  ST/停牌/涨跌停/流动性 规则模板
-  │                  → ~150 候选标的
-  ├─ 5. 择时层       MarketTimingGate.evaluate(snapshot)
-  │                  大盘MA/宽度/波动 → targetExposure
-  ├─ 6. 配仓层       OrderGenerator.generate()
-  │                  因子值加权 + singleStockCap(5%)
-  ├─ 7. 风控层       TimedCircuitBreaker
-  │                  回撤熔断 / 单日减仓
-  │
-  └─ → 调仓指令 → 次日开盘执行
-```
-
----
-
-## 五、测试验证计划
-
-### 5.1 单元测试
-
-- `MarketTimingGate`: 手工构造 snapshot，验证 4 种市场状态下的输出
-- `TimedCircuitBreaker`: 模拟净值序列，验证 15% 回撤熔断 + 5 日恢复
-
-### 5.2 回测验证
-
-| 测试场景 | 预期 |
-|----------|------|
-| 2020-2026 全区间 | 年化转正, maxDD < 25% |
-| 2022年熊市 | 择时空仓 > 80% 交易日 |
-| 2024年9.24牛市 | 满仓, G1 跑赢 G5 |
-| v9 因子满仓 vs 分层策略 | 策略 Sharpe > 因子满仓 Sharpe |
-
----
-
-## 六、实施顺序
-
-| 步骤 | 预估时间 |
-|------|----------|
-| 1. `MarketTimingGate` 实现 + 单元测试 | 1 天 |
-| 2. `TimedCircuitBreaker` 实现 | 0.5 天 |
-| 3. `StrategyEngine::backtest()` 集成 | 1 天 |
-| 4. 规则模板 (ST/流动性) | 0.5 天 |
-| 5. 端到端回测 + 参数调优 | 1 天 |
-| **合计** | **4 天** |
-
----
-
-> 设计原则: 最小侵入、复用优先、分层可替换、全规则可回测
+> v2.1 核心变化: 规则从闸门→评委, 因子从选池→共同打分
+> 当前状态: 设计定稿, 待编码实施

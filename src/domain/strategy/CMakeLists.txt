@@ -15,6 +15,9 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyManager.cpp
     src/RiskEvaluator.cpp
     src/EventRiskSubscriber.cpp
+    src/MarketTimingGate.cpp
+    src/TimedCircuitBreaker.cpp
+    src/FactorDrivenStrategy.cpp
     src/FactorSignalProcessor.cpp
     src/SignalBlendCompositor.cpp
     src/NonFactorStrategy.cpp

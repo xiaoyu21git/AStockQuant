@@ -12,6 +12,8 @@
 #include "RulePipeline.h"
 #include "RiskEvaluator.h"
 #include "OrderGenerator.h"
+#include "MarketTimingGate.h"
+#include "TimedCircuitBreaker.h"
 #include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
@@ -705,6 +707,8 @@ private:
     std::map<std::string, rules::RuleAttribution> m_ruleAttribution;  ///< 最近一次回测的规则归因
     std::string m_backtestDateRange;  ///< 最近一次回测的日期区间 (如 "20200102-20260717")
     RiskConfig m_riskConfig = RiskConfig::defaults();
+    MarketTimingGate m_timingGate;             ///< 大盘择时闸门
+    TimedCircuitBreaker m_circuitBreaker;      ///< 风控熔断器
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
@@ -739,6 +743,12 @@ public:
     /// @brief 配置调仓频率
     Builder& withRebalanceConfig(const RebalanceConfig& cfg);
 
+    /// @brief 启用择时闸门 (v0.13 规则模式)
+    Builder& withTimingGate(const MarketTimingGate& gate);
+
+    /// @brief 配置风控熔断器 (v0.13)
+    Builder& withCircuitBreaker(const TimedCircuitBreaker& breaker);
+
     [[nodiscard]] std::unique_ptr<StrategyEngine> build();
 
 private:
@@ -758,6 +768,8 @@ private:
     RuleGateConfig ruleGateCfg_;
     RiskConfig riskCfg_{RiskConfig::defaults()};
     RebalanceConfig rebalanceCfg_;
+    MarketTimingGate timingGate_;
+    TimedCircuitBreaker circuitBreaker_;
 };
 
 } // namespace domain::strategy
