@@ -191,13 +191,10 @@
         <file>config/views/risk_backtest_params.json</file>
         <file>config/views/factor_common.json</file>
         <file>config/views/factor_common_params.json</file>
-        <file>utils/FactorDataAdapter.js</file>
-        <file>utils/FactorMetaLoader.js</file>
         <file>utils/I18n.js</file>
         <file>utils/OrderUtils.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StartupGateFormatter.js</file>
-        <file>utils/StrategyStructureAdapter.js</file>
         <file>utils/TradingConstants.js</file>
 
 

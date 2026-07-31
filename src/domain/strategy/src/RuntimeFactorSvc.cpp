@@ -295,6 +295,11 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         instanceIds = m_factorIds;
     }
     if (tradeDay == 0 || syms.empty() || instanceIds.empty()) {
+        static int diagCount = 0;
+        if (++diagCount <= 3)
+            INTERNAL_WARN_STREAM << "[RFS] copySnapshots skip: tradeDay=" << tradeDay
+                                 << " syms=" << syms.size()
+                                 << " ids=" << instanceIds.size();
         return;
     }
 
@@ -307,9 +312,11 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
     }
     if (output.empty()) {
         static int emptySnapCount = 0;
-        if (++emptySnapCount % 50 == 0)
-            INTERNAL_WARN_STREAM << "[RFS] 快照连续空: count=" << emptySnapCount
-                                 << " day=" << tradeDay << " ids=" << instanceIds.size();
+        ++emptySnapCount;
+        if (emptySnapCount <= 3 || emptySnapCount % 50 == 0)
+            INTERNAL_WARN_STREAM << "[RFS] copySnapshots empty: count=" << emptySnapCount
+                                 << " day=" << tradeDay << " ids=" << instanceIds.size()
+                                 << " values=" << output.size();
     }
 }
 
