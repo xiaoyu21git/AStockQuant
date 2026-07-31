@@ -1147,19 +1147,126 @@ QString StrategyBridge::resolveRuleTemplateFileName(const QString& templateId) c
 
 // ── 模板洞察 ──
 QString StrategyBridge::getTemplateInsight(const QVariantMap& rule) const {
-    return rule.value("summary", rule.value("templateDisplayName", "")).toString();
+    auto s = rule.value("summary").toString();
+    if (!s.isEmpty()) return s;
+    s = rule.value("templateDisplayName").toString();
+    if (!s.isEmpty()) return s;
+    return rule.value("templateId").toString();
 }
-QString StrategyBridge::insightSectionTitle(const QString& phaseKey) const { return phaseKey; }
-QString StrategyBridge::insightPrimaryTitle(const QString&) const { return QStringLiteral("主要信号"); }
+QString StrategyBridge::insightSectionTitle(const QString& phaseKey) const {
+    return phaseDisplayName(phaseKey);
+}
+QString StrategyBridge::insightPrimaryTitle(const QString&) const {
+    return QStringLiteral("主要信号");
+}
 QVariantList StrategyBridge::insightPrimaryItems(const QVariantMap&) const { return {}; }
-QString StrategyBridge::insightSecondaryTitle(const QString&) const { return QStringLiteral("辅助条件"); }
+QString StrategyBridge::insightSecondaryTitle(const QString&) const {
+    return QStringLiteral("辅助条件");
+}
 QVariantList StrategyBridge::insightSecondaryItems(const QVariantMap&) const { return {}; }
-QString StrategyBridge::normalizePhaseKey(const QString& raw) const { return raw; }
-QString StrategyBridge::phaseDisplayName(const QString& phaseKey) const { return phaseKey; }
+
+QString StrategyBridge::normalizePhaseKey(const QString& raw) const {
+    if (raw == "market" || raw == "0") return "market";
+    if (raw == "signal" || raw == "1") return "signal";
+    if (raw == "eligibility" || raw == "2") return "eligibility";
+    if (raw == "rebalance" || raw == "3") return "rebalance";
+    if (raw == "portfolio" || raw == "4") return "portfolio";
+    if (raw == "execution" || raw == "5") return "execution";
+    if (raw == "account_risk" || raw == "6") return "account_risk";
+    return raw;
+}
+
+QString StrategyBridge::phaseDisplayName(const QString& phaseKey) const {
+    if (phaseKey == "market") return QStringLiteral("市场闸门");
+    if (phaseKey == "signal") return QStringLiteral("信号审核");
+    if (phaseKey == "eligibility") return QStringLiteral("资格检查");
+    if (phaseKey == "rebalance") return QStringLiteral("调仓管理");
+    if (phaseKey == "portfolio") return QStringLiteral("组合构建");
+    if (phaseKey == "execution") return QStringLiteral("执行管理");
+    if (phaseKey == "account_risk") return QStringLiteral("账户风控");
+    return phaseKey;
+}
 
 // ── 翻译 ──
+static const std::vector<std::pair<QString, QString>> kTranslations = {
+    // 策略创建
+    {"strategyCreation.selectStrategyType", QStringLiteral("选择策略类型")},
+    {"strategyCreation.basicInfo", QStringLiteral("基本信息")},
+    {"strategyCreation.paramConfig", QStringLiteral("参数配置")},
+    {"strategyCreation.reviewConfirm", QStringLiteral("审核确认")},
+    {"strategyCreation.strategyName", QStringLiteral("策略名称")},
+    {"strategyCreation.strategyDescription", QStringLiteral("策略描述")},
+    {"strategyCreation.optimizationMethod", QStringLiteral("优化方式")},
+    {"strategyCreation.createStrategy", QStringLiteral("创建策略")},
+    {"strategyCreation.back", QStringLiteral("返回")},
+    {"strategyCreation.next", QStringLiteral("下一步")},
+    {"strategyCreation.complete", QStringLiteral("完成")},
+    {"strategyCreation.maxPositions", QStringLiteral("最大持仓数")},
+    {"strategyCreation.weightScheme", QStringLiteral("权重方案")},
+    {"strategyCreation.stopLoss", QStringLiteral("止损线")},
+    {"strategyCreation.takeProfit", QStringLiteral("止盈线")},
+    {"strategyCreation.maxDrawdown", QStringLiteral("最大回撤")},
+    // 策略类型
+    {"strategyCreation.strategyTypes.trend_following", QStringLiteral("趋势跟随")},
+    {"strategyCreation.strategyTypes.trend_breakout", QStringLiteral("趋势突破")},
+    {"strategyCreation.strategyTypes.mean_reversion", QStringLiteral("均值回归")},
+    {"strategyCreation.strategyTypes.momentum", QStringLiteral("动量")},
+    {"strategyCreation.strategyTypes.multi_factor", QStringLiteral("多因子选股")},
+    {"strategyCreation.strategyTypes.machine_learning", QStringLiteral("机器学习")},
+    {"strategyCreation.strategyTypes.arbitrage", QStringLiteral("统计套利")},
+    {"strategyCreation.strategyTypes.event_driven", QStringLiteral("事件驱动")},
+    {"strategyCreation.strategyTypes.high_frequency", QStringLiteral("高频交易")},
+    {"strategyCreation.strategyTypes.custom", QStringLiteral("自定义策略")},
+    // 风险等级
+    {"risk.low", QStringLiteral("低风险")},
+    {"risk.medium", QStringLiteral("中风险")},
+    {"risk.high", QStringLiteral("高风险")},
+    {"risk.aggressive", QStringLiteral("激进")},
+    // 通用
+    {"common.confirm", QStringLiteral("确认")},
+    {"common.cancel", QStringLiteral("取消")},
+    {"common.save", QStringLiteral("保存")},
+    {"common.delete", QStringLiteral("删除")},
+    // 规则
+    {"rules.market", QStringLiteral("市场闸门")},
+    {"rules.signal", QStringLiteral("信号审核")},
+    {"rules.rebalance", QStringLiteral("调仓管理")},
+    // 描述
+    {"strategyCreation.strategyTypeDescriptions.trend_following",
+     QStringLiteral("基于双均线金叉死叉的趋势跟踪策略，顺势而为")},
+    {"strategyCreation.strategyTypeDescriptions.mean_reversion",
+     QStringLiteral("捕捉超买超卖后的价格回归机会")},
+    {"strategyCreation.strategyTypeDescriptions.momentum",
+     QStringLiteral("追踪强势股的持续上涨趋势")},
+    {"strategyCreation.strategyTypeDescriptions.multi_factor",
+     QStringLiteral("多因子加权综合排名选股，分散单因子风险")},
+    {"strategyCreation.strategyTypeDescriptions.machine_learning",
+     QStringLiteral("机器学习模型驱动的智能选股策略")},
+    {"strategyCreation.strategyTypeDescriptions.arbitrage",
+     QStringLiteral("利用价差偏离进行统计套利")},
+    {"strategyCreation.strategyTypeDescriptions.event_driven",
+     QStringLiteral("基于财报、公告等事件的交易策略")},
+    {"strategyCreation.strategyTypeDescriptions.high_frequency",
+     QStringLiteral("分钟级别高频交易策略")},
+    {"strategyCreation.strategyTypeDescriptions.custom",
+     QStringLiteral("用户自定义参数的灵活策略")},
+};
+
 QString StrategyBridge::tr(const QString& key, const QString&) const {
-    // 简单实现: 提取 key 的最后一段
+    for (auto& [k, v] : kTranslations)
+        if (k == key) return v;
+    // 策略类型名: 尝试从 key 推断
+    if (key.contains("TrendFollowing") || key.contains("trend_following"))
+        return QStringLiteral("趋势跟随");
+    if (key.contains("MeanReversion") || key.contains("mean_reversion"))
+        return QStringLiteral("均值回归");
+    if (key.contains("Momentum") || key.contains("momentum"))
+        return QStringLiteral("动量");
+    if (key.contains("MultiFactor") || key.contains("multi_factor"))
+        return QStringLiteral("多因子选股");
+    if (key.contains("Arbitrage") || key.contains("arbitrage"))
+        return QStringLiteral("套利");
+    // fallback
     int dot = key.lastIndexOf('.');
     return dot >= 0 ? key.mid(dot + 1) : key;
 }
