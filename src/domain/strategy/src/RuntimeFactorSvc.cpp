@@ -204,8 +204,16 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         auto it = m_factorCache[instanceId].find(dateBuf);
         if (it != m_factorCache[instanceId].end()) {
             for (const auto& [sym, val] : it->second) {
-                for (uint32_t id : symbolIds)
-                    if (m_symbolResolver(id) == sym) { result[id] = val; break; }
+                // 缓存 key 可能带后缀 (如 "000001.SZ"), 统一去掉后缀再匹配
+                std::string codeOnly = sym;
+                auto dot = codeOnly.find('.');
+                if (dot != std::string::npos) codeOnly.resize(dot);
+                for (uint32_t id : symbolIds) {
+                    std::string resolved = m_symbolResolver(id);
+                    auto rd = resolved.find('.');
+                    if (rd != std::string::npos) resolved.resize(rd);
+                    if (resolved == codeOnly) { result[id] = val; break; }
+                }
             }
         } else {
             INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " NOT FOUND in cache (cache has " << m_factorCache[instanceId].size() << " dates)";

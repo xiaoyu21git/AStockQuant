@@ -272,6 +272,14 @@ public:
 
         auto scores = strategyDefinition_->computeCompositeScores(factorSnapshots);
         auto candidates = buildCandidateSignals(*strategyDefinition_, scores);
+        static int scoreDiag = 0;
+        if (++scoreDiag <= 3) {
+            double maxScore = 0.0; int nonzeroSym = 0;
+            for (auto& s : scores) { if (s.symbolId > 0) ++nonzeroSym; if (s.score > maxScore) maxScore = s.score; }
+            INTERNAL_WARN_STREAM << "[MultiFactor] scores=" << scores.size()
+                << " nonzeroSym=" << nonzeroSym << " maxScore=" << maxScore
+                << " candidates=" << candidates.size();
+        }
 
         // v2.1: 生成持仓卖出信号 — 因子分跌破阈值则卖出
         {
