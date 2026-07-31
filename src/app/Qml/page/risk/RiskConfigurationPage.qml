@@ -3,7 +3,6 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0 as ConsoleUiComponents
-import AStock.Bridge 1.0 as Bridge
 import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
 

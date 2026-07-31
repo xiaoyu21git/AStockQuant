@@ -2,8 +2,6 @@ import AStock.Bridge 1.0 as Bridge
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import AStock.Bridge 1.0 as Bridge
-
 import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
 import "../../Base" as BaseComponents
 
@@ -35,7 +33,7 @@ Rectangle {
     property bool hasSearched: false
     property bool onlyReady: false
     readonly property bool requestInFlight: activeRequestId !== ""
-    readonly property bool phaseLocked: PreviewUtils.StrategyBridge.normalizePhaseKey(phaseLockValue) !== ""
+    readonly property bool phaseLocked: Bridge.StrategyBridge.normalizePhaseKey(phaseLockValue) !== ""
     readonly property string contextualPhaseValue: suggestionPhaseForStage(selectedStageId)
     readonly property bool compactInlineLayout: showInlinePhaseInputs && width >= 520
     readonly property bool compactSuggestionActionRow: width < 360
@@ -150,12 +148,12 @@ Rectangle {
     readonly property var displayedInlinePhasePanels: {
         if (phaseLocked) {
             return inlinePhasePanels.filter(function(panelSpec) {
-                return PreviewUtils.StrategyBridge.normalizePhaseKey(panelSpec.value) === PreviewUtils.StrategyBridge.normalizePhaseKey(phaseLockValue)
+                return Bridge.StrategyBridge.normalizePhaseKey(panelSpec.value) === Bridge.StrategyBridge.normalizePhaseKey(phaseLockValue)
             })
         }
         if (contextualPhaseValue !== "") {
             return inlinePhasePanels.filter(function(panelSpec) {
-                return PreviewUtils.StrategyBridge.normalizePhaseKey(panelSpec.value) === contextualPhaseValue
+                return Bridge.StrategyBridge.normalizePhaseKey(panelSpec.value) === contextualPhaseValue
             })
         }
         return inlinePhasePanels
@@ -163,10 +161,10 @@ Rectangle {
     readonly property var displayedQuickQueries: {
         var targetRole = String(selectedGroupRole || "").trim().toLowerCase()
         var targetPhase = phaseLocked
-            ? PreviewUtils.StrategyBridge.normalizePhaseKey(phaseLockValue)
+            ? Bridge.StrategyBridge.normalizePhaseKey(phaseLockValue)
             : contextualPhaseValue
         return quickQueries.filter(function(item) {
-            if (targetPhase !== "" && PreviewUtils.StrategyBridge.normalizePhaseKey(item.phase) !== targetPhase) {
+            if (targetPhase !== "" && Bridge.StrategyBridge.normalizePhaseKey(item.phase) !== targetPhase) {
                 return false
             }
             if (!targetRole) {
@@ -598,17 +596,17 @@ Rectangle {
             return "围绕“" + selectedGroupTitle + "”输入术语"
         }
         if (phaseLocked) {
-            return "输入" + PreviewUtils.StrategyBridge.phaseDisplayName(phaseLockValue) + "术语"
+            return "输入" + Bridge.StrategyBridge.phaseDisplayName(phaseLockValue) + "术语"
         }
         return "输入交易术语，例如：情绪修复后午后反杀"
     }
 
     function selectedPhaseValue() {
         if (showInlinePhaseInputs) {
-            return PreviewUtils.StrategyBridge.normalizePhaseKey(inlineActivePhase)
+            return Bridge.StrategyBridge.normalizePhaseKey(inlineActivePhase)
         }
         if (phaseLocked) {
-            return PreviewUtils.StrategyBridge.normalizePhaseKey(phaseLockValue)
+            return Bridge.StrategyBridge.normalizePhaseKey(phaseLockValue)
         }
         var option = phaseOptions[phaseCombo.currentIndex]
         var optionValue = option ? option.value : ""
@@ -619,7 +617,7 @@ Rectangle {
     }
 
     function phaseDraftValue(phase) {
-        var key = PreviewUtils.StrategyBridge.normalizePhaseKey(phase)
+        var key = Bridge.StrategyBridge.normalizePhaseKey(phase)
         if (!key) {
             return ""
         }
@@ -627,7 +625,7 @@ Rectangle {
     }
 
     function setPhaseDraftValue(phase, text) {
-        var key = PreviewUtils.StrategyBridge.normalizePhaseKey(phase)
+        var key = Bridge.StrategyBridge.normalizePhaseKey(phase)
         if (!key) {
             return
         }
@@ -642,11 +640,11 @@ Rectangle {
 
     function currentStrategyHint() {
         if (selectedGroupTitle !== "") {
-            var stageLabel = selectedStageTitle !== "" ? selectedStageTitle : PreviewUtils.StrategyBridge.phaseDisplayName(phaseLockValue)
+            var stageLabel = selectedStageTitle !== "" ? selectedStageTitle : Bridge.StrategyBridge.phaseDisplayName(phaseLockValue)
             return "当前正在为“" + stageLabel + " / " + selectedGroupTitle + "”补规则，建议会优先按“" + roleDisplayName(selectedGroupRole) + "”角色和当前阶段自动过滤。"
         }
         if (phaseLocked) {
-            var phaseKey = PreviewUtils.StrategyBridge.normalizePhaseKey(phaseLockValue)
+            var phaseKey = Bridge.StrategyBridge.normalizePhaseKey(phaseLockValue)
             if (phaseKey === "signal") {
                 return "在这里输入入场或观察信号术语，应用后只会写入信号阶段。"
             }
@@ -723,7 +721,7 @@ Rectangle {
         if (!compactInlineLayout) {
             return true
         }
-        return PreviewUtils.StrategyBridge.normalizePhaseKey(phaseValue) === PreviewUtils.StrategyBridge.normalizePhaseKey(inlineActivePhase)
+        return Bridge.StrategyBridge.normalizePhaseKey(phaseValue) === Bridge.StrategyBridge.normalizePhaseKey(inlineActivePhase)
     }
 
     function visiblePhaseExamples(panelSpec) {
@@ -845,15 +843,15 @@ Rectangle {
 
         for (var index = 0; index < list.length; ++index) {
             var item = list[index]
-            var phaseKey = PreviewUtils.StrategyBridge.normalizePhaseKey(item && item.phase) || "other"
+            var phaseKey = Bridge.StrategyBridge.normalizePhaseKey(item && item.phase) || "other"
             var categoryKey = String((item && item.category) || "").trim().toLowerCase()
             var sectionKey = phaseKey + "|" + categoryKey
             var section = sectionMap[sectionKey]
             if (!section) {
                 section = {
                     id: sectionKey,
-                    title: PreviewUtils.StrategyBridge.phaseDisplayName(item && item.phase),
-                    subtitle: PreviewUtils.StrategyBridge.strategyTypeName(item && item.category),
+                    title: Bridge.StrategyBridge.phaseDisplayName(item && item.phase),
+                    subtitle: Bridge.StrategyBridge.strategyTypeName(item && item.category),
                     items: [],
                     readyCount: 0
                 }
@@ -872,7 +870,7 @@ Rectangle {
 
     function applyQuickQuery(query, phaseValue) {
         if (showInlinePhaseInputs) {
-            var inlinePhase = PreviewUtils.StrategyBridge.normalizePhaseKey(phaseValue)
+            var inlinePhase = Bridge.StrategyBridge.normalizePhaseKey(phaseValue)
             if (inlinePhase !== "") {
                 inlineActivePhase = inlinePhase
                 setPhaseDraftValue(inlinePhase, query)
@@ -898,7 +896,7 @@ Rectangle {
         var templateName = String(
             (suggestion && (suggestion.template_display_name || suggestion.templateDisplayName || suggestion.template_id)) || "该模板"
         ).trim()
-        var phaseLabel = PreviewUtils.StrategyBridge.phaseDisplayName(suggestion && suggestion.phase)
+        var phaseLabel = Bridge.StrategyBridge.phaseDisplayName(suggestion && suggestion.phase)
         applyFeedbackTone = "success"
         if (selectedGroupTitle !== "") {
             applyFeedbackMessage = "已将 “" + templateName + "” 加入“" + selectedGroupTitle + "”，并顺带补充策略描述与标签。"
@@ -912,7 +910,7 @@ Rectangle {
         var queryText = String(overrideQueryText !== undefined
             ? overrideQueryText
             : (showInlinePhaseInputs ? phaseDraftValue(inlineActivePhase) : queryField.text)).trim()
-        var phaseValue = PreviewUtils.StrategyBridge.normalizePhaseKey(overridePhase)
+        var phaseValue = Bridge.StrategyBridge.normalizePhaseKey(overridePhase)
         if (phaseValue === "") {
             phaseValue = selectedPhaseValue()
         }
@@ -1033,8 +1031,8 @@ Rectangle {
         id: suggestionCardDelegate
 
         Rectangle {
-            property var insight: PreviewUtils.StrategyBridge.getTemplateInsight(modelData)
-            property bool secondaryCollapsible: PreviewUtils.StrategyBridge.normalizePhaseKey(modelData.phase) === "market"
+            property var insight: Bridge.StrategyBridge.getTemplateInsight(modelData)
+            property bool secondaryCollapsible: Bridge.StrategyBridge.normalizePhaseKey(modelData.phase) === "market"
             property bool secondaryExpanded: !secondaryCollapsible
             property bool hasExtraDetails: root.normalizeList(modelData.matched_aliases).length > 0
                 || root.normalizeList(modelData.missing_feature_labels).length > 0
@@ -1122,8 +1120,8 @@ Rectangle {
 
                     Repeater {
                         model: [
-                            PreviewUtils.StrategyBridge.phaseDisplayName(modelData.phase),
-                            PreviewUtils.StrategyBridge.strategyTypeName(modelData.category),
+                            Bridge.StrategyBridge.phaseDisplayName(modelData.phase),
+                            Bridge.StrategyBridge.strategyTypeName(modelData.category),
                             modelData.is_default_template ? "默认模板" : ""
                         ]
 
@@ -1173,7 +1171,7 @@ Rectangle {
 
                         Text {
                             Layout.fillWidth: true
-                            text: PreviewUtils.StrategyBridge.insightSectionTitle(modelData.phase, false)
+                            text: Bridge.StrategyBridge.insightSectionTitle(modelData.phase, false)
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
                             color: "#f8fafc"
@@ -1203,14 +1201,14 @@ Rectangle {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: PreviewUtils.StrategyBridge.insightPrimaryTitle(insight)
+                                    text: Bridge.StrategyBridge.insightPrimaryTitle(insight)
                                     font.pixelSize: 11
                                     font.weight: Font.Medium
                                     color: "#fdba74"
                                 }
 
                                 Repeater {
-                                    model: PreviewUtils.StrategyBridge.insightPrimaryItems(insight)
+                                    model: Bridge.StrategyBridge.insightPrimaryItems(insight)
 
                                     delegate: Text {
                                         Layout.fillWidth: true
@@ -1248,7 +1246,7 @@ Rectangle {
 
                                         Text {
                                             Layout.fillWidth: true
-                                            text: PreviewUtils.StrategyBridge.insightSecondaryTitle(insight)
+                                            text: Bridge.StrategyBridge.insightSecondaryTitle(insight)
                                             font.pixelSize: 11
                                             font.weight: Font.Medium
                                             color: "#7dd3fc"
@@ -1277,7 +1275,7 @@ Rectangle {
                                     spacing: 4
 
                                     Repeater {
-                                        model: PreviewUtils.StrategyBridge.insightSecondaryItems(insight)
+                                        model: Bridge.StrategyBridge.insightSecondaryItems(insight)
 
                                         delegate: Text {
                                             Layout.fillWidth: true

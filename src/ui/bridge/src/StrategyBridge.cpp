@@ -980,41 +980,32 @@ QVariantList StrategyBridge::buildParamConfigs(int typeIndex) const {
 }
 
 QVariantMap StrategyBridge::buildCompleteStrategyData(const QVariantMap& context) const {
+    int ti = normalizeStrategyTypeIndex(context.value("selectedStrategyTypeIndex", 0).toInt());
+    int bk = strategyBehaviorKindFromTypeIndex(ti);
+
+    // 有因子配置时 → 强制 MultiFactor (4)
+    auto params = context.value("strategyParameters", QVariantMap()).toMap();
+    auto overlay = params.value("factor_overlay", QVariantMap()).toMap();
+    bool hasFactorOverlay = overlay.value("enabled", false).toBool()
+                         && !overlay.value("allocations", QVariantList()).toList().isEmpty();
+    if (hasFactorOverlay || !params.value("factorIds", QVariantList()).toList().isEmpty()) {
+        bk = 4;  // StrategyBehaviorKind::MultiFactor
+    }
+
     QVariantMap data;
-    int ti = context.value("strategyTypeIndex", 0).toInt();
+    data["name"] = context.value("strategyName", QStringLiteral("新策略"));
+    data["displayName"] = data["name"];
+    data["strategyBehaviorKind"] = bk;
     data["strategyTypeIndex"] = ti;
-    data["behaviorKind"] = strategyBehaviorKindFromTypeIndex(ti);
-    data["name"] = context.value("name", QStringLiteral("新策略"));
-    data["description"] = context.value("description", "");
-    data["maxPositions"] = context.value("maxPositions", 20);
-    data["maxWeightPerStock"] = context.value("maxWeightPerStock", 0.1);
-    data["minWeightPerStock"] = context.value("minWeightPerStock", 0.01);
-    data["weightScheme"] = context.value("weightScheme", 0);
-    data["rebalanceFrequency"] = context.value("rebalanceFrequency", 0);
-    data["allowShort"] = context.value("allowShort", false);
-    data["stopLossPercent"] = context.value("stopLossPercent", 10.0);
-    data["takeProfitPercent"] = context.value("takeProfitPercent", 20.0);
-    data["maxDrawdownLimit"] = context.value("maxDrawdownLimit", 99.0);
+    data["typeName"] = strategyTypeName(ti);
+    data["description"] = context.value("strategyDescription", "");
 
-    // 类型专属参数
-    int bk = data["behaviorKind"].toInt();
-    if (bk == 0 || bk == 1) {  // TrendFollowing/TrendBreakout
-        data["fastPeriod"] = context.value("fastPeriod", 5);
-        data["slowPeriod"] = context.value("slowPeriod", 30);
-    }
-    if (bk == 1 || bk == 2) {
-        data["period"] = context.value("period", 14);
-    }
-    data["parameters"] = context.value("parameters", QVariantMap());
-    data["rule_profile"] = context.value("rule_profile", QVariantMap());
-    return data;
-}
+    data["assetTypeIndex"] = context.value("assetTypeIndex", 1);
+    data["timeFrameIndex"] = context.value("timeFrameIndex", 7);
+    data["riskLevelIndex"] = context.value("riskLevelIndex", 2);
+    data["optimizationMethod"] = context.value("optimizationMethod", "genetic");
+    data["enableAdvancedOptions"] = context.value("enableAdvancedOptions", false);
 
-QVariantMap StrategyBridge::resetFormData() const {
-    QVariantMap data;
-    data["strategyTypeIndex"] = 0;
-    data["name"] = "";
-    data["description"] = "";
     data["maxPositions"] = 20;
     data["maxWeightPerStock"] = 0.1;
     data["minWeightPerStock"] = 0.01;
@@ -1024,9 +1015,26 @@ QVariantMap StrategyBridge::resetFormData() const {
     data["stopLossPercent"] = 10.0;
     data["takeProfitPercent"] = 20.0;
     data["maxDrawdownLimit"] = 99.0;
-    data["fastPeriod"] = 5;
-    data["slowPeriod"] = 30;
-    data["period"] = 14;
+
+    data["parameters"] = params;
+    data["rule_profile"] = params.value("rule_profile", QVariantMap());
+    return data;
+}
+
+QVariantMap StrategyBridge::resetFormData() const {
+    QVariantMap data;
+    data["strategyName"] = "";
+    data["strategyDescription"] = "";
+    data["selectedStrategyTypeIndex"] = 0;
+    data["strategyTags"] = QVariantList();
+    data["assetType"] = "stock";
+    data["timeFrame"] = "daily";
+    data["riskLevel"] = "medium";
+    data["optimizationMethod"] = "genetic";
+    data["enableAdvancedOptions"] = false;
+    data["strategyParameters"] = QVariantMap();
+    data["parametersValid"] = false;
+    data["validationMessage"] = "";
     return data;
 }
 
