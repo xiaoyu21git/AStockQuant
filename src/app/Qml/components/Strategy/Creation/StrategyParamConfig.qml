@@ -44,7 +44,7 @@ Rectangle {
         typeof root.computeCurrentRuleComposerGroupQuickImportEntries === "function"
             ? (root.computeCurrentRuleComposerGroupQuickImportEntries() || [])
             : [])
-    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
     readonly property bool ruleComposerConfigValid: (root.ruleComposerValidation.errorCount || 0) === 0
     readonly property bool useNarrowRulePanels: width >= 1180
     readonly property bool useWideParamGrid: width >= 1200
@@ -1956,7 +1956,7 @@ Rectangle {
     
     // 加载参数配置
     function loadParamConfigs(initialValues) {
-        var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyTypeIndex)
+        var paramConfigs = strategyService.buildParamConfigs(root.selectedStrategyTypeIndex)
         var separatedConfigs = splitParameterConfigs(paramConfigs)
         root.commonParameterConfigs = separatedConfigs.common
         root.personalizedParameterConfigs = separatedConfigs.personalized
@@ -3794,7 +3794,7 @@ Rectangle {
             throw new Error("编辑参数缺少 rule_composer_state，当前仅支持新字段合同")
         }
         var mappedValues = importedFactorContextPayload(sourceParams)
-        var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
+        var normalizedStrategyTypeIndex = strategyService.normalizeStrategyTypeIndex(strategyTypeIndex)
         var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
         var persistedComposerState = normalizeStructuredValue(sourceParams.rule_composer_state) || ({})
         if (!Array.isArray(persistedComposerState.stages) || persistedComposerState.stages.length === 0) {

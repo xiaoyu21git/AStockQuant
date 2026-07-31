@@ -26,7 +26,7 @@ Page {
     
     // 数据容器
     property int selectedStrategyTypeIndex: 0
-    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
     property string strategyName: ""
     property string strategyDescription: ""
     property string optimizationMethod: "genetic"
@@ -82,8 +82,7 @@ Page {
 
                             onStrategyTypeIndexChanged: function(strategyTypeIndex) {
                                 root.selectedStrategyTypeIndex = strategyTypeIndex
-                                if (Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex)
-                                        !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+                                if (strategyService.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex) !== -1) {
                                     strategyBasicInfo.applyStrategyTypeDefaults(root.selectedStrategyTypeIndex, false)
                                 }
                             }
@@ -332,7 +331,7 @@ Page {
                                         }
 
                                         Text {
-                                            text: "类型: " + Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
+                                            text: "类型: " + strategyService.strategyTypeName(root.selectedStrategyTypeIndex)
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
@@ -899,7 +898,7 @@ Page {
     function mapBackendTypeToFrontendIndex(strategy) {
         var explicitTypeIndex = Number(strategy && strategy.strategyTypeIndex)
         if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
-            var normalizedTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(explicitTypeIndex)
+            var normalizedTypeIndex = strategyService.normalizeStrategyTypeIndex(explicitTypeIndex)
             if (normalizedTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
                 return normalizedTypeIndex
             }
@@ -1027,7 +1026,7 @@ Page {
             parametersValid: step2Content && step2Content.isValid ? step2Content.isValid() : parametersValid
         }
 
-        var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
+        var strategyData = strategyService.buildCompleteStrategyData(context)
         if (strategyData.assetTypeIndex <= 0) {
             showErrorDialog("当前资产类型不在策略合同支持范围内，请改用股票、期货、期权或 ETF。")
             return
