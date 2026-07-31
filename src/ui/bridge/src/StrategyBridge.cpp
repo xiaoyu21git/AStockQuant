@@ -1029,3 +1029,137 @@ QVariantMap StrategyBridge::resetFormData() const {
     data["period"] = 14;
     return data;
 }
+
+QString StrategyBridge::defaultStrategyDescription(int typeIndex) const {
+    return strategyTypeBrief(typeIndex);
+}
+QStringList StrategyBridge::defaultStrategyTags(int) const {
+    return {QStringLiteral("量化"), QStringLiteral("A股")};
+}
+
+// ── 规则编辑器 (基本实现) ──
+QVariantMap StrategyBridge::buildDefaultStrategyProfile(int typeIndex) const {
+    int bk = strategyBehaviorKindFromTypeIndex(typeIndex);
+    QVariantMap p;
+    p["strategyTypeIndex"] = typeIndex;
+    p["strategyBehaviorKind"] = bk;
+    p["horizon"] = "swing";
+    p["tradingFrequency"] = "low_frequency";
+    p["marketScope"] = "a_share";
+    p["executionStyle"] = "close_confirmed";
+    return p;
+}
+
+QVariantList StrategyBridge::buildDefaultBaseRuleBindings(const QVariantMap&) const {
+    QVariantList bindings;
+    // 默认: 趋势模板 → 承接走弱退出 + 分批止盈
+    auto makeRule = [](const QString& tid, const QString& phase, const QString& group) {
+        QVariantMap r;
+        r["templateId"] = tid; r["bindingPhase"] = phase.toInt();
+        r["groupId"] = group; r["defaultInjected"] = true;
+        return r;
+    };
+    bindings << makeRule("template_exit_acceptance_breakdown_v1", "4", "rebalance_exit");
+    bindings << makeRule("template_exit_scale_out_take_profit_v1", "4", "rebalance_scale");
+    return bindings;
+}
+
+QVariantList StrategyBridge::buildDefaultMarketRuleBindings(const QVariantMap&) const {
+    QVariantList bindings;
+    auto makeRule = [](const QString& tid, const QString& phase, const QString& group) {
+        QVariantMap r;
+        r["templateId"] = tid; r["bindingPhase"] = phase.toInt();
+        r["groupId"] = group; r["defaultInjected"] = true;
+        return r;
+    };
+    bindings << makeRule("template_risk_market_bear_freeze_entry_v1", "2", "market_gate");
+    bindings << makeRule("template_risk_market_bull_trend_allow_entry_v1", "2", "market_gate");
+    bindings << makeRule("template_risk_market_trend_neutral_allow_entry_v1", "2", "market_gate");
+    return bindings;
+}
+
+QVariantList StrategyBridge::buildDefaultRuleComposerSkeleton(const QVariantMap& profile, const QVariantList& bindings) const {
+    QVariantList stages;
+    auto findGroup = [&](const QString& groupId) -> QVariantList {
+        QVariantList rules;
+        for (auto& b : bindings) {
+            auto m = b.toMap();
+            if (m["groupId"].toString() == groupId) {
+                QVariantMap r;
+                r["templateId"] = m["templateId"];
+                r["bindingPhase"] = m["bindingPhase"];
+                r["defaultInjected"] = true;
+                rules << r;
+            }
+        }
+        return rules;
+    };
+
+    // Market stage
+    QVariantMap marketStage;
+    marketStage["stageId"] = "market"; marketStage["stageTitle"] = QStringLiteral("市场闸门");
+    marketStage["bindingPhase"] = 0;
+    QVariantList marketGroups;
+    QVariantMap gateGroup;
+    gateGroup["groupId"] = "market_gate"; gateGroup["groupTitle"] = QStringLiteral("市场放行组");
+    gateGroup["groupRole"] = "must_pass"; gateGroup["groupOperator"] = "all";
+    gateGroup["rules"] = findGroup("market_gate");
+    marketGroups << gateGroup;
+    marketStage["groups"] = marketGroups;
+    stages << marketStage;
+
+    // Rebalance stage
+    QVariantMap rebalanceStage;
+    rebalanceStage["stageId"] = "rebalance"; rebalanceStage["stageTitle"] = QStringLiteral("调仓管理");
+    rebalanceStage["bindingPhase"] = 3;
+    QVariantList rebalanceGroups;
+    QVariantMap exitGroup;
+    exitGroup["groupId"] = "rebalance_exit"; exitGroup["groupTitle"] = QStringLiteral("退出触发组");
+    exitGroup["groupRole"] = "any_pass"; exitGroup["groupOperator"] = "any";
+    exitGroup["rules"] = findGroup("rebalance_exit");
+    rebalanceGroups << exitGroup;
+    QVariantMap scaleGroup;
+    scaleGroup["groupId"] = "rebalance_scale"; scaleGroup["groupTitle"] = QStringLiteral("分批管理组");
+    scaleGroup["groupRole"] = "position_management"; scaleGroup["groupOperator"] = "all";
+    scaleGroup["rules"] = findGroup("rebalance_scale");
+    rebalanceGroups << scaleGroup;
+    rebalanceStage["groups"] = rebalanceGroups;
+    stages << rebalanceStage;
+
+    return stages;
+}
+
+QVariantMap StrategyBridge::validateRuleComposerConfiguration(const QVariantMap&, const QVariantList&) const {
+    QVariantMap result;
+    result["valid"] = true;
+    result["errorCount"] = 0;
+    result["warningCount"] = 0;
+    result["errors"] = QVariantList();
+    result["warnings"] = QVariantList();
+    result["suggestions"] = QVariantList();
+    result["summaryText"] = QStringLiteral("配置有效");
+    return result;
+}
+
+QString StrategyBridge::resolveRuleTemplateFileName(const QString& templateId) const {
+    return templateId + ".yaml";
+}
+
+// ── 模板洞察 ──
+QString StrategyBridge::getTemplateInsight(const QVariantMap& rule) const {
+    return rule.value("summary", rule.value("templateDisplayName", "")).toString();
+}
+QString StrategyBridge::insightSectionTitle(const QString& phaseKey) const { return phaseKey; }
+QString StrategyBridge::insightPrimaryTitle(const QString&) const { return QStringLiteral("主要信号"); }
+QVariantList StrategyBridge::insightPrimaryItems(const QVariantMap&) const { return {}; }
+QString StrategyBridge::insightSecondaryTitle(const QString&) const { return QStringLiteral("辅助条件"); }
+QVariantList StrategyBridge::insightSecondaryItems(const QVariantMap&) const { return {}; }
+QString StrategyBridge::normalizePhaseKey(const QString& raw) const { return raw; }
+QString StrategyBridge::phaseDisplayName(const QString& phaseKey) const { return phaseKey; }
+
+// ── 翻译 ──
+QString StrategyBridge::tr(const QString& key, const QString&) const {
+    // 简单实现: 提取 key 的最后一段
+    int dot = key.lastIndexOf('.');
+    return dot >= 0 ? key.mid(dot + 1) : key;
+}

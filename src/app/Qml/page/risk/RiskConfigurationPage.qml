@@ -5,7 +5,7 @@ import ConsoleUi 1.0 as ConsoleUiComponents
 import AStock.Bridge 1.0 as Bridge
 import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
-import "../../utils/StrategyCreationUtils.js" as StrategyCreationUtils
+
 
 Item {
     id: riskConfigPage
@@ -1510,7 +1510,7 @@ Item {
     function isPortfolioStrategy(strategy) {
         var storedTypeIndex = Number(strategy && strategy.strategyTypeIndex)
         return Number.isFinite(storedTypeIndex)
-            && Math.floor(storedTypeIndex) === StrategyCreationUtils.StrategyStoredTypeIndex.Portfolio
+            && Math.floor(storedTypeIndex) === StrategyCreation5
     }
 
     function resolveExternalPortfolioStrategy() {

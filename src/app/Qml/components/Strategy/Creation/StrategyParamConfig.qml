@@ -5,7 +5,6 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
-import "../../../utils/StrategyCreationUtils.js" as Utils
 import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
 import "../../FactorWorkbench/Creation/components" as PluginComponents
 
@@ -146,14 +145,14 @@ Rectangle {
                 spacing: 4
                 
                 Text {
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Title')
+                    text: strategyService.tr('strategyCreation.step2Title')
                     font.pixelSize: 16
                     font.weight: Font.DemiBold
                     color: "#f1f5f9"
                 }
                 
                 Text {
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Description')
+                    text: strategyService.tr('strategyCreation.step2Description')
                     font.pixelSize: 12
                     color: "#94a3b8"
                     wrapMode: Text.WordWrap
@@ -165,8 +164,8 @@ Rectangle {
 
                     Repeater {
                         model: [
-                            Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters'),
-                            Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                            strategyService.tr('strategyCreation.commonParameters'),
+                            strategyService.tr('strategyCreation.personalizedParameters')
                         ]
 
                         delegate: Rectangle {
@@ -212,7 +211,7 @@ Rectangle {
                         spacing: 8
 
                         Text {
-                            text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConfigPanel')
+                            text: strategyService.tr('strategyCreation.parameterConfigPanel')
                             font.pixelSize: 14
                             font.weight: Font.Medium
                             color: "#f1f5f9"
@@ -223,7 +222,7 @@ Rectangle {
                             spacing: 8
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: strategyService.tr('strategyCreation.configuredParameters') + ": " +
                                       root.totalConfiguredParameterCount()
                                 font.pixelSize: 11
                                 color: "#94a3b8"
@@ -233,8 +232,8 @@ Rectangle {
 
                             Text {
                                 text: root.parametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      strategyService.tr('strategyCreation.parameterValidationPassed') :
+                                      strategyService.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 11
                                 font.weight: Font.Medium
                                 color: root.parametersValid ? "#10b981" : "#ef4444"
@@ -259,7 +258,7 @@ Rectangle {
                         spacing: 6
 
                         Text {
-                            text: Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
+                            text: strategyService.tr('strategyCreation.commonParameters')
                             font.pixelSize: 12
                             font.weight: Font.Medium
                             color: "#dbeafe"
@@ -270,7 +269,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: strategyService.tr('strategyCreation.configuredParameters') + ": " +
                                       (commonDynamicGenerator && commonDynamicGenerator.configsList ? commonDynamicGenerator.configsList.length : 0)
                                 font.pixelSize: 10
                                 color: "#93c5fd"
@@ -280,8 +279,8 @@ Rectangle {
 
                             Text {
                                 text: root.commonParametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      strategyService.tr('strategyCreation.parameterValidationPassed') :
+                                      strategyService.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                                 color: root.commonParametersValid ? "#10b981" : "#ef4444"
@@ -330,7 +329,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                                text: strategyService.tr('strategyCreation.personalizedParameters')
                                 font.pixelSize: 12
                                 font.weight: Font.Medium
                                 color: "#e2e8f0"
@@ -361,7 +360,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: strategyService.tr('strategyCreation.configuredParameters') + ": " +
                                       (personalizedDynamicGenerator && personalizedDynamicGenerator.configsList ? personalizedDynamicGenerator.configsList.length : 0)
                                 font.pixelSize: 10
                                 color: "#94a3b8"
@@ -371,8 +370,8 @@ Rectangle {
 
                             Text {
                                 text: root.personalizedParametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      strategyService.tr('strategyCreation.parameterValidationPassed') :
+                                      strategyService.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                                 color: root.personalizedParametersValid ? "#10b981" : "#ef4444"
@@ -1357,7 +1356,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRange')
+                                        text: strategyService.tr('strategyCreation.parameterOptimizationRange')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1365,7 +1364,7 @@ Rectangle {
                                     ComboBox {
                                         id: parameterOptimizationRangeCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRangeOptions')
+                                        model: strategyService.tr('strategyCreation.parameterOptimizationRangeOptions')
                                         currentIndex: 1
                                         
                                         background: Rectangle {
@@ -1392,7 +1391,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysis')
+                                        text: strategyService.tr('strategyCreation.sensitivityAnalysis')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1400,7 +1399,7 @@ Rectangle {
                                     ComboBox {
                                         id: sensitivityAnalysisCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysisOptions')
+                                        model: strategyService.tr('strategyCreation.sensitivityAnalysisOptions')
                                         currentIndex: 1
                                         
                                         background: Rectangle {
@@ -1427,7 +1426,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraints')
+                                        text: strategyService.tr('strategyCreation.parameterConstraints')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1435,7 +1434,7 @@ Rectangle {
                                     ComboBox {
                                         id: parameterConstraintsCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraintOptions')
+                                        model: strategyService.tr('strategyCreation.parameterConstraintOptions')
                                         currentIndex: 0
                                         
                                         background: Rectangle {
@@ -1462,7 +1461,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethod')
+                                        text: strategyService.tr('strategyCreation.parameterInitializationMethod')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1470,7 +1469,7 @@ Rectangle {
                                     ComboBox {
                                         id: parameterInitializationMethodCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethods')
+                                        model: strategyService.tr('strategyCreation.parameterInitializationMethods')
                                         currentIndex: 0
                                         
                                         background: Rectangle {
@@ -1498,7 +1497,7 @@ Rectangle {
                                 spacing: 6
                                 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScript')
+                                    text: strategyService.tr('strategyCreation.customParameterScript')
                                     font.pixelSize: 12
                                     color: "#cbd5e1"
                                 }
@@ -1507,7 +1506,7 @@ Rectangle {
                                     id: customParameterScriptTextArea
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 70
-                                    placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScriptPlaceholder')
+                                    placeholderText: strategyService.tr('strategyCreation.customParameterScriptPlaceholder')
                                     wrapMode: Text.WordWrap
                                     
                                     background: Rectangle {
@@ -1630,7 +1629,7 @@ Rectangle {
                                             Text {
                                                 id: phaseText
                                                 anchors.centerIn: parent
-                                                text: PreviewUtils.phaseDisplayName(modelData.stageId, "short")
+                                                text: PreviewstrategyService.phaseDisplayName(modelData.stageId, "short")
                                                 font.pixelSize: 11
                                                 color: "#cbd5e1"
                                             }
@@ -1713,8 +1712,8 @@ Rectangle {
                                                         property var stageData: groupPreviewCard.stageData
                                                         property var groupData: groupPreviewCard.modelData
                                                         property var bindingData: root.ruleComposerPreviewBinding(stageData, groupData, modelData)
-                                                        property var insight: PreviewUtils.getTemplateInsight(bindingData)
-                                                        property bool secondaryCollapsible: PreviewUtils.normalizePhaseKey(bindingData.stageId) === "market"
+                                                        property var insight: PreviewstrategyService.getTemplateInsight(bindingData)
+                                                        property bool secondaryCollapsible: PreviewstrategyService.normalizePhaseKey(bindingData.stageId) === "market"
                                                         property bool secondaryExpanded: !secondaryCollapsible
                                                         Layout.fillWidth: true
                                                         radius: 8
@@ -1744,7 +1743,7 @@ Rectangle {
                                                                     Text {
                                                                         id: rulePhaseText
                                                                         anchors.centerIn: parent
-                                                                        text: PreviewUtils.phaseDisplayName(bindingData.stageId, "short")
+                                                                        text: PreviewstrategyService.phaseDisplayName(bindingData.stageId, "short")
                                                                         font.pixelSize: 11
                                                                         color: "#cbd5e1"
                                                                     }
@@ -1826,7 +1825,7 @@ Rectangle {
 
                                                                     Text {
                                                                         Layout.fillWidth: true
-                                                                        text: PreviewUtils.insightSectionTitle(bindingData.stageId, true)
+                                                                        text: PreviewstrategyService.insightSectionTitle(bindingData.stageId, true)
                                                                         font.pixelSize: 12
                                                                         font.weight: Font.DemiBold
                                                                         color: "#f8fafc"
@@ -1848,14 +1847,14 @@ Rectangle {
 
                                                                             Text {
                                                                                 Layout.fillWidth: true
-                                                                                text: PreviewUtils.insightPrimaryTitle(insight)
+                                                                                text: PreviewstrategyService.insightPrimaryTitle(insight)
                                                                                 font.pixelSize: 11
                                                                                 font.weight: Font.Medium
                                                                                 color: "#fdba74"
                                                                             }
 
                                                                             Repeater {
-                                                                                model: PreviewUtils.insightPrimaryItems(insight)
+                                                                                model: PreviewstrategyService.insightPrimaryItems(insight)
 
                                                                                 delegate: Text {
                                                                                     Layout.fillWidth: true
@@ -1893,7 +1892,7 @@ Rectangle {
 
                                                                                     Text {
                                                                                         Layout.fillWidth: true
-                                                                                        text: PreviewUtils.insightSecondaryTitle(insight)
+                                                                                        text: PreviewstrategyService.insightSecondaryTitle(insight)
                                                                                         font.pixelSize: 11
                                                                                         font.weight: Font.Medium
                                                                                         color: "#7dd3fc"
@@ -1922,7 +1921,7 @@ Rectangle {
                                                                                 spacing: 4
 
                                                                                 Repeater {
-                                                                                    model: PreviewUtils.insightSecondaryItems(insight)
+                                                                                    model: PreviewstrategyService.insightSecondaryItems(insight)
 
                                                                                     delegate: Text {
                                                                                         Layout.fillWidth: true
@@ -1976,8 +1975,8 @@ Rectangle {
         var source = Array.isArray(paramConfigs) ? paramConfigs : []
         var common = []
         var personalized = []
-        var commonCategory = Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
-        var personalizedCategory = Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+        var commonCategory = strategyService.tr('strategyCreation.commonParameters')
+        var personalizedCategory = strategyService.tr('strategyCreation.personalizedParameters')
 
         for (var index = 0; index < source.length; ++index) {
             var config = source[index]
@@ -2422,7 +2421,7 @@ Rectangle {
         }
 
         try {
-            var builtProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            var builtProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
             return isPlainObject(builtProfile) ? builtProfile : ({})
         } catch (error) {
             console.warn("buildDefaultStrategyProfile failed:", error)
@@ -2432,7 +2431,7 @@ Rectangle {
 
     function safeBuildDefaultRuleComposerSkeleton(profile, bindings) {
         try {
-            var stages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, bindings || [])
+            var stages = strategyService.buildDefaultRuleComposerSkeleton(profile, bindings || [])
             return Array.isArray(stages) ? stages : []
         } catch (error) {
             return []
@@ -2441,7 +2440,7 @@ Rectangle {
 
     function safeBuildDefaultMarketRuleBindings(profile) {
         try {
-            var entries = Utils.StrategyCreationUtils.buildDefaultMarketRuleBindings(profile)
+            var entries = strategyService.buildDefaultMarketRuleBindings(profile)
             return Array.isArray(entries) ? entries : []
         } catch (error) {
             return []
@@ -2450,7 +2449,7 @@ Rectangle {
 
     function safeBuildDefaultBaseRuleBindings(profile) {
         try {
-            var entries = Utils.StrategyCreationUtils.buildDefaultBaseRuleBindings(profile)
+            var entries = strategyService.buildDefaultBaseRuleBindings(profile)
             return Array.isArray(entries) ? entries : []
         } catch (error) {
             return []
@@ -2889,7 +2888,7 @@ Rectangle {
         if (directFileName) {
             return directFileName
         }
-        return Utils.StrategyCreationUtils.resolveRuleTemplateFileName(
+        return strategyService.resolveRuleTemplateFileName(
             ruleLike && (ruleLike.templateId || "")
         )
     }
@@ -3067,7 +3066,7 @@ Rectangle {
     }
 
     function refreshRuleComposerValidation() {
-        root.ruleComposerValidation = Utils.StrategyCreationUtils.validateRuleComposerConfiguration(
+        root.ruleComposerValidation = strategyService.validateRuleComposerConfiguration(
             root.strategyProfile,
             root.ruleComposerStages)
         return root.ruleComposerValidation
@@ -3167,7 +3166,7 @@ Rectangle {
             return "signal"
         }
 
-        var normalized = PreviewUtils.normalizePhaseKey(rawPhase)
+        var normalized = PreviewstrategyService.normalizePhaseKey(rawPhase)
         var validPhases = {
             market: true,
             eligibility: true,
@@ -3831,57 +3830,57 @@ Rectangle {
         assignIfPresent("weightScheme", ["weightScheme"], Number)
         assignIfPresent("rebalanceFrequency", ["rebalanceFrequency"], Number)
 
-        if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.DoubleMovingAverage) {
+        if (normalizedStrategyTypeIndex === 0) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
             assignIfPresent("slowPeriod", ["slowPeriod"], Number)
             assignIfPresent("priceField", ["priceField"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TurtleBreakout) {
+        } else if (normalizedStrategyTypeIndex === 1) {
             assignIfPresent("channelPeriod", ["channelPeriod"], Number)
             assignIfPresent("breakoutMultiplier", ["breakoutMultiplier"], Number)
             assignIfPresent("atrPeriod", ["atrPeriod"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.BollingerBandMeanReversion) {
+        } else if (normalizedStrategyTypeIndex === 2) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("standardDeviationMultiplier", ["standardDeviationMultiplier"], Number)
             assignIfPresent("entryThreshold", ["entryThreshold"], Number)
             assignIfPresent("exitThreshold", ["exitThreshold"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RsiMeanReversion) {
+        } else if (normalizedStrategyTypeIndex === 3) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactorSelection || normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor) {
+        } else if (normalizedStrategyTypeIndex === 4Selection || normalizedStrategyTypeIndex === 4) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.EarningsSurprise) {
+        } else if (normalizedStrategyTypeIndex === 5) {
             assignIfPresent("surpriseThreshold", ["surpriseThreshold"], Number)
             assignIfPresent("holdDays", ["holdDays"], Number)
             assignIfPresent("eventSources", ["eventSources"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.StatisticalPairTrading) {
+        } else if (normalizedStrategyTypeIndex === 6) {
             assignIfPresent("tradingPair", ["tradingPair"])
             assignIfPresent("hedgeRatio", ["hedgeRatio"], Number)
             assignIfPresent("lookback", ["lookback"], Number)
             assignIfPresent("entryZScore", ["entryZScore"], Number)
             assignIfPresent("exitZScore", ["exitZScore"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RiskParityAllocation) {
+        } else if (normalizedStrategyTypeIndex === 7) {
             assignIfPresent("assets", ["assets"])
             assignIfPresent("volatilityLookback", ["volatilityLookback"], Number)
             assignIfPresent("targetVolatility", ["targetVolatility"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearningSelection) {
+        } else if (normalizedStrategyTypeIndex === 8) {
             assignIfPresent("modelId", ["modelId"], Number)
             assignIfPresent("featureIds", ["featureIds"])
             assignIfPresent("topN", ["topN"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.OrderFlowImbalance) {
+        } else if (normalizedStrategyTypeIndex === 9) {
             assignIfPresent("depthLevels", ["depthLevels"], Number)
             assignIfPresent("imbalanceThreshold", ["imbalanceThreshold"], Number)
             assignIfPresent("maxHoldSeconds", ["maxHoldSeconds"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.VolatilitySpread) {
+        } else if (normalizedStrategyTypeIndex === 10) {
             assignIfPresent("underlying", ["underlying"])
             assignIfPresent("optionChainFilter", ["optionChainFilter"])
             assignIfPresent("historicalVolatilityWindow", ["historicalVolatilityWindow"], Number)
             assignIfPresent("entrySpreadUpper", ["entrySpreadUpper"], Number)
             assignIfPresent("entrySpreadLower", ["entrySpreadLower"], Number)
             assignIfPresent("deltaNeutral", ["deltaNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Custom) {
+        } else if (normalizedStrategyTypeIndex === 9) {
             assignIfPresent("customCode", ["customCode"])
         }
 
@@ -4008,7 +4007,7 @@ Rectangle {
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
         root.forbidDefaultRuleBuildInEdit = false
-        root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         root.factorOverlay = defaultFactorOverlay()
         rebuildRuleComposerState(false)
         root.strategyParameters = decorateParameters({})
@@ -4033,7 +4032,7 @@ Rectangle {
         paramComponents.registerAllComponents()
 
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         if (!Array.isArray(root.ruleComposerStages) || root.ruleComposerStages.length === 0) {

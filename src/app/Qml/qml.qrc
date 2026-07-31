@@ -201,7 +201,6 @@
         <file>utils/TradingConstants.js</file>
 
 
-        <file>utils/StrategyCreationUtils.js</file>
         <file>components/Base/qmldir</file>
     </qresource>
 </RCC>

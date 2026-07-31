@@ -4,7 +4,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../../utils/StrategyCreationUtils.js" as Utils
+
 
 Rectangle {
     id: root
@@ -24,26 +24,26 @@ Rectangle {
     property bool descriptionRecentlyUpdated: false
     property bool tagsRecentlyUpdated: false
     readonly property var assetTypeIndexOptions: [
-        Utils.StrategyCreationUtils.AssetTypeIndex.Stock,
-        Utils.StrategyCreationUtils.AssetTypeIndex.Futures,
-        Utils.StrategyCreationUtils.AssetTypeIndex.Options,
-        Utils.StrategyCreationUtils.AssetTypeIndex.Etf,
-        Utils.StrategyCreationUtils.AssetTypeIndex.Index,
-        Utils.StrategyCreationUtils.AssetTypeIndex.MultiAsset
+        1,
+        2,
+        3,
+        4,
+        5,
+        6
     ]
     readonly property var timeFrameIndexOptions: [
-        Utils.StrategyCreationUtils.TimeFrameIndex.OneMinute,
-        Utils.StrategyCreationUtils.TimeFrameIndex.FiveMinutes,
-        Utils.StrategyCreationUtils.TimeFrameIndex.FifteenMinutes,
-        Utils.StrategyCreationUtils.TimeFrameIndex.OneHour,
-        Utils.StrategyCreationUtils.TimeFrameIndex.Daily,
-        Utils.StrategyCreationUtils.TimeFrameIndex.Weekly
+        2,
+        3,
+        4,
+        6,
+        7,
+        8
     ]
     readonly property var riskLevelIndexOptions: [
-        Utils.StrategyCreationUtils.RiskLevelIndex.Low,
-        Utils.StrategyCreationUtils.RiskLevelIndex.Medium,
-        Utils.StrategyCreationUtils.RiskLevelIndex.High,
-        Utils.StrategyCreationUtils.RiskLevelIndex.Aggressive
+        1,
+        2,
+        3,
+        4
     ]
 
     // 信号
@@ -83,7 +83,7 @@ Rectangle {
             spacing: 12
 
             Text {
-                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyBasicInfo')
+                text: Bridge.StrategyBridge.tr('strategyCreation.strategyBasicInfo')
                 font.pixelSize: 16
                 font.weight: Font.Medium
                 color: "#f1f5f9"
@@ -122,7 +122,7 @@ Rectangle {
                             spacing: 5
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyName')
+                                text: Bridge.StrategyBridge.tr('strategyCreation.strategyName')
                                 font.pixelSize: 14
                                 font.weight: Font.Medium
                                 color: "#f1f5f9"
@@ -131,7 +131,7 @@ Rectangle {
                             TextField {
                                 id: strategyNameField
                                 Layout.fillWidth: true
-                                placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.strategyNamePlaceholder')
+                                placeholderText: Bridge.StrategyBridge.tr('strategyCreation.strategyNamePlaceholder')
                                 text: ""
 
                                 property bool hasError: false
@@ -178,7 +178,7 @@ Rectangle {
 
                             Text {
                                 visible: strategyNameField.hasError && strategyNameField.text.trim() === ""
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyNameError')
+                                text: Bridge.StrategyBridge.tr('strategyCreation.strategyNameError')
                                 font.pixelSize: 12
                                 color: "#ef4444"
                                 Layout.fillWidth: true
@@ -195,7 +195,7 @@ Rectangle {
                                 spacing: 8
 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyDescription')
+                                    text: Bridge.StrategyBridge.tr('strategyCreation.strategyDescription')
                                     font.pixelSize: 14
                                     font.weight: Font.Medium
                                     color: "#f1f5f9"
@@ -227,7 +227,7 @@ Rectangle {
                                 id: strategyDescField
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 92
-                                placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.strategyDescriptionPlaceholder')
+                                placeholderText: Bridge.StrategyBridge.tr('strategyCreation.strategyDescriptionPlaceholder')
                                 text: ""
                                 wrapMode: Text.WordWrap
 
@@ -286,7 +286,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.assetType')
+                                    text: Bridge.StrategyBridge.tr('strategyCreation.assetType')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -294,7 +294,7 @@ Rectangle {
                                 ComboBox {
                                     id: assetTypeCombo
                                     Layout.fillWidth: true
-                                    model: Utils.StrategyCreationUtils.tr('strategyCreation.assetTypes')
+                                    model: Bridge.StrategyBridge.tr('strategyCreation.assetTypes')
                                     currentIndex: 0
 
                                     background: Rectangle {
@@ -320,7 +320,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.timeFrame')
+                                    text: Bridge.StrategyBridge.tr('strategyCreation.timeFrame')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -328,7 +328,7 @@ Rectangle {
                                 ComboBox {
                                     id: timeFrameCombo
                                     Layout.fillWidth: true
-                                    model: Utils.StrategyCreationUtils.tr('strategyCreation.timeFrames')
+                                    model: Bridge.StrategyBridge.tr('strategyCreation.timeFrames')
                                     currentIndex: 4
 
                                     background: Rectangle {
@@ -354,7 +354,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.riskLevel')
+                                    text: Bridge.StrategyBridge.tr('strategyCreation.riskLevel')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -363,10 +363,10 @@ Rectangle {
                                     id: riskLevelCombo
                                     Layout.fillWidth: true
                                     model: [
-                                        Utils.StrategyCreationUtils.getRiskLevelName("low"),
-                                        Utils.StrategyCreationUtils.getRiskLevelName("medium"),
-                                        Utils.StrategyCreationUtils.getRiskLevelName("high"),
-                                        Utils.StrategyCreationUtils.getRiskLevelName("aggressive")
+                                        Bridge.StrategyBridge.riskLevelName("low"),
+                                        Bridge.StrategyBridge.riskLevelName("medium"),
+                                        Bridge.StrategyBridge.riskLevelName("high"),
+                                        Bridge.StrategyBridge.riskLevelName("aggressive")
                                     ]
                                     currentIndex: 1
 
@@ -393,7 +393,7 @@ Rectangle {
                                 spacing: 5
 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethod')
+                                    text: Bridge.StrategyBridge.tr('strategyCreation.optimizationMethod')
                                     font.pixelSize: 13
                                     color: "#cbd5e1"
                                 }
@@ -401,7 +401,7 @@ Rectangle {
                                 ComboBox {
                                     id: optimizationCombo
                                     Layout.fillWidth: true
-                                    model: Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethods')
+                                    model: Bridge.StrategyBridge.tr('strategyCreation.optimizationMethods')
                                     currentIndex: 0
 
                                     background: Rectangle {
@@ -444,7 +444,7 @@ Rectangle {
                             spacing: 8
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.tags')
+                                text: Bridge.StrategyBridge.tr('strategyCreation.tags')
                                 font.pixelSize: 14
                                 font.weight: Font.Medium
                                 color: "#f1f5f9"
@@ -475,7 +475,7 @@ Rectangle {
                         TextField {
                             id: tagsField
                             Layout.fillWidth: true
-                            placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.tagsPlaceholder')
+                            placeholderText: Bridge.StrategyBridge.tr('strategyCreation.tagsPlaceholder')
                             onEditingFinished: {
                                 var tags = tagsField.text.split(',').map(function(tag) {
                                     return tag.trim();
@@ -648,7 +648,7 @@ Rectangle {
 
         return mergeTags(
             getTagsList(),
-            [termName, Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)]
+            [termName, Bridge.StrategyBridge.strategyTypeName(root.selectedStrategyTypeIndex)]
                 .concat(recommendedActions)
                 .concat(matchedAliases)
         )
@@ -690,8 +690,8 @@ Rectangle {
     }
 
     function applyStrategyTypeDefaults(strategyTypeIndex, forceOverwrite) {
-        var defaultDescription = Utils.StrategyCreationUtils.getDefaultStrategyDescription(strategyTypeIndex)
-        var defaultTags = Utils.StrategyCreationUtils.getDefaultStrategyTags(strategyTypeIndex)
+        var defaultDescription = Bridge.StrategyBridge.strategyTypeBrief(strategyTypeIndex)
+        var defaultTags = Bridge.StrategyBridge.defaultStrategyTags(strategyTypeIndex)
         var defaultTagsText = defaultTags.join(', ')
 
         if (forceOverwrite || strategyDescField.text.trim() === "" || strategyDescField.text === lastAutoDescription) {
@@ -721,20 +721,20 @@ Rectangle {
     }
 
     function getAssetTypeIndex() {
-        return assetTypeIndexOptions[assetTypeCombo.currentIndex] || Utils.StrategyCreationUtils.AssetTypeIndex.Invalid
+        return assetTypeIndexOptions[assetTypeCombo.currentIndex] || 0
     }
     
     function getTimeFrameIndex() {
-        return timeFrameIndexOptions[timeFrameCombo.currentIndex] || Utils.StrategyCreationUtils.TimeFrameIndex.Invalid
+        return timeFrameIndexOptions[timeFrameCombo.currentIndex] || 0
     }
     
     function getRiskLevelIndex() {
-        return riskLevelIndexOptions[riskLevelCombo.currentIndex] || Utils.StrategyCreationUtils.RiskLevelIndex.Invalid
+        return riskLevelIndexOptions[riskLevelCombo.currentIndex] || 0
     }
     
     // 获取优化方法值
     function getOptimizationMethodValue() {
-        var values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
+        var values = Bridge.StrategyBridge.tr('strategyCreation.optimizationMethodValues')
         return values[optimizationCombo.currentIndex] || "genetic"
     }
     
@@ -757,7 +757,7 @@ Rectangle {
 
         riskLevelCombo.currentIndex = Math.max(0, riskLevelIndexOptions.indexOf(Number(strategyData.riskLevelIndex)))
 
-        var values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
+        var values = Bridge.StrategyBridge.tr('strategyCreation.optimizationMethodValues')
         optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || "genetic"))
 
         var tags = strategyData.tags || []

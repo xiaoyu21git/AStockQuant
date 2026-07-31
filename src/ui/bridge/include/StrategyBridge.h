@@ -98,6 +98,31 @@ public:
     Q_INVOKABLE QVariantMap buildCompleteStrategyData(const QVariantMap& context) const;
     /// @brief 重置表单数据默认值 (替代 JS resetFormData)
     Q_INVOKABLE QVariantMap resetFormData() const;
+    /// @brief 默认策略描述 (替代 JS getDefaultStrategyDescription)
+    Q_INVOKABLE QString defaultStrategyDescription(int typeIndex) const;
+    /// @brief 默认策略标签 (替代 JS getDefaultStrategyTags)
+    Q_INVOKABLE QStringList defaultStrategyTags(int typeIndex) const;
+
+    // ── 规则编辑器 (替代 JS rule composer) ──
+    Q_INVOKABLE QVariantMap buildDefaultStrategyProfile(int typeIndex) const;
+    Q_INVOKABLE QVariantList buildDefaultBaseRuleBindings(const QVariantMap& profile) const;
+    Q_INVOKABLE QVariantList buildDefaultMarketRuleBindings(const QVariantMap& profile) const;
+    Q_INVOKABLE QVariantList buildDefaultRuleComposerSkeleton(const QVariantMap& profile, const QVariantList& bindings) const;
+    Q_INVOKABLE QVariantMap validateRuleComposerConfiguration(const QVariantMap& profile, const QVariantList& stages) const;
+    Q_INVOKABLE QString resolveRuleTemplateFileName(const QString& templateId) const;
+
+    // ── 模板洞察 (替代 JS template insight) ──
+    Q_INVOKABLE QString getTemplateInsight(const QVariantMap& rule) const;
+    Q_INVOKABLE QString insightSectionTitle(const QString& phaseKey) const;
+    Q_INVOKABLE QString insightPrimaryTitle(const QString& phaseKey) const;
+    Q_INVOKABLE QVariantList insightPrimaryItems(const QVariantMap& rule) const;
+    Q_INVOKABLE QString insightSecondaryTitle(const QString& phaseKey) const;
+    Q_INVOKABLE QVariantList insightSecondaryItems(const QVariantMap& rule) const;
+    Q_INVOKABLE QString normalizePhaseKey(const QString& raw) const;
+    Q_INVOKABLE QString phaseDisplayName(const QString& phaseKey) const;
+
+    // ── 翻译 (替代 JS tr) ──
+    Q_INVOKABLE QString tr(const QString& key, const QString& language = QString()) const;
 
     /// @brief C++ 内部获取单例，供 backtest bridge 等内部组件使用
     static StrategyBridge* instance();

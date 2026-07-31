@@ -7,7 +7,7 @@ import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import Qt5Compat.GraphicalEffects
 import AStock.Bridge 1.0 as Bridge  // 导入C++桥接模块
-import "../../utils/StrategyCreationUtils.js" as Utils
+
 import "../../components/Strategy/Creation" as StrategyComponents
 
 Page {
@@ -337,21 +337,21 @@ Page {
                                         }
 
                                         Text {
-                                            text: "资产类型: " + Utils.StrategyCreationUtils.getAssetTypeNameFromIndex(strategyBasicInfo.getAssetTypeIndex())
+                                            text: "资产类型: " + strategyService.strategyTypeName(strategyBasicInfo.getAssetTypeIndex())
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "时间周期: " + Utils.StrategyCreationUtils.getTimeFrameNameFromIndex(strategyBasicInfo.getTimeFrameIndex())
+                                            text: "时间周期: " + strategyService.strategyTypeName(strategyBasicInfo.getTimeFrameIndex())
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "风险等级: " + Utils.StrategyCreationUtils.getRiskLevelNameFromIndex(strategyBasicInfo.getRiskLevelIndex())
+                                            text: "风险等级: " + strategyService.riskLevelName(strategyBasicInfo.getRiskLevelIndex())
                                             font.pixelSize: 13
-                                            color: Utils.StrategyCreationUtils.getRiskLevelColorFromIndex(strategyBasicInfo.getRiskLevelIndex())
+                                            color: strategyService.riskLevelColor(strategyBasicInfo.getRiskLevelIndex())
                                         }
 
                                         Text {
@@ -696,7 +696,7 @@ Page {
                     id: cancelButton
                     Layout.preferredWidth: 100
                     Layout.preferredHeight: 40
-                    text: Utils.StrategyCreationUtils.tr('common.cancel')
+                    text: strategyService.tr('common.cancel')
                     onClicked: {
                         root.backClicked()
                     }
@@ -747,8 +747,8 @@ Page {
                         
                         Text {
                             text: stepIndicator.currentStepValid ? 
-                                  Utils.StrategyCreationUtils.tr('strategyCreation.validationPassed') : 
-                                  Utils.StrategyCreationUtils.tr('strategyCreation.validationRequired')
+                                  strategyService.tr('strategyCreation.validationPassed') : 
+                                  strategyService.tr('strategyCreation.validationRequired')
                             font.pixelSize: 13
                             color: stepIndicator.currentStepValid ? "#10b981" : "#ef4444"
                         }
@@ -762,7 +762,7 @@ Page {
                     id: prevButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: Utils.StrategyCreationUtils.tr('common.previous')
+                    text: strategyService.tr('common.previous')
                     visible: stepIndicator.currentStep > 1
                     enabled: stepIndicator.currentStep > 1
                     onClicked: {
@@ -793,7 +793,7 @@ Page {
                     id: createButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: root.isEditMode ? "保存修改" : Utils.StrategyCreationUtils.tr('strategyCreation.create')
+                    text: root.isEditMode ? "保存修改" : strategyService.tr('strategyCreation.create')
                     visible: stepIndicator.currentStep === 3
                     enabled: stepIndicator.currentStepValid
                     onClicked: {
@@ -822,7 +822,7 @@ Page {
                     id: nextButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: Utils.StrategyCreationUtils.tr('common.next')
+                    text: strategyService.tr('common.next')
                     visible: stepIndicator.currentStep < 3
                     enabled: stepIndicator.currentStepValid
                     onClicked: {
@@ -899,12 +899,12 @@ Page {
         var explicitTypeIndex = Number(strategy && strategy.strategyTypeIndex)
         if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
             var normalizedTypeIndex = strategyService.normalizeStrategyTypeIndex(explicitTypeIndex)
-            if (normalizedTypeIndex !== Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+            if (normalizedTypeIndex !== -1) {
                 return normalizedTypeIndex
             }
         }
 
-        return Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid
+        return -1
     }
 
     function loadStrategyForEdit(strategy) {
@@ -927,7 +927,7 @@ Page {
         }
 
         var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainStrategy)
-        if (frontendTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Invalid) {
+        if (frontendTypeIndex === -1) {
             showErrorDialog("策略缺少合法 strategyTypeIndex，无法继续编辑。")
             return
         }
@@ -1043,7 +1043,7 @@ Page {
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
 
         isCreating = true
-        creationStatus = Utils.StrategyCreationUtils.tr("strategyCreation.strategyCreatedSuccess")
+        creationStatus = strategyService.tr("strategyCreation.strategyCreatedSuccess")
 
         if (!strategyService) {
             console.error("StrategyService 未初始化，无法创建策略")
@@ -1123,7 +1123,7 @@ Page {
         strategyTypeSelector.reset()
         strategyBasicInfo.reset()
         
-        var resetData = Utils.StrategyCreationUtils.resetFormData()
+        var resetData = strategyService.resetFormData()
         
         // 应用重置数据
         selectedStrategyTypeIndex = Number(resetData.selectedStrategyTypeIndex)
