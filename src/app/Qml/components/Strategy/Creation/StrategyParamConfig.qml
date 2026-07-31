@@ -1629,7 +1629,7 @@ Rectangle {
                                             Text {
                                                 id: phaseText
                                                 anchors.centerIn: parent
-                                                text: PreviewstrategyService.phaseDisplayName(modelData.stageId, "short")
+                                                text: PreviewUtils.phaseDisplayName(modelData.stageId, "short")
                                                 font.pixelSize: 11
                                                 color: "#cbd5e1"
                                             }
@@ -1712,8 +1712,8 @@ Rectangle {
                                                         property var stageData: groupPreviewCard.stageData
                                                         property var groupData: groupPreviewCard.modelData
                                                         property var bindingData: root.ruleComposerPreviewBinding(stageData, groupData, modelData)
-                                                        property var insight: PreviewstrategyService.getTemplateInsight(bindingData)
-                                                        property bool secondaryCollapsible: PreviewstrategyService.normalizePhaseKey(bindingData.stageId) === "market"
+                                                        property var insight: PreviewUtils.getTemplateInsight(bindingData)
+                                                        property bool secondaryCollapsible: PreviewUtils.normalizePhaseKey(bindingData.stageId) === "market"
                                                         property bool secondaryExpanded: !secondaryCollapsible
                                                         Layout.fillWidth: true
                                                         radius: 8
@@ -1743,7 +1743,7 @@ Rectangle {
                                                                     Text {
                                                                         id: rulePhaseText
                                                                         anchors.centerIn: parent
-                                                                        text: PreviewstrategyService.phaseDisplayName(bindingData.stageId, "short")
+                                                                        text: PreviewUtils.phaseDisplayName(bindingData.stageId, "short")
                                                                         font.pixelSize: 11
                                                                         color: "#cbd5e1"
                                                                     }
@@ -1825,7 +1825,7 @@ Rectangle {
 
                                                                     Text {
                                                                         Layout.fillWidth: true
-                                                                        text: PreviewstrategyService.insightSectionTitle(bindingData.stageId, true)
+                                                                        text: PreviewUtils.insightSectionTitle(bindingData.stageId, true)
                                                                         font.pixelSize: 12
                                                                         font.weight: Font.DemiBold
                                                                         color: "#f8fafc"
@@ -1847,14 +1847,14 @@ Rectangle {
 
                                                                             Text {
                                                                                 Layout.fillWidth: true
-                                                                                text: PreviewstrategyService.insightPrimaryTitle(insight)
+                                                                                text: PreviewUtils.insightPrimaryTitle(insight)
                                                                                 font.pixelSize: 11
                                                                                 font.weight: Font.Medium
                                                                                 color: "#fdba74"
                                                                             }
 
                                                                             Repeater {
-                                                                                model: PreviewstrategyService.insightPrimaryItems(insight)
+                                                                                model: PreviewUtils.insightPrimaryItems(insight)
 
                                                                                 delegate: Text {
                                                                                     Layout.fillWidth: true
@@ -1892,7 +1892,7 @@ Rectangle {
 
                                                                                     Text {
                                                                                         Layout.fillWidth: true
-                                                                                        text: PreviewstrategyService.insightSecondaryTitle(insight)
+                                                                                        text: PreviewUtils.insightSecondaryTitle(insight)
                                                                                         font.pixelSize: 11
                                                                                         font.weight: Font.Medium
                                                                                         color: "#7dd3fc"
@@ -1921,7 +1921,7 @@ Rectangle {
                                                                                 spacing: 4
 
                                                                                 Repeater {
-                                                                                    model: PreviewstrategyService.insightSecondaryItems(insight)
+                                                                                    model: PreviewUtils.insightSecondaryItems(insight)
 
                                                                                     delegate: Text {
                                                                                         Layout.fillWidth: true
@@ -3166,7 +3166,7 @@ Rectangle {
             return "signal"
         }
 
-        var normalized = PreviewstrategyService.normalizePhaseKey(rawPhase)
+        var normalized = PreviewUtils.normalizePhaseKey(rawPhase)
         var validPhases = {
             market: true,
             eligibility: true,
