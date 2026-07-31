@@ -1756,7 +1756,7 @@ Rectangle {
                     }
                     if (typeof item.strategyId !== "undefined") {
                         item.strategyId = strategyLibraryPage.selectedStrategyId
-                        item.strategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                        item.strategyName = strategyLibraryPage.backtestResult.strategyName || strategyLibraryPage.selectedStrategyName || ""
                     }
                     if (typeof item.backtestResult !== "undefined") {
                         item.backtestResult = strategyLibraryPage.backtestResult

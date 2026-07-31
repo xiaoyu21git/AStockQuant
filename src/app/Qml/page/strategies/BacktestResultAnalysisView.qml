@@ -171,7 +171,7 @@ Item {
     ColumnLayout { id: content; width: parent.width; spacing:10
 
         RowLayout { Layout.fillWidth: true
-            Text{text:"回测分析 · "+(strategyName||strategyId||"");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
+            Text{text:"回测分析 · "+(backtestResult&&backtestResult.strategyName?backtestResult.strategyName:strategyName||strategyId||"");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
             Item{Layout.fillWidth:true}
             Rectangle{width:55;height:24;radius:4;color:"#475569";Text{anchors.centerIn:parent;text:"返回";font.pixelSize:10;color:"#F1F5F9"}MouseArea{anchors.fill:parent;onClicked:backToWorkbench()}}}
 
