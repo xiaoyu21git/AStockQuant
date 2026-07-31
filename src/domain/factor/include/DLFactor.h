@@ -14,8 +14,8 @@ public:
         DLModelType modelType{DLModelType::LSTM};
         int hiddenLayers = 3;
         int hiddenUnits = 128;
-        int featureCount = 64;
-        int predictionHorizon = 5;         // 预测未来N日收益
+        int featureCount = 12;  // 与 train.py FEATURE_FIELDS 对齐
+        int predictionHorizon = 5;         // 预测未来N日收益，必须与回测 forwardDays 一致
         double learningRate = 0.001;
         int batchSize = 512;
         int epochs = 100;

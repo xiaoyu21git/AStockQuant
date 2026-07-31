@@ -1,6 +1,6 @@
-# AI 因子与 AI 策略 需求文档 v1.2
+# AI 因子与 AI 策略 需求文档 v1.3
 
-> 基于项目已有代码架构分析 | 三轮评审通过 | 后续版本规划，当前不实施
+> 基于项目已有代码架构分析 | 三轮评审通过 | P0 推理引擎已实现 (2026-07-28)
 
 ---
 
@@ -212,4 +212,118 @@ endif()
 - [x] ONNX Runtime 默认 ON，检测不到编译告警
 - [x] 训练数据首期直接读 Parquet
 
-> 三轮评审通过，编码前确认全部闭环。后续可随时启动 P0 实施。
+> 三轮评审通过，编码前确认全部闭环。P0 推理引擎已于 2026-07-28 实现。
+
+---
+
+## 七、P0 实施状态 (2026-07-28)
+
+| 模块 | 文件 | 状态 |
+|------|------|------|
+| IModelInference | `include/factor_compute/IModelInference.h` | ✅ 已实现 |
+| OnnxInference | `src/factor_compute/OnnxInference.cpp` | ✅ 已实现 |
+| FeatureTensorBuilder | `src/factor_compute/FeatureTensorBuilder.cpp` | ✅ 已实现 |
+| DLFactor::calculate() | `src/DLFactor.cpp` | ✅ 推理通路完成 |
+| train.py | `astock_engine/ai/train.py` | ✅ 可用 (CPU) |
+| 测试 ONNX 模型 | `models/dl_test.onnx` | ✅ C++ 推理验证通过 |
+| 80只训练模型 | `models/dl_v1/model.onnx` | ✅ IC 0.083 |
+| 500只训练模型 | `models/dl_v2/` | 🔄 训练中 (IC 0.053+) |
+| 特征配置对齐 | `feature_config.json` | 🔄 training/inference 特征数未对齐 |
+
+---
+
+## 八、AI 因子能力升级路线图
+
+> 目标维度: 准确性 / 稳定性 / 收益能力 / 抗风险 / 易用性
+
+### 第一阶段: 数据基础 (准确性和稳定性基础)
+
+**目标**: IC > 0.08, 样本外 IC 衰减 < 20%
+
+| 改进项 | 内容 | 预期收益 |
+|--------|------|---------|
+| 特征扩维 | 4 → 12+：加 pe_ratio, pb_ratio, roe, amplitude, volume_ratio, index_return, industry_code | IC +0.02~0.04 |
+| 标签优化 | fwd_return → fwd_rank (截面排序) | 信号稳定性 +30% |
+| 样本外验证 | 训练 2020-2023 / 验证 2024-2026 | 真实评估标准 |
+| 缺失值处理 | ffill → 自适应 (ffill + 大盘均值兜底) | 减少无效样本 |
+| 极端值过滤 | 双侧 1% winsorize | IC 方差收窄 |
+
+### 第二阶段: 模型升级 (准确性提升)
+
+**目标**: IC > 0.10
+
+| 改进项 | 内容 | 预期收益 |
+|--------|------|---------|
+| 全市场训练 | 500 → 5741 只股票，GPU 训练 | 泛化能力 |
+| 市场环境特征 | 大盘波动率、涨跌比、行业相对强弱 | 风格感知 |
+| 多尺度输入 | 5日 + 20日 + 60日三个时间尺度 | 短中长期兼顾 |
+| 多任务学习 | 同时预测 1/5/20 日收益 | 多周期信号融合 |
+| 注意力机制 | LSTM → Transformer (仅长序列 60+) | IC +0.01~0.02 |
+
+### 第三阶段: 自我纠错与风控 (抗风险)
+
+**目标**: 信号衰减自动恢复, 最大回撤 < 25%
+
+| 改进项 | 内容 | 触发条件 |
+|--------|------|---------|
+| 滚动 IC 监控 | 每周计算最近 60 天 IC | IC < 0.03 → 告警 |
+| 自动再训练 | 检测衰减 → 触发增量训练 → 覆盖 ONNX | IC 跌破阈值 |
+| 模型回滚 | 保留最近 3 个模型版本 | 新模型 IC 不如旧 |
+| 特征漂移检测 | KL 散度监控输入分布 | 漂移 > 阈值 → 告警 |
+| 极端行情熔断 | 大盘单日涨跌 > 5% → 暂停 AI 信号 | 波动率暴增 |
+
+### 第四阶段: 策略融合 (收益能力)
+
+**目标**: 多因子组合 IC > 0.12，年化超额 > 15%
+
+| 改进项 | 内容 |
+|--------|------|
+| AI 因子 + 价值因子 | AI 动量 + 估值锚定，互补 |
+| AI 因子 + 质量因子 | AI 趋势 + 基本面过滤 |
+| 动态权重 | 牛市 AI 权重↑、熊市价值权重↑ |
+| 行业中性 | AI 信号按行业去均值，消除行业偏差 |
+| 容量控制 | AI 选股池限制 Top 30%，避免过度拥挤 |
+
+### 第五阶段: 自动化运维 (易用性)
+
+**目标**: 零人工干预闭环
+
+| 改进项 | 内容 |
+|--------|------|
+| 一站式训练 | `python train.py --auto`，自动选特征+调参 |
+| 定时调度 | Windows 任务计划 + 项目内置定时器 |
+| 模型 A/B 测试 | 新模型在模拟盘跑 30 天后再切实盘 |
+| 监控仪表盘 | UI 上实时展示 IC 曲线、特征漂移、模型版本 |
+| 一键回滚 | UI 按钮退回上一模型版本 |
+
+---
+
+## 九、特征设计完整清单
+
+### 价格类
+`close, open, high, low, pre_close, amplitude, change_pct`
+
+### 量价类
+`volume, amount, turnover_rate, volume_ratio`
+
+### 估值类
+`pe_ratio, pb_ratio, market_cap, circulating_market_cap, dividend_yield`
+
+### 质量/财务类
+`roe, roa, profit_margin, gross_margin, debt_to_equity, current_ratio, quick_ratio, revenue_yoy`
+
+### 市场环境类 (缓存已有/可派生)
+`index_return_5d, index_volatility, market_breadth, industry_code`
+
+### 标签设计
+| 标签 | 说明 | 适用场景 |
+|------|------|---------|
+| `fwd_return_5d` | 原始收益率 | 短期择时 |
+| `fwd_return_20d` | 月频收益率 | 组合调仓 |
+| `fwd_rank` | 截面排序 | 横截面选股 |
+| `fwd_excess_vs_industry` | 行业超额 | 行业中性策略 |
+
+---
+
+> 当前 P0 状态: 推理引擎就绪，训练管线可用，500 只训练中。
+> 下一优先: 第一阶段（扩特征 + 改标签 + 样本外验证）→ GPU 全市场训练。

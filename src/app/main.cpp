@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QApplication>
+#include <QDir>
 #include <QIcon>
 #include <QObject>
 #include <iostream>
@@ -102,6 +103,7 @@ int main(int argc, char* argv[])
     QCoreApplication::setOrganizationDomain("astock.com");
     QCoreApplication::setApplicationName("AStockQuantEngine");
     QApplication app(argc, argv);
+    QDir::setCurrent(QCoreApplication::applicationDirPath());  // 工作目录 = exe 目录
     app.setWindowIcon(QIcon(QStringLiteral(":/resources/icons/app.ico")));
 
     AppBootstrap bootstrap;

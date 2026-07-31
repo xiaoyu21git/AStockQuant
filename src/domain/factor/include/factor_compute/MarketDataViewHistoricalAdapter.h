@@ -42,14 +42,16 @@ public:
         const std::string& symbol,
         const std::string& startDate,
         const std::string& endDate,
-        const std::string& field) const override;
+        const std::string& field,
+        bool includeNaN = false) const override;
 
     /// @brief 便捷方法：从 anchorDate 往前取 window 个交易日的数据
     [[nodiscard]] std::vector<factor::HistoricalDataPoint> getSeries(
         const std::string& symbol,
         const std::string& anchorDate,
         int window,
-        const std::string& field) const override;
+        const std::string& field,
+        bool includeNaN = false) const override;
 
     [[nodiscard]] std::vector<std::string> getAvailableSymbols(
         const std::string& date) const override;

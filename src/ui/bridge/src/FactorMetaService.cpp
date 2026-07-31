@@ -1113,7 +1113,13 @@ QList<ParamConfigSpec> dlConfigs()
         buildToggleConfig(QStringLiteral("orthogonalConstraint"),
                           QStringLiteral("正交化"),
                           QStringLiteral("是否剥离风格/行业暴露"),
-                          false, QStringLiteral("是"), QStringLiteral("否"))
+                          false, QStringLiteral("是"), QStringLiteral("否")),
+        buildInputConfig(QStringLiteral("modelPath"),
+                          QStringLiteral("模型路径"),
+                          QStringLiteral("ONNX 模型文件路径 (必填)"),
+                          QStringLiteral("models/dl_v4/model.onnx"),
+                          QStringLiteral("models/dl_v4/model.onnx"),
+                          false, 512, true)
     };
 }
 

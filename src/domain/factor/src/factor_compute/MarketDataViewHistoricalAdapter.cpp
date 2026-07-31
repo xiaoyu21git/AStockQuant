@@ -72,7 +72,7 @@ std::optional<double> CachedMarketDataViewHistoricalAdapter::getValue(
 
 std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::getSeries(
     const std::string& symbol, const std::string& startDate, const std::string& endDate,
-    const std::string& field) const
+    const std::string& field, bool includeNaN) const
 {
     std::vector<factor::HistoricalDataPoint> result;
     int32_t symIdx = findSymbolIndex(symbol);
@@ -92,7 +92,7 @@ std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::
     const int32_t stride = fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount;
     for (int32_t d = startIdx; d <= endIdx; ++d) {
         double val = fv.data[static_cast<size_t>(d) * static_cast<size_t>(stride) + static_cast<size_t>(symIdx)];
-        if (std::isfinite(val))
+        if (includeNaN || std::isfinite(val))
             result.push_back({dates_[static_cast<size_t>(d)], val});
     }
     return result;
@@ -100,12 +100,12 @@ std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::
 
 std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::getSeries(
     const std::string& symbol, const std::string& anchorDate, int window,
-    const std::string& field) const
+    const std::string& field, bool includeNaN) const
 {
     int32_t anchorIdx = findDateIndex(anchorDate);
     if (anchorIdx < 0 || window <= 0) return {};
     int32_t startIdx = std::max(0, anchorIdx - window + 1);
-    return getSeries(symbol, dates_[static_cast<size_t>(startIdx)], anchorDate, field);
+    return getSeries(symbol, dates_[static_cast<size_t>(startIdx)], anchorDate, field, includeNaN);
 }
 
 std::vector<std::string> CachedMarketDataViewHistoricalAdapter::getAvailableSymbols(const std::string&) const

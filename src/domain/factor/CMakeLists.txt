@@ -279,6 +279,8 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/SignalSetBuilder.cpp
     src/factor_compute/FactorEngine.cpp
     src/factor_compute/MarketDataViewHistoricalAdapter.cpp
+    src/factor_compute/OnnxInference.cpp
+    src/factor_compute/FeatureTensorBuilder.cpp
 )
 
 set(FACTOR_COMPUTE_HEADERS
@@ -311,6 +313,8 @@ set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/GroupedBacktestTypes.h
     include/factor_compute/SimulatedTradingExecutor.h
     include/factor_compute/SignalSetBuilder.h
+    include/factor_compute/IModelInference.h
+    include/factor_compute/FeatureTensorBuilder.h
 )
 
 # 创建库 — 合并 factor 和 factor_compute 为统一库 factor
@@ -414,6 +418,46 @@ if(EXISTS "${HF_FACTOR_TEST_SOURCE}")
         add_test(NAME test_high_freq_factor
             COMMAND test_high_freq_factor
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    endif()
+endif()
+
+set(FEAT_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_feature_tensor.cpp")
+if(EXISTS "${FEAT_TEST_SOURCE}")
+    add_executable(test_feature_tensor ${FEAT_TEST_SOURCE})
+    target_link_libraries(test_feature_tensor factor)
+    if(HAS_ONNX_RUNTIME)
+        add_custom_command(TARGET test_feature_tensor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+            "$<TARGET_FILE_DIR:test_feature_tensor>/onnxruntime.dll")
+    endif()
+endif()
+
+set(ONNX_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_onnx_inference.cpp")
+if(HAS_ONNX_RUNTIME AND EXISTS "${ONNX_TEST_SOURCE}")
+    add_executable(test_onnx_inference
+        ${ONNX_TEST_SOURCE}
+    )
+
+    target_link_libraries(test_onnx_inference
+        factor
+    )
+
+    # copy onnxruntime.dll
+    add_custom_command(TARGET test_onnx_inference POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+        "$<TARGET_FILE_DIR:test_onnx_inference>/onnxruntime.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime_providers_shared.dll"
+        "$<TARGET_FILE_DIR:test_onnx_inference>/onnxruntime_providers_shared.dll"
+    )
+
+    if(BUILD_TESTS)
+        add_test(NAME test_onnx_inference
+            COMMAND test_onnx_inference
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         )
     endif()
 endif()
