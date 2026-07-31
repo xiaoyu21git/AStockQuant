@@ -1727,7 +1727,9 @@ StrategyBacktestResult StrategyEngine::backtest(
             equity = cash + mv;
         } else {
         // ── 因子定池: 喂快照 → 选候选池 → 注入策略上下文 → 策略只在池内判买点 ──
+        // v2.1: 规则形态分注入为合成因子 (rule_score), 与 AI 因子共同参与 compositeScore
         if (m_factorSignalProcessor.enabled() && m_poolSelector) {
+            // 现有因子值注入
             const std::int32_t dayValue = dates[static_cast<std::size_t>(r)].value;
             for (const auto& fid : m_factorSignalProcessor.factorIds()) {
                 const auto* factorVals = factorService_->backtestValuesBySymbol(fid, dayValue);
@@ -1738,6 +1740,22 @@ StrategyBacktestResult StrategyEngine::backtest(
                 for (const auto& [code, value] : *factorVals)
                     bySymbol[foundation::market::AStockSymbol::fromCode(code).fullSymbol()] = value;
                 m_factorSignalProcessor.updateSnapshot(fid, bySymbol);
+            }
+
+            // v2.1: 规则形态分注入 (合成因子 "rule_score")
+            if (m_ruleGate.enabled()) {
+                std::unordered_map<std::string, double> ruleScoreMap;
+                const auto& allSyms = m_factorSignalProcessor.allSymbols();
+                for (const auto& sym : allSyms) {
+                    rules::RuleCandidateContext candidateCtx;
+                    candidateCtx.symbol = sym;
+                    auto dot = sym.find('.');
+                    candidateCtx.code = dot != std::string::npos ? sym.substr(0, dot) : sym;
+                    candidateCtx.isHolding = false;
+                    ruleProvider.setCandidate(candidateCtx);
+                    ruleScoreMap[sym] = m_ruleGate.entryScore(ruleProvider);
+                }
+                m_factorSignalProcessor.updateSnapshot("rule_score", ruleScoreMap);
             }
             auto pool = m_poolSelector->selectPool(m_factorSignalProcessor);
             if (!pool.empty()) { totalPoolCandidates += pool.size(); ++poolSelectionDays; }

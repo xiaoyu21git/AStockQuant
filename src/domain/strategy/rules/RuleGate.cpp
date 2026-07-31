@@ -116,4 +116,40 @@ RuleAction RuleGate::positionAction(const IRuleVariableProvider& provider)
     return action;
 }
 
+double RuleGate::entryScore(const IRuleVariableProvider& provider)
+{
+    // 遍历所有 signal/eligibility 规则, 统计 Pass 的比例
+    if (m_signalRules.empty()) return 0.5;  // 无规则时中性
+
+    int hits = 0, total = 0;
+    for (auto& bound : m_signalRules) {
+        ++total;
+        const TriState verdict = bound.rule->evaluateCondition(provider);
+        if (verdict == TriState::Pass) {
+            ++hits;
+        }
+        // DataMissing 和 Fail 都不计入命中
+    }
+    return total > 0 ? static_cast<double>(hits) / static_cast<double>(total) : 0.5;
+}
+
+double RuleGate::exitScore(const IRuleVariableProvider& provider)
+{
+    // 遍历所有 rebalance 规则, 统计触发 exit/reduce 的比例
+    if (m_positionRules.empty()) return 0.0;
+
+    int hits = 0, total = 0;
+    for (auto& bound : m_positionRules) {
+        ++total;
+        const TriState verdict = bound.rule->evaluateCondition(provider);
+        if (verdict == TriState::Pass) {
+            const auto action = bound.rule->decision.action;
+            if (action == RuleAction::Exit || action == RuleAction::Reduce) {
+                ++hits;
+            }
+        }
+    }
+    return total > 0 ? static_cast<double>(hits) / static_cast<double>(total) : 0.0;
+}
+
 } // namespace domain::strategy::rules

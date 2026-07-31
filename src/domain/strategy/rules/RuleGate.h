@@ -60,6 +60,16 @@ public:
     /// @brief 最近一次命中规则的 ruleId (供归因记录)
     [[nodiscard]] const std::string& lastHitRuleId() const noexcept { return m_lastHitRuleId; }
 
+    // ── v2.1 评分接口: 规则从闸门升级为评分工 ──
+
+    /// @brief 买入形态评分: 遍历所有 signal/eligibility 规则, 统计命中比例
+    /// @return 0~1, 0=无规则命中, 1=所有规则命中; 无信号规则时返回 0.5(中性)
+    [[nodiscard]] double entryScore(const IRuleVariableProvider& provider);
+
+    /// @brief 出场形态评分: 遍历所有 rebalance 规则, 统计触发 exit/reduce 的比例
+    /// @return 0~1, 0=无出场触发, 1=所有规则触发; 无持仓规则时返回 0.0
+    [[nodiscard]] double exitScore(const IRuleVariableProvider& provider);
+
 private:
     struct BoundRule {
         const CompiledRule* rule{nullptr};
