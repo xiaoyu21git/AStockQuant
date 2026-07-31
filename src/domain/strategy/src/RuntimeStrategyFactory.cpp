@@ -248,11 +248,26 @@ public:
                   std::vector<domain::strategy::StrategySignal>& outputSignals) override
     {
         if (!strategyDefinition_ || !strategyDefinition_->isConfigured() || !context.isValid()
-            || context.strategyInstanceId() != strategyInstanceId_ || factorSnapshots.empty()) return;
+            || context.strategyInstanceId() != strategyInstanceId_ || factorSnapshots.empty()) {
+            static int diagCount = 0;
+            if (++diagCount <= 3) {
+                std::string reason;
+                if (!strategyDefinition_) reason = "strategyDefinition_=null";
+                else if (!strategyDefinition_->isConfigured()) reason = "!isConfigured";
+                else if (!context.isValid()) reason = "!context.isValid";
+                else if (context.strategyInstanceId() != strategyInstanceId_) reason = "instanceId mismatch";
+                else if (factorSnapshots.empty()) reason = "factorSnapshots empty";
+                INTERNAL_WARN_STREAM << "[MultiFactor] evaluate skipped: " << reason
+                    << " snapshots=" << factorSnapshots.size()
+                    << " configured=" << strategyDefinition_->isConfigured();
+            }
+            return;
+        }
 
-        const double wCap = resolveWeightCap(*strategyDefinition_, context);
+        double wCap = resolveWeightCap(*strategyDefinition_, context);
+        if (!(wCap > kZeroValue)) wCap = 0.05;  // 容错: 配置缺失时默认单票5%
         const double wMin = strategyDefinition_->minWeightPerStock();
-        if (!(wCap > kZeroValue) || wCap < wMin) return;
+        if (wMin > kZeroValue && wCap < wMin) return;
 
         auto scores = strategyDefinition_->computeCompositeScores(factorSnapshots);
         auto candidates = buildCandidateSignals(*strategyDefinition_, scores);

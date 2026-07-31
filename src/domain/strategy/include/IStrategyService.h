@@ -440,6 +440,7 @@ public:
     [[nodiscard]] StrategyServiceFlowResult onMarketDataBatch(
         const std::vector<MarketDataPoint>& batch) override;
 
+
     [[nodiscard]] StrategyExecutionStats lastExecutionStats() const override;
     [[nodiscard]] StrategyCount pendingOrderCount() const override;
     void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const override;

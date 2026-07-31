@@ -1377,6 +1377,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
         engine->m_factorSignalProcessor.setMinimumCompositeScore(factorOverlayCfg_.minimumCompositeScore);
         engine->m_factorSignalProcessor.setCombineMode(factorOverlayCfg_.combineMode);
         engine->m_needsMarketCapField = factorOverlayCfg_.needsMarketCapField;
+        // v2.1: 通知 RuntimeFactorSvc 有哪些因子实例 (MultiFactor 策略 copySnapshots 需要)
+        engine->m_factorIds = factorOverlayCfg_.factorIds();
+        if (engine->m_factorSvc)
+            engine->m_factorSvc->setFactorIds(engine->m_factorIds);
         // v2.1: 规则形态分自动注入因子权重 (因子50% + 规则50%)
         if (ruleGateCfg_.enabled()) {
             auto influence = factorOverlayCfg_.factorInfluence;
@@ -1780,6 +1784,14 @@ StrategyBacktestResult StrategyEngine::backtest(
                                      << " 标的 (targetPosition=" << m_factorSignalProcessor.targetPositionCount() << ")";
         } else {
             strategyService_->updateCandidatePool({});
+        }
+
+        // 注入当前持仓权重到策略上下文 (出池卖出评估需要)
+        {
+            std::unordered_map<std::string, double> wmap;
+            for (const auto& [sym, pos] : backtestPositions)
+                if (pos.quantity() > 0) wmap[sym] = static_cast<double>(pos.quantity());
+            strategyService_->updateCurrentWeights(wmap);
         }
 
         ordersOpt = stepBatch(mdpBatch);
