@@ -1,6 +1,5 @@
 #include "../include/NonFactorStrategy.h"
-#include "../include/RuntimeStrategyFactory.h"
-#include "../../strategies/include/MultiFactorSelectionStrategy.h"
+#include "../include/MultiFactorStrategy.h"
 #include <ta_libc.h>
 #include <cmath>
 #include <memory>
@@ -113,17 +112,23 @@ std::shared_ptr<IRuntimeStrategy> StrategyBase::create(
     auto cfg = makeCommonCfg(p);
     if (kind == ::domain::strategies::StrategyBehaviorKind::MultiFactor
         || kind == ::domain::strategies::StrategyBehaviorKind::MachineLearning) {
-        ::domain::strategies::StrategyMetadata meta;
-        meta.name=p.strategyName; meta.description=p.description;
-        meta.behaviorKind=p.behaviorKind; meta.factorIds=p.factorIds; meta.enabled=true;
-        ::domain::strategies::MultiFactorSelectionStrategySpec spec;
-        spec.topN = p.topN > 0 ? p.topN : p.maxPositions;
-        if (!p.factorWeights.empty()) {
-            double tw=0; for (auto& fw:p.factorWeights) tw+=fw.weight;
-            for (auto& fw:p.factorWeights) spec.factorWeights.push_back({fw.factorId,tw>0?fw.weight/tw:0});
+        MultiFactorConfig mfConfig;
+        mfConfig.maxPositions = p.maxPositions > 0 ? p.maxPositions : 50;
+        mfConfig.topN = p.topN > 0 ? p.topN : mfConfig.maxPositions;
+        mfConfig.minCompositeScore = 0.0;
+        mfConfig.sellThreshold = 0.2;
+        mfConfig.industryNeutral = p.industryNeutral;
+        mfConfig.weightScheme = p.weightScheme;
+        mfConfig.maxWeightPerStock = p.maxWeightPerStock;
+        mfConfig.minWeightPerStock = p.minWeightPerStock;
+        double totalWeight = 0.0;
+        for (const auto& fw : p.factorWeights) totalWeight += fw.weight;
+        for (const auto& fw : p.factorWeights) {
+            mfConfig.factorIds.push_back(fw.factorId);
+            mfConfig.weights[fw.factorId] = totalWeight > 0.0
+                ? fw.weight / totalWeight : 1.0;
         }
-        auto def = std::make_shared<::domain::strategies::MultiFactorSelectionStrategy>(cfg, meta, spec);
-        return createMultiFactorSelectionRuntimeStrategy(def, id);
+        return std::make_shared<MultiFactorStrategy>(id, std::move(mfConfig));
     }
     switch (kind) {
     case ::domain::strategies::StrategyBehaviorKind::TrendFollowing: return std::make_shared<TrendFollowingStrategy>(id,cfg);

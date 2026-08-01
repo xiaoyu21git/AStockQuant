@@ -1643,6 +1643,71 @@ function buildDefaultBaseRuleBindings(strategyProfile) {
                 category: "exit_pattern",
                 termId: "exit_acceptance_breakdown",
                 termDisplayName: "承接走弱退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_scale",
+                groupTitle: "分批管理组",
+                groupRole: "position_management",
+                groupOperator: "all",
+                templateId: "template_exit_scale_out_take_profit_v1",
+                templateDisplayName: "分批止盈模板",
+                summary: "浮盈达到阈值后分段兑现利润(破5日线/前高压力/超涨/回吐)。",
+                category: "exit_management",
+                termId: "exit_scale_out_take_profit",
+                termDisplayName: "分批止盈"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_long_term_ma120_break_v1",
+                templateDisplayName: "跌破120日线退出模板",
+                summary: "长线趋势跌破120日线并伴随回撤扩大时退出。",
+                category: "exit_pattern",
+                termId: "exit_long_term_ma120_break",
+                termDisplayName: "跌破120日线退出"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_weak_to_strong_fail_consensus_take_profit_v1",
+                templateDisplayName: "弱转强失败共识止盈模板",
+                summary: "弱转强修复后共识兑现，完成止盈退出。",
+                category: "exit_pattern",
+                termId: "exit_weak_to_strong_fail_consensus",
+                termDisplayName: "弱转强共识止盈"
+            },
+            {
+                stageId: "rebalance",
+                groupId: "rebalance_exit",
+                groupTitle: "退出触发组",
+                groupRole: "any_pass",
+                groupOperator: "any",
+                templateId: "template_exit_high_level_sideways_flush_v1",
+                templateDisplayName: "高位横盘出货退出模板",
+                summary: "高位持续横盘且量能萎缩，判定出货结构，执行退出。",
+                category: "exit_pattern",
+                termId: "exit_high_level_sideways_flush",
+                termDisplayName: "高位横盘出货"
+            },
+            {
+                stageId: "account_risk",
+                groupId: "account_guard",
+                groupTitle: "账户保护组",
+                groupRole: "account_guard",
+                groupOperator: "any",
+                templateId: "template_risk_strategy_drawdown_freeze_v1",
+                templateDisplayName: "策略回撤熔断模板",
+                summary: "策略级回撤超过阈值时暂停所有新开仓，保护账户。",
+                category: "account_risk",
+                termId: "strategy_drawdown_freeze",
+                termDisplayName: "策略回撤熔断"
             }
         ];
     } else {

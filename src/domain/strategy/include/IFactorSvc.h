@@ -12,7 +12,7 @@ namespace domain::strategy {
 /// @brief 因子计算服务接口 — 策略只需调用 compute() 获取因子原始值
 ///
 /// 策略完全不感知因子内部如何计算（FactorInstanceManager / HistoricalView / BaseFactor）。
-/// 加权合成由策略端 MultiFactorSelectionStrategy 完成。
+/// 加权合成由策略端 MultiFactorStrategy 完成。
 class IFactorSvc {
 public:
     virtual ~IFactorSvc() = default;

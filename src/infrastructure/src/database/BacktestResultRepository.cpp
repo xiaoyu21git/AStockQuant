@@ -32,7 +32,7 @@ bool BacktestResultRepository::ensureTables()
         if (!exists.isEmpty() && probe.isEmpty()) {
             INTERNAL_WARN_STREAM << "[BacktestRepo] 检测到旧版 strategy_backtest_results schema, 重建";
             m_db.executeUpdate("DROP TABLE live.strategy_backtest_results");
-        }
+        } 
     }
 
     // 旧版 JSONB/TEXT 表已在上面按需重建，不再每次回测无条件 DROP CASCADE

@@ -40,25 +40,6 @@ const MachineLearningSelectionStrategySpec& MachineLearningSelectionStrategy::sp
 	return spec_;
 }
 
-MultiFactorSelectionStrategy::MultiFactorSelectionStrategy(
-	const StrategyCommonConfig& commonConfig,
-	const StrategyMetadata& metadata,
-	const MultiFactorSelectionStrategySpec& spec)
-	: IStrategy(commonConfig, metadata)
-	, spec_(spec)
-{
-}
-
-StrategyType MultiFactorSelectionStrategy::strategyType() const
-{
-	return StrategyType::MULTI_FACTOR_SELECTION;
-}
-
-const MultiFactorSelectionStrategySpec& MultiFactorSelectionStrategy::spec() const noexcept
-{
-	return spec_;
-}
-
 OrderFlowImbalanceStrategy::OrderFlowImbalanceStrategy(
 	const StrategyCommonConfig& commonConfig,
 	const StrategyMetadata& metadata,

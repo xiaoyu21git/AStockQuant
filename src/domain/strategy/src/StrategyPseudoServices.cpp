@@ -68,7 +68,10 @@ RuleEvaluationResult LocalRuleEvaluationService::evaluate(
     RuleRejectReason rejectReason = RuleRejectReason::None;
     std::string failDetail;
     for (rules::RuleId ruleId : selectedRules) {
-        if (ruleId == kRuleScoreNonNegative && signal.score() < kMinSignalScore) {
+        // 买入单: 分数不能为负；卖出单: 不检查分数
+        if (ruleId == kRuleScoreNonNegative
+            && signal.side() == RuntimeOrderSide::Buy
+            && signal.score() < kMinSignalScore) {
             passed = false;
             rejectReason = RuleRejectReason::RuleTemplateBlocked;
             failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";
@@ -159,7 +162,10 @@ StrategyServiceFlowResult LocalRuleEvaluationService::evaluateBatch(
         std::string failDetail;
 
         for (rules::RuleId ruleId : selectedRules) {
-            if (ruleId == kRuleScoreNonNegative && signal.score() < kMinSignalScore) {
+            // 买入单: 分数不能为负；卖出单: 不检查分数
+            if (ruleId == kRuleScoreNonNegative
+                && signal.side() == RuntimeOrderSide::Buy
+                && signal.score() < kMinSignalScore) {
                 passed = false;
                 rejectReason = RuleRejectReason::RuleTemplateBlocked;
                 failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";

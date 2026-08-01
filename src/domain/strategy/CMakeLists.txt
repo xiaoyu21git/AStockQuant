@@ -4,7 +4,7 @@ add_library(domain_strategy_runtime STATIC)
 
 target_sources(domain_strategy_runtime PRIVATE
     src/RuntimeFactorSvc.cpp
-    src/RuntimeStrategyFactory.cpp
+    src/MultiFactorStrategy.cpp
     src/StrategyServiceContracts.cpp
     src/StrategySnapshotTypes.cpp
     src/StrategyPseudoServices.cpp

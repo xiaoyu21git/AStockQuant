@@ -40,8 +40,11 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
         for (size_t i = 0; i < symbols.size(); ++i) {
             const std::string& sym = symbols[i];
             if (sym.empty()) continue;
+            std::string codeOnly = sym;
+            auto dotPos = codeOnly.find('.');
+            if (dotPos != std::string::npos) codeOnly.resize(dotPos);
             std::uint32_t codeId = 0;
-            try { codeId = static_cast<std::uint32_t>(std::stoul(sym)); }
+            try { codeId = static_cast<std::uint32_t>(std::stoul(codeOnly)); }
             catch (...) { continue; }
             (*idToSym)[codeId] = sym;
         }
@@ -71,8 +74,11 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
                 for (size_t i = 0; i < symbols.size(); ++i) {
                     const std::string& sym = symbols[i];
                     if (sym.empty()) continue;
+                    std::string codeOnly = sym;
+                    auto dotPos = codeOnly.find('.');
+                    if (dotPos != std::string::npos) codeOnly.resize(dotPos);
                     std::uint32_t codeId = 0;
-                    try { codeId = static_cast<std::uint32_t>(std::stoul(sym)); }
+                    try { codeId = static_cast<std::uint32_t>(std::stoul(codeOnly)); }
                     catch (...) { continue; }
                     (*idToSym)[codeId] = sym;
                 }
@@ -302,29 +308,61 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         syms = m_latestSymbols;
         instanceIds = m_factorIds;
     }
-    if (tradeDay == 0 || syms.empty() || instanceIds.empty()) {
-        static int diagCount = 0;
-        if (++diagCount <= 3)
-            INTERNAL_WARN_STREAM << "[RFS] copySnapshots skip: tradeDay=" << tradeDay
-                                 << " syms=" << syms.size()
-                                 << " ids=" << instanceIds.size();
+    if (tradeDay == 0 || instanceIds.empty()) {
         return;
     }
 
+    char dateBuf[16];
+    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                  tradeDay / 10000, (tradeDay / 100) % 100, tradeDay % 100);
+
+    // 回测路径: 直接从 m_factorCache 读值，用 view symbolStrings 做字符串匹配
+    // (与 FactorBacktestOrchestrator / backtestValuesBySymbol 保持一致，不经过 resolver)
+    if (m_dataSvc) {
+        // 从 view 构建 symbol → instrumentId 映射
+        std::unordered_map<std::string, std::uint32_t> symbolToId;
+        auto batch = m_dataSvc->loadBatch(0);
+        if (batch.marketView) {
+            const auto& viewSyms = batch.marketView->symbolStrings();
+            const auto& insts = batch.marketView->instruments();
+            for (size_t i = 0; i < viewSyms.size() && i < insts.size(); ++i)
+                symbolToId[viewSyms[i]] = insts[i].value;
+        }
+
+        for (const auto& iid : instanceIds) {
+            auto cacheIt = m_factorCache.find(iid);
+            if (cacheIt == m_factorCache.end()) continue;
+            auto dateIt = cacheIt->second.find(dateBuf);
+            if (dateIt == cacheIt->second.end()) continue;
+
+            size_t matched = 0;
+            double sampleVal = 0.0;
+            for (const auto& [sym, val] : dateIt->second) {
+                auto idIt = symbolToId.find(sym);
+                if (idIt == symbolToId.end()) continue;
+                if (matched == 0) sampleVal = val;
+                ++matched;
+                output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
+            }
+            static int diag = 0;
+            if (++diag <= 3)
+                INTERNAL_INFO_STREAM << "[RFS] copySnapshots cacheRead: iid=" << iid
+                                     << " date=" << dateBuf
+                                     << " cacheEntries=" << dateIt->second.size()
+                                     << " matched=" << matched
+                                     << " sampleVal=" << sampleVal;
+        }
+        return;
+    }
+
+    // 实盘路径: 通过 getValues 按需计算因子值
+    if (tradeDay == 0 || syms.empty()) return;
     auto* self = const_cast<RuntimeFactorSvc*>(this);
     for (const auto& iid : instanceIds) {
         auto values = self->getValues(iid, tradeDay, syms);
         for (auto& [sym, score] : values) {
             output.push_back(RuntimeFactorSnapshot{ sym, iid, score, 1 });
         }
-    }
-    if (output.empty()) {
-        static int emptySnapCount = 0;
-        ++emptySnapCount;
-        if (emptySnapCount <= 3 || emptySnapCount % 50 == 0)
-            INTERNAL_WARN_STREAM << "[RFS] copySnapshots empty: count=" << emptySnapCount
-                                 << " day=" << tradeDay << " ids=" << instanceIds.size()
-                                 << " values=" << output.size();
     }
 }
 

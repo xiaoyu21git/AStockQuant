@@ -1,7 +1,6 @@
-#include "RuntimeStrategyFactory.h"
-#include "IStrategyService.h"
-#include "MultiFactorSelectionStrategy.h"
-#include "factor_compute/IMarketDataView.h"
+#include "domain/strategy/include/MultiFactorStrategy.h"
+#include "domain/strategy/include/IStrategyService.h"
+#include "domain/factor/include/factor_compute/IMarketDataView.h"
 #include "domain/market/include/MarketDataService.h"
 #include "engine/include/GmSessionEngine.h"
 
@@ -125,26 +124,20 @@ private:
     std::vector<factor::compute::signal_value_t> m_marketCap;
 };
 
-/// @brief 构建指定权重方案的多因子策略定义
-[[nodiscard]] std::shared_ptr<const domain::strategies::MultiFactorSelectionStrategy>
-makeStrategy(domain::strategies::WeightScheme scheme)
+/// @brief 构建指定权重方案的 MultiFactorConfig（新版配置结构）
+[[nodiscard]] domain::strategy::MultiFactorConfig makeConfig(domain::strategies::WeightScheme scheme)
 {
-    domain::strategies::StrategyCommonConfig commonCfg;
-    commonCfg.allowShort = false;
-    commonCfg.maxPositions = 10;
-    commonCfg.maxWeightPerStock = 1.0;   // 不截断, 便于断言原始比例
-    commonCfg.minWeightPerStock = 0.0;
-    commonCfg.weightScheme = scheme;
-
-    domain::strategies::StrategyMetadata meta;
-    meta.name = "weight-scheme-test";
-    meta.enabled = true;
-
-    domain::strategies::MultiFactorSelectionStrategySpec spec;
-    spec.topN = 3;
-    spec.factorWeights.push_back({"f1", 1.0});
-
-    return std::make_shared<domain::strategies::MultiFactorSelectionStrategy>(commonCfg, meta, spec);
+    domain::strategy::MultiFactorConfig config;
+    config.topN = 3;
+    config.minCompositeScore = 0.0;
+    config.sellThreshold = 0.2;
+    config.industryNeutral = false;
+    config.weightScheme = scheme;
+    config.maxWeightPerStock = 1.0;   // 不截断, 便于断言原始比例
+    config.minWeightPerStock = 0.0;
+    config.factorIds.push_back("f1");
+    config.weights["f1"] = 1.0;
+    return config;
 }
 
 /// @brief 跑一次 evaluate, 返回 symbolId → targetWeight
@@ -154,8 +147,9 @@ makeStrategy(domain::strategies::WeightScheme scheme)
     int evaluationRow)
 {
     constexpr domain::strategy::StrategyInstanceId kInstanceId = 1;
-    auto runtimeStrategy = domain::strategy::createMultiFactorSelectionRuntimeStrategy(
-        makeStrategy(scheme), kInstanceId);
+
+    auto strategy = std::make_shared<domain::strategy::MultiFactorStrategy>(
+        kInstanceId, makeConfig(scheme));
 
     domain::strategy::RuntimeStrategyContext context(kInstanceId, 1, 1000, 1.0, true);
     context.setHistoricalView(view);
@@ -169,7 +163,7 @@ makeStrategy(domain::strategies::WeightScheme scheme)
     }
 
     std::vector<domain::strategy::StrategySignal> signals;
-    runtimeStrategy->evaluate(snapshots, context, signals);
+    strategy->evaluate(snapshots, context, signals);
 
     std::unordered_map<std::uint32_t, double> weights;
     for (const auto& signal : signals) {

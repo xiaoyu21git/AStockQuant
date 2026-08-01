@@ -1,8 +1,5 @@
-#include "../../strategies/include/MultiFactorSelectionStrategy.h"
-
 #include "../include/IStrategyService.h"
 #include "../include/NonFactorStrategy.h"
-#include "../include/RuntimeStrategyFactory.h"
 #include "../include/RuntimeFactorSvc.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
@@ -115,7 +112,12 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     // 解析 metadata_json
     std::string metaJson = row.getString("metadata_json");
+    INTERNAL_INFO_STREAM << "[fromDb] metaJson.length=" << metaJson.size()
+                         << " first50=" << metaJson.substr(0, 50);
     auto meta = foundation::json::JsonFacade::parse(metaJson);
+    INTERNAL_INFO_STREAM << "[fromDb] meta.has(name)=" << meta.has("name")
+                         << " has(behaviorKind)=" << meta.has("behaviorKind")
+                         << " name=" << (meta.has("name") ? meta.get("name").asString() : "N/A");
 
     StrategyCreationParams params;
     params.strategyId     = strategyId;
@@ -136,9 +138,19 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     std::string paramJson = row.getString("parameters");
     if (!paramJson.empty() && paramJson != "null") {
         auto root = foundation::json::JsonFacade::parse(paramJson);
+        // v2.1: fallback — metadata 无 behaviorKind 但有因子配置时强制 MultiFactor
+        if (params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::Custom) {
+            if (root.has("factor_overlay") && root.get("factor_overlay").has("enabled")
+                && root.get("factor_overlay").get("enabled").asBool()) {
+                params.behaviorKind = ::domain::strategies::StrategyBehaviorKind::MultiFactor;
+            }
+        }
         params.topN = root.has("topN") ? root.get("topN").asInt() : 0;
         params.allowShort = root.has("allowShort") && root.get("allowShort").asBool();
-        params.maxPositions = root.has("maxPositions") ? root.get("maxPositions").asInt() : 100;
+        params.maxPositions = root.has("maxPositions") ? root.get("maxPositions").asInt() : 20;
+        // 因子池容量约束: 最大持仓不能超过因子候选池可提供的标的数
+        if (factorTargetPositionCount > 0 && params.maxPositions > factorTargetPositionCount)
+            params.maxPositions = factorTargetPositionCount;
         params.maxWeightPerStock = root.has("maxWeightPerStock") ? root.get("maxWeightPerStock").asDouble() : 0.1;
         params.minWeightPerStock = root.has("minWeightPerStock") ? root.get("minWeightPerStock").asDouble() : 0.0;
         params.maxOrderQuantity = root.has("maxOrderQuantity") ? static_cast<std::uint32_t>(root.get("maxOrderQuantity").asInt()) : 100U;
@@ -256,7 +268,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     RiskConfig riskCfg;
     riskCfg.stopLossPercent        = 0.0;   // 由规则模板接管
     riskCfg.takeProfitPercent      = 0.0;   // 由规则模板接管
-    riskCfg.maxDrawdownLimitPercent = 99.0;
+    riskCfg.maxDrawdownLimitPercent = params.maxDrawdownLimit;
 
     // ── 构建调仓配置 ──
     RebalanceConfig rebalanceCfg;
@@ -1847,57 +1859,8 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
         }
 
-        // ── 止损扫描: 浮亏超线 + 信号确认才卖（避免洗盘）──
-        if (m_riskConfig.stopLossPercent > 0.0 && !backtestPositions.empty()) {
-            std::vector<OrderRequest> stopLossExits;
-            for (const auto& kvPos : backtestPositions) {
-                const auto& posSymbol = kvPos.first;
-                const auto& pos = kvPos.second;
-                if (pos.quantity() <= 0) continue;
-                auto bpIt = buyPriceMap.find(posSymbol);
-                if (bpIt == buyPriceMap.end() || bpIt->second <= 0.0) continue;
-                const int colIdx = symbolToCol.at(posSymbol);
-                const double currentPrice = static_cast<double>(closeMat.data[
-                    rowOffset + static_cast<std::size_t>(colIdx)]);
-                if (currentPrice <= 0.0) continue;  // 当日停牌无价, 无法止损
-                double lossPct = (bpIt->second - currentPrice) / bpIt->second * 100.0;
-                if (lossPct >= m_riskConfig.stopLossPercent) {
-                    // 均线破位确认: 5日均线 < 10日均线（趋势已经转弱），才确认止损
-                    double sum5 = 0.0, sum10 = 0.0;
-                    int cnt5 = 0, cnt10 = 0;
-                    for (int back = 0; back < 10 && (r - back) >= 0; ++back) {
-                        double c = static_cast<double>(closeMat.data[
-                            static_cast<size_t>(r - back) * static_cast<size_t>(colCount)
-                            + static_cast<size_t>(colIdx)]);
-                        if (c > 0) {
-                            if (back < 5) { sum5 += c; ++cnt5; }
-                            sum10 += c; ++cnt10;
-                        }
-                    }
-                    bool trendDown = (cnt5 >= 3 && cnt10 >= 5)
-                        ? (sum5 / cnt5) < (sum10 / cnt10) : false;
-                    if (trendDown) {
-                        OrderRequest exitOrder;
-                        exitOrder.setSymbol(posSymbol);  // 契约: 真实完整代码, 与持仓键一致
-                        exitOrder.setSide(OrderSide::Sell);
-                        exitOrder.setQuantity(pos.quantity());
-                        exitOrder.setOrderType(domain::trading::OrderType::Market);
-                        ++stopLossExitCount;
-                        todayStopLossSyms.insert(posSymbol);
-                        stopLossExits.push_back(std::move(exitOrder));
-                    }
-                }
-            }
-            if (!stopLossExits.empty()) {
-                if (!ordersOpt.has_value()) ordersOpt = std::move(stopLossExits);
-                else {
-                    auto& list = ordersOpt.value();
-                    list.insert(list.end(),
-                                std::make_move_iterator(stopLossExits.begin()),
-                                std::make_move_iterator(stopLossExits.end()));
-                }
-            }
-        }
+        // ── 止损止盈扫描（由规则闸门 positionAction 接管，此处保留引擎层兜底）──
+        // 规则模板中绑定止盈止损模板后，positionAction 会触发对应出场。
 
         if (ordersOpt.has_value()) {
             auto& orderList = ordersOpt.value();
@@ -1914,7 +1877,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 const int col = symbolToCol.at(symbol);
                 const double closePrice = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<std::size_t>(col)]);
-                if (closePrice <= 0.0) continue;  // 当日停牌无价, 无法成交
+                if (!std::isfinite(closePrice) || closePrice <= 0.0) continue;  // 停牌/无价/NaN, 无法成交
 
                 // ── 规则闸门: 买入候选审核 ──
                 if (m_ruleGate.enabled() && order.side() == OrderSide::Buy) {
@@ -2019,7 +1982,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (order.side() == OrderSide::Buy) {
                     double remaining = fillSim.cashAfterBuy(cash, closePrice,
                         static_cast<std::int64_t>(order.quantity()));
-                    if (remaining >= 0.0) {
+                    if (remaining >= 0.0 && std::isfinite(remaining)) {
                         cash = remaining;
                         ++dayBuys;
                         const std::int64_t filledQty = static_cast<std::int64_t>(order.quantity());
@@ -2056,6 +2019,13 @@ StrategyBacktestResult StrategyEngine::backtest(
                         ++stopLossSkippedNoHeld;
                     if (sellQty > 0) {
                         auto fr = fillSim.simulateSell(closePrice, sellQty);
+                        if (!std::isfinite(fr.income)) {
+                            INTERNAL_WARN_STREAM << "[backtest] NaN income day="
+                                << dates[static_cast<std::size_t>(r)].value
+                                << " sym=" << symbol << " price=" << closePrice
+                                << " qty=" << sellQty << " cash=" << cash;
+                            continue;
+                        }
                         cash += fr.income;
                         ++totalFills;
                         ++daySells;
@@ -2121,6 +2091,16 @@ StrategyBacktestResult StrategyEngine::backtest(
             if (px > 0.0) marketValue += px * static_cast<double>(pos.quantity());
         }
         equity = cash + marketValue;
+        if (!std::isfinite(equity) && r > 0) {
+            INTERNAL_ERROR_STREAM << "[backtest] NaN equity at day="
+                << dates[static_cast<std::size_t>(r)].value
+                << " row=" << r << " cash=" << cash
+                << " marketValue=" << marketValue
+                << " positions=" << backtestPositions.size()
+                << " — stopping backtest";
+            result.errorMessage = "NaN equity at day " + std::to_string(dates[static_cast<std::size_t>(r)].value);
+            return result;
+        }
         domain::trading::AccountSnapshot newAcc;
         newAcc.setAvailableCash(cash);
         newAcc.setMarketValue(marketValue);

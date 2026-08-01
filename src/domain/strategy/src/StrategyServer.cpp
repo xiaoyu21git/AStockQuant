@@ -584,9 +584,12 @@ void StrategyService::setContextEvaluationRow(int row)
 }
 
 void StrategyService::updateCurrentWeights(
-    const std::unordered_map<std::string, double>& /*weights*/)
+    const std::unordered_map<std::string, double>& weights)
 {
-    // 策略不再感知持仓权重，意图由调度层 buildPositionAwareOrders 确定
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCurrentWeights(weights);
+    }
 }
 
 void StrategyService::updateCandidatePool(
