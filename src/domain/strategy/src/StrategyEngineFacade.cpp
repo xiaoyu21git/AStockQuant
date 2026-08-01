@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <numeric>
 #include <string>
 #include <unordered_map>
 #include <cstdlib>
@@ -1543,6 +1544,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
     int stopLossSkippedNoHeld = 0, totalStopLossOrders = 0;
     std::unordered_set<std::string> todayStopLossSyms, todayRuleExitSyms;
+    std::unordered_set<std::string> boughtToday;  // T+1: 当日买入的标的禁止同日卖出
     double totalProfit = 0.0, totalLoss = 0.0, largestWin = 0.0, largestLoss = 0.0;
     std::unordered_map<std::string, double> buyPriceMap;
     std::unordered_map<std::string, double> buySignalScoreMap;  // 买入时因子信号强度
@@ -1620,7 +1622,10 @@ StrategyBacktestResult StrategyEngine::backtest(
         const auto& dates = view->dates();
         const int currentDay = dates[static_cast<std::size_t>(r)].value;
         // 跳过不在回测窗口内的日期 (用于样本内/样本外切分)
-        if (currentDay < kWindowStartDay || currentDay > kWindowEndDay) continue;
+        if (currentDay < kWindowStartDay || currentDay > kWindowEndDay) {
+            equityCurve.push_back(latestEquity);
+            continue;
+        }
 
         const auto& instruments = view->instruments();
         auto closeMat = view->close();
@@ -1741,7 +1746,6 @@ StrategyBacktestResult StrategyEngine::backtest(
             }
             if (!exitOrders.empty()) ordersOpt = std::move(exitOrders);
             strategyService_->updateCandidatePool({});  // 禁止新品种进入候选池
-            // 计算熔断日的基础净值 (用于后续 peakEquity 更新)
             double mv = 0.0;
             for (const auto& kvPos : backtestPositions) {
                 const auto& sym = kvPos.first;
@@ -1751,6 +1755,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (px > 0.0) mv += px * static_cast<double>(kvPos.second.quantity());
             }
             equity = cash + mv;
+            equityCurve.push_back(equity);  // 熔断日也记录净值, 保证与 dates 对齐
         } else {
         // ── 因子定池: 喂快照 → 选候选池 → 注入策略上下文 → 策略只在池内判买点 ──
         // v2.1: 规则形态分注入为合成因子 (rule_score), 与 AI 因子共同参与 compositeScore
@@ -1912,8 +1917,15 @@ StrategyBacktestResult StrategyEngine::backtest(
                     constexpr std::int64_t kSharesPerLot = 100;
                     const double targetWeight = order.extensionAs<double>(
                         domain::trading::ExtKey::kTargetWeight, 0.0);
-                    // 预算受可用现金约束, 不足一手则放弃该信号
-                    const double budget = (std::min)(sizingBase * targetWeight, cash);
+                    // 已持仓部分市值: 只买差额, 避免重复计算导致资金超100%
+                    auto existIt = backtestPositions.find(symbol);
+                    const std::int64_t existingQty = (existIt != backtestPositions.end())
+                        ? existIt->second.quantity() : 0LL;
+                    const double existingValue = (existingQty > 0)
+                        ? closePrice * static_cast<double>(existingQty) : 0.0;
+                    const double targetValue = sizingBase * targetWeight;
+                    const double neededValue = (std::max)(0.0, targetValue - existingValue);
+                    const double budget = (std::min)(neededValue, cash);
                     const std::int64_t lots = static_cast<std::int64_t>(
                         budget / (closePrice * static_cast<double>(kSharesPerLot)));
                     if (lots <= 0) {
@@ -1994,21 +2006,24 @@ StrategyBacktestResult StrategyEngine::backtest(
                         domain::trading::Position pos;
                         pos.setSymbol(symbol);
                         pos.setSide(domain::trading::PositionSide::Long);
-                        const auto& buyPosMap = backtestPositions;
-                        std::int64_t existingQty = buyPosMap.count(symbol)
-                            ? buyPosMap.at(symbol).quantity() : 0LL;
-                        if (existingQty == 0) {
+                        std::int64_t heldQty = 0LL;
+                        { auto it = backtestPositions.find(symbol);
+                          if (it != backtestPositions.end()) heldQty = it->second.quantity(); }
+                        if (heldQty == 0) {
                             buyPriceMap[symbol] = closePrice;
                             buySignalScoreMap[symbol] = signalScore;
                             buyDateMap[symbol] = static_cast<double>(r);  // entry row
                             buyFactorScoreMap2[symbol] = m_factorSignalProcessor.enabled()
                                 ? m_factorSignalProcessor.compositeScore(symbol) : 0.0;
                         }
-                        pos.setQuantity(existingQty + static_cast<std::int64_t>(order.quantity()));
+                        pos.setQuantity(heldQty + static_cast<std::int64_t>(order.quantity()));
                         pos.setLastPrice(closePrice);
                         backtestPositions[symbol] = pos;
+                        boughtToday.insert(symbol);  // T+1: 当日买入, 禁止同日卖出
                     }
                 } else {
+                    // T+1: 当日买入的标的禁止同日卖出
+                    if (boughtToday.count(symbol)) continue;
                     if (todayStopLossSyms.count(symbol)) ++totalStopLossOrders;
                     const auto& posMap = backtestPositions;
                     auto it = posMap.find(symbol);
@@ -2127,6 +2142,7 @@ StrategyBacktestResult StrategyEngine::backtest(
         }
         todayStopLossSyms.clear();
         todayRuleExitSyms.clear();
+        boughtToday.clear();  // T+1 次日解禁
         }  // else (非熔断/清仓路径)
         if (equity > peakEquity) peakEquity = equity;
 
@@ -2418,8 +2434,11 @@ StrategyBacktestResult StrategyEngine::backtest(
             ? static_cast<double>(dailyPositionSum) / static_cast<double>(totalDays) : 0.0;
         double avgDeployed = totalDays > 0
             ? deployedCapitalSum / static_cast<double>(totalDays) : 0.0;
-        double initCapital = static_cast<double>(req.costSpec.initialCapital.value);
-        double utilizationPct = initCapital > 0.0 ? (avgDeployed / initCapital * 100.0) : 0.0;
+        // 用日均净值做分母, 避免盈利放大后利用率虚高
+        double avgEquity = equityCurve.empty() ? 0.0
+            : std::accumulate(equityCurve.begin(), equityCurve.end(), 0.0)
+                / static_cast<double>(equityCurve.size());
+        double utilizationPct = avgEquity > 0.0 ? (avgDeployed / avgEquity * 100.0) : 0.0;
         double activeDayPct = totalDays > 0
             ? static_cast<double>(daysWithTrades) / static_cast<double>(totalDays) * 100.0 : 0.0;
 

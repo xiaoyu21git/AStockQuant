@@ -214,7 +214,12 @@ Rectangle {
                         Text { text: "回测模式"; font.pixelSize: 12; color: "#94A3B8" }
                         ComboBox { id: cbMode; width: parent.width; height: 34; model: root.mdOpts; textRole: "l"; font.pixelSize: 13
                             Component.onCompleted: root.sc(cbMode,root.mdOpts,"v",root.backtestMode)
-                            onCurrentIndexChanged: { if(currentIndex>=0){root.backtestMode=root.mdOpts[currentIndex].v;root.ec()} }
+                            onCurrentIndexChanged: {
+                                if (currentIndex >= 0) {
+                                    root.backtestMode = root.mdOpts[currentIndex].v
+                                    root.ec()
+                                }
+                            }
                             background: Rectangle { radius: 6; color: "#0F172A"; border.color: "#334155"; border.width: 1 }
                             contentItem: Text { text: parent.displayText; font.pixelSize: 13; color: "#F1F5F9"; verticalAlignment: Text.AlignVCenter; leftPadding: 10 } } }
                     Column { spacing: 4; width: 170
@@ -450,6 +455,14 @@ Rectangle {
             datasetCacheId: root.selectedDatasetId,
             numGroups: 10
         }
+
+        // 样本内/外切分: 根据模式调整回测窗口
+        if (root.backtestMode === "in_sample") {
+            config.endDate = root.outSampleStart
+        } else if (root.backtestMode === "out_sample") {
+            config.startDate = root.outSampleStart
+        }
+        // "full" 模式不调整, 使用全区间
 
         backtestController.runBacktest(root.selectedStrategyId, config)
         root.startBacktestRequested()
