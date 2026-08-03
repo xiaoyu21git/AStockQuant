@@ -121,6 +121,9 @@ public:
     // ── 底层 Strategy 指针 ──
     void* strategy() const;
 
+    // ── GM SDK 全局互斥锁（非线程安全 SDK，JMC 和同步线程互斥）──
+    static std::recursive_mutex& gmSdkMutex();
+
     // ── 符号转换 ──
     static std::string toGmSymbol(const std::string& internal);
     static std::string fromGmSymbol(const std::string& gm);

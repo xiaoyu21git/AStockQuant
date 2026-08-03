@@ -120,6 +120,10 @@ public:
     Q_INVOKABLE QVariantList insightSecondaryItems(const QVariantMap& rule) const;
     Q_INVOKABLE QString normalizePhaseKey(const QString& raw) const;
     Q_INVOKABLE QString phaseDisplayName(const QString& phaseKey) const;
+    Q_INVOKABLE QString phaseShortName(const QString& phaseKey) const;
+    Q_INVOKABLE QString categoryDisplayName(const QString& category) const;
+    Q_INVOKABLE QString actionDisplayName(const QString& action) const;
+    Q_INVOKABLE QVariantMap templateInsight(const QString& templateId) const;
 
     // ── 翻译 (替代 JS tr) ──
     Q_INVOKABLE QString tr(const QString& key, const QString& language = QString()) const;

@@ -237,6 +237,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/RuleStageNavigator.qml
         Qml/components/Strategy/Creation/RuleTemplateStructureView.qml
         Qml/components/Strategy/Creation/RuleTemplateSuggestionPanel.qml
+        Qml/components/Strategy/Creation/RuleTemplatePickerDialog.qml
         Qml/components/Strategy/Creation/StrategyProfilePanel.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
@@ -281,7 +282,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/DynamicParamForm.qml
         Qml/utils/FactorMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
-        Qml/utils/RuleTemplatePreviewUtils.js
         Qml/utils/I18n.js
         Qml/utils/StrategyStructureAdapter.js
         Qml/utils/RiskBacktestMetaLoader.js

@@ -156,6 +156,10 @@ int RuntimeFactorSvc::getMaxLookbackDays() const {
     return calendarDays;
 }
 
+void RuntimeFactorSvc::clearSignalCache() {
+    if (m_engine) m_engine->clearSignalCache();
+}
+
 void RuntimeFactorSvc::buildLiveView(
     const std::vector<astock::database::SqlQueryResultRow>& rows,
     const std::vector<std::string>& extraFields)

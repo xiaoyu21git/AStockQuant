@@ -390,4 +390,21 @@ void RuleTemplateSuggestionService::suggestTemplatesRequestAsync(
     emit suggestionReady(result);
 }
 
+QVariantList RuleTemplateSuggestionService::suggestAllTemplates()
+{
+    QVariantList result;
+    if (!m_initialized) {
+        const auto* lib = domain::strategy::rules::sharedRuleLibrary();
+        if (!lib) return result;
+    }
+    const auto* lib = domain::strategy::rules::sharedRuleLibrary();
+    if (!lib) return result;
+
+    result.reserve(static_cast<int>(lib->templates.size()));
+    for (const auto& tmpl : lib->templates) {
+        result.append(buildSuggestionItem(tmpl));
+    }
+    return result;
+}
+
 #include "moc_RuleTemplateSuggestionService.cpp"

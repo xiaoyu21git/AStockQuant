@@ -554,4 +554,9 @@ std::string GmSessionEngine::fromGmSymbol(const std::string& gm) {
     return gm;
 }
 
+std::recursive_mutex& GmSessionEngine::gmSdkMutex() {
+    static std::recursive_mutex m;
+    return m;
+}
+
 } // namespace engine

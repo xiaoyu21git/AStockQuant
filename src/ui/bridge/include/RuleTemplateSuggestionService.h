@@ -21,6 +21,7 @@ public:
     /// @param request   { text, phase?, action?, stageId?, groupRole?, groupId?,
     ///                    strategyProfile?, onlyReady?, limit? }
     Q_INVOKABLE void suggestTemplatesRequestAsync(const QString& requestId, const QVariantMap& request);
+    Q_INVOKABLE QVariantList suggestAllTemplates();
 
 signals:
     /// 建议成功: { requestId, resolvedTermId, resolvedTermDisplayName, suggestions[] }

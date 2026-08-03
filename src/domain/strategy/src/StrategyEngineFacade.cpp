@@ -1640,6 +1640,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     int poolSelectionDays{0};                                  // 因子池选择的天数
     // 规则闸门: 变量提供者 + 当日新开仓许可
     rules::BacktestRuleVariableProvider ruleProvider;
+    ruleProvider.setConceptQueriesEnabled(false);  // 默认关闭: 无规则引用 concept.* 变量
     bool ruleAllowEntriesToday = true;
 
     // 查找基准指数列（用于大盘解冻判断）— 不在视图内则保持 -1, 下游跳过解冻判断

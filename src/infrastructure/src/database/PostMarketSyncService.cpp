@@ -63,6 +63,9 @@ bool PostMarketSyncService::forceSyncToday() {
         struct Guard { std::atomic<bool>& flag; ~Guard() { flag.store(false); } };
         Guard g{m_syncRunning};
 
+        // GM SDK 非线程安全: 与 JMC 互斥
+        std::lock_guard<std::recursive_mutex> gmLock(engine::GmSessionEngine::gmSdkMutex());
+
         // 盘中禁止同步：GM SDK 日线/分钟线 API 在交易时段调用可能崩溃
         const SyncWindow window = resolveSyncWindow();
         int mins = getCurrentLocalMinutes();
@@ -118,6 +121,7 @@ void PostMarketSyncService::forceSyncHistory(
     m_executor->post([this, onProgress = std::move(onProgress)]() {
         struct Guard { std::atomic<bool>& flag; ~Guard() { flag.store(false); } };
         Guard g{m_syncRunning};
+        std::lock_guard<std::recursive_mutex> gmLock(engine::GmSessionEngine::gmSdkMutex());
 
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) return;
@@ -379,7 +383,7 @@ void PostMarketSyncService::syncAll(int tradingDay) {
             auto r = db->executeQuery(
                 "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
                 {astock::database::SqlParam{std::string(ds)}});
-            if (r.rowCount() > 0 && r.getRow(0).getInt(0) > 0) {
+            if (r.rowCount() > 0 && r.getRow(0).getInt("count") > 0) {
                 INTERNAL_INFO_STREAM << "[PostMktSync] today=" << tradingDay << " 已有数据, 跳过同步";
                 return;
             }
@@ -641,7 +645,7 @@ bool PostMarketSyncService::syncMinuteRange(int startDay, int endDay)
         auto covRes = db->executeQuery(
             "SELECT COUNT(DISTINCT symbol_id) FROM mkt.minute_bar WHERE trade_ts::date=$1::date",
             {astock::database::SqlParam{dt}});
-        int cov = (covRes.rowCount() > 0) ? covRes.getRow(0).getInt(0) : 0;
+        int cov = (covRes.rowCount() > 0) ? covRes.getRow(0).getInt("count") : 0;
         int expected = static_cast<int>(syms.size());
         if (cov >= expected * 90 / 100) {
             ++skipped;
@@ -1004,15 +1008,15 @@ void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     // 日线: 缺则补，满则跳过
     auto cntRes=db->executeQuery("SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
-    bool dailyExists=(cntRes.rowCount()>0&&cntRes.getRow(0).getInt(0)>static_cast<int>(syms.size()*0.9));
+    bool dailyExists=(cntRes.rowCount()>0&&cntRes.getRow(0).getInt("count")>static_cast<int>(syms.size()*0.9));
     // 估值状态
     auto peRes=db->executeQuery("SELECT COUNT(*) FILTER (WHERE pe_ratio=0 OR pe_ratio IS NULL) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
-    bool peMissing=(peRes.rowCount()>0&&peRes.getRow(0).getInt(0)>0);
+    bool peMissing=(peRes.rowCount()>0&&peRes.getRow(0).getInt("count")>0);
     // 分钟线状态
     auto minRes=db->executeQuery("SELECT COUNT(*) FROM mkt.minute_bar WHERE trade_ts::date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
-    bool minMissing=(minRes.rowCount()==0||minRes.getRow(0).getInt(0)==0);
+    bool minMissing=(minRes.rowCount()==0||minRes.getRow(0).getInt("count")==0);
 
     const char* dStatus=dailyExists?"已覆盖":"补";const char* pStatus=peMissing?"补":"已覆盖";const char* mStatus=minMissing?"补":"已覆盖";
     INTERNAL_INFO_STREAM<<"[PostMktSync] "<<tradingDay<<" 日线="<<dStatus<<" PE="<<pStatus<<" 分钟="<<mStatus;
@@ -1091,24 +1095,24 @@ void PostMarketSyncService::syncWeeklyMonthly(int tradingDay) {
 
     // ── 周线缺口补齐 ──
     {
-        auto res=db->executeQuery("SELECT MAX(trade_date)::text FROM mkt.weekly_bar");
+        auto res=db->executeQuery("SELECT MAX(trade_date)::text AS last_dt FROM mkt.weekly_bar");
         if(res.rowCount()>0){
-            std::string last=res.getRow(0).getString(0);
+            std::string last=res.getRow(0).getString("last_dt");
             int filled=0;
             while(!last.empty() && last < today){
                 // last 的下一个周日
                 auto nr=db->executeQuery(
-                    "SELECT (date_trunc('week',$1::date+interval'8 days')+interval'4 days')::date::text",
+                    "SELECT (date_trunc('week',$1::date+interval'8 days')+interval'4 days')::date::text AS next_sun",
                     {astock::database::SqlParam{last}});
                 if(nr.rowCount()==0)break;
-                std::string nextSun=nr.getRow(0).getString(0);
+                std::string nextSun=nr.getRow(0).getString("next_sun");
                 if(nextSun > today) break;
                 // 该周日落在一个完整周内，取该周日作为 tradingDay
                 auto cnt=db->executeQuery(
                     "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date<=$1::date"
                     " AND trade_date>=date_trunc('week',$1::date)::date",
                     {astock::database::SqlParam{nextSun}});
-                if(cnt.rowCount()>0 && cnt.getRow(0).getInt(0)>0){
+                if(cnt.rowCount()>0 && cnt.getRow(0).getInt("count")>0){
                     int ny,nm,nd; sscanf(nextSun.c_str(),"%d-%d-%d",&ny,&nm,&nd);
                     syncWeekly(db,ny*10000+nm*100+nd); ++filled;
                 }
@@ -1120,23 +1124,23 @@ void PostMarketSyncService::syncWeeklyMonthly(int tradingDay) {
 
     // ── 月线缺口补齐 ──
     {
-        auto res=db->executeQuery("SELECT MAX(trade_date)::text FROM mkt.monthly_bar");
+        auto res=db->executeQuery("SELECT MAX(trade_date)::text AS last_dt FROM mkt.monthly_bar");
         if(res.rowCount()>0){
-            std::string last=res.getRow(0).getString(0);
+            std::string last=res.getRow(0).getString("last_dt");
             int filled=0;
             while(!last.empty() && last < today){
                 // last 的下一个月末
                 auto nr=db->executeQuery(
-                    "SELECT (date_trunc('month',$1::date+interval'1 month')+interval'1 month-1 day')::date::text",
+                    "SELECT (date_trunc('month',$1::date+interval'1 month')+interval'1 month'-interval'1 day')::date::text AS next_end",
                     {astock::database::SqlParam{last}});
                 if(nr.rowCount()==0)break;
-                std::string nextEnd=nr.getRow(0).getString(0);
+                std::string nextEnd=nr.getRow(0).getString("next_end");
                 if(nextEnd > today) break;
                 auto cnt=db->executeQuery(
                     "SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date<=$1::date"
                     " AND trade_date>=date_trunc('month',$1::date)::date",
                     {astock::database::SqlParam{nextEnd}});
-                if(cnt.rowCount()>0 && cnt.getRow(0).getInt(0)>0){
+                if(cnt.rowCount()>0 && cnt.getRow(0).getInt("count")>0){
                     int ny,nm,nd; sscanf(nextEnd.c_str(),"%d-%d-%d",&ny,&nm,&nd);
                     syncMonthly(db,ny*10000+nm*100+nd); ++filled;
                 }

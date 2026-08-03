@@ -5,7 +5,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
-import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
+// RuleTemplatePreviewUtils.js migrated to C++ StrategyBridge
 import "../../FactorWorkbench/Creation/components" as PluginComponents
 
 Rectangle {
@@ -972,144 +972,6 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     spacing: root.ruleComposerSpacing
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        radius: 10
-                        color: "#0b1220"
-                        border.width: 1
-                        border.color: "#1d4ed8"
-                        implicitHeight: defaultRulePackColumn.implicitHeight + 20
-
-                        ColumnLayout {
-                            id: defaultRulePackColumn
-                            anchors.fill: parent
-                            anchors.margins: 10
-                            spacing: 8
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 10
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-
-                                    Text {
-                                        text: "默认规则包入口"
-                                        font.pixelSize: 14
-                                        font.weight: Font.DemiBold
-                                        color: "#dbeafe"
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "先加载当前策略的默认规则包，再按当前阶段和规则组做局部增删改。右侧建议栏现在只作为补充入口。"
-                                        font.pixelSize: 11
-                                        color: "#bfdbfe"
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-
-                                Button {
-                                    text: "恢复整包默认项"
-                                    onClicked: root.restoreDefaultRuleComposerPack()
-                                }
-
-                                Button {
-                                    text: "恢复当前阶段"
-                                    enabled: !!root.currentSelectedRuleComposerStage()
-                                    onClicked: root.restoreSelectedRuleComposerStageDefaults()
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Rectangle {
-                                    radius: 8
-                                    color: "#1a2332"
-                                    border.width: 1
-                                    border.color: "#334155"
-                                    implicitWidth: currentStageChipText.implicitWidth + 16
-                                    implicitHeight: currentStageChipText.implicitHeight + 10
-
-                                    Text {
-                                        id: currentStageChipText
-                                        anchors.centerIn: parent
-                                        text: ((root.currentSelectedRuleComposerStage() && root.currentSelectedRuleComposerStage().title) || "未选择阶段")
-                                        font.pixelSize: 11
-                                        color: "#e2e8f0"
-                                    }
-                                }
-
-                                Rectangle {
-                                    radius: 8
-                                    color: "#1a2332"
-                                    border.width: 1
-                                    border.color: "#334155"
-                                    implicitWidth: currentGroupChipText.implicitWidth + 16
-                                    implicitHeight: currentGroupChipText.implicitHeight + 10
-
-                                    Text {
-                                        id: currentGroupChipText
-                                        anchors.centerIn: parent
-                                        text: ((root.currentSelectedRuleComposerGroup() && root.currentSelectedRuleComposerGroup().title) || "未选择规则组")
-                                        font.pixelSize: 11
-                                        color: "#e2e8f0"
-                                    }
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "当前阶段已放入 " + root.selectedRuleComposerStageRuleCount()
-                                        + " 条规则，可快捷引入 " + root.currentRuleComposerGroupQuickImportList.length + " 个默认项。"
-                                    font.pixelSize: 11
-                                    color: "#93c5fd"
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 6
-
-                                Text {
-                                    text: "当前组快捷引入"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Medium
-                                    color: "#f8fafc"
-                                }
-
-                                Flow {
-                                    width: parent.width
-                                    spacing: 8
-                                    visible: root.currentRuleComposerGroupQuickImportList.length > 0
-
-                                    Repeater {
-                                        model: root.currentRuleComposerGroupQuickImportList
-
-                                        delegate: Button {
-                                            required property var modelData
-                                            text: modelData.termDisplayName || modelData.templateDisplayName || modelData.templateId || "未命名默认项"
-                                            onClicked: root.applyDefaultRulePackEntryToCurrentGroup(modelData)
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: root.currentRuleComposerGroupQuickImportList.length === 0
-                                    text: "当前组没有剩余的默认快捷项。可以先恢复当前阶段默认规则，或者再用右侧建议栏补充非默认模板。"
-                                    font.pixelSize: 11
-                                    color: "#94a3b8"
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-                        }
-                    }
-
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -1209,6 +1071,9 @@ Rectangle {
                                     onAddRuleRequested: function(stageId, groupId) {
                                         root.selectedRuleComposerStageId = stageId
                                         root.selectedRuleComposerGroupId = groupId
+                                        ruleTemplatePicker.stageId = stageId
+                                        ruleTemplatePicker.groupId = groupId
+                                        ruleTemplatePicker.open()
                                     }
                                     onGroupSelected: function(stageId, groupId) {
                                         root.selectedRuleComposerStageId = stageId
@@ -1524,431 +1389,8 @@ Rectangle {
                         }
                     }
                 }
-
-                Rectangle {
-                    Layout.fillWidth: !root.useNarrowRulePanels
-                    Layout.alignment: Qt.AlignTop | Qt.AlignHCenter
-                    Layout.preferredWidth: root.rulePanelWidth
-                    Layout.maximumWidth: root.rulePanelWidth
-                    visible: root.previewRuleComposerStages().length > 0
-                    radius: 10
-                    color: "#1e293b"
-                    border.width: 1
-                    border.color: "#334155"
-                    implicitHeight: selectedTemplateLayout.implicitHeight + 24
-
-                    ColumnLayout {
-                        id: selectedTemplateLayout
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
-
-                        Text {
-                            text: "已绑定规则模板"
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                            color: "#f1f5f9"
-                        }
-
-                        Text {
-                            text: "这里直接按阶段、规则组、规则实例展示当前真实编排结果，和最终保存到策略里的结构保持一致。"
-                            font.pixelSize: 11
-                            color: "#93c5fd"
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            text: "共 " + root.previewRuleComposerStages().length + " 个阶段 / "
-                                  + root.previewRuleComposerGroupCount() + " 个规则组 / "
-                                  + root.previewRuleComposerRuleCount() + " 条规则"
-                            font.pixelSize: 11
-                            color: "#cbd5e1"
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: !root.hasAnyMarketRuleComposerRules()
-                                      ? "当前市场环境阶段已清空，可手动添加规则或恢复系统默认组合。"
-                                      : (root.hasCustomizedMarketRuleComposerStage()
-                                      ? "恢复后只重置市场环境阶段，不影响标的准入、入场确认和退出规则。"
-                                      : "当前市场环境阶段已经是系统默认组合，可直接继续补充其它阶段规则。")
-                                font.pixelSize: 11
-                                color: "#94a3b8"
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Button {
-                                text: "清空市场规则"
-                                enabled: root.hasAnyMarketRuleComposerRules()
-                                onClicked: root.clearMarketRuleComposerStage()
-                            }
-
-                            Button {
-                                text: "恢复默认市场规则"
-                                enabled: root.hasCustomizedMarketRuleComposerStage()
-                                onClicked: root.restoreDefaultMarketRuleComposerStage()
-                            }
-                        }
-
-                        Repeater {
-                            model: root.previewRuleComposerStages()
-
-                            delegate: Rectangle {
-                                id: stagePreviewCard
-                                required property var modelData
-                                Layout.fillWidth: true
-                                radius: 8
-                                color: "#1a2332"
-                                border.width: 1
-                                border.color: modelData.accentColor || "#334155"
-                                implicitHeight: stageBindingColumn.implicitHeight + 16
-
-                                ColumnLayout {
-                                    id: stageBindingColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 8
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-
-                                        Rectangle {
-                                            radius: 10
-                                            color: "#1e293b"
-                                            border.width: 1
-                                            border.color: "#475569"
-                                            implicitWidth: phaseText.implicitWidth + 12
-                                            implicitHeight: 22
-
-                                            Text {
-                                                id: phaseText
-                                                anchors.centerIn: parent
-                                                text: PreviewUtils.phaseDisplayName(modelData.stageId, "short")
-                                                font.pixelSize: 11
-                                                color: "#cbd5e1"
-                                            }
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: (modelData.title || modelData.stageId || "阶段")
-                                                   + " · "
-                                                   + root.populatedRuleComposerGroups(modelData).length + " 个规则组 / "
-                                                   + root.previewRuleComposerRuleCountForStage(modelData) + " 条规则"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Medium
-                                            color: "#e2e8f0"
-                                            wrapMode: Text.WordWrap
-                                        }
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        visible: !!modelData.description
-                                        text: modelData.description || ""
-                                        font.pixelSize: 11
-                                        color: "#cbd5e1"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Repeater {
-                                        model: root.populatedRuleComposerGroups(modelData)
-
-                                        delegate: Rectangle {
-                                            id: groupPreviewCard
-                                            required property var modelData
-                                            property var stageData: stagePreviewCard.modelData
-                                            Layout.fillWidth: true
-                                            radius: 8
-                                            color: "#0b1220"
-                                            border.width: 1
-                                            border.color: "#1f2937"
-                                            implicitHeight: groupBindingColumn.implicitHeight + 14
-
-                                            ColumnLayout {
-                                                id: groupBindingColumn
-                                                anchors.fill: parent
-                                                anchors.margins: 8
-                                                spacing: 8
-
-                                                RowLayout {
-                                                    Layout.fillWidth: true
-                                                    spacing: 8
-
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        text: (modelData.title || modelData.groupId || "规则组")
-                                                              + " · " + root.roleDisplayName(modelData.role)
-                                                              + " / " + root.operatorDisplayName(modelData.operator)
-                                                              + " / " + ((Array.isArray(modelData.rules) ? modelData.rules.length : 0) + " 条规则")
-                                                        font.pixelSize: 11
-                                                        font.weight: Font.DemiBold
-                                                        color: "#f8fafc"
-                                                        wrapMode: Text.WordWrap
-                                                    }
-                                                }
-
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    visible: !!modelData.description
-                                                    text: modelData.description || ""
-                                                    font.pixelSize: 11
-                                                    color: "#94a3b8"
-                                                    wrapMode: Text.WordWrap
-                                                }
-
-                                                Repeater {
-                                                    model: Array.isArray(modelData.rules) ? modelData.rules : []
-
-                                                    delegate: Rectangle {
-                                                        id: rulePreviewCard
-                                                        required property var modelData
-                                                        property var stageData: groupPreviewCard.stageData
-                                                        property var groupData: groupPreviewCard.modelData
-                                                        property var bindingData: root.ruleComposerPreviewBinding(stageData, groupData, modelData)
-                                                        property var insight: PreviewUtils.getTemplateInsight(bindingData)
-                                                        property bool secondaryCollapsible: PreviewUtils.normalizePhaseKey(bindingData.stageId) === "market"
-                                                        property bool secondaryExpanded: !secondaryCollapsible
-                                                        Layout.fillWidth: true
-                                                        radius: 8
-                                                        color: "#1a2332"
-                                                        border.width: 1
-                                                        border.color: "#334155"
-                                                        implicitHeight: ruleBindingColumn.implicitHeight + 16
-
-                                                        ColumnLayout {
-                                                            id: ruleBindingColumn
-                                                            anchors.fill: parent
-                                                            anchors.margins: 8
-                                                            spacing: 8
-
-                                                            RowLayout {
-                                                                Layout.fillWidth: true
-                                                                spacing: 8
-
-                                                                Rectangle {
-                                                                    radius: 10
-                                                                    color: "#1e293b"
-                                                                    border.width: 1
-                                                                    border.color: "#475569"
-                                                                    implicitWidth: rulePhaseText.implicitWidth + 12
-                                                                    implicitHeight: 22
-
-                                                                    Text {
-                                                                        id: rulePhaseText
-                                                                        anchors.centerIn: parent
-                                                                        text: PreviewUtils.phaseDisplayName(bindingData.stageId, "short")
-                                                                        font.pixelSize: 11
-                                                                        color: "#cbd5e1"
-                                                                    }
-                                                                }
-
-                                                                Text {
-                                                                    Layout.fillWidth: true
-                                                                    text: bindingData.templateDisplayName || bindingData.templateId || "未命名模板"
-                                                                    font.pixelSize: 12
-                                                                    font.weight: Font.Medium
-                                                                    color: "#e2e8f0"
-                                                                    wrapMode: Text.WordWrap
-                                                                }
-
-                                                                Rectangle {
-                                                                    visible: !!bindingData.defaultInjected
-                                                                    radius: 9
-                                                                    color: "#3f2d16"
-                                                                    border.width: 1
-                                                                    border.color: "#f59e0b"
-                                                                    implicitWidth: presetBindingChipText.implicitWidth + 14
-                                                                    implicitHeight: 22
-
-                                                                    Text {
-                                                                        id: presetBindingChipText
-                                                                        anchors.centerIn: parent
-                                                                        text: "系统预置"
-                                                                        font.pixelSize: 10
-                                                                        font.weight: Font.Medium
-                                                                        color: "#fde68a"
-                                                                    }
-                                                                }
-
-                                                                Button {
-                                                                    text: "移除"
-                                                                    onClicked: root.removeRuleComposerInstance(stageData.stageId, groupData.groupId, modelData.instanceId)
-                                                                }
-                                                            }
-
-                                                            Text {
-                                                                Layout.fillWidth: true
-                                                                visible: !!(bindingData.summary || (insight && insight.summary))
-                                                                text: bindingData.summary || (insight && insight.summary) || ""
-                                                                font.pixelSize: 11
-                                                                color: "#cbd5e1"
-                                                                wrapMode: Text.WordWrap
-                                                            }
-
-                                                            Text {
-                                                                Layout.fillWidth: true
-                                                                visible: !!(bindingData.termDisplayName || bindingData.termId)
-                                                                text: "绑定术语: " + (bindingData.termDisplayName || bindingData.termId || "")
-                                                                font.pixelSize: 11
-                                                                color: "#7dd3fc"
-                                                                wrapMode: Text.WordWrap
-                                                            }
-
-                                                            RuleTemplateStructureView {
-                                                                Layout.fillWidth: true
-                                                                bindingData: rulePreviewCard.bindingData
-                                                                compact: false
-                                                                showTemplateHeader: false
-                                                            }
-
-                                                            Rectangle {
-                                                                Layout.fillWidth: true
-                                                                visible: insight !== null
-                                                                radius: 8
-                                                                color: "#0b1220"
-                                                                border.width: 1
-                                                                border.color: "#334155"
-                                                                implicitHeight: boundMarketInsightColumn.implicitHeight + 18
-
-                                                                ColumnLayout {
-                                                                    id: boundMarketInsightColumn
-                                                                    anchors.fill: parent
-                                                                    anchors.margins: 10
-                                                                    spacing: 8
-
-                                                                    Text {
-                                                                        Layout.fillWidth: true
-                                                                        text: PreviewUtils.insightSectionTitle(bindingData.stageId, true)
-                                                                        font.pixelSize: 12
-                                                                        font.weight: Font.DemiBold
-                                                                        color: "#f8fafc"
-                                                                    }
-
-                                                                    Rectangle {
-                                                                        Layout.fillWidth: true
-                                                                        radius: 6
-                                                                        color: "#1f2937"
-                                                                        border.width: 1
-                                                                        border.color: "#7c2d12"
-                                                                        implicitHeight: boundFreezeColumn.implicitHeight + 16
-
-                                                                        ColumnLayout {
-                                                                            id: boundFreezeColumn
-                                                                            anchors.fill: parent
-                                                                            anchors.margins: 8
-                                                                            spacing: 4
-
-                                                                            Text {
-                                                                                Layout.fillWidth: true
-                                                                                text: PreviewUtils.insightPrimaryTitle(insight)
-                                                                                font.pixelSize: 11
-                                                                                font.weight: Font.Medium
-                                                                                color: "#fdba74"
-                                                                            }
-
-                                                                            Repeater {
-                                                                                model: PreviewUtils.insightPrimaryItems(insight)
-
-                                                                                delegate: Text {
-                                                                                    Layout.fillWidth: true
-                                                                                    text: (index + 1) + ". " + modelData
-                                                                                    font.pixelSize: 11
-                                                                                    color: "#e5e7eb"
-                                                                                    wrapMode: Text.WordWrap
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-
-                                                                    Rectangle {
-                                                                        Layout.fillWidth: true
-                                                                        radius: 6
-                                                                        color: "#102a43"
-                                                                        border.width: 1
-                                                                        border.color: "#0369a1"
-                                                                        implicitHeight: boundRepairColumn.implicitHeight + 16
-
-                                                                        ColumnLayout {
-                                                                            id: boundRepairColumn
-                                                                            anchors.fill: parent
-                                                                            anchors.margins: 8
-                                                                            spacing: 6
-
-                                                                            Item {
-                                                                                Layout.fillWidth: true
-                                                                                implicitHeight: boundRepairHeader.implicitHeight
-
-                                                                                RowLayout {
-                                                                                    id: boundRepairHeader
-                                                                                    anchors.fill: parent
-                                                                                    spacing: 8
-
-                                                                                    Text {
-                                                                                        Layout.fillWidth: true
-                                                                                        text: PreviewUtils.insightSecondaryTitle(insight)
-                                                                                        font.pixelSize: 11
-                                                                                        font.weight: Font.Medium
-                                                                                        color: "#7dd3fc"
-                                                                                    }
-
-                                                                                    Text {
-                                                                                        visible: secondaryCollapsible
-                                                                                        text: secondaryExpanded ? "收起" : "展开"
-                                                                                        font.pixelSize: 10
-                                                                                        font.weight: Font.Medium
-                                                                                        color: "#bae6fd"
-                                                                                    }
-                                                                                }
-
-                                                                                MouseArea {
-                                                                                    anchors.fill: parent
-                                                                                    enabled: secondaryCollapsible
-                                                                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                                                    onClicked: secondaryExpanded = !secondaryExpanded
-                                                                                }
-                                                                            }
-
-                                                                            ColumnLayout {
-                                                                                Layout.fillWidth: true
-                                                                                visible: !secondaryCollapsible || secondaryExpanded
-                                                                                spacing: 4
-
-                                                                                Repeater {
-                                                                                    model: PreviewUtils.insightSecondaryItems(insight)
-
-                                                                                    delegate: Text {
-                                                                                        Layout.fillWidth: true
-                                                                                        text: (index + 1) + ". " + modelData
-                                                                                        font.pixelSize: 11
-                                                                                        color: "#e0f2fe"
-                                                                                        wrapMode: Text.WordWrap
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
+    }
     }
     
     // ============ 功能函数 ============
@@ -3166,7 +2608,7 @@ Rectangle {
             return "signal"
         }
 
-        var normalized = PreviewUtils.normalizePhaseKey(rawPhase)
+        var normalized = strategyService.normalizePhaseKey(rawPhase)
         var validPhases = {
             market: true,
             eligibility: true,
@@ -4079,6 +3521,30 @@ Rectangle {
     onSelectedRuleComposerGroupIdChanged: {
         if (root.ruleComposerStages.length > 0) {
             syncDecoratedParameters()
+        }
+    }
+
+    // ── 规则模板浏览弹窗 ──
+    RuleTemplatePickerDialog {
+        id: ruleTemplatePicker
+        selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
+        strategyProfile: root.strategyProfile
+
+        onRuleAdded: function(templateId) {
+            if (!templateId) return
+            // 从编译库查找完整模板信息
+            var all = ruleTemplateSuggestionService.suggestAllTemplates()
+            var suggestion = null
+            for (var i = 0; i < all.length; ++i) {
+                if (String(all[i].templateId || all[i].template_id || "") === templateId) {
+                    suggestion = all[i]
+                    break
+                }
+            }
+            if (suggestion) {
+                upsertRuleComposerSuggestion(suggestion)
+                syncDecoratedParameters()
+            }
         }
     }
 }

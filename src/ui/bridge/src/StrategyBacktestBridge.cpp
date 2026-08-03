@@ -3,6 +3,10 @@
 // 不允许在此层写任何业务逻辑。
 
 #include "StrategyBacktestBridge.h"
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/Utils/Timestamp.h"
 #include "foundation/Utils/Uuid.h"
@@ -466,21 +470,43 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 }
             }
 
-            // ── 释放回测内存: 引擎(因子缓存) + Arrow 数据集 (可达数 GB) ──
+            // ── 释放回测内存: 因子缓存 + Arrow 视图 (可达数 GB) ──
+            if (factorSvc) factorSvc->clearSignalCache();
             mgr.stopStrategy(capturedStrategyId);
-            m_strategyDataSvc.reset();
+            // Arrow 视图: 清列缓存 + 关闭 mmap
+            if (m_strategyDataSvc) {
+                m_strategyDataSvc->clearColumnCaches();
+                m_strategyDataSvc.reset();
+            }
 
-            // ── 通知 UI 切换到分析页（数据来自内存 qResult，无需等 DB）──
+            // ── 通知 UI 切换到分析页 ──
             QMetaObject::invokeMethod(this, [this, qResult, capturedStrategyId]() {
                 m_isRunning.store(false); m_progress = 100.0;
                 m_statusText = QStringLiteral("Complete");
                 emit isRunningChanged(); emit progressChanged(); emit statusChanged();
                 emit backtestCompleted(qResult);
 
-                // DB 已落库，单行刷新策略列表卡片上的回测指标
                 if (auto* sb = StrategyBridge::instance()) {
                     sb->refreshSingleStrategy(QString::fromStdString(capturedStrategyId));
                 }
+#ifdef _WIN32
+                // 强制 trim 进程工作集: 释放已 free 但未归还 OS 的物理页
+                {
+                    PROCESS_MEMORY_COUNTERS_EX pmc{};
+                    pmc.cb = sizeof(pmc);
+                    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+                        SIZE_T wsBefore = pmc.WorkingSetSize;
+                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet BEFORE trim: "
+                            << (wsBefore / (1024.0 * 1024.0)) << " MB";
+                        SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
+                        GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
+                        SIZE_T wsAfter = pmc.WorkingSetSize;
+                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet AFTER trim: "
+                            << (wsAfter / (1024.0 * 1024.0)) << " MB"
+                            << " (released " << ((wsBefore - wsAfter) / (1024.0 * 1024.0)) << " MB)";
+                    }
+                }
+#endif
             }, Qt::QueuedConnection);
 
             // ── 回测结果 & 逐笔成交持久化（后台执行，不阻塞 UI）──
@@ -568,7 +594,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 
         } catch (const std::runtime_error& e) {
             domain::strategy::StrategyManager::instance().stopStrategy(capturedStrategyId);
-            m_strategyDataSvc.reset();
+            if (m_strategyDataSvc) { m_strategyDataSvc->clearColumnCaches(); m_strategyDataSvc.reset(); }
             std::string what = e.what();
             if (what == "cancelled") {
                 QMetaObject::invokeMethod(this, [this]() {

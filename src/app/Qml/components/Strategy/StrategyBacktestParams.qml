@@ -98,7 +98,7 @@ Rectangle {
             strategySignalConnected = true
             StrategyBridge.strategiesChanged.connect(function() {
                 console.log("StrategyBacktestParams: 策略数据已更新，刷新下拉列表")
-                rebuildStrategyCombo()
+                root.rebuildStrategyCombo()
             })
         }
         // 延迟刷新：initAsync 可能需要一点时间，用 Timer 兜底
@@ -159,7 +159,7 @@ Rectangle {
         }
     }
 
-    Timer { id: strategyRefreshTimer; interval: 200; repeat: false; onTriggered: { rebuildStrategyCombo() } }
+    Timer { id: strategyRefreshTimer; interval: 200; repeat: false; onTriggered: { root.rebuildStrategyCombo() } }
 
     function switchStrategy(sid, sname) {
         if (sid) { root.selectedStrategyId = sid; root.selectedStrategyName = sname || ""; root.ec(); root.strategySwitched(sid) }

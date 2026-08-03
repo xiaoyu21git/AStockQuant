@@ -2,7 +2,7 @@ import AStock.Bridge 1.0 as Bridge
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
+// RuleTemplatePreviewUtils.js migrated to C++ StrategyBridge
 import "../../Base" as BaseComponents
 
 Rectangle {

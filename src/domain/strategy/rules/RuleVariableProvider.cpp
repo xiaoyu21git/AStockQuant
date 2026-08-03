@@ -96,6 +96,7 @@ struct BacktestRuleVariableProvider::Impl {
 
     // ── 蜡烛形态缓存 (惰性批量计算) ──
     bool candlePatternsEnabled{false};
+    bool conceptQueriesEnabled{false};  // 有规则引用 concept.* 时才开启
     mutable std::unordered_map<std::string, std::optional<double>> candleCache;
     mutable int candleCacheColIndex{-1};
     mutable int candleCacheLastRow{-1};
@@ -571,6 +572,11 @@ void BacktestRuleVariableProvider::setCandlePatternsEnabled(bool enabled)
     if (!enabled) m_impl->candleCache.clear();
 }
 
+void BacktestRuleVariableProvider::setConceptQueriesEnabled(bool enabled)
+{
+    m_impl->conceptQueriesEnabled = enabled;
+}
+
 // ── 蜡烛形态批量计算 ──
 // 使用宏内联展开避免 TA-Lib CDL 函数签名不统一的问题
 // 大部分 CDL 函数无 penetration 参数，少数(约6个)有
@@ -749,22 +755,25 @@ void BacktestRuleVariableProvider::setDay(
             if (dates[static_cast<std::size_t>(i)].value <= date) { m_impl->lastRow = i; break; }
         }
         if (m_impl->lastRow >= 0) {
-            m_impl->market = computeMarketSnapshot(view, m_impl->lastRow, kRecentHighWindow);
+            m_impl->market = computeMarketSnapshot(view, m_impl->lastRow, kRecentHighWindow,
+                                                     m_impl->conceptQueriesEnabled);
             m_impl->marketReady = true;
-            // 加载当日龙头排名缓存
-            char ds[16]; int ly=date/10000, lm=(date/100)%100, ld=date%100;
-            std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
-            try {
-                auto& pool = astock::database::NativePgConnectionPool::instance();
-                auto db = pool.getConnection();
-                if (db && db->isOpen()) {
-                    auto r = db->executeQuery(
-                        "SELECT symbol, rank FROM live.concept_leader_rank WHERE trade_date=$1::date",
-                        {astock::database::SqlParam{std::string(ds)}});
-                    for (auto& row : r.getRows())
-                        m_impl->leaderRankCache[row.getString("symbol")] = row.getInt("rank");
-                }
-            } catch (...) {}
+            // 加载当日龙头排名缓存 (仅规则引用 concept.* 变量时启用)
+            if (m_impl->conceptQueriesEnabled) {
+                char ds[16]; int ly=date/10000, lm=(date/100)%100, ld=date%100;
+                std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
+                try {
+                    auto& pool = astock::database::NativePgConnectionPool::instance();
+                    auto db = pool.getConnection();
+                    if (db && db->isOpen()) {
+                        auto r = db->executeQuery(
+                            "SELECT symbol, rank FROM live.concept_leader_rank WHERE trade_date=$1::date",
+                            {astock::database::SqlParam{std::string(ds)}});
+                        for (auto& row : r.getRows())
+                            m_impl->leaderRankCache[row.getString("symbol")] = row.getInt("rank");
+                    }
+                } catch (...) {}
+            }
         }
     }
 }
@@ -1159,7 +1168,8 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
 }
 
 RuleMarketSnapshot computeMarketSnapshot(
-    const factor::compute::IMarketDataView* view, int lastRow, int lookback)
+    const factor::compute::IMarketDataView* view, int lastRow, int lookback,
+    bool conceptQueriesEnabled)
 {
     RuleMarketSnapshot snapshot;
     if (!view || lastRow < 1) return snapshot;
@@ -1293,8 +1303,8 @@ RuleMarketSnapshot computeMarketSnapshot(
         }
     }
 
-    // ── 概念/题材统计 (从 live.concept_daily_stats 加载) ──
-    {
+    // ── 概念/题材统计 (从 live.concept_daily_stats 加载, 仅规则引用 concept.* 时启用) ──
+    if (conceptQueriesEnabled) {
         const auto& viewDates = view->dates();
         int lastDate = viewDates[static_cast<std::size_t>(lastRow)].value;
         char ds[32];

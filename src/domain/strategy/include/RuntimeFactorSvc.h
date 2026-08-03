@@ -62,6 +62,8 @@ public:
 
     /// @brief 从因子需求计算最大回溯窗口（交易日数，用于确定查多少天历史数据）
     [[nodiscard]] int getMaxLookbackDays() const override;
+    /// @brief 清理 FactorEngine 信号缓存 (回测结束后释放内存)
+    void clearSignalCache();
 
     /// @brief 用 DB 查询结果构建实盘 MarketView（零 JSON）
     void buildLiveView(

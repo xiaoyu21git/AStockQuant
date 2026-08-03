@@ -1,4 +1,6 @@
 #include "../include/StrategyBridge.h"
+#include "../include/TemplateInsights.h"
+#include <QJsonDocument>
 
 // 静态单例指针
 StrategyBridge* StrategyBridge::s_instance = nullptr;
@@ -1173,24 +1175,40 @@ QString StrategyBridge::resolveRuleTemplateFileName(const QString& templateId) c
 }
 
 // ── 模板洞察 ──
-QString StrategyBridge::getTemplateInsight(const QVariantMap& rule) const {
-    auto s = rule.value("summary").toString();
-    if (!s.isEmpty()) return s;
-    s = rule.value("templateDisplayName").toString();
-    if (!s.isEmpty()) return s;
-    return rule.value("templateId").toString();
-}
 QString StrategyBridge::insightSectionTitle(const QString& phaseKey) const {
-    return phaseDisplayName(phaseKey);
+    auto nk = normalizePhaseKey(phaseKey);
+    if (nk == "market") return QStringLiteral("当前市场风控详情");
+    return QStringLiteral("当前模板语义详情");
 }
+
+QString StrategyBridge::getTemplateInsight(const QVariantMap& rule) const {
+    // 从 rule 提取 templateId，查 kTemplateInsights 返回 insight JSON
+    QString tid = rule.value("templateId").toString();
+    if (tid.isEmpty()) tid = rule.value("template_id").toString();
+    if (tid.isEmpty()) return QStringLiteral("{}");
+    auto map = templateInsight(tid);
+    if (map.isEmpty()) return QStringLiteral("{}");
+    return QJsonDocument::fromVariant(map).toJson(QJsonDocument::Compact);
+}
+
 QString StrategyBridge::insightPrimaryTitle(const QString&) const {
-    return QStringLiteral("主要信号");
+    return QStringLiteral("触发要点");
 }
-QVariantList StrategyBridge::insightPrimaryItems(const QVariantMap&) const { return {}; }
+QVariantList StrategyBridge::insightPrimaryItems(const QVariantMap& rule) const {
+    QString tid = rule.value("templateId").toString();
+    if (tid.isEmpty()) tid = rule.value("template_id").toString();
+    auto map = templateInsight(tid);
+    return map.value("primaryItems").toList();
+}
 QString StrategyBridge::insightSecondaryTitle(const QString&) const {
-    return QStringLiteral("辅助条件");
+    return QStringLiteral("提醒");
 }
-QVariantList StrategyBridge::insightSecondaryItems(const QVariantMap&) const { return {}; }
+QVariantList StrategyBridge::insightSecondaryItems(const QVariantMap& rule) const {
+    QString tid = rule.value("templateId").toString();
+    if (tid.isEmpty()) tid = rule.value("template_id").toString();
+    auto map = templateInsight(tid);
+    return map.value("secondaryItems").toList();
+}
 
 QString StrategyBridge::normalizePhaseKey(const QString& raw) const {
     if (raw == "market" || raw == "0") return "market";
@@ -1212,6 +1230,63 @@ QString StrategyBridge::phaseDisplayName(const QString& phaseKey) const {
     if (phaseKey == "execution") return QStringLiteral("执行管理");
     if (phaseKey == "account_risk") return QStringLiteral("账户风控");
     return phaseKey;
+}
+
+QString StrategyBridge::phaseShortName(const QString& phaseKey) const {
+    if (phaseKey == "market") return QStringLiteral("市场");
+    if (phaseKey == "eligibility") return QStringLiteral("准入");
+    if (phaseKey == "signal") return QStringLiteral("入场/信号");
+    if (phaseKey == "portfolio") return QStringLiteral("组合");
+    if (phaseKey == "rebalance") return QStringLiteral("减仓/退出");
+    if (phaseKey == "execution") return QStringLiteral("执行");
+    if (phaseKey == "account_risk") return QStringLiteral("账户风控");
+    return phaseKey.isEmpty() ? QStringLiteral("未分类") : phaseKey;
+}
+
+QString StrategyBridge::categoryDisplayName(const QString& category) const {
+    auto key = category.toLower();
+    if (key == "entry_pattern") return QStringLiteral("入场形态");
+    if (key == "exit_pattern") return QStringLiteral("退出形态");
+    if (key == "exit_management") return QStringLiteral("持仓管理");
+    if (key == "market_gate") return QStringLiteral("市场放行");
+    if (key == "market_risk") return QStringLiteral("市场风控");
+    if (key == "watch_invalidation") return QStringLiteral("观察失效");
+    return key;
+}
+
+QString StrategyBridge::actionDisplayName(const QString& action) const {
+    auto key = action.toLower();
+    if (key == "candidate_entry") return QStringLiteral("候选入场");
+    if (key == "watch") return QStringLiteral("观察");
+    if (key == "block") return QStringLiteral("阻断");
+    if (key == "unwatch") return QStringLiteral("取消观察");
+    if (key == "note") return QStringLiteral("备注");
+    if (key == "reduce") return QStringLiteral("减仓");
+    if (key == "exit") return QStringLiteral("退出");
+    if (key == "cooldown") return QStringLiteral("冷却");
+    if (key == "freeze") return QStringLiteral("冻结");
+    if (key == "state_switch") return QStringLiteral("状态切换");
+    if (key == "halt") return QStringLiteral("暂停");
+    if (key == "open") return QStringLiteral("开仓");
+    if (key == "score") return QStringLiteral("评分");
+    if (key == "tag") return QStringLiteral("打标签");
+    return action;
+}
+
+QVariantMap StrategyBridge::templateInsight(const QString& templateId) const {
+    using astock::bridge::kTemplateInsights;
+    QVariantMap result;
+    auto it = kTemplateInsights.find(templateId);
+    if (it != kTemplateInsights.end()) {
+        result["summary"] = it->second.summary;
+        result["primaryTitle"] = it->second.primaryTitle;
+        result["secondaryTitle"] = it->second.secondaryTitle;
+        result["primaryItems"] = it->second.primaryItems;
+        result["secondaryItems"] = it->second.secondaryItems;
+        result["templateId"] = templateId;
+        return result;
+    }
+    return result;  // empty = caller uses fallback
 }
 
 // ── 翻译 ──

@@ -78,8 +78,9 @@ public:
     [[nodiscard]] std::optional<double> resolve(const std::string& varPath) const override;
 
     /// @brief 启用/禁用 TA-Lib 蜡烛形态计算 (默认关闭)
-    /// 关闭时 candle.* 变量统一返回 nullopt
     void setCandlePatternsEnabled(bool enabled);
+    /// @brief 启用/禁用概念板块数据查询 (默认关闭, 无规则引用 concept.* 时跳过)
+    void setConceptQueriesEnabled(bool enabled);
 
 private:
     struct Impl;
@@ -88,6 +89,7 @@ private:
 
 /// @brief 回测: 从全市场行情视图计算市场快照(每日一次)
 [[nodiscard]] RuleMarketSnapshot computeMarketSnapshot(
-    const factor::compute::IMarketDataView* view, int lastRow, int lookback);
+    const factor::compute::IMarketDataView* view, int lastRow, int lookback,
+    bool conceptQueriesEnabled = false);
 
 } // namespace domain::strategy::rules

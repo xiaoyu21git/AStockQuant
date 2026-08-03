@@ -167,11 +167,7 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
     }
 
     if (params.size() != static_cast<size_t>(paramCount)) {
-        // 参数数量不匹配：SQL 可能用原生 $N 语法(无 ?)，此时 pgSql==sql
-        // 仍然用 PQexecParams 传参，让 PG 按 $N 序号匹配
-        INTERNAL_WARN_STREAM << "[NativePgDB] param count mismatch: params=" << params.size()
-                             << " placeholders=" << paramCount
-                             << " sql=" << sql.substr(0, 200);
+        // SQL 使用原生 $N 语法(无 ? 占位符)，正常路径，不警告
     }
 
     // 参数化查询
