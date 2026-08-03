@@ -20,14 +20,24 @@ void RiskManager::setRiskConfig(const RiskConfig& config) { m_config = config; }
 const RiskConfig& RiskManager::riskConfig() const { return m_config; }
 
 // ── 纯函数: 涨跌停检查 ──
-bool RiskManager::isPriceAtLimit(double currentPrice, double preClose, bool isBuy) {
+bool RiskManager::isPriceAtLimit(double currentPrice, double preClose, bool isBuy,
+                                  const std::string& symbol) {
     if (preClose <= 0) return false;
-    // A股涨跌停 10%, 科创板 20%, 北交所 30% — 由上层根据 symbol 判断并传入正确的 limitPct
-    // 这里只做最基础的 10% 判断, 调用方可根据品种调整
-    constexpr double kDefaultLimitPct = 9.9; // 留 0.1% 容差
+    double limitPct = 9.9;  // 主板默认 ±10%, 留 0.1% 容差
+    if (!symbol.empty()) {
+        // 科创板 688xxx/689xxx: ±20%
+        if (symbol.size() >= 3 && (symbol.substr(0, 3) == "688" || symbol.substr(0, 3) == "689"))
+            limitPct = 19.9;
+        // 创业板 300xxx/301xxx: ±20%
+        else if (symbol.size() >= 3 && (symbol.substr(0, 3) == "300" || symbol.substr(0, 3) == "301"))
+            limitPct = 19.9;
+        // 北交所 8xxxxx: ±30%
+        else if (!symbol.empty() && symbol[0] == '8')
+            limitPct = 29.9;
+    }
     double changePct = (currentPrice - preClose) / preClose * 100.0;
-    if (isBuy)  return changePct >= kDefaultLimitPct;
-    else        return changePct <= -kDefaultLimitPct;
+    if (isBuy)  return changePct >= limitPct;
+    else        return changePct <= -limitPct;
 }
 
 // ── 公共: 找持仓 ──

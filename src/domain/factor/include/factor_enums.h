@@ -25,6 +25,7 @@ enum class FactorType : uint8_t {
     REVERSAL = 15,       // 反转因子 (短期反转+理想反转W式切割)
     HIGH_FREQ = 16,      // 高频因子 (分钟级量价微观结构)
     DL = 17,             // 深度学习因子 (神经网络自动特征提取)
+    SUPPLY_CHAIN = 18,   // 传导链因子 (商品价格→股票映射)
     UNKNOWN = 255
 };
 
@@ -408,6 +409,7 @@ inline constexpr FactorType factorTypeFromIndex(int index)
     case 15: return FactorType::REVERSAL;
     case 16: return FactorType::HIGH_FREQ;
     case 17: return FactorType::DL;
+    case 18: return FactorType::SUPPLY_CHAIN;
     default: return FactorType::UNKNOWN;
     }
 }

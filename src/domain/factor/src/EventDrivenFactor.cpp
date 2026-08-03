@@ -1,4 +1,5 @@
 #include "EventDrivenFactor.h"
+#include "CommodityEventDetector.h"
 
 #include "FactorInstanceManager.h"
 #include "foundation/json/json_facade.h"
@@ -43,6 +44,10 @@ void EventDrivenFactor::loadConfig(
 // ═══════════════════════════════════════════════════════════════
 
 void EventDrivenFactor::onEvent(const engine::EventFormat& event) {
+    // ── 商品突发事件检测 (在解析标的前) ──
+    static CommodityEventDetector s_commodityDetector;  // 无DB连接时仅日志
+    s_commodityDetector.onNewsEvent(event);
+
     // 解析关联标的列表 (EventFormat::get<T> 返回 optional<T>)
     auto symbolsOpt = event.get<std::vector<std::string>>("symbols");
     if (!symbolsOpt || symbolsOpt->empty()) return;

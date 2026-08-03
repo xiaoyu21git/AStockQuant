@@ -1,5 +1,7 @@
 #include "../include/database/NativePgDatabase.h"
 
+#include "foundation/log/logging.hpp"
+
 #include <libpq-fe.h>
 
 #include <cstring>
@@ -149,17 +151,27 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
     int paramCount = 0;
     std::string pgSql = convertPlaceholders(sql, paramCount);
 
-    if (params.empty() || params.size() != static_cast<size_t>(paramCount)) {
-        // 无参数或参数数量不匹配：直接执行
-        PGresult* res = PQexec(impl_->conn, pgSql.c_str());
+    if (params.empty()) {
+        // 无参数：直接执行原始 SQL
+        PGresult* res = PQexec(impl_->conn, sql.c_str());
         if (PQresultStatus(res) != PGRES_TUPLES_OK && PQresultStatus(res) != PGRES_COMMAND_OK) {
             impl_->lastError_ = PQresultErrorMessage(res);
+            INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery failed: " << impl_->lastError_
+                                 << " sql=" << sql.substr(0, 200);
             PQclear(res);
             return {};
         }
         auto result = buildResult(res);
         PQclear(res);
         return result;
+    }
+
+    if (params.size() != static_cast<size_t>(paramCount)) {
+        // 参数数量不匹配：SQL 可能用原生 $N 语法(无 ?)，此时 pgSql==sql
+        // 仍然用 PQexecParams 传参，让 PG 按 $N 序号匹配
+        INTERNAL_WARN_STREAM << "[NativePgDB] param count mismatch: params=" << params.size()
+                             << " placeholders=" << paramCount
+                             << " sql=" << sql.substr(0, 200);
     }
 
     // 参数化查询
@@ -180,6 +192,8 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
                                   nullptr, nullptr, 0);
     if (PQresultStatus(res) != PGRES_TUPLES_OK && PQresultStatus(res) != PGRES_COMMAND_OK) {
         impl_->lastError_ = PQresultErrorMessage(res);
+        INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery(params) failed: " << impl_->lastError_
+                             << " sql=" << pgSql;
         PQclear(res);
         return {};
     }

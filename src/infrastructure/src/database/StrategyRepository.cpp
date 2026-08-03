@@ -163,8 +163,8 @@ QString StrategyRepository::save(const PersistedStrategyData& d) {
     metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
 
     // 字符串参数以 text OID 绑定, jsonb 列必须显式 ::jsonb 转换 (否则 PG 42804)
-    db->executeUpdate(
-        "INSERT INTO strategy(strategy_id,strategy_code,metadata_json,strategy_identity_json,"
+    int affected = db->executeUpdate(
+        "INSERT INTO live.strategy(strategy_id,strategy_code,metadata_json,strategy_identity_json,"
         "version,author,language,status,parameters,performance_metrics,runtime_json) "
         "VALUES(?,?,?::jsonb,?::jsonb,?,?,?,?,?::jsonb,?::jsonb,?::jsonb) ON CONFLICT(strategy_id) DO UPDATE SET "
         "strategy_code=EXCLUDED.strategy_code,metadata_json=EXCLUDED.metadata_json,"
@@ -176,6 +176,10 @@ QString StrategyRepository::save(const PersistedStrategyData& d) {
          SqlParam{"{}"},SqlParam{d.version},SqlParam{d.author},
          SqlParam{std::to_string(static_cast<int>(d.language))},SqlParam{std::to_string(0)},
          SqlParam{toJson(d.parameters)},SqlParam{toJson(d.performanceMetrics)},SqlParam{"{}"}});
+    if (affected <= 0) {
+        INTERNAL_ERROR_STREAM << "[Repo] save INSERT failed affected=" << affected << " id=" << id;
+        return {};
+    }
     return sid;
 }
 

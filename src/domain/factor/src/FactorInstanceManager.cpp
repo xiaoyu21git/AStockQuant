@@ -16,6 +16,7 @@
 #include "QualityFactor.h"
 #include "SentimentFactor.h"
 #include "SizeFactor.h"
+#include "SupplyChainFactor.h"
 #include "TechnicalFactor.h"
 #include "ValueFactor.h"
 #include "FactorConfigAccess.h"
@@ -192,6 +193,14 @@ std::shared_ptr<BaseFactor> createDLFactorEntry(const FactorInstanceInfo& info,
     return DLFactor::create(info, std::move(dataChecker));
 }
 
+std::shared_ptr<BaseFactor> createSupplyChainFactorEntry(
+    const FactorInstanceInfo& info,
+    std::shared_ptr<DataAvailabilityChecker> dataChecker,
+    FactorInstanceManager&)
+{
+    return SupplyChainFactor::create(info, std::move(dataChecker));
+}
+
 const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::MOMENTUM, &createMomentumFactorEntry},
     {FactorType::VALUE, &createValueFactorEntry},
@@ -211,6 +220,7 @@ const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::REVERSAL, &createReversalFactorEntry},
     {FactorType::HIGH_FREQ, &createHighFreqFactorEntry},
     {FactorType::DL, &createDLFactorEntry},
+    {FactorType::SUPPLY_CHAIN, &createSupplyChainFactorEntry},
 };
 
 FactorCreator resolveFactorCreator(FactorType factorType)

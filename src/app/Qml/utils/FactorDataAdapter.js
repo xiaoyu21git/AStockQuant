@@ -74,6 +74,10 @@ function normalizeCategoryKey(category) {
     case "ai因子":
     case "AI因子":
         return "AI因子"
+    case "supply_chain":
+    case "传导链因子":
+    case "传导链":
+        return "传导链因子"
     default:
         return rawCategory || "动量因子"
     }
@@ -98,6 +102,7 @@ var COLOR_MAP = {
     "反转因子": "#EF4444",     // 红色
     "高频因子": "#F59E0B",     // 橙色
     "AI因子": "#8B5CF6",       // 紫色
+    "传导链因子": "#14B8A6",    // 青色
 
     // 状态颜色
     "ACTIVE": "#10B981",     // 活跃 - 绿色

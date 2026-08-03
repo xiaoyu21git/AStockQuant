@@ -20,6 +20,7 @@ std::string FactorTypeRegistry::displayName(FactorType type) {
     case FactorType::Reversal: return "reversal";
     case FactorType::HighFreq: return "high_freq";
     case FactorType::DL: return "dl";
+    case FactorType::SupplyChain: return "supply_chain";
     default: return "unknown";
     }
 }
@@ -42,6 +43,7 @@ std::string FactorTypeRegistry::typeId(FactorType type) {
     case FactorType::Reversal: return "reversal";
     case FactorType::HighFreq: return "high_freq";
     case FactorType::DL: return "dl";
+    case FactorType::SupplyChain: return "supply_chain";
     default: return "unknown";
     }
 }
@@ -63,6 +65,7 @@ FactorType FactorTypeRegistry::fromIndex(int index) {
     case 12: return FactorType::Reversal;
     case 13: return FactorType::HighFreq;
     case 14: return FactorType::DL;
+    case 15: return FactorType::SupplyChain;
     default: return FactorType::Custom;
     }
 }

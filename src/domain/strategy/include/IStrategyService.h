@@ -334,6 +334,8 @@ public:
     virtual void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) = 0;
     /// @brief 更新所有已注册策略上下文的因子候选池（空池=扫全市场）
     virtual void updateCandidatePool(const std::unordered_set<std::string>& pool) = 0;
+    /// @brief 更新所有已注册策略上下文的因子复合评分 (按策略权重加权)
+    virtual void updateFactorScores(std::unordered_map<std::string, double> scores) = 0;
 };
 
 class LocalRuleEvaluationService final : public IRuleEvaluationService,
@@ -474,6 +476,7 @@ private:
     void setContextEvaluationRow(int row) override;
     void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) override;
     void updateCandidatePool(const std::unordered_set<std::string>& pool) override;
+    void updateFactorScores(std::unordered_map<std::string, double> scores) override;
 
 private:
     IRuntimeFactorService& factorService_;

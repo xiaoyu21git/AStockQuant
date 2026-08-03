@@ -171,6 +171,8 @@ set(FACTOR_SOURCES
     src/ReversalFactor.cpp
     src/HighFreqFactor.cpp
     src/DLFactor.cpp
+    src/SupplyChainFactor.cpp
+    src/SupplyChainRepository.cpp
     src/FactorConfigAccess.cpp
     src/FactorInstanceManager.cpp
     src/FactorRatingEngine.cpp
@@ -179,6 +181,7 @@ set(FACTOR_SOURCES
     src/CachedMarketDataView.cpp
     src/factor_compute/ArrowMarketDataView.cpp
     src/FactorParamsStubs.cpp
+    src/CommodityEventDetector.cpp
     src/FactorMetricsCalculator.cpp
     src/factor_compute/FactorSignalSetAssembler.cpp
     src/factor_compute/FactorComputeEngine.cpp
@@ -223,6 +226,8 @@ set(FACTOR_HEADERS
     include/ReversalFactor.h
     include/HighFreqFactor.h
     include/DLFactor.h
+    include/SupplyChainFactor.h
+    include/SupplyChainRepository.h
     include/CompositeFactorConfig.h
     include/IFactorResolver.h
     include/FactorConfigAccess.h

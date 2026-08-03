@@ -601,4 +601,13 @@ void StrategyService::updateCandidatePool(
     }
 }
 
+void StrategyService::updateFactorScores(
+    std::unordered_map<std::string, double> scores)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setFactorScores(scores);
+    }
+}
+
 } // namespace domain::strategy

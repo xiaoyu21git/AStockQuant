@@ -960,7 +960,7 @@ Rectangle {
     }
 
     radius: 10
-    color: "#0f172a"
+    color: "#1e293b"
     border.width: 1
     border.color: "#334155"
 
@@ -1042,7 +1042,7 @@ Rectangle {
             property bool detailsExpanded: false
             Layout.fillWidth: true
             radius: 10
-            color: "#111827"
+            color: "#1a2332"
             border.width: 1
             border.color: modelData.is_ready ? "#0f766e" : "#475569"
             implicitHeight: suggestionColumn.implicitHeight + 20
@@ -1844,7 +1844,7 @@ Rectangle {
                         required property var modelData
                         Layout.fillWidth: true
                         radius: 10
-                        color: "#0f172a"
+                        color: "#1e293b"
                         border.width: 1
                         border.color: modelData.readyCount > 0 ? "#0f766e" : "#334155"
                         implicitHeight: sectionColumn.implicitHeight + 20

@@ -35,7 +35,8 @@ const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_ID = {
     {factor::FactorType::CUSTOM, "custom"},
     {factor::FactorType::REVERSAL, "reversal"},
     {factor::FactorType::HIGH_FREQ, "high_freq"},
-    {factor::FactorType::DL, "dl"}
+    {factor::FactorType::DL, "dl"},
+    {factor::FactorType::SUPPLY_CHAIN, "supply_chain"}
 };
 
 const QMap<QString, factor::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
@@ -54,7 +55,8 @@ const QMap<QString, factor::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
     {"custom", factor::FactorType::CUSTOM},
     {"reversal", factor::FactorType::REVERSAL},
     {"high_freq", factor::FactorType::HIGH_FREQ},
-    {"dl", factor::FactorType::DL}
+    {"dl", factor::FactorType::DL},
+    {"supply_chain", factor::FactorType::SUPPLY_CHAIN}
 };
 
 const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLAY_NAME = {
@@ -73,7 +75,8 @@ const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLA
     {factor::FactorType::CUSTOM, "自定义因子"},
     {factor::FactorType::REVERSAL, "反转因子"},
     {factor::FactorType::HIGH_FREQ, "高频因子"},
-    {factor::FactorType::DL, "AI因子"}
+    {factor::FactorType::DL, "AI因子"},
+    {factor::FactorType::SUPPLY_CHAIN, "传导链因子"}
 };
 
 namespace {
@@ -1123,6 +1126,45 @@ QList<ParamConfigSpec> dlConfigs()
     };
 }
 
+QList<ParamConfigSpec> supplyChainConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildToggleConfig(QStringLiteral("dynamicMode"),
+                          QStringLiteral("动态模式"),
+                          QStringLiteral("开启后根据排名动态选择Top-N商品；关闭后使用固定商品ID"),
+                          true,
+                          QStringLiteral("动态"),
+                          QStringLiteral("固定")),
+        buildInputConfig(QStringLiteral("fixedProductId"),
+                         QStringLiteral("固定商品ID"),
+                         QStringLiteral("动态模式关闭时使用的固定商品ID"),
+                         QStringLiteral(""),
+                         QStringLiteral("例如: lithium_carbonate"),
+                         false,
+                         64),
+        buildSliderConfig(QStringLiteral("lookbackWindow"),
+                          QStringLiteral("动量窗口"),
+                          QStringLiteral("商品价格动量计算窗口（交易日数）"),
+                          20,
+                          5,
+                          120,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({5, 10, 20, 60})),
+        buildSliderConfig(QStringLiteral("maxHoldings"),
+                          QStringLiteral("最大持仓数"),
+                          QStringLiteral("动态模式Top-N商品数量"),
+                          3,
+                          1,
+                          10,
+                          1,
+                          QStringLiteral("个"),
+                          0,
+                          buildIntList({1, 3, 5, 10}))
+    };
+}
+
 const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCatalog()
 {
     static const QMap<factor::FactorType, QList<ParamConfigSpec>> kCatalog = {
@@ -1142,7 +1184,8 @@ const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCat
         {factor::FactorType::SENTIMENT, appendConfigs(buildCommonConfigs(), sentimentConfigs())},
         {factor::FactorType::CUSTOM, appendConfigs(buildCommonConfigs(), customConfigs())},
         {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(), lowVolatilityConfigs())},
-        {factor::FactorType::COMPOSITE, buildCommonConfigs()}
+        {factor::FactorType::COMPOSITE, buildCommonConfigs()},
+        {factor::FactorType::SUPPLY_CHAIN, appendConfigs(buildCommonConfigs(), supplyChainConfigs())}
     };
     return kCatalog;
 }
@@ -1302,7 +1345,16 @@ const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
             QStringLiteral("需预训练模型权重文件，推理引擎建议 libtorch / ONNX Runtime"),
             QStringLiteral("#8B5CF6"),
             QStringLiteral("🧠"),
-            QStringLiteral("AI,深度学习,神经网络"))}
+            QStringLiteral("AI,深度学习,神经网络"))},
+        {factor::FactorType::SUPPLY_CHAIN, buildFactorUiMeta(QStringLiteral("supply_chain"), 18,
+            QStringLiteral("传导链因子"),
+            QStringLiteral("商品价格→产业链传导→个股"),
+            QStringLiteral("基于商品价格通过产业链传导映射至A股相关公司的alpha因子"),
+            QStringLiteral("例如：锂矿涨价→锂矿股"),
+            QStringLiteral("大宗商品价格波动沿产业链传导至下游股票，同商品组内所有股票得到相同动量信号"),
+            QStringLiteral("#14B8A6"),
+            QStringLiteral("🔗"),
+            QStringLiteral("传导链,商品,产业链"))}
     };
     return kCatalog;
 }

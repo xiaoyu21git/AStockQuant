@@ -459,7 +459,7 @@ Page {
                                     Text {
                                         Layout.fillWidth: true
                                         visible: step3Content.factorTopPreviewText().length > 0
-                                        text: "Top 预览: " + step3Content.factorTopPreviewText()
+                                        text: "因子排名预览: " + step3Content.factorTopPreviewText()
                                         font.pixelSize: 12
                                         color: "#bae6fd"
                                         wrapMode: Text.WordWrap

@@ -66,6 +66,7 @@ QString resolveFactorTypeDisplayName(factor::FactorType type)
     case factor::FactorType::REVERSAL:     return QStringLiteral("反转因子");
     case factor::FactorType::HIGH_FREQ:    return QStringLiteral("高频因子");
     case factor::FactorType::DL:           return QStringLiteral("AI因子");
+    case factor::FactorType::SUPPLY_CHAIN: return QStringLiteral("传导链因子");
     default:                               return QStringLiteral("未知因子");
     }
 }
@@ -90,6 +91,7 @@ QString factorTypeId(factor::FactorType type)
     case factor::FactorType::REVERSAL:     return QStringLiteral("reversal");
     case factor::FactorType::HIGH_FREQ:    return QStringLiteral("high_freq");
     case factor::FactorType::DL:           return QStringLiteral("dl");
+    case factor::FactorType::SUPPLY_CHAIN: return QStringLiteral("supply_chain");
     default:                               return QStringLiteral("unknown");
     }
 }

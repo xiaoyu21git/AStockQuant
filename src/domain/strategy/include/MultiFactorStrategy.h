@@ -16,6 +16,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace domain::strategy {
@@ -56,6 +57,9 @@ struct MultiFactorConfig final {
     /// 排名驱动的卖出倍率: 持仓排名 > maxPositions * sellRankMultiplier 时强制卖出
     /// 默认 2.0 = 跌出 2×maxPositions 即卖。调大可容忍更多持仓，调小换手更频繁
     double sellRankMultiplier{2.0};
+
+    /// 跳过截面 Z-score 归一化的因子 ID 集合（如 SupplyChain 同组同值因子）
+    std::unordered_set<std::string> skipNormalizeFactorIds;
 
     [[nodiscard]] bool isValid() const noexcept
     {

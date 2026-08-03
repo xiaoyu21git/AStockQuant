@@ -211,10 +211,13 @@ MultiFactorStrategy::normalizeCrossSectional(
         if (m_config.weights.find(snap.factorId) == m_config.weights.end())
             continue;
 
-        auto& stats = statsByFactor[snap.factorId];
-        stats.sum += snap.factorValue;
-        stats.sumSquares += snap.factorValue * snap.factorValue;
-        ++stats.count;
+        // 传导链等同组同值因子: 只存原始值，不参与截面统计（统计量会歪斜）
+        if (!m_config.skipNormalizeFactorIds.count(snap.factorId)) {
+            auto& stats = statsByFactor[snap.factorId];
+            stats.sum += snap.factorValue;
+            stats.sumSquares += snap.factorValue * snap.factorValue;
+            ++stats.count;
+        }
 
         valuesBySymbol[snap.symbolId][snap.factorId] = snap.factorValue;
     }
@@ -251,20 +254,24 @@ MultiFactorStrategy::normalizeCrossSectional(
     std::unordered_map<std::string,
         std::unordered_map<std::int32_t, std::size_t>> industryCountByFactor;
 
-    // 第二遍: 计算原始 Z-score
+    // 第二遍: 计算原始 Z-score (skipNormalize 因子直接使用原始值)
     for (const auto& [symId, factorVals] : valuesBySymbol) {
         SymbolFactorScore sfs;
         sfs.symbolId = symId;
 
         for (const auto& [fid, val] : factorVals) {
-            const auto meanIt = meanByFactor.find(fid);
-            const auto invStdIt = invStdByFactor.find(fid);
-            if (meanIt == meanByFactor.end() || invStdIt == invStdByFactor.end())
-                continue;
-
-            double zScore = (val - meanIt->second) * invStdIt->second;
-            // 夹紧到 [-3, +3]
-            zScore = std::clamp(zScore, kMinZScore, kMaxZScore);
+            double zScore = 0.0;
+            if (m_config.skipNormalizeFactorIds.count(fid)) {
+                zScore = val;  // 同组同值因子，不做 Z-score
+            } else {
+                const auto meanIt = meanByFactor.find(fid);
+                const auto invStdIt = invStdByFactor.find(fid);
+                if (meanIt == meanByFactor.end() || invStdIt == invStdByFactor.end())
+                    continue;
+                zScore = (val - meanIt->second) * invStdIt->second;
+                // 夹紧到 [-3, +3]
+                zScore = std::clamp(zScore, kMinZScore, kMaxZScore);
+            }
 
             sfs.factorZScores[fid] = zScore;
         }

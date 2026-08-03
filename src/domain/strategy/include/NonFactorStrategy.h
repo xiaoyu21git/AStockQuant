@@ -94,7 +94,12 @@ public:
             if (sig.valid) {
                 double lo=(std::max)(0.0,m_commonCfg.minWeightPerStock);
                 double hi=(std::max)(lo,m_commonCfg.maxWeightPerStock);
-                double w = lo + (hi-lo)*std::clamp(sig.score,0.0,1.0);
+                // 融合因子复合评分 (按策略配置权重加权) 与技术信号分
+                double fs = ctx.factorScore(sym);
+                double blendedScore = fs > 0.0
+                    ? sig.score * 0.5 + std::clamp(fs, 0.0, 1.0) * 0.5
+                    : sig.score;
+                double w = lo + (hi-lo)*std::clamp(blendedScore,0.0,1.0);
                 all.push_back(StrategySignal(ctx.strategyInstanceId(),InstrumentId{sig.instrumentId},
                     sig.isBuy?RuntimeOrderSide::Buy:RuntimeOrderSide::Sell, sig.score, w, sym));
             }

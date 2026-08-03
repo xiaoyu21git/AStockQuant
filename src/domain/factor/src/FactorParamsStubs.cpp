@@ -1,3 +1,4 @@
+#include "SupplyChainFactor.h"
 #include "DividendFactor.h"
 #include "GrowthFactor.h"
 #include "IndustryFactor.h"
@@ -352,6 +353,21 @@ void DLFactor::Params::fromJson(const foundation::json::JsonFacade& json)
     if (json.has("orthogonalConstraint")) orthogonalConstraint = json.get("orthogonalConstraint").asBool();
     if (json.has("ascending")) ascending = json.get("ascending").asBool();
     if (json.has("modelPath")) modelPath = json.get("modelPath").asString();
+}
+
+// ============================================================================
+// SupplyChainFactor::Params::fromJson
+// ============================================================================
+void SupplyChainFactor::Params::fromJson(const foundation::json::JsonFacade& json)
+{
+    CommonParams::fromJson(json);
+
+    if (json.has("dynamicMode"))           dynamicMode           = json.get("dynamicMode").asBool();
+    if (json.has("fixedProductId"))         fixedProductId        = json.get("fixedProductId").asString();
+    if (json.has("lookbackWindow"))         lookbackWindow        = json.get("lookbackWindow").asInt();
+    if (json.has("maxHoldings"))            maxHoldings           = json.get("maxHoldings").asInt();
+    if (json.has("maxStocksPerProduct"))    maxStocksPerProduct   = json.get("maxStocksPerProduct").asInt();
+    if (json.has("minScore"))               minScore              = json.get("minScore").asDouble();
 }
 
 } // namespace factor

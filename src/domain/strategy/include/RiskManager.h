@@ -25,7 +25,8 @@ public:
     void setRiskConfig(const RiskConfig& config);
     const RiskConfig& riskConfig() const;
 
-    static bool isPriceAtLimit(double currentPrice, double preClose, bool isBuy);
+    static bool isPriceAtLimit(double currentPrice, double preClose, bool isBuy,
+                               const std::string& symbol = "");
 
 private:
     RiskManager() : m_config(RiskConfig::defaults()) {}

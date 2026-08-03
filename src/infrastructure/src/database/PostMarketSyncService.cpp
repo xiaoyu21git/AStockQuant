@@ -794,9 +794,13 @@ int PostMarketSyncService::getCurrentTradingDay() {
 bool PostMarketSyncService::isTradingDay(int date) {
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (db && db->isOpen()) {
+        // date 是 int(YYYYMMDD), 需要转为 "YYYY-MM-DD" 字符串才能被 PG ::date 正确解析
+        char dateBuf[16];
+        std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                      date / 10000, (date / 100) % 100, date % 100);
         auto r = db->executeQuery(
             "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1::date",
-            {astock::database::SqlParam{date}});
+            {astock::database::SqlParam{std::string(dateBuf)}});
         if (r.rowCount() > 0) return r.getRow(0).getInt("is_trading_day") == 1;
     }
     // DB 不可用或查不到时，用 tm_wday 兜底：跳过周六日

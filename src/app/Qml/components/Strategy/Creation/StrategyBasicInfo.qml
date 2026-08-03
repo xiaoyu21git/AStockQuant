@@ -100,7 +100,7 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     radius: 10
-                    color: "#111827"
+                    color: "#1a2332"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: coreInfoColumn.implicitHeight + 24
@@ -140,7 +140,7 @@ Rectangle {
                                 background: Rectangle {
                                     implicitHeight: 42
                                     radius: 6
-                                    color: "#0f172a"
+                                    color: "#1e293b"
                                     border.width: strategyNameField.hasError ? 2 : 1
                                     border.color: strategyNameField.hasError ? "#ef4444" : "#334155"
 
@@ -234,7 +234,7 @@ Rectangle {
 
                                 background: Rectangle {
                                     radius: 6
-                                    color: "#0f172a"
+                                    color: "#1e293b"
                                     border.width: root.descriptionRecentlyUpdated ? 2 : 1
                                     border.color: root.descriptionRecentlyUpdated ? "#14b8a6" : "#334155"
 
@@ -258,7 +258,7 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     radius: 10
-                    color: "#111827"
+                    color: "#1a2332"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: runtimeColumn.implicitHeight + 24
@@ -301,7 +301,7 @@ Rectangle {
                                     background: Rectangle {
                                         implicitHeight: 36
                                         radius: 6
-                                        color: "#0f172a"
+                                        color: "#1e293b"
                                         border.width: 1
                                         border.color: "#334155"
                                     }
@@ -335,7 +335,7 @@ Rectangle {
                                     background: Rectangle {
                                         implicitHeight: 36
                                         radius: 6
-                                        color: "#0f172a"
+                                        color: "#1e293b"
                                         border.width: 1
                                         border.color: "#334155"
                                     }
@@ -374,7 +374,7 @@ Rectangle {
                                     background: Rectangle {
                                         implicitHeight: 36
                                         radius: 6
-                                        color: "#0f172a"
+                                        color: "#1e293b"
                                         border.width: 1
                                         border.color: "#334155"
                                     }
@@ -408,7 +408,7 @@ Rectangle {
                                     background: Rectangle {
                                         implicitHeight: 36
                                         radius: 6
-                                        color: "#0f172a"
+                                        color: "#1e293b"
                                         border.width: 1
                                         border.color: "#334155"
                                     }
@@ -429,7 +429,7 @@ Rectangle {
                 Rectangle {
                     Layout.fillWidth: true
                     radius: 10
-                    color: "#111827"
+                    color: "#1a2332"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: tagsColumn.implicitHeight + 24
@@ -489,7 +489,7 @@ Rectangle {
                             background: Rectangle {
                                 implicitHeight: 42
                                 radius: 6
-                                color: "#0f172a"
+                                color: "#1e293b"
                                 border.width: root.tagsRecentlyUpdated ? 2 : 1
                                 border.color: root.tagsRecentlyUpdated ? "#fb923c" : "#334155"
 

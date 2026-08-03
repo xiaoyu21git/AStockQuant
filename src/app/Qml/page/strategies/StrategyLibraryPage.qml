@@ -2119,8 +2119,9 @@ Rectangle {
     }
 
     onVisibleChanged: {
-        if (visible && !pageServicesReady) {
+        if (visible) {
             ensurePageServicesReady()
+            rebuildStrategyVisibleModel()
         }
     }
 

@@ -135,6 +135,7 @@ private:
     int m_currentEvaluationRow{-1};  // -1 = 实盘/未设置, 使用最后一行
     std::unordered_map<std::string, double> m_currentWeights;  // symbol→当前持仓权重
     std::unordered_set<std::string> m_candidatePool;  // 因子候选池(空=扫全市场)
+    std::unordered_map<std::string, double> m_factorScores;  // 因子复合评分 (按策略权重加权)
 
 public:
     RuntimeStrategyContext() = default;
@@ -171,6 +172,13 @@ public:
     void setCandidatePool(std::unordered_set<std::string> pool) { m_candidatePool = std::move(pool); }
     [[nodiscard]] const std::unordered_set<std::string>& candidatePool() const noexcept { return m_candidatePool; }
     [[nodiscard]] bool hasCandidatePool() const noexcept { return !m_candidatePool.empty(); }
+
+    /// @brief 因子复合评分 (按策略配置的权重加权), 供非因子策略增强信号
+    void setFactorScores(std::unordered_map<std::string, double> scores) { m_factorScores = std::move(scores); }
+    [[nodiscard]] double factorScore(const std::string& symbol) const {
+        auto it = m_factorScores.find(symbol);
+        return it != m_factorScores.end() ? it->second : 0.0;
+    }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
     {
@@ -536,6 +544,9 @@ struct StrategyCreationParams final {
     std::string description;
     ::domain::strategies::StrategyBehaviorKind behaviorKind{::domain::strategies::StrategyBehaviorKind::Custom};
     std::vector<std::string> factorIds;  // instance_id 字符串
+
+    /// 跳过截面 Z-score 归一化的因子 instance_id 集合（如 SupplyChain 同组同值因子）
+    std::unordered_set<std::string> skipNormalizeFactorIds;
 
     // 因子回调（桥接层填充）
     std::function<StrategyServiceFlowResult(const MarketDataPoint&)> onIncremental;

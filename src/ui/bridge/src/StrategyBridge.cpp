@@ -294,6 +294,11 @@ void StrategyBridge::applyReq(const BridgeUpsertRequest& request,
             true
         };
     }
+    // strategy_code 有 UNIQUE 约束，不能为空
+    if (target.strategyCode.empty()) {
+        auto ts = std::chrono::system_clock::now().time_since_epoch().count();
+        target.strategyCode = "SPT_" + std::to_string(ts);
+    }
 }
 
 std::optional<domain::strategies::StrategyUuid> StrategyBridge::parseId(const QString& input) const
@@ -901,25 +906,31 @@ QString StrategyBridge::riskLevelColor(int index) const {
 // ── 策略参数配置 + 数据组装 (替代 JS buildParamConfigs / buildCompleteStrategyData / resetFormData) ──
 
 static auto slider(const QString& id, const QString& label, double def, double min, double max,
-                    double step, const QString& unit, int decimals = 0) {
+                    double step, const QString& unit, int decimals = 0,
+                    const QString& category = QStringLiteral("通用参数")) {
     QVariantMap m;
     m["id"] = id; m["label"] = label; m["type"] = "slider";
     m["default"] = def; m["min"] = min; m["max"] = max; m["step"] = step;
     m["unit"] = unit; m["decimals"] = decimals;
+    m["category"] = category;
     return m;
 }
 
-static auto select(const QString& id, const QString& label, int def, const QVariantList& options) {
+static auto select(const QString& id, const QString& label, int def, const QVariantList& options,
+                   const QString& category = QStringLiteral("通用参数")) {
     QVariantMap m;
     m["id"] = id; m["label"] = label; m["type"] = "select";
     m["default"] = def; m["options"] = options;
+    m["category"] = category;
     return m;
 }
 
-static auto toggle(const QString& id, const QString& label, bool def) {
+static auto toggle(const QString& id, const QString& label, bool def,
+                   const QString& category = QStringLiteral("通用参数")) {
     QVariantMap m;
     m["id"] = id; m["label"] = label; m["type"] = "toggle";
     m["default"] = def;
+    m["category"] = category;
     return m;
 }
 
@@ -961,21 +972,27 @@ QVariantList StrategyBridge::buildParamConfigs(int typeIndex) const {
     configs << toggle("allowShort", QStringLiteral("允许做空"), false);
 
     // ── 类型专属参数 ──
+    auto P = QStringLiteral("个性化参数");
     if (ti == 0 || ti == 1) {  // TrendFollowing / TrendBreakout
-        configs << slider("fastPeriod", QStringLiteral("快线周期"), 5, 2, 60, 1, QStringLiteral("天"), 0);
-        configs << slider("slowPeriod", QStringLiteral("慢线周期"), 30, 5, 120, 1, QStringLiteral("天"), 0);
+        configs << slider("fastPeriod", QStringLiteral("快线周期"), 5, 2, 60, 1, QStringLiteral("天"), 0, P);
+        configs << slider("slowPeriod", QStringLiteral("慢线周期"), 30, 5, 120, 1, QStringLiteral("天"), 0, P);
     }
     if (ti == 2 || ti == 3) {  // MeanReversion / RsiMeanReversion
-        configs << slider("period", QStringLiteral("RSI周期"), 14, 5, 50, 1, QStringLiteral("天"), 0);
+        configs << slider("period", QStringLiteral("RSI周期"), 14, 5, 50, 1, QStringLiteral("天"), 0, P);
     }
     if (ti == 2) {  // Momentum
-        configs << slider("macdFast", QStringLiteral("MACD快线"), 12, 2, 60, 1, QStringLiteral("天"), 0);
-        configs << slider("macdSlow", QStringLiteral("MACD慢线"), 26, 3, 120, 1, QStringLiteral("天"), 0);
-        configs << slider("macdSignal", QStringLiteral("MACD信号"), 9, 2, 30, 1, QStringLiteral("天"), 0);
+        configs << slider("macdFast", QStringLiteral("MACD快线"), 12, 2, 60, 1, QStringLiteral("天"), 0, P);
+        configs << slider("macdSlow", QStringLiteral("MACD慢线"), 26, 3, 120, 1, QStringLiteral("天"), 0, P);
+        configs << slider("macdSignal", QStringLiteral("MACD信号"), 9, 2, 30, 1, QStringLiteral("天"), 0, P);
+    }
+    if (ti == 4 || ti == 5) {  // MultiFactor / MachineLearning
+        configs << slider("sellThreshold", QStringLiteral("卖出阈值"), 0.2, -5.0, 5.0, 0.1, QStringLiteral("σ"), 1, P);
+        configs << slider("sellRankMultiplier", QStringLiteral("排名卖出乘数"), 2.0, 1.0, 10.0, 0.5, QStringLiteral("x"), 1, P);
+        configs << slider("minCompositeScore", QStringLiteral("最低综合分"), 0.0, -5.0, 5.0, 0.1, QStringLiteral("σ"), 1, P);
     }
     if (ti == 6) {  // Arbitrage/BollingerBand
-        configs << slider("bbPeriod", QStringLiteral("布林带周期"), 20, 5, 60, 1, QStringLiteral("天"), 0);
-        configs << slider("bbStdDev", QStringLiteral("标准差倍数"), 2.0, 1.0, 4.0, 0.1, QStringLiteral("倍"), 1);
+        configs << slider("bbPeriod", QStringLiteral("布林带周期"), 20, 5, 60, 1, QStringLiteral("天"), 0, P);
+        configs << slider("bbStdDev", QStringLiteral("标准差倍数"), 2.0, 1.0, 4.0, 0.1, QStringLiteral("倍"), 1, P);
     }
     return configs;
 }
@@ -991,6 +1008,7 @@ QVariantMap StrategyBridge::buildCompleteStrategyData(const QVariantMap& context
                          && !overlay.value("allocations", QVariantList()).toList().isEmpty();
     if (hasFactorOverlay || !params.value("factorIds", QVariantList()).toList().isEmpty()) {
         bk = 4;  // StrategyBehaviorKind::MultiFactor
+        ti = 4;  // strategyTypeIndex 同步到多因子
     }
 
     QVariantMap data;
@@ -1200,12 +1218,20 @@ QString StrategyBridge::phaseDisplayName(const QString& phaseKey) const {
 static const std::vector<std::pair<QString, QString>> kTranslations = {
     // 策略创建
     {"strategyCreation.selectStrategyType", QStringLiteral("选择策略类型")},
+    {"strategyCreation.strategyBasicInfo", QStringLiteral("基本信息")},
     {"strategyCreation.basicInfo", QStringLiteral("基本信息")},
     {"strategyCreation.paramConfig", QStringLiteral("参数配置")},
     {"strategyCreation.reviewConfirm", QStringLiteral("审核确认")},
     {"strategyCreation.strategyName", QStringLiteral("策略名称")},
+    {"strategyCreation.strategyNamePlaceholder", QStringLiteral("输入策略名称，如：AI择时策略")},
+    {"strategyCreation.strategyNameError", QStringLiteral("策略名称至少需要2个字符")},
     {"strategyCreation.strategyDescription", QStringLiteral("策略描述")},
+    {"strategyCreation.strategyDescriptionPlaceholder", QStringLiteral("输入策略描述（可选）")},
     {"strategyCreation.optimizationMethod", QStringLiteral("优化方式")},
+    {"strategyCreation.assetType", QStringLiteral("资产类型")},
+    {"strategyCreation.assetTypes", QStringLiteral("股票,ETF,可转债")},
+    {"strategyCreation.timeFrame", QStringLiteral("时间周期")},
+    {"strategyCreation.timeFrames", QStringLiteral("日线,周线,月线")},
     {"strategyCreation.createStrategy", QStringLiteral("创建策略")},
     {"strategyCreation.back", QStringLiteral("返回")},
     {"strategyCreation.next", QStringLiteral("下一步")},
@@ -1259,6 +1285,31 @@ static const std::vector<std::pair<QString, QString>> kTranslations = {
      QStringLiteral("分钟级别高频交易策略")},
     {"strategyCreation.strategyTypeDescriptions.custom",
      QStringLiteral("用户自定义参数的灵活策略")},
+    // ── 步骤2: 参数配置页 (StrategyParamConfig) ──
+    {"strategyCreation.step2Title", QStringLiteral("参数配置")},
+    {"strategyCreation.step2Description", QStringLiteral("配置策略的运行参数和因子权重")},
+    {"strategyCreation.commonParameters", QStringLiteral("通用参数")},
+    {"strategyCreation.personalizedParameters", QStringLiteral("个性化参数")},
+    {"strategyCreation.parameterConfigPanel", QStringLiteral("参数配置面板")},
+    {"strategyCreation.configuredParameters", QStringLiteral("已配置参数")},
+    {"strategyCreation.parameterValidationPassed", QStringLiteral("参数校验通过")},
+    {"strategyCreation.parameterValidationRequired", QStringLiteral("请完成参数配置")},
+    {"strategyCreation.parameterOptimizationRange", QStringLiteral("参数优化范围")},
+    {"strategyCreation.parameterOptimizationRangeOptions", QStringLiteral("默认范围,自定义范围,全范围搜索")},
+    {"strategyCreation.sensitivityAnalysis", QStringLiteral("敏感性分析")},
+    {"strategyCreation.sensitivityAnalysisOptions", QStringLiteral("不启用,单参数分析,多参数分析")},
+    {"strategyCreation.parameterConstraints", QStringLiteral("参数约束")},
+    {"strategyCreation.parameterConstraintOptions", QStringLiteral("无约束,正整数,正浮点,自定义范围")},
+    {"strategyCreation.parameterInitializationMethod", QStringLiteral("参数初始化方式")},
+    {"strategyCreation.parameterInitializationMethods", QStringLiteral("默认值,随机采样,网格搜索,遗传算法")},
+    {"strategyCreation.customParameterScript", QStringLiteral("自定义参数脚本")},
+    {"strategyCreation.customParameterScriptPlaceholder", QStringLiteral("输入自定义参数脚本（可选）")},
+    // ── 步骤1: 基本信息 (StrategyBasicInfo) ──
+    {"strategyCreation.riskLevel", QStringLiteral("风险等级")},
+    {"strategyCreation.optimizationMethods", QStringLiteral("遗传算法,网格搜索,贝叶斯优化,随机搜索")},
+    {"strategyCreation.tags", QStringLiteral("标签")},
+    {"strategyCreation.tagsPlaceholder", QStringLiteral("输入标签，按回车添加（可选）")},
+    {"strategyCreation.optimizationMethodValues", QStringLiteral("genetic,grid_search,bayesian,random")},
 };
 
 QString StrategyBridge::tr(const QString& key, const QString&) const {

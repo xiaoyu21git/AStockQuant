@@ -8,7 +8,7 @@ namespace domain::factor {
 enum class FactorType : uint8_t {
     Value = 0, Momentum, Size, Quality, LowVolatility, Growth,
     Dividend, Technical, Liquidity, Macro, Industry, Sentiment, Custom,
-    Reversal, HighFreq, DL
+    Reversal, HighFreq, DL, SupplyChain
 };
 
 class FactorTypeRegistry {

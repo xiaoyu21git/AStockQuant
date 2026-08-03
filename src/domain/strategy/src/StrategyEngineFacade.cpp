@@ -13,6 +13,8 @@
 #include "../../factor/include/factor_compute/IMarketDataView.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../factor/include/FactorMetricsCalculator.h"
+#include "../../factor/include/factor_enums.h"
+#include "../../factor/include/FactorInstanceManager.h"
 #include "../../trading/TradingTypes.h"
 #include "../include/EventRiskSubscriber.h"
 #include "RuleGate.h"
@@ -209,6 +211,16 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         INTERNAL_INFO_STREAM << "[fromDb] factorOverlayEnabled=" << factorOverlayEnabled
                              << " 因子数=" << params.factorWeights.size()
                              << " factorIds=" << params.factorIds.size();
+
+        // ── 自动标记: 从PG查因子类型, SUPPLY_CHAIN=18 → skipNormalizeFactorIds ──
+        for (const auto& fw : params.factorWeights) {
+            auto fi = db->executeQuery(
+                "SELECT factor_type FROM alpha.factor_instance WHERE instance_id = ?",
+                {astock::database::SqlParam{fw.factorId}});
+            if (!fi.isEmpty() && fi.getRow(0).getInt("factor_type", 0) == 18) {
+                params.skipNormalizeFactorIds.insert(fw.factorId);
+            }
+        }
 
         // ── 规则模板勾选: rule_composer_state.stages[].groups[].rules[].templateId ──
         if (root.has("rule_composer_state")) {
@@ -933,7 +945,6 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     std::vector<PendingOrder> pendingOrders;
 
     // ── 规则闸门: 市场审核(每日冻结) ──
-    // 视图已由 prepareMarketData 构建, 仅需计算市场快照
     bool ruleAllowEntriesEod = true;
     std::unordered_map<std::string, int> eodSymToCol;
     if (m_ruleGate.enabled() && liveMarketView()) {
@@ -949,9 +960,70 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 市场冻结, 当日不产生新买单";
     }
 
+    // ── 择时闸门 (v0.13): 与回测一致, 每日盘前判断大盘状态 ──
+    TimingResult eodTiming;
+    if (liveMarketView()) {
+        const auto* view = liveMarketView();
+        auto closeMat = view->close();
+        const auto& viewInstrs = view->instruments();
+        int eodCols = static_cast<int>(viewInstrs.size());
+        int eodRows = static_cast<int>(view->dates().size());
+        // 查找沪深300列 (与回测一致)
+        int eodBmCol = -1;
+        const auto& eodSyms = view->symbolStrings();
+        for (int c = 0; c < eodCols && c < static_cast<int>(eodSyms.size()); ++c) {
+            if (eodSyms[c] == "000300.SH") { eodBmCol = c; break; }
+        }
+        if (eodBmCol >= 0 && eodRows > 60) {
+            int lastRow = eodRows - 1;
+            MarketTimingSnapshot ts;
+            const double idxClose = static_cast<double>(closeMat.data[
+                static_cast<size_t>(lastRow) * static_cast<size_t>(eodCols) + static_cast<size_t>(eodBmCol)]);
+            if (idxClose > 0.0) {
+                ts.indexClose = idxClose;
+                double sum20=0, sum60=0; int cnt20=0, cnt60=0;
+                for (int back=0; back<60 && (lastRow-back)>=0; ++back) {
+                    double c = static_cast<double>(closeMat.data[
+                        static_cast<size_t>(lastRow-back)*static_cast<size_t>(eodCols)+static_cast<size_t>(eodBmCol)]);
+                    if (c>0) { if (back<20) { sum20+=c; ++cnt20; } sum60+=c; ++cnt60; }
+                }
+                ts.ma20 = cnt20>0 ? sum20/cnt20 : idxClose;
+                ts.ma60 = cnt60>0 ? sum60/cnt60 : idxClose;
+                ts.ma20AboveMa60 = ts.ma20 > ts.ma60;
+                double sum20_5=0; int cnt20_5=0;
+                for (int back=5; back<25 && (lastRow-back)>=0; ++back) {
+                    double c = static_cast<double>(closeMat.data[
+                        static_cast<size_t>(lastRow-back)*static_cast<size_t>(eodCols)+static_cast<size_t>(eodBmCol)]);
+                    if (c>0) { sum20_5+=c; ++cnt20_5; }
+                }
+                ts.ma20Rising = cnt20_5>0 ? ts.ma20 > sum20_5/cnt20_5 : false;
+                if (eodCols>0) { int up=0,tot=0;
+                    for (int c=0; c<eodCols; ++c) {
+                        double t = static_cast<double>(closeMat.data[lastRow*static_cast<size_t>(eodCols)+c]);
+                        double p = static_cast<double>(closeMat.data[(lastRow-1)*static_cast<size_t>(eodCols)+c]);
+                        if (t>1e-9&&p>1e-9) { if(t>p)++up; ++tot; }
+                    }
+                    ts.advanceRatio = tot>0?static_cast<double>(up)/tot:0.5;
+                }
+                ts.atrPercent = 0.02;
+                eodTiming = m_timingGate.evaluate(ts);
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 择时: exposure=" << eodTiming.targetExposure
+                    << " allowNew=" << eodTiming.allowNewEntries
+                    << " liquidate=" << eodTiming.forceLiquidate
+                    << " reason=" << eodTiming.reason;
+            }
+        }
+    }
+
+    // 择时空仓: 一键清仓
+    if (eodTiming.forceLiquidate && !m_circuitBreaker.isHalted()) {
+        liquidateAll();
+        return EodEvaluationStatus::Submitted;
+    }
+
     for (const auto& sym : symbols) {
-        // 规则闸门冻结 → 跳过所有新开仓
-        if (!ruleAllowEntriesEod) break;
+        // 规则闸门冻结 或 择时不允新开仓 → 跳过
+        if (!ruleAllowEntriesEod || !eodTiming.allowNewEntries) break;
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
         if (!d.valid()) continue;
 
@@ -1627,6 +1699,23 @@ StrategyBacktestResult StrategyEngine::backtest(
             continue;
         }
 
+        // ── 调仓间隔检查 (与实盘 EOD 一致): 非调仓日跳过策略评估 ──
+        bool isRebalanceDay = true;
+        if (m_rebalanceInterval > 1 && !m_lastRebalanceDate.empty()) {
+            isRebalanceDay = false;
+            std::string dateStr = std::to_string(currentDay);
+            int since = 0;
+            for (int i = 0; i < m_rebalanceInterval && !dateStr.empty(); ++i) {
+                char prevOut[32] = {};
+                if (::get_previous_trading_date("SZSE", dateStr.c_str(), prevOut) != 0)
+                    ::get_previous_trading_date("SHSE", dateStr.c_str(), prevOut);
+                dateStr = prevOut;
+                if (dateStr.empty()) break;
+                ++since;
+                if (dateStr == m_lastRebalanceDate) { isRebalanceDay = (since >= m_rebalanceInterval); break; }
+            }
+        }
+
         const auto& instruments = view->instruments();
         auto closeMat = view->close();
         auto volumeMat = view->volume();
@@ -1757,10 +1846,28 @@ StrategyBacktestResult StrategyEngine::backtest(
             equity = cash + mv;
             equityCurve.push_back(equity);  // 熔断日也记录净值, 保证与 dates 对齐
         } else {
-        // ── 因子定池: 喂快照 → 选候选池 → 注入策略上下文 → 策略只在池内判买点 ──
-        // v2.1: 规则形态分注入为合成因子 (rule_score), 与 AI 因子共同参与 compositeScore
-        if (m_factorSignalProcessor.enabled() && m_poolSelector) {
-            // 现有因子值注入
+        // ── 非调仓日: 只更新净值, 不评估策略 ──
+        if (!isRebalanceDay) {
+            double mv = 0.0;
+            for (const auto& [sym, pos] : backtestPositions) {
+                if (pos.quantity() <= 0) continue;
+                const double px = static_cast<double>(closeMat.data[
+                    rowOffset + static_cast<size_t>(symbolToCol.at(sym))]);
+                if (px > 0.0) mv += px * static_cast<double>(pos.quantity());
+            }
+            equity = cash + mv;
+            equityCurve.push_back(equity);
+            latestEquity = equity;
+            if (equity > peakEquity) peakEquity = equity;
+            m_circuitBreaker.updateEndOfDay(equity);
+            dailyPositionSum += static_cast<int>(backtestPositions.size());
+            deployedCapitalSum += mv;
+            if (!backtestPositions.empty()) ++daysWithTrades;
+            continue;  // 跳过策略评估和订单处理, 进入下一天
+        }
+
+        // ── 因子值注入 (所有策略共用: 填充缓存 + 更新快照) ──
+        {
             const std::int32_t dayValue = dates[static_cast<std::size_t>(r)].value;
             for (const auto& fid : m_factorSignalProcessor.factorIds()) {
                 const auto* factorVals = factorService_->backtestValuesBySymbol(fid, dayValue);
@@ -1772,7 +1879,10 @@ StrategyBacktestResult StrategyEngine::backtest(
                     bySymbol[foundation::market::AStockSymbol::fromCode(code).fullSymbol()] = value;
                 m_factorSignalProcessor.updateSnapshot(fid, bySymbol);
             }
+        }
 
+        // ── 因子定池/候选池 (因子策略跳过: 自行全量排名) ──
+        if (m_factorSignalProcessor.enabled() && m_poolSelector && !m_hasFactorStrategies) {
             // v2.1: 规则形态分注入 (合成因子 "rule_score")
             if (m_ruleGate.enabled()) {
                 std::unordered_map<std::string, double> ruleScoreMap;
@@ -1792,6 +1902,13 @@ StrategyBacktestResult StrategyEngine::backtest(
             if (!pool.empty()) { totalPoolCandidates += pool.size(); ++poolSelectionDays; }
             strategyService_->updateCandidatePool(
                 std::unordered_set<std::string>(pool.begin(), pool.end()));
+            // 注入因子复合评分到上下文 (非因子策略用, 按策略配置的因子权重加权)
+            {
+                std::unordered_map<std::string, double> factorScoreMap;
+                for (const auto& sym : pool)
+                    factorScoreMap[sym] = m_factorSignalProcessor.compositeScore(sym);
+                strategyService_->updateFactorScores(std::move(factorScoreMap));
+            }
             if (r == 0 || r % 100 == 0)
                 INTERNAL_INFO_STREAM << "[backtest] day " << r << " 因子候选池: " << pool.size()
                                      << " 标的 (targetPosition=" << m_factorSignalProcessor.targetPositionCount() << ")";
@@ -2081,6 +2198,10 @@ StrategyBacktestResult StrategyEngine::backtest(
                     }
                 }
             }
+
+            // 记录调仓日期 (与实盘 EOD 一致)
+            if (dayBuys > 0 || daySells > 0)
+                m_lastRebalanceDate = std::to_string(dates[static_cast<std::size_t>(r)].value);
 
             // 采样日输出真实成交统计 (换算后的最终下单量)
             if ((r == 0 || r % 100 == 0)

@@ -173,6 +173,9 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
 
     m_workerPool->post([this, capturedStrategyId, capturedDatasetId, params]() {
         try {
+            // 检查是否已被取消
+            if (!m_isRunning.load()) return;
+
             // ─── 1. 构建回测请求（纯 CPU，无 I/O）───
             BacktestRequest request = buildBacktestRequest(
                 QString::fromStdString(capturedStrategyId), params);
@@ -236,6 +239,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             // ─── 4. 执行回测 ───
             auto result = engine->backtest(request, dataSvc.get(),
                 [this](double progress) {
+                    if (!m_isRunning.load()) throw std::runtime_error("cancelled");
                     QMetaObject::invokeMethod(this, [this, progress]() {
                         m_progress = progress;
                         emit progressChanged();
@@ -462,6 +466,10 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 }
             }
 
+            // ── 释放回测内存: 引擎(因子缓存) + Arrow 数据集 (可达数 GB) ──
+            mgr.stopStrategy(capturedStrategyId);
+            m_strategyDataSvc.reset();
+
             // ── 通知 UI 切换到分析页（数据来自内存 qResult，无需等 DB）──
             QMetaObject::invokeMethod(this, [this, qResult, capturedStrategyId]() {
                 m_isRunning.store(false); m_progress = 100.0;
@@ -558,6 +566,21 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 INTERNAL_WARN_STREAM << "[StrategyBacktest] 回测结果持久化失败: " << e.what();
             }
 
+        } catch (const std::runtime_error& e) {
+            domain::strategy::StrategyManager::instance().stopStrategy(capturedStrategyId);
+            m_strategyDataSvc.reset();
+            std::string what = e.what();
+            if (what == "cancelled") {
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_isRunning.store(false); emit isRunningChanged();
+                    emit backtestCancelled();
+                }, Qt::QueuedConnection);
+            } else {
+                QMetaObject::invokeMethod(this, [this, msg = QString::fromUtf8(e.what())]() {
+                    m_isRunning.store(false); emit isRunningChanged();
+                    emit backtestFailed(QStringLiteral("Error: %1").arg(msg));
+                }, Qt::QueuedConnection);
+            }
         } catch (const std::exception& e) {
             QMetaObject::invokeMethod(this, [this, msg = QString::fromUtf8(e.what())]() {
                 m_isRunning.store(false);
@@ -578,6 +601,14 @@ void StrategyBacktestBridge::cancelBacktest()
 {
     m_isRunning.store(false);
     emit isRunningChanged();
+    // 停止线程池, 等待当前任务退出后重建
+    if (m_workerPool) {
+        m_workerPool->shutdown(true);
+        m_workerPool.reset();
+    }
+    m_progress = 0.0;
+    m_statusText.clear();
+    emit progressChanged(); emit statusChanged();
     emit backtestCancelled();
 }
 

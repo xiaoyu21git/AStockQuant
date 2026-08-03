@@ -199,7 +199,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     radius: 8
-                    color: "#0f172a"
+                    color: "#1e293b"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: parameterPanelLayout.implicitHeight + 18
@@ -313,7 +313,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     radius: 8
-                    color: "#111827"
+                    color: "#1a2332"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: personalizedParameterCardLayout.implicitHeight + 14
@@ -481,7 +481,7 @@ Rectangle {
 
                             Rectangle {
                                 radius: 9
-                                color: "#0f172a"
+                                color: "#1e293b"
                                 border.width: 1
                                 border.color: "#334155"
                                 implicitWidth: modeChipText.implicitWidth + 14
@@ -761,7 +761,7 @@ Rectangle {
                                                             Layout.preferredWidth: 96
                                                             implicitHeight: 28
                                                             radius: 8
-                                                            color: "#111827"
+                                                            color: "#1a2332"
                                                             border.width: 1
                                                             border.color: "#334155"
 
@@ -867,7 +867,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     radius: 8
-                    color: "#111827"
+                    color: "#1a2332"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: blacklistCardLayout.implicitHeight + 14
@@ -901,7 +901,7 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 32
                                 radius: 6
-                                color: "#0f172a"
+                                color: "#1e293b"
                                 border.width: 1
                                 border.color: "#334155"
                                 TextInput {
@@ -1029,7 +1029,7 @@ Rectangle {
 
                                 Rectangle {
                                     radius: 8
-                                    color: "#111827"
+                                    color: "#1a2332"
                                     border.width: 1
                                     border.color: "#334155"
                                     implicitWidth: currentStageChipText.implicitWidth + 16
@@ -1046,7 +1046,7 @@ Rectangle {
 
                                 Rectangle {
                                     radius: 8
-                                    color: "#111827"
+                                    color: "#1a2332"
                                     border.width: 1
                                     border.color: "#334155"
                                     implicitWidth: currentGroupChipText.implicitWidth + 16
@@ -1172,7 +1172,7 @@ Rectangle {
                                     // 添加阶段
                                     Rectangle {
                                         implicitWidth: 38; implicitHeight: 38; radius: 8
-                                        color: "#111827"; border.width: 1; border.color: "#1f2937"
+                                        color: "#1a2332"; border.width: 1; border.color: "#1f2937"
                                         Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 18; color: "#60a5fa" }
                                         MouseArea {
                                             anchors.fill: parent; cursorShape: Qt.PointingHandCursor
@@ -1284,7 +1284,7 @@ Rectangle {
                     Layout.alignment: Qt.AlignTop
                     Layout.minimumHeight: root.enableAdvancedOptions ? 184 : 56
                     radius: 10
-                    color: "#0f172a"
+                    color: "#1e293b"
                     border.width: 1
                     border.color: "#334155"
                     
@@ -1370,7 +1370,7 @@ Rectangle {
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1405,7 +1405,7 @@ Rectangle {
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1440,7 +1440,7 @@ Rectangle {
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1475,7 +1475,7 @@ Rectangle {
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1511,7 +1511,7 @@ Rectangle {
                                     
                                     background: Rectangle {
                                         radius: 6
-                                        color: "#0f172a"
+                                        color: "#1e293b"
                                         border.width: 1
                                         border.color: "#334155"
                                     }
@@ -1532,7 +1532,7 @@ Rectangle {
                     Layout.maximumWidth: root.rulePanelWidth
                     visible: root.previewRuleComposerStages().length > 0
                     radius: 10
-                    color: "#0f172a"
+                    color: "#1e293b"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: selectedTemplateLayout.implicitHeight + 24
@@ -1603,7 +1603,7 @@ Rectangle {
                                 required property var modelData
                                 Layout.fillWidth: true
                                 radius: 8
-                                color: "#111827"
+                                color: "#1a2332"
                                 border.width: 1
                                 border.color: modelData.accentColor || "#334155"
                                 implicitHeight: stageBindingColumn.implicitHeight + 16
@@ -1717,7 +1717,7 @@ Rectangle {
                                                         property bool secondaryExpanded: !secondaryCollapsible
                                                         Layout.fillWidth: true
                                                         radius: 8
-                                                        color: "#111827"
+                                                        color: "#1a2332"
                                                         border.width: 1
                                                         border.color: "#334155"
                                                         implicitHeight: ruleBindingColumn.implicitHeight + 16
@@ -3972,6 +3972,8 @@ Rectangle {
         }
         Qt.callLater(function() {
             root.suppressRuleComposerReset = false
+            // 重新加载当前策略类型的参数（切换类型时被 suppress 跳过了）
+            loadParamConfigs({})
         })
         root.advancedOptionsChanged(root.enableAdvancedOptions)
         emitValidationState(currentParameterValidationErrors())
@@ -4027,6 +4029,17 @@ Rectangle {
     
     // ============ 初始化和信号连接 ============
     
+    // 机器学习/多因子策略自动启用因子覆盖层
+    function autoEnableFactorOverlayIfNeeded() {
+        if (root.selectedStrategyBehaviorKind === 4     // MultiFactor
+            || root.selectedStrategyBehaviorKind === 5) { // MachineLearning
+            if (!root.factorOverlay.enabled) {
+                root.factorOverlay.enabled = true
+                root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
+            }
+        }
+    }
+
     Component.onCompleted: {
         // 注册参数组件
         paramComponents.registerAllComponents()
@@ -4034,6 +4047,7 @@ Rectangle {
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
             root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
+        autoEnableFactorOverlayIfNeeded()
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         if (!Array.isArray(root.ruleComposerStages) || root.ruleComposerStages.length === 0) {
             rebuildRuleComposerState(true)
@@ -4044,13 +4058,13 @@ Rectangle {
     }
 
     onSelectedStrategyTypeIndexChanged: {
-        if (root.suppressRuleComposerReset) {
-            return
-        }
         loadParamConfigs({})
         root.forbidDefaultRuleBuildInEdit = false
+        autoEnableFactorOverlayIfNeeded()
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
-        rebuildRuleComposerState(true)
+        if (!root.suppressRuleComposerReset) {
+            rebuildRuleComposerState(true)
+        }
         syncDecoratedParameters()
     }
 

@@ -186,7 +186,7 @@ Rectangle {
                 Layout.preferredHeight: 100
                 Layout.minimumHeight: 80
                 radius: 8
-                color: "#0f172a"
+                color: "#1e293b"
                 border.width: 1
                 border.color: "#334155"
                 

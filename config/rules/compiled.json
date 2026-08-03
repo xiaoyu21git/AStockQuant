@@ -1,8 +1,8 @@
 {
   "version": 1,
   "namespace": "a_share_short_term",
-  "compiled_at": "2026-07-17T20:57:54",
-  "template_count": 81,
+  "compiled_at": "2026-08-03T14:55:05.780775",
+  "template_count": 84,
   "templates": [
     {
       "templateId": "template_entry_weak_to_strong_v1",
@@ -9785,6 +9785,309 @@
                 "open"
               ],
               "focus": "熊市不买"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "templateId": "template_risk_market_bear_freeze_entry",
+      "displayName": "risk_market_bear_freeze_entry.yaml",
+      "fileName": "risk_market_bear_freeze_entry.yaml",
+      "phase": "risk",
+      "summary": "",
+      "actions": [
+        "freeze",
+        "candidate_entry",
+        "open"
+      ],
+      "tags": [
+        "market_regime"
+      ],
+      "namespace": "trading.risk.market_bear_freeze_entry",
+      "rules": [
+        {
+          "id": "market-bear-regime-freeze",
+          "name": "熊市体制冻结",
+          "stage": "market",
+          "priority": 99,
+          "description": "市场进入熊市体制(全市场站上MA60比例≤35%)即无条件冻结新开仓, 不再等待回撤/波动率确认。",
+          "tags": [
+            "market",
+            "risk",
+            "bear_market",
+            "freeze"
+          ],
+          "when": {
+            "op": "eq",
+            "left": {
+              "var": "market.regime_state"
+            },
+            "right": "bear"
+          },
+          "result": {
+            "result": "freeze",
+            "reason_code": "market_bear_regime_freeze",
+            "message": "市场处于熊市体制, 冻结新增仓位",
+            "payload": {
+              "state": "frozen",
+              "gate_level": "bear_regime_freeze",
+              "blocked_actions": [
+                "candidate_entry",
+                "open"
+              ],
+              "focus": "熊市不买, 等待系统性企稳"
+            }
+          }
+        },
+        {
+          "id": "market-near-bear-freeze",
+          "name": "准熊市退潮冻结",
+          "stage": "market",
+          "priority": 97,
+          "description": "市场宽度不足30%且等权指数回撤超过10%, 虽未触发熊市体制但已处于系统性退潮边缘, 冻结新开仓。",
+          "tags": [
+            "market",
+            "risk",
+            "near_bear",
+            "freeze"
+          ],
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "lt",
+                "left": {
+                  "var": "market.breadth_above_ma60_ratio"
+                },
+                "right": 0.3
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "market.drawdown_from_recent_high"
+                },
+                "right": 0.1
+              }
+            ]
+          },
+          "result": {
+            "result": "freeze",
+            "reason_code": "market_near_bear_freeze",
+            "message": "市场宽度严重不足且回撤显著, 冻结新增仓位",
+            "payload": {
+              "state": "frozen",
+              "gate_level": "near_bear_freeze",
+              "blocked_actions": [
+                "candidate_entry",
+                "open"
+              ],
+              "focus": "退潮加速, 防守优先"
+            }
+          }
+        },
+        {
+          "id": "market-panic-vol-freeze",
+          "name": "恐慌波动冻结",
+          "stage": "market",
+          "priority": 95,
+          "description": "短期波动率达到长期均值的70%以上(波动冲击评分≥0.70), 无论市场体制如何, 冻结新开仓。",
+          "tags": [
+            "market",
+            "risk",
+            "panic_vol",
+            "freeze"
+          ],
+          "when": {
+            "op": "ge",
+            "left": {
+              "var": "market.volatility_shock_score"
+            },
+            "right": 0.7
+          },
+          "result": {
+            "result": "freeze",
+            "reason_code": "market_panic_vol_freeze",
+            "message": "市场波动剧烈, 冻结新增仓位",
+            "payload": {
+              "state": "frozen",
+              "gate_level": "panic_vol_freeze",
+              "blocked_actions": [
+                "candidate_entry",
+                "open"
+              ],
+              "focus": "恐慌波动中不接飞刀"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "templateId": "template_risk_market_sideways_selective_entry",
+      "displayName": "risk_market_sideways_selective_entry.yaml",
+      "fileName": "risk_market_sideways_selective_entry.yaml",
+      "phase": "risk",
+      "summary": "",
+      "actions": [
+        "freeze",
+        "candidate_entry",
+        "open"
+      ],
+      "tags": [
+        "market_regime"
+      ],
+      "namespace": "trading.risk.market_sideways_selective_entry",
+      "rules": [
+        {
+          "id": "market-sideways-selective-entry",
+          "name": "震荡市精选放行规则",
+          "stage": "market",
+          "priority": 84,
+          "description": "市场处于震荡阶段且波动冲击受控时，仅放行低风险、强确认类候选。",
+          "tags": [
+            "market",
+            "gate",
+            "sideways_market",
+            "selective_entry"
+          ],
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "eq",
+                "left": {
+                  "var": "market.regime_state"
+                },
+                "right": "sideways"
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "market.breadth_above_ma60_ratio"
+                },
+                "right": 0.38
+              },
+              {
+                "op": "le",
+                "left": {
+                  "var": "market.breadth_above_ma60_ratio"
+                },
+                "right": 0.58
+              },
+              {
+                "op": "le",
+                "left": {
+                  "var": "market.volatility_shock_score"
+                },
+                "right": 0.58
+              },
+              {
+                "op": "le",
+                "left": {
+                  "var": "market.drawdown_from_recent_high"
+                },
+                "right": 0.1
+              }
+            ]
+          },
+          "result": {
+            "result": "state_switch",
+            "reason_code": "market_sideways_selective_entry",
+            "message": "市场处于震荡阶段，仅放行精选确认类新增仓位",
+            "payload": {
+              "state": "selective_active",
+              "gate_level": "sideways_selective_allow",
+              "allow_actions": [
+                "observe",
+                "candidate_entry"
+              ],
+              "focus": "仅放行低吸回补、事件催化和强确认类候选"
+            },
+            "state": {
+              "market_state": "selective_active"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "templateId": "template_risk_market_bull_trend_allow_entry",
+      "displayName": "risk_market_bull_trend_allow_entry.yaml",
+      "fileName": "risk_market_bull_trend_allow_entry.yaml",
+      "phase": "risk",
+      "summary": "",
+      "actions": [
+        "freeze",
+        "candidate_entry",
+        "open"
+      ],
+      "tags": [
+        "market_regime"
+      ],
+      "namespace": "trading.risk.market_bull_trend_allow_entry",
+      "rules": [
+        {
+          "id": "market-bull-trend-allow-entry",
+          "name": "牛市趋势放行新开仓",
+          "stage": "market",
+          "priority": 90,
+          "description": "市场处于牛市趋势阶段且广度、趋势强度与年线站稳比例同步改善时，允许恢复趋势类新增仓位。",
+          "tags": [
+            "market",
+            "gate",
+            "bull_market",
+            "trend",
+            "allow_entry"
+          ],
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "eq",
+                "left": {
+                  "var": "market.regime_state"
+                },
+                "right": "bull"
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "market.breadth_above_ma60_ratio"
+                },
+                "right": 0.58
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "market.index_above_ma120_ratio"
+                },
+                "right": 1.01
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "market.trend_strength_score"
+                },
+                "right": 0.62
+              }
+            ]
+          },
+          "result": {
+            "result": "state_switch",
+            "reason_code": "market_bull_trend_allow_entry",
+            "message": "市场进入牛市趋势阶段，允许恢复趋势类新增仓位",
+            "payload": {
+              "state": "active",
+              "gate_level": "bull_market_allow",
+              "allow_actions": [
+                "observe",
+                "candidate_entry",
+                "open"
+              ],
+              "focus": "优先放行趋势突破、回踩确认和中长线趋势类候选"
+            },
+            "state": {
+              "market_state": "active"
             }
           }
         }

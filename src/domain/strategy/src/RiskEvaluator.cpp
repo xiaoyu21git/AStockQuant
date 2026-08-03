@@ -88,7 +88,8 @@ RiskResult RiskEvaluator::evaluateOrder(const RiskInput& input) {
     // ── 步骤 2.5：涨跌停检查（买卖通用，referencePrice 由 buildRiskInput 从 preClose 填充）──
     if (input.referencePrice() > 0.0) {
         bool atLimit = RiskManager::isPriceAtLimit(
-            input.price(), input.referencePrice(), input.isBuyOrder());
+            input.price(), input.referencePrice(), input.isBuyOrder(),
+            input.symbol());
         if (atLimit) {
             return RiskResult::rejected(
                 RiskRejectCode::PriceInvalid, 1.0,
