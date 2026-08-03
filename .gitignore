@@ -149,3 +149,11 @@ Thumbs.db
 
 # 缓存备份(勿提交)
 backup/
+
+# v0.14.0 传导链因子 — 数据文件/模型
+ChainKnowledgeGraph/
+Commodity-News-Corpus/
+CrudeOilNews-Corpus/
+tools/commodity_event_model/
+tools/commodity_event_train.jsonl
+
