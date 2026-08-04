@@ -41,6 +41,31 @@ void CommodityEventDetector::initPatterns()
            "supply_disruption", "罢工停产", 0.7},
         EP{std::regex(R"((疫情|封控|静默).{0,12}(产区|工厂|矿|码头|运输))"),
            "supply_disruption", "疫情封控", 0.6},
+        // ── 地缘政治 ──
+        EP{std::regex(R"((制裁|封锁|禁运).{0,10}(石油|天然气|原油|矿产|金属|稀土))"),
+           "trade_restriction", "地缘制裁", 0.9},
+        EP{std::regex(R"((中东|俄乌|红海|霍尔木兹).{0,10}(冲突|紧张|袭击|中断|封锁))"),
+           "supply_disruption", "地缘冲突", 0.9},
+        // ── 天气/农业 ──
+        EP{std::regex(R"((干旱|冻害|寒潮|倒春寒|冰雹|洪涝).{0,10}(作物|产区|农田|大豆|玉米|棉花|小麦|白糖|橡胶))"),
+           "supply_disruption", "天气灾害", 0.7},
+        // ── OPEC ──
+        EP{std::regex(R"(OPEC.{0,15}(减产|增产|维持|配额|协议))"),
+           "policy_restriction", "OPEC决议", 0.9},
+        EP{std::regex(R"(欧佩克.{0,10}(减产|增产|维持|配额|会议|决定))"),
+           "policy_restriction", "OPEC决议", 0.9},
+        // ── 管道爆炸 ──
+        EP{std::regex(R"((管道|输油|输气|管线).{0,8}(爆炸|泄漏|破裂|关闭|停运))"),
+           "supply_disruption", "管道事故", 0.9},
+        // ── 电力危机 ──
+        EP{std::regex(R"((限电|缺电|电力紧张|能源危机|电荒).{0,10}(停产|减产|工厂|冶炼|电解))"),
+           "supply_disruption", "能源危机", 0.8},
+        // ── 矿山枯竭 ──
+        EP{std::regex(R"((矿山|矿区|矿井).{0,8}(关闭|关停|枯竭|资源耗尽))"),
+           "supply_disruption", "矿山枯竭", 0.8},
+        // ── 需求冲击 ──
+        EP{std::regex(R"((新能源汽车|锂电池|储能).{0,10}(销量.{0,5}(暴增|翻倍|超预期|创新高)|需求.{0,5}(暴增|激增|旺盛)))"),
+           "demand_shock", "需求暴增", 0.6},
     };
 
     // 关键词 → product_id
