@@ -215,7 +215,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         // ── 自动标记: 从PG查因子类型, SUPPLY_CHAIN=18 → skipNormalizeFactorIds ──
         for (const auto& fw : params.factorWeights) {
             auto fi = db->executeQuery(
-                "SELECT factor_type FROM alpha.factor_instance WHERE instance_id = ?",
+                "SELECT full_config->>'factorType' AS factor_type FROM alpha.factor_instance WHERE instance_id = ?",
                 {astock::database::SqlParam{fw.factorId}});
             if (!fi.isEmpty() && fi.getRow(0).getInt("factor_type", 0) == 18) {
                 params.skipNormalizeFactorIds.insert(fw.factorId);

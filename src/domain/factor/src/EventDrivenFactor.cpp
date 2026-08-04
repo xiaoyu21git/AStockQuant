@@ -4,6 +4,8 @@
 #include "FactorInstanceManager.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
+#include "infrastructure/include/database/NativePgConnectionPool.h"
+#include "infrastructure/include/database/ISqlDatabase.h"
 
 #include <algorithm>
 #include <chrono>
@@ -261,6 +263,77 @@ void EventDrivenFactor::loadHistoricalEvents(
 void EventDrivenFactor::clearCache() {
     std::unique_lock<std::shared_mutex> lock(m_cacheMutex);
     m_eventCache.clear();
+}
+
+void EventDrivenFactor::loadEventsFromDb(const std::string& startDate,
+                                          const std::string& endDate)
+{
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) {
+        INTERNAL_WARN_STREAM << "[EventDriven] loadEventsFromDb: DB不可用";
+        return;
+    }
+
+    using P = astock::database::SqlParam;
+    // 1. 查询事件
+    auto eventsRes = db->executeQuery(
+        "SELECT product_id, event_type, event_name, urgency, direction, title, source "
+        "FROM alpha.commodity_event_signals "
+        "WHERE created_at::date BETWEEN ? AND ? "
+        "ORDER BY created_at",
+        {P{startDate}, P{endDate}});
+
+    if (eventsRes.isEmpty()) {
+        INTERNAL_INFO_STREAM << "[EventDriven] loadEventsFromDb: "
+                             << startDate << "~" << endDate << " 无商品事件";
+        return;
+    }
+
+    // 2. 查询 product_stock_mapping 构建 product→symbols 映射
+    auto mappingRes = db->executeQuery(
+        "SELECT product_id, symbol FROM ref.product_stock_mapping "
+        "WHERE effective_date <= ? AND expired_date >= ?",
+        {P{endDate}, P{startDate}});
+
+    std::unordered_map<std::string, std::vector<std::string>> productStocks;
+    for (std::size_t i = 0; i < mappingRes.rowCount(); ++i) {
+        auto& row = mappingRes.getRow(i);
+        productStocks[row.getString("product_id")].push_back(row.getString("symbol"));
+    }
+
+    // 3. 转换为 EventFormat 并注入缓存
+    std::vector<engine::EventFormat> formats;
+    for (std::size_t i = 0; i < eventsRes.rowCount(); ++i) {
+        auto& row = eventsRes.getRow(i);
+        std::string productId = row.getString("product_id");
+        double urgency = row.getDouble("urgency");
+        int direction = row.getInt("direction");
+
+        auto symbolsIt = productStocks.find(productId);
+        if (symbolsIt == productStocks.end() || symbolsIt->second.empty())
+            continue;
+
+        // sentiment_score = urgency * direction (商品事件→情感分)
+        double sentiment = urgency * direction;
+
+        engine::EventFormat evt;
+        evt.type = "commodity_event";
+        evt.set("symbols", symbolsIt->second);
+        evt.set("sentiment_score", std::to_string(sentiment));
+        evt.set("confidence", std::to_string(urgency));
+        evt.set("title", row.getString("title"));
+        evt.metadata["event_type"] = row.getString("event_type");
+        evt.metadata["event_name"] = row.getString("event_name");
+        evt.metadata["product_id"] = productId;
+        formats.push_back(std::move(evt));
+    }
+
+    INTERNAL_INFO_STREAM << "[EventDriven] loadEventsFromDb: "
+                         << eventsRes.rowCount() << " events → "
+                         << formats.size() << " injected ("
+                         << startDate << "~" << endDate << ")";
+
+    loadHistoricalEvents(formats);
 }
 
 // ═══════════════════════════════════════════════════════════════

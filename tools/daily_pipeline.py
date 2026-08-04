@@ -10,6 +10,7 @@ STEPS = [
     ("价格更新", "commodity_ranker.py --mode update_prices"),
     ("库存同步", "sync_inventory.py"),
     ("排名计算", "commodity_ranker.py --mode compute_rank --top-n 5"),
+    ("事件检测", "news_event_pipeline.py"),
     ("信号监控", "inventory_monitor.py --brief"),
 ]
 

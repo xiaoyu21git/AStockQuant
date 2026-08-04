@@ -211,6 +211,12 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         *instanceMgr,
                         std::move(symbolResolver),
                         std::move(factorNameResolver));
+                    // 加载商品历史事件到 EventDrivenFactor 缓存
+                    if (factorSvc) {
+                        factorSvc->loadCommodityEvents(
+                            params.value("startDate").toString().toStdString(),
+                            params.value("endDate").toString().toStdString());
+                    }
                 }
             }
             auto* engine = mgr.createEngine(capturedStrategyId, std::move(factorSvc));

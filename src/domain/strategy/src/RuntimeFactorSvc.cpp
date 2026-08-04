@@ -1,5 +1,6 @@
 #include "../include/RuntimeFactorSvc.h"
 #include "../../factor/include/FactorInstanceManager.h"
+#include "../../factor/include/EventDrivenFactor.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../infrastructure/include/database/ISqlDatabase.h"
@@ -158,6 +159,20 @@ int RuntimeFactorSvc::getMaxLookbackDays() const {
 
 void RuntimeFactorSvc::clearSignalCache() {
     if (m_engine) m_engine->clearSignalCache();
+}
+
+void RuntimeFactorSvc::loadCommodityEvents(const std::string& startDate,
+                                            const std::string& endDate)
+{
+    for (const auto& fid : m_factorIds) {
+        if (fid.empty()) continue;
+        try {
+            auto factor = m_instanceManager.createInstance(fid);
+            if (!factor) continue;
+            auto* edf = dynamic_cast<factor::EventDrivenFactor*>(factor.get());
+            if (edf) edf->loadEventsFromDb(startDate, endDate);
+        } catch (...) {}
+    }
 }
 
 void RuntimeFactorSvc::buildLiveView(

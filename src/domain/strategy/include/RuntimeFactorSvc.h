@@ -64,6 +64,8 @@ public:
     [[nodiscard]] int getMaxLookbackDays() const override;
     /// @brief 清理 FactorEngine 信号缓存 (回测结束后释放内存)
     void clearSignalCache();
+    /// @brief 从PG加载商品事件到 EventDrivenFactor 缓存 (回测初始化时调用)
+    void loadCommodityEvents(const std::string& startDate, const std::string& endDate);
 
     /// @brief 用 DB 查询结果构建实盘 MarketView（零 JSON）
     void buildLiveView(

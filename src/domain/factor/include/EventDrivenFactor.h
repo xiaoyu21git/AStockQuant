@@ -63,6 +63,8 @@ public:
     /// @brief 回测专用: 批量加载历史事件
     void loadHistoricalEvents(
         const std::vector<engine::EventFormat>& events);
+    /// @brief 回测专用: 从PG加载商品事件到缓存
+    void loadEventsFromDb(const std::string& startDate, const std::string& endDate);
 
     /// @brief 清空事件缓存 (回测日期切换时调用)
     void clearCache();
