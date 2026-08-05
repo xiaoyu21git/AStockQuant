@@ -1756,6 +1756,12 @@ StrategyBacktestResult StrategyEngine::backtest(
         if (m_ruleGate.enabled()) {
             ruleProvider.setDay(view, dates[static_cast<std::size_t>(r)].value, &backtestPositions);
             ruleAllowEntriesToday = m_ruleGate.allowNewEntriesToday(ruleProvider);
+            if (!ruleAllowEntriesToday && m_tradeJournal) {
+                m_tradeJournal->log(
+                    std::to_string(dates[static_cast<std::size_t>(r)].value)
+                    + " FREEZE template:" + m_ruleGate.lastHitTemplateId()
+                    + " rule:" + m_ruleGate.lastHitRuleId());
+            }
         } else {
             ruleAllowEntriesToday = true;
         }
@@ -2055,6 +2061,14 @@ StrategyBacktestResult StrategyEngine::backtest(
                             m_ruleGate.lastHitRuleId(),
                             closePrice, r
                         });
+                        // 交易日志: 规则拒绝
+                        if (m_tradeJournal) {
+                            m_tradeJournal->log(
+                                std::to_string(dates[static_cast<std::size_t>(r)].value)
+                                + " REJECT " + symbol
+                                + " rule:" + m_ruleGate.lastHitRuleId()
+                                + " template:" + m_ruleGate.lastHitTemplateId());
+                        }
                         continue;
                     }
                 }
@@ -2140,6 +2154,13 @@ StrategyBacktestResult StrategyEngine::backtest(
                 auto riskResult = domain::strategy::RiskEvaluator::evaluateOrder(riskInput);
                 if (!riskResult.approved()) {
                     ++riskRejectedCount;
+                    // 交易日志: 风控拒绝
+                    if (m_tradeJournal) {
+                        m_tradeJournal->log(
+                            std::to_string(dates[static_cast<std::size_t>(r)].value)
+                            + " RISK_REJECT " + symbol
+                            + " " + riskResult.description());
+                    }
                     continue;
                 }
 
@@ -2318,6 +2339,15 @@ StrategyBacktestResult StrategyEngine::backtest(
         todayStopLossSyms.clear();
         todayRuleExitSyms.clear();
         boughtToday.clear();  // T+1 次日解禁
+        // 交易日志: 每日快照
+        if (m_tradeJournal) {
+            int posCount = static_cast<int>(backtestPositions.size());
+            m_tradeJournal->log(
+                std::to_string(dates[static_cast<std::size_t>(r)].value)
+                + " EOD 持仓:" + std::to_string(posCount)
+                + " 净值:" + std::to_string(static_cast<int>(equity))
+                + " 现金:" + std::to_string(static_cast<int>(cash)));
+        }
         }  // else (非熔断/清仓路径)
         if (equity > peakEquity) peakEquity = equity;
 
