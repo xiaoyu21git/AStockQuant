@@ -984,16 +984,17 @@ Rectangle {
         var sharpe = Number(m.sharpeRatio || 0).toFixed(2)
         var dd = (Number(m.maxDrawdown || 0) * 100).toFixed(1)
         var win = (Number(m.winRate || 0) * 100).toFixed(1)
-        var msg = "年化 " + ann + "% | 夏普 " + sharpe + " | 回撤 " + dd + "% | 胜率 " + win + "%"
+        var fullK = Number(m.fullKelly || 0)
+        var halfK = Number(m.halfKelly || 0)
+        var msg = "年化 " + ann + "% | 夏普 " + sharpe + " | 回撤 " + dd + "% | 胜率 " + win + "% | 半凯 " + (halfK * 100).toFixed(1) + "%"
         console.log("策略回测完成: " + msg)
         showActionFeedback(msg, false)
         showPerformance = false
         showBacktestWorkbench = true
+        // 策略卡片数据由 C++ StrategyBacktestBridge 直接更新 StrategyListModel 单行，QML 不再调 init()
         backtestWorkbenchMode = "analysis"
         backtestWorkbenchLoadedOnce = true
-        if (performanceLoader.item && typeof performanceLoader.item.refreshPerformance === "function") {
-            performanceLoader.item.refreshPerformance()
-        }
+        // 绩效页数据由 StrategyBridge.strategiesChanged 信号驱动刷新，无需主动调用
     }
 
 
@@ -1113,7 +1114,7 @@ Rectangle {
             id: scrollView
             visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
@@ -1707,7 +1708,28 @@ Rectangle {
 
         Item {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillHeight: strategyLibraryPage.showPerformance
+            visible: strategyLibraryPage.showPerformance
+
+            Loader {
+                id: performanceLoader
+                anchors.fill: parent
+                asynchronous: true
+                active: strategyLibraryPage.showPerformance
+                visible: status === Loader.Ready && strategyLibraryPage.showPerformance
+                source: "../../components/Strategy/PerformanceHistoryList.qml"
+                onLoaded: {
+                    if (!item) return
+                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary()
+                        ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                }
+            }
+        }
+
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: strategyLibraryPage.showBacktestWorkbench
             visible: strategyLibraryPage.showBacktestWorkbench
 
             Loader {
@@ -1734,7 +1756,7 @@ Rectangle {
                     }
                     if (typeof item.strategyId !== "undefined") {
                         item.strategyId = strategyLibraryPage.selectedStrategyId
-                        item.strategyName = strategyLibraryPage.getSelectedStrategySummary() ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
+                        item.strategyName = strategyLibraryPage.backtestResult.strategyName || strategyLibraryPage.selectedStrategyName || ""
                     }
                     if (typeof item.backtestResult !== "undefined") {
                         item.backtestResult = strategyLibraryPage.backtestResult
@@ -1802,6 +1824,7 @@ Rectangle {
                 }
             }
         }
+
     }
     
     // 新建策略对话框
@@ -2096,8 +2119,9 @@ Rectangle {
     }
 
     onVisibleChanged: {
-        if (visible && !pageServicesReady) {
+        if (visible) {
             ensurePageServicesReady()
+            rebuildStrategyVisibleModel()
         }
     }
 
@@ -2113,27 +2137,4 @@ Rectangle {
     }
 
     property var strategyService: StrategyBridge
-
-    // ── 绩效分页 ──
-    Item {
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        visible: strategyLibraryPage.showPerformance
-
-        Loader {
-            id: performanceLoader
-            anchors.fill: parent
-            active: strategyLibraryPage.showPerformance
-            source: "qrc:/components/Strategy/PerformanceHistoryList.qml"
-
-            onLoaded: {
-                if (item) {
-                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
-                    item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary()
-                        ? (strategyLibraryPage.getSelectedStrategySummary().strategyName
-                           || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
-                }
-            }
-        }
-    }
 }

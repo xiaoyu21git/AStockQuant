@@ -395,6 +395,21 @@ std::vector<CalculationResult> CompositeFactor::calculateBatch(const std::vector
             validMasks.push_back(std::move(validMask));
         }
 
+        // RankAverage：将每个子因子的得分转为截面百分位排名（跨 symbol），再以加权平均合并。
+        // 转换后所有值落在 [0, 1]，中性值固定为 0.5。
+        if (params_.combineMode == CompositeCombineMode::RankAverage) {
+            for (size_t childIndex = 0; childIndex < children.size(); ++childIndex) {
+                std::vector<size_t> validIndexes;
+                validIndexes.reserve(context.symbols.size());
+                for (size_t i = 0; i < validMasks[childIndex].size(); ++i) {
+                    if (validMasks[childIndex][i] != 0) {
+                        validIndexes.push_back(i);
+                    }
+                }
+                applyRankLike(normalizedScores[childIndex], validIndexes, true);
+            }
+        }
+
         for (size_t symbolIndex = 0; symbolIndex < context.symbols.size(); ++symbolIndex) {
             const std::string& symbol = context.symbols[symbolIndex];
             int validChildCount = 0;
@@ -442,14 +457,21 @@ std::vector<CalculationResult> CompositeFactor::calculateBatch(const std::vector
                         continue;
                     }
                     const auto& spec = children[childIndex].spec;
-                    adjustedWeightedScore += spec.weight * neutralValueForMode(spec.normalizeMode);
+                    const double neutralVal = (params_.combineMode == CompositeCombineMode::RankAverage)
+                        ? 0.5 : neutralValueForMode(spec.normalizeMode);
+                    adjustedWeightedScore += spec.weight * neutralVal;
                 }
             }
 
             double compositeScore = 0.0;
             switch (params_.combineMode) {
             case CompositeCombineMode::WeightedAverage:
+                compositeScore = params_.missingPolicy == CompositeMissingPolicy::FillNeutral
+                    ? (totalWeight > 0.0 ? adjustedWeightedScore / totalWeight : 0.0)
+                    : (validWeightSum > 0.0 ? weightedScore / validWeightSum : 0.0);
+                break;
             case CompositeCombineMode::RankAverage:
+                // 得分已在上方转为截面百分位排名 [0,1]；加权平均公式与 WeightedAverage 一致
                 compositeScore = params_.missingPolicy == CompositeMissingPolicy::FillNeutral
                     ? (totalWeight > 0.0 ? adjustedWeightedScore / totalWeight : 0.0)
                     : (validWeightSum > 0.0 ? weightedScore / validWeightSum : 0.0);
@@ -513,6 +535,14 @@ DataRequirements CompositeFactor::getDataRequirements() const
 BoundaryRules CompositeFactor::getBoundaryRules() const
 {
     return mergeBoundaryRules(resolveChildrenOrThrow());
+}
+
+int CompositeFactor::getLookbackDays() const
+{
+    int m = 0;
+    for (const auto& c : resolveChildrenOrThrow())
+        if (c.factor) m = std::max(m, c.factor->getLookbackDays());
+    return m > 0 ? m : 252;
 }
 
 void CompositeFactor::loadConfig(const foundation::json::JsonFacade& config)

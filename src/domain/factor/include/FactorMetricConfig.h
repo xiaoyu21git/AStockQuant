@@ -9,6 +9,7 @@ namespace foundation::json { class JsonFacade; }
 namespace factor {
 
 enum class DataFrequency : uint8_t {
+    Minute = 0,   // 分钟频（高频因子专用）
     Daily,
     Weekly,
     Monthly,
@@ -82,6 +83,7 @@ struct CommonMetricParams {
     bool lagEnabled{false};
     LagMode lagMode{LagMode::None};
     uint8_t lagPeriods{1};
+    bool ascending{true};  // 因子方向：true=升序(值越大越好)，false=降序(值越小越好)
 };
 
 struct CustomMetricDefinition {

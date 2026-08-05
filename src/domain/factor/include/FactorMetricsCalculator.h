@@ -131,6 +131,8 @@ private:
     static int estimateHalfLifeDays(const std::vector<double>& series);
     static double calculateMonthlyWinRate(const std::vector<double>& periodicReturns,
                                           const std::vector<std::string>& periodicDates);
+    static double calculateTopBottomSpreadReturn(const Inputs& inputs);
+    static bool calculateSpreadSignConsistency(const Inputs& inputs);
     static double annualizationFactorForPeriods(int forwardDays);
 };
 

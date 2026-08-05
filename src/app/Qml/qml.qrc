@@ -81,6 +81,8 @@
         <file>components/DataAnalysis/QuickStart.qml</file>
         <file>components/DataAnalysis/RulesConfigModal.qml</file>
         <file>components/DataAnalysis/RulePaginationBar.qml</file>
+        <file>components/DataAnalysis/RuleStatsCard.qml</file>
+        <file>components/DataAnalysis/RuleParamEditor.qml</file>
         <file>components/DataAnalysis/StatsCard.qml</file>
         <file>components/DataAnalysis/TaskCategory.qml</file>
         <file>components/DataAnalysis/WorkflowSteps.qml</file>
@@ -94,6 +96,7 @@
         <file>components/Factor/FactorTypeParameterPage.qml</file>
         <file>components/FactorCard.qml</file>
         <file>components/FactorWorkbench/Analysis/AnalysisPage.qml</file>
+        <file>components/FactorWorkbench/Backtest/FactorAnalysisCharts.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestConfigDialog.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestPage.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestResultView.qml</file>
@@ -151,14 +154,17 @@
         <file>main.qml</file>
         <file>page/DataAnalysis/Datamain.qml</file>
         <file>page/DataAnalysis/CacheManagementPage.qml</file>
+        <file>page/DataAnalysis/CleaningRulesPage.qml</file>
+        <file>page/DataAnalysis/StrategyRulesPage.qml</file>
         <file>page/FactorWorkbench.qml</file>
+        <file>page/FactorPerformancePage.qml</file>
         <file>page/Sidebar.qml</file>
         <file>page/dashboard/ChartArea.qml</file>
         <file>page/dashboard/MainContent.qml</file>
         <file>page/dashboard/MarketGrid.qml</file>
         <file>page/dashboard/OrderBook.qml</file>
         <file>page/dashboard/PositionsPanel.qml</file>
-        <file>page/dashboard/QtCandlestickChart.qml</file>
+
         <file>page/dashboard/StatusSummaryCard.qml</file>
         <file>page/dashboard/StrategiesPanel.qml</file>
         <file>page/trading/TradingPage.qml</file>
@@ -169,28 +175,29 @@
         <file>page/leftSidebar/PrimaryMenu.qml</file>
         <file>page/leftSidebar/SecondaryMenu.qml</file>
         <file>page/risk/RiskConfigurationPage.qml</file>
+        <file>page/SettingsPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>page/strategies/BacktestResultAnalysisView.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
+        <file>components/Trading/CandlestickChart.qml</file>
+        <file>components/Trading/CrosshairIndicator.qml</file>
+        <file>components/Trading/CandleTooltip.qml</file>
+
         <file>components/Trading/OrderFormSection.qml</file>
         <file>components/Trading/OrderActionBar.qml</file>
         <file>config/views/risk_backtest_params.json</file>
         <file>config/views/factor_common.json</file>
         <file>config/views/factor_common_params.json</file>
-        <file>utils/FactorDataAdapter.js</file>
-        <file>utils/FactorMetaLoader.js</file>
         <file>utils/I18n.js</file>
         <file>utils/OrderUtils.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StartupGateFormatter.js</file>
-        <file>utils/StrategyStructureAdapter.js</file>
         <file>utils/TradingConstants.js</file>
 
 
-        <file>utils/StrategyCreationUtils.js</file>
         <file>components/Base/qmldir</file>
     </qresource>
 </RCC>

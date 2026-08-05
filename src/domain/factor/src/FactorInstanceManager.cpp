@@ -1,7 +1,11 @@
 #include "FactorInstanceManager.h"
 #include "CompositeFactor.h"
 #include "CustomFactor.h"
+#include "EventDrivenFactor.h"
 #include "DividendFactor.h"
+#include "ReversalFactor.h"
+#include "HighFreqFactor.h"
+#include "DLFactor.h"
 #include "GrowthFactor.h"
 #include "IndustryFactor.h"
 #include "LiquidityFactor.h"
@@ -12,6 +16,7 @@
 #include "QualityFactor.h"
 #include "SentimentFactor.h"
 #include "SizeFactor.h"
+#include "SupplyChainFactor.h"
 #include "TechnicalFactor.h"
 #include "ValueFactor.h"
 #include "FactorConfigAccess.h"
@@ -160,6 +165,42 @@ std::shared_ptr<BaseFactor> createCompositeFactorEntry(const FactorInstanceInfo&
         std::make_shared<FactorResolverAdapter>(manager));
 }
 
+std::shared_ptr<BaseFactor> createEventDrivenFactorEntry(const FactorInstanceInfo& info,
+                                                          std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                          FactorInstanceManager&)
+{
+    return EventDrivenFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createReversalFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                       FactorInstanceManager&)
+{
+    return ReversalFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createHighFreqFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                       FactorInstanceManager&)
+{
+    return HighFreqFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createDLFactorEntry(const FactorInstanceInfo& info,
+                                                 std::shared_ptr<DataAvailabilityChecker> dataChecker,
+                                                 FactorInstanceManager&)
+{
+    return DLFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createSupplyChainFactorEntry(
+    const FactorInstanceInfo& info,
+    std::shared_ptr<DataAvailabilityChecker> dataChecker,
+    FactorInstanceManager&)
+{
+    return SupplyChainFactor::create(info, std::move(dataChecker));
+}
+
 const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::MOMENTUM, &createMomentumFactorEntry},
     {FactorType::VALUE, &createValueFactorEntry},
@@ -175,6 +216,11 @@ const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
     {FactorType::SENTIMENT, &createSentimentFactorEntry},
     {FactorType::CUSTOM, &createCustomFactorEntry},
     {FactorType::COMPOSITE, &createCompositeFactorEntry},
+    {FactorType::EVENT_DRIVEN, &createEventDrivenFactorEntry},
+    {FactorType::REVERSAL, &createReversalFactorEntry},
+    {FactorType::HIGH_FREQ, &createHighFreqFactorEntry},
+    {FactorType::DL, &createDLFactorEntry},
+    {FactorType::SUPPLY_CHAIN, &createSupplyChainFactorEntry},
 };
 
 FactorCreator resolveFactorCreator(FactorType factorType)
@@ -308,11 +354,9 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::listAvailableInstances() 
 std::vector<FactorInstanceInfo> FactorInstanceManager::listAllInstances() {
     std::lock_guard<std::mutex> lock(cacheMutex_);
 
-    // 延迟加载: QML 因子选择窗口需要全量列表
-    if (infoCache_.empty()) {
-        auto all = loadAllInstancesFromDB();
-        for (auto& info : all) infoCache_[info.instanceId] = info;
-    }
+    // 全量加载: 必须从 DB 拉取, infoCache_ 可能只有部分条目
+    auto all = loadAllInstancesFromDB();
+    for (auto& info : all) infoCache_[info.instanceId] = info;
 
     std::vector<FactorInstanceInfo> allInstances;
     allInstances.reserve(infoCache_.size());
@@ -350,10 +394,30 @@ bool FactorInstanceManager::updateInstanceConfig(
     const foundation::json::JsonFacade& newConfig) {
 
     try {
+        // 提取 instance_name
+        std::string instanceName = newConfig.has("instance_name")
+            ? newConfig.get("instance_name").asString() : instanceId;
+        std::string description = newConfig.has("description")
+            ? newConfig.get("description").asString() : "";
+
+        using P = astock::database::SqlParam;
+        std::string configStr = newConfig.toString();
+        // 先确保 alpha.factors 存在 (FK 约束)
+        db_->executeUpdate(
+            "INSERT INTO alpha.factors (factor_id, factor_name, display_name) "
+            "VALUES ($1, $2, $2) "
+            "ON CONFLICT (factor_id) DO NOTHING",
+            {P{instanceId}, P{instanceName}}
+        );
         const int affectedRows = db_->executeUpdate(
-            "UPDATE factor_instance SET full_config = ?, updated_at = CURRENT_TIMESTAMP "
-            "WHERE instance_id = ?",
-            buildParams(newConfig.toString(), instanceId)
+            "INSERT INTO alpha.factor_instance (instance_id, factor_id, instance_name, description, full_config) "
+            "VALUES ($1, $2, $3, $4, $5::jsonb) "
+            "ON CONFLICT (instance_id) DO UPDATE SET "
+            "  full_config = EXCLUDED.full_config, "
+            "  instance_name = EXCLUDED.instance_name, "
+            "  description = EXCLUDED.description, "
+            "  updated_at = CURRENT_TIMESTAMP",
+            {P{instanceId}, P{instanceId}, P{instanceName}, P{description}, P{configStr}}
         );
 
         if (affectedRows > 0) {
@@ -428,8 +492,8 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
         auto result = db_->executeQuery(
             "SELECT fi.instance_id, fi.instance_name, fi.description, "
             "fi.full_config::text AS full_config, fi.status, fi.factor_id, f.major_category "
-            "FROM factor_instance fi "
-            "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
+            "FROM alpha.factor_instance fi "
+            "LEFT JOIN alpha.factors f ON fi.factor_id = f.factor_id "
             "WHERE fi.instance_id = ?",
             buildParams(instanceId)
         );
@@ -476,7 +540,7 @@ void FactorInstanceManager::updateInstanceAvailability(
     if (checkDate.empty()) {
         try {
             auto latestResult = db_->executeQuery(
-                "SELECT MAX(trade_date) as latest_date FROM daily_bar"
+                "SELECT MAX(trade_date) as latest_date FROM mkt.daily_bar"
             );
 
             if (!latestResult.isEmpty()) {
@@ -516,8 +580,8 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
         auto result = db_->executeQuery(
             "SELECT fi.instance_id, fi.instance_name, fi.description, "
             "fi.full_config::text AS full_config, fi.status, fi.factor_id, f.major_category "
-            "FROM factor_instance fi "
-            "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
+            "FROM alpha.factor_instance fi "
+            "LEFT JOIN alpha.factors f ON fi.factor_id = f.factor_id "
             "WHERE fi.status = 'ACTIVE' "
             "ORDER BY fi.created_at DESC"
         );

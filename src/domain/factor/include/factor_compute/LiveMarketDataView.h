@@ -32,6 +32,9 @@ public:
 
     [[nodiscard]] const std::vector<DateKey>& dates() const override;
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const override {
+        return symbolStrings_;
+    }
 
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override;
@@ -47,6 +50,7 @@ private:
     mutable std::mutex mutex_;
     std::vector<DateKey> dates_;               ///< 所有已接收的日期
     std::vector<InstrumentId> instruments_;    ///< 所有已接收的标的
+    std::vector<std::string> symbolStrings_;   ///< 标的代码（与 instruments_ 一一对应）
     std::vector<signal_value_t> closeBuffer_;  ///< 收盘价环形缓冲区
     std::vector<signal_value_t> highBuffer_;
     std::vector<signal_value_t> lowBuffer_;

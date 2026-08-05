@@ -1,6 +1,7 @@
 ---
 name: live-trading-architecture
 description: 策略实盘交易订单系统完整架构（行情→策略引擎→订单执行）
+note: 文中 MySQL 引用已于 2026-07 迁移到 PostgreSQL
 metadata:
   type: project
 ---
@@ -33,7 +34,7 @@ QML 点击"启动策略"
     → m_startupPool->post(lambda)           [线程池]
       → StrategyManager::createEngine()
       → engine->start()                    (StrategyService 状态→Running)
-      → 加载历史 MarketView (MySQL, ~60交易日)
+      → 加载历史 MarketView (PostgreSQL, ~60交易日)
       → engine->startLiveLoop()            (启动 drainQueue 专用线程)
         → QMetaObject::invokeMethod 回主线程更新UI状态
 ```

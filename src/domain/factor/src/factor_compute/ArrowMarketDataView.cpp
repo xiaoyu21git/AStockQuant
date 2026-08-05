@@ -18,20 +18,15 @@ namespace factor::compute {
 
 namespace {
 
-/// @brief 解析日期字符串 → YYYYMMDD int，基于项目 Timestamp 类
+/// @brief 解析日期字符串 → YYYYMMDD int（直接字符运算，避免 Timestamp::from_string 开销）
 inline int32_t parseDateInt(const std::string& s) {
-    if (s.empty()) return 0;
-    // 尝试 "YYYY-MM-DD"
-    try {
-        auto ts = foundation::utils::Timestamp::from_string(s, "%Y-%m-%d");
-        return ts.to_yyyymmdd();
-    } catch (...) {}
-    // 尝试 "YYYYMMDD"
-    try {
-        auto ts = foundation::utils::Timestamp::from_string(s, "%Y%m%d");
-        return ts.to_yyyymmdd();
-    } catch (...) {}
-    return 0;
+    if (s.size() < 8) return 0;
+    if (s.size() >= 10 && s[4] == '-') {
+        return (s[0]-'0')*10000000 + (s[1]-'0')*1000000 + (s[2]-'0')*100000 + (s[3]-'0')*10000
+             + (s[5]-'0')*1000 + (s[6]-'0')*100 + (s[8]-'0')*10 + (s[9]-'0');
+    }
+    return (s[0]-'0')*10000000 + (s[1]-'0')*1000000 + (s[2]-'0')*100000 + (s[3]-'0')*10000
+         + (s[4]-'0')*1000 + (s[5]-'0')*100 + (s[6]-'0')*10 + (s[7]-'0');
 }
 
 NumericConstMatrixView buildMatrixView(
@@ -117,6 +112,7 @@ public:
 
     [[nodiscard]] const std::vector<DateKey>& dates() const override { return dates_; }
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override { return instruments_; }
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const override { return symbols_; }
 
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override {
@@ -129,6 +125,20 @@ public:
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(const std::vector<InstrumentId>& ids) const override {
         return std::make_unique<SubMarketDataView>(*this, dates_, ids);
+    }
+
+    signal_value_t* mutableFieldData(const std::string& fieldName) override {
+        auto it = columns_.find(fieldName);
+        return (it != columns_.end()) ? it->second.values.data() : nullptr;
+    }
+    int32_t fieldDataLength() const override {
+        return static_cast<int32_t>(dates_.size()) * static_cast<int32_t>(instruments_.size());
+    }
+    std::vector<std::string> fieldNames() const override {
+        std::vector<std::string> names;
+        names.reserve(columns_.size());
+        for (const auto& [k, _] : columns_) names.push_back(k);
+        return names;
     }
 
 private:
@@ -370,8 +380,32 @@ public:
             }
             view->setColumn(colName, std::move(cd));
         }
-
         return view;
+    }
+
+    // ── 清除懒加载列缓存 ──
+    void clearColumnCaches() {
+        size_t coreCols = coreColumns_.size();
+        size_t extraCols = extraFields_.size();
+        size_t coreLoadedCount = coreLoaded_.size();
+
+        // 估算释放内存
+        size_t freedBytes = 0;
+        for (auto& [name, cd] : coreColumns_) {
+            freedBytes += cd.values.size() * sizeof(signal_value_t);
+        }
+        for (auto& [name, cd] : extraFields_) {
+            freedBytes += cd.values.size() * sizeof(signal_value_t);
+        }
+
+        coreLoaded_.clear();
+        coreColumns_.clear();
+        extraFields_.clear();
+
+        INTERNAL_INFO_STREAM << "[MEM] ArrowView::clearColumnCaches: freed "
+            << (freedBytes / (1024.0 * 1024.0)) << " MB"
+            << " (coreCols=" << coreCols << " extraCols=" << extraCols
+            << " coreLoaded=" << coreLoadedCount << ")";
     }
 
     // ── 日期查找辅助 ──
@@ -467,6 +501,18 @@ void ArrowMarketDataView::ensureColumns(const std::vector<std::string>& names) c
             impl_->availableFields_.erase(n);
         }
     }
+}
+
+void ArrowMarketDataView::clearColumnCaches() const {
+    impl_->clearColumnCaches();
+}
+
+std::vector<std::string> ArrowMarketDataView::fieldNames() const {
+    std::vector<std::string> names = {"open","high","low","close","volume"};
+    for (const auto& f : impl_->availableFields_)
+        if (f != "open" && f != "high" && f != "low" && f != "close" && f != "volume")
+            names.push_back(f);
+    return names;
 }
 
 std::unique_ptr<IMarketDataView>

@@ -4,10 +4,21 @@ import QtQuick.Layouts 1.15
 Item {
     id: positionsPanel
 
-    property var positions: []
+    property var positions: {
+        if (typeof Bridge !== "undefined" && Bridge.PositionAccountBridge)
+            return Bridge.PositionAccountBridge.positions || []
+        return []
+    }
     property real totalMarketValue: 0
     property string currencySymbol: "$"
     property var marketDataService: null
+
+    Connections {
+        target: typeof Bridge !== "undefined" ? Bridge.PositionAccountBridge : null
+        function onPositionsChanged() {
+            positionsPanel.positions = Bridge.PositionAccountBridge.positions || []
+        }
+    }
 
     function pnlColor(value) {
         return Number(value || 0) >= 0 ? "#ef4444" : "#10b981"

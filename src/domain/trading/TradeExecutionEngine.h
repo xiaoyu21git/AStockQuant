@@ -76,6 +76,9 @@ public:
     [[nodiscard]] double signalStrength() const noexcept { return m_signalStrength; }
     void setSignalStrength(double v) noexcept { m_signalStrength = v; }
 
+    [[nodiscard]] OrderType orderType() const noexcept { return m_orderType; }
+    void setOrderType(OrderType v) noexcept { m_orderType = v; }
+
     [[nodiscard]] double cashAmount() const noexcept { return m_cashAmount; }
     void setCashAmount(double v) noexcept { m_cashAmount = v; }
 
@@ -87,6 +90,18 @@ public:
 
     [[nodiscard]] const std::string& clientOrderId() const noexcept { return m_clientOrderId; }
     void setClientOrderId(std::string v) { m_clientOrderId = std::move(v); }
+
+    [[nodiscard]] const std::string& clOrdId()   const noexcept { return m_clOrdId; }
+    void setClOrdId(std::string v)                    { m_clOrdId = std::move(v); }
+
+    [[nodiscard]] const std::string& accountId() const noexcept { return m_accountId; }
+    void setAccountId(std::string v)                   { m_accountId = std::move(v); }
+
+    [[nodiscard]] const std::string& currency()  const noexcept { return m_currency; }
+    void setCurrency(std::string v)                    { m_currency = std::move(v); }
+
+    [[nodiscard]] const std::string& exchange()  const noexcept { return m_exchange; }
+    void setExchange(std::string v)                    { m_exchange = std::move(v); }
 
     // Execution batch metadata
     [[nodiscard]] const std::string& batchId() const noexcept { return m_batchId; }
@@ -123,6 +138,9 @@ public:
     [[nodiscard]] const std::string& brokerOrderId() const noexcept { return m_brokerOrderId; }
     void setBrokerOrderId(std::string v) { m_brokerOrderId = std::move(v); }
 
+    [[nodiscard]] uint64_t basketId() const noexcept { return m_basketId; }
+    void setBasketId(uint64_t v) noexcept { m_basketId = v; }
+
     [[nodiscard]] OrderStatusValue status() const noexcept { return m_status; }
     void setStatus(OrderStatusValue v) noexcept { m_status = v; }
 
@@ -150,12 +168,18 @@ private:
     double m_price{0.0};
     std::int64_t m_quantity{0};
     double m_signalStrength{1.0};
+    OrderType m_orderType{OrderType::Limit};
     double m_cashAmount{0.0};
     ActionKind m_actionKind{ActionKind::Normal};
     bool m_isBoardLotMode{true};
     std::string m_clientOrderId;
+    std::string m_clOrdId;
+    std::string m_accountId;
+    std::string m_currency;
+    std::string m_exchange;
 
     std::string m_brokerOrderId;
+    uint64_t m_basketId{0};
     OrderStatusValue m_status{OrderStatusValue::Pending};
     double m_filledPrice{0.0};
     std::int64_t m_filledQuantity{0};
@@ -261,10 +285,16 @@ public:
     // ── 注册外部提交的订单 (直连网关绕过管线), 使 EventBus 回调能追踪状态 ──
     void registerOrder(const TradeOrder& order);
 
+    /// @brief 回填 brokerOrderId（先注册再提交的场景，如 JMC 止损单）
+    void updateOrderBrokerId(const std::string& clOrdId, const std::string& brokerOrderId);
+
     // ── Order operations ──
     SubmitResult submitOrder(const TradeOrder& order);  // 自动构建 RiskInput
     SubmitResult submitOrder(const TradeOrder& order, const strategy::RiskInput& riskContext);
     bool cancelOrder(BrokerOrderId brokerOrderId);
+    // ── 篮子委托辅助 ──
+    TradeOrder buildTradeOrder(const strategy::OrderRequest& req) const;
+    strategy::RiskInput buildRiskInput(const TradeOrder& order) const;
 
     // ── Queries ──
     [[nodiscard]] const std::vector<TradeOrder>& recentOrders() const noexcept;

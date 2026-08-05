@@ -23,6 +23,12 @@ StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
 
     const std::lock_guard<std::mutex> lock(m_mutex);
     auto* ptr = engine.get();
+    // 移除旧引擎（参数可能已变更），用新引擎替换
+    auto old = m_engines.find(strategyId);
+    if (old != m_engines.end() && old->second) {
+        old->second->stopLiveLoop();
+        m_engines.erase(old);
+    }
     m_engines[strategyId] = std::move(engine);
     INTERNAL_INFO_STREAM << "[SM] createEngine: stored, count=" << m_engines.size();
     return ptr;
@@ -89,16 +95,6 @@ std::vector<OrderRequest> StrategyManager::stepAll(const MarketDataPoint& mdp) {
         }
     }
     return orders;
-}
-
-void StrategyManager::pushMarketData(const MarketDataPoint& mdp)
-{
-    const std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto& [id, engine] : m_engines) {
-        if (engine) {
-            engine->enqueueMarketData(mdp);
-        }
-    }
 }
 
 void StrategyManager::setOrderListener(IOrderListener* listener)
@@ -179,6 +175,11 @@ void StrategyManager::startStrategy(const std::string& strategyId)
     // 注入订单监听器
     if (m_defaultOrderListener) {
         engine->setOrderListener(m_defaultOrderListener);
+    }
+
+    // 注入实盘数据持久化路径（lastEvalDay JSON 等）
+    if (!m_liveDataPath.empty()) {
+        engine->setLiveDataPath(m_liveDataPath);
     }
 
     // 启动实盘循环

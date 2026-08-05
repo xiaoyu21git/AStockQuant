@@ -1,5 +1,7 @@
 # PostgreSQL 量化数据库设计规范 — 终版
 
+> **ℹ️ (2026-07)**: MySQL 已退役，本文档中 MySQL 对比内容为历史参考。PostgreSQL 为主库，本文档是当前权威规范。
+
 ## 设计原则
 
 1. **对齐代码现实**：字段名、类型、主键必须与现有 C++ 代码的读取方式一致，不制造无意义的适配层
@@ -41,7 +43,7 @@
 | `list_date` | `date` | | 上市日期 |
 | `delist_date` | `date` | | 退市日期 |
 | `status` | `varchar(20)` | NOT NULL | ACTIVE / DELISTED / ST / \*ST / SUSPENDED |
-| `industry` | `varchar(100)` | | 行业名称 |
+| `industry_code` | `varchar(100)` | | 行业代码 |
 | `created_at` | `timestamptz` | DEFAULT now() | |
 | `updated_at` | `timestamptz` | DEFAULT now() | |
 

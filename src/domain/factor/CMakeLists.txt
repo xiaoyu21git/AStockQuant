@@ -17,6 +17,7 @@ include(CheckSymbolExists)
 # 鍖呭惈鐩綍
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../factor_check/include
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/src/foundation/include
     ${CMAKE_SOURCE_DIR}/src/infrastructure/include
@@ -159,12 +160,19 @@ set(FACTOR_SOURCES
     src/GrowthFactor.cpp
     src/LiquidityFactor.cpp
     src/TechnicalFactor.cpp
+    src/batch_technical_indicators.cpp
     src/DividendFactor.cpp
     src/MacroFactor.cpp
     src/IndustryFactor.cpp
     src/SentimentFactor.cpp
     src/CustomFactor.cpp
     src/CompositeFactor.cpp
+    src/EventDrivenFactor.cpp
+    src/ReversalFactor.cpp
+    src/HighFreqFactor.cpp
+    src/DLFactor.cpp
+    src/SupplyChainFactor.cpp
+    src/SupplyChainRepository.cpp
     src/FactorConfigAccess.cpp
     src/FactorInstanceManager.cpp
     src/FactorRatingEngine.cpp
@@ -173,7 +181,9 @@ set(FACTOR_SOURCES
     src/CachedMarketDataView.cpp
     src/factor_compute/ArrowMarketDataView.cpp
     src/FactorParamsStubs.cpp
+    src/CommodityEventDetector.cpp
     src/FactorMetricsCalculator.cpp
+    src/FactorWeightOptimizer.cpp
     src/factor_compute/FactorSignalSetAssembler.cpp
     src/factor_compute/FactorComputeEngine.cpp
     src/factor_compute/FactorRegistry.cpp
@@ -186,6 +196,10 @@ set(FACTOR_SOURCES
     src/factor_compute/AnalysisModule.cpp
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
+    ../factor_check/src/FactorSupportEvaluator.cpp
+    ../factor_check/src/FactorSupportInfo.cpp
+    ../factor_check/src/FactorSupportScopeCache.cpp
+    ../factor_check/src/FactorSupportScopeKey.cpp
 )
 
 # 因子系统头文件
@@ -209,6 +223,12 @@ set(FACTOR_HEADERS
     include/SentimentFactor.h
     include/CustomFactor.h
     include/CompositeFactor.h
+    include/EventDrivenFactor.h
+    include/ReversalFactor.h
+    include/HighFreqFactor.h
+    include/DLFactor.h
+    include/SupplyChainFactor.h
+    include/SupplyChainRepository.h
     include/CompositeFactorConfig.h
     include/IFactorResolver.h
     include/FactorConfigAccess.h
@@ -240,7 +260,12 @@ set(FACTOR_HEADERS
     include/FactorBacktestOrchestrator.h
     include/FactorBacktestTypes.h
     include/FactorMetricsCalculator.h
+    include/FactorWeightOptimizer.h
     include/BacktestRunConfig.h
+    ../factor_check/include/factor_check/FactorSupportEvaluator.h
+    ../factor_check/include/factor_check/FactorSupportInfo.h
+    ../factor_check/include/factor_check/FactorSupportScopeCache.h
+    ../factor_check/include/factor_check/FactorSupportScopeKey.h
 )
 
 set(FACTOR_COMPUTE_SOURCES
@@ -261,6 +286,8 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/SignalSetBuilder.cpp
     src/factor_compute/FactorEngine.cpp
     src/factor_compute/MarketDataViewHistoricalAdapter.cpp
+    src/factor_compute/OnnxInference.cpp
+    src/factor_compute/FeatureTensorBuilder.cpp
 )
 
 set(FACTOR_COMPUTE_HEADERS
@@ -293,6 +320,8 @@ set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/GroupedBacktestTypes.h
     include/factor_compute/SimulatedTradingExecutor.h
     include/factor_compute/SignalSetBuilder.h
+    include/factor_compute/IModelInference.h
+    include/factor_compute/FeatureTensorBuilder.h
 )
 
 # 创建库 — 合并 factor 和 factor_compute 为统一库 factor
@@ -336,6 +365,21 @@ else()
     message(FATAL_ERROR "Arrow C++ target not found after FetchContent population")
 endif()
 
+# ONNX Runtime（可选，DLFactor AI 推理引擎）
+if(HAS_ONNX_RUNTIME)
+    target_link_libraries(factor PUBLIC onnxruntime::onnxruntime)
+    target_compile_definitions(factor PUBLIC HAS_ONNX_RUNTIME)
+    # 将 DLL 复制到输出目录
+    add_custom_command(TARGET factor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+        "$<TARGET_FILE_DIR:factor>/onnxruntime.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime_providers_shared.dll"
+        "$<TARGET_FILE_DIR:factor>/onnxruntime_providers_shared.dll"
+    )
+endif()
+
 # 安装
 install(TARGETS factor
     ARCHIVE DESTINATION lib
@@ -348,27 +392,6 @@ install(DIRECTORY include/
     FILES_MATCHING PATTERN "*.h"
 )
 
-# 娴嬭瘯绋嬪簭
-set(FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/test_factor.cpp")
-if(BUILD_TESTS AND EXISTS "${FACTOR_TEST_SOURCE}")
-    add_executable(test_factor
-        ${FACTOR_TEST_SOURCE}
-    )
-    
-    target_link_libraries(test_factor
-        factor
-        foundation
-        infrastructure
-        pymysql
-        pthread
-    )
-    
-    # 娣诲姞娴嬭瘯
-    add_test(NAME test_factor
-        COMMAND test_factor
-        WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-    )
-endif()
 
 set(FACTOR_COMPUTE_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_factor_signal_engine_smoke.cpp")
 if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
@@ -384,6 +407,64 @@ if(EXISTS "${FACTOR_COMPUTE_TEST_SOURCE}")
         add_test(NAME test_factor_compute_smoke
             COMMAND test_factor_compute_smoke
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    endif()
+endif()
+
+set(HF_FACTOR_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_high_freq_factor.cpp")
+if(EXISTS "${HF_FACTOR_TEST_SOURCE}")
+    add_executable(test_high_freq_factor
+        ${HF_FACTOR_TEST_SOURCE}
+    )
+
+    target_link_libraries(test_high_freq_factor
+        factor
+    )
+
+    if(BUILD_TESTS)
+        add_test(NAME test_high_freq_factor
+            COMMAND test_high_freq_factor
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+    endif()
+endif()
+
+set(FEAT_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_feature_tensor.cpp")
+if(EXISTS "${FEAT_TEST_SOURCE}")
+    add_executable(test_feature_tensor ${FEAT_TEST_SOURCE})
+    target_link_libraries(test_feature_tensor factor)
+    if(HAS_ONNX_RUNTIME)
+        add_custom_command(TARGET test_feature_tensor POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+            "$<TARGET_FILE_DIR:test_feature_tensor>/onnxruntime.dll")
+    endif()
+endif()
+
+set(ONNX_TEST_SOURCE "${CMAKE_SOURCE_DIR}/tests/test_onnx_inference.cpp")
+if(HAS_ONNX_RUNTIME AND EXISTS "${ONNX_TEST_SOURCE}")
+    add_executable(test_onnx_inference
+        ${ONNX_TEST_SOURCE}
+    )
+
+    target_link_libraries(test_onnx_inference
+        factor
+    )
+
+    # copy onnxruntime.dll
+    add_custom_command(TARGET test_onnx_inference POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+        "$<TARGET_FILE_DIR:test_onnx_inference>/onnxruntime.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime_providers_shared.dll"
+        "$<TARGET_FILE_DIR:test_onnx_inference>/onnxruntime_providers_shared.dll"
+    )
+
+    if(BUILD_TESTS)
+        add_test(NAME test_onnx_inference
+            COMMAND test_onnx_inference
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         )
     endif()
 endif()

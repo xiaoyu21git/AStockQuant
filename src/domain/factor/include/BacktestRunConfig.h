@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include "../../types/DomainDate.h"
 #include "CompositeFactorConfig.h"
 
 namespace Factor::backtest {
@@ -28,14 +29,15 @@ struct BacktestRunConfig {
     // ── 缓存配置 (从 QML 缓存页面选择) ──
     DataSourceMode dataSourceMode = DataSourceMode::Cache;
     int selectedDatasetId = 0;
-    int32_t cacheStartDate = 0;    // YYYYMMDD 格式, 如 20240101
-    int32_t cacheEndDate = 0;
+    domain::DomainDate cacheStartDate;
+    domain::DomainDate cacheEndDate;
 
     // ── 因子配置 ──
     FactorMode factorMode = FactorMode::Single;
     std::vector<std::string> factorIds;  // 只传 ID, 底层用 FactorInstanceManager 查数据库取配置
 
     // ── 组合因子配置 (仅 FactorMode::Composite 时有效) ──
+    std::string compositeName;          // 组合因子名称（从 QML compositeDraftName 传入）
     std::vector<factor::CompositeChildSpec> compositeChildren;
     int compositeCombineMode = 0;      // CompositeCombineMode 枚举值
     int compositeMissingPolicy = 2;    // CompositeMissingPolicy 枚举值
@@ -51,7 +53,13 @@ struct BacktestRunConfig {
     double initialCapital = 1000000.0;
     std::string benchmarkSymbol = "000300.SH";
     std::string adjustPriceType = "pre";   // "pre" / "post"
+    double winsorizeQuantile{0.005};       // 因子值双侧缩尾分位数（0.0=不缩尾），传递给 Orchestrator
     int marketEnvironmentProfile = 0;
+    bool ascending{true};                   // 因子方向: true=值越大越好, false=值越小越好
+
+    // ── 预检预注入字段 (从预检结果传入，避免 Orchestrator 重复 createInstance) ──
+    std::vector<std::string> preResolvedExtraFields;  // 已排除核心5字段的额外字段列表
+    bool hasPreResolvedFields{false};                  // 为 true 时跳过 orchestrator 的 createInstance 步骤
 };
 
 } // namespace Factor::backtest

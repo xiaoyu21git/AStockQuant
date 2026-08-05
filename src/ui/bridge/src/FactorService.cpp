@@ -4,7 +4,7 @@
 #include "FactorService.h"
 #include "FactorViewModel.h"
 #include "FactorDetectionService.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "foundation.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 
@@ -62,6 +62,11 @@ QString resolveFactorTypeDisplayName(factor::FactorType type)
     case factor::FactorType::INDUSTRY:     return QStringLiteral("行业因子");
     case factor::FactorType::SENTIMENT:    return QStringLiteral("情绪因子");
     case factor::FactorType::CUSTOM:       return QStringLiteral("自定义因子");
+    case factor::FactorType::COMPOSITE:    return QStringLiteral("组合因子");
+    case factor::FactorType::REVERSAL:     return QStringLiteral("反转因子");
+    case factor::FactorType::HIGH_FREQ:    return QStringLiteral("高频因子");
+    case factor::FactorType::DL:           return QStringLiteral("AI因子");
+    case factor::FactorType::SUPPLY_CHAIN: return QStringLiteral("传导链因子");
     default:                               return QStringLiteral("未知因子");
     }
 }
@@ -82,6 +87,11 @@ QString factorTypeId(factor::FactorType type)
     case factor::FactorType::INDUSTRY:     return QStringLiteral("industry");
     case factor::FactorType::SENTIMENT:    return QStringLiteral("sentiment");
     case factor::FactorType::CUSTOM:       return QStringLiteral("custom");
+    case factor::FactorType::COMPOSITE:    return QStringLiteral("composite");
+    case factor::FactorType::REVERSAL:     return QStringLiteral("reversal");
+    case factor::FactorType::HIGH_FREQ:    return QStringLiteral("high_freq");
+    case factor::FactorType::DL:           return QStringLiteral("dl");
+    case factor::FactorType::SUPPLY_CHAIN: return QStringLiteral("supply_chain");
     default:                               return QStringLiteral("unknown");
     }
 }
@@ -102,16 +112,53 @@ QVariantMap buildFactorInfoMap(const factor::FactorInstanceInfo& info)
     result[QStringLiteral("creator")] = QStringLiteral("system");
     result[QStringLiteral("createDate")] = QString();
     result[QStringLiteral("tags")] = QVariantList();
+
+    // ── 回测指标 (从 full_config.backtest_metrics 提取) ──
+    if (info.config.has("backtest_metrics")) {
+        auto bt = info.config.get("backtest_metrics");
+        if (bt.has("icValue"))            result[QStringLiteral("icValue")]            = bt.get("icValue").asDouble();
+        if (bt.has("irValue"))            result[QStringLiteral("irValue")]            = bt.get("irValue").asDouble();
+        if (bt.has("coreRating"))         result[QStringLiteral("coreRating")]         = bt.get("coreRating").asInt();
+        if (bt.has("coreRatingLabel"))    result[QStringLiteral("coreRatingLabel")]    = toQString(bt.get("coreRatingLabel").asString());
+        if (bt.has("turnoverRate"))       result[QStringLiteral("turnoverRate")]       = bt.get("turnoverRate").asDouble();
+        if (bt.has("effectiveStartDate")) result[QStringLiteral("backtestStartDate")]  = toQString(bt.get("effectiveStartDate").asString());
+        if (bt.has("effectiveEndDate"))   result[QStringLiteral("backtestEndDate")]    = toQString(bt.get("effectiveEndDate").asString());
+    } else {
+        result[QStringLiteral("icValue")]     = 0.0;
+        result[QStringLiteral("irValue")]     = 0.0;
+        result[QStringLiteral("coreRating")]  = 0.0;
+        result[QStringLiteral("turnoverRate")]= 0.0;
+    }
     result[QStringLiteral("majorCategory")] = resolveFactorTypeDisplayName(info.factorType);
     result[QStringLiteral("subCategory")] = QString();
-    result[QStringLiteral("icValue")] = 0.0;
-    result[QStringLiteral("irValue")] = 0.0;
-    result[QStringLiteral("coreRating")] = 0.0;
     result[QStringLiteral("validityDays")] = 0;
-    result[QStringLiteral("turnoverRate")] = 0.0;
     result[QStringLiteral("isRecommended")] = false;
     result[QStringLiteral("isFavorite")] = false;
     result[QStringLiteral("groupReturns")] = QVariantMap();
+
+    // ── 提取参数配置 (优先 calculation, 兼容旧 parameters) ──
+    {
+        QVariantMap params;
+        auto extractParams = [&params](const foundation::json::JsonFacade& src) {
+            for (const auto& key : src.keys()) {
+                auto v = src.get(key);
+                if (v.isNumber()) {
+                    if (v.isInteger()) params[toQString(key)] = v.asInt();
+                    else               params[toQString(key)] = v.asDouble();
+                } else if (v.isBool()) {
+                    params[toQString(key)] = v.asBool();
+                } else if (v.isString()) {
+                    params[toQString(key)] = toQString(v.asString());
+                }
+            }
+        };
+        if (info.config.has("calculation"))
+            extractParams(info.config.get("calculation"));
+        else if (info.config.has("parameters"))
+            extractParams(info.config.get("parameters"));
+        result[QStringLiteral("parameters")] = params;
+    }
+
     return result;
 }
 
@@ -162,8 +209,8 @@ bool FactorService::resolveBackend()
         INTERNAL_INFO_STREAM << "[FS] resolveBackend START";
         std::lock_guard<std::mutex> lock(m_mutex);
 
-        // 统一使用 NativeMySQLConnectionPool（基础设施层唯一 DB 连接入口）
-        auto nativeDb = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+        // 统一使用 NativePgConnectionPool（基础设施层唯一 DB 连接入口）
+        auto nativeDb = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!nativeDb) {
             INTERNAL_ERROR_STREAM << "[FS] nativeDb=null";
             emit errorOccurred(QStringLiteral("FactorService: 数据库连接池初始化失败"));
@@ -393,13 +440,22 @@ QString FactorService::addFactor(const QVariantMap& factorData)
                     paramsJson.set(key.toStdString(), foundation::json::JsonFacade::createString(toStd(value.toString())));
                 }
             }
-            config.set("parameters", paramsJson);
+            config.set("calculation", paramsJson);
         }
 
         factor::config::setSerializedConfig(config, config);
 
         INTERNAL_DEBUG_STREAM << "[FactorService] 添加因子:" << factorId.toStdString() << factorName.toStdString();
 
+        bool persisted = m_instanceManager->updateInstanceConfig(toStd(factorId), config);
+        if (!persisted) {
+            endMutation(false, QStringLiteral("因子持久化失败"));
+            return {};
+        }
+
+        if (m_viewModel) {
+            ensureViewModelPopulated();
+        }
         endMutation(true, QStringLiteral("因子创建成功"));
         emit factorAdded(factorId, factorData);
 
@@ -468,13 +524,52 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
                     paramsJson.set(key.toStdString(), foundation::json::JsonFacade::createString(toStd(value.toString())));
                 }
             }
-            config.set("parameters", paramsJson);
+            config.set("calculation", paramsJson);
         }
+
+        // ── 回测指标写入 (QML 回测完成后回调) ──
+        auto btMetrics = foundation::json::JsonFacade::createObject();
+        if (factorData.contains(QStringLiteral("icValue"))) {
+            btMetrics.set("icValue", foundation::json::JsonFacade::createDouble(
+                factorData.value(QStringLiteral("icValue")).toDouble()));
+        }
+        if (factorData.contains(QStringLiteral("irValue"))) {
+            btMetrics.set("irValue", foundation::json::JsonFacade::createDouble(
+                factorData.value(QStringLiteral("irValue")).toDouble()));
+        }
+        if (factorData.contains(QStringLiteral("coreRating"))) {
+            int rating = factorData.value(QStringLiteral("coreRating")).toInt();
+            btMetrics.set("coreRating", foundation::json::JsonFacade::createInt(rating));
+            // 同时写入中文标签
+            const char* label = (rating == 3) ? "优秀" : (rating == 2) ? "良好"
+                              : (rating == 1) ? "合格" : "不合格";
+            btMetrics.set("coreRatingLabel", foundation::json::JsonFacade::createString(label));
+        }
+        if (factorData.contains(QStringLiteral("turnoverRate"))) {
+            btMetrics.set("turnoverRate", foundation::json::JsonFacade::createDouble(
+                factorData.value(QStringLiteral("turnoverRate")).toDouble()));
+        }
+        if (factorData.contains(QStringLiteral("effectiveStartDate"))) {
+            btMetrics.set("effectiveStartDate", foundation::json::JsonFacade::createString(
+                toStd(factorData.value(QStringLiteral("effectiveStartDate")).toString())));
+        }
+        if (factorData.contains(QStringLiteral("effectiveEndDate"))) {
+            btMetrics.set("effectiveEndDate", foundation::json::JsonFacade::createString(
+                toStd(factorData.value(QStringLiteral("effectiveEndDate")).toString())));
+        }
+        if (factorData.contains(QStringLiteral("warmupTrimmedTradingDays"))) {
+            btMetrics.set("warmupTrimmedTradingDays", foundation::json::JsonFacade::createInt(
+                factorData.value(QStringLiteral("warmupTrimmedTradingDays")).toInt()));
+        }
+        config.set("backtest_metrics", btMetrics);
 
         bool updated = m_instanceManager->updateInstanceConfig(toStd(factorId), config);
 
         if (updated) {
             INTERNAL_DEBUG_STREAM << "[FactorService] 更新因子:" << factorId.toStdString();
+            if (m_viewModel) {
+                ensureViewModelPopulated();
+            }
             endMutation(true, QStringLiteral("因子更新成功"));
             emit factorUpdated(factorId, factorData);
         } else {
@@ -493,6 +588,26 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
         emit errorOccurred(err);
         return false;
     }
+}
+
+bool FactorService::writeBacktestMetrics(const QString& factorId, const QVariantMap& report)
+{
+    auto metrics = report.value("metrics").toMap();
+    auto ic = metrics.value("ic").toMap();
+    auto factorQuality = metrics.value("factorQuality").toMap();
+    auto exec = metrics.value("execution").toMap();
+    auto config = report.value("config").toMap();
+
+    QVariantMap data;
+    data["factorId"]            = factorId;
+    data["icValue"]             = ic.value("value");
+    data["irValue"]             = ic.value("ir");
+    data["coreRating"]          = factorQuality.value("coreRating");
+    data["turnoverRate"]        = exec.value("turnoverRate");
+    data["effectiveStartDate"]  = config.value("startDate");
+    data["effectiveEndDate"]    = config.value("endDate");
+
+    return updateFactor(factorId, data);
 }
 
 bool FactorService::deleteFactor(const QString& factorId)
@@ -647,13 +762,13 @@ QVariantMap FactorService::buildFactorSupportMap(
     int selectedDatasetId)
 {
     if (!m_detectionService || !m_instanceManager) {
-        // 回退：全部标记为支持
+        // 服务未就绪时返回 unsupported，不允许 UI 显示"可回测"
         QVariantMap map;
         for (const QString& id : factorIds) {
             QVariantMap info;
-            info["supported"] = true;
-            info["reason"] = QStringLiteral("因子服务未就绪，跳过检测");
-            info["category"] = QStringLiteral("unknown");
+            info["supported"] = false;
+            info["reason"] = QStringLiteral("因子服务未就绪，请稍后重试");
+            info["category"] = QStringLiteral("runtime-init-failed");
             map[id] = info;
         }
         return map;

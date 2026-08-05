@@ -23,7 +23,6 @@
 #include "foundation/yaml/yaml_facade.h"
 #include "foundation/net/net_facade.h"
 #include "foundation/Utils/random.hpp"
-#include "foundation/Utils/time.hpp"
 #include "foundation/Utils/string.hpp"
 #include "foundation/Utils/system.hpp"
 #include "foundation/core/exception.hpp"
@@ -246,7 +245,6 @@ public:
     net::WebSocketConnection& websocket();
     thread::ThreadPoolExecutor& thread_pool();
     utils::Random& random();
-    utils::Time& time();
     utils::String& string();
     utils::SystemUtilsImpl& system();
     
@@ -359,7 +357,6 @@ private:
     std::unique_ptr<net::WebSocketConnection> websocket_;
     thread::ThreadPoolPtr thread_pool_;
     std::unique_ptr<utils::Random> random_;
-    std::unique_ptr<utils::Time> time_;
     std::unique_ptr<utils::String> string_;
     std::unique_ptr<utils::SystemUtilsImpl> system_;
     // 新增成员
@@ -863,7 +860,6 @@ inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
 #define FOUNDATION_WEBSOCKET FOUNDATION_APP.websocket()
 #define FOUNDATION_THREADS FOUNDATION_APP.thread_pool()
 #define FOUNDATION_RANDOM FOUNDATION_APP.random()
-#define FOUNDATION_TIME FOUNDATION_APP.time()
 #define FOUNDATION_STRING FOUNDATION_APP.string()
 #define FOUNDATION_SYSTEM FOUNDATION_APP.system()
 

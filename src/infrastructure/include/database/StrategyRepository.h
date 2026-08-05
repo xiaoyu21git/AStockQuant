@@ -1,7 +1,7 @@
 #ifndef ASTOCK_INFRASTRUCTURE_DATABASE_STRATEGYREPOSITORY_H
 #define ASTOCK_INFRASTRUCTURE_DATABASE_STRATEGYREPOSITORY_H
 
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
 #include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
 #include "../../../domain/types/ResolvedStrategyBehavior.h"
 #include "../../../domain/strategies/include/StrategyDefinitionTypes.h"
@@ -41,6 +41,7 @@ struct PersistedStrategyData {
     std::string strategyCode;
     domain::strategies::StrategyMetadata metadata;
     domain::backtest::ResolvedStrategyIdentity strategyIdentity;
+    int strategyTypeIndex{0};
     std::string version;
     std::string author;
     StrategyLanguageCode language{StrategyLanguageCode::Python};
@@ -127,7 +128,7 @@ private:
     class ScopedConnection {
     public:
         ScopedConnection()
-            : m_db(NativeMySQLConnectionPool::instance().getConnection())
+            : m_db(NativePgConnectionPool::instance().getConnection())
         {
         }
         ~ScopedConnection() = default;

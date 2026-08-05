@@ -1,7 +1,6 @@
 # PostgreSQL via infrastructure
 find_package(PostgreSQL REQUIRED)
 
-# CMakeLists.txt
 cmake_minimum_required(VERSION 3.15)
 project(astock_market LANGUAGES CXX)
 
@@ -14,29 +13,10 @@ if (WIN32)
 endif()
 find_package(OpenSSL REQUIRED)
 
-# 查找 MySQL 头文件（用于 DatabaseProvider）
-find_path(MARKET_MYSQL_INCLUDE_DIR
-    NAMES mysql.h mysql/mysql.h
-    PATHS
-        "D:/Program Files/MySQL/include"
-        "D:/Program Files/MySQL/MySQL Server 8.0/include"
-        "C:/Program Files/MySQL/MySQL Server 8.0/include"
-        "C:/Program Files/MySQL/MySQL Connector C++ 8.0/include"
-        "/usr/include/mysql"
-        "/usr/local/include/mysql"
-)
-
-if(NOT MARKET_MYSQL_INCLUDE_DIR)
-    message(WARNING "MySQL headers not found for astock_market; DatabaseProvider may fail to build.")
-endif()
-# 添加源码
 add_library(astock_market STATIC
     src/AdjustableMarketDataView.cpp
-    # Old core/providers removed — depend on deleted DataTypes.h/IDataProvider.h/MarketData.h
-    # src/core/DataTypes.cpp
-    # src/core/DataProviderFactory.cpp
-    # src/providers/SimProvider.cpp
-    # src/providers/DatabaseProvider.cpp
+    src/LiveData.cpp
+    src/MarketDataService.cpp
 )
 
 target_link_libraries(astock_market

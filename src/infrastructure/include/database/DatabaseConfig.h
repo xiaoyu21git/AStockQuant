@@ -12,13 +12,13 @@ namespace database {
  */
 struct DatabaseConfig {
     // 连接信息
-    std::string driver{"mysql"};          // 数据库驱动
+    std::string driver{"postgresql"};      // 数据库驱动
     std::string host{"localhost"};        // 主机地址
-    int port{3306};                        // 端口号
+    int port{5432};                        // 端口号
     std::string database{"astock_quant"}; // 数据库名
-    std::string username{"root"};         // 用户名
+    std::string username{"postgres"};     // 用户名
     std::string password;                  // 密码
-    std::string charset{"utf8mb4"};       // 字符集
+    std::string charset{"utf8"};          // 字符集
     
     // 连接池配置
     size_t pool_size{10};                 // 连接池大小
@@ -47,9 +47,9 @@ struct DatabaseConfig {
      * @brief 构建连接URL
      */
     std::string getConnectionUrl() const {
-        return "mysql://" + username + ":" + password + 
-               "@" + host + ":" + std::to_string(port) + 
-               "/" + database + "?charset=" + charset;
+        return "postgresql://" + username + ":" + password +
+               "@" + host + ":" + std::to_string(port) +
+               "/" + database;
     }
     
     /**

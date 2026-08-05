@@ -181,6 +181,33 @@ Dialog {
         return isFinite(rating) && rating > 0 ? Math.round(rating) : 0
     }
 
+    function factorCoreRatingLabel(record, detail) {
+        var rating = factorCoreRating(record, detail)
+        switch (rating) {
+        case 3: return "优秀"
+        case 2: return "良好"
+        case 1: return "合格"
+        default: return "不合格"
+        }
+    }
+
+    function factorCoreRatingColor(value) {
+        var rating = Number(value)
+        if (!isFinite(rating)) rating = 0
+        switch (rating) {
+        case 3: return "#10B981"
+        case 2: return "#38BDF8"
+        case 1: return "#F59E0B"
+        default: return "#EF4444"
+        }
+    }
+
+    function hasBacktestMetrics(record) {
+        var ic = Number((record && record.icValue) || 0)
+        var ir = Number((record && record.irValue) || 0)
+        return isFinite(ic) && isFinite(ir) && (Math.abs(ic) > 1e-9 || Math.abs(ir) > 1e-9)
+    }
+
     function factorEffectiveRangeText(detail) {
         var startDate = String((detail && (detail.actualStartDate || detail.effectiveStartDate)) || "").trim()
         var endDate = String((detail && detail.effectiveEndDate) || "").trim()
@@ -746,11 +773,27 @@ Dialog {
                                             spacing: 4
 
                                             Repeater {
-                                                model: [
-                                                    { label: root.factorCategoryLabel(modelData.factorType), fg: root.factorCategoryColor(modelData.factorType), bg: "#0f172a" },
-                                                    { label: "ID " + factorId, fg: "#cbd5e1", bg: "#111827" },
-                                                    { label: "评分 " + (root.factorCoreRating(modelData, null) > 0 ? root.factorCoreRating(modelData, null) : "未评"), fg: "#fde68a", bg: "#2a2110" }
-                                                ]
+                                                model: {
+                                                    var pills = [
+                                                        { label: root.factorCategoryLabel(modelData.factorType), fg: root.factorCategoryColor(modelData.factorType), bg: "#0f172a" },
+                                                        { label: "ID " + factorId, fg: "#cbd5e1", bg: "#111827" }
+                                                    ]
+                                                    var rating = root.factorCoreRating(modelData, null)
+                                                    if (rating > 0) {
+                                                        pills.push({ label: root.factorCoreRatingLabel(modelData, null), fg: root.factorCoreRatingColor(rating), bg: "#2a2110" })
+                                                        var ic = Number(modelData.icValue || 0)
+                                                        if (isFinite(ic) && Math.abs(ic) > 1e-9) {
+                                                            pills.push({ label: "IC " + ic.toFixed(3), fg: "#93c5fd", bg: "#0f172a" })
+                                                        }
+                                                        var ir = Number(modelData.irValue || 0)
+                                                        if (isFinite(ir) && Math.abs(ir) > 1e-9) {
+                                                            pills.push({ label: "IR " + ir.toFixed(2), fg: "#93c5fd", bg: "#0f172a" })
+                                                        }
+                                                    } else {
+                                                        pills.push({ label: "未回测", fg: "#64748b", bg: "#1e293b" })
+                                                    }
+                                                    return pills
+                                                }
 
                                                 delegate: Rectangle {
                                                     required property var modelData
@@ -880,14 +923,32 @@ Dialog {
                                         spacing: 10
 
                                         Repeater {
-                                            model: [
-                                                { title: "分类", value: root.factorCategoryLabel(root.activeFactorRecord.factorType) },
-                                                { title: "核心评分", value: root.factorCoreRating(root.activeFactorRecord, root.activeFactorDetail) > 0 ? String(root.factorCoreRating(root.activeFactorRecord, root.activeFactorDetail)) : "未评" },
-                                                { title: "回测输出", value: "仅保留因子信息" },
-                                                { title: "有效区间", value: root.factorEffectiveRangeText(root.activeFactorDetail) },
-                                                { title: "预热裁剪", value: root.factorWarmupText(root.activeFactorDetail) },
-                                                { title: "状态", value: root.factorStatusText(root.activeFactorRecord, root.activeFactorDetail) }
-                                            ]
+                                            model: {
+                                                var rating = root.factorCoreRating(root.activeFactorRecord, root.activeFactorDetail)
+                                                var backtestOutputText = "仅保留因子信息"
+                                                if (rating > 0) {
+                                                    var parts = []
+                                                    var ic = Number((root.activeFactorRecord && root.activeFactorRecord.icValue) || 0)
+                                                    var ir = Number((root.activeFactorRecord && root.activeFactorRecord.irValue) || 0)
+                                                    if (isFinite(ic) && Math.abs(ic) > 1e-9) {
+                                                        parts.push("IC " + ic.toFixed(3))
+                                                    }
+                                                    if (isFinite(ir) && Math.abs(ir) > 1e-9) {
+                                                        parts.push("IR " + ir.toFixed(2))
+                                                    }
+                                                    if (parts.length > 0) {
+                                                        backtestOutputText = parts.join("  ")
+                                                    }
+                                                }
+                                                return [
+                                                    { title: "分类", value: root.factorCategoryLabel(root.activeFactorRecord.factorType) },
+                                                    { title: "核心评分", value: rating > 0 ? root.factorCoreRatingLabel(root.activeFactorRecord, root.activeFactorDetail) : "未评" },
+                                                    { title: "回测输出", value: backtestOutputText },
+                                                    { title: "有效区间", value: root.factorEffectiveRangeText(root.activeFactorDetail) },
+                                                    { title: "预热裁剪", value: root.factorWarmupText(root.activeFactorDetail) },
+                                                    { title: "状态", value: root.factorStatusText(root.activeFactorRecord, root.activeFactorDetail) }
+                                                ]
+                                            }
 
                                             delegate: Rectangle {
                                                 required property var modelData

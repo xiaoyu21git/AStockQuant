@@ -10,10 +10,52 @@ Rectangle {
     color: Const.tradingPanelBg
     border.color: Const.tradingPanelBorder
     border.width: 1
-    implicitHeight: compactMode ? 800 : 980
+    implicitHeight: compactMode ? 620 : 980
 
-    property var marketSnapshot: ({})
-    property var depthSnapshot: ({})
+    // 解析完整symbol (代码→代码.后缀)
+    function resolveFullSymbol(code) {
+        if (!code) return ""
+        if (code.indexOf('.') >= 0) return code
+        var snaps = Bridge.MarketDataBridge.marketSnapshots
+        return (snaps[code + ".SZ"] && snaps[code + ".SZ"].price > 0) ? code + ".SZ"
+             : (snaps[code + ".SH"] && snaps[code + ".SH"].price > 0) ? code + ".SH"
+             : (snaps[code + ".BJ"] && snaps[code + ".BJ"].price > 0) ? code + ".BJ"
+             : code + ".SZ"
+    }
+    property var marketSnapshot: {
+        var sym = resolveFullSymbol(currentSymbol)
+        return sym ? (Bridge.MarketDataBridge.marketSnapshots[sym] || {}) : {}
+    }
+
+    // 持仓列表点击 → primarySymbol 变更 → 自动填入下单控件+价格
+    Connections {
+        target: Bridge.MarketDataBridge
+        function onPrimarySymbolChanged() {
+            var sym = Bridge.MarketDataBridge.primarySymbol || ""
+            if (sym) {
+                var code = String(sym).replace(".SZ","").replace(".SH","").replace(".BJ","")
+                stockCode = code
+                Bridge.MarketDataBridge.resolveInstrument(sym)
+                Qt.callLater(function() {
+                    var snap = Bridge.MarketDataBridge.marketSnapshots[sym] || {}
+                    if (snap.price > 0) {
+                        stockPrice = snap.price.toFixed(2)
+                        lastAutoStockPrice = snap.price.toFixed(2)
+                    }
+                })
+            }
+        }
+        function onMarketSnapshotsChanged() {
+            var sym = Bridge.MarketDataBridge.primarySymbol || ""
+            if (!sym) return
+            var snap = Bridge.MarketDataBridge.marketSnapshots[sym] || {}
+            if (snap.price > 0 && stockPrice === "") {
+                stockPrice = snap.price.toFixed(2)
+                lastAutoStockPrice = snap.price.toFixed(2)
+            }
+        }
+    }
+    property var depthSnapshot: (marketSnapshot && marketSnapshot.depthSnapshot) ? marketSnapshot.depthSnapshot : ({})
     property real availableCapital: 500000
     property var pendingOrders: []
     property string toastMessage: ""
@@ -21,24 +63,27 @@ Rectangle {
     property var positionAvailabilitySummary: ({})
     property bool positionAvailabilityError: false
     property bool compactMode: false
+    property real scaleFactor: 1.0
     readonly property var tradingFormHelper: Bridge.TradingFormPanelHelper
-    readonly property int compactTitleFont: compactMode ? 18 : 24
-    readonly property int compactBodyFont: compactMode ? 11 : 13
-    readonly property int compactMetaFont: compactMode ? 10 : 12
-    readonly property int compactButtonFont: compactMode ? 10 : 13
-    readonly property int compactButtonHeight: compactMode ? 28 : 38
-    readonly property int compactChipHeight: compactMode ? 32 : 46
-    readonly property int compactOrderRowHeight: compactMode ? 58 : 72
-    readonly property int compactSectionLabelFont: compactMode ? 10 : 12
-    readonly property int compactInputFont: compactMode ? 10 : 12
-    readonly property int compactInputHeight: compactMode ? 30 : 38
-    readonly property int compactInputRadius: compactMode ? 10 : 12
-    readonly property int compactInputHorizontalPadding: compactMode ? 10 : 12
-    readonly property int compactInputVerticalPadding: compactMode ? 0 : 1
-    readonly property int compactQuickButtonHeight: compactMode ? 24 : 30
-    readonly property int compactQuickButtonFont: compactMode ? 9 : 10
-    readonly property int compactActionHeight: compactMode ? 28 : 38
-    readonly property int compactActionRadius: compactMode ? 12 : 16
+
+    function _s(v) { return Math.max(1, Math.round(v * scaleFactor)) }
+    readonly property int compactTitleFont: _s(compactMode ? 15 : 24)
+    readonly property int compactBodyFont: _s(compactMode ? 10 : 13)
+    readonly property int compactMetaFont: _s(compactMode ? 9 : 12)
+    readonly property int compactButtonFont: _s(compactMode ? 9 : 13)
+    readonly property int compactButtonHeight: _s(compactMode ? 26 : 38)
+    readonly property int compactChipHeight: _s(compactMode ? 28 : 46)
+    readonly property int compactOrderRowHeight: _s(compactMode ? 48 : 72)
+    readonly property int compactSectionLabelFont: _s(compactMode ? 9 : 12)
+    readonly property int compactInputFont: _s(compactMode ? 9 : 12)
+    readonly property int compactInputHeight: _s(compactMode ? 26 : 38)
+    readonly property int compactInputRadius: _s(compactMode ? 8 : 12)
+    readonly property int compactInputHorizontalPadding: _s(compactMode ? 8 : 12)
+    readonly property int compactInputVerticalPadding: _s(compactMode ? 0 : 1)
+    readonly property int compactQuickButtonHeight: _s(compactMode ? 20 : 30)
+    readonly property int compactQuickButtonFont: _s(compactMode ? 8 : 10)
+    readonly property int compactActionHeight: _s(compactMode ? 26 : 38)
+    readonly property int compactActionRadius: _s(compactMode ? 10 : 16)
 
     property int currentTabIndex: 0
     property bool deferredOrderListReady: false
@@ -50,6 +95,31 @@ Rectangle {
     property string stockShares: "100"
     property string stockPriceType: "limit"
     property string stockPrice: ""
+
+    // 当前参考价文本（最新价/涨停/跌停/昨收）
+    property var currentReferenceText: {
+        var ms = marketSnapshot
+        var px = ms.price || ms.lastPrice || 0
+        return px > 0 ? ("最新 " + px.toFixed(2)) : "暂无行情"
+    }
+    property var preClose:  (marketSnapshot && marketSnapshot.preClose  > 0) ? marketSnapshot.preClose  : 0
+    property var limitUp:   (marketSnapshot && marketSnapshot.limitUp   > 0) ? marketSnapshot.limitUp   : 0
+    property var limitDown: (marketSnapshot && marketSnapshot.limitDown > 0) ? marketSnapshot.limitDown : 0
+    property string lastAutoStockPrice: ""
+
+    // 选股/切股时自动拉取最新市价
+    onStockCodeChanged: {
+        if (!stockCode) return
+        var fullSym = resolveFullSymbol(stockCode)
+        if (fullSym) Bridge.MarketDataBridge.resolveInstrument(fullSym)
+        Qt.callLater(function() {
+            var ms = marketSnapshot
+            if (ms && ms.price > 0) {
+                stockPrice = ms.price.toFixed(2)
+                lastAutoStockPrice = ms.price.toFixed(2)
+            }
+        })
+    }
 
     property string futuresCode: "RB2410"
     property string futuresLots: "1"
@@ -65,7 +135,6 @@ Rectangle {
     property string marginSellShares: "100"
     property string marginSellPriceType: "limit"
     property string marginSellPrice: ""
-    property string lastAutoStockPrice: ""
     property string lastAutoMarginBuyPrice: ""
     property string lastAutoMarginSellPrice: ""
     property string lastAutoStockPriceType: ""
@@ -101,7 +170,6 @@ Rectangle {
         marketSnapshot || ({})
     )
     readonly property bool openingMarketWindow: headerDisplay.openingMarketWindow === true
-    readonly property string currentReferenceText: String(headerDisplay.referenceText || "")
     readonly property var quickButtonModel: tradingFormHelper.quickButtonsForMode(currentMode)
     readonly property var equityQuickPriceButtonModel: tradingFormHelper.equityQuickPriceButtons()
     function equityDisplay(eqMode, code, shares, priceType, price) {
@@ -354,6 +422,7 @@ Rectangle {
         root.syncEquityReferenceState(currentMode)
     }
     onCurrentSymbolChanged: {
+        Bridge.MarketDataBridge.resolveInstrument(currentSymbol)
         publishModeContextAsync()
         root.syncEquityReferenceState(currentMode)
     }
@@ -1503,7 +1572,7 @@ Rectangle {
             color: Const.tradingHeaderBg
             border.color: Const.tradingHeaderBorder
             border.width: 1
-            implicitHeight: compactMode ? 70 : 94
+            implicitHeight: compactMode ? 52 : 94
 
             RowLayout {
                 anchors.fill: parent
@@ -1549,7 +1618,7 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: compactMode ? 286 : 360
+            Layout.preferredHeight: compactMode ? 220 : 360
             radius: compactMode ? 16 : 20
             color: Const.tradingPanelBgAlt
             border.color: Const.tradingFormAreaBorder
@@ -1590,16 +1659,36 @@ Rectangle {
                                 leftPadding: compactInputHorizontalPadding
                                 rightPadding: compactInputHorizontalPadding
                                 property bool suppressTextChange: false
-                                text: root.stockDisplayName || root.stockCode
+                                // 显示"名称 代码"，用户输入时只回写代码避免双向绑定循环
+                                text: root.stockDisplayName
+                                      ? (root.stockCode ? root.stockDisplayName + " " + root.stockCode
+                                                        : root.stockDisplayName)
+                                      : (root.stockCode || "")
                                 onTextChanged: {
                                     if (suppressTextChange) return
                                     var t = text.trim()
-                                    root.stockDisplayName = ""
-                                    root.stockCode = t
+                                    // 用户输入代码(数字)时回写stockCode，搜素名称时只触发search
+                                    var codeMatch = t.match(/\b(\d{6})\b/)
+                                    suppressTextChange = true
+                                    if (codeMatch) {
+                                        root.stockCode = codeMatch[1]
+                                    } else {
+                                        root.stockCode = t
+                                    }
                                     symbolSearch.search(t)
                                     Qt.callLater(function() {
                                         searchPopup.visible = symbolSearch.count > 0
                                     })
+                                    Qt.callLater(function() { suppressTextChange = false })
+                                }
+                                Connections {
+                                    target: root
+                                    function onStockCodeChanged() {
+                                        if (!suppressTextChange)
+                                            stockCodeField.text = root.stockDisplayName
+                                                ? root.stockDisplayName + " " + root.stockCode
+                                                : root.stockCode
+                                    }
                                 }
                                 background: Rectangle {
                                     radius: compactInputRadius
@@ -2312,14 +2401,17 @@ Rectangle {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         padding: 2
         opacity: 0.92
+        property var _formRef: root
+        property var _fieldRef: stockCodeField
         background: Rectangle { radius: 6; color: Const.tradingSearchPopupBg; border.color: Const.tradingSearchPopupBorder; border.width: 1.5 }
 
         onVisibleChanged: {
             if (visible) {
-                var pt = stockCodeField.mapToItem(null, 0, stockCodeField.height)
+                var fld = _fieldRef
+                var pt = fld ? fld.mapToItem(null, 0, fld.height) : ({x:0, y:0})
                 x = pt.x
                 y = pt.y
-                width = Math.max(220, stockCodeField.width)
+                width = fld ? Math.max(220, fld.width) : 220
                 var rows = Math.min(symbolSearch.count, 3)
                 height = rows > 0 ? rows * 34 + 8 : 40
             }
@@ -2330,6 +2422,9 @@ Rectangle {
             anchors.fill: parent; anchors.margins: 2
             model: symbolSearch
             clip: true; spacing: 1
+            property var _formRef: root
+            property var _fieldRef: stockCodeField
+            property var _popupRef: searchPopup
             delegate: Rectangle {
                 id: row
                 width: searchList.width; height: 34
@@ -2351,12 +2446,22 @@ Rectangle {
                     anchors.fill: parent; hoverEnabled: true
                     onClicked: {
                         var it = row.item || {}
-                        root.stockCode = it.symbol || ""
-                        root.stockDisplayName = it.secName || ""
-                        stockCodeField.suppressTextChange = true
-                        stockCodeField.text = root.stockDisplayName
-                        stockCodeField.suppressTextChange = false
-                        searchPopup.visible = false
+                        var sym = it.symbol || ""
+                        var nm = it.secName || ""
+                        var lv = row.ListView.view
+                        var frm = lv._formRef
+                        var fld = lv._fieldRef
+                        var pop = lv._popupRef
+                        if (frm) {
+                            frm.stockCode = sym
+                            frm.stockDisplayName = nm
+                        }
+                        if (fld) {
+                            fld.suppressTextChange = true
+                            fld.text = nm + " " + sym
+                            fld.suppressTextChange = false
+                        }
+                        if (pop) pop.visible = false
                     }
                 }
             }

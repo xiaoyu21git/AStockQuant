@@ -7,11 +7,12 @@ Rectangle {
     id: root
     signal depthLevelsChanged(int levels)
 
+    onDepthLevelsChanged: function(levels) { selectedDepthLevels = levels }
+
     radius: 28
     color: Const.depthPanelBg
     border.color: Const.depthPanelBorder
     border.width: 1
-    implicitHeight: compactMode ? 600 : 760
 
     property var marketSnapshot: ({})
     property var depthSnapshot: ({ bids: [], asks: [], totalBid: 0, totalAsk: 0 })
@@ -19,24 +20,26 @@ Rectangle {
     property string activeMode: "stock"
     property string activeSymbol: "000001"
     property bool compactMode: false
+    property real scaleFactor: 1.0
     property int selectedDepthLevels: 5
     readonly property int requestedDepthLevels: selectedDepthLevels > 10 ? 10 : (selectedDepthLevels < 5 ? 5 : selectedDepthLevels)
-    readonly property int compactHeaderFont: compactMode ? 15 : 20
-    readonly property int compactSectionTitleFont: compactMode ? 12 : 15
-    readonly property int compactStatCardHeight: compactMode ? 48 : 64
-    readonly property int compactBookRowHeight: compactMode ? 24 : 30
-    readonly property int compactTradeRowHeight: compactMode ? 26 : 34
-    readonly property int compactMidPriceHeight: compactMode ? 26 : 34
-    readonly property int compactOrderBookHeight: compactMode ? 310 : 420
-    readonly property int compactPanelGap: compactMode ? 6 : 12
-    readonly property int compactBookTagFont: compactMode ? 8 : 11
-    readonly property int compactBookPriceFont: compactMode ? 10 : 12
-    readonly property int compactBookVolumeFont: compactMode ? 8 : 11
-    readonly property int compactMetaFont: compactMode ? 9 : 11
-    readonly property int compactTradePanelWidth: compactMode ? 150 : 256
-    readonly property int compactDepthChipHeight: compactMode ? 20 : 26
-    readonly property int compactDepthHeaderHeight: compactMode ? 24 : 30
-    readonly property int compactDepthSideWidth: compactMode ? 24 : 34
+    function _s(v) { return Math.max(1, Math.round(v * scaleFactor)) }
+    readonly property int compactHeaderFont: _s(compactMode ? 15 : 20)
+    readonly property int compactSectionTitleFont: _s(compactMode ? 12 : 15)
+    readonly property int compactStatCardHeight: _s(compactMode ? 48 : 64)
+    readonly property int compactBookRowHeight: compactMode ? 26 : 30
+    readonly property int compactTradeRowHeight: _s(compactMode ? 26 : 34)
+    readonly property int compactMidPriceHeight: _s(compactMode ? 26 : 34)
+    readonly property int compactOrderBookHeight: _s(compactMode ? 310 : 420)
+    readonly property int compactPanelGap: _s(compactMode ? 6 : 12)
+    readonly property int compactBookTagFont: _s(compactMode ? 8 : 11)
+    readonly property int compactBookPriceFont: _s(compactMode ? 10 : 12)
+    readonly property int compactBookVolumeFont: _s(compactMode ? 8 : 11)
+    readonly property int compactMetaFont: _s(compactMode ? 9 : 11)
+    readonly property int compactTradePanelWidth: _s(compactMode ? 150 : 256)
+    readonly property int compactDepthChipHeight: _s(compactMode ? 20 : 26)
+    readonly property int compactDepthHeaderHeight: _s(compactMode ? 24 : 30)
+    readonly property int compactDepthSideWidth: _s(compactMode ? 24 : 34)
 
     readonly property bool isLimitBoard: !!(marketSnapshot && (marketSnapshot.limitUp || marketSnapshot.limitDown))
     function statusBadgeText() {
@@ -59,11 +62,11 @@ Rectangle {
         var side = marketSnapshot.limitUp ? "买一封单" : "卖一封单"
         return side + ": " + volStr + " 约" + amtStr
     }
-    readonly property int compactDepthPriceWidth: compactMode ? 40 : 60
-    readonly property int compactDepthLotWidth: compactMode ? 28 : 44
-    readonly property int compactDepthShareWidth: compactMode ? 38 : 56
-    readonly property int compactDepthAmountWidth: compactMode ? 48 : 68
-    readonly property bool l2PanelVisible: !!(depthSnapshot && depthSnapshot.live && tickRows && tickRows.length > 0)
+    readonly property int compactDepthPriceWidth: _s(compactMode ? 40 : 60)
+    readonly property int compactDepthLotWidth: _s(compactMode ? 28 : 44)
+    readonly property int compactDepthShareWidth: _s(compactMode ? 38 : 56)
+    readonly property int compactDepthAmountWidth: _s(compactMode ? 48 : 68)
+    readonly property bool l2PanelVisible: !!(tickRows && tickRows.length > 0)
     readonly property string shareCountLabel: activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell"
         ? "股数"
         : (activeMode === "options" ? "张数" : "数量")
@@ -272,169 +275,7 @@ Rectangle {
 
         RowLayout {
             Layout.fillWidth: true
-
-            ColumnLayout {
-                spacing: 4
-
-                Text {
-                    text: ((marketSnapshot && marketSnapshot.name ? String(marketSnapshot.name) + "  ·  " : "")
-                        + (marketSnapshot && marketSnapshot.symbol ? String(marketSnapshot.symbol) : activeSymbol)
-                        + "  ·  " + modeName())
-                    color: Const.tradingBrightText
-                    font.pixelSize: compactHeaderFont
-                    font.weight: Font.DemiBold
-                }
-
-                Text {
-                    text: quoteStateText()
-                    color: Const.depthLabelText
-                    font.pixelSize: compactMode ? 10 : 12
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            ColumnLayout {
-                spacing: 2
-
-                Text {
-                    text: {
-                        var priceText = formatPrice(currentPrice())
-                        if (priceText === "--") {
-                            return priceText
-                        }
-                        return (activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell" ? "¥" : "") + priceText
-                    }
-                    color: root.trendColor
-                    font.pixelSize: compactMode ? 20 : 28
-                    font.weight: Font.Bold
-                }
-
-                Text {
-                    text: trendText()
-                    color: root.trendColor
-                    font.pixelSize: compactMode ? 10 : 13
-                }
-
-                Row {
-                    spacing: 4
-                    visible: root.isLimitBoard
-                    Rectangle {
-                        radius: 3; color: root.statusBadgeColor()
-                        width: badgeText.implicitWidth + 10; height: badgeText.implicitHeight + 4
-                        Text {
-                            id: badgeText
-                            anchors.centerIn: parent
-                            text: root.statusBadgeText()
-                            color: "white"; font.pixelSize: 9; font.weight: Font.Bold
-                        }
-                    }
-                    Text {
-                        text: root.sealedInfo()
-                        color: Const.tradingStatusDefault; font.pixelSize: compactMode ? 9 : 11
-                        visible: root.sealedInfo() !== ""
-                    }
-                }
-            }
-        }
-
-        GridLayout {
-            Layout.fillWidth: true
-            columns: 3
-            columnSpacing: compactMode ? 6 : 10
-            rowSpacing: compactMode ? 6 : 10
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: compactStatCardHeight
-                radius: 16
-                color: Const.tradingHeaderBg
-                border.color: Const.tradingFormAreaBorder
-                border.width: 1
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.leftMargin: compactMode ? 12 : 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: compactMode ? 4 : 6
-
-                    Text {
-                        text: "总委买"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Text {
-                        text: formatVolume(depthSnapshot.totalBid)
-                        color: Const.tradingBrightText
-                        font.pixelSize: compactMode ? 13 : 16
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: compactStatCardHeight
-                radius: 16
-                color: Const.tradingHeaderBg
-                border.color: Const.tradingFormAreaBorder
-                border.width: 1
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.leftMargin: compactMode ? 12 : 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: compactMode ? 4 : 6
-
-                    Text {
-                        text: "总委卖"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Text {
-                        text: formatVolume(depthSnapshot.totalAsk)
-                        color: Const.tradingBrightText
-                        font.pixelSize: compactMode ? 13 : 16
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                implicitHeight: compactStatCardHeight
-                radius: 16
-                color: Const.tradingHeaderBg
-                border.color: Const.tradingFormAreaBorder
-                border.width: 1
-
-                Column {
-                    anchors.left: parent.left
-                    anchors.leftMargin: compactMode ? 12 : 14
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: compactMode ? 4 : 6
-
-                    Text {
-                        text: "逐笔数"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Text {
-                        text: String(root.tickRows.length)
-                        color: Const.tradingBrightText
-                        font.pixelSize: compactMode ? 13 : 16
-                        font.weight: Font.DemiBold
-                    }
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: compactOrderBookHeight
+            Layout.fillHeight: true
             Layout.alignment: Qt.AlignTop
             spacing: compactPanelGap
 
@@ -494,140 +335,129 @@ Rectangle {
                         }
                     }
 
-                    Text {
-                        Layout.fillWidth: true
-                        text: "显示 " + root.visibleDepthLevels + " / " + root.requestedDepthLevels + " 档"
-                        color: Const.depthLabelText
-                        font.pixelSize: compactMetaFont
-                    }
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: compactDepthHeaderHeight
-                        radius: compactMode ? 10 : 12
-                        color: Const.depthInactiveLevelBg
-
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.margins: compactMode ? 5 : 8
-                            spacing: compactMode ? 4 : 8
-
-                            Text {
-                                text: "档"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthSideWidth
-                            }
-                            Text {
-                                text: "价格"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthPriceWidth
-                                horizontalAlignment: Text.AlignRight
-                            }
-                            Text {
-                                text: "手数"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthLotWidth
-                                horizontalAlignment: Text.AlignRight
-                            }
-                            Text {
-                                text: root.shareCountLabel
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.preferredWidth: compactDepthShareWidth
-                                horizontalAlignment: Text.AlignRight
-                            }
-                            Text {
-                                text: "金额"
-                                color: Const.depthLabelText
-                                font.pixelSize: compactMetaFont
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignRight
-                            }
-                        }
-                    }
-
-                    ListView {
+                    // ── 左卖右买 双列布局 ──
+                    RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        clip: true
-                        spacing: compactMode ? 2 : 4
-                        boundsBehavior: Flickable.StopAtBounds
-                        model: root.depthTableRows
-                        interactive: true
+                        spacing: compactMode ? 4 : 8
 
-                        ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AlwaysOff
+                        // 左: 卖盘 (Ask)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            radius: compactMode ? 9 : 12
+                            color: Const.depthAskRowBg
+                            border.color: Const.depthAskRowBorder
+                            border.width: 1
+                            clip: true
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 2
+                                spacing: 0
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "卖盘"
+                                    color: "#10b981"
+                                    font.pixelSize: compactMode ? 10 : 12
+                                    font.weight: Font.DemiBold
+                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.preferredHeight: compactMode ? 18 : 22
+                                }
+
+                                // 卖盘表头
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 0; height: compactMode?16:20
+                                    Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.28; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.22; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; width:parent.width*0.32; horizontalAlignment:Text.AlignHCenter }
+                                }
+
+                                ListView {
+                                    id: askListView
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: 0
+                                    model: { var a=[]; var asks=depthSnapshot&&depthSnapshot.asks?depthSnapshot.asks:[]; for(var i=Math.min(asks.length,requestedDepthLevels)-1;i>=0;i--) a.push(asks[i]); return a }
+                                    delegate: Rectangle {
+                                        required property var modelData; required property int index
+                                        width: askListView.width; height: Math.max(14, askListView.height / Math.max(askListView.count, 1))
+                                        color: "transparent"
+                                        RowLayout {
+                                            anchors.fill: parent; anchors.margins: 2; spacing: 0
+                                            Text { text:"卖"+(index+1); color:"#10b981"; font.pixelSize:compactMode?9:10; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#10b981"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.32; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                        }
+                                    }
+                                }
+                            }
                         }
 
-                        delegate: Item {
-                            property var rowData: modelData
-                            width: ListView.view.width
-                            height: rowData.kind === "divider" ? (compactMode ? 8 : 12) : compactBookRowHeight
+                        // 中间分隔线
+                        Rectangle {
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 2
+                            color: "#334155"
+                        }
 
-                            Rectangle {
+                        // 右: 买盘 (Bid)
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            radius: compactMode ? 9 : 12
+                            color: Const.depthBidRowBg
+                            border.color: Const.depthBidRowBorder
+                            border.width: 1
+                            clip: true
+
+                            ColumnLayout {
                                 anchors.fill: parent
-                                visible: rowData.kind === "depth"
-                                radius: compactMode ? 9 : 12
-                                color: rowData.isBid ? Const.depthBidRowBg : Const.depthAskRowBg
-                                border.color: rowData.isBid ? Const.depthBidRowBorder : Const.depthAskRowBorder
-                                border.width: 1
-                            }
-
-                            Rectangle {
-                                visible: rowData.kind === "divider"
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.leftMargin: compactMode ? 2 : 6
-                                anchors.rightMargin: compactMode ? 2 : 6
-                                height: 1
-                                color: Const.depthAggregateBar
-                            }
-
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.margins: compactMode ? 5 : 8
-                                spacing: compactMode ? 4 : 8
-                                visible: rowData.kind === "depth"
+                                anchors.margins: 2
+                                spacing: 0
 
                                 Text {
-                                    text: rowData.side + rowData.level
-                                    color: rowData.isBid ? Const.depthBidText : Const.depthAskText
-                                    font.pixelSize: compactBookTagFont
-                                    font.weight: Font.DemiBold
-                                    Layout.preferredWidth: compactDepthSideWidth
-                                }
-                                Text {
-                                    text: root.formatPrice(rowData.price)
-                                    color: Const.tradingBrightText
-                                    font.pixelSize: compactBookPriceFont
-                                    Layout.preferredWidth: compactDepthPriceWidth
-                                    horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    text: root.formatLotCount(rowData.volume)
-                                    color: Const.depthInfoText
-                                    font.pixelSize: compactBookVolumeFont
-                                    Layout.preferredWidth: compactDepthLotWidth
-                                    horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    text: root.formatShareCount(rowData.volume)
-                                    color: Const.depthInfoText
-                                    font.pixelSize: compactBookVolumeFont
-                                    Layout.preferredWidth: compactDepthShareWidth
-                                    horizontalAlignment: Text.AlignRight
-                                }
-                                Text {
-                                    text: root.formatAmount(rowData.price, rowData.volume)
-                                    color: rowData.isBid ? Const.depthBidVolumeText : Const.depthAskVolumeText
-                                    font.pixelSize: compactBookVolumeFont
                                     Layout.fillWidth: true
-                                    horizontalAlignment: Text.AlignRight
-                                    elide: Text.ElideRight
+                                    text: "买盘"
+                                    color: "#ef4444"
+                                    font.pixelSize: compactMode ? 10 : 12
+                                    font.weight: Font.DemiBold
+                                    horizontalAlignment: Text.AlignHCenter
+                                    Layout.preferredHeight: compactMode ? 18 : 22
+                                }
+
+                                // 买盘表头
+                                RowLayout {
+                                    Layout.fillWidth: true; spacing: 0; height: compactMode?16:20
+                                    Text { text:"档"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"价格"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"手数"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter }
+                                    Text { text:"金额"; color:"#94a3b8"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.32; horizontalAlignment:Text.AlignHCenter }
+                                }
+
+                                ListView {
+                                    id: bidListView
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    clip: true
+                                    spacing: 0
+                                    model: { var a=[]; var bids=depthSnapshot&&depthSnapshot.bids?depthSnapshot.bids:[]; for(var i=0;i<Math.min(bids.length,requestedDepthLevels);i++) a.push(bids[i]); return a }
+                                    delegate: Rectangle {
+                                        required property var modelData; required property int index
+                                        width: bidListView.width; height: Math.max(14, bidListView.height / Math.max(bidListView.count, 1))
+                                        color: "transparent"
+                                        RowLayout {
+                                            anchors.fill: parent; anchors.margins: 2; spacing: 0
+                                            Text { text:"买"+(index+1); color:"#ef4444"; font.pixelSize:compactMode?9:10; font.weight:Font.DemiBold; Layout.preferredWidth:parent.width*0.18; horizontalAlignment:Text.AlignHCenter }
+                                            Text { text:root.formatPrice(modelData.price||0); color:"#f1f5f9"; font.pixelSize:compactMode?9:10; Layout.preferredWidth:parent.width*0.28; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatLotCount(modelData.volume||0); color:"#cbd5e1"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.22; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                            Text { text:root.formatAmount(modelData.price||0,modelData.volume||0); color:"#ef4444"; font.pixelSize:compactMode?8:9; Layout.preferredWidth:parent.width*0.32; horizontalAlignment:Text.AlignHCenter; elide:Text.ElideRight }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -655,8 +485,7 @@ Rectangle {
             }
 
             Rectangle {
-                visible: root.l2PanelVisible
-                Layout.preferredWidth: root.l2PanelVisible ? compactTradePanelWidth : 0
+                Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.alignment: Qt.AlignTop
                 radius: 22
@@ -698,16 +527,18 @@ Rectangle {
                     }
 
                     ListView {
+                        id: tickListView
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
                         spacing: compactMode ? 3 : 6
                         model: root.tickRows
+                        onCountChanged: { if(count>0) positionViewAtEnd() }
 
                         delegate: Rectangle {
                             property var tickData: modelData
                             width: ListView.view.width
-                            height: compactTradeRowHeight
+                            height: tickListView.count > 0 ? Math.max(14, tickListView.height / tickListView.count) : 30
                             radius: compactMode ? 10 : 12
                             color: Const.tradingHeaderBg
                             border.color: tickData.direction === "buy" ? Const.depthTickBuyBorder : Const.depthTickSellBorder

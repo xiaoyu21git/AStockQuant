@@ -20,7 +20,6 @@ target_sources(foundation PRIVATE
     thread/thread_pool.cpp
     thread/ThreadExit.cpp
     Utils/CacheUtils.cpp
-    Utils/time.cpp
     Utils/random.cpp
     Utils/system.cpp
     Utils/String.cpp

@@ -21,6 +21,11 @@ enum class FactorType : uint8_t {
     CUSTOM = 11,
     LOW_VOLATILITY = 12,
     COMPOSITE = 13,
+    EVENT_DRIVEN = 14,   // 金融事件驱动因子 (金融事件感知模块)
+    REVERSAL = 15,       // 反转因子 (短期反转+理想反转W式切割)
+    HIGH_FREQ = 16,      // 高频因子 (分钟级量价微观结构)
+    DL = 17,             // 深度学习因子 (神经网络自动特征提取)
+    SUPPLY_CHAIN = 18,   // 传导链因子 (商品价格→股票映射)
     UNKNOWN = 255
 };
 
@@ -400,8 +405,59 @@ inline constexpr FactorType factorTypeFromIndex(int index)
     case 11: return FactorType::CUSTOM;
     case 12: return FactorType::LOW_VOLATILITY;
     case 13: return FactorType::COMPOSITE;
+    case 14: return FactorType::EVENT_DRIVEN;
+    case 15: return FactorType::REVERSAL;
+    case 16: return FactorType::HIGH_FREQ;
+    case 17: return FactorType::DL;
+    case 18: return FactorType::SUPPLY_CHAIN;
     default: return FactorType::UNKNOWN;
     }
 }
+
+// ── 反转因子 ──
+enum class ReversalSplitMethod : uint8_t {
+    NONE = 0,      // 传统反转
+    W_CUT = 1,     // W式切割（理想反转）
+    UNKNOWN = 255
+};
+
+// ── 高频因子 ──
+enum class HFAggregation : uint8_t {
+    MEAN = 0,       // 均值
+    CUMULATIVE = 1, // 累计
+    MAX = 2,        // 最大值
+    UNKNOWN = 255
+};
+
+enum class HFMomentType : uint8_t {
+    VARIANCE = 0,   // 已实现方差
+    SKEWNESS = 1,   // 已实现偏度
+    KURTOSIS = 2,   // 已实现峰度
+    UNKNOWN = 255
+};
+
+enum class HFMethod : uint8_t {
+    SMART_MONEY = 0,      // 聪明钱: |R|/V^0.25 排序取 Top N% VWAP
+    REALIZED_MOMENTS = 1, // 已实现高阶矩: RV/RSkew/RKurt
+    VOLUME_PRICE = 2,     // 量价关系: 相关性 + 相对成交量 + 振幅比
+    UNKNOWN = 255
+};
+
+// ── AI 因子 ──
+enum class DLModelType : uint8_t {
+    RNN = 0,
+    LSTM = 1,
+    GRU = 2,
+    CNN = 3,
+    TRANSFORMER = 4,
+    GFLOWNET = 5,
+    UNKNOWN = 255
+};
+
+enum class DLOptimizer : uint8_t {
+    ADAM = 0,
+    SGD = 1,
+    UNKNOWN = 255
+};
 
 }  // namespace factor

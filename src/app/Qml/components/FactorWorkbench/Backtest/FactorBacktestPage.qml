@@ -2059,12 +2059,26 @@ Item {
         if (datasetId <= 0) return "未选择缓存集"
         var supportMap = factorSupportMapCache
         if (!supportMap || Object.keys(supportMap).length === 0) return "因子支持校验未完成，请打开因子选择器点击\"开始校验\""
-        if (!selectedFactorIds || selectedFactorIds.length === 0) return "未选择因子"
-        for (var si = 0; si < selectedFactorIds.length; si++) {
-            var factorId = String(selectedFactorIds[si])
-            var sInfo = supportMap[factorId]
-            if (!sInfo) return "因子 " + factorId + " 未经校验"
-            if (sInfo.supported === false) return "因子 " + factorId + " 不支持: " + (sInfo.reason || "未知原因")
+        // 组合因子模式检查 compositeChildAllocations，单因子模式检查 selectedFactorIds
+        if (backtestEntryMode === 1) {
+            if (!compositeDraftName || String(compositeDraftName).trim().length === 0)
+                return "请输入组合因子名称"
+            if (!compositeChildAllocations || compositeChildAllocations.length < 2)
+                return "组合因子需要至少2个子因子"
+            for (var ci = 0; ci < compositeChildAllocations.length; ci++) {
+                var cid = String((compositeChildAllocations[ci] || {}).instanceId || "")
+                var cinfo = supportMap[cid]
+                if (!cinfo) return "子因子 " + cid + " 未经校验"
+                if (cinfo.supported === false) return "子因子 " + cid + " 不支持: " + (cinfo.reason || "未知原因")
+            }
+        } else {
+            if (!selectedFactorIds || selectedFactorIds.length === 0) return "未选择因子"
+            for (var si = 0; si < selectedFactorIds.length; si++) {
+                var factorId = String(selectedFactorIds[si])
+                var sInfo = supportMap[factorId]
+                if (!sInfo) return "因子 " + factorId + " 未经校验"
+                if (sInfo.supported === false) return "因子 " + factorId + " 不支持: " + (sInfo.reason || "未知原因")
+            }
         }
         return ""
     }
@@ -2083,11 +2097,22 @@ Item {
             console.warn("回测按钮禁用原因:", backtestDisabledReason)
             console.warn("  cacheDatasetOptions.length:", cacheDatasetOptions ? cacheDatasetOptions.length : -1)
             console.warn("  factorSupportMapCache keys:", factorSupportMapCache ? Object.keys(factorSupportMapCache).length : -1)
-            console.warn("  selectedFactorIds:", JSON.stringify(selectedFactorIds))
-            if (factorSupportMapCache && selectedFactorIds.length > 0) {
-                for (var si = 0; si < selectedFactorIds.length; si++) {
-                    var fid = String(selectedFactorIds[si])
-                    console.warn("  factor " + fid + " in map:", factorSupportMapCache[fid] !== undefined, "supported:", factorSupportMapCache[fid] ? factorSupportMapCache[fid].supported : "N/A")
+            console.warn("  backtestEntryMode:", backtestEntryMode)
+            if (backtestEntryMode === 1) {
+                console.warn("  compositeChildAllocations.length:", compositeChildAllocations ? compositeChildAllocations.length : -1)
+                if (factorSupportMapCache && compositeChildAllocations && compositeChildAllocations.length > 0) {
+                    for (var ci = 0; ci < compositeChildAllocations.length; ci++) {
+                        var cfid = String((compositeChildAllocations[ci] || {}).instanceId || "")
+                        console.warn("  composite child " + cfid + " in map:", factorSupportMapCache[cfid] !== undefined, "supported:", factorSupportMapCache[cfid] ? factorSupportMapCache[cfid].supported : "N/A")
+                    }
+                }
+            } else {
+                console.warn("  selectedFactorIds:", JSON.stringify(selectedFactorIds))
+                if (factorSupportMapCache && selectedFactorIds.length > 0) {
+                    for (var si = 0; si < selectedFactorIds.length; si++) {
+                        var fid = String(selectedFactorIds[si])
+                        console.warn("  factor " + fid + " in map:", factorSupportMapCache[fid] !== undefined, "supported:", factorSupportMapCache[fid] ? factorSupportMapCache[fid].supported : "N/A")
+                    }
                 }
             }
         }
@@ -3216,8 +3241,51 @@ Item {
                                     wrapMode: Text.WordWrap
                                 }
                             }
+
+                            // 保存为实例：持久化组合因子配置，以后可在因子列表中直接选用
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                visible: backtestEntryMode === 1 && compositeChildAllocations.length > 0
+
+                                Button {
+                                    id: saveCompositeButton
+                                    text: "💾 保存为因子实例"
+                                    Layout.preferredHeight: 32
+                                    enabled: !isBacktesting && compositeDraftName.length > 0
+                                    background: Rectangle { color: parent.enabled ? (saveCompositeButton.hovered ? "#059669" : "#047857") : "#374151"; radius: 6 }
+                                    contentItem: Text { text: parent.text; color: parent.enabled ? "white" : "#666"; font.pixelSize: 12; font.bold: true; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                    onClicked: {
+                                        if (!factorService || typeof factorService.addFactor !== "function") {
+                                            console.log("FactorService 不可用，无法保存组合因子实例")
+                                            return
+                                        }
+                                        var draft = buildCompositeDraft()
+                                        // 纠正并补充类型标记（组合因子在 JSON 里要显式标 FACTOR_TYPE）
+                                        draft.factorType = "COMPOSITE"
+                                        var result = factorService.addFactor(draft)
+                                        if (result && String(result).length > 0) {
+                                            console.log("组合因子实例已保存:", result)
+                                            handlePanelStatusRequested("✓ 组合因子实例已保存: " + String(result), "success")
+                                        } else {
+                                            console.log("组合因子实例保存失败")
+                                            handlePanelStatusRequested("❌ 保存失败", "error")
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    text: compositeDraftName.length > 0
+                                        ? ("保存后将在因子列表中可见，随时可选用或再次编辑")
+                                        : "请输入组合名称后才可保存"
+                                    font.pixelSize: 10
+                                    color: compositeDraftName.length > 0 ? "#10B981" : "#FCA5A5"
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
                         }
-                        
+
                         // 回测配置
                         RowLayout {
                             Layout.fillWidth: true
@@ -3827,153 +3895,6 @@ Item {
                     }
                 }
             
-                // 主要内容区域
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: backtestResultSwitchPanelContent.implicitHeight + 24
-                    visible: backtestResultSwitchEntries().length > 0
-                    radius: 12
-                    color: "#1E293B"
-
-                    ColumnLayout {
-                        id: backtestResultSwitchPanelContent
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 10
-
-                        RowLayout {
-                            Layout.fillWidth: true
-
-                            Text {
-                                text: "🧭 回测结果切换"
-                                font.pixelSize: 15
-                                font.weight: Font.DemiBold
-                                color: "#F8FAFC"
-                            }
-
-                            Item { Layout.fillWidth: true }
-
-                            Text {
-                                text: "点击卡片刷新下方分组内容和交易回放"
-                                font.pixelSize: 11
-                                color: "#94A3B8"
-                            }
-                        }
-
-                        Item {
-                            Layout.fillWidth: true
-                            implicitHeight: resultSwitchFlow.childrenRect.height
-
-                            Flow {
-                                id: resultSwitchFlow
-                                width: parent.width
-                                spacing: root.compactCardSpacing
-
-                                Repeater {
-                                    model: backtestResultSwitchEntries()
-
-                                    delegate: Rectangle {
-                                        property var resultMetrics: modelData.metrics || ({})
-                                        property var resultExecution: resultMetrics.execution || ({})
-                                        property var resultFactorQuality: resultMetrics.factorQuality || ({})
-                                        property bool hovered: resultCardMouse.containsMouse
-                                        property bool selected: root.backtestResultCardSelected(index, modelData)
-                                        property color accentColor: root.backtestResultStatusColor(modelData.status)
-
-                                        width: root.compactCardWidth(
-                                                   resultSwitchFlow.width,
-                                                   root.resultSwitchCardMinWidth,
-                                                   root.resultSwitchCardMaxWidth)
-                                        radius: 8
-                                        color: selected ? "#172554" : (hovered ? "#0F223F" : "#111827")
-                                        border.width: 1
-                                        border.color: selected ? "#60A5FA" : (hovered ? accentColor : "#334155")
-                                        implicitHeight: resultSwitchCardColumn.implicitHeight + 20
-
-                                        ColumnLayout {
-                                            id: resultSwitchCardColumn
-                                            anchors.fill: parent
-                                            anchors.margins: 10
-                                            spacing: 5
-
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                spacing: 6
-
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: root.displayedBacktestResultName(modelData) || (modelData.factorName || "回测结果")
-                                                    font.pixelSize: 12
-                                                    font.weight: Font.Medium
-                                                    color: "#F1F5F9"
-                                                    wrapMode: Text.WordWrap
-                                                    maximumLineCount: 2
-                                                }
-
-                                                Rectangle {
-                                                    radius: 8
-                                                    color: Qt.rgba(Qt.color(accentColor).r,
-                                                                   Qt.color(accentColor).g,
-                                                                   Qt.color(accentColor).b,
-                                                                   0.18)
-                                                    border.width: 1
-                                                    border.color: accentColor
-                                                    implicitWidth: resultStatusBadgeText.implicitWidth + 12
-                                                    implicitHeight: 18
-
-                                                    Text {
-                                                        id: resultStatusBadgeText
-                                                        anchors.centerIn: parent
-                                                        text: root.backtestResultStatusLabel(modelData.status)
-                                                        font.pixelSize: 10
-                                                        font.weight: Font.DemiBold
-                                                        color: accentColor
-                                                    }
-                                                }
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: root.backtestResultCardMeta(modelData)
-                                                font.pixelSize: 10
-                                                color: "#94A3B8"
-                                                elide: Text.ElideRight
-                                                visible: text.length > 0
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: root.backtestResultCardSummary(modelData)
-                                                font.pixelSize: 10
-                                                color: "#CBD5E1"
-                                                wrapMode: Text.WordWrap
-                                                maximumLineCount: 2
-                                                visible: text.length > 0
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "评级 " + root.backtestResultCardRatingText(modelData)
-                                                    + " · 时间 " + root.formatRunTimestamp(modelData.timestamp)
-                                                font.pixelSize: 10
-                                                color: root.backtestResultCardRatingColor(modelData)
-                                                elide: Text.ElideRight
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            id: resultCardMouse
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.selectBacktestResultCard(index, modelData)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -4772,9 +4693,10 @@ Item {
                             }
                         }
                     }
+
                 }
-            } // 这里应该是ColumnLayout的结束
-        } // 这里应该是Flickable的结束，这是修复的关键位置
+            } // ColumnLayout 结束
+        } // Flickable 结束
     } // 这是最外层Rectangle的结束
 
     Dialog {
@@ -5162,19 +5084,20 @@ Item {
         var supportMapLoading = factorBacktestController
                 ? factorBacktestController.supportMapRequestInFlight
                 : false
-        
+
         // 创建对话框组件
         var component = Qt.createComponent("FactorSelectorDialog.qml")
         if (component.status === Component.Ready) {
+            // 每次打开对话框都强制刷新检测，避免使用旧缓存
             var dialogParent = Qt.application.activeWindow ? Qt.application.activeWindow : root
             factorSelectorDialog = component.createObject(root, {
                 factorService: factorService,
                 factorViewModel: factorService ? factorService.getViewModel() : null,
                 selectedFactorIds: backtestEntryMode === 1 ? compositeChildIds().slice() : selectedFactorIds.slice(),
                 dataSourceMode: selectedDataSourceMode,
-                supportMapRequested: hasCachedSupportMap || supportMapLoading,
-                supportMapLoading: supportMapLoading,
-                factorSupportMap: hasCachedSupportMap ? shallowCopyMap(cachedSupportMap) : ({}),
+                supportMapRequested: false,
+                supportMapLoading: false,
+                factorSupportMap: ({}),
                 supportMapRefreshCallback: function() { runSupportMapRefresh(true) }
             })
             if (factorSelectorDialog && dialogParent) {

@@ -18,10 +18,10 @@ namespace checker_contract {
 
 constexpr const char* kRequiredKey = "required";
 constexpr const char* kSourceTableKey = "sourceTable";
-constexpr const char* kDailyBarTable = "daily_bar";
+constexpr const char* kDailyBarTable = "mkt.daily_bar";
 constexpr const char* kCleanedDailyBarTable = "cleaned_daily_bar";
-constexpr const char* kFinancialIndicatorDailyTable = "financial_indicator_daily";
-constexpr const char* kSymbolInfoTable = "symbol_info";
+constexpr const char* kFinancialIndicatorDailyTable = "fund.financial_indicator_daily";
+constexpr const char* kSymbolInfoTable = "ref.symbol_info";
 constexpr const char* kNewsSentimentTable = "news_sentiment";
 constexpr const char* kPolicyDataTable = "policy_data";
 constexpr const char* kAlternativeDataTable = "alternative_data";
@@ -258,7 +258,7 @@ std::unordered_set<std::string> loadTableColumns(
             return it->second;
     }
 
-    // PG: 用 search_path 中的全部 schema 代替 MySQL 的 DATABASE()
+    // PG: 用 search_path 中的全部 schema 扫描
     auto result = db->executeQuery(
         "SELECT COLUMN_NAME AS column_name FROM information_schema.COLUMNS "
         "WHERE TABLE_SCHEMA = ANY(regexp_split_to_array("

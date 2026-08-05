@@ -29,7 +29,7 @@ public:
     bool initialize();
     
     // 获取数据库连接
-    std::shared_ptr<QtMySQLDatabase> getDatabase();
+    std::shared_ptr<ISqlDatabase> getDatabase();
     
     // 检查连接状态
     bool isConnected() const;
@@ -152,12 +152,12 @@ public:
 };
 ```
 
-### 5. QtMySQL数据库接口
-**文件**: `src/infrastructure/include/database/QtMySQLDatabase.h`
+### 5. 数据库接口（已迁移至 PostgreSQL）
+**文件**: `src/infrastructure/include/database/ISqlDatabase.h`
 
 ```cpp
-// FROZEN INTERFACE - Qt MySQL数据库包装器
-class QtMySQLDatabase {
+// FROZEN INTERFACE - 数据库抽象接口（PG）
+class ISqlDatabase {
 public:
     // 连接管理
     bool open();
@@ -165,8 +165,8 @@ public:
     bool isOpen() const;
     
     // 查询执行
-    QueryResult executeQuery(const QString& sql, 
-                            const std::map<QString, QVariant>& params = {});
+    QueryResult executeQuery(const std::string& sql, 
+                            const std::map<std::string, Value>& params = {});
     int executeUpdate(const QString& sql,
                      const std::map<QString, QVariant>& params = {});
     int executeBatchUpdate(const QString& sql,

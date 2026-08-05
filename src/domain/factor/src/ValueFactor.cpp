@@ -1,4 +1,5 @@
 #include "domain/factor/include/ValueFactor.h"
+#include "foundation/log/logging.hpp"
 
 //#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
@@ -420,7 +421,9 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
         params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled);
+        params_.neutralizationEnabled,
+        1,
+        params_.ascending);
 
     const std::vector<ValuationMetric> metrics = selectedMetricsFromParams(params_);
     const std::vector<std::string> dateResolutionFields = collectDateResolutionFields(metrics);
@@ -452,17 +455,14 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
 
                 if (metric == ValuationMetric::CFP) {
                     if (!context.historicalView->hasField("market_cap") || !context.historicalView->hasField("operating_cash_flow")) {
-                        result.dataStatus = CalculationResult::createError(
-                            "dataset missing market_cap or operating_cash_flow for CFP").dataStatus;
-                        return;
+                        continue; // 缺少 CFP 字段时跳过此指标，不影响其他指标
                     }
                     contributions.push_back(computeCFPContribution(context, runtime, weight));
                 } else {
                     const std::string field = valuationMetricField(metric);
-                    if (field.empty() || !context.historicalView->hasField(field)) {
-                        result.dataStatus = CalculationResult::createError(
-                            "dataset missing field: " + (field.empty() ? valuationMetricToJsonString(metric) : field)).dataStatus;
-                        return;
+                    bool hasF = !field.empty() && context.historicalView->hasField(field);
+                    if (!hasF) {
+                        continue;
                     }
                     auto contrib = computeStandardContribution(context, runtime, metric, weight);
                     contributions.push_back(std::move(contrib));
@@ -508,9 +508,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 return;
             }
         },
-        [](const CommonRuntimeState&, CalculationResult& result) {
-            winsorizeTopBottom5Percent(result.values);
-        },
+        [](const CommonRuntimeState&, CalculationResult&) {},
         [this, metrics](const CommonRuntimeState&, CalculationResult& result) {
             auto valuationMetricsJson = foundation::json::JsonFacade::createArray();
             auto valuationWeightsJson = foundation::json::JsonFacade::createArray();

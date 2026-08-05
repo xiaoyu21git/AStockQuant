@@ -1,5 +1,7 @@
 #include "../include/database/NativePgDatabase.h"
 
+#include "foundation/log/logging.hpp"
+
 #include <libpq-fe.h>
 
 #include <cstring>
@@ -17,7 +19,7 @@ namespace database {
 
 namespace {
 
-// 将 MySQL 风格 ? 占位符转为 PG $1, $2, ...
+// 将 ? 占位符转为 PG $1, $2, ...
 // 并构造 params 数组给 PQexecParams
 std::string convertPlaceholders(const std::string& sql, int& outCount) {
     outCount = 0;
@@ -62,7 +64,7 @@ std::vector<PgParam> buildParams(const std::vector<SqlParam>& params) {
             std::snprintf(buf, sizeof(buf), "%.15g", std::get<double>(p));
             result.push_back({buf, PG_FLOAT8});
         } else if (std::holds_alternative<std::string>(p)) {
-            result.push_back({std::get<std::string>(p), PG_TEXT});
+            result.push_back({std::get<std::string>(p), 0});  // OID=0 让 PG 自动推断类型
         }
     }
     return result;
@@ -149,17 +151,23 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
     int paramCount = 0;
     std::string pgSql = convertPlaceholders(sql, paramCount);
 
-    if (params.empty() || params.size() != static_cast<size_t>(paramCount)) {
-        // 无参数或参数数量不匹配：直接执行
-        PGresult* res = PQexec(impl_->conn, pgSql.c_str());
+    if (params.empty()) {
+        // 无参数：直接执行原始 SQL
+        PGresult* res = PQexec(impl_->conn, sql.c_str());
         if (PQresultStatus(res) != PGRES_TUPLES_OK && PQresultStatus(res) != PGRES_COMMAND_OK) {
             impl_->lastError_ = PQresultErrorMessage(res);
+            INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery failed: " << impl_->lastError_
+                                 << " sql=" << sql.substr(0, 200);
             PQclear(res);
             return {};
         }
         auto result = buildResult(res);
         PQclear(res);
         return result;
+    }
+
+    if (params.size() != static_cast<size_t>(paramCount)) {
+        // SQL 使用原生 $N 语法(无 ? 占位符)，正常路径，不警告
     }
 
     // 参数化查询
@@ -180,6 +188,8 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
                                   nullptr, nullptr, 0);
     if (PQresultStatus(res) != PGRES_TUPLES_OK && PQresultStatus(res) != PGRES_COMMAND_OK) {
         impl_->lastError_ = PQresultErrorMessage(res);
+        INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery(params) failed: " << impl_->lastError_
+                             << " sql=" << pgSql;
         PQclear(res);
         return {};
     }

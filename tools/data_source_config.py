@@ -76,7 +76,7 @@ def _calendar_juejin() -> list[dt.date]:
             except: pass
     return sorted(set(dates))
 
-def _calendar_mysql() -> list[dt.date]:
+def _calendar_db() -> list[dt.date]:
     import os, sys
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from db_config import pg_connect
@@ -92,8 +92,7 @@ _CALENDAR_SOURCES = {
     'akshare': _calendar_akshare,
     'baostock': _calendar_baostock,
     'juejin': _calendar_juejin,
-    'mysql': _calendar_mysql,  # 已改用 PG，保持兼容
-    'pg': _calendar_mysql,
+    'db': _calendar_db,
 }
 
 @lru_cache(maxsize=1)
@@ -104,7 +103,7 @@ def _get_cached_calendar(source: str) -> list[dt.date]:
 def get_trade_calendar(force_source: Optional[str] = None) -> list[dt.date]:
     """获取交易日历，默认使用配置的源"""
     cfg = _load_config()
-    source = force_source or cfg.get('calendar_source', 'mysql')
+    source = force_source or cfg.get('calendar_source', 'db')
     return _get_cached_calendar(source)
 
 def clear_calendar_cache():

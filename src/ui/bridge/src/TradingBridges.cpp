@@ -13,6 +13,9 @@
 
 #include "../../../engine/include/GlobalEventBusRegistry.h"
 #include "../../../domain/strategy/include/RiskEvaluator.h"
+#include "foundation/market/AStockSymbol.h"
+
+#include <sstream>
 #include "../../../domain/strategy/include/RiskManager.h"
 #include "foundation/log/logging.hpp"
 
@@ -25,6 +28,22 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
+
+#include <atomic>
+#include <chrono>
+
+namespace {
+
+std::string generateClOrdId() {
+    static std::atomic<uint64_t> s_counter{0};
+    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    uint64_t seq = s_counter.fetch_add(1, std::memory_order_relaxed);
+    std::ostringstream oss;
+    oss << std::hex << now << "_" << seq;
+    return oss.str();
+}
+
+} // anonymous namespace
 
 namespace bridge {
 
@@ -43,7 +62,10 @@ bool TradeExecutionBridge::isLiveBridgeReady() {
     return liveBridgeReady();
 }
 QVariantList TradeExecutionBridge::recentRuleHits() const { return {}; }
-QVariantList TradeExecutionBridge::recentOrders() const { return m_recentOrders; }
+QVariantList TradeExecutionBridge::recentOrders() const {
+    const_cast<TradeExecutionBridge*>(this)->ensureInitialized();
+    return m_recentOrders;
+}
 QString TradeExecutionBridge::lastErrorMessage() const { return m_lastErrorMessage; }
 
 void TradeExecutionBridge::ensureInitialized() {
@@ -71,7 +93,7 @@ void TradeExecutionBridge::ensureInitialized() {
     auto orderStatusValueToString = [](domain::trading::OrderStatusValue v) -> QString {
         using domain::trading::OrderStatusValue;
         switch (v) {
-            case OrderStatusValue::Submitted:        return QStringLiteral("SUBMITTED");
+            case OrderStatusValue::New:              return QStringLiteral("SUBMITTED");
             case OrderStatusValue::PartiallyFilled:  return QStringLiteral("PARTIAL_FILLED");
             case OrderStatusValue::Filled:           return QStringLiteral("FILLED");
             case OrderStatusValue::Cancelled:        return QStringLiteral("CANCELLED");
@@ -330,41 +352,43 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     emit orderRequested(orderMap);
     emit orderRequestPublished(orderMap);
 
-    // ── 手动单账户风控 ──
-    {
-        QString accountId = TradingConnectionConfigService::instance()
-            ->currentConfiguration().value("accountId").toString();
-        engine::OrderRequest engineReq;
-        engineReq.symbol    = order.symbol();
-        engineReq.price     = order.price();
-        engineReq.quantity  = order.quantity();
-        engineReq.side      = (order.side() == domain::strategy::OrderDirection::Buy)
-                              ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
-        engineReq.orderType = engine::OrderRequest::Limit;
+    // 构建 OrderRequest（风控在 Trading 引擎 submitOrder 内部统一完成）
+    engine::OrderRequest engineReq;
+    auto& accEng = engine::AccountEngine::instance();
+    auto account   = accEng.account();
 
-        auto riskResult = domain::strategy::RiskManager::instance()
-            .checkManualOrder(accountId.toStdString(), engineReq);
-        if (!riskResult.approved()) {
-            QVariantMap out;
-            out["accepted"] = false;
-            out["message"]  = QString::fromStdString(riskResult.description());
-            setLastError(QString::fromStdString(riskResult.description()));
-            QVariantMap rejectEntry;
-            rejectEntry["status"]     = QStringLiteral("REJECTED");
-            rejectEntry["rawStatus"]  = QStringLiteral("REJECTED");
-            rejectEntry["message"]    = out["message"];
-            rejectEntry["symbol"]     = orderMap.value("symbol");
-            rejectEntry["side"]       = orderMap.value("side");
-            rejectEntry["price"]      = orderMap.value("price");
-            rejectEntry["quantity"]   = orderMap.value("quantity");
-            rejectEntry["reasonCode"] = QString::fromStdString(
-                domain::strategy::RiskEvaluator::descriptionForCode(riskResult.code()));
-            rejectEntry["statusOrigin"] = QStringLiteral("risk_reject");
-            emit orderStatusChanged(rejectEntry);
-            emit orderStatusPublished(rejectEntry);
-            return out;
-        }
+    domain::trading::OrderBuilder manualBuilder;
+    manualBuilder.setStrategyId(strategyId.toStdString());
+    manualBuilder.setAccountId(account.accountId);
+    bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
+    auto pe = isBuy ? domain::trading::PositionEffect::Open
+                    : domain::trading::PositionEffect::Close;
+    engineReq = manualBuilder.buildManualOrder(
+        order.symbol(),
+        isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
+        order.price(), order.quantity(), pe);
+
+    if (!engineReq.isValid()) {
+        QVariantMap out;
+        out["accepted"] = false;
+        out["message"]  = QStringLiteral("订单构建失败: 价格/数量无效");
+        setLastError(out["message"].toString());
+        return out;
     }
+
+    // 篮子ID — 手动单也标记以便审计追溯
+    {
+        static std::atomic<uint64_t> s_manualBasketSeq{0};
+        engineReq.setExtension(domain::trading::ExtKey::kBasketId,
+                               s_manualBasketSeq.fetch_add(1));
+    }
+
+    // TradeOrder 字段对齐 OrderBuilder 输出
+    order.setClOrdId(engineReq.clOrdId());
+    order.setAccountId(engineReq.accountId());
+    order.setCurrency(engineReq.currency());
+    order.setExchange(engineReq.exchange());
+    order.setPositionEffect(static_cast<domain::strategy::PositionEffect>(engineReq.positionEffect()));
 
     auto result = domain::trading::TradeExecutionEngine::instance().submitOrder(order);
 
@@ -594,7 +618,7 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
         trackOrder.setPrice(price);
         trackOrder.setSide(side == "BUY" ? domain::strategy::OrderDirection::Buy
                                          : domain::strategy::OrderDirection::Sell);
-        trackOrder.setStatus(domain::trading::OrderStatusValue::Submitted);
+        trackOrder.setStatus(domain::trading::OrderStatusValue::New);
         trackOrder.setStatusMessage("accepted");
         domain::trading::TradeExecutionEngine::instance().registerOrder(trackOrder);
     }
@@ -687,19 +711,27 @@ void PositionAccountBridge::refresh() {
 }
 
 QVariantMap PositionAccountBridge::accountSnapshot() const {
+    const_cast<PositionAccountBridge*>(this)->initialize();
     QVariantMap map;
     if (!m_initialized) return map;
     auto acc = engine::AccountEngine::instance().account();
     map["totalAsset"]    = acc.totalAsset;
     map["marketValue"]   = acc.marketValue;
     map["availableCash"] = acc.availableCash;
-    map["realizedPnl"]   = 0.0;
-    map["unrealizedPnl"] = 0.0;
+    map["realizedPnl"]   = acc.realizedPnl;
+    // 浮动盈亏优先用 gmsdk 推送值，否则汇总各持仓
+    double unrealized = acc.unrealizedPnl;
+    if (unrealized == 0.0) {
+        for (const auto& p : engine::AccountEngine::instance().positions())
+            unrealized += p.unrealizedPnl;
+    }
+    map["unrealizedPnl"] = unrealized;
     map["accountId"]     = QString::fromStdString(acc.accountId);
     return map;
 }
 
 QVariantList PositionAccountBridge::positions() const {
+    const_cast<PositionAccountBridge*>(this)->initialize();
     QVariantList list;
     if (!m_initialized) return list;
     for (auto& p : engine::AccountEngine::instance().positions()) {
@@ -841,8 +873,8 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
     snapshot["totalAsset"] = acc.totalAsset;
     snapshot["marketValue"] = acc.marketValue;
     snapshot["availableCash"] = acc.availableCash;
-    snapshot["realizedPnl"] = 0.0;
-    snapshot["unrealizedPnl"] = 0.0;
+    snapshot["realizedPnl"] = acc.realizedPnl;
+    snapshot["unrealizedPnl"] = acc.unrealizedPnl;
     snapshot["status"] = "ok";
 
     auto positions = engine::AccountEngine::instance().positions();

@@ -5,7 +5,6 @@ target_sources(domain_strategies PRIVATE
     DoubleMovingAverageStrategy.cxx
     EarningsSurpriseStrategy.cxx
     MachineLearningSelectionStrategy.cxx
-    MultiFactorSelectionStrategy.cxx
     OrderFlowImbalanceStrategy.cxx
     RiskParityAllocationStrategy.cxx
     RsiMeanReversionStrategy.cxx

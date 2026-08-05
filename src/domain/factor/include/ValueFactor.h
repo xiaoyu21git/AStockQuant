@@ -62,6 +62,7 @@ public:
     CalculationResult calculate(const CalculationContext& context) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
+    int getLookbackDays() const override { return params_.lookbackWindow; }
 
     static std::shared_ptr<ValueFactor> create(
         const FactorInstanceInfo& info,

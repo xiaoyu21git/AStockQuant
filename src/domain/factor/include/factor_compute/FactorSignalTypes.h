@@ -2,6 +2,7 @@
 
 #include "AnalysisReportTypes.h"
 #include "../../../types/InstrumentId.h"
+#include "../../../types/DomainDate.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -53,17 +54,8 @@ enum class Frequency : uint8_t {
 
 using InstrumentId = ::domain::InstrumentId; // 规范定义在 domain/types/InstrumentId.h
 
-struct DateKey final {
-    int32_t value{0};
-
-    static constexpr int32_t kMinimumDate = 19000101;
-    static constexpr int32_t kMaximumDate = 29991231;
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return value >= kMinimumDate && value <= kMaximumDate;
-    }
-};
+/// @brief 日期键，统一使用 domain::DomainDate（int32_t YYYYMMDD）
+using DateKey = domain::DomainDate;
 
 struct DateRange final {
     DateKey from{};

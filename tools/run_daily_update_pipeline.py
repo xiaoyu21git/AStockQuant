@@ -29,7 +29,7 @@ from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calenda
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from db_config import PG_CONFIG
 
-MYSQL_CONFIG = PG_CONFIG  # 兼容旧变量名
+DB_CONFIG = PG_CONFIG
 
 DEFAULT_AUTO_CLOSE_TIME = "15:40"
 
@@ -136,6 +136,16 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="仅运行 Baostock 单线程全量更新 (跳过所有回填步骤)",
     )
+    parser.add_argument(
+        "--with-minute-backfill",
+        action="store_true",
+        help="分钟线自动缺口分析并回填",
+    )
+    parser.add_argument(
+        "--weekly-monthly-backfill",
+        action="store_true",
+        help="历史模式时周月线全量重建(否则只聚合当前周期)",
+    )
     return parser.parse_args()
 
 
@@ -161,10 +171,8 @@ def prompt_yes_no(prompt: str, default: bool) -> bool:
 
 def prompt_menu_choice() -> str:
     choices = {
-        "1": "仅对齐最新行情",
-        "2": "最新行情 + 历史缺口",
-        "3": "最新行情 + 财务数据",
-        "4": "最新行情 + 历史缺口 + 财务数据",
+        "1": "最新行情 (日线+派生+分钟线+周月线+校验)",
+        "2": "历史补缺 (分钟线+周月线全量回填)",
     }
     print("\n可执行方案:")
     for key, label in choices.items():
@@ -175,16 +183,25 @@ def prompt_menu_choice() -> str:
         if choice in choices:
             print(f"已选择: {choices[choice]}")
             return choice
-        print("无效选择，请输入 1-4")
+        print("无效选择，请输入 1-2")
 
 
 def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | None:
     print("数据更新交互模式")
-    print("说明: 默认保留现有派生字段、估值、市值与换手率回填；高级参数仍可通过命令行传入。")
+    print("  最新行情: 日线 → 派生字段 → 分钟线(当日) → 周月线(当前周期) → 校验")
+    print("  历史补缺: 分钟线全量回填 + 周月线全量重建(日线已完整,不需要补)")
 
     choice = prompt_menu_choice()
-    args.include_history_gaps = choice in {"2", "4"}
-    args.with_financial = choice in {"3", "4"}
+    if choice == "1":
+        args.include_history_gaps = False
+    elif choice == "2":
+        args.include_history_gaps = False
+        args.with_minute_backfill = True
+        args.weekly_monthly_backfill = True
+        args.skip_derived_backfill = True
+        args.skip_valuation_backfill = True
+        args.skip_caps_backfill = True
+        args.skip_turnover_backfill = True
 
     while True:
         target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
@@ -234,7 +251,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
         return trade_calendar[left:right]
 
     print(f"  [resolve_backfill_range] mode={mode} fetching data...", flush=True)
-    conn = psycopg2.connect(**MYSQL_CONFIG)
+    conn = psycopg2.connect(**DB_CONFIG)
     try:
         with conn.cursor() as cursor:
             cursor.execute(
@@ -387,6 +404,19 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
     ]
 
 
+def build_minute_update_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
+    return [sys.executable, "tools/import_minute_from_juejin.py",
+            "--start", target_date.isoformat(), "--end", target_date.isoformat()]
+
+def build_minute_backfill_command() -> list[str]:
+    return [sys.executable, "tools/import_minute_from_juejin.py", "--backfill"]
+
+def build_weekly_monthly_command(args: argparse.Namespace, target_date: dt.date) -> list[str]:
+    cmd = [sys.executable, "tools/update_weekly_monthly.py", "--target-date", target_date.isoformat()]
+    if args.weekly_monthly_backfill:
+        cmd.append("--backfill")
+    return cmd
+
 def build_financial_backfill_command(args: argparse.Namespace) -> list[str]:
     command = [sys.executable, "tools/import_financial_from_jq.py"]
     command.extend(["--limit", str(args.financial_limit)])
@@ -503,56 +533,65 @@ def main() -> int:
         f"continue_on_step_failure={args.continue_on_step_failure}"
     )
 
-    if not execute_step(
-        "daily latest supplement",
-        update_cmd_builder(args),
-        required=True,
-        continue_on_failure=args.continue_on_step_failure,
-        results=step_results,
-    ):
-        return finalize(step_results[-1]["exit_code"])
+    pipeline_failed = False
+    skip_daily = args.with_minute_backfill and not args.include_history_gaps
 
-    if not args.skip_derived_backfill:
+    if not skip_daily:
         if not execute_step(
-            "derived fields backfill (latest)",
-            build_derived_backfill_command(latest_start_date, latest_end_date),
-            required=False,
+            "daily latest supplement",
+            update_cmd_builder(args),
+            required=True,
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,
         ):
-            return finalize(step_results[-1]["exit_code"])
+            pipeline_failed = True
 
-    if not args.skip_valuation_backfill:
-        if not execute_step(
-            "valuation backfill (latest)",
-            build_valuation_backfill_command(args, latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+    if not skip_daily and not pipeline_failed:
+        if not args.skip_derived_backfill:
+            if not execute_step(
+                "derived fields backfill (latest)",
+                build_derived_backfill_command(latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if not args.skip_caps_backfill:
-        if not execute_step(
-            "market cap fallback backfill (latest)",
-            build_caps_backfill_command(latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+        if not pipeline_failed and not args.skip_valuation_backfill:
+            if not execute_step(
+                "valuation backfill (latest)",
+                build_valuation_backfill_command(args, latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if not args.skip_turnover_backfill:
-        if not execute_step(
-            "turnover rate backfill (latest)",
-            build_turnover_backfill_command(latest_start_date, latest_end_date),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
+        if not pipeline_failed and not args.skip_caps_backfill:
+            if not execute_step(
+                "market cap fallback backfill (latest)",
+                build_caps_backfill_command(latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-    if args.with_financial:
+        if not pipeline_failed and not args.skip_turnover_backfill:
+            if not execute_step(
+                "turnover rate backfill (latest)",
+                build_turnover_backfill_command(latest_start_date, latest_end_date),
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
+
+    if not pipeline_failed and args.with_financial:
         if not execute_step(
             "financial backfill",
             build_financial_backfill_command(args),
@@ -560,9 +599,10 @@ def main() -> int:
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,
         ):
-            return finalize(step_results[-1]["exit_code"])
+            if not args.continue_on_step_failure:
+                pipeline_failed = True
 
-    if args.include_history_gaps and history_start_date <= history_end_date:
+    if not pipeline_failed and args.include_history_gaps and history_start_date <= history_end_date:
         if not execute_step(
             "daily history gap supplement",
             build_baostock_update_command(args, start_date=history_start_date),
@@ -570,9 +610,10 @@ def main() -> int:
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,
         ):
-            return finalize(step_results[-1]["exit_code"])
+            if not args.continue_on_step_failure:
+                pipeline_failed = True
 
-        if not args.skip_derived_backfill:
+        if not pipeline_failed and not args.skip_derived_backfill:
             if not execute_step(
                 "derived fields backfill (history)",
                 build_derived_backfill_command(history_start_date, history_end_date),
@@ -580,9 +621,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-        if not args.skip_valuation_backfill:
+        if not pipeline_failed and not args.skip_valuation_backfill:
             if not execute_step(
                 "valuation backfill (history)",
                 build_valuation_backfill_command(args, history_start_date, history_end_date),
@@ -590,9 +632,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-        if not args.skip_caps_backfill:
+        if not pipeline_failed and not args.skip_caps_backfill:
             if not execute_step(
                 "market cap fallback backfill (history)",
                 build_caps_backfill_command(history_start_date, history_end_date),
@@ -600,9 +643,10 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
 
-        if not args.skip_turnover_backfill:
+        if not pipeline_failed and not args.skip_turnover_backfill:
             if not execute_step(
                 "turnover rate backfill (history)",
                 build_turnover_backfill_command(history_start_date, history_end_date),
@@ -610,11 +654,43 @@ def main() -> int:
                 continue_on_failure=args.continue_on_step_failure,
                 results=step_results,
             ):
-                return finalize(step_results[-1]["exit_code"])
+                if not args.continue_on_step_failure:
+                    pipeline_failed = True
+
+    # ── 分钟线/周月线历史回填 (独立于日线历史缺口) ──
+    if args.with_minute_backfill:
+        if not execute_step(
+            "minute bars backfill (auto-gap)",
+            build_minute_backfill_command(),
+            required=False,
+            continue_on_failure=True,
+            results=step_results,
+        ):
+            pass
+
+    # ↓ 以下步骤不受前面失败影响，始终执行 ↓
 
     if not execute_step(
         "auto-fix lagging daily (akshare)",
         [sys.executable, "tools/verify_daily_update.py", "--sample-limit", str(args.sample_limit), "--auto-fix"],
+        required=False,
+        continue_on_failure=True,
+        results=step_results,
+    ):
+        pass
+
+    if not execute_step(
+        "minute bars latest",
+        build_minute_update_command(args, target_date),
+        required=False,
+        continue_on_failure=True,
+        results=step_results,
+    ):
+        pass
+
+    if not execute_step(
+        "weekly/monthly aggregate",
+        build_weekly_monthly_command(args, target_date),
         required=False,
         continue_on_failure=True,
         results=step_results,

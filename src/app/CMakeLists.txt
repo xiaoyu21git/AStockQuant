@@ -40,6 +40,7 @@ add_subdirectory(adapters)
 # 閸掓稑缂撴稉璇茬氨閻╊喗鐖?
 add_library(astockquantapp SHARED
     src/AppBootstrap.cpp
+    src/PythonEventBridge.cpp
     src/VasAurora.cpp
     facade/MarketDataFacade.cpp
 )
@@ -56,8 +57,14 @@ if(ENABLE_JUJIN_MARKET)
     )
 endif()
 
-# 鐠佸墽鐤嗘惔鎾舵畱鐏炵偞鈧?
+# 编译宏
 target_compile_definitions(astockquantapp PRIVATE BUILD_DLL)
+
+# Python 可执行文件路径（QProcess 启动子进程用）
+if(Python_EXECUTABLE)
+    target_compile_definitions(astockquantapp PRIVATE
+        PYTHON_EXECUTABLE="${Python_EXECUTABLE}")
+endif()
 
 if(MSVC)
     target_compile_options(astockquantapp PRIVATE /FS)
@@ -95,6 +102,17 @@ elseif(TARGET arrow_shared)
     add_custom_command(TARGET astockquantapp POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_FILE:arrow_shared>
+            $<TARGET_FILE_DIR:astockquantapp>
+    )
+endif()
+# ONNX Runtime DLL（DLFactor 运行时依赖）
+if(HAS_ONNX_RUNTIME)
+    add_custom_command(TARGET astockquantapp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime.dll"
+            $<TARGET_FILE_DIR:astockquantapp>
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${ONNXRUNTIME_LOCAL_DIR}/lib/onnxruntime_providers_shared.dll"
             $<TARGET_FILE_DIR:astockquantapp>
     )
 endif()
@@ -138,14 +156,14 @@ qt_add_qml_module(astockquantapp
         Qml/page/dashboard/MainContent.qml
         Qml/page/dashboard/MarketGrid.qml
         Qml/page/dashboard/PositionsPanel.qml
-        Qml/page/dashboard/QtCandlestickChart.qml
         Qml/page/dashboard/StatusSummaryCard.qml
         Qml/page/dashboard/StrategiesPanel.qml
         Qml/page/dashboard/OrderBook.qml
         Qml/page/monitoring/MonitoringPage.qml
         Qml/page/trading/TradingPage.qml
         Qml/page/settings/SystemSettingsPage.qml
-        Qml/page/leftSidebar/DynamicMenu.qml    
+        Qml/page/SettingsPage.qml
+        Qml/page/leftSidebar/DynamicMenu.qml
         Qml/page/leftSidebar/FundOperationPanel.qml
         Qml/page/leftSidebar/MenuModel.qml
         Qml/page/leftSidebar/SecondaryMenu.qml
@@ -155,6 +173,8 @@ qt_add_qml_module(astockquantapp
         Qml/page/strategies/StrategyCreationPagePro.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/DataAnalysis/CacheManagementPage.qml
+        Qml/page/DataAnalysis/CleaningRulesPage.qml
+        Qml/page/DataAnalysis/StrategyRulesPage.qml
             Qml/page/risk/RiskConfigurationPage.qml
         Qml/components/BaseQuantCard.qml
         Qml/components/FactorCard.qml
@@ -181,6 +201,9 @@ qt_add_qml_module(astockquantapp
         Qml/components/Trading/TradingChartWorkspace.qml
         Qml/components/Trading/TradingFormPanel.qml
         Qml/components/Trading/DepthMarketPanel.qml
+        Qml/components/Trading/CandlestickChart.qml
+        Qml/components/Trading/CrosshairIndicator.qml
+        Qml/components/Trading/CandleTooltip.qml
         Qml/components/Trading/OrderFormSection.qml
         Qml/components/Trading/OrderActionBar.qml
         Qml/components/Trading/RuntimeRuleObserverPanel.qml
@@ -214,6 +237,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/RuleStageNavigator.qml
         Qml/components/Strategy/Creation/RuleTemplateStructureView.qml
         Qml/components/Strategy/Creation/RuleTemplateSuggestionPanel.qml
+        Qml/components/Strategy/Creation/RuleTemplatePickerDialog.qml
         Qml/components/Strategy/Creation/StrategyProfilePanel.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
@@ -224,6 +248,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/EmbeddedWorkflow.qml
         Qml/components/DataAnalysis/RulesConfigModal.qml
         Qml/components/DataAnalysis/RulePaginationBar.qml
+        Qml/components/DataAnalysis/RuleStatsCard.qml
+        Qml/components/DataAnalysis/RuleParamEditor.qml
         Qml/components/DataAnalysis/DataOverviewCard.qml
         Qml/components/DataAnalysis/DataSelectionPanel.qml
         Qml/components/DataAnalysis/DataPreviewPanel.qml
@@ -237,6 +263,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/FactorListRow.qml
         Qml/components/Factor/FactorCardEnhanced.qml
         Qml/page/FactorWorkbench.qml
+        Qml/page/FactorPerformancePage.qml
         # FactorWorkbench缂佸嫪娆㈤弬鍥︽
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
@@ -255,7 +282,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/DynamicParamForm.qml
         Qml/utils/FactorMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
-        Qml/utils/RuleTemplatePreviewUtils.js
         Qml/utils/I18n.js
         Qml/utils/StrategyStructureAdapter.js
         Qml/utils/RiskBacktestMetaLoader.js
@@ -263,11 +289,13 @@ qt_add_qml_module(astockquantapp
         Qml/utils/FactorDataAdapter.js
         Qml/utils/OrderUtils.js
         Qml/utils/TradingConstants.js
+        Qml/utils/TradingWidgetBase.js
 
 
         Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
+        Qml/components/FactorWorkbench/Backtest/FactorAnalysisCharts.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml
         Qml/components/FactorWorkbench/Backtest/BacktestPage.qml
@@ -276,12 +304,28 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
         Qml/components/FactorWorkbench/Backtest/GroupConfigPanel.qml
         Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
+        Qml/page/dynamicworkspace/DynamicWorkspacePage.qml
+        Qml/page/dynamicworkspace/WidgetRegistry.qml
+        Qml/components/DynamicWorkspace/WidgetCanvas.qml
+        Qml/components/DynamicWorkspace/WidgetFrame.qml
+        Qml/components/DynamicWorkspace/WidgetPalette.qml
+        Qml/components/DynamicWorkspace/widgets/AccountCardWidget.qml
+        Qml/components/DynamicWorkspace/widgets/CandlestickChartWidget.qml
+        Qml/components/DynamicWorkspace/widgets/DepthPanelWidget.qml
+        Qml/components/DynamicWorkspace/widgets/ExecutionLogWidget.qml
+        Qml/components/DynamicWorkspace/widgets/OrderFormWidget.qml
+        Qml/components/DynamicWorkspace/widgets/OrderListWidget.qml
+        Qml/components/DynamicWorkspace/widgets/PositionListWidget.qml
+        Qml/components/DynamicWorkspace/widgets/StrategyMonitorWidget.qml
     SOURCES
        # Qml/resources/
     RESOURCES
         Qml/components/Backtest/qmldir
         Qml/components/DataAnalysis/qmldir
         Qml/components/FactorWorkbench/Creation/components/qmldir
+        Qml/components/DynamicWorkspace/qmldir
+        Qml/components/Trading/qmldir
+        Qml/page/dynamicworkspace/qmldir
         Qml/page/risk/qmldir
         Qml/page/settings/qmldir
         Qml/page/strategies/qmldir
@@ -326,6 +370,8 @@ add_custom_command(TARGET astockquantapp-exe POST_BUILD
         $<TARGET_FILE:astockquantapp>
         $<TARGET_FILE_DIR:astockquantapp-exe>
 )
+
+# 内置规则已编译进二进制 (astock_rule_engine), 不再需要拷贝 compiled.json
 
 
 # 濞村鐦?

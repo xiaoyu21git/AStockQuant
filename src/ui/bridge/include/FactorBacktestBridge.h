@@ -84,9 +84,10 @@ public:
     /// @brief 设置 DataService 指针（普通 C++ 方法，非 Q_INVOKABLE）
     void setDataService(QObject* ds);
 
-    Q_INVOKABLE void startBacktestWithFactors(const QVariantList& factorIds, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot);
+    Q_INVOKABLE void startBacktestWithFactors(const QVariantList& factorIds, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot, const QVariantList& compositeChildren = {}, const QString& compositeName = {});
     Q_INVOKABLE void startCompositeBacktest(const QVariantMap& compositeDraft, const QString& groupText, const QString& startDate, const QString& endDate, const QVariantMap& cacheSnapshot);
     Q_INVOKABLE void cancelBacktest();
+    Q_INVOKABLE void clearBacktestResult();
     Q_INVOKABLE QVariantMap getDefaultConfig() const;
     Q_INVOKABLE QVariantList getAvailableDataSets() const;
     Q_INVOKABLE QVariantList buildBacktestDatasetOptions(const QVariantList& datasetList) const;
@@ -153,6 +154,16 @@ private:
         const factor::compute::AnalysisReport& report,
         const QString& factorId) const;
 
+    /// @brief 单次回测运行结果的解析/组装/持久化 (worker 线程执行, 不碰成员/不发信号)
+    /// @param errorOut 编排器返回错误或结果解析失败时的原因
+    /// @return 组装完成的结果 map; 失败返回空 map
+    QVariantMap processRunResult(const Factor::backtest::BacktestRunConfig& config,
+                                 const std::string& serializedResult,
+                                 QString& errorOut) const;
+
+    /// @brief 统一放出缓存的批量回测结果 (UI 线程执行, 每份结果各发一次 backtestCompleted)
+    void publishBatchResults(const QVariantList& results);
+
     static QVariantList buildCoreMetrics(const factor::compute::FactorQualityMetrics16View& metrics,
                                          const factor::compute::FactorQualityMetrics16DiagnosticsView& diag);
     static QVariantList buildGroupCharts(const factor::compute::SimulatedTradingResult& tradingResult);
@@ -176,6 +187,10 @@ private:
     QVariantList m_lastPreflightFailures;
     std::atomic<bool> m_supportMapRequestInFlight{false};
     QTimer* m_timeoutTimer{nullptr};
+
+    // 跟踪当前 ArrowMarketDataView 加载的数据集 ID
+    // 回测复用时若 ID 相同则跳过 mmap + 索引重建
+    int m_loadedDatasetId{0};
 
     // 工作线程池（foundation::thread，替代 QtConcurrent）
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_workerPool;

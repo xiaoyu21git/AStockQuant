@@ -1,4 +1,5 @@
 #include "domain/factor/include/BaseFactor.h"
+#include "foundation/log/logging.hpp"
 
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorNeutralizationUtils.h"
@@ -6,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <ctime>
 #include <numeric>
 
@@ -252,16 +254,21 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
             return left.second < right.second;
         });
-        const double denominator = static_cast<double>(ranked.size());
+        // Percentile: rank / N   (范围 0 ~ (N-1)/N)
+        // Rank:       rank / (N-1) (范围 0 ~ 1)，与 CompositeFactor::applyRankLike 一致
+        const bool isPercentile = (standardization == StandardizationMethod::Percentile);
+        const double denominator = isPercentile
+            ? static_cast<double>(ranked.size())
+            : (ranked.size() > 1 ? static_cast<double>(ranked.size() - 1) : 1.0);
         for (size_t index = 0; index < ranked.size();) {
             size_t groupEnd = index + 1;
             while (groupEnd < ranked.size() && ranked[groupEnd].second == ranked[index].second) {
                 ++groupEnd;
             }
 
-            const double precedingFraction = static_cast<double>(index) / denominator;
+            const double rankValue = static_cast<double>(index) / denominator;
             for (size_t groupIndex = index; groupIndex < groupEnd; ++groupIndex) {
-                values[ranked[groupIndex].first] = precedingFraction;
+                values[ranked[groupIndex].first] = rankValue;
             }
             index = groupEnd;
         }
@@ -406,6 +413,13 @@ CalculationResult BaseFactor::executeWithCommonParams(
 
     rawCalculator(runtime, result);
 
+    // 方向翻转：ascending=false 时对所有原始值取反（与中性化/标准化可交换，放在最前面语义最清晰）
+    if (!params.ascending && !result.values.empty()) {
+        for (auto& [symbol, value] : result.values) {
+            value = -value;
+        }
+    }
+
     if (result.dataStatus.isValid() && !result.values.empty()) {
         applyCommonNeutralization(context, params, runtime, result, runtime.neutralizationMode);
     }
@@ -500,7 +514,8 @@ CommonMetricParams BaseFactor::buildCommonMetricParams(int lookbackWindow,
                                                        DataFrequency frequency,
                                                        StandardizationMethod standardization,
                                                        bool neutralizationEnabled,
-                                                       uint8_t lagPeriods)
+                                                       uint8_t lagPeriods,
+                                                       bool ascending)
 {
     CommonMetricParams params;
     params.lookbackWindow = static_cast<uint16_t>((std::max)(1, lookbackWindow));
@@ -509,6 +524,7 @@ CommonMetricParams BaseFactor::buildCommonMetricParams(int lookbackWindow,
     params.frequency = frequency;
     params.standardization = standardization;
     params.neutralizationEnabled = neutralizationEnabled;
+    params.ascending = ascending;
     return params;
 }
 
@@ -563,18 +579,9 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     std::string errorMessage;
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
         neutralizationMode = NeutralizationStatus::HistoricalViewFailed;
-        result.values.clear();
-        if (isNeutralizationSampleInsufficientMessage(errorMessage)) {
-            result.dataStatus.availability = DataAvailability::PARTIAL;
-            result.dataStatus.coverage = 0.0;
-            result.dataStatus.message = errorMessage;
-            result.metadata.set("emptyReason", json_helper::toJsonValue(errorMessage));
-            return true;
-        }
-
-        result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue(errorMessage));
-        return false;
+        // 中性化失败不丢弃原始因子值
+        INTERNAL_WARN_STREAM << "[neutralization] failed: " << errorMessage << " — keeping raw values";
+        return true;
     }
 
     neutralizationMode = NeutralizationStatus::HistoricalViewCrossSectionIndustryMarketCap;
@@ -719,23 +726,49 @@ std::unordered_map<std::string, std::vector<double>> BaseFactor::latestFinancial
     const CalculationContext& context, const std::string& field,
     const std::string& date, int limit) const {
     std::unordered_map<std::string, std::vector<double>> result;
-    if (!context.historicalView || field.empty()) {
-        return result;
-    }
+    if (!context.historicalView || field.empty()) return result;
+
     const std::string effectiveDate = date.empty() ? context.date : date;
     const auto symbols = effectiveSymbols(context);
     const int effectiveLimit = (limit > 0) ? limit : 1;
-    for (const auto& symbol : symbols) {
-        const auto series = context.historicalView->getSeries(symbol, effectiveDate, effectiveDate, field);
-        std::vector<double>& values = result[symbol];
-        values.reserve(series.size());
-        for (const auto& dp : series) {
-            values.push_back(dp.value);
-        }
-        if (effectiveLimit > 0 && static_cast<int>(values.size()) > effectiveLimit) {
-            values.erase(values.begin(), values.end() - effectiveLimit);
-        }
+
+    // 记忆化：财务按季度更新，回测每交易日都调本函数；同一 (field,effectiveDate,limit)
+    // 的结果不变，缓存后跨交易日直接复用，避免每天重复做 4~16 次全市场横切(dbFallback)。
+    const std::string cacheKey =
+        field + "|" + effectiveDate + "|" + std::to_string(effectiveLimit);
+    {
+        auto cit = m_finSeriesCache.find(cacheKey);
+        if (cit != m_finSeriesCache.end()) return cit->second;
     }
+
+    // 用 getCrossSection 横切多个历史锚点日期（从 effectiveDate 往回推 quarterly），
+    // 自动走 dbFallback 且每次横切只查一次静态缓存
+    int y = 0, m = 0, d = 1;
+    if (effectiveDate.size() == 10)
+        sscanf(effectiveDate.c_str(), "%d-%d-%d", &y, &m, &d);
+
+    for (int i = 0; i < effectiveLimit * 2 && i < 16; ++i) {
+        int qy = y, qm = m - i * 3;
+        while (qm <= 0) { qm += 12; --qy; }
+        char qBuf[16];
+        snprintf(qBuf, sizeof(qBuf), "%04d-%02d-%02d", qy, qm, (d > 28 ? 28 : d));
+        auto cs = context.historicalView->getCrossSection(std::string(qBuf), field, symbols);
+        bool anyNew = false;
+        for (const auto& [sym, val] : cs) {
+            if (!std::isfinite(val)) continue;
+            auto& vec = result[sym];
+            // 只收集不同于前值的（不同报告期）
+            if (vec.empty() || std::abs(vec.back() - val) > 1e-12) {
+                vec.push_back(val);
+                anyNew = true;
+            }
+        }
+        if (!anyNew && i >= effectiveLimit) break;
+    }
+    // 上限保护：月频工作集很小(每月同一 effectiveDate 复用)，几乎不触发；
+    // 日频 effectiveDate 每日变、不复用，满则清空以免内存无限增长。
+    if (m_finSeriesCache.size() >= 256) m_finSeriesCache.clear();
+    m_finSeriesCache.emplace(cacheKey, result);
     return result;
 }
 
@@ -753,6 +786,22 @@ std::unordered_map<std::string, std::string> BaseFactor::industryBySymbol(
         }
     }
     return result;
+}
+
+std::string BaseFactor::subtractCalendarDays(const std::string& isoDate, int days)
+{
+    if (days < 0) days = 0;
+    std::tm tm = {};
+    int y = 0, m = 0, d = 0;
+    if (sscanf(isoDate.c_str(), "%d-%d-%d", &y, &m, &d) != 3) return isoDate;
+    tm.tm_year = y - 1900;
+    tm.tm_mon  = m - 1;
+    tm.tm_mday = d - days;
+    if (std::mktime(&tm) == static_cast<std::time_t>(-1)) return isoDate;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+             tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+    return std::string(buf);
 }
 
 } // namespace factor

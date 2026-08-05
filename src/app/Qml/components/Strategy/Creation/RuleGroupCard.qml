@@ -289,116 +289,58 @@ Rectangle {
 
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 6
+            spacing: 4
             visible: Array.isArray(groupData && groupData.rules) && groupData.rules.length > 0
 
             Repeater {
                 model: Array.isArray(groupData && groupData.rules) ? groupData.rules : []
 
                 delegate: Rectangle {
-                    id: ruleCard
                     required property var modelData
-                    readonly property int ruleIndex: index
-                    readonly property var bindingData: ({
-                        template_id: modelData.templateId || "",
-                        template_display_name: modelData.templateName || "",
-                        file_name: modelData.fileName || "",
-                        file_path: modelData.filePath || "",
-                        phase: modelData.phase || root.stageId,
-                        summary: modelData.summary || "",
-                        term_id: modelData.termId || "",
-                        term_display_name: modelData.termName || "",
-                        default_injected: !!modelData.defaultInjected
-                    })
                     Layout.fillWidth: true
-                    radius: 9
-                    color: "#0b1220"
+                    height: 36
+                    radius: 6
+                    color: "#111827"
                     border.width: 1
-                    border.color: modelData.ready ? "#16a34a" : "#475569"
-                    implicitHeight: ruleColumn.implicitHeight + 12
+                    border.color: "#1f2937"
 
-                    ColumnLayout {
-                        id: ruleColumn
+                    RowLayout {
                         anchors.fill: parent
                         anchors.margins: 6
-                        spacing: 6
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
-
-                            Rectangle {
-                                radius: 8
-                                color: "#111827"
-                                border.width: 1
-                                border.color: modelData.ready ? "#16a34a" : "#475569"
-                                Layout.fillWidth: true
-                                implicitHeight: chipText.implicitHeight + 10
-
-                                Text {
-                                    id: chipText
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    text: modelData.templateName || modelData.templateId || "未命名模板"
-                                    font.pixelSize: 10
-                                    color: "#e2e8f0"
-                                    verticalAlignment: Text.AlignVCenter
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-
-                            Rectangle {
-                                visible: !!modelData.defaultInjected
-                                radius: 8
-                                color: "#3f2d16"
-                                border.width: 1
-                                border.color: "#f59e0b"
-                                implicitWidth: presetChipText.implicitWidth + 14
-                                implicitHeight: presetChipText.implicitHeight + 10
-
-                                Text {
-                                    id: presetChipText
-                                    anchors.centerIn: parent
-                                    text: "系统预置"
-                                    font.pixelSize: 10
-                                    font.weight: Font.Medium
-                                    color: "#fde68a"
-                                }
-                            }
-
-                            Button {
-                                text: "上移"
-                                enabled: ruleIndex > 0
-                                onClicked: root.moveRuleRequested(root.stageId, (groupData && groupData.groupId) || "", modelData.instanceId || "", -1)
-                            }
-
-                            Button {
-                                text: "下移"
-                                enabled: Array.isArray(groupData && groupData.rules) && ruleIndex < groupData.rules.length - 1
-                                onClicked: root.moveRuleRequested(root.stageId, (groupData && groupData.groupId) || "", modelData.instanceId || "", 1)
-                            }
-
-                            Button {
-                                text: "移除"
-                                onClicked: root.removeRuleRequested(root.stageId, (groupData && groupData.groupId) || "", modelData.instanceId || "")
-                            }
-                        }
+                        spacing: 8
 
                         Text {
                             Layout.fillWidth: true
-                            visible: !!(modelData.summary || modelData.termName || modelData.termId)
-                            text: (modelData.summary || "")
-                                  + ((modelData.summary && (modelData.termName || modelData.termId)) ? "\n" : "")
-                                  + ((modelData.termName || modelData.termId) ? ("绑定术语: " + (modelData.termName || modelData.termId)) : "")
-                            font.pixelSize: 11
-                            color: "#94a3b8"
-                            wrapMode: Text.WordWrap
+                            text: modelData.templateName || modelData.templateId || ""
+                            font.pixelSize: 12
+                            color: "#e2e8f0"
+                            elide: Text.ElideRight
                         }
 
-                        RuleTemplateStructureView {
-                            Layout.fillWidth: true
-                            bindingData: ruleCard.bindingData
-                            compact: true
+                        Text {
+                            visible: !!(modelData.summary)
+                            text: String(modelData.summary || "").substring(0, 40)
+                            font.pixelSize: 10
+                            color: "#64748b"
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: 160
+                        }
+
+                        Rectangle {
+                            width: 32; height: 22; radius: 4
+                            color: mouseArea.containsMouse ? "#dc2626" : "transparent"
+                            border.color: mouseArea.containsMouse ? "#ef4444" : "#334155"
+                            border.width: 1
+                            Text {
+                                anchors.centerIn: parent
+                                text: "×"; font.pixelSize: 14; color: mouseArea.containsMouse ? "white" : "#94a3b8"
+                            }
+                            MouseArea {
+                                id: mouseArea
+                                anchors.fill: parent; hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.removeRuleRequested(root.stageId, (groupData && groupData.groupId) || "", modelData.instanceId || "")
+                            }
                         }
                     }
                 }

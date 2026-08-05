@@ -1,2 +1,3 @@
 - [实盘交易架构全景](live-trading-architecture.md) — 策略引擎、行情链路、订单执行、线程模型
-- [掘金行情事件不匹配](jujin-market-data-event-mismatch.md) — EventBus 类型不对导致 C++ SDK 路径收不到行情
+- [掘金行情事件不匹配](jujin-market-data-event-mismatch.md) — ✅ 已修复 (af74f14) — EventBus 类型不对→统一桥接层直接订阅
+- [指标封装原则](encapsulated-metrics-principle.md) — 算法必须封装为独立函数，不允许散落

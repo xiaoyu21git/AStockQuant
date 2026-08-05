@@ -4,8 +4,22 @@
 #include "domain/factor/include/FactorInstanceManager.h"
 
 #include <cmath>
+#include <algorithm>
 
 namespace factor {
+
+namespace {
+
+constexpr const char* dividendMetricFieldName(DividendMetric metric) noexcept
+{
+    switch (metric) {
+    case DividendMetric::DIVIDEND_YIELD:     return "dividend_yield";
+    case DividendMetric::PAYOUT_RATIO:       return "payout_ratio";
+    case DividendMetric::DIVIDEND_STABILITY: return "dividend_stability";
+    default: return nullptr;
+    }
+}
+} // anonymous namespace
 
 DividendFactor::DividendFactor()
 {
@@ -20,21 +34,76 @@ CalculationResult DividendFactor::calculate(const CalculationContext& context)
     const CommonParams& common = params_;
     const auto symbols = effectiveSymbols(context);
 
+    // 选择指标：dividendMetrics 向量优先，否则回退到 dividendMetric 单值
+    std::vector<DividendMetric> metrics;
+    if (!params_.dividendMetrics.empty()) {
+        metrics = params_.dividendMetrics;
+    } else if (params_.dividendMetric != DividendMetric::UNKNOWN) {
+        metrics = {params_.dividendMetric};
+    } else {
+        metrics = {DividendMetric::DIVIDEND_YIELD};
+    }
+
     return executeWithCommonParams(
         context,
         common,
         [&]() { return context.date; },
+
+        // ── Lambda 2: 红利指标计算 ──
         [&](const CommonRuntimeState& runtime, CalculationResult& result) {
-            const auto crossSection = context.historicalView->getCrossSection(
-                runtime.effectiveDate, "dividend_yield", symbols);
-            for (const auto& [symbol, value] : crossSection) {
-                if (!std::isfinite(value) || value < 0) continue;
-                result.values[symbol] = value > 1.0 ? value / 100.0 : value;
+            const double minYield = params_.minDividendYield;
+
+            // 收集各指标的裸值，不做归一化（尺度对齐交给框架标准化或 CompositeFactor）
+            std::vector<std::unordered_map<std::string, double>> metricResults;
+            metricResults.reserve(metrics.size());
+
+            for (DividendMetric metric : metrics) {
+                const char* field = dividendMetricFieldName(metric);
+                if (!field || !context.historicalView->hasField(field)) continue;
+
+                std::unordered_map<std::string, double> mr;
+                const auto cs = context.historicalView->getCrossSection(
+                    runtime.effectiveDate, field, symbols);
+                for (const auto& [symbol, value] : cs) {
+                    if (!std::isfinite(value) || value < 0) continue;
+                    if (metric == DividendMetric::DIVIDEND_YIELD
+                        && minYield > 0.0 && value < minYield) continue;
+                    mr[symbol] = value;
+                }
+                if (!mr.empty()) metricResults.push_back(std::move(mr));
+            }
+
+            if (metricResults.empty()) {
+                for (const auto& symbol : symbols) result.values[symbol] = 0.0;
+                result.metadata.set("emptyReason",
+                    json_helper::toJsonValue("红利因子没有可用数据"));
+                return;
+            }
+
+            // 多指标时简单等权平均裸值，不做额外归一化
+            for (const auto& symbol : symbols) {
+                double sum = 0.0;
+                int count = 0;
+                for (const auto& mr : metricResults) {
+                    auto it = mr.find(symbol);
+                    if (it != mr.end() && std::isfinite(it->second)) {
+                        sum += it->second;
+                        ++count;
+                    }
+                }
+                result.values[symbol] = (count > 0) ? (sum / static_cast<double>(count)) : 0.0;
             }
         },
+
         [](const CommonRuntimeState&, CalculationResult&) {},
-        [](const CommonRuntimeState&, CalculationResult& result) {
-            result.metadata.set("metricSourceTable", json_helper::toJsonValue(static_cast<int>(SourceTable::FINANCIAL_INDICATOR)));
+
+        [&](const CommonRuntimeState&, CalculationResult& result) {
+            result.metadata.set("metricSourceTable",
+                json_helper::toJsonValue(static_cast<int>(SourceTable::FINANCIAL_INDICATOR)));
+            result.metadata.set("dividendMetric",
+                json_helper::toJsonValue(static_cast<int>(metrics.front())));
+            result.metadata.set("metricCount",
+                json_helper::toJsonValue(static_cast<int>(metrics.size())));
         });
 }
 
@@ -54,7 +123,20 @@ std::shared_ptr<DividendFactor> DividendFactor::create(
 DataRequirements DividendFactor::getDataRequirements() const
 {
     DataRequirements req;
-    appendRequiredField(req, "dividend_yield");
+
+    std::vector<DividendMetric> metrics;
+    if (!params_.dividendMetrics.empty()) {
+        metrics = params_.dividendMetrics;
+    } else if (params_.dividendMetric != DividendMetric::UNKNOWN) {
+        metrics = {params_.dividendMetric};
+    } else {
+        metrics = {DividendMetric::DIVIDEND_YIELD};
+    }
+
+    for (DividendMetric metric : metrics) {
+        const char* field = dividendMetricFieldName(metric);
+        if (field) appendRequiredField(req, field);
+    }
     appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;
 }

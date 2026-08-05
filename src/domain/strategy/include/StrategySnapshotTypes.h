@@ -473,7 +473,7 @@ struct UniverseSpec final {
 
 struct FactorOverlaySpec final {
     bool enabled{false};
-    int targetPositionCount{10};
+    int targetPositionCount{50};
     double minimumCompositeScore{0.0};
     std::vector<FactorOverlayAllocation> allocations;
     std::vector<FactorId> selectedFactors;
@@ -546,6 +546,8 @@ struct TimeSeriesSnapshot final {
     std::vector<double> drawdowns;
     std::vector<double> positions;
     std::vector<double> cash;
+    std::vector<double> benchmarkValues;    // 基准指数净值曲线
+    std::vector<double> benchmarkDrawdowns; // 基准指数回撤曲线
 
     [[nodiscard]] bool isValid() const;
 };
@@ -572,15 +574,43 @@ struct StrategyPerformanceSummary final {
     PerformanceSummaryMetrics latestMetrics;
 };
 
+/// @brief 回测逐笔成交记录 (独立重放验证的审计明细)
+struct BacktestTradeRecord final {
+    std::int32_t tradeDate{0};       // YYYYMMDD
+    std::string symbol;              // fullSymbol (如 "300097.SZ")
+    bool isBuy{true};
+    std::int64_t quantity{0};
+    double price{0.0};               // 成交基准价(当日收盘)
+    double realizedPnl{0.0};         // 卖出时的已实现盈亏(净额), 买入为 0
+};
+
+/// @brief 混合模式因子参与统计 (该因子在回测中成功喂入快照的交易日数)
+struct HybridFactorCoverage final {
+    std::string factorId;
+    int coveredDays{0};
+};
+
 /// @brief 策略回测结果（纯域层，无 Qt 依赖）
 struct StrategyBacktestResult final {
     PerformanceSummaryMetrics metrics;
     TimeSeriesSnapshot timeSeries;
     TradeStatistics tradeStats;
+    std::vector<BacktestTradeRecord> tradeLog;  // 逐笔成交明细
+    std::vector<HybridFactorCoverage> hybridFactorCoverage;  // 混合模式各因子参与天数
     bool success{false};
     std::string errorMessage;
     int riskRejectedCount{0};
     std::unordered_map<int, int> riskRejectionStats;  // RiskRejectCode → count
+    double fullKelly{0.0};
+    double halfKelly{0.0};
+    // 诊断(持久化用)
+    int stopLossFills{0};
+    int ruleExitFills{0};
+    int normalSellFills{0};
+    double avgHoldingDays{0.0};
+    double avgPositions{0.0};
+    double avgPoolSize{0.0};
+    double rankIC{0.0};
 };
 
 } // namespace domain::strategy

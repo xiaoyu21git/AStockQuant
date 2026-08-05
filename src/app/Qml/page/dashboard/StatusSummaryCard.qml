@@ -6,6 +6,7 @@ Item {
 
     property var cardData: ({})
     property color fallbackAccentColor: "#3b82f6"
+    property bool centered: false
 
     Rectangle {
         anchors.fill: parent

@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 import "../../utils/OrderUtils.js" as OrderUtils
+import "../../components/Trading" as TradingComponents
 
 Item {
     id: mainContent
@@ -241,9 +242,12 @@ Item {
             detailColor: liveRecentOrders.length > 0 ? orderSideAccentColor(liveRecentOrders[0].side) : "#94a3b8"
         }
     ] : statusCards
-    readonly property var effectivePositions: pageMode === "live-trading"
-        ? (positionAccountService && positionAccountService.positions
-            ? positionAccountService.positions.map(function(position) {
+    property var effectivePositions: []
+
+    function refreshEffectivePositions() {
+        var result = []
+        if (pageMode === "live-trading" && positionAccountService && positionAccountService.positions) {
+            result = positionAccountService.positions.map(function(position) {
                 var quantity = Number(position.quantity || position.shares || 0)
                 var availableQuantity = Number(position.availableQuantity || position.availableShares || quantity)
                 var avgPrice = Number(position.costBasis || position.avgPrice || 0)
@@ -271,8 +275,11 @@ Item {
             }).sort(function(left, right) {
                 return Number(right.currentValue || 0) - Number(left.currentValue || 0)
             })
-            : [])
-        : positions
+        } else if (pageMode !== "live-trading") {
+            result = positions
+        }
+        effectivePositions = result
+    }
     readonly property var liveMarketSections: pageMode === "live-trading" ? buildLiveMarketSections() : []
     readonly property real livePositionCount: effectivePositions ? effectivePositions.length : 0
     readonly property int liveAccountOrderCount: pageMode === "live-trading" && liveAccountOrderStatusesCache
@@ -456,6 +463,10 @@ Item {
             focus = gainers.slice(0, 3)
         }
 
+        // \u89e6\u53d1\u677f\u5757\u6570\u636e\u62c9\u53d6 (MarketGrid \u81ea\u7ed1\u5b9a\u4f1a\u8bfb\u53d6 sectorHeatData)
+        if (marketDataService && typeof marketDataService.fetchSectorHeat === "function")
+            Qt.callLater(function() { marketDataService.fetchSectorHeat() })
+
         return [
             { title: liveText("leadersGain"), icon: "\u6da8", stocks: gainers },
             { title: liveText("leadersLoss"), icon: "\u8dcc", stocks: losers },
@@ -546,15 +557,25 @@ Item {
     Component.onCompleted: {
         syncLiveAccountOrderStatusesCache()
         syncLiveMarketSnapshotCache()
+        refreshEffectivePositions()
     }
 
-    onPageModeChanged: syncLiveMarketSnapshotCache()
-    onMarketDataServiceChanged: syncLiveMarketSnapshotCache()
+    onPageModeChanged: {
+        syncLiveMarketSnapshotCache()
+        refreshEffectivePositions()
+    }
+    onMarketDataServiceChanged: {
+        syncLiveMarketSnapshotCache()
+        refreshEffectivePositions()
+    }
     onVisibleChanged: {
         if (visible) {
             syncLiveMarketSnapshotCache()
+            refreshEffectivePositions()
         }
     }
+    onPositionsChanged: refreshEffectivePositions()
+    onMarketDataChanged: refreshEffectivePositions()
 
     Connections {
         target: mainContent.marketDataService
@@ -562,6 +583,7 @@ Item {
 
         function onMarketSnapshotsChanged() {
             mainContent.syncLiveMarketSnapshotCache()
+            mainContent.refreshEffectivePositions()
         }
     }
 
@@ -571,6 +593,15 @@ Item {
 
         function onRecentOrderStatusesChanged() {
             mainContent.syncLiveAccountOrderStatusesCache()
+        }
+        function onPositionsChanged() {
+            mainContent.refreshEffectivePositions()
+        }
+        function onAccountSnapshotChanged() {
+            mainContent.refreshEffectivePositions()
+        }
+        function onDataChanged() {
+            mainContent.refreshEffectivePositions()
         }
     }
 
@@ -702,7 +733,6 @@ Item {
                                     Layout.fillHeight: true
                                     marketData: mainContent.effectiveMarketData
                                     marketDataService: mainContent.marketDataService
-                                    displayPositions: mainContent.effectivePositions
                                     currentSymbol: mainContent.liveOverviewChartSymbol
                                     currencySymbol: mainContent.displayCurrencySymbol
                                     autoWatchSymbols: false
@@ -965,31 +995,10 @@ Item {
                                         spacing: 20
                                         
                                         // 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁诡垎鍐ｆ寖闂佺娅曢幑鍥灳閺冨牆绀冩い蹇庣娴滈箖鏌ㄥ┑鍡欏嚬缂併劌銈搁弻鐔兼儌閸濄儳袦闂佸搫鐭夌紞渚€銆佸鈧幃娆撳箹椤撶噥妫ч梻鍌氬€稿ú銈壦囬悽绋胯摕闁靛鍎弨浠嬫煕閳╁啰鎳冩い銈傚亾濠碉紕鍋戦崐鏇犳崲閹烘挻鍙忓瀣椤洟鏌熼悜姗嗘當闁绘帒鐏氶妵鍕箳瀹ュ牆鍘＄紓浣叉閸嬫捇姊绘担渚劸闁哄牜鍓熼妴鍐幢濞戞ɑ顥濋梺閫炲苯澧存慨濠勭帛閹峰懘鎼归悷鎵偧闂備焦瀵у銊╁焵椤掍緡鍟忛柛鐘崇墵閹儲绺介崫銉ョウ闂佸搫绋侀崢鑲╃不濞戙垺鐓熸俊銈傚亾闁绘绻樺畷銏＄鐎ｎ偀鎷洪梻鍌氱墛缁嬫挻鏅堕弴鐔翠簻闁挎洖鍊烽幉楣冩煙椤旇棄鍔ら悡銈嗐亜韫囨挻鍣介柛妯绘倐閹宕楁径濠佸闂備線鈧偛鑻晶瀵糕偓瑙勬磻閸楁娊鐛鈧幊婊冣枔閹稿海绋愰梻鍌欑濠€閬嶅磿閵堝鍚归柨鏇炲€归崑鍕煕濞戞﹫宸ユい顐節濮婃椽宕崟鍨﹂梺璇茬箲缁诲牓骞冨Ο缁樺缂侇垱娲橀弬鈧梻浣虹帛閿氶柣蹇斿哺瀵娊鍩￠崨顔惧幈闁诲函缍嗛崜娆愮鏉堫煈娈介柣鎰綑婵秵顨ラ悙瀵稿闁瑰嘲鎳庨湁閻庯綆浜欐竟鏇㈡⒑閹稿孩绀€闁稿﹤缍婂畷鎰節濮橆厾鍙冨┑鈽嗗灟鐠€锕€危婵傚憡鐓欓柤鎭掑劜缁€瀣叏婵犲懏顏犵紒杈ㄥ笒铻ｉ柤濮愬€曞鎶芥⒒娴ｅ憡鍟為柤褰掔畺椤㈡牗寰勬繝鍕闂佸綊鍋婇崰姘卞閸忛棿绻嗘い鏍ㄧ鐠愶紕绱掗悩瀹犲妞ゎ亜鍟存俊鍫曞幢濞嗗浚娼风紓鍌欐祰椤曆囧磹閸喚鏆﹂柕澶堝妸娴滃綊鏌熼悜妯诲暗闁告ê宕埞鎴︽倷閸欏妫炵紓浣虹帛閸ㄨ儻妫㈤梺闈涚箚閸撴繈宕ｈ箛鎾斀闁绘ɑ褰冮弳鐐烘煏閸ャ劎绠栨い銊ｅ劦閹瑧鈧數顭堥埛宀勬⒑鐠団€虫灍闁荤啿鏅犻悰顕€骞樼拠鑼唺濠电娀娼ч悧鍐磻閹惧灈鍋撻棃娑欐喐缁惧彞绮欓弻娑氫沪閸撗勫櫗缂備椒鑳舵晶妤呭Φ閸曨垰鍗抽柛鈩冾殕婢跺嫰鏌涚€ｎ亶鍎旈柡宀€鍠栭幃娆擃敆閳ь剚鏅堕鐐寸厱闁靛牆妫欑粈鈧梺瀹狀潐閸ㄥ潡骞冮埡鍐ｅ亾閸︻厼孝妞ゃ儲绻堝娲川婵犲孩鐣锋繝鐢靛仜閿曨亜顕ｆ繝姘櫜濠㈣泛锕﹂惈鍕⒑閹肩偛鍔撮柣鎾崇墛缁傛帡鍩℃笟鍥ㄥ瘜闂侀潧鐗嗗Λ娆撳煕閹邦厾绠鹃柤纰卞墮閺嬪孩銇勯銏㈢闁圭厧缍婂畷鐑筋敇閻欏懐搴婂┑鐘殿暯濡插懘宕规导鏉戠妞ゆ劑鍎洪弶娲⒒閸屾艾鈧绮堟笟鈧獮澶愭晸閻樿尙顔囬柣鐘叉穿鐏忔瑩寮抽崱娑欑厵闂傚倸顕ˇ锔剧磼閻樺磭澧甸柡宀嬬秮婵偓闁靛繆鏅濋崝鎼佹⒑閸涘娈曞┑鐐诧躬瀵鏁愭径濠勵吅濠电娀娼уù鍌毼涢敓鐘崇厽閹兼番鍔嶅☉褔鏌ｉ鐐测偓鎼侊綖韫囨拋娲敂閸滀焦顥堟繝鐢靛仦閸ㄥ爼鎳濇ィ鍐︹偓鍌毭洪鍛嫼闂佸憡绺块崕鍗炩枍韫囨稒鐓曢悗锝庝悍瀹搞儵鏌ｉ敐鍛Щ闁宠鍨垮畷閬嶅煛閸屾艾鍘為梻鍌欒兌閸樠囧箺濠婂牆鏋侀柟闂寸閸屻劑鏌﹀Ο渚Т闁衡偓娴犲绠抽柟鎯版绾惧綊鏌熼崜褏甯涢柛濠傛健閺屻劑寮村Δ鈧禍楣冩⒑娴兼瑧鍒伴柛銏＄叀閹儳鈹戠€ｎ亞鍔﹀銈嗗笒鐎氼剟鎮為崹顐犱簻闁瑰搫绉剁拹浼存煕閻旈绠婚柡灞剧洴閹晛鐣烽崶褉鎷伴梻浣哄仺閸庤崵绮婚幋锔藉仼闁跨喓濮甸悞浠嬫煥閺囨浜惧┑鐐茬墑閸旀垵顫忓ú顏勬嵍妞ゆ挴鍓濋妤呮⒑閸濄儱校妞ゃ劌锕ら锝夊蓟閵夘喗鏅㈤梺鍛婃处閸撴盯宕㈤柆宥嗏拺闁告繂瀚崒銊╂煕閺傝法鐒搁柣娑卞枛铻栧ù锝堟閻﹀牓姊洪棃娑氱畾闁逞屽墮绾绢厽绂掗幘顔解拺閻庡湱濯鎰版煕閵娿儲鍋ユ鐐插暣閸╋繝宕ㄩ鐐碘偓顓烆渻閵堝棗濮х紒鏌ョ畺閹焦鎯旈埦鈧弨浠嬫煟濡澧柛鐔风箻閺屾盯鎮╅幇浣圭杹濡ょ姷鍋為崝娆忕暦濮椻偓閹崇娀顢楁担璇″晭闂傚倷绀佸﹢杈ㄦ櫠濡も偓椤灝螣閼测晙绗夐梺鑽ゅ枑閸ｇ銇愰幒鎾存珳闂佸憡渚楅崰妤呭窗閹扮増鈷戦柛娑橆煬閻掓儳顪冮弶鎴炴喐闁瑰箍鍨归埞鎴犫偓锝庝憾濞煎﹪姊洪幐搴ｇ畵婵☆偅鐩俊鎾箛閻楀牃鎷哄┑鐐跺蔼椤曆勬櫠閺屻儲鐓曢悗锝庡亜婵牏绱?
-                                        Item {
-                                            Layout.fillWidth: true
-                                            Layout.preferredHeight: 230
-                                            Layout.minimumHeight: 210
-                                            
-                                            PositionsPanel {
-                                                anchors.fill: parent
-                                                positions: mainContent.effectivePositions
-                                                totalMarketValue: Number(mainContent.liveAccountSnapshot.marketValue || 0)
-                                                currencySymbol: mainContent.displayCurrencySymbol
-                                                marketDataService: mainContent.marketDataService
-                                            }
-                                        }
-                                        
+                                        // Positions moved to TradingPage
+
                                         // 缂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁绘劦鍓欓崝銈囩磽瀹ュ拑韬€殿喖顭烽幃銏ゅ礂鐏忔牗瀚介梺璇查叄濞佳勭珶婵犲伣锝夘敊閸撗咃紲闂佺粯鍔﹂崜娆撳礉閵堝洨纾界€广儱鎷戦煬顒傗偓娈垮枛椤兘寮幇顓炵窞濠电姴瀚烽崥鍛存⒒娴ｇ懓顕滅紒璇插€块獮澶娾槈閵忕姷顔掔紓鍌欑劍椤洭宕㈡潏銊х瘈闁汇垽娼у瓭闂佺锕ょ紞濠傜暦閹达箑唯闁冲搫鍊婚崢鎼佹煟韫囨洖浠╂い鏇嗗嫭鍙忛柛灞惧閸嬫挸鈻撻崹顔界彯闂佸憡鎸鹃崰搴ㄦ偩閻ゎ垬浜归柟鐑樼箖閺呪晠鏌ｉ悢鍝ユ噧閻庢凹鍓熼幆渚€鏌嗗鍡忔嫽闂佺鏈悷褔宕濆鍡曠箚闁绘劕寮堕崑銉р偓瑙勬磸閸ㄨ櫣绮嬮幒鏂哄亾閿濆骸浜滃ù鐙€鍙冨娲礃閸欏鍎撻梺鐟板暱闁帮綁骞忛幋锔藉亜闁稿繗鍋愰崢浠嬫⒑閸濆嫬鈧悂鎮樺┑瀣畺闁硅揪闄勯悡鏇炩攽閻樻彃顏悽顖涚洴閺岀喐绗熼崹顔碱瀳闁剧粯鐗犻弻宥堫檨闁告挻鐟ㄩ悘瀣攽閻愬弶顥為柟绋款煼瀹曟垿鍩￠崨顔惧幗闂佺鎻徊鍊燁暱闂備焦濞婇弨閬嶅垂閸︻厽顫曢柟鐑樻煛閸嬫捇鏁愭惔鈥茶埅闂佺绨洪崕鐢稿蓟濞戞瑦鍎熼柨娑樺椤斿姊洪棃娑欐悙閻庢矮鍗抽悰顔锯偓锝庝簴閺€浠嬫煕閵夈劌鐓愰柨鐔村劦濮婄粯鎷呴悜妯烘畬缂備胶濮寸粔鐟扮暦绾懌浜归柟鐑樺灩閸樻挳姊虹涵鍛涧缂佺姵鍨块幃娆愮節閸ャ劎鍘撻梺鍛婄箓鐎氼剟寮抽悢闀愮箚闁圭粯甯楅崰妯绘叏婵犲嫮甯涢柟宄版噺缁楃喖顢涘鍐ㄐ梻鍌欑閹碱偊鎮у鍫濈婵炴垯鍨圭粈鍡涙煙閻戞ê鐏╅柡鍡楁閺屾盯寮村Δ浣规緬闂佺顑嗛幑鍥х暦閹烘鍊烽棅顐幘閻愬﹪姊绘担鍛婂暈婵炴彃绻樺畷婵嗩吋婢跺﹥顥濋梺閫炲苯澧ǎ鍥э躬閹瑩顢旈崟銊ヤ壕闁哄诞灞剧稁閻熸粎澧楃敮鈺呭极閸曨剛绠鹃柛鈩冾殕缁傚鏌ｉ幒宥囩煓闁哄瞼鍠栭獮宥夘敊绾拌鲸姣夐梻浣虹帛閹搁箖宕伴弽顓炶摕闁绘梻鍘ч崹鍌涖亜閺冨倵鎷″ù灏栧亾缂傚倸鍊风拋鎻掝瀶瑜斿畷鎴﹀箻缂佹鍘介柟鍏肩暘閸╁嫰宕箛娑欑厱闁绘ê纾晶鐢告煃閵夘垳鐣甸柟顔界矒閹稿﹥寰勫畝鈧弳顐︽⒒娓氣偓濞佳呮崲閸儱纾归柡宥庡幖绾惧鏌涘畝鈧崑娑氱不瑜版帒绾ч柛顐ｇ箓閳锋梻绱掓径灞炬毈闁哄本绋戦～婵嬵敆婢跺﹤澹夊┑鐑囩到濞层倝鏁冮鍫濈畺婵炲棙鎼╅弫鍌炴煕閺囨ê濡煎ù婊堢畺閺屸€崇暤椤斿吋婀扮紓宥呭缁绘繈鎮介棃娴讹綁鏌よぐ鎺旂暫闁诡噯绻濆鎾閿涘嫬骞堟俊鐐€栭崝妤佹叏閹绢喖绀夋慨姗嗗幗閸欏繘鏌ｉ悢鍛婄凡缂佺嫏鍥ㄧ厪闁搞儜鍐句純濡ょ姷鍋為敃銏犵暦閿熺姵鍊烽柛蹇撴憸濡垶姊婚崒娆戝妽濠电偛锕銊╂焼瀹ュ懎鐎梺闈╁瘜閸樹粙锝為弴銏＄厵闁绘垶蓱閻撴盯鏌涚€ｎ偅宕岄柡浣瑰姈閹柨鈹戦崼婵嗘瘓闂傚倷鑳堕…鍫ヮ敄閸愵喖纾块柡灞诲劚妗呴梺鍛婃处閸撴岸宕曢悢鍏肩厪闊洤锕ュ▍鍡涙煟閵堝嫮顦﹂柍瑙勫灴椤㈡瑧娑甸悜鐣屽弽婵犵數鍋涢幏鎴犵礊娴ｅ壊鍤曟い鎰跺瘜閺佸鏌嶈閸撶喖濡存担绯曟瀻闁规儳纾ˇ顓烆渻閵堝骸澧婚柛鐘愁殘閸掓帡骞樼拠鑼暫濠德板€愰崑鎾绘煃缂佹ɑ宕岀€规洖缍婇、娆撴偩鐏炲ジ鍋楁繝纰夌磿閸嬫垿宕愰妶澶婂偍濡わ絽鍟粈鍌涙叏濡炶浜鹃梺缁樹緱閸ｏ絽鐣峰鈧、娆戝枈鏉堛劎绉遍梻鍌欑窔濞佳呮崲閸℃稑鐒垫い鎺嗗亾闁告ɑ鐗滈崚鎺曨樄婵﹦绮幏鍛村传閸曨亞绱﹂梻浣侯焾闁帮絾绂嶇捄铏规殾闁靛繈鍊曢崘鈧梺闈浤涢崨顓㈢崕闂傚倷绀侀幖顐⒚洪姀銈呭瀭婵炲樊浜滈悡鏇㈡煙鐎电浠﹂柛娆忕箻閺岋綁鎮㈤崫鍕垫毉闂佺懓鍚嬮崝娆撳蓟閿濆牏鐤€闁挎繂瀚崙褰掓⒑闂堟稒鎼愰悗姘緲椤曪綁顢氶埀顒勫春閳ь剚銇勯幒鎴濐仾闁稿顑夐弻锝呂熷▎鎯ф缂備胶濮甸悧鐘诲蓟閿濆绠涙い鎺嶇劍閸庢挾绱撴担鍝勑ｇ痪鏉跨Ч婵＄敻宕熼锝嗘櫈闁荤喐鐟辩徊鑺ョ閸撗€鍋撶憴鍕婵炲眰鍔嶉〃娆撴⒒閸屾瑦绁版い鏇熺墵瀹曚即骞掑Δ鈧悿鐐箾閹存瑥鐏柛瀣ф櫊閺岋綁骞嬮敐鍡╂闂佺粯鍔曢敃顏堝蓟瀹ュ浼犻柛鏇ㄥ亝濞堫參鏌ｉ姀鈺佺仩闂佸府绲介～蹇旂節濮橆剛锛滃┑顔斤供閸忔﹢宕戦幘鍓佺煓婵☆偄鐏氬鑺ヤ繆閼哥數鐝堕柨鏇楀亾婵炲樊鍙冮獮鍐偩瀹€鈧惌娆撴煠閹颁礁鐏￠柟韫嵆濮婄粯鎷呴悷閭﹀殝缂備浇顕ч崐鍧楃嵁婢跺娼ㄩ柍褜鍓熼獮鍐閵堝懍绱堕梺鍛婃处閸撴盯鍩€椤掍礁鈻曟慨濠冩そ瀹曘劍绻濇惔銏㈡毉闂備胶顭堥鍡涙儎椤栫偞鏅查柣鎰▕濞尖晠鏌ら崫銉毌闁归绮换娑欐綇閸撗呅氬┑鈽嗗亜鐎氼厾绮嬪澶嬪仭闂侇叏濡囬崬鐢告偡濠婂啴鍙勯柕鍡楀暣瀹曞ジ濡烽妷褍濮︽俊鐐€栫敮鎺楀磹婵犳艾绠犳俊銈呮噺閻撴洟鏌曟径瀣仴闁硅櫕鍔欏鑸电鐎ｎ偀鎷绘繛鎾村焹閸嬫挻绻涙担鍐叉礌閳ь剨绠撻、姗€鎮㈤崜浣虹暰闂備焦鎮堕崕顕€寮插☉娆愬弿妞ゆ帒瀚悡鍐喐濠婂牆绀堥柣鏂款殠濞兼牠鏌ц箛鎾磋础闁活厽鐟╅弻銈夊箛娴ｅ摜浼囧┑鐐靛帶閻栫厧顫忛搹鍦煓闁告牑鍓濋弫鎯ь渻閵堝啫濡奸柨鏇樺€濋幃楣冩倻閽樺）銊ф喐婢舵劕纾婚柟鍓х帛閺呮煡骞栫划鐟板⒉闁诲繐绉瑰铏圭矙閸栤€冲闂佽桨绀侀…鐑界嵁閸愩劎鏆嬮柟浣冩珪閻庡妫呴銏″闁瑰皷鏅滅粋鎺楀礈瑜忕壕钘壝归敐鍡楃祷濞存粓绠栧娲礈閹绘帊绨撮梺绋垮閻擄繝骞冮敓鐘插嵆闁绘柨澧庣粻姘渻閵堝棛澧紒顔艰嫰閻☆厽绻濋悽闈涗粶闁活亙鍗冲畷鎰攽鐎ｎ亞鐣洪梺璺ㄥ枔婵挳鎮橀幎鑺ョ厵濡娴囬崗宀勬煕閻愬灚鏆柡宀嬬秮閹晠宕ｆ径瀣壍闂備線娼ч悧鍛垝濞嗘挸鏋侀柟鍓х帛閸嬫劙鏌涢幇顖氱处缂併劌顭峰缁樻媴娓氼垳鍔哥紓浣虹帛閸旀瑩骞嗛崘顔藉€婚柦妯侯槺椤斿棙绻濋悽闈浶ｇ痪鏉跨Ч閹繝鎮㈤悡搴ｎ啇濠电儑缍嗛崜娆愪繆閼恒儳绠鹃柟鍐插槻濞诧箓鎮″▎鎾村仯闁搞儱娲ら幊鎰版儊閸儲鈷戦弶鐐村椤︼妇绱掓径鎰垫缂侇喛顕ч埥澶愬閻樼數娼夐梻浣侯焾閺堫剛鍒掓惔鈭?
-                                        Item {
-                                            Layout.fillWidth: true
-                                            Layout.fillHeight: true
-                                            visible: !mainContent.isTradeRecordsView
-                                            
-                                            StrategiesPanel {
-                                                anchors.fill: parent
-                                                strategies: mainContent.effectiveStrategies
-                                            }
-                                        }
+                                        // Strategies moved to right sidebar in main.qml
                                     }
                                 }
                                 // 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁诡垎鍐ｆ寖闂佺娅曢幑鍥灳閺冨牆绀冩い蹇庣娴滈箖鏌ㄥ┑鍡欏嚬缂併劌銈搁弻鐔兼儌閸濄儳袦闂佸搫鐭夌紞渚€銆佸鈧幃娆撳箹椤撶噥妫ч梻鍌欑窔濞佳兾涘▎鎴炴殰闁圭儤顨愮紞鏍ㄧ節闂堟侗鍎愰柡鍛叀閺屾稑鈽夐崡鐐差潻濡炪們鍎查懝楣冨煘閹寸偛绠犻梺绋匡攻椤ㄥ棝骞堥妸鈺傚€婚柦妯侯槺閿涙稑鈹戦悙鏉戠亶闁瑰磭鍋ゅ畷鍫曨敆娴ｉ晲缂撶紓鍌欑椤戝棛鈧瑳鍥ㄥ€垫い鎺戝閳锋垿鏌ｉ悢鍛婄凡闁抽攱姊荤槐鎺楊敋閸涱厾浠搁悗瑙勬礃閸ㄥ潡鐛崶顒佸亱闁割偁鍨归獮鍫ユ⒒娴ｅ摜绉洪柛瀣躬瀹曞綊骞嶉绛嬫綗闂佹寧娲栭崐褰掓偂閻斿吋鐓忛煫鍥ㄦ礀椤庡矂鏌ｉ幘鍐叉倯闁逛究鍔嶇换婵嬪礋椤撶偟顐肩紓鍌欑劍椤ㄥ牓宕伴弽顓炴槬闁逞屽墯閵囧嫰骞掗崱妞惧婵＄偑鍊ら崢鐓幟洪埡鍚藉洩銇愰幒鎾崇檮濠电娀娼уú銏＄濠婂牊鐓欓柡澶婄仢椤ｆ娊鏌ｉ敐澶夋喚闁哄矉缍佹俊鍫曞炊瑜屾竟鏇犵磽娴ｈ櫣甯涢柣鈺婂灦閻涱喚鈧綆浜栭弸搴ㄧ叓閸ャ劍纾婚柟顕嗙悼缁辨挻鎷呴崫鍕闂佺瀛╂繛濠冧繆閸洖绠瑰ù锝嗙摃閹芥洟姊洪崫鍕窛闁哥姵鎸剧划缁樸偅閸愨晝鍘介梺閫涘嵆濞佳勬櫠椤栫偞鐓熸繝闈涙处缁€瀣叏婵犲懏顏犵紒杈ㄥ笒铻ｉ悹鍥ㄧ叀閻庤櫣绱撻崒娆戭槮妞ゆ垵妫濋獮鎴﹀炊椤掆偓閺勩儵鏌嶈閸撴岸濡甸崟顖氱闁糕剝銇炴竟鏇犵磽閸屾瑨鍏屽┑顔碱嚟缁棃鎮烽幍顔芥闂佸搫娲ㄩ崰鎰礊閸ャ劊浜滄い鎾跺枎閻忥附銇勯弮鈧Λ鍐潖妤﹁￥浜归柟鐑樻惈缁辩敻姊洪悡搴ｆ瀮婵炲鐩幃楣冨垂椤愩倗鎳濋梺閫炲苯澧寸€殿喖顭烽崹楣冨箛娴ｅ憡鍊梺纭呭亹鐞涖儵鍩€椤掆偓绾绢參顢欓幋锔解拻濞达綀娅ｇ敮娑㈡煙閹间胶鐣虹€规洑鍗冲浠嬵敇閻愯埖鎲伴梻浣告惈濞层垽宕硅ぐ鎺撶厑闁搞儯鍔庣弧鈧梺鍓茬厛閸嬪嫭鎱ㄩ崼婢棃寮崼鐔叉嫽婵炶揪缍侀ˉ鎾寸▔閼碱剛纾奸柛娆忣槸閸斻倖銇勯鍕殲缂佸倹甯為埀顒婄秵娴滐綁骞楅弴銏♀拺闁圭娴烽埥澶愭倵濮橀棿绨婚柍璁崇矙椤㈡棃宕奸悢鍝勫箞闂備礁婀遍崑鎾汇€冮崨顖楀亾濮樼厧澧寸€规洝顫夊蹇涘Ω閵堝洨鐣鹃梻浣虹帛閸旓附绂嶅鍫濈劦妞ゆ帊绀侀悘瀵糕偓瑙勬礀缂嶅﹤鐣烽锕€绀夐柤鎭掑劜閵囨繈鏌熼鍝勭伈闁诡喒鍓濋幆鏃堝閳垛晛浜炬い鎺戝閳锋垿鏌涢敂璇插箹妞わ絽鍚嬬换婵嬪閳藉懓鈧潡鏌ｅ☉鍗炴珝濠殿喒鍋撻梺鎸庣☉鐎氼噣顢欓弴銏♀拺缂侇垱娲栨晶鏌ユ煏閸℃瑥浠辨鐐差儔閺佹劙宕掑顒傛▕闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁惧墽鎳撻—鍐偓锝庝簼閹癸綁鏌ｉ鐐搭棞闁靛棙甯掗～婵嬫晲閸涱剙顥氬┑掳鍊楁慨鐑藉磻閻愮儤鍋嬮柣妯荤湽閳ь兛绶氬鎾閳╁啯鐝栭梻渚€鈧偛鑻晶鎵磼椤旂⒈鐓兼い銏＄洴閹瑩寮堕幋鏂夸壕闁汇垹鎲￠悡銉︾節闂堟稒顥㈡い搴㈩殜閺岋紕鈧綆鍋嗛妴鎺旂磼鏉堛劌娴柛鈹惧亾濡炪倖甯掔€氼剟鏌嬮崶顒佺厽闁哄啫鍋嗛悞鍓р偓娈垮枛閻忔繈鍩為幋锕€鐓￠柛鈩冾殘娴狀參鏌ｆ惔锝囨嚄闁告侗鍠栭崢褰掓⒑閸涘﹥瀵欓柛娑卞灲缁辨煡姊绘担铏瑰笡闁挎洏鍨归…鍥槼缂佸倹甯￠弻鍡楊吋閸℃瑥骞愰梺璇茬箳閸嬬喖宕戦幘鍓佺焼闁告劦浜炵壕鑲╃磽娴ｈ鐒芥繛鎻掝嚟閳ь剝顫夊ú鏍礊婵犲洢鈧礁鈻庨幘鏉戜簵濡ょ姷鍎愰崰鎾诲磹閺嶎偅宕叉繝闈涱儐閸嬨劑姊婚崼鐔衡棩闁规潙鍢查—鍐Χ閸℃浠稿┑鐐跺皺閸犲酣鎮惧畡鎵虫斀閻庯綆浜為娲⒑閹稿孩纾甸柛瀣崌閺岋箓宕橀鍕€剧紓浣虹帛閻╊垶鐛€ｎ亖鏋庨煫鍥ㄦ磻閹綁姊绘担铏瑰笡閻㈩垱顨呴—鍐╃鐎ｎ亣鎽曞┑鐐村灟閸ㄥ湱绮诲☉銏＄厱闁规崘灏崗宀€绱掗幇顓ф當闁宠鍨块幃娆撴嚑椤掑倸濮煎┑鐐茬摠缁姵绂嶅鍫稏闊洦鎷嬪ú顏嶆晜闁告洦鍋嗛悰鈺佲攽閻樺灚鏆╁┑顔芥尦瀹曟劗绱掑Ο纰辨祫濡炪倖鐗楃划搴ｅ閽樺鈧帒顫濋浣规倷闂佸搫顑囬崰鏍蓟閿濆鍋勯柡澶嬪灥婵箓姊洪幐搴ｇ畼闁稿濮风划璇测槈閵忕姷鐫勯梺绋挎湰缁骸危閸ャ劎绡€婵炲牆鐏濋弸鐔兼煥閺囨娅婄€规洘绮岄埥澶愬閳╁啯鐝繝鐢靛Т閿曘倝宕悩璇茬哗闁兼亽鍎禍婊堟煛閸愶絽浜鹃梺鍝勵儑缁垳绮悢灏佹闁靛骏绱曢崢鍗炩攽閻愬弶顥滅紒缁橈耿椤㈡挸螖閸涱喗鍤夐梺缁樺姉閸庛倝鎮￠悢鍏肩厵闂侇叏绠戦弸鐔兼煛閸″繑娅囬柣銉邯瀹曪綁濡疯閻撴捇姊洪崫鍕拱缂佸鎸荤粋鎺楁晝閸屾稑鈧攱銇勯幒鎴濃偓褰掝敇婵犳碍鐓熼幖娣灮閳洜绱掔拠鑼妞ゎ偄绻愮叅妞ゅ繐瀚鍥煙閸忚偐鏆橀柛銊ョ秺钘濋柍鍝勫€荤粻楣冩倵濞戞瑯鐒介柣顓烆儑缁辨帡顢欓懞銉ョ３闂侀潧妫旂粈渚€锝炲┑瀣殝闁割煈鍋呴悵鎶芥⒒娴ｈ櫣銆婇柛鎾寸箞閹柉顦归柟顖欑窔瀹曠厧鈹戦崘鈺傛澑婵＄偑鍊栧褰掑几缂佹鐟规繛鎴欏灪閻撴洘淇婇娑橆嚋妞ゃ儱顦甸弻宥囨嫚閼碱儷銏°亜椤撴粌濮傜€规洜鍠栭、姗€鎮╅崹顐綋闂傚倸鍊风欢姘焽瑜庨〃銉ㄧ疀閺囩偟绛忔繛瀵稿Т椤戝棝宕戦崒鐐寸厵闁规鍠栭。濂告倵濮橆剚鍤囨慨濠冩そ椤㈡鍩€椤掑倻鐭撻柣銏犳啞閸嬪倹绻涢幋娆忕仾闁绘挻娲樼换娑㈠箣濠靛棜鍩為梺鍝勵儍閸婃繈寮婚敐澶樻晣闁绘棃顥撻悷鏌ユ⒑闁稓鈹掗柛鏂跨Ф閹广垹鈹戠€ｎ亜绐涘銈嗘礀閹冲秹宕Δ鍛拻濞达絽鎲￠崯鐐烘煟濡や緡娈滈柟顔ㄥ洦鍋愮€瑰壊鍠栧▓銊╂⒑閸︻叀妾搁柛鐘愁殜瀹曟劙鏌ㄧ€ｎ剛顔曢梺鍝勵槹閸╁牓宕曢幇鐗堝€垫慨妯哄船閺嬪酣鏌嶇憴鍕伌闁轰礁绉瑰畷鐔碱敃閳╁啯绶氶梻鍌欒兌椤牓鏁冮妷鈺佸瀭闁割煈鍠氶弳锔界節闂堟稓澧旀繛宀婁邯瀵爼鎮欓弶鎴殝缂備礁顑嗛崹鍧楀春閻愬搫绠ｉ柣姗嗗亜娴滈箖鏌ㄥ┑鍡欏嚬缂併劋绮欓弻锝夋晲閸涱喗鍎撻梺瀹狀潐閸ㄥ潡銆佸▎鎰弿闁归偊浜為幑鏇㈡⒒娴ｄ警鐒炬い鎴濇楠炴劖銈ｉ崘銊у姦濡炪倖甯掗崰姘焽閹邦厾绠鹃柛娆忣槺婢ь亪鏌ｉ敐鍥у幋妞ゃ垺顨婂畷姗€顢旈崘顓炵劵闂傚倸鍊搁崐椋庣矆娓氣偓瀹曘儳鈧綆鍓涢惌鍫ユ煙缂併垹鏋涢柣銈夌畺閺屽秹宕崟顒€娅ｉ梺姹囧€ら崳锝夌嵁閺嶎灔搴敆閳ь剚淇婃禒瀣厓闂佸灝顑呴悘鎾煙椤旇偐绉虹€规洘鍎奸ˇ鑼磼閻欐瑥娲﹂悡娆撴煟瑜嶉幗婊呯矓椤曗偓閺岋紕浠︾粙鍨拤闂佺懓鍢查幊鎰板箟閹绢喖绀嬫い鎰枎娴滈箖鏌熼幍顔碱暭闁绘挸鍟撮弻鏇熷緞濡櫣浠梺浼欑悼閺佹悂鍩€椤掑喚娼愭繛鍙夌矒瀹曘垼顦归柛鈺冨仱楠炲鏁冮埀顒勬煁閸ヮ剚鐓熼柡鍐ㄥ亞閻掔偓绻涢崨顔肩伌婵﹤顭峰畷鎺戭潩椤戣棄浜鹃柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻锝夊箣閿濆憛鎾绘煕閵堝懎顏柡灞剧洴楠炴﹢鎳犻澶嬓滈梻浣规偠閸斿秶鎹㈤崘顔嘉﹂柛鏇ㄥ灠閸愨偓濡炪倖鍔﹀鈧柡澶樺弮濮婃椽鏌呴悙鑼跺濠⒀屽櫍閺屾盯鎮㈤崨濠勭▏闂佷紮绲块崗妯讳繆閹间礁鐓涘┑鐘插暞濞呮牗绻濋悽闈涗沪闁搞劌鐖奸弫瀣磽娴ｉ潧濡搁柛搴ゅ皺閹广垹鈹戦崱蹇旂亖闂佸壊鐓堥崰妤呮倶瀹ュ鈷戦梻鍫熺⊕婢跺嫰鏌ｉ埡濠傜仩闁伙絿鍏橀獮瀣晝閳ь剛绮婚懡銈囩＝濞达綀顕栭悞浠嬫煕濡寧顥夐柍瑙勫灴閹瑩寮堕幋鐘辨樊闁诲氦顫夊ú锕傚礈閻斿鍤曢柟闂寸劍閺呮粓鏌涢幘妤€鎷戠槐鏌ユ⒒娴ｈ櫣甯涢柨姘辩棯缂併垹寮柛鈹垮劜瀵板嫰骞囬鐘插笚闂備浇濮ら敋妞わ箒妫勫嵄閻熸瑥瀚粻楣冩煟閹捐櫕鎹ｇ紒鐘侯嚙閳规垿鍩勯崘鈺佲偓鎰版煛娴ｇ鈧潡骞冮崜褌娌柣锝呮湰閸嬔囨⒒閸屾艾鈧悂宕愰幖浣哥９闁归棿绀佺壕褰掓煟閹达絽袚闁稿﹤娼￠弻銊╁籍閸喐娈伴梺绋款儐閹稿墽鍒掗鐐╂婵☆垰鎼粻濠氭⒑閸涘﹦绠撻悗姘卞厴瀹曘儳鈧綆浜堕悢鍡涙偣閾忕懓鐨戦柛鏃傚枛閺屻劌鈽夊▎鎴炲垱濠殿喖锕ㄥ▍锝夊箟閹绢喖绀嬫い鎰╁灩琚樻繝鐢靛Л閹峰啴宕橀埡鍌氶棷濠电姰鍨奸～澶娒哄Ο鑲╃处濞寸姴顑呭婵嗏攽閻樻彃顏╅悽顖涱殜閺岋綁鎮㈤崫銉х厑缂備緡鍠楅幐鎼佹偩瀹勯偊鐓ラ柛顐ゅ枎娴滄粍淇婇悙宸剰閻庢稈鏅涢埢鎾诲箚瑜夐弨鑺ャ亜閺傛娼熷ù鐘崇矒閺屾稓鈧綆鍋呭畷宀勬煛鐏炲墽娲撮柛鈺嬬節瀹曟﹢濡搁妶鍡楀闂佽楠搁悘姘熆濡皷鍋撳顓熺凡闁伙絿鍏橀、鏇㈡晝閳ь剙鏁柣鐔哥矊闁帮絽顕ｉ弻銉ノ╅柍鍝勫€甸幏濠氭⒑缁嬫寧婀伴柤褰掔畺閸┾偓妞ゆ帒瀚峰Λ鎴犵磼椤旇偐澧涚紒妤冨枛閸┾偓妞ゆ帒瀚畵渚€鏌″搴″季闁轰礁鍟撮弻銊╁即濡も偓娴滃墽绱掗悙顒€鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲海鏁搁…鍫熶繆娴犲鈷戠紒瀣皡姒岸鏌涢埡鍌滃⒈闁瑰箍鍨归埞鎴犫偓锝庡亽濡啫鈹戦悙鏉戠仴鐎规洦鍓熷畷婊堝箥椤斿墽锛濇繛杈剧到閹碱偅鐗庨梻浣虹帛椤ㄥ牊绻涢埀顒傗偓娈垮枛椤兘骞冮姀銏″仒闁炽儱鍘栨竟鏇㈡⒑濮瑰洤鐏い鏃€鐗犻幃鐐哄箚椤紕鎳撻…銊╁川椤撶偘绮梻鍌氭搐椤︽壆鎹㈠┑鍥╃瘈闁稿本鍑规导鈧梻浣规た閸樼晫鏁敓鐘茶摕闁挎繂顦粻濂告煕閹扳晛濡洪柛鐘诧躬閹鎲撮崟顒傤槬闂佺粯鐗曢崥瀣┍婵犲洤绠瑰ù锝堫潐濞呭棛绱撻崒娆撴闁搞劑缂氶埅鏌ユ⒒閸屾艾鈧悂宕愭搴ｇ焼濞撴埃鍋撴鐐寸墵椤㈡洟鏁傜紒妯绘珗闂備胶纭堕崜婵嬫偡瑜旈幆灞解枎閹惧鍘甸梺缁樺灦閿曗晛鈻撻弮鍌滅＜?
@@ -998,66 +1007,51 @@ Item {
                                     Layout.minimumWidth: 280
                                     Layout.maximumWidth: 320
                                     Layout.fillHeight: true
-                                    visible: mainContent.isPerformanceAnalysisView
+                                    visible: mainContent.pageMode === "live-trading"
 
-                                    Rectangle {
+                                    // ── 交易表单 + 策略状态 ──
+                                    ColumnLayout {
                                         anchors.fill: parent
-                                        visible: mainContent.isPerformanceAnalysisView
-                                        radius: 16
-                                        color: "#121828"
-                                        border.color: "#2d3748"
-                                        border.width: 1
+                                        anchors.margins: 8
+                                        spacing: 8
 
-                                        ColumnLayout {
-                                            anchors.fill: parent
-                                            anchors.margins: 24
-                                            spacing: 16
+                                        TradingComponents.TradingFormPanel {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 420
+                                            compactMode: true
+                                        }
 
-                                            Text {
-                                                text: mainContent.liveText("performanceBreakdown")
-                                                color: "#f1f5f9"
-                                                font.pixelSize: 15
-                                                font.weight: Font.Medium
-                                            }
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.fillHeight: true
+                                            radius: 14
+                                            color: "#091321"
+                                            border.color: "#1c314b"
+                                            border.width: 1
+                                            clip: true
 
-                                            Repeater {
-                                                model: [
-                                                    { label: mainContent.liveText("accountAssets"), value: mainContent.currencyText(mainContent.liveAccountSnapshot.totalAsset || 0) },
-                                                    { label: mainContent.liveText("availableCash"), value: mainContent.currencyText(mainContent.liveAccountSnapshot.availableCash || 0) },
-                                                    { label: mainContent.liveText("marketValue"), value: mainContent.currencyText(mainContent.liveAccountSnapshot.marketValue || 0) },
-                                                    { label: mainContent.liveText("turnover"), value: mainContent.currencyText(mainContent.liveTurnover || 0) }
-                                                ]
-
+                                            ColumnLayout {
+                                                anchors.fill: parent
+                                                anchors.margins: 10
+                                                spacing: 6
+                                                Text {
+                                                    text: "策略状态与执行日志"
+                                                    color: "#f8fafc"; font.pixelSize: 13; font.weight: Font.DemiBold
+                                                }
+                                                Text {
+                                                    text: "绑定策略: 查看策略配置"
+                                                    color: "#8ba4c7"; font.pixelSize: 10
+                                                }
                                                 Rectangle {
-                                                    id: breakdownCard
-                                                    required property var modelData
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: 64
-                                                    radius: 10
-                                                    color: "#1a2235"
-
-                                                    Column {
-                                                        anchors.fill: parent
-                                                        anchors.margins: 14
-                                                        spacing: 6
-
-                                                        Text {
-                                                            text: breakdownCard.modelData.label || ""
-                                                            color: "#94a3b8"
-                                                            font.pixelSize: 12
-                                                        }
-
-                                                        Text {
-                                                            text: breakdownCard.modelData.value || ""
-                                                            color: "#f8fafc"
-                                                            font.pixelSize: 17
-                                                            font.weight: Font.Medium
-                                                        }
+                                                    Layout.fillWidth: true; Layout.fillHeight: true
+                                                    radius: 10; color: "#08111e"; border.color: "#182a40"; border.width: 1
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "执行日志将在收到委托回报后显示"
+                                                        color: "#64748b"; font.pixelSize: 10
                                                     }
                                                 }
                                             }
-
-                                            Item { Layout.fillHeight: true }
                                         }
                                     }
                                 }

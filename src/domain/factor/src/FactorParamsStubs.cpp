@@ -1,8 +1,12 @@
+#include "SupplyChainFactor.h"
 #include "DividendFactor.h"
 #include "GrowthFactor.h"
 #include "IndustryFactor.h"
 #include "LiquidityFactor.h"
 #include "MacroFactor.h"
+#include "ReversalFactor.h"
+#include "HighFreqFactor.h"
+#include "DLFactor.h"
 #include "SentimentFactor.h"
 #include "TechnicalFactor.h"
 #include "factor_enums.h"
@@ -255,6 +259,115 @@ void TechnicalFactor::Params::fromJson(const foundation::json::JsonFacade& json)
     if (json.has("useVolume")) {
         useVolume = json.get("useVolume").asBool();
     }
+}
+
+// ============================================================================
+// ReversalFactor::Params::fromJson
+// ============================================================================
+void ReversalFactor::Params::fromJson(const foundation::json::JsonFacade& json)
+{
+    CommonParams::fromJson(json);
+    if (json.has("splitMethod")) {
+        const auto& value = json.get("splitMethod");
+        if (value.isNumber()) splitMethod = static_cast<ReversalSplitMethod>(value.asInt());
+    }
+    if (json.has("window")) window = json.get("window").asInt();
+    if (json.has("splitMetric")) splitMetric = json.get("splitMetric").asString();
+    if (json.has("useHighOnly")) useHighOnly = json.get("useHighOnly").asBool();
+}
+
+// ============================================================================
+// HighFreqFactor::Params::fromJson
+// ============================================================================
+void HighFreqFactor::Params::fromJson(const foundation::json::JsonFacade& json)
+{
+    CommonParams::fromJson(json);
+    if (json.has("barFrequency")) barFrequency = json.get("barFrequency").asInt();
+    if (json.has("lookbackDays")) {
+        lookbackDays = json.get("lookbackDays").asInt();
+        if (lookbackDays < 1)
+            throw std::runtime_error("HighFreqFactor: lookbackDays 必须 >= 1");
+    }
+    if (json.has("window")) {
+        window = json.get("window").asInt();
+        if (window < 2)
+            throw std::runtime_error("HighFreqFactor: window 必须 >= 2");
+    }
+    if (json.has("aggregation")) {
+        const auto& value = json.get("aggregation");
+        if (!value.isNumber())
+            throw std::runtime_error("HighFreqFactor: aggregation 不是枚举数值字段");
+        const int v = value.asInt();
+        if (v < 0 || v > 2)
+            throw std::runtime_error("HighFreqFactor: aggregation 枚举值无效 (0-2)");
+        aggregation = static_cast<HFAggregation>(v);
+    }
+    if (json.has("threshold")) threshold = json.get("threshold").asDouble();
+    if (json.has("percentile")) {
+        percentile = json.get("percentile").asDouble();
+        if (percentile <= 0.0 || percentile > 1.0)
+            throw std::runtime_error("HighFreqFactor: percentile 必须在 (0,1]");
+    }
+    if (json.has("momentType")) {
+        const auto& value = json.get("momentType");
+        if (!value.isNumber())
+            throw std::runtime_error("HighFreqFactor: momentType 不是枚举数值字段");
+        const int v = value.asInt();
+        if (v < 0 || v > 2)
+            throw std::runtime_error("HighFreqFactor: momentType 枚举值无效 (0-2)");
+        momentType = static_cast<HFMomentType>(v);
+    }
+    if (json.has("method")) {
+        const auto& value = json.get("method");
+        if (!value.isNumber())
+            throw std::runtime_error("HighFreqFactor: method 不是枚举数值字段");
+        const int v = value.asInt();
+        if (v < 0 || v > 2)
+            throw std::runtime_error("HighFreqFactor: method 枚举值无效 (0-2)");
+        method = static_cast<HFMethod>(v);
+    }
+}
+
+// ============================================================================
+// DLFactor::Params::fromJson
+// ============================================================================
+void DLFactor::Params::fromJson(const foundation::json::JsonFacade& json)
+{
+    CommonParams::fromJson(json);
+    if (json.has("modelType")) {
+        const auto& value = json.get("modelType");
+        if (value.isNumber()) modelType = static_cast<DLModelType>(value.asInt());
+    }
+    if (json.has("hiddenLayers")) hiddenLayers = json.get("hiddenLayers").asInt();
+    if (json.has("hiddenUnits")) hiddenUnits = json.get("hiddenUnits").asInt();
+    if (json.has("featureCount")) featureCount = json.get("featureCount").asInt();
+    if (json.has("predictionHorizon")) predictionHorizon = json.get("predictionHorizon").asInt();
+    if (json.has("learningRate")) learningRate = json.get("learningRate").asDouble();
+    if (json.has("batchSize")) batchSize = json.get("batchSize").asInt();
+    if (json.has("epochs")) epochs = json.get("epochs").asInt();
+    if (json.has("optimizer")) {
+        const auto& value = json.get("optimizer");
+        if (value.isNumber()) optimizer = static_cast<DLOptimizer>(value.asInt());
+    }
+    if (json.has("dropoutRate")) dropoutRate = json.get("dropoutRate").asDouble();
+    if (json.has("orthogonalConstraint")) orthogonalConstraint = json.get("orthogonalConstraint").asBool();
+    if (json.has("ascending")) ascending = json.get("ascending").asBool();
+    if (json.has("modelPath")) modelPath = json.get("modelPath").asString();
+}
+
+// ============================================================================
+// SupplyChainFactor::Params::fromJson
+// ============================================================================
+void SupplyChainFactor::Params::fromJson(const foundation::json::JsonFacade& json)
+{
+    CommonParams::fromJson(json);
+
+    if (json.has("dynamicMode"))           dynamicMode           = json.get("dynamicMode").asBool();
+    if (json.has("fixedProductId"))         fixedProductId        = json.get("fixedProductId").asString();
+    if (json.has("lookbackWindow"))         lookbackWindow        = json.get("lookbackWindow").asInt();
+    if (json.has("maxHoldings"))            maxHoldings           = json.get("maxHoldings").asInt();
+    if (json.has("maxStocksPerProduct"))    maxStocksPerProduct   = json.get("maxStocksPerProduct").asInt();
+    if (json.has("minScore"))               minScore              = json.get("minScore").asDouble();
 }
 
 } // namespace factor

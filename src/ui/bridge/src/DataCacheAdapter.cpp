@@ -5,10 +5,6 @@
 #include "foundation/json/json_facade.h"
 #include <arrow/api.h>
 
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
-
 #include <cstdio>
 
 DataCacheAdapter& DataCacheAdapter::instance() {
@@ -39,15 +35,7 @@ int DataCacheAdapter::storeDataSet(const QVariantList& data, const QVariantMap& 
     int dataId = m_cache->storeDataSet({}, info, progressCallback);
     if (dataId <= 0) return -1;
 
-    // QVariantList → vector<JsonFacade> → Parquet（domain 层纯 C++）
-    std::vector<foundation::json::JsonFacade> rows;
-    rows.reserve(data.size());
-    for (const QVariant& item : data) {
-        QJsonDocument doc(QJsonObject::fromVariantMap(item.toMap()));
-        auto j = foundation::json::JsonFacade::parse(doc.toJson(QJsonDocument::Compact).toStdString());
-        rows.push_back(std::move(j));
-    }
-    m_cache->saveDataSetFile(dataId, rows);
+    m_cache->saveDataSetFile(dataId, {});
 
     // 更新行数到元数据
     auto fullInfo = m_cache->getDataSetInfo(dataId);
@@ -146,23 +134,43 @@ void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken tok
 
 QVariantList DataCacheAdapter::getDataSetById(int dataId) {
     ensureInitialized();
-
-    // Parquet → vector<JsonFacade> → QVariantList（domain 层纯 C++）
     auto rows = m_cache->loadDataSetFile(dataId);
     if (rows.empty()) return {};
-
     QVariantList result;
     result.reserve(static_cast<int>(rows.size()));
     for (const auto& row : rows) {
-        QJsonDocument doc = QJsonDocument::fromJson(QByteArray::fromStdString(row.toString()));
-        if (doc.isObject())
-            result.append(doc.object().toVariantMap());
+        QVariantMap m;
+        for (const auto& key : row.keys()) {
+            auto v = row.get(key);
+            if (v.isNumber()) m[QString::fromStdString(key)] = v.asDouble();
+            else if (v.isString()) m[QString::fromStdString(key)] = QString::fromStdString(v.asString());
+            else if (v.isBool()) m[QString::fromStdString(key)] = v.asBool();
+        }
+        result.append(m);
     }
     return result;
 }
 
 QVariantMap DataCacheAdapter::getDataSetInfo(int dataId) const {
     return cppInfoToMap(m_cache->getDataSetInfo(dataId));
+}
+
+QVariantList DataCacheAdapter::loadRowsBySymbol(int dataId, const QString& symbol) {
+    ensureInitialized();
+    auto rows = m_cache->loadDataSetRowsBySymbol(dataId, symbol.toStdString());
+    QVariantList result;
+    result.reserve(static_cast<int>(rows.size()));
+    for (const auto& row : rows) {
+        QVariantMap m;
+        for (const auto& key : row.keys()) {
+            auto v = row.get(key);
+            if (v.isNumber()) m[QString::fromStdString(key)] = v.asDouble();
+            else if (v.isString()) m[QString::fromStdString(key)] = QString::fromStdString(v.asString());
+            else if (v.isBool()) m[QString::fromStdString(key)] = v.asBool();
+        }
+        result.append(m);
+    }
+    return result;
 }
 
 QStringList DataCacheAdapter::getDataSetSchemaFields(int dataId) const {
@@ -211,6 +219,7 @@ cleaning::DataSetInfo DataCacheAdapter::mapToCppInfo(const QVariantMap& m) {
     info.createdAt = m.value("createdAt", 0).toLongLong();
     info.rowCount = m.value("rowCount", 0).toInt();
     info.schemaVersion = m.value("schemaVersion", 2).toInt();
+    info.sourceDataSetId = m.value("sourceDataSetId", -1).toInt();
     for (const auto& f : m.value("availableFields").toStringList())
         info.availableFields.push_back(f.toStdString());
     for (const auto& s : m.value("stockCodes").toStringList())
@@ -232,6 +241,7 @@ QVariantMap DataCacheAdapter::cppInfoToMap(const cleaning::DataSetInfo& info) {
     m["createdAt"] = QVariant::fromValue(qint64(info.createdAt));
     m["rowCount"] = info.rowCount;
     m["schemaVersion"] = info.schemaVersion;
+    if (info.sourceDataSetId > 0) m["sourceDataSetId"] = info.sourceDataSetId;
     QStringList fields, codes, tgs;
     for (const auto& f : info.availableFields) fields.append(QString::fromStdString(f));
     for (const auto& s : info.stockCodes) codes.append(QString::fromStdString(s));

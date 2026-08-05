@@ -49,7 +49,7 @@ public:
                                    const QString& cleaningRule = "",
                                    double minDataQuality = 0.0);
     Q_INVOKABLE void clearSelection();
-    
+
     // 获取数据库中清洗后数据的日期范围
     Q_INVOKABLE QVariantMap getDataDateRange();
     
@@ -83,7 +83,7 @@ signals:
     void datasetsFound(const QVariantList& datasets);
     void errorOccurred(const QString& error);
     void initializationCompleted(bool success);
-    
+
 private:
     // 内部方法
     void updateLoadingState(bool loading);

@@ -89,7 +89,9 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
         params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled);
+        params_.neutralizationEnabled,
+        1,
+        params_.ascending);
 
     return executeWithCommonParams(
         context,
@@ -121,27 +123,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 result.metadata.set("emptyReason", json_helper::toJsonValue("规模因子字段存在但没有可用正数值"));
             }
         },
-        [](const CommonRuntimeState&, CalculationResult& result) {
-            std::vector<double> finiteValues;
-            finiteValues.reserve(result.values.size());
-            for (const auto& [symbol, value] : result.values) {
-                (void)symbol;
-                if (std::isfinite(value)) {
-                    finiteValues.push_back(value);
-                }
-            }
-
-            if (finiteValues.size() >= 16) {
-                const double lower = BaseFactor::calculatePercentileValue(finiteValues, 0.05);
-                const double upper = BaseFactor::calculatePercentileValue(finiteValues, 0.95);
-                if (upper > lower) {
-                    for (auto& [symbol, value] : result.values) {
-                        (void)symbol;
-                        value = (std::max)(lower, (std::min)(upper, value));
-                    }
-                }
-            }
-        },
+        [](const CommonRuntimeState&, CalculationResult&) {},
         [this](const CommonRuntimeState&, CalculationResult& result) {
             result.metadata.set("sizeMetric", json_helper::toJsonValue(static_cast<int>(params_.sizeMetric)));
             result.metadata.set("logTransform", json_helper::toJsonValue(params_.logTransform));

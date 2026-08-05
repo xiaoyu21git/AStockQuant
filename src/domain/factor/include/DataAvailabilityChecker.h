@@ -180,7 +180,7 @@ private:
     // 检查字段列表
     DataStatus checkFields(const std::vector<std::string>& fields,
                            const std::string& date,
-                           const std::string& table = "daily_bar");
+                           const std::string& table = "mkt.daily_bar");
     
     // 数据类型到字段映射
     std::vector<std::string> getFieldsForType(DataType type);

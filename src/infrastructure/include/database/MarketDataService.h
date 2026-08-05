@@ -62,7 +62,8 @@ namespace field {
 
 // ── 查询参数 ──
 enum class PriceTableType { Daily, Weekly, Monthly };
-enum class DataSourceType { Stock, Index, AllMarket, Financial, SymbolInfo };
+enum class DataSourceType { Stock, Index, AllMarket, Financial, SymbolInfo,
+    NewsSentiment, PolicyData, AlternativeData, MinuteBar, CleanedDailyBar };
 
 struct MarketDataQuery {
     DataSourceType sourceType{DataSourceType::Stock};
@@ -130,10 +131,53 @@ public:
     /// 下一个交易日
     std::string nextTradingDay(const std::string& anchorDate);
 
+    /// 快捷方法：周K线
+    MarketDataResult queryWeeklyBar(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 快捷方法：月K线
+    MarketDataResult queryMonthlyBar(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 快捷方法：分钟线
+    MarketDataResult queryMinuteBar(
+        const std::vector<std::string>& symbols,
+        const std::string& startTime,
+        const std::string& endTime);
+
+    /// 快捷方法：新闻舆情
+    MarketDataResult queryNewsSentiment(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 快捷方法：政策数据
+    MarketDataResult queryPolicyData(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 快捷方法：另类数据
+    MarketDataResult queryAlternativeData(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
+    /// 快捷方法：清洗后日线
+    MarketDataResult queryCleanedDailyBar(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
 private:
     static J barRowToJson(const DailyBarRow& row, const std::vector<std::string>& extraFields);
     static J financialRowToJson(const astock::database::SqlQueryResultRow& row);
     static J symbolInfoRowToJson(const astock::database::SqlQueryResultRow& row);
+    static J genericRowToJson(const astock::database::SqlQueryResultRow& row);
 
     std::unique_ptr<MarketDataRepository> m_repo;
 };
