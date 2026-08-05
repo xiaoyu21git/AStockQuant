@@ -297,7 +297,7 @@ void RuleTemplateSuggestionService::suggestTemplatesRequestAsync(
     if (!m_initialized) {
         QVariantMap err;
         err["requestId"] = requestId;
-        err["error"] = QStringLiteral("规则库未加载，请先确保 config/rules/compiled.json 存在");
+        err["error"] = QStringLiteral("规则库未加载，请检查程序完整性或联系技术支持");
         emit suggestionFailed(err);
         return;
     }

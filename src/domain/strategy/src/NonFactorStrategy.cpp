@@ -122,6 +122,7 @@ std::shared_ptr<IRuntimeStrategy> StrategyBase::create(
         mfConfig.maxWeightPerStock = p.maxWeightPerStock;
         mfConfig.minWeightPerStock = p.minWeightPerStock;
         mfConfig.skipNormalizeFactorIds = p.skipNormalizeFactorIds;
+        mfConfig.minHoldDays = p.minHoldDays;
         double totalWeight = 0.0;
         for (const auto& fw : p.factorWeights) totalWeight += fw.weight;
         for (const auto& fw : p.factorWeights) {

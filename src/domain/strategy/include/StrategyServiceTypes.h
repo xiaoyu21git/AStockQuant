@@ -136,6 +136,7 @@ private:
     std::unordered_map<std::string, double> m_currentWeights;  // symbol→当前持仓权重
     std::unordered_set<std::string> m_candidatePool;  // 因子候选池(空=扫全市场)
     std::unordered_map<std::string, double> m_factorScores;  // 因子复合评分 (按策略权重加权)
+    std::unordered_map<std::string, int> m_positionEntryDates;  // symbol→entryRowIndex, 最少持有期检查
 
 public:
     RuntimeStrategyContext() = default;
@@ -178,6 +179,15 @@ public:
     [[nodiscard]] double factorScore(const std::string& symbol) const {
         auto it = m_factorScores.find(symbol);
         return it != m_factorScores.end() ? it->second : 0.0;
+    }
+
+    /// @brief 持仓入场日映射: symbol(fullCode) → 买入时的回测行号(entryRowIndex)
+    /// 用于最少持有期检查: daysHeld = currentRow - entryRow
+    void setPositionEntryDates(std::unordered_map<std::string, int> dates) { m_positionEntryDates = std::move(dates); }
+    [[nodiscard]] const std::unordered_map<std::string, int>& positionEntryDates() const noexcept { return m_positionEntryDates; }
+    [[nodiscard]] int positionEntryRow(const std::string& symbol) const {
+        auto it = m_positionEntryDates.find(symbol);
+        return it != m_positionEntryDates.end() ? it->second : -1;
     }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
@@ -547,6 +557,9 @@ struct StrategyCreationParams final {
 
     /// 跳过截面 Z-score 归一化的因子 instance_id 集合（如 SupplyChain 同组同值因子）
     std::unordered_set<std::string> skipNormalizeFactorIds;
+
+    /// 最少持有天数 — 0=不启用(默认), >0 时持有不足该天数的持仓禁止卖出(硬止损除外)
+    int minHoldDays{0};
 
     // 因子回调（桥接层填充）
     std::function<StrategyServiceFlowResult(const MarketDataPoint&)> onIncremental;

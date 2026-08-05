@@ -7,6 +7,9 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 
 namespace domain::strategy::rules {
 
@@ -100,11 +103,92 @@ int UserRuleRepository::loadFromDirectory(const std::string& dirPath)
 
     INTERNAL_INFO_STREAM << "[UserRepo] 扫描用户规则目录: " << dirPath;
 
-    // TODO: 实现目录遍历加载用户模板
+    // 检查目录是否存在
+    std::error_code ec;
+    if (!std::filesystem::exists(dirPath, ec)) {
+        INTERNAL_INFO_STREAM << "[UserRepo] 用户规则目录不存在, 跳过: " << dirPath;
+        m_impl->library = lib;
+        return 0;
+    }
+
+    // 遍历 *.json 文件
+    for (const auto& entry : std::filesystem::directory_iterator(dirPath, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() != ".json") continue;
+
+        std::string filePath = entry.path().string();
+        INTERNAL_DEBUG_STREAM << "[UserRepo] 加载用户规则文件: " << filePath;
+
+        try {
+            // 读取 JSON 文件
+            std::ifstream file(filePath);
+            if (!file) {
+                INTERNAL_WARN_STREAM << "[UserRepo] 无法打开文件: " << filePath;
+                ++skipCount;
+                continue;
+            }
+            std::stringstream buffer;
+            buffer << file.rdbuf();
+            std::string jsonStr = buffer.str();
+
+            // 解析 JSON
+            auto root = foundation::json::JsonFacade::parse(jsonStr);
+
+            // 支持两种格式:
+            //   A) 单个模板: { "templateId":..., "rules":[...], ... }
+            //   B) 多个模板: { "templates": [...] }
+            auto loadSingleTemplate = [&](const foundation::json::JsonFacade& tmplNode) {
+                if (!tmplNode.has("templateId") || !tmplNode.has("rules")) {
+                    INTERNAL_WARN_STREAM << "[UserRepo] 用户模板缺少 templateId 或 rules: "
+                                         << filePath;
+                    return;
+                }
+                std::string tid = tmplNode.get("templateId").asString();
+                if (lib->byId.find(tid) != lib->byId.end()) {
+                    INTERNAL_WARN_STREAM << "[UserRepo] 用户模板 ID 重复, 跳过: " << tid;
+                    ++skipCount;
+                    return;
+                }
+                // 包装为 {"templates": [tmplNode]} 格式以复用 loadRuleLibrary
+                std::string wrapperJson = R"({"templates":[)"
+                    + tmplNode.toString() + "]}";
+                auto wrapper = foundation::json::JsonFacade::parse(wrapperJson);
+                auto compiledLib = loadRuleLibrary(wrapper, {});
+                if (compiledLib && !compiledLib->templates.empty()) {
+                    for (auto& tmpl : compiledLib->templates) {
+                        lib->templates.push_back(std::move(tmpl));
+                    }
+                    ++successCount;
+                }
+            };
+
+            if (root.has("templates")) {
+                // 格式 B: 多模板
+                auto templatesArr = root.get("templates");
+                for (std::size_t i = 0; i < templatesArr.size(); ++i) {
+                    loadSingleTemplate(templatesArr.at(i));
+                }
+            } else {
+                // 格式 A: 单模板
+                loadSingleTemplate(root);
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_WARN_STREAM << "[UserRepo] 解析用户规则失败: " << filePath
+                                 << " error=" << e.what();
+            ++skipCount;
+        }
+    }
+
+    // 重建 byId 索引
+    for (const auto& tmpl : lib->templates) {
+        lib->byId[tmpl.templateId] = &tmpl;
+    }
 
     m_impl->library = lib;
-    INTERNAL_INFO_STREAM << "[UserRepo] 用户规则加载: 成功=" << successCount
-                         << " 跳过=" << skipCount;
+    INTERNAL_INFO_STREAM << "[UserRepo] 用户规则加载完成: 成功=" << successCount
+                         << " 跳过=" << skipCount
+                         << " 模板总数=" << m_impl->library->templates.size();
     return successCount;
 }
 

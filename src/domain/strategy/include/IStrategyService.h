@@ -716,6 +716,7 @@ private:
     std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
+    int m_minHoldDays{0};                  ///< 最少持有天数, 0=不启用
 };
 
 class StrategyEngine::Builder final {

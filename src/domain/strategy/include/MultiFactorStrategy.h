@@ -61,6 +61,9 @@ struct MultiFactorConfig final {
     /// 跳过截面 Z-score 归一化的因子 ID 集合（如 SupplyChain 同组同值因子）
     std::unordered_set<std::string> skipNormalizeFactorIds;
 
+    /// 最少持有天数 — 0=不启用(默认), >0 时持有不足该天数的持仓禁止卖出(硬止损除外)
+    int minHoldDays{0};
+
     [[nodiscard]] bool isValid() const noexcept
     {
         return maxPositions > 0 && topN > 0 && !factorIds.empty() && !weights.empty();

@@ -63,6 +63,7 @@ struct CompiledRule {
     std::string stage;          // market/eligibility/signal/rebalance (YAML 原值)
     int priority{0};            // 越小越高优
     std::string conditionJson;  // when 子句原始 JSON (供 UI 展示与参数提取)
+    std::vector<std::string> tags;  // 规则级标签 (如 hard-stop, stop_loss, hard_exit)
     std::function<TriState(const IRuleVariableProvider&)> evaluateCondition;
     RuleDecision decision;
 };
@@ -114,5 +115,15 @@ enum class RuleSource : std::uint8_t { BuiltIn, UserFile };
 [[nodiscard]] std::unique_ptr<RuleLibrary> loadRuleLibrary(
     const foundation::json::JsonFacade& compiledJson,
     const ParamOverrides& paramOverrides = {});
+
+/// @brief 规则运行时状态 (从 PG live.rule_state 加载)
+struct RuleRuntimeState {
+    bool enabled{true};
+    std::string severity{"active"};  // active | degraded | disabled
+};
+
+/// @brief 查询规则运行时状态 (从 PG 加载, 线程安全)
+using RuleStateMap = std::unordered_map<std::string, RuleRuntimeState>;
+[[nodiscard]] const RuleStateMap& getRuleStates();
 
 } // namespace domain::strategy::rules

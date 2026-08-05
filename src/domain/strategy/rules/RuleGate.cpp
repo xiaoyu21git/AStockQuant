@@ -15,6 +15,7 @@ int RuleGate::configure(const std::vector<std::string>& enabledTemplateIds,
                         const std::vector<std::string>& ablatedTemplateIds)
 {
     m_marketRules.clear(); m_signalRules.clear(); m_positionRules.clear();
+    m_templateTags.clear();
     m_boundTemplates = 0;
 
     for (const auto& tid : enabledTemplateIds) {
@@ -30,6 +31,7 @@ int RuleGate::configure(const std::vector<std::string>& enabledTemplateIds,
             continue;
         }
         const auto& compiledTemplate = *it->second;
+        m_templateTags[tid] = compiledTemplate.tags;
         for (const auto& rule : compiledTemplate.rules) {
             BoundRule bound{&rule, tid};
             if (rule.stage == "market")
@@ -67,8 +69,19 @@ RuleAction RuleGate::runRules(std::vector<BoundRule>& rules,
     // - Block/Freeze/Exit/Reduce 等阻断动作 → 立即返回, 终止审核
     // - Pass 类动作 (如 eligibility 资格确认) → 仅计数继续看下一个模板
     for (auto& bound : rules) {
+        // ── 规则运行时状态: disabled → 跳过; degraded → 评估但不阻断 ──
+        const auto& ruleStates = getRuleStates();
+        auto stateIt = ruleStates.find(bound.rule->ruleId);
+        bool ruleDisabled = (stateIt != ruleStates.end() && !stateIt->second.enabled);
+        bool ruleDegraded = (stateIt != ruleStates.end() && stateIt->second.severity == "degraded");
+
         const auto& statsEntry = m_stats.byTemplate[bound.templateId];
         auto& stats = const_cast<RuleTemplateStats&>(statsEntry);
+
+        if (ruleDisabled) {
+            ++stats.dataMissing;
+            continue;
+        }
         ++stats.evaluated;
 
         const TriState verdict = bound.rule->evaluateCondition(provider);
@@ -76,10 +89,15 @@ RuleAction RuleGate::runRules(std::vector<BoundRule>& rules,
         if (verdict == TriState::Pass) {
             ++stats.hits;
             if (bound.rule->decision.action == RuleAction::Block) ++stats.blockedSignals;
-            if (bound.rule->decision.action == RuleAction::Pass) continue;  // 资格确认不计入阻断
+            if (bound.rule->decision.action == RuleAction::Pass) continue;
+            // degraded: 命中但仅记录归因, 不阻断
+            if (ruleDegraded) continue;
             m_lastHitTemplateId = bound.templateId;
             m_lastHitRuleId = bound.rule->ruleId;
-            return bound.rule->decision.action;  // Block/Freeze/Exit/Reduce → 立即生效
+            auto tagIt = m_templateTags.find(bound.templateId);
+            m_lastHitTemplateTags = tagIt != m_templateTags.end() ? tagIt->second : std::vector<std::string>{};
+            m_lastHitRuleTags = bound.rule->tags;
+            return bound.rule->decision.action;
         }
         // Fail: 本条规则条件不满足, 继续下一条
     }

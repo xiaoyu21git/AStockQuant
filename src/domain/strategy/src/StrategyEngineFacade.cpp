@@ -156,6 +156,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
             params.maxPositions = factorTargetPositionCount;
         params.maxWeightPerStock = root.has("maxWeightPerStock") ? root.get("maxWeightPerStock").asDouble() : 0.1;
         params.minWeightPerStock = root.has("minWeightPerStock") ? root.get("minWeightPerStock").asDouble() : 0.0;
+        params.minHoldDays = root.has("minHoldDays") ? root.get("minHoldDays").asInt() : 0;
         params.maxOrderQuantity = root.has("maxOrderQuantity") ? static_cast<std::uint32_t>(root.get("maxOrderQuantity").asInt()) : 100U;
         params.stopLossPercent   = root.has("stopLossPercent")   ? root.get("stopLossPercent").asDouble()   : 10.0;
         params.takeProfitPercent = root.has("takeProfitPercent") ? root.get("takeProfitPercent").asDouble() : 20.0;
@@ -317,6 +318,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     if (!runtimeStrategy || !engine->registerStrategy(runtimeStrategy, ctx).isOk())
         return nullptr;
 
+    engine->m_minHoldDays = params.minHoldDays;
     return engine;
 
     } catch (const std::exception& e) {
@@ -1956,6 +1958,27 @@ StrategyBacktestResult StrategyEngine::backtest(
                     posCtx.pnlPercent = (currentPrice - posCtx.entryPrice) / posCtx.entryPrice * 100.0;  // 百分数口径, 与规则阈值(如 ≥12)一致
                 ruleProvider.setCandidate(posCtx);
                 const rules::RuleAction exitAction = m_ruleGate.positionAction(ruleProvider);
+
+                // ── 最少持有期检查(v0.15): 非硬止损规则触发的卖出需满足 minHoldDays ──
+                bool isHardStop = false;
+                if (m_minHoldDays > 0 && (exitAction == rules::RuleAction::Exit || exitAction == rules::RuleAction::Reduce)) {
+                    // 优先检查规则级 tags, 回退到模板级 tags
+                    const auto& ruleTags = m_ruleGate.lastHitRuleTags();
+                    const auto& tmplTags = m_ruleGate.lastHitTemplateTags();
+                    isHardStop = std::find(ruleTags.begin(), ruleTags.end(), "hard-stop") != ruleTags.end()
+                              || std::find(tmplTags.begin(), tmplTags.end(), "hard-stop") != tmplTags.end();
+                    if (!isHardStop) {
+                        auto bdIt = buyDateMap.find(fullSymbol);
+                        if (bdIt != buyDateMap.end()) {
+                            int entryRow = static_cast<int>(bdIt->second);
+                            int daysHeld = r - entryRow;  // 行号差 = 交易日数
+                            if (daysHeld < m_minHoldDays) {
+                                continue;  // 持有期不足, 跳过此卖出(硬止损除外)
+                            }
+                        }
+                    }
+                }
+
                 if (exitAction == rules::RuleAction::Exit || exitAction == rules::RuleAction::Reduce) {
                     // 归因记录: 规则触发的出场
                     const double exitPrice = static_cast<double>(closeMat.data[

@@ -59,6 +59,10 @@ public:
     [[nodiscard]] const std::string& lastHitTemplateId() const noexcept { return m_lastHitTemplateId; }
     /// @brief 最近一次命中规则的 ruleId (供归因记录)
     [[nodiscard]] const std::string& lastHitRuleId() const noexcept { return m_lastHitRuleId; }
+    /// @brief 最近一次命中模板的 tags (用于判断 isHardStop 等标记)
+    [[nodiscard]] const std::vector<std::string>& lastHitTemplateTags() const noexcept { return m_lastHitTemplateTags; }
+    /// @brief 最近一次命中规则的 tags (规则级, 如 hard-stop)
+    [[nodiscard]] const std::vector<std::string>& lastHitRuleTags() const noexcept { return m_lastHitRuleTags; }
 
     // ── v2.1 评分接口: 规则从闸门升级为评分工 ──
 
@@ -86,6 +90,9 @@ private:
     int m_boundTemplates{0};
     std::string m_lastHitTemplateId;
     std::string m_lastHitRuleId;
+    std::vector<std::string> m_lastHitTemplateTags;
+    std::vector<std::string> m_lastHitRuleTags;  // 最近命中规则的 tags
+    std::unordered_map<std::string, std::vector<std::string>> m_templateTags;  // templateId → tags
 };
 
 } // namespace domain::strategy::rules

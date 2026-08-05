@@ -270,6 +270,12 @@ std::unique_ptr<RuleLibrary> loadRuleLibrary(const foundation::json::JsonFacade&
                 rule.ruleId = ruleNode.has("id") ? ruleNode.get("id").asString() : "";
                 rule.stage = ruleNode.has("stage") ? ruleNode.get("stage").asString() : "";
                 rule.priority = ruleNode.has("priority") ? ruleNode.get("priority").asInt() : 0;
+                // 规则级 tags (如 hard-stop, stop_loss, hard_exit)
+                if (ruleNode.has("tags")) {
+                    auto ruleTags = ruleNode.get("tags");
+                    for (std::size_t k = 0; k < ruleTags.size(); ++k)
+                        rule.tags.push_back(ruleTags.at(k).asString());
+                }
                 if (ruleNode.has("when")) {
                     auto whenNode = ruleNode.get("when");
                     // 查找该模板的用户参数覆盖

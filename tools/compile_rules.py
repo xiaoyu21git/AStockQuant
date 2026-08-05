@@ -93,14 +93,7 @@ def compile_rules(verbose=False):
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(compiled_json, f, ensure_ascii=False, indent=2)
 
-    # 同步副本到 bin 目录 (Debug/Release 都能就近加载)
-    import shutil
-    for subdir in ("Debug", "Release"):
-        dest_dir = os.path.join(PROJECT_ROOT, "bin", subdir, "config", "rules")
-        dest_file = os.path.join(dest_dir, "compiled.json")
-        os.makedirs(dest_dir, exist_ok=True)
-        shutil.copy2(OUTPUT_PATH, dest_file)
-
+    # 内置规则已编译进 EXE 二进制 (embed_rules.py → rules_builtin.cpp), 不再拷贝到 bin/
     print(f"编译完成: {len(templates_out)} 个模板 → {OUTPUT_PATH} "
           f"({os.path.getsize(OUTPUT_PATH) / 1024:.0f} KB)")
     if errors:

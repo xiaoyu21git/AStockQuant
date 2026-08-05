@@ -48,6 +48,8 @@ namespace builtin {
 namespace {
 std::unique_ptr<CompositeRuleRepository> s_compositeRepo;
 std::mutex s_compositeMutex;
+RuleStateMap s_ruleStates;
+std::mutex s_ruleStatesMutex;
 }
 
 void initCompositeRepo()
@@ -58,6 +60,7 @@ void initCompositeRepo()
                              << " detail=" << detail;
     });
     ParamOverrides overrides;
+    RuleStateMap ruleStates;
     try {
         auto& pool = astock::database::NativePgConnectionPool::instance();
         auto db = pool.getConnection();
@@ -68,8 +71,22 @@ void initCompositeRepo()
                 overrides[row.getString("template_id")]
                          [row.getString("param_key")] = row.getDouble("param_value");
             }
+            // 加载规则运行时状态
+            auto stateResult = db->executeQuery(
+                "SELECT rule_id, template_id, enabled, severity FROM live.rule_state");
+            for (auto& row : stateResult.getRows()) {
+                RuleRuntimeState rs;
+                rs.enabled = row.getInt("enabled") != 0;
+                rs.severity = row.getString("severity", "active");
+                ruleStates[row.getString("rule_id")] = rs;
+            }
+            INTERNAL_INFO_STREAM << "[RuleRepo] 规则状态加载: " << ruleStates.size() << " 条";
         }
     } catch (...) {}
+    {
+        std::lock_guard<std::mutex> lock(s_ruleStatesMutex);
+        s_ruleStates = std::move(ruleStates);
+    }
     repo->initialize(builtin::getBuiltinRulesJson(), "config/rules/user", overrides);
     std::lock_guard<std::mutex> lock(s_compositeMutex);
     s_compositeRepo = std::move(repo);
@@ -85,6 +102,11 @@ const RuleLibrary* sharedRuleLibrary()
 {
     auto lib = sharedCompositeRepo().library();
     return lib.get();
+}
+
+const RuleStateMap& getRuleStates() {
+    std::lock_guard<std::mutex> lock(s_ruleStatesMutex);
+    return s_ruleStates;
 }
 
 } // namespace domain::strategy::rules

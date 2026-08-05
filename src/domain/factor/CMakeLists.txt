@@ -183,6 +183,7 @@ set(FACTOR_SOURCES
     src/FactorParamsStubs.cpp
     src/CommodityEventDetector.cpp
     src/FactorMetricsCalculator.cpp
+    src/FactorWeightOptimizer.cpp
     src/factor_compute/FactorSignalSetAssembler.cpp
     src/factor_compute/FactorComputeEngine.cpp
     src/factor_compute/FactorRegistry.cpp
@@ -259,6 +260,7 @@ set(FACTOR_HEADERS
     include/FactorBacktestOrchestrator.h
     include/FactorBacktestTypes.h
     include/FactorMetricsCalculator.h
+    include/FactorWeightOptimizer.h
     include/BacktestRunConfig.h
     ../factor_check/include/factor_check/FactorSupportEvaluator.h
     ../factor_check/include/factor_check/FactorSupportInfo.h

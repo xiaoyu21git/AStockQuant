@@ -1,8 +1,8 @@
 {
   "version": 1,
   "namespace": "a_share_short_term",
-  "compiled_at": "2026-08-03T14:55:05.780775",
-  "template_count": 84,
+  "compiled_at": "2026-08-05T22:17:51",
+  "template_count": 82,
   "templates": [
     {
       "templateId": "template_entry_weak_to_strong_v1",
@@ -412,7 +412,7 @@
       "displayName": "分批止盈模板",
       "fileName": "exit_scale_out_take_profit.yaml",
       "phase": "rebalance",
-      "summary": "结构止盈: 前高85%减30->超涨MA110%减30->回撤6%清仓->动能<50减30->支撑破位清仓",
+      "summary": "四级止盈(压力+超涨+支撑+回吐): 前高压力92%减30→超涨MA20/110%减30→支撑破位<0.98清仓→回吐≥5%清仓",
       "actions": [
         "reduce",
         "exit"
@@ -425,10 +425,56 @@
       "namespace": "trading.exit.scale_out_take_profit",
       "rules": [
         {
-          "id": "pressure-reduce",
-          "name": "前高压力减仓",
+          "id": "profit-ma5-break-reduce",
+          "name": "破5日线减仓",
           "stage": "rebalance",
           "priority": 86,
+          "description": "浮盈3%以上但收盘跌破5日线。上升趋势中价格应沿5日线攀升, 跌破说明短线动能转弱——可能只是回调也可能是趋势逆转的开始。先减仓30%观察, 若回踩20日线不破可再加仓。",
+          "tags": [
+            "take_profit",
+            "ma5_break",
+            "reduce"
+          ],
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.pnl_percent"
+                },
+                "right": 3
+              },
+              {
+                "op": "lt",
+                "left": {
+                  "var": "position.close_below_board_pivot_ratio"
+                },
+                "right": 1.0
+              }
+            ]
+          },
+          "then": {
+            "result": "reduce",
+            "reason_code": "profit_ma5_break_reduce",
+            "message": "跌破5日线, 短线动能转弱, 减仓30%",
+            "payload": {
+              "reduce_ratio": 0.3,
+              "state": "ma5_reduced"
+            }
+          }
+        },
+        {
+          "id": "profit-pressure-reduce",
+          "name": "前高压力减仓",
+          "stage": "rebalance",
+          "priority": 83,
+          "description": "浮盈3%以上且收盘接近60日前高(≥90%), 前高是重要阻力位, 一次性突破概率不高, 先减仓30%。突破后回踩确认再加仓。",
+          "tags": [
+            "take_profit",
+            "pressure",
+            "reduce"
+          ],
           "when": {
             "op": "all",
             "conditions": [
@@ -444,59 +490,31 @@
                 "left": {
                   "var": "position.previous_high_breakout_ratio"
                 },
-                "right": 0.85
+                "right": 0.9
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "pressure",
-            "message": "前高压力, 减30%",
+            "reason_code": "profit_pressure_reduce",
+            "message": "接近前高压力位, 减仓30%",
             "payload": {
               "reduce_ratio": 0.3,
-              "state": "pressure"
+              "state": "pressure_reduced"
             }
           }
         },
         {
-          "id": "overextend-reduce",
+          "id": "profit-overextend-reduce",
           "name": "超涨减仓",
           "stage": "rebalance",
-          "priority": 83,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 5
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.close_below_rebound_pivot_ratio"
-                },
-                "right": 1.1
-              }
-            ]
-          },
-          "then": {
-            "result": "reduce",
-            "reason_code": "overextend",
-            "message": "超涨, 减30%",
-            "payload": {
-              "reduce_ratio": 0.3,
-              "state": "overextend"
-            }
-          }
-        },
-        {
-          "id": "trailing-protect",
-          "name": "动态回撤保护",
-          "stage": "rebalance",
-          "priority": 81,
+          "priority": 80,
+          "description": "浮盈8%以上且收盘超MA20的110%, 短期涨幅过大已远离中期均线, 均值回归压力显著, 减仓30%。",
+          "tags": [
+            "take_profit",
+            "overextend",
+            "reduce"
+          ],
           "when": {
             "op": "all",
             "conditions": [
@@ -510,87 +528,19 @@
               {
                 "op": "ge",
                 "left": {
-                  "var": "position.trailing_drawdown_ratio"
+                  "var": "position.close_below_rebound_pivot_ratio"
                 },
-                "right": 0.06
-              }
-            ]
-          },
-          "then": {
-            "result": "exit",
-            "reason_code": "trailing",
-            "message": "回撤6%, 清仓锁利",
-            "payload": {
-              "reduce_ratio": 1.0,
-              "state": "trail_exit"
-            }
-          }
-        },
-        {
-          "id": "momentum-fade-reduce",
-          "name": "动能衰减减仓",
-          "stage": "rebalance",
-          "priority": 80,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 3
-              },
-              {
-                "op": "lt",
-                "left": {
-                  "var": "position.trend_health_score"
-                },
-                "right": 50
+                "right": 1.1
               }
             ]
           },
           "then": {
             "result": "reduce",
-            "reason_code": "momentum_fade",
-            "message": "动能衰减, 减30%",
+            "reason_code": "profit_overextend_reduce",
+            "message": "超涨远离20日线, 减仓30%",
             "payload": {
               "reduce_ratio": 0.3,
-              "state": "momentum_fade"
-            }
-          }
-        },
-        {
-          "id": "support-break-exit",
-          "name": "支撑破位清仓",
-          "stage": "rebalance",
-          "priority": 77,
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "ge",
-                "left": {
-                  "var": "position.pnl_percent"
-                },
-                "right": 2
-              },
-              {
-                "op": "lt",
-                "left": {
-                  "var": "position.close_below_rebound_pivot_ratio"
-                },
-                "right": 1.0
-              }
-            ]
-          },
-          "then": {
-            "result": "exit",
-            "reason_code": "support_break",
-            "message": "破MA20, 清仓",
-            "payload": {
-              "reduce_ratio": 1.0,
-              "state": "support_exit"
+              "state": "overextend_reduced"
             }
           }
         }
@@ -601,8 +551,9 @@
       "displayName": "情绪退潮冻结模板",
       "fileName": "risk_market_emotion_cooling_freeze.yaml",
       "phase": "market",
-      "summary": "市场情绪退潮或恐慌且市场宽度或回封率同步恶化时, 使用freeze动作无条件冻结新开仓。",
+      "summary": "市场情绪退潮或恐慌且市场宽度或回封率恶化时, 使用freeze动作无条件冻结新开仓。",
       "actions": [
+        "state_switch",
         "freeze"
       ],
       "tags": [
@@ -617,7 +568,7 @@
           "name": "情绪退潮冻结新开仓",
           "stage": "market",
           "priority": 100,
-          "description": "市场情绪处于退潮或恐慌且市场宽度或回封率同步恶化时, 无条件冻结新增仓位。使用freeze动作确保规则闸门实际拦截。",
+          "description": "市场情绪处于退潮或恐慌且市场宽度或回封率同步恶化时, 无条件冻结新增仓位。注意: 使用 freeze 动作而非 state_switch, 确保规则闸门实际拦截。",
           "tags": [
             "market",
             "risk",
@@ -1515,7 +1466,7 @@
       "displayName": "承接走弱退出模板",
       "fileName": "exit_acceptance_breakdown.yaml",
       "phase": "rebalance",
-      "summary": "硬止损-8% + 支撑破位",
+      "summary": "五级止损(硬止损+破位加速+趋势破坏+承接崩塌+减仓): -12%→亏5%+破MA20→趋势坏→承接<20→承接<40+日内回撤≥2%减半仓",
       "actions": [
         "reduce",
         "exit"
@@ -1528,21 +1479,26 @@
       "namespace": "trading.exit.acceptance_breakdown",
       "rules": [
         {
-          "id": "hard-stop",
-          "name": "硬止损(-8%)",
+          "id": "hard-stop-pnl-floor",
+          "name": "硬止损 (最后防线)",
           "stage": "rebalance",
           "priority": 97,
+          "description": "亏损达到-12%, 无条件清仓退出。",
+          "tags": [
+            "stop_loss",
+            "hard_exit"
+          ],
           "when": {
             "op": "le",
             "left": {
               "var": "position.pnl_percent"
             },
-            "right": -8
+            "right": -12
           },
           "then": {
             "result": "exit",
-            "reason_code": "hard_stop",
-            "message": "亏损-8%, 清仓",
+            "reason_code": "hard_stop_pnl_floor",
+            "message": "亏损达到-12%, 无条件清仓",
             "payload": {
               "reduce_ratio": 1.0,
               "state": "hard_stopped"
@@ -1550,10 +1506,56 @@
           }
         },
         {
-          "id": "support-break",
-          "name": "支撑破位退出",
+          "id": "breakdown-accelerate-exit",
+          "name": "破位加速止损",
           "stage": "rebalance",
-          "priority": 85,
+          "priority": 94,
+          "description": "亏损超5%且收盘跌破MA20达3%以上, 下跌在加速, 不等硬止损。",
+          "tags": [
+            "stop_loss",
+            "breakdown_accelerate",
+            "exit"
+          ],
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "lt",
+                "left": {
+                  "var": "position.pnl_percent"
+                },
+                "right": -5
+              },
+              {
+                "op": "lt",
+                "left": {
+                  "var": "position.close_below_rebound_pivot_ratio"
+                },
+                "right": 0.97
+              }
+            ]
+          },
+          "then": {
+            "result": "exit",
+            "reason_code": "breakdown_accelerate_exit",
+            "message": "亏损+破MA20支撑, 下跌加速, 提前截断",
+            "payload": {
+              "reduce_ratio": 1.0,
+              "state": "breakdown_exited"
+            }
+          }
+        },
+        {
+          "id": "profit-trailing-stop",
+          "name": "利润保护止损",
+          "stage": "rebalance",
+          "priority": 92,
+          "description": "已有12%以上可观利润, 从持仓高点回撤12%立即清仓保护利润。",
+          "tags": [
+            "stop_loss",
+            "trailing_stop",
+            "profit_protect"
+          ],
           "when": {
             "op": "all",
             "conditions": [
@@ -1562,24 +1564,147 @@
                 "left": {
                   "var": "position.pnl_percent"
                 },
-                "right": 3
+                "right": 12
               },
               {
-                "op": "lt",
+                "op": "ge",
                 "left": {
-                  "var": "position.close_below_rebound_pivot_ratio"
+                  "var": "position.trailing_drawdown_ratio"
                 },
-                "right": 1.0
+                "right": 0.12
               }
             ]
           },
           "then": {
             "result": "exit",
-            "reason_code": "support_break",
-            "message": "有利但破MA20, 清仓",
+            "reason_code": "profit_trailing_stop",
+            "message": "利润保护触发, 从高点回撤12%, 清仓锁定利润",
             "payload": {
               "reduce_ratio": 1.0,
-              "state": "support_exit"
+              "state": "profit_protected"
+            }
+          }
+        },
+        {
+          "id": "trend-damage-exit",
+          "name": "趋势破坏退出",
+          "stage": "rebalance",
+          "priority": 91,
+          "description": "收盘跌破MA20且MA20斜率转负, 趋势结构已确认破坏。唯一基于趋势结构的出场——不会被反复穿越骗炮。",
+          "tags": [
+            "stop_loss",
+            "trend_damage",
+            "exit"
+          ],
+          "when": {
+            "op": "truthy",
+            "value": {
+              "var": "position.trend_damage_confirmed"
+            }
+          },
+          "then": {
+            "result": "exit",
+            "reason_code": "trend_damage_exit",
+            "message": "趋势结构已确认破坏, 执行退出",
+            "payload": {
+              "reduce_ratio": 1.0,
+              "state": "trend_damaged"
+            }
+          }
+        },
+        {
+          "id": "support-break-exit",
+          "name": "支撑破位退出",
+          "stage": "rebalance",
+          "priority": 82,
+          "description": "收盘跌破MA20(close/MA20<0.99)。排在止盈减仓(p86-p80)之后, 给MA5破位减仓一个观察机会。减仓后若继续恶化至此才清仓。",
+          "tags": [
+            "stop_loss",
+            "support_break",
+            "exit"
+          ],
+          "when": {
+            "op": "lt",
+            "left": {
+              "var": "position.close_below_rebound_pivot_ratio"
+            },
+            "right": 0.99
+          },
+          "then": {
+            "result": "exit",
+            "reason_code": "support_break_exit",
+            "message": "跌破MA20支撑, 上涨结构受损, 清仓",
+            "payload": {
+              "reduce_ratio": 1.0,
+              "state": "support_broken_exit"
+            }
+          }
+        },
+        {
+          "id": "acceptance-collapse-exit",
+          "name": "承接崩塌退出",
+          "stage": "rebalance",
+          "priority": 88,
+          "description": "日内承接评分低于20, 买方完全消失, 独立触发退出。",
+          "tags": [
+            "stop_loss",
+            "acceptance_collapse",
+            "exit"
+          ],
+          "when": {
+            "op": "lt",
+            "left": {
+              "var": "position.acceptance_strength_score"
+            },
+            "right": 20
+          },
+          "then": {
+            "result": "exit",
+            "reason_code": "acceptance_collapse_exit",
+            "message": "承接崩塌, 买方消失, 执行退出",
+            "payload": {
+              "reduce_ratio": 1.0,
+              "state": "acceptance_collapsed"
+            }
+          }
+        },
+        {
+          "id": "acceptance-weaken-reduce",
+          "name": "预警减仓",
+          "stage": "rebalance",
+          "priority": 84,
+          "description": "承接转弱(评分<40)且日内有明显抛压(开-低≥2%), 先减半仓观察。",
+          "tags": [
+            "stop_loss",
+            "acceptance_weaken",
+            "reduce"
+          ],
+          "when": {
+            "op": "all",
+            "conditions": [
+              {
+                "op": "lt",
+                "left": {
+                  "var": "position.acceptance_strength_score"
+                },
+                "right": 40
+              },
+              {
+                "op": "ge",
+                "left": {
+                  "var": "position.intraday_pullback_percent"
+                },
+                "right": 2.0
+              }
+            ]
+          },
+          "then": {
+            "result": "reduce",
+            "reason_code": "acceptance_weaken_reduce",
+            "message": "承接转弱且日内抛压明显, 减半仓",
+            "payload": {
+              "reduce_ratio": 0.5,
+              "state": "defense_mode"
             }
           }
         }
@@ -2478,7 +2603,7 @@
       "displayName": "趋势参与资格过滤模板",
       "fileName": "eligibility_trend_participation_guard.yaml",
       "phase": "eligibility",
-      "summary": "标的必须在成交活跃度(量比≥0.60)、均线位置与趋势斜率三个维度同时满足收紧后的门槛, 才允许进入后续趋势信号确认。不满足任一条件的候选静默丢弃。",
+      "summary": "量比≥0.60、均线偏离收紧至±10~12%、斜率门槛提升, 三个维度同时满足才放行。不满足任一条件静默丢弃。",
       "actions": [
         "pass"
       ],
@@ -2495,7 +2620,7 @@
           "name": "趋势参与资格过滤规则",
           "stage": "eligibility",
           "priority": 88,
-          "description": "标的必须在成交活跃度(量比≥0.60)、均线位置(偏离≤10~12%)与趋势斜率三个维度同时满足收紧后的门槛, 才允许进入后续趋势信号确认。不满足任一条件的候选静默丢弃。",
+          "description": "标的必须在成交活跃度、均线位置与趋势斜率三个维度同时满足收紧后的门槛, 才允许进入后续趋势信号确认。不满足任一条件的候选静默丢弃。",
           "tags": [
             "a_share_trend",
             "eligibility",
@@ -2595,7 +2720,7 @@
       "displayName": "趋势结构破坏阻断模板",
       "fileName": "watch_trend_structure_breakdown.yaml",
       "phase": "signal",
-      "summary": "标的已跌破趋势支撑、均线斜率转弱或成交活跃度塌陷时, 阻断继续按趋势候选开仓。阈值较前版收紧以拦截更多弱候选。",
+      "summary": "标的跌破趋势支撑、均线斜率转弱或成交活跃度塌陷时阻断候选开仓。阈值较前版收紧以拦截更多弱候选。",
       "actions": [
         "block",
         "unwatch"
@@ -2714,7 +2839,7 @@
           "then": {
             "result": "block",
             "reason_code": "trend_structure_breakdown_block",
-            "message": "标的趋势结构已明显走坏，阻断继续按趋势候选开仓",
+            "message": "标的趋势结构已明显走坏, 阻断继续按趋势候选开仓",
             "payload": {
               "state": "abandoned",
               "action": "unwatch"
@@ -9581,7 +9706,7 @@
       "displayName": "趋势中性环境放行模板",
       "fileName": "risk_market_trend_neutral_allow_entry.yaml",
       "phase": "market",
-      "summary": "市场体制为牛市或震荡且回撤≤25%时允许筛选新仓。已移除breadth≥0.12和strength≥0.02两个橡皮图章分支。",
+      "summary": "市场体制为牛市或震荡且回撤≤25%时允许筛选新仓。已移除breadth≥0.12和strength≥0.02橡皮图章分支。",
       "actions": [
         "state_switch"
       ],
@@ -9750,7 +9875,7 @@
       "displayName": "熊市冻结新开仓模板",
       "fileName": "risk_market_bear_freeze_entry.yaml",
       "phase": "market",
-      "summary": "熊市体制冻结: regime==bear冻结新开仓",
+      "summary": "三级熊市冻结: 熊市体制→准熊市退潮→恐慌波动, 独立OR触发冻结。不再要求四条件同时满足。",
       "actions": [
         "freeze"
       ],
@@ -9758,51 +9883,6 @@
         "risk",
         "market_risk",
         "bear_market"
-      ],
-      "namespace": "trading.risk.market_bear_freeze_entry",
-      "rules": [
-        {
-          "id": "market-bear-regime-freeze",
-          "name": "熊市体制冻结",
-          "stage": "market",
-          "priority": 99,
-          "when": {
-            "op": "eq",
-            "left": {
-              "var": "market.regime_state"
-            },
-            "right": "bear"
-          },
-          "then": {
-            "result": "freeze",
-            "reason_code": "market_bear_regime_freeze",
-            "message": "熊市体制, 冻结新仓",
-            "payload": {
-              "state": "frozen",
-              "gate_level": "bear_regime_freeze",
-              "blocked_actions": [
-                "candidate_entry",
-                "open"
-              ],
-              "focus": "熊市不买"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "templateId": "template_risk_market_bear_freeze_entry",
-      "displayName": "risk_market_bear_freeze_entry.yaml",
-      "fileName": "risk_market_bear_freeze_entry.yaml",
-      "phase": "risk",
-      "summary": "",
-      "actions": [
-        "freeze",
-        "candidate_entry",
-        "open"
-      ],
-      "tags": [
-        "market_regime"
       ],
       "namespace": "trading.risk.market_bear_freeze_entry",
       "rules": [
@@ -9825,7 +9905,7 @@
             },
             "right": "bear"
           },
-          "result": {
+          "then": {
             "result": "freeze",
             "reason_code": "market_bear_regime_freeze",
             "message": "市场处于熊市体制, 冻结新增仓位",
@@ -9871,7 +9951,7 @@
               }
             ]
           },
-          "result": {
+          "then": {
             "result": "freeze",
             "reason_code": "market_near_bear_freeze",
             "message": "市场宽度严重不足且回撤显著, 冻结新增仓位",
@@ -9905,7 +9985,7 @@
             },
             "right": 0.7
           },
-          "result": {
+          "then": {
             "result": "freeze",
             "reason_code": "market_panic_vol_freeze",
             "message": "市场波动剧烈, 冻结新增仓位",
@@ -9923,171 +10003,51 @@
       ]
     },
     {
-      "templateId": "template_risk_market_sideways_selective_entry",
-      "displayName": "risk_market_sideways_selective_entry.yaml",
-      "fileName": "risk_market_sideways_selective_entry.yaml",
-      "phase": "risk",
-      "summary": "",
+      "templateId": "template_risk_strategy_drawdown_freeze_v1",
+      "displayName": "策略回撤冻结模板",
+      "fileName": "risk_strategy_drawdown_freeze.yaml",
+      "phase": "market",
+      "summary": "账户从历史峰值回撤超过15%, 冻结新开仓。",
       "actions": [
-        "freeze",
-        "candidate_entry",
-        "open"
+        "freeze"
       ],
       "tags": [
-        "market_regime"
+        "risk",
+        "strategy",
+        "drawdown"
       ],
-      "namespace": "trading.risk.market_sideways_selective_entry",
+      "namespace": "trading.risk.strategy_drawdown_freeze",
       "rules": [
         {
-          "id": "market-sideways-selective-entry",
-          "name": "震荡市精选放行规则",
+          "id": "strategy-drawdown-freeze",
+          "name": "账户回撤冻结",
           "stage": "market",
-          "priority": 84,
-          "description": "市场处于震荡阶段且波动冲击受控时，仅放行低风险、强确认类候选。",
+          "priority": 87,
+          "description": "账户从历史峰值回撤超过15%, 冻结新开仓。",
           "tags": [
-            "market",
-            "gate",
-            "sideways_market",
-            "selective_entry"
+            "risk",
+            "strategy",
+            "drawdown",
+            "freeze"
           ],
           "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "eq",
-                "left": {
-                  "var": "market.regime_state"
-                },
-                "right": "sideways"
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "market.breadth_above_ma60_ratio"
-                },
-                "right": 0.38
-              },
-              {
-                "op": "le",
-                "left": {
-                  "var": "market.breadth_above_ma60_ratio"
-                },
-                "right": 0.58
-              },
-              {
-                "op": "le",
-                "left": {
-                  "var": "market.volatility_shock_score"
-                },
-                "right": 0.58
-              },
-              {
-                "op": "le",
-                "left": {
-                  "var": "market.drawdown_from_recent_high"
-                },
-                "right": 0.1
-              }
-            ]
-          },
-          "result": {
-            "result": "state_switch",
-            "reason_code": "market_sideways_selective_entry",
-            "message": "市场处于震荡阶段，仅放行精选确认类新增仓位",
-            "payload": {
-              "state": "selective_active",
-              "gate_level": "sideways_selective_allow",
-              "allow_actions": [
-                "observe",
-                "candidate_entry"
-              ],
-              "focus": "仅放行低吸回补、事件催化和强确认类候选"
+            "op": "ge",
+            "left": {
+              "var": "strategy.drawdown"
             },
-            "state": {
-              "market_state": "selective_active"
-            }
-          }
-        }
-      ]
-    },
-    {
-      "templateId": "template_risk_market_bull_trend_allow_entry",
-      "displayName": "risk_market_bull_trend_allow_entry.yaml",
-      "fileName": "risk_market_bull_trend_allow_entry.yaml",
-      "phase": "risk",
-      "summary": "",
-      "actions": [
-        "freeze",
-        "candidate_entry",
-        "open"
-      ],
-      "tags": [
-        "market_regime"
-      ],
-      "namespace": "trading.risk.market_bull_trend_allow_entry",
-      "rules": [
-        {
-          "id": "market-bull-trend-allow-entry",
-          "name": "牛市趋势放行新开仓",
-          "stage": "market",
-          "priority": 90,
-          "description": "市场处于牛市趋势阶段且广度、趋势强度与年线站稳比例同步改善时，允许恢复趋势类新增仓位。",
-          "tags": [
-            "market",
-            "gate",
-            "bull_market",
-            "trend",
-            "allow_entry"
-          ],
-          "when": {
-            "op": "all",
-            "conditions": [
-              {
-                "op": "eq",
-                "left": {
-                  "var": "market.regime_state"
-                },
-                "right": "bull"
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "market.breadth_above_ma60_ratio"
-                },
-                "right": 0.58
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "market.index_above_ma120_ratio"
-                },
-                "right": 1.01
-              },
-              {
-                "op": "ge",
-                "left": {
-                  "var": "market.trend_strength_score"
-                },
-                "right": 0.62
-              }
-            ]
+            "right": 0.15
           },
-          "result": {
-            "result": "state_switch",
-            "reason_code": "market_bull_trend_allow_entry",
-            "message": "市场进入牛市趋势阶段，允许恢复趋势类新增仓位",
+          "then": {
+            "result": "freeze",
+            "reason_code": "strategy_drawdown_freeze",
+            "message": "账户回撤超15%, 暂停开新仓",
             "payload": {
-              "state": "active",
-              "gate_level": "bull_market_allow",
-              "allow_actions": [
-                "observe",
+              "state": "frozen",
+              "blocked_actions": [
                 "candidate_entry",
                 "open"
               ],
-              "focus": "优先放行趋势突破、回踩确认和中长线趋势类候选"
-            },
-            "state": {
-              "market_state": "active"
+              "focus": "大幅回撤预警, 强制防御"
             }
           }
         }
