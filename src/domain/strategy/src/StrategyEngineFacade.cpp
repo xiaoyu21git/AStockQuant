@@ -2175,12 +2175,11 @@ StrategyBacktestResult StrategyEngine::backtest(
                         boughtToday.insert(symbol);  // T+1: 当日买入, 禁止同日卖出
                         // 交易日志: 买入成交
                         if (m_tradeJournal) {
+                            auto dt = dates[static_cast<std::size_t>(r)].value;
                             m_tradeJournal->log(
-                                "{\"ts\":\"" + std::to_string(dates[static_cast<std::size_t>(r)].value)
-                                + "\",\"type\":\"fill\",\"side\":\"buy\""
-                                + ",\"symbol\":\"" + symbol + "\""
-                                + ",\"qty\":" + std::to_string(filledQty)
-                                + ",\"price\":" + std::to_string(closePrice) + "}");
+                                std::to_string(dt) + " BUY  " + symbol
+                                + "  " + std::to_string(filledQty) + "股  "
+                                + std::to_string(closePrice));
                         }
                     }
                 } else {
@@ -2220,13 +2219,13 @@ StrategyBacktestResult StrategyEngine::backtest(
                         symbolPnl[symbol] += pnl;
                         // 交易日志: 卖出成交
                         if (m_tradeJournal) {
+                            auto dt = dates[static_cast<std::size_t>(r)].value;
+                            auto pnlInt = static_cast<int>(pnl);
                             m_tradeJournal->log(
-                                "{\"ts\":\"" + std::to_string(dates[static_cast<std::size_t>(r)].value)
-                                + "\",\"type\":\"fill\",\"side\":\"sell\""
-                                + ",\"symbol\":\"" + symbol + "\""
-                                + ",\"qty\":" + std::to_string(sellQty)
-                                + ",\"price\":" + std::to_string(closePrice)
-                                + ",\"pnl\":" + std::to_string(static_cast<int>(pnl)) + "}");
+                                std::to_string(dt) + " SELL " + symbol
+                                + "  " + std::to_string(sellQty) + "股  "
+                                + std::to_string(closePrice)
+                                + "  盈亏:" + (pnlInt >= 0 ? "+" : "") + std::to_string(pnlInt));
                         }
                         // ── 持仓诊断 ──
                         {
