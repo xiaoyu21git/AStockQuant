@@ -1759,8 +1759,8 @@ StrategyBacktestResult StrategyEngine::backtest(
             if (!ruleAllowEntriesToday && m_tradeJournal) {
                 m_tradeJournal->log(
                     std::to_string(dates[static_cast<std::size_t>(r)].value)
-                    + " FREEZE template:" + m_ruleGate.lastHitTemplateId()
-                    + " rule:" + m_ruleGate.lastHitRuleId());
+                    + " 冻结 模板:" + m_ruleGate.lastHitTemplateId()
+                    + " 规则:" + m_ruleGate.lastHitRuleId());
             }
         } else {
             ruleAllowEntriesToday = true;
@@ -2065,9 +2065,9 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (m_tradeJournal) {
                             m_tradeJournal->log(
                                 std::to_string(dates[static_cast<std::size_t>(r)].value)
-                                + " REJECT " + symbol
-                                + " rule:" + m_ruleGate.lastHitRuleId()
-                                + " template:" + m_ruleGate.lastHitTemplateId());
+                                + " 拒绝 " + symbol
+                                + " 规则:" + m_ruleGate.lastHitRuleId()
+                                + " 模板:" + m_ruleGate.lastHitTemplateId());
                         }
                         continue;
                     }
@@ -2158,7 +2158,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                     if (m_tradeJournal) {
                         m_tradeJournal->log(
                             std::to_string(dates[static_cast<std::size_t>(r)].value)
-                            + " RISK_REJECT " + symbol
+                            + " 风控拒绝 " + symbol
                             + " " + riskResult.description());
                     }
                     continue;
@@ -2198,7 +2198,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (m_tradeJournal) {
                             auto dt = dates[static_cast<std::size_t>(r)].value;
                             m_tradeJournal->log(
-                                std::to_string(dt) + " BUY  " + symbol
+                                std::to_string(dt) + " 买入 " + symbol
                                 + "  " + std::to_string(filledQty) + "股  "
                                 + std::to_string(closePrice));
                         }
@@ -2243,7 +2243,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                             auto dt = dates[static_cast<std::size_t>(r)].value;
                             auto pnlInt = static_cast<int>(pnl);
                             m_tradeJournal->log(
-                                std::to_string(dt) + " SELL " + symbol
+                                std::to_string(dt) + " 卖出 " + symbol
                                 + "  " + std::to_string(sellQty) + "股  "
                                 + std::to_string(closePrice)
                                 + "  盈亏:" + (pnlInt >= 0 ? "+" : "") + std::to_string(pnlInt));
@@ -2344,7 +2344,7 @@ StrategyBacktestResult StrategyEngine::backtest(
             int posCount = static_cast<int>(backtestPositions.size());
             m_tradeJournal->log(
                 std::to_string(dates[static_cast<std::size_t>(r)].value)
-                + " EOD 持仓:" + std::to_string(posCount)
+                + " 日终 持仓:" + std::to_string(posCount)
                 + " 净值:" + std::to_string(static_cast<int>(equity))
                 + " 现金:" + std::to_string(static_cast<int>(cash)));
         }
