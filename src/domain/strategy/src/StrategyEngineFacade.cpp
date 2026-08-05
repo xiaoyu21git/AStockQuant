@@ -319,6 +319,11 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         return nullptr;
 
     engine->m_minHoldDays = params.minHoldDays;
+    engine->m_strategyName = params.strategyName;
+    // 初始化交易日志: logs/策略名/trade_YYYY-MM-DD.jsonl
+    if (!params.strategyName.empty()) {
+        engine->m_tradeJournal = std::make_unique<TradeJournal>("logs", params.strategyName);
+    }
     return engine;
 
     } catch (const std::exception& e) {
@@ -2168,6 +2173,15 @@ StrategyBacktestResult StrategyEngine::backtest(
                         pos.setLastPrice(closePrice);
                         backtestPositions[symbol] = pos;
                         boughtToday.insert(symbol);  // T+1: 当日买入, 禁止同日卖出
+                        // 交易日志: 买入成交
+                        if (m_tradeJournal) {
+                            m_tradeJournal->log(
+                                "{\"ts\":\"" + std::to_string(dates[static_cast<std::size_t>(r)].value)
+                                + "\",\"type\":\"fill\",\"side\":\"buy\""
+                                + ",\"symbol\":\"" + symbol + "\""
+                                + ",\"qty\":" + std::to_string(filledQty)
+                                + ",\"price\":" + std::to_string(closePrice) + "}");
+                        }
                     }
                 } else {
                     // T+1: 当日买入的标的禁止同日卖出
@@ -2204,6 +2218,16 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
                         else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
                         symbolPnl[symbol] += pnl;
+                        // 交易日志: 卖出成交
+                        if (m_tradeJournal) {
+                            m_tradeJournal->log(
+                                "{\"ts\":\"" + std::to_string(dates[static_cast<std::size_t>(r)].value)
+                                + "\",\"type\":\"fill\",\"side\":\"sell\""
+                                + ",\"symbol\":\"" + symbol + "\""
+                                + ",\"qty\":" + std::to_string(sellQty)
+                                + ",\"price\":" + std::to_string(closePrice)
+                                + ",\"pnl\":" + std::to_string(static_cast<int>(pnl)) + "}");
+                        }
                         // ── 持仓诊断 ──
                         {
                             auto bdIt = buyDateMap.find(symbol);
