@@ -1,7 +1,7 @@
 # 主CMakeLists.txt
 cmake_minimum_required(VERSION 3.15)
 
-project(AstockQuantEngine VERSION 0.12.0)
+project(AstockQuantEngine VERSION 0.15.0)
 
 # ==================== 基础设置 ====================
 set(CMAKE_CXX_STANDARD 17)
