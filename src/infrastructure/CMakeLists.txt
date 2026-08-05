@@ -28,7 +28,7 @@ add_library(infrastructure STATIC
     src/database/StrategyRepository.cpp
     src/database/MarketDataRepository.cpp
     src/database/MarketDataService.cpp
-    src/database/SymbolMapper.cpp
+
     src/database/BacktestResultRepository.cpp
 )
 
