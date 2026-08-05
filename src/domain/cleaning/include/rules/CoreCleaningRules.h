@@ -90,7 +90,11 @@ public:
         if (m_keyFields.empty()) return true;
         std::string key;
         for (const auto& f : m_keyFields) {
-            if (row.has(f.c_str())) key += f + "=" + row.get(f.c_str()).asString() + ";";
+            if (row.has(f.c_str())) {
+                key += f + "=" + row.get(f.c_str()).asString() + ";";
+            } else {
+                key += f + "=\x01;";  // 缺失键用 SOH 标记，与空值区分
+            }
         }
         if (m_seen.count(key)) return false;
         m_seen.insert(key);
@@ -126,6 +130,8 @@ public:
                     row.set(FF::REPORT_DATE.c_str(), LightRow::createNull());
                 } else if (d.size() >= 10) {
                     row.set(FF::REPORT_DATE.c_str(), LightRow::createString(d.substr(0, 10)));
+                } else {
+                    row.set(FF::REPORT_DATE.c_str(), LightRow::createNull());  // 短日期无效
                 }
             }
         }
@@ -140,6 +146,8 @@ public:
                     row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createNull());
                 } else if (d.size() >= 10) {
                     row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createString(d.substr(0, 10)));
+                } else {
+                    row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createNull());  // 短日期无效
                 }
             }
         }
@@ -168,7 +176,7 @@ public:
         static const FieldKey* finiteFields[] = {
             &FF::EPS, &FF::BPS, &FF::ROE, &FF::ROA, &FF::NET_PROFIT,
             &FF::TOTAL_REVENUE, &FF::EQUITY, &FF::PROFIT_MARGIN,
-            &FF::GROSS_MARGIN, &FF::OPERATING_MARGIN, &FF::NET_MARGIN,
+            &FF::GROSS_MARGIN, &FF::OPERATING_MARGIN,
             &FF::DEBT_TO_EQUITY, &FF::DIVIDEND_YIELD, &FF::PAYOUT_RATIO,
             &FF::OPERATING_CASH_FLOW, &FF::INVESTING_CASH_FLOW, &FF::FINANCING_CASH_FLOW
         };
@@ -415,6 +423,14 @@ public:
     }
 
     bool clean(J& row) override {
+        bool hasPref = row.has(MF::PRE_ADJ_FACTOR.c_str());
+        bool hasPostf = row.has(MF::POST_ADJ_FACTOR.c_str());
+
+        if (!hasPref && !hasPostf) {
+            row.set(IF::ADJUSTED_PRICE_APPLIED.c_str(), LightRow::createBool(false));
+            return true;
+        }
+
         double pref = detail::safeDouble(row, MF::PRE_ADJ_FACTOR, 1.0);
         double postf = detail::safeDouble(row, MF::POST_ADJ_FACTOR, 1.0);
 
@@ -554,6 +570,10 @@ public:
         return "";
     }
 
+    bool appliesTo(const J& row) const override {
+        return row.has(MF::CHANGE_PCT.c_str());
+    }
+
     bool clean(J& row) override {
         double chg = 0.0;
         if (row.has(MF::CHANGE_PCT.c_str())) {
@@ -652,12 +672,12 @@ public:
         }
 
         // 2. 重命名 effective_disclosure_date → disclosure_date
-        if (row.has("effective_disclosure_date") && !row.has(FF::DISCLOSURE_DATE.c_str())) {
-            auto v = row.get("effective_disclosure_date");
+        if (row.has(F_F::EFFECTIVE_DISCLOSURE_DATE.c_str()) && !row.has(FF::DISCLOSURE_DATE.c_str())) {
+            auto v = row.get(F_F::EFFECTIVE_DISCLOSURE_DATE.c_str());
             if (v.isString() && !v.asString().empty()) {
                 row.set(FF::DISCLOSURE_DATE.c_str(), LightRow::createString(v.asString().substr(0, 10)));
             }
-            row.set("effective_disclosure_date", LightRow::createNull());
+            row.set(F_F::EFFECTIVE_DISCLOSURE_DATE.c_str(), LightRow::createNull());
         }
 
         // 3. 格式化日期字段（去掉时间后缀）
@@ -736,6 +756,14 @@ public:
     bool clean(J& row) override {
         if (!row.has(FF::REPORT_DATE.c_str())) return true;
 
+        // 护栏：日线行(带 OHLC/成交量)的 trade_date 是真实交易日，绝不能被披露日覆盖。
+        // 财务数据 join 到每条日线后每行都有 report_date，若不加此护栏，整批日线的 trade_date
+        // 会被改写成披露日 → 同季度所有交易日塌成同一天(数据不重复、日期重复)。
+        // 该规则只对“纯财务行”(无行情价量)做日期对齐。
+        if (row.has(MF::CLOSE.c_str()) || row.has(MF::OPEN.c_str()) || row.has(MF::VOLUME.c_str())) {
+            return true;
+        }
+
         std::string rd = row.get(FF::REPORT_DATE.c_str()).asString();
         if (rd.size() < 10) return true;
 
@@ -813,7 +841,7 @@ public:
     uint8_t executionOrder() const override { return static_cast<uint8_t>(RuleExecutionOrder::STFilter); }
 
     bool clean(J& row) override {
-        // 检查 is_st 标记
+        // 检查 is_st 标记（外部导入数据可能有此字段；PG 标准查询无此列，此分支为兼容预留）
         if (row.has("is_st")) {
             auto v = row.get("is_st");
             if (v.isBool() && v.asBool()) return false;

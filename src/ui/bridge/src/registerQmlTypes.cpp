@@ -10,6 +10,8 @@
 #include "FactorDebugController.h" // 新增：因子调试控制器
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
+#include "CandleDataModel.h"
+#include "CrosshairManager.h"
 #include "MarketDataBridge.h"
 #include "StrategyBridge.h"
 #include "FactorService.h"
@@ -22,9 +24,13 @@
 #include "RiskConfigService.h"
 #include "TradingFormPanelHelper.h"
 #include "UiLifecycleCoordinator.h"
+#include "BacktestAnalyticsService.h"
 #include "StrategyPerformanceModel.h"
 #include "SymbolSearchModel.h"
 #include "RuleTemplateDetailHelper.h"
+#include "RuleTemplateSuggestionService.h"
+#include "DataCleaningServiceRefactored.h"
+#include "StrategyRuleStatsBridge.h"
 
 namespace wang{
 
@@ -69,15 +75,31 @@ namespace wang{
          }
       );
 
-      qmlRegisterSingletonType<bridge::MarketDataBridge>(
-         url, 1, 0, "MarketDataBridge",
-         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
-            Q_UNUSED(engine)
-            Q_UNUSED(scriptEngine)
-            auto* bridge = new bridge::MarketDataBridge();
-            bridge->initializeAsync();
-            return bridge;
+      // 共享 CandleDataModel 实例
+      auto* sharedModel = new bridge::CandleDataModel();
+
+      qmlRegisterSingletonType<bridge::CandleDataModel>(
+         url, 1, 0, "CandleDataModel",
+         [sharedModel](QQmlEngine*, QJSEngine*) -> QObject* {
+            return sharedModel;
          }
+      );
+
+      // 统一的行情桥接层 — 同时注册到两个 QML 名字, 兼容现有 QML 代码
+      auto* marketBridge = new bridge::MarketDataBridge();
+      marketBridge->setModel(sharedModel);
+      marketBridge->initializeAsync();
+
+      qmlRegisterSingletonInstance<bridge::MarketDataBridge>(
+         url, 1, 0, "MarketDataBridge", marketBridge);
+
+      qmlRegisterSingletonInstance<bridge::MarketDataBridge>(
+         url, 1, 0, "StockDataLoader", marketBridge);
+
+      // CrosshairManager — 十字光标状态 (单例, 引擎不接管生命周期)
+      qmlRegisterSingletonInstance<bridge::CrosshairManager>(
+         url, 1, 0, "CrosshairManager",
+         &bridge::CrosshairManager::instance()
       );
 
        qmlRegisterSingletonType<StrategyBridge>(
@@ -170,7 +192,44 @@ namespace wang{
        qmlRegisterType<SymbolSearchModel>(
           url, 1, 0, "SymbolSearchModel");
 
-       qmlRegisterType<RuleTemplateDetailHelper>(
-          url, 1, 0, "RuleTemplateDetailHelper");
+       // QML 侧按 singleton 用法直接调 RuleTemplateDetailHelper.describeBinding(),
+       // 必须注册为 singleton (qmlRegisterType 会导致对类型名调方法 → TypeError)
+       qmlRegisterSingletonType<RuleTemplateDetailHelper>(
+          url, 1, 0, "RuleTemplateDetailHelper",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new RuleTemplateDetailHelper();
+          });
+
+       qmlRegisterSingletonType<RuleTemplateSuggestionService>(
+          url, 1, 0, "RuleTemplateSuggestionService",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new RuleTemplateSuggestionService();
+          });
+
+       // BacktestAnalyticsService — 回测绩效分析
+       qmlRegisterSingletonType<ui::bridge::BacktestAnalyticsService>(
+          url, 1, 0, "BacktestAnalyticsService",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             auto* svc = new ui::bridge::BacktestAnalyticsService();
+             svc->refreshRunList();
+             return svc;
+          });
+
+       // DataCleaningServiceRefactored — 数据清洗服务
+       qmlRegisterSingletonType<DataCleaningServiceRefactored>(
+          url, 1, 0, "DataCleaningServiceRefactored",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             auto* svc = new DataCleaningServiceRefactored();
+             svc->initialize();
+             return svc;
+          });
+
+       // StrategyRuleStatsBridge — 策略规则统计桥接
+       qmlRegisterSingletonType<StrategyRuleStatsBridge>(
+          url, 1, 0, "StrategyRuleStatsBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new StrategyRuleStatsBridge();
+          });
+
    }
 }

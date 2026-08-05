@@ -11,20 +11,13 @@
 
 #include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <unordered_set>
 
 #include "DataCacheAdapter.h"
-#include "factor_check/FactorDetectionCoreService.h"
-#include "factor_check/FactorSupportScopeCacheCore.h"
+#include "factor_check/FactorSupportInfo.h"
+#include "factor_check/FactorSupportScopeCache.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
-
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
 
 namespace factor {
 class BaseFactor;
@@ -89,10 +82,8 @@ private:
         QVariantMap dataSetInfo;
     };
 
-    mutable QHash<QString, std::shared_ptr<factor::BaseFactor>> m_factorInstanceCache;
-    mutable QHash<QString, factor::FactorInstanceInfo> m_instanceInfoCache;
-    mutable std::mutex m_factorInstanceCacheMutex;
-    mutable std::mutex m_instanceInfoCacheMutex;
+    // 缓存已删除 — 统一使用 FactorInstanceManager 的 infoCache_/instanceCache_
+    // resolveInstanceInfo() 和 resolveFactorInstance() 直接走 instanceManager
 
     QString normalizedDataSourceMode(const QString& dataSourceMode) const;
     QStringList dedupeFactorIds(const QStringList& factorIds) const;
@@ -106,19 +97,19 @@ private:
     QStringList declaredRequiredFieldsFromConfig(const factor::FactorInstanceInfo& info) const;
     QStringList normalizedRequiredFields(factor::FactorType runtimeType,
                                          const factor::DataRequirements& requirements) const;
-    QVariantMap buildSupportInfo(const factor::bridge::check::SupportInfo& typedInfo) const;
+    QVariantMap buildSupportInfo(const factor::check::SupportInfo& typedInfo) const;
     QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot) const;
     bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,
                               const QString& field) const;
     QString buildScopeKey(const Request& request) const;
     QString buildDefinitionFingerprint(const factor::FactorInstanceInfo& info) const;
     QString legacyCacheFilePath() const;
-    factor::bridge::check::PersistedFactorEntryMap loadScopeEntries(
+    factor::check::PersistedFactorEntryMap loadScopeEntries(
         const QString& filePath,
         const QString& scopeKey) const;
     void persistScopeEntries(const QString& filePath,
                              const QString& scopeKey,
-                             const factor::bridge::check::PersistedFactorEntryMap& scopeEntries) const;
+                             const factor::check::PersistedFactorEntryMap& scopeEntries) const;
     QString resolveInstanceId(const QString& factorId,
                               const std::function<QString(const QString&)>& resolveOverride) const;
     factor::FactorInstanceInfo resolveInstanceInfo(

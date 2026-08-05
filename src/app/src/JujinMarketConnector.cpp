@@ -1,9 +1,14 @@
 ﻿#include "JujinMarketConnector.h"
 #include "../../engine/include/GmSessionEngine.h"
-#include "../../domain/strategy/include/MarketDataAdapter.h"
+#include "../../../thirdparty/gmsdk/strategy.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
+#include "../../domain/trading/include/OrderBuilder.h"
+#include "../../domain/trading/TradeExecutionEngine.h"
+#include "../../domain/strategy/include/RiskManager.h"
+#include "../../../infrastructure/include/database/OrderRecorder.h"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -22,7 +27,7 @@
 #include "JujinTypes.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "MarketSubscriptionStatusRegistry.h"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/market/AStockSymbol.h"
@@ -240,7 +245,7 @@ bool JujinMarketConnector::start()
     }
 
     auto& cfgMgr = foundation::config::ConfigManager::instance();
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] start requested";
+    INTERNAL_INFO_STREAM << "[JMC] 启动中...";
 
     // 通过 ConfigManager 统一读取 trading_connection.json
     std::string token, accountId, gmStrategyId, accountRuntimeId;
@@ -269,49 +274,7 @@ bool JujinMarketConnector::start()
     engine::TradeEngine::instance().initialize(s);
     engine::AccountEngine::instance().initialize(s);
     engine::OrderManager::instance().initialize(s);
-    INTERNAL_INFO_STREAM << "[JMC] GmSessionEngine 初始化成功";
-
-    // ── 订阅 GmSessionEngine 发布的行情事件 → 推送到策略引擎 ──
-    // GmStrategySession::on_tick() 发布 "trading.market.tick"
-    // 字段: symbol, price(double), volume(double, 瞬时成交量), tradingDay(int64, YYYYMMDD)
-    m_tradingTickSubscription = eventBus->subscribe("trading.market.tick",
-        [this](const engine::EventFormat& event) {
-            auto sym   = event.get<std::string>("symbol");
-            auto price = event.get<double>("price");
-            auto vol   = event.get<double>("volume");
-            auto date  = event.get<std::int64_t>("tradingDay");
-            if (sym.has_value() && price.has_value()) {
-                static int totalTicks = 0;
-                static auto lastReport = std::chrono::steady_clock::now();
-                totalTicks++;
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastReport).count();
-                if (elapsed >= 60) {
-                    INTERNAL_INFO_STREAM << "[行情] tick: " << totalTicks << "/" << elapsed
-                                         << "s ≈ " << (totalTicks / (elapsed > 0 ? elapsed : 1)) << "/s";
-                    totalTicks = 0;
-                    lastReport = now;
-                }
-                domain::strategy::MarketDataAdapter().pushTick(
-                    *sym, *price, vol.value_or(0.0),
-                    date.has_value() ? static_cast<std::int32_t>(*date) : 0);
-            }
-        });
-
-    // GmStrategySession::on_bar() 发布 "trading.market.bar"
-    // 字段: symbol, close(double), volume(double, bar成交量), tradingDay(int64, YYYYMMDD)
-    m_tradingBarSubscription = eventBus->subscribe("trading.market.bar",
-        [this](const engine::EventFormat& event) {
-            auto sym   = event.get<std::string>("symbol");
-            auto price = event.get<double>("close");
-            auto vol   = event.get<double>("volume");
-            auto date  = event.get<std::int64_t>("tradingDay");
-            if (sym.has_value() && price.has_value()) {
-                domain::strategy::MarketDataAdapter().pushTick(
-                    *sym, *price, vol.value_or(0.0),
-                    date.has_value() ? static_cast<std::int32_t>(*date) : 0);
-            }
-        });
+    INTERNAL_DEBUG_STREAM << "[JMC] GmSessionEngine 初始化成功";
 
     m_started = true;
     m_lastError.clear();
@@ -342,33 +305,29 @@ bool JujinMarketConnector::start()
         }
     }
     publishExistingOrders(eventBus, token, accountId, "", boundIds);
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] start completed";
+
+    m_patrolExecutor = std::make_shared<foundation::thread::ThreadPoolExecutor>(
+        1, 1, std::chrono::seconds(60), "JmcRiskPatrol");
+    m_patrolExecutor->post([this]() { riskPatrolLoop(); });
+
+    INTERNAL_INFO_STREAM << "[JMC] 启动完成";
     return true;
 }
 
 void JujinMarketConnector::stop()
 {
     m_stopRequested.store(true);
+    if (m_patrolExecutor)
+        m_patrolExecutor->shutdown();
 
     if (m_initialOrderSyncThread.joinable()) {
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for initial order sync thread";
         m_initialOrderSyncThread.join();
     }
 
-    if (engine::EventBus* bus = engine::get_engine_event_bus()) {
-        if (m_tradingTickSubscription) {
-            bus->unsubscribe(m_tradingTickSubscription);
-            m_tradingTickSubscription = foundation::utils::Uuid();
-        }
-        if (m_tradingBarSubscription) {
-            bus->unsubscribe(m_tradingBarSubscription);
-            m_tradingBarSubscription = foundation::utils::Uuid();
-        }
-    }
-
     engine::GmSessionEngine::instance().shutdown();
     m_started = false;
-    INTERNAL_INFO_STREAM << "[JujinMarketConnector] stopped";
+    INTERNAL_INFO_STREAM << "[JMC] 已停止";
 }
 
 std::string JujinMarketConnector::symbolName(const std::string& gmSymbol) const {
@@ -398,121 +357,37 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
         m_initialOrderSyncThread.join();
 
     auto* rawEventBus = eventBus;
-    const std::string requestToken = token;
-    const std::string requestAccountId = accountId;
     const std::string configuredRuntimeId = trim(runtimeStrategyId);
     const std::unordered_set<std::string> configuredBoundIds = boundStrategyIds;
 
-    m_initialOrderSyncThread = std::thread([this, rawEventBus, requestToken, requestAccountId,
+    m_initialOrderSyncThread = std::thread([this, rawEventBus,
                                             configuredRuntimeId, configuredBoundIds]() {
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] initial unfinished-order sync started asynchronously";
+        try {
+        INTERNAL_DEBUG_STREAM << "[JMC] unfinished-order sync 开始";
 
-        // 1. Write Python script to temp file
-#ifdef _WIN32
-        std::string tmpPath = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".")
-                              + "\\astock_jujin_sync_" + std::to_string(std::rand()) + ".py";
-#else
-        std::string tmpPath = "/tmp/astock_jujin_sync_" + std::to_string(std::rand()) + ".py";
-#endif
-        std::ofstream scriptFile(tmpPath, std::ios::out | std::ios::trunc);
-        if (!scriptFile.is_open()) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] failed to create temp python script file";
+        auto& engine = engine::GmSessionEngine::instance();
+        auto* s = static_cast<::Strategy*>(engine.strategy());
+        if (!s) {
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] gmsdk strategy not initialized";
             return;
         }
 
-        const char* kPyScript = R"py(
-import json, sys
-import gm.api as gm
-token = sys.argv[1]
-account_id = sys.argv[2]
-gm.set_token(token)
-if account_id:
-    gm.set_account_id(account_id)
-orders = gm.get_unfinished_orders() or []
-
-def pick(obj, *keys):
-    for key in keys:
-        value = obj.get(key) if isinstance(obj, dict) else None
-        if value is not None and value != '':
-            return value
-    return None
-
-result = []
-for order in orders:
-    item = order if isinstance(order, dict) else {}
-    result.append({
-        'order_id': pick(item, 'cl_ord_id', 'order_id', 'orderId'),
-        'business_strategy_id': pick(item, 'business_strategy_id'),
-        'runtime_strategy_id': pick(item, 'runtime_strategy_id'),
-        'symbol': pick(item, 'symbol'),
-        'side': pick(item, 'side', 'position_side'),
-        'price': pick(item, 'price'),
-        'quantity': pick(item, 'volume', 'quantity'),
-        'filled_quantity': pick(item, 'filled_volume', 'filledQuantity'),
-        'filled_notional': pick(item, 'filled_amount', 'filledNotional'),
-        'status': pick(item, 'status'),
-        'message': pick(item, 'ord_rej_reason_detail', 'status_msg', 'message'),
-        'created_at': str(pick(item, 'created_at', 'createdAt') or ''),
-        'updated_at': str(pick(item, 'updated_at', 'updatedAt') or '')
-    })
-print(json.dumps(result, ensure_ascii=True))
-)py";
-
-        scriptFile << kPyScript;
-        scriptFile.close();
-
-        // 2. Execute Python
-        std::string cmd = "python \"" + tmpPath + "\" \"" + requestToken + "\" \"" + requestAccountId + "\"";
-#ifdef _WIN32
-        FILE* pipe = _popen(cmd.c_str(), "r");
-#else
-        FILE* pipe = popen(cmd.c_str(), "r");
-#endif
-        if (!pipe) {
-            std::remove(tmpPath.c_str());
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] python process start failed";
-            return;
-        }
-
-        std::string output;
-        char buf[4096];
-        while (fgets(buf, sizeof(buf), pipe)) output += buf;
-        int ret = 
-#ifdef _WIN32
-            _pclose(pipe);
-#else
-            pclose(pipe);
-#endif
-        std::remove(tmpPath.c_str());
-
-        if (m_stopRequested.load()) return;
-        if (ret != 0) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] python exited code=" << ret
-                                  << " output=" << output.substr(0, 256);
-            return;
-        }
-
-        // 3. Parse JSON
-        auto doc = foundation::json::JsonFacade::parse(output);
-        if (!doc.isArray()) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] invalid JSON array";
-            return;
-        }
-        if (doc.size() == 0) {
-            INTERNAL_INFO_STREAM << "[JujinMarketConnector] no orders found";
+        auto* arr = s->get_unfinished_orders(nullptr);
+        if (!arr || arr->status() != 0) {
+            if (arr) arr->release();
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] get_unfinished_orders failed";
             return;
         }
 
         std::size_t publishedCount = 0, filteredCount = 0;
-        for (std::size_t i = 0; i < doc.size() && !m_stopRequested.load()
+        for (size_t i = 0; i < arr->count() && !m_stopRequested.load()
              && rawEventBus && rawEventBus->is_running(); ++i) {
-            auto order = doc.at(i);
-            if (!order.isObject()) continue;
+            auto& o = arr->at(i);
 
-            std::string orderId    = order.has("order_id") ? trim(order.get("order_id").asString()) : "";
-            std::string bizId      = order.has("business_strategy_id") ? trim(order.get("business_strategy_id").asString()) : "";
-            std::string rtId       = order.has("runtime_strategy_id") ? trim(order.get("runtime_strategy_id").asString()) : "";
-            std::string sym        = order.has("symbol") ? trim(order.get("symbol").asString()) : "";
+            std::string orderId = o.cl_ord_id ? o.cl_ord_id : "";
+            std::string sym     = engine.fromGmSymbol(o.symbol);
+            std::string bizId   = o.strategy_id ? o.strategy_id : "";
+            std::string rtId;   // gmsdk Order 无 runtime_strategy_id，预留
             if (orderId.empty() || sym.empty()) continue;
 
             // Strategy filter
@@ -529,41 +404,101 @@ print(json.dumps(result, ensure_ascii=True))
             event.set("order_id", orderId);
             event.set("symbol", sym);
             if (!bizId.empty()) { event.set("business_strategy_id", bizId); event.metadata["business_strategy_id"] = bizId; }
-            if (!rtId.empty())  { event.set("runtime_strategy_id", rtId); event.metadata["runtime_strategy_id"] = rtId; }
 
-            std::string rawSide = order.has("side") ? trim(order.get("side").asString()) : "1";
-            event.set("side", normalizeOrderSide(rawSide));
-            double price = order.has("price") ? order.get("price").asDouble() : 0.0;
-            event.set("price", price);
-            int64_t qty = order.has("quantity") ? static_cast<int64_t>(order.get("quantity").asDouble()) : 0;
-            event.set("quantity", qty);
-            int64_t fqty = order.has("filled_quantity") ? static_cast<int64_t>(order.get("filled_quantity").asDouble()) : 0;
-            event.set("filled_quantity", fqty);
-            double fnotional = order.has("filled_notional") ? order.get("filled_notional").asDouble() : 0.0;
-            event.set("filled_notional", fnotional);
-            std::string rawStatus = order.has("status") ? trim(order.get("status").asString()) : "";
-            event.set("status", normalizeOrderStatus(rawStatus));
-            std::string msg = order.has("message") ? trim(order.get("message").asString()) : "";
-            event.set("message", msg);
-
-            if (order.has("created_at")) { std::string v = trim(order.get("created_at").asString()); event.set("created_at", v); event.metadata["created_at"] = v; }
-            if (order.has("updated_at")) { std::string v = trim(order.get("updated_at").asString()); event.set("updated_at", v); event.metadata["updated_at"] = v; }
+            event.set("side", std::to_string(o.side));
+            event.set("price", static_cast<double>(o.price));
+            event.set("quantity", static_cast<int64_t>(o.volume));
+            event.set("filled_quantity", static_cast<int64_t>(o.filled_volume));
+            event.set("filled_notional", static_cast<double>(o.filled_vwap));
+            event.set("status", std::to_string(o.status));
+            event.set("message", o.ord_rej_reason_detail ? o.ord_rej_reason_detail : "");
 
             event.metadata["order_id"] = orderId;
-            event.metadata["symbol"] = sym;
-            event.metadata["side"] = normalizeOrderSide(rawSide);
-            event.metadata["status"] = normalizeOrderStatus(rawStatus);
-            event.metadata["source"] = "snapshot.async";
+            event.metadata["symbol"]   = sym;
+            event.metadata["side"]     = std::to_string(o.side);
+            event.metadata["status"]   = std::to_string(o.status);
+            event.metadata["source"]   = "snapshot.async";
             event.metadata["event_contract"] = "canonical";
 
             rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
             ++publishedCount;
         }
+        arr->release();
         INTERNAL_INFO_STREAM << "[JujinMarketConnector] sync done published=" << publishedCount
                              << " filtered=" << filteredCount;
+        } catch (const std::exception& e) {
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] sync exception: " << e.what();
+        } catch (...) {
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] sync unknown exception";
+        }
     });
 }
 
+void JujinMarketConnector::riskPatrolLoop()
+{
+    INTERNAL_INFO_STREAM << "[JMC] 全局风控巡检启动";
+    domain::trading::OrderBuilder builder;
+    while (!m_stopRequested.load(std::memory_order_acquire)) {
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        try {
+            auto& accEng = engine::AccountEngine::instance();
+            builder.setAccountId(accEng.account().accountId);
+            auto stopOrders = domain::strategy::RiskManager::instance().patrolPositions(builder);
+            auto& tradeEng = engine::TradeEngine::instance();
+            for (const auto& o : stopOrders) {
+                INTERNAL_WARN_STREAM << "[JMC] 止损/止盈触发: " << o.symbol()
+                                     << " price=" << o.price() << " qty=" << o.quantity();
+                // 篮子ID
+                static std::atomic<uint64_t> s_patrolBasketSeq{0};
+                uint64_t patrolBasketId = s_patrolBasketSeq.fetch_add(1);
+                const_cast<engine::OrderRequest&>(o).setExtension(
+                    domain::trading::ExtKey::kBasketId, patrolBasketId);
+                if (tradeEng.initialized()) {
+                    // 先注册到 recentOrders，再提交 — gmsdk 回调可能异步先到
+                    domain::trading::TradeOrder tOrder;
+                    tOrder.setSymbol(o.symbol());
+                    tOrder.setSide(domain::strategy::OrderDirection::Sell);
+                    tOrder.setQuantity(static_cast<std::int64_t>(o.quantity()));
+                    tOrder.setPrice(o.price());
+                    tOrder.setClOrdId(o.clOrdId());
+                    tOrder.setAccountId(o.accountId());
+                    tOrder.setOrderType(domain::trading::OrderType::Limit);
+                    tOrder.setPositionEffect(domain::strategy::PositionEffect::Close);
+                    tOrder.setSignalStrength(0.8);
+                    domain::trading::TradeExecutionEngine::instance().registerOrder(tOrder);
 
+                    auto result = tradeEng.submitOrder(o);
+                    INTERNAL_INFO_STREAM << "[JMC] 止损/止盈提交: " << o.symbol()
+                                         << " accepted=" << result.accepted
+                                         << " basketId=" << patrolBasketId
+                                         << " msg=" << result.message;
+                    // 回填 brokerOrderId 并入库
+                    if (result.accepted) {
+                        domain::trading::TradeExecutionEngine::instance().updateOrderBrokerId(
+                            o.clOrdId(), result.brokerOrderId);
+                    }
+                    astock::infrastructure::database::OrderRecorder::instance().insertOrder(
+                        o.clOrdId(), "", o.symbol(),
+                        astock::infrastructure::database::RecSide::Sell,
+                        astock::infrastructure::database::RecOrdType::Limit,
+                        o.price(), static_cast<int>(o.quantity()),
+                        0.8, astock::infrastructure::database::RecPosEff::Close,
+                        0, std::to_string(patrolBasketId));
+                    if (result.accepted) {
+                        astock::infrastructure::database::OrderRecorder::instance().updateOrderStatus(
+                            o.clOrdId(), astock::infrastructure::database::RecOrdStatus::Pending,
+                            result.brokerOrderId, "");
+                    }
+                } else {
+                    INTERNAL_ERROR_STREAM << "[JMC] TradeEngine 未初始化, 止损/止盈订单未提交: "
+                                          << o.symbol();
+                }
+            }
+        } catch (const std::exception& e) {
+            INTERNAL_WARN_STREAM << "[JMC] 巡检异常: " << e.what();
+        }
+    }
+    INTERNAL_INFO_STREAM << "[JMC] 全局风控巡检结束";
+}
 
 

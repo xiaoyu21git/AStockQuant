@@ -36,9 +36,6 @@ public:
     /// @brief 回测（同步）路径 — 串行处理所有引擎
     [[nodiscard]] std::vector<OrderRequest> stepAll(const MarketDataPoint& mdp);
 
-    /// @brief 实盘异步路径 — 向所有运行中的引擎推送行情到各自后台线程队列
-    void pushMarketData(const MarketDataPoint& mdp);
-
     /// @brief 为所有引擎注册订单回调监听器（实盘模式下使用）
     void setOrderListener(IOrderListener* listener);
 
@@ -56,6 +53,9 @@ public:
     void setDefaultOrderListener(IOrderListener* listener) {
         m_defaultOrderListener = listener;
     }
+
+    /// @brief 设置实盘数据持久化目录（由桥接层在初始化时注入一次）
+    void setLiveDataPath(const std::string& path) { m_liveDataPath = path; }
 
     // ── 统一生命周期管理 ──
 
@@ -81,6 +81,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<StrategyEngine>> m_engines;
     factor::FactorInstanceManager* m_factorInstanceManager{nullptr};
     IOrderListener* m_defaultOrderListener{nullptr};
+    std::string m_liveDataPath;  // 实盘数据持久化目录
 };
 
 } // namespace domain::strategy

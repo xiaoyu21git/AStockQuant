@@ -119,7 +119,6 @@ struct FF {
     static constexpr FieldKey CURRENT_RATIO{"current_ratio"};
     static constexpr FieldKey QUICK_RATIO{"quick_ratio"};
     static constexpr FieldKey PAYOUT_RATIO{"payout_ratio"};
-    static constexpr FieldKey NET_MARGIN{"net_margin"};
     static constexpr FieldKey DIVIDEND_STABILITY{"dividend_stability"};
 };
 
@@ -138,7 +137,6 @@ struct TF {  // TagFields
     static constexpr FieldKey SURVIVOR_BIAS_CHECKED{"survivor_bias_checked"};
     static constexpr FieldKey REPORT_DATE_ALIGNED{"report_date_aligned"};
     static constexpr FieldKey IS_SUSPENDED{"is_suspended"};
-    static constexpr FieldKey SUSPENSION_DAYS{"suspension_days"};
     static constexpr FieldKey FORWARD_FILLED{"forward_filled"};
     static constexpr FieldKey MISSING_VALUE_FILLED{"missing_value_filled"};
     static constexpr FieldKey LIMIT_UP{"limit_up"};

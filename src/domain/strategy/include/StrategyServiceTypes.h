@@ -2,11 +2,14 @@
 
 #include "../../strategies/include/StrategyDefinitionTypes.h"
 #include "../../types/InstrumentId.h"
+#include "../../trading/TradingTypes.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace domain::strategy {
@@ -130,6 +133,10 @@ private:
     bool autoExecutionEnabled_{false};
     const void* m_historicalView{nullptr};
     int m_currentEvaluationRow{-1};  // -1 = 实盘/未设置, 使用最后一行
+    std::unordered_map<std::string, double> m_currentWeights;  // symbol→当前持仓权重
+    std::unordered_set<std::string> m_candidatePool;  // 因子候选池(空=扫全市场)
+    std::unordered_map<std::string, double> m_factorScores;  // 因子复合评分 (按策略权重加权)
+    std::unordered_map<std::string, int> m_positionEntryDates;  // symbol→entryRowIndex, 最少持有期检查
 
 public:
     RuntimeStrategyContext() = default;
@@ -158,6 +165,30 @@ public:
     // ── 回测：当前评估行号 (从 0 开始), 实盘为 -1 表示使用最后一行 ──
     void setCurrentEvaluationRow(int row) { m_currentEvaluationRow = row; }
     [[nodiscard]] int currentEvaluationRow() const noexcept { return m_currentEvaluationRow; }
+
+    void setCurrentWeights(std::unordered_map<std::string, double> w) { m_currentWeights = std::move(w); }
+    [[nodiscard]] const std::unordered_map<std::string, double>& currentWeights() const noexcept { return m_currentWeights; }
+
+    /// @brief 因子候选池: 策略只评估池内标的; 空池 = 扫全市场
+    void setCandidatePool(std::unordered_set<std::string> pool) { m_candidatePool = std::move(pool); }
+    [[nodiscard]] const std::unordered_set<std::string>& candidatePool() const noexcept { return m_candidatePool; }
+    [[nodiscard]] bool hasCandidatePool() const noexcept { return !m_candidatePool.empty(); }
+
+    /// @brief 因子复合评分 (按策略配置的权重加权), 供非因子策略增强信号
+    void setFactorScores(std::unordered_map<std::string, double> scores) { m_factorScores = std::move(scores); }
+    [[nodiscard]] double factorScore(const std::string& symbol) const {
+        auto it = m_factorScores.find(symbol);
+        return it != m_factorScores.end() ? it->second : 0.0;
+    }
+
+    /// @brief 持仓入场日映射: symbol(fullCode) → 买入时的回测行号(entryRowIndex)
+    /// 用于最少持有期检查: daysHeld = currentRow - entryRow
+    void setPositionEntryDates(std::unordered_map<std::string, int> dates) { m_positionEntryDates = std::move(dates); }
+    [[nodiscard]] const std::unordered_map<std::string, int>& positionEntryDates() const noexcept { return m_positionEntryDates; }
+    [[nodiscard]] int positionEntryRow(const std::string& symbol) const {
+        auto it = m_positionEntryDates.find(symbol);
+        return it != m_positionEntryDates.end() ? it->second : -1;
+    }
 
     [[nodiscard]] std::uint64_t snapshotVersion() const noexcept
     {
@@ -256,6 +287,15 @@ enum class RuntimeOrderSide : std::uint8_t {
     Sell = 1,
 };
 
+/// @brief 策略信号意图 — 策略基于当前持仓权重对比目标权重后产出
+enum class SignalIntent : std::uint8_t {
+    KEEP   = 0,  // 不变, 不产出订单
+    OPEN   = 1,  // 建仓: 当前无持仓, 目标权重 > 0
+    ADD    = 2,  // 加仓: 当前持有, 目标权重 > 当前权重
+    REDUCE = 3,  // 减仓: 当前持有, 目标权重 < 当前权重
+    CLOSE  = 4,  // 平仓: 当前持有, 目标权重 = 0
+};
+
 enum class RuleRejectReason : std::uint8_t {
     None = 0,
     MarketGuardBlocked = 1,
@@ -317,6 +357,9 @@ private:
     RuntimeOrderSide side_{RuntimeOrderSide::Buy};
     double score_{0.0};
     double targetWeight_{0.0};
+    double currentWeight_{0.0};
+    SignalIntent intent_{SignalIntent::KEEP};
+    std::string fullSymbol_{};
 
 public:
     StrategySignal() = default;
@@ -324,12 +367,14 @@ public:
                    InstrumentId instrumentId,
                    RuntimeOrderSide side,
                    double score,
-                   double targetWeight)
+                   double targetWeight,
+                   std::string fullSymbol)
         : strategyInstanceId_(strategyInstanceId)
         , instrumentId_(instrumentId)
         , side_(side)
         , score_(score)
         , targetWeight_(targetWeight)
+        , fullSymbol_(std::move(fullSymbol))
     {
     }
 
@@ -358,9 +403,21 @@ public:
         return targetWeight_;
     }
 
+    /// 真实完整代码 (如 "300767.SZ"), 与行情视图 symbolStrings 逐字节一致 — 信号必填
+    [[nodiscard]] const std::string& fullSymbol() const noexcept
+    {
+        return fullSymbol_;
+    }
+
+    [[nodiscard]] double currentWeight() const noexcept { return currentWeight_; }
+    void setCurrentWeight(double v) noexcept { currentWeight_ = v; }
+
+    [[nodiscard]] SignalIntent intent() const noexcept { return intent_; }
+    void setIntent(SignalIntent v) noexcept { intent_ = v; }
+
     [[nodiscard]] bool isValid() const noexcept
     {
-        return strategyInstanceId_ > 0 && instrumentId_.isValid();
+        return strategyInstanceId_ > 0 && instrumentId_.isValid() && !fullSymbol_.empty();
     }
 };
 
@@ -395,51 +452,10 @@ public:
     }
 };
 
-struct OrderRequest final {
-private:
-    StrategyInstanceId strategyInstanceId_{0};
-    InstrumentId instrumentId_{};
-    RuntimeOrderSide side_{RuntimeOrderSide::Buy};
-    std::uint32_t quantity_{0};
-
-public:
-    OrderRequest() = default;
-    OrderRequest(StrategyInstanceId strategyInstanceId,
-                 InstrumentId instrumentId,
-                 RuntimeOrderSide side,
-                 std::uint32_t quantity)
-        : strategyInstanceId_(strategyInstanceId)
-        , instrumentId_(instrumentId)
-        , side_(side)
-        , quantity_(quantity)
-    {
-    }
-
-    [[nodiscard]] StrategyInstanceId strategyInstanceId() const noexcept
-    {
-        return strategyInstanceId_;
-    }
-
-    [[nodiscard]] const InstrumentId& instrumentId() const noexcept
-    {
-        return instrumentId_;
-    }
-
-    [[nodiscard]] RuntimeOrderSide side() const noexcept
-    {
-        return side_;
-    }
-
-    [[nodiscard]] std::uint32_t quantity() const noexcept
-    {
-        return quantity_;
-    }
-
-    [[nodiscard]] bool isValid() const noexcept
-    {
-        return strategyInstanceId_ > 0 && instrumentId_.isValid() && quantity_ > 0;
-    }
-};
+// 统一定单类型 → domain::trading
+using OrderRequest = domain::trading::OrderRequest;
+using OrderSide    = domain::trading::OrderSide;
+using OrderType    = domain::trading::OrderType;
 
 struct StrategyExecutionStats final {
 private:
@@ -493,6 +509,9 @@ public:
 inline constexpr std::size_t kDefaultSignalBufferReserve = 256;
 inline constexpr std::size_t kDefaultRuleResultBufferReserve = 256;
 inline constexpr std::size_t kDefaultMarketDataBatchReserve = 256;
+/// 全市场日频批量容量: A股+北交所约 5800 标的, 预留增长余量。
+/// 回测逐日推送全市场行情、实盘 EOD 评估同样是全市场批量, 必须容纳全体标的。
+inline constexpr std::size_t kAllMarketDataBatchCapacity = 16384;
 
 [[nodiscard]] inline StrategyServiceExecutionPlan defaultExecutionPlan() noexcept
 {
@@ -521,6 +540,7 @@ struct StrategyCreationParams final {
     std::uint32_t maxOrderQuantity{100};
     double stopLossPercent{10.0};
     double takeProfitPercent{20.0};
+    double maxDrawdownLimit{99.0};
     int fastPeriod{5};
     int slowPeriod{20};
     int signalPeriod{14};
@@ -534,6 +554,12 @@ struct StrategyCreationParams final {
     std::string description;
     ::domain::strategies::StrategyBehaviorKind behaviorKind{::domain::strategies::StrategyBehaviorKind::Custom};
     std::vector<std::string> factorIds;  // instance_id 字符串
+
+    /// 跳过截面 Z-score 归一化的因子 instance_id 集合（如 SupplyChain 同组同值因子）
+    std::unordered_set<std::string> skipNormalizeFactorIds;
+
+    /// 最少持有天数 — 0=不启用(默认), >0 时持有不足该天数的持仓禁止卖出(硬止损除外)
+    int minHoldDays{0};
 
     // 因子回调（桥接层填充）
     std::function<StrategyServiceFlowResult(const MarketDataPoint&)> onIncremental;

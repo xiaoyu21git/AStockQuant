@@ -1,7 +1,8 @@
+import AStock.Bridge 1.0 as Bridge
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../../utils/StrategyCreationUtils.js" as Utils
+
 
 Rectangle {
     id: root
@@ -62,7 +63,7 @@ Rectangle {
 
     radius: 12
     implicitHeight: profileLayout.implicitHeight + 24
-    color: "#0f172a"
+    color: "#1e293b"
     border.width: 1
     border.color: "#334155"
 
@@ -91,7 +92,7 @@ Rectangle {
             Layout.preferredWidth: root.compactControlWidth
             Layout.alignment: Qt.AlignLeft
             radius: 10
-            color: "#111827"
+            color: "#1a2332"
             border.width: 1
             border.color: "#1d4ed8"
             implicitHeight: typeColumn.implicitHeight + 16
@@ -110,7 +111,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: Utils.StrategyCreationUtils.getStrategyTypeNameFromIndex(root.selectedStrategyTypeIndex)
+                    text: Bridge.StrategyBridge.strategyTypeName(root.selectedStrategyTypeIndex)
                     font.pixelSize: 13
                     font.weight: Font.Medium
                     color: "#dbeafe"

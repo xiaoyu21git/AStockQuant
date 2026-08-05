@@ -1,7 +1,7 @@
 #include "SymbolSearchModel.h"
 #include "StockNameResolver.h"
 #include "foundation/log/logging.hpp"
-#include "../../../infrastructure/include/database/NativeMySQLConnectionPool.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 
 #include <algorithm>
 
@@ -28,7 +28,7 @@ QHash<int, QByteArray> SymbolSearchModel::roleNames() const {
 }
 
 void SymbolSearchModel::init() {
-    auto& pool = astock::database::NativeMySQLConnectionPool::instance();
+    auto& pool = astock::database::NativePgConnectionPool::instance();
     if (!pool.isInitialized()) {
         INTERNAL_WARN_STREAM << "[SymbolSearch] DB pool not initialized";
         return;
@@ -41,7 +41,7 @@ void SymbolSearchModel::init() {
     }
 
     auto result = db->executeQuery(
-        "SELECT symbol, name, exchange FROM symbol_info WHERE asset_class='STOCK' ORDER BY symbol");
+        "SELECT symbol, name, exchange FROM ref.symbol_info WHERE asset_class='STOCK' ORDER BY symbol");
     int rows = static_cast<int>(result.rowCount());
     INTERNAL_DEBUG_STREAM << "[SymbolSearch] query returned" << rows << "rows";
     if (rows == 0) {

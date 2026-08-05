@@ -1,0 +1,9 @@
+OrderFormSection 1.0 OrderFormSection.qml
+TradingFormPanel 1.0 TradingFormPanel.qml
+DepthMarketPanel 1.0 DepthMarketPanel.qml
+CandlestickChart 1.0 CandlestickChart.qml
+
+
+TradingChartWorkspace 1.0 TradingChartWorkspace.qml
+OrderActionBar 1.0 OrderActionBar.qml
+RuntimeRuleObserverPanel 1.0 RuntimeRuleObserverPanel.qml

@@ -156,6 +156,7 @@ public:
     ColumnData volumeColumn;
     std::vector<DateKey> datesOwned;
     std::vector<InstrumentId> instrumentsOwned;
+    std::vector<std::string> symbolStringsOwned;
     int32_t rowCount{0};
     int32_t columnCount{0};
 };
@@ -209,6 +210,21 @@ ParquetMarketDataView::ParquetMarketDataView(const std::string& parquetPath)
 
         impl_->datesOwned = extractDateKeys(impl_->table, "date");
         impl_->instrumentsOwned = extractInstrumentIds(impl_->table, "instrument");
+        // 尝试读取 symbol 字符串列
+        {
+            int symIdx = impl_->table->schema()->GetFieldIndex("symbol");
+            if (symIdx >= 0) {
+                auto symCol = impl_->table->column(symIdx);
+                if (symCol && symCol->type_id() == arrow::Type::STRING) {
+                    auto strArr = std::static_pointer_cast<arrow::StringArray>(
+                        symCol->chunk(0));
+                    impl_->symbolStringsOwned.reserve(strArr->length());
+                    for (int64_t i = 0; i < strArr->length(); ++i)
+                        impl_->symbolStringsOwned.push_back(
+                            strArr->IsNull(i) ? "" : strArr->GetString(i));
+                }
+            }
+        }
 
         if (impl_->datesOwned.empty() && impl_->instrumentsOwned.empty()) {
             impl_->rowCount = rowCount;
@@ -280,6 +296,7 @@ ParquetMarketDataView::getField(const std::string& fieldName) const
 
 const std::vector<DateKey>& ParquetMarketDataView::dates() const { return impl_->datesOwned; }
 const std::vector<InstrumentId>& ParquetMarketDataView::instruments() const { return impl_->instrumentsOwned; }
+const std::vector<std::string>& ParquetMarketDataView::symbolStrings() const { return impl_->symbolStringsOwned; }
 
 std::unique_ptr<IMarketDataView>
 ParquetMarketDataView::slice(DateRange dateRange) const

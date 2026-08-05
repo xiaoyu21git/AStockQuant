@@ -40,6 +40,8 @@ public:
                            const std::shared_ptr<arrow::Table>& table);
     void finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount);
     QVariantList getDataSetById(int dataId);
+    /// @brief 加载指定数据集中某 symbol 的所有行（用于缓存数据查看/对比）
+    QVariantList loadRowsBySymbol(int dataId, const QString& symbol);
     QVariantMap getDataSetInfo(int dataId) const;
     /// @brief 仅读取 Arrow schema 字段名列表（零数据行加载）
     QStringList getDataSetSchemaFields(int dataId) const;

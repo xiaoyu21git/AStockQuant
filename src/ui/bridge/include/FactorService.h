@@ -53,6 +53,7 @@ public:
     Q_INVOKABLE QVariantMap getFactorByIdFromRepository(const QString& factorId);
     Q_INVOKABLE QString addFactor(const QVariantMap& factorData);
     Q_INVOKABLE bool updateFactor(const QString& factorId, const QVariantMap& factorData);
+    Q_INVOKABLE bool writeBacktestMetrics(const QString& factorId, const QVariantMap& report);
     Q_INVOKABLE bool deleteFactor(const QString& factorId);
 
     /// @brief 生成因子的跨表数据视图（收集 requiredFields → 按表分组 → 逐表加载 → 合并到 CachedMarketDataView）

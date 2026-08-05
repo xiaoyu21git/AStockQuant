@@ -79,7 +79,7 @@ build_thirdparty/
 # 临时构建目录
 build_test_foundation/
 build_test_jujin/
-build_test_qt_mysql/
+
 build_test_wrapper/
 
 # 测试相关的临时文�?
@@ -146,3 +146,14 @@ Thumbs.db
 *.tar
 *.gz
 *.7z
+
+# 缓存备份(勿提交)
+backup/
+
+# v0.14.0 传导链因子 — 数据文件/模型
+ChainKnowledgeGraph/
+Commodity-News-Corpus/
+CrudeOilNews-Corpus/
+tools/commodity_event_model/
+tools/commodity_event_train.jsonl
+

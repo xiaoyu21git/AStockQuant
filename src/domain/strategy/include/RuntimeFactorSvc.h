@@ -43,28 +43,37 @@ public:
     ~RuntimeFactorSvc() override;
 
     // ── 数据注入 ──
-    void setMarketView(const factor::compute::IMarketDataView* view);
-    void setDataService(factor::compute::BacktestDataService* dataSvc);
+    void setMarketView(const factor::compute::IMarketDataView* view);  // 非接口方法，向后兼容
+    void setDataService(factor::compute::BacktestDataService* dataSvc) override;
 
     /// @brief 设置实盘行情视图（包含足够回溯窗口的滑动 MarketView）
-    void setLiveMarketView(const factor::compute::IMarketDataView* view);
+    void setLiveMarketView(const factor::compute::IMarketDataView* view) override;
 
     /// @brief 设置关注的因子实例 ID 列表（copySnapshots 迭代用）
-    void setFactorIds(const std::vector<std::string>& factorIds);
+    void setFactorIds(const std::vector<std::string>& factorIds) override;
+
+    /// @brief 回测: 直取某因子某交易日的 symbol→value 全量映射 (首次访问触发全量计算并缓存)
+    /// @param date YYYYMMDD 整数; 无数据返回 nullptr。key 为视图 symbolStrings (无交易所后缀)
+    [[nodiscard]] const std::map<std::string, double>* backtestValuesBySymbol(
+        const std::string& instanceId, std::int32_t date) const override;
 
     /// @brief 从因子需求收集所需的数据字段
-    [[nodiscard]] std::vector<std::string> getRequiredFields() const;
+    [[nodiscard]] std::vector<std::string> getRequiredFields() const override;
 
     /// @brief 从因子需求计算最大回溯窗口（交易日数，用于确定查多少天历史数据）
-    [[nodiscard]] int getMaxLookbackDays() const;
+    [[nodiscard]] int getMaxLookbackDays() const override;
+    /// @brief 清理 FactorEngine 信号缓存 (回测结束后释放内存)
+    void clearSignalCache();
+    /// @brief 从PG加载商品事件到 EventDrivenFactor 缓存 (回测初始化时调用)
+    void loadCommodityEvents(const std::string& startDate, const std::string& endDate);
 
     /// @brief 用 DB 查询结果构建实盘 MarketView（零 JSON）
     void buildLiveView(
         const std::vector<astock::database::SqlQueryResultRow>& rows,
-        const std::vector<std::string>& extraFields);
+        const std::vector<std::string>& extraFields) override;
 
-    /// @brief 获取当前实盘视图（供桥接层读取元数据）
-    [[nodiscard]] const factor::compute::IMarketDataView* liveView() const {
+    /// @brief 获取当前实盘视图（生命周期与 RFS 实例一致；无数据返回 nullptr）
+    [[nodiscard]] const factor::compute::IMarketDataView* liveView() const override {
         return m_liveMarketView;
     }
 
@@ -91,8 +100,8 @@ private:
     std::unique_ptr<factor::compute::CachedMarketDataView> m_ownedLiveView;
     std::unique_ptr<factor::compute::FactorEngine> m_engine;
 
-    // ── 回测缓存 ──
-    std::unordered_map<std::string, std::map<std::string, std::map<std::string, double>>> m_factorCache;
+    // ── 回测缓存（mutable — backtestValuesBySymbol 为 const 接口但首次访问需写入缓存）──
+    mutable std::unordered_map<std::string, std::map<std::string, std::map<std::string, double>>> m_factorCache;
 
     // ── 实盘状态 (原 buildFactorCallbacks 闭包状态) ──
     mutable std::mutex m_stateMutex;

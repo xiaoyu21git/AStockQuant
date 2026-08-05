@@ -99,7 +99,6 @@ function(copy_benchmark_qt_sql_plugins target_name)
     if(qt_core_debug_location)
         get_filename_component(qt_core_debug_bin_dir "${qt_core_debug_location}" DIRECTORY)
         list(APPEND qt_sql_plugin_sources
-            "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlmysqld.dll"
             "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlited.dll")
     endif()
 
@@ -107,7 +106,6 @@ function(copy_benchmark_qt_sql_plugins target_name)
     if(qt_core_release_location)
         get_filename_component(qt_core_release_bin_dir "${qt_core_release_location}" DIRECTORY)
         list(APPEND qt_sql_plugin_sources
-            "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlmysql.dll"
             "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlite.dll")
     endif()
 
@@ -271,10 +269,6 @@ copy_benchmark_runtime_dlls(test_eventsystem)
 copy_benchmark_qt_sql_plugins(test_eventsystem)
 
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
-    message(STATUS "[TESTS] Skipping run_factor_full_market_benchmark: legacy factor backtest modules removed")
-endif()
-
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
     message(STATUS "[TESTS] Found: run_cleaning_cache_probe.cpp")
 
@@ -398,3 +392,53 @@ if(ENABLE_RULE_SERVICE_PY_WORKER_HF_BENCHMARK AND EXISTS "${CMAKE_CURRENT_SOURCE
 
     message(STATUS "[TESTS] Configured run_strategy_rule_service_py_worker_hf_benchmark executable")
 endif()
+
+# ─── 权重方案单元测试 (市值加权/风险平价, 无 DB/UI 依赖) ───
+add_executable(test_weight_schemes
+    test_weight_schemes.cpp
+)
+
+set_target_properties(test_weight_schemes PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_weight_schemes
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+        ${CMAKE_SOURCE_DIR}/src/domain/strategies/include
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_weight_schemes
+    PRIVATE
+        astock_core
+        thirdParty
+)
+
+message(STATUS "[TESTS] Configured test_weight_schemes executable")
+
+# ─── 规则引擎单元测试 (条件求值三态语义 + compiled.json 全量加载) ───
+add_executable(test_rule_engine
+    test_rule_engine.cpp
+)
+
+set_target_properties(test_rule_engine PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_rule_engine
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/rules
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_rule_engine
+    PRIVATE
+        astock_core
+        thirdParty
+)
+
+message(STATUS "[TESTS] Configured test_rule_engine executable")

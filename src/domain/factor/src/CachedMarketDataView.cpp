@@ -321,7 +321,7 @@ CachedMarketDataView::fromJson(const foundation::json::JsonFacade& root,
     return view;
 }
 
-// ── fromDailyBarRows：MySQL 查询结果直接构建 CachedMarketDataView（零 JSON） ──
+// ── fromDailyBarRows：数据库查询结果直接构建 CachedMarketDataView（零 JSON） ──
 std::unique_ptr<CachedMarketDataView>
 CachedMarketDataView::fromDailyBarRows(
     const std::vector<astock::infrastructure::database::DailyBarRow>& rows)

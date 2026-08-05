@@ -1,4 +1,5 @@
 #include "../include/RiskEvaluator.h"
+#include "../include/RiskManager.h"
 
 #include <algorithm>
 #include <cmath>
@@ -52,6 +53,17 @@ RiskResult RiskEvaluator::evaluateOrder(const RiskInput& input) {
             "策略未激活");
     }
 
+    // ── 大盘指数回撤保护（仅拦截增加敞口的买入，不拦减仓/卖出）──
+    if (input.indexDrawdownPct() > 0.0 && input.indexDrawdownLimitPercent() > 0.0
+        && input.isBuyOrder() && increasesExposure(OrderDirection::Buy, PositionEffect::Open)) {
+        if (input.indexDrawdownPct() >= input.indexDrawdownLimitPercent()) {
+            return RiskResult::rejected(
+                RiskRejectCode::IndexDrawdownExceeded, 0.85,
+                "大盘回撤保护: " + std::to_string(static_cast<int>(input.indexDrawdownPct()))
+                + "% >= " + std::to_string(static_cast<int>(input.indexDrawdownLimitPercent())) + "%");
+        }
+    }
+
     // 信号强度检查（阈值 0.1 为最低可接受信号）
     if (input.signalStrength() < 0.1) {
         return RiskResult::rejected(
@@ -71,6 +83,18 @@ RiskResult RiskEvaluator::evaluateOrder(const RiskInput& input) {
         return RiskResult::rejected(
             RiskRejectCode::Level3TradingHaltActive, 1.0,
             "三级熔断生效中，暂停所有交易");
+    }
+
+    // ── 步骤 2.5：涨跌停检查（买卖通用，referencePrice 由 buildRiskInput 从 preClose 填充）──
+    if (input.referencePrice() > 0.0) {
+        bool atLimit = RiskManager::isPriceAtLimit(
+            input.price(), input.referencePrice(), input.isBuyOrder(),
+            input.symbol());
+        if (atLimit) {
+            return RiskResult::rejected(
+                RiskRejectCode::PriceInvalid, 1.0,
+                input.isBuyOrder() ? "涨停板，无法买入" : "跌停板，无法卖出");
+        }
     }
 
     // ── 步骤 3：买入/卖出侧定向检查 ──
@@ -272,6 +296,8 @@ std::string RiskEvaluator::descriptionForCode(RiskRejectCode code) {
         return "持仓集中度超限";
     case RiskRejectCode::TotalExposureExceeded:
         return "总敞口超限";
+    case RiskRejectCode::IndexDrawdownExceeded:
+        return "大盘回撤保护：暂停开仓";
     case RiskRejectCode::Level3TradingHaltActive:
         return "三级交易暂停生效";
     case RiskRejectCode::AutoStrategyWithoutQuantity:
@@ -427,6 +453,9 @@ RiskConfig RiskConfig::defaults() noexcept {
     cfg.commissionRate         = 0.0003;  // 万三
     cfg.minCommission          = 5.0;     // 最低 5 元
     cfg.stampTaxRate           = 0.001;   // 千一（仅卖出）
+    cfg.indexDrawdownLimitPercent = 3.0;
+    cfg.indexDrawdownLookbackDays = 5;
+    cfg.indexSymbol               = "000001.SH";
     return cfg;
 }
 

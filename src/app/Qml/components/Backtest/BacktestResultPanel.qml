@@ -418,6 +418,16 @@ Rectangle {
                         axisY: portfolioYAxis
                     }
 
+                    LineSeries {
+                        id: benchmarkNetValueSeries
+                        name: "基准(沪深300)"
+                        color: "#94A3B8"
+                        width: 1
+                        style: Qt.DashLine
+                        axisX: portfolioXAxis
+                        axisY: portfolioYAxis
+                    }
+
                     ScatterSeries {
                         id: portfolioBoundarySeries
                         axisX: portfolioXAxis
@@ -584,6 +594,16 @@ Rectangle {
                         name: "回撤"
                         color: "#F59E0B"
                         width: 2
+                        axisX: drawdownXAxis
+                        axisY: drawdownYAxis
+                    }
+
+                    LineSeries {
+                        id: benchmarkDrawdownSeries
+                        name: "基准回撤"
+                        color: "#94A3B8"
+                        width: 1
+                        style: Qt.DashLine
                         axisX: drawdownXAxis
                         axisY: drawdownYAxis
                     }
@@ -949,10 +969,7 @@ Rectangle {
             || hasValue(root.executionPolicy().rebalanceDays)
     }
 
-    function hasRuleTemplateSummary() {
-        var summary = root.backtestResult.ruleTemplateSummary || {}
-        return !!summary.hasTemplate || Number(summary.triggeredCount || 0) > 0
-    }
+    function hasRuleTemplateSummary() { return false }
 
     function resultStatusText() {
         if (root.isBacktesting) {
@@ -1273,19 +1290,31 @@ Rectangle {
         var dates = timeSeries.dates || []
         var portfolioValues = timeSeries.portfolioValues || []
         var drawdowns = timeSeries.drawdowns || []
+        var benchmarkValues = timeSeries.benchmarkValues || []
+        var benchmarkDrawdowns = timeSeries.benchmarkDrawdowns || []
 
         chartDateLabels = dates
 
-        var portfolioBounds = calculateAxisBounds(portfolioValues, 0, 1)
+        // 标准化到同一起点（首日净值归一），策略和基准直接可比
+        var stratBase = portfolioValues.length > 0 && portfolioValues[0] > 0 ? portfolioValues[0] : 1.0
+        var normPV = portfolioValues.map(function(v) { return v / stratBase })
+        var bmBase = benchmarkValues.length > 0 && benchmarkValues[0] > 0 ? benchmarkValues[0] : 1.0
+        var normBV = benchmarkValues.map(function(v) { return v / bmBase })
+
+        var allValues = normPV.concat(normBV)
+        var portfolioBounds = calculateAxisBounds(allValues, 0, 1)
         portfolioAxisMin = portfolioBounds.min
         portfolioAxisMax = portfolioBounds.max
 
-        var drawdownBounds = calculateAxisBounds(drawdowns, -1, 0)
+        var allDrawdowns = drawdowns.concat(benchmarkDrawdowns)
+        var drawdownBounds = calculateAxisBounds(allDrawdowns, -1, 0)
         drawdownAxisMin = Math.min(drawdownBounds.min, -0.001)
         drawdownAxisMax = Math.max(drawdownBounds.max, 0)
 
-        updateLineSeries(netValueSeries, portfolioValues)
+        updateLineSeries(netValueSeries, normPV)
         updateLineSeries(drawdownSeries, drawdowns)
+        updateLineSeries(benchmarkNetValueSeries, normBV)
+        updateLineSeries(benchmarkDrawdownSeries, benchmarkDrawdowns)
         updateScatterSeries(portfolioBoundarySeries, buildBoundaryPoints(portfolioValues))
         updateScatterSeries(drawdownBoundarySeries, buildBoundaryPoints(drawdowns))
 

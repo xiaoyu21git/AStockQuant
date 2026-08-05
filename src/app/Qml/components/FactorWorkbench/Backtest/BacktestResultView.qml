@@ -322,7 +322,7 @@ Item {
                             // 波动�?
                             TableCell {
                                 width: 100
-                                text: root.metricPercentText(modelData.annualizedReturn, 2)
+                                text: root.metricPercentText(modelData.returnRate, 2)
                             }
                             
                             // 夏普比率

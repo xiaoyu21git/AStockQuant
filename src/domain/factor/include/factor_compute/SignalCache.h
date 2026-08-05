@@ -36,6 +36,9 @@ public:
     /// @brief 当前缓存条目数
     [[nodiscard]] size_t entryCount() const noexcept;
 
+    /// @brief 清空所有缓存条目并重置内存计数
+    void clear() noexcept;
+
 private:
     struct SignalCacheKeyHash final {
         [[nodiscard]] size_t operator()(const SignalCacheKey& key) const noexcept;

@@ -54,6 +54,11 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="最多输出多少条落后股票样本，默认 20",
     )
+    parser.add_argument(
+        "--auto-fix",
+        action="store_true",
+        help="发现落后样本时自动调用 import_from_juejin.py 补充数据",
+    )
     return parser.parse_args()
 
 
@@ -165,7 +170,58 @@ def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
                 "special_lagging_samples": special_lagging_samples[:sample_limit],
                 "special_lagging_reason_counts": special_lagging_reason_counts,
                 "lagging_samples": lagging_samples[:sample_limit],
+                "all_lagging_samples": lagging_samples,
             }
+    finally:
+        conn.close()
+
+
+def _auto_fix_lagging_symbols(summary: dict, sample_limit: int = 20) -> None:
+    """auto-fix: 用 akshare 补齐落后标的的缺失日线"""
+    from tools.import_from_akshare import get_connection, upsert_daily_bars, DATA_SOURCE_AKSHARE
+    from tools.update_daily_data import fetch_symbol_daily
+    import datetime as dt
+
+    lagging = summary.get("all_lagging_samples", [])
+    target_date = summary["target_date"]
+    ordinary = [s for s in lagging if s.get("special_state") in (None, "ST")]
+
+    if not ordinary:
+        print("auto-fix: 无普通落后标的需补齐")
+        return
+
+    print(f"auto-fix: 开始用 akshare 补齐 {len(ordinary)} 只落后标的日线 ...")
+    conn = get_connection()
+    fixed = 0
+    failed = 0
+    try:
+        for i, sample in enumerate(ordinary, start=1):
+            symbol = sample["symbol"]
+            latest = sample.get("latest_trade_date")
+            if latest is None:
+                continue
+            start = latest + dt.timedelta(days=1)
+            if start > target_date:
+                continue
+
+            try:
+                daily = fetch_symbol_daily(symbol, start, target_date)
+                if daily is not None and not daily.empty:
+                    with conn.cursor() as cursor:
+                        upsert_daily_bars(cursor, symbol, daily.to_dict("records"))
+                    conn.commit()
+                    fixed += 1
+                    if fixed <= sample_limit:
+                        rows_count = len(daily)
+                        print(f"  [{i}/{len(ordinary)}] {symbol} 补齐 {rows_count} 行 ({start}..{target_date})")
+                else:
+                    failed += 1
+            except Exception as exc:
+                failed += 1
+                if failed <= 5:
+                    print(f"  [{i}/{len(ordinary)}] {symbol} 失败: {exc}")
+
+        print(f"auto-fix: 补齐 {fixed} 只标的, 失败 {failed} 只")
     finally:
         conn.close()
 
@@ -213,6 +269,9 @@ def main() -> int:
                 f"- {sample['symbol']} {sample['name']} ({sample['share_type']}) "
                 f"status={sample['status']} latest={sample['latest_trade_date']} expected={sample['expected_target_date']}"
             )
+        if args.auto_fix:
+            _auto_fix_lagging_symbols(summary, sample_limit=args.sample_limit)
+            return 0
         return 2
 
     if summary["special_lagging_symbol_count"] > 0:
@@ -225,6 +284,8 @@ def main() -> int:
 
     print("校验通过: daily_bar 已更新到目标交易日")
     return 0
+
+
 
 
 if __name__ == "__main__":

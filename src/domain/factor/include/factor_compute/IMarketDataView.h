@@ -27,8 +27,12 @@ public:
     [[nodiscard]] virtual std::optional<NumericConstMatrixView>
     getField(const std::string& fieldName) const = 0;
 
+    /// @brief 所有可用字段名
+    [[nodiscard]] virtual std::vector<std::string> fieldNames() const { return {}; }
+
     [[nodiscard]] virtual const std::vector<DateKey>& dates() const = 0;
     [[nodiscard]] virtual const std::vector<InstrumentId>& instruments() const = 0;
+    [[nodiscard]] virtual const std::vector<std::string>& symbolStrings() const = 0;
 
     /// @brief 获取时间子集的视图（零拷贝）
     /// @param dateRange 时间范围
@@ -41,6 +45,10 @@ public:
     /// @return 子视图，与原视图共享底层内存映射
     [[nodiscard]] virtual std::unique_ptr<IMarketDataView>
     slice(const std::vector<InstrumentId>& instrumentIds) const = 0;
+
+    /// @brief 获取可写的列数据指针（仅 DenseChunkView 支持，其他返回 nullptr）
+    virtual signal_value_t* mutableFieldData(const std::string& /*fieldName*/) { return nullptr; }
+    virtual int32_t fieldDataLength() const { return 0; }
 };
 
 } // namespace factor::compute

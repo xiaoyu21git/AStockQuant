@@ -39,6 +39,7 @@ public:
 
     [[nodiscard]] const std::vector<DateKey>& dates() const override { return dates_; }
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override { return instruments_; }
+    [[nodiscard]] const std::vector<std::string>& symbolStrings() const override { return symbolStrings_; }
 
     [[nodiscard]] std::unique_ptr<IMarketDataView> slice(DateRange) const override { return nullptr; }
     [[nodiscard]] std::unique_ptr<IMarketDataView> slice(const std::vector<InstrumentId>&) const override { return nullptr; }
@@ -57,6 +58,7 @@ private:
     signal_value_t dummyValue_{kDummyPrice};
     std::vector<DateKey> dates_{DateKey{kStartDate}};
     std::vector<InstrumentId> instruments_{InstrumentId{kInstrumentToken}};
+    std::vector<std::string> symbolStrings_{"TEST.SH"};
 };
 
 bool runGenerateSuccessCase()

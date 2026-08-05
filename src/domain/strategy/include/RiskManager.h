@@ -1,10 +1,13 @@
-// RiskManager.h — 风控管理器（domain/strategy, 纯 C++，零 Qt）
-// 无状态，按 accountId 查询 AccountEngine 后判断。
-// 调用方负责把 RiskResult 投递到 EventBus "trading.risk.rejected"
+// RiskManager.h — 风控管理器
+// 被动: 订单到达时检查 checkAutoSignal/checkManualOrder
+// 主动: 定时巡检持仓，触发止损止盈时委托 OrderBuilder 生成退出订单
 #pragma once
 
 #include "../../../engine/include/GmSessionEngine.h"
 #include "RiskEvaluator.h"
+#include "../../trading/include/OrderBuilder.h"
+
+#include <vector>
 
 namespace domain::strategy {
 
@@ -12,23 +15,22 @@ class RiskManager {
 public:
     static RiskManager& instance();
 
-    /// @brief 手动下单风控 — TradeExecutionBridge 显式调用
-    RiskResult checkManualOrder(const std::string& accountId,
-                                const engine::OrderRequest& req);
+    // ── 主动 ──
 
-    /// @brief 策略信号风控 — StrategyEngine 发单前调用
-    RiskResult checkAutoSignal(const std::string& accountId,
-                               const engine::OrderRequest& req,
-                               double signalStrength);
+    /// @brief 巡检所有持仓，触发止损止盈时委托 OrderBuilder 生成退出订单
+    /// @param builder 调用方传入，不持有，避免悬空指针
+    /// @return 需要执行的退出订单列表
+    std::vector<engine::OrderRequest> patrolPositions(domain::trading::OrderBuilder& builder);
 
     void setRiskConfig(const RiskConfig& config);
     const RiskConfig& riskConfig() const;
 
-private:
-    RiskManager() = default;
-    RiskConfig m_config;
+    static bool isPriceAtLimit(double currentPrice, double preClose, bool isBuy,
+                               const std::string& symbol = "");
 
-    bool priceAtLimit(const std::string& symbol, double price, bool isBuy) const;
+private:
+    RiskManager() : m_config(RiskConfig::defaults()) {}
+    RiskConfig m_config;
 };
 
 } // namespace domain::strategy

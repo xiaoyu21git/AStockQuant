@@ -1,21 +1,30 @@
 #include "AppBootstrap.h"
 
-// #include "InlineExecutor.h"
-// #include "IExecutor.h"
 #include "foundation.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "Event/EventBus.hpp"
 #include "GlobalEventBusRegistry.h"
-// 下面这些现在可以是空头文件或 forward declare
-// #include "engine/Engine.h"
 
+#include <QRegularExpression>
 #include <iostream>
+
+namespace {
+QRegularExpression s_pureNumber("^\\s*-?\\d+(\\.\\d+)?\\s*$");
+
+void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const QString& msg)
+{
+    if (type == QtDebugMsg && s_pureNumber.match(msg.trimmed()).hasMatch())
+        return;
+    std::cerr << msg.toStdString() << std::endl;
+}
+}
 #include <QCoreApplication>
 #include <QDir>
 #include <QElapsedTimer>
 #include <QIcon>
 #include <QObject>
 #include <QQmlApplicationEngine>
+#include <QLoggingCategory>
 #include <QQmlContext>
 #include <QQuickWindow>
 #include <QTimer>
@@ -24,12 +33,18 @@
 
 #include "../../domain/strategy/include/RiskEvaluator.h"
 #include "../../domain/strategy/include/RiskManager.h"
+#include "../../domain/strategy/include/StrategyManager.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/TradeEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
 #include "../../ui/bridge/include/MarketDataBridge.h"
-#include "database/NativeMySQLConnectionPool.h"
+#include "database/NativePgConnectionPool.h"
+#include "database/PostMarketSyncService.h"
+#include "../../../domain/strategy/include/EventRiskSubscriber.h"
+#include "EventDrivenFactor.h"
+#include "../include/PythonEventBridge.h"
+#include "database/EventBridgePoller.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinMarketConnector.h"
@@ -190,6 +205,9 @@ void AppBootstrap::shutdown()
 {
     INTERNAL_INFO_STREAM << "[AppBootstrap] Shutting down...";
 
+    // 先停所有策略引擎 (线程安全退出)
+    domain::strategy::StrategyManager::instance().stopAll();
+
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
     shutdownOptionalConnectors();
 #endif
@@ -318,6 +336,18 @@ bool AppBootstrap::initServices()
 
             engine::register_engine_event_bus(m_eventBus.get());
             INTERNAL_INFO_STREAM << "[AppBootstrap] Application EventBus initialized";
+
+            // 启动事件风控订阅器（订阅 news.* 事件，动态调整风控参数）
+            domain::strategy::EventRiskSubscriber::instance().start();
+
+            // 启动事件驱动因子订阅 (接收 news.*, 为策略提供实时情绪信号)
+            factor::EventDrivenFactor::subscribeToEventBus();
+
+            // 启动 Python 金融事件感知调度器 (QProcess 子进程)
+            app::PythonEventBridge::instance().start();
+
+            // 启动事件桥接轮询器 (消费 Python 写入的 live.event_bridge → C++ EventBus)
+            astock::infrastructure::database::EventBridgePoller::instance().start();
         }
 
         // ── GmSessionEngine（唯一 gmsdk 连接）在 QML 之前初始化 ──
@@ -357,8 +387,8 @@ bool AppBootstrap::initDatabase()
 {
     INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing database...";
 
-    // 预热数据库连接池（NativeMySQLConnectionPool 自动惰性初始化）
-    auto conn = astock::database::NativeMySQLConnectionPool::instance().getConnection();
+    // 预热数据库连接池（NativePgConnectionPool 自动惰性初始化）
+    auto conn = astock::database::NativePgConnectionPool::instance().getConnection();
     if (conn) {
         INTERNAL_INFO_STREAM << "[AppBootstrap] Native PG pool warmed up";
     }
@@ -371,6 +401,7 @@ bool AppBootstrap::initQmlEngine()
     INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing QML engine...";
 
     try {
+        qInstallMessageHandler(filteredMessageHandler);
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
         applyRootWindowIcon(m_engine.get());
@@ -430,6 +461,16 @@ void AppBootstrap::initializeDeferredDomainServices()
     if (m_deferredDomainServicesInitialized) {
         return;
     }
+
+    // 注入实盘数据持久化路径，再启动盘后数据同步服务
+    {
+        auto dirs = runtimeDirectories();
+        QString livePath = QDir(dirs.filesDir).filePath("live");
+        ensureDirectoryExists(livePath, "live");
+        astock::infrastructure::database::PostMarketSyncService::instance()
+            .setLiveDataPath(livePath.toStdString());
+    }
+    astock::infrastructure::database::PostMarketSyncService::instance().start();
 
     initializeDeferredTradingServices();
 

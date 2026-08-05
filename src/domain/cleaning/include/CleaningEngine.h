@@ -69,7 +69,7 @@ public:
         }
         std::vector<size_t> idx(data.size());
         for (size_t i = 0; i < data.size(); ++i) idx[i] = i;
-        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+        std::stable_sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
             if (keys[a].first != keys[b].first) return keys[a].first < keys[b].first;
             return keys[a].second < keys[b].second;
         });
@@ -147,7 +147,9 @@ public:
             m_lastStats.ruleStats.clear();
             for (const auto& rule : m_rules) m_lastStats.ruleStats.push_back({rule->ruleName(), 0, 0});
         }
-        for (auto& rule : m_rules) rule->cleanCrossSectional(batch);
+        if (isFirst) {
+            for (auto& rule : m_rules) rule->cleanCrossSectional(batch);
+        }
         m_lastStats.totalRecords += bs;
         int processed = m_lastStats.keptRecords + m_lastStats.removedRecords;
         for (auto& row : batch) {
@@ -163,7 +165,8 @@ public:
             if (keep) { stripInternalFieldsSingle(row); onKeep(row); ++m_lastStats.keptRecords; }
             ++processed;
         }
-        if (isLast) { std::vector<LightRow> d; for (auto& rule : m_rules) rule->postCrossSectional(d);
+        if (isLast) { std::vector<LightRow> noRows; for (auto& rule : m_rules) rule->postCrossSectional(noRows);
+            // NOTE: postCrossSectional 当前无规则实现；若将来有规则需要 survivors，需在此累积
             INTERNAL_INFO_STREAM << "[CleaningEngine] " << m_lastStats.totalRecords << " -> " << m_lastStats.keptRecords << " rows (" << m_lastStats.removedRecords << " removed)"; }
     }
 
@@ -171,7 +174,13 @@ public:
 
 private:
     static void stripInternalFieldsSingle(LightRow& row) { if (!row.isObject()) return;
-        static const char* ik[] = {"adjusted_price_applied","data_type","valuation_invalid_fields","cleaning_tags","adj_factor","amount","date","tradeDate","industry","turnover_amount"};
+        static const char* ik[] = {
+            IF::ADJUSTED_PRICE_APPLIED.c_str(),
+            IF::DATA_TYPE.c_str(),
+            IF::VALUATION_INVALID_FIELDS.c_str(),
+            IF::CLEANING_TAGS.c_str(),
+            "adj_factor", "amount", "date", "tradeDate", "industry", "turnover_amount"
+        };
         for (auto* k : ik) row.remove(k); }
     void stripInternalFields(std::vector<LightRow>& rows) {
         for (auto& row : rows) {

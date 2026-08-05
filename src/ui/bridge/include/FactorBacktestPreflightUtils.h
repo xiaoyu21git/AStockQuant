@@ -67,6 +67,9 @@ inline QString classifyBacktestPreflightCategory(const QString& category)
     if (normalized == QStringLiteral("dataset-missing")) {
         return QStringLiteral("未选择缓存集");
     }
+    if (normalized == QStringLiteral("runtime-not-ready")) {
+        return QStringLiteral("回测运行时未就绪");
+    }
     if (normalized == QStringLiteral("stock-pool-mismatch")) {
         return QStringLiteral("股票池与缓存集不匹配");
     }

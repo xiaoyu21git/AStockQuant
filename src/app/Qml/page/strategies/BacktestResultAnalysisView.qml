@@ -2,6 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtCharts 2.15
+import AStock.Bridge 1.0
 
 Item {
     id: page
@@ -11,181 +12,259 @@ Item {
     property var backtestResult: null
     signal backToWorkbench()
 
-    function fp(v,d){var n=Number(v);return isNaN(n)?"--":n.toFixed(d||2)+"%"}
-    function fn(v,d){var n=Number(v);return isNaN(n)?"--":n.toFixed(d||2)}
+    property string selSymbol: ""
+    property double selPnLTotal: 0.0
 
-    property var perf: (backtestResult && backtestResult.performance) ? backtestResult.performance : ({})
-    property var trades: (backtestResult && backtestResult.trades) ? backtestResult.trades : ({})
-    property var ts: (backtestResult && backtestResult.timeSeries) ? backtestResult.timeSeries : ({})
-    property var params: (backtestResult && backtestResult.parameters) ? backtestResult.parameters : ({})
-    property var risk: (backtestResult && backtestResult.risk) ? backtestResult.risk : ({})
-
-    function rejectionLabel(code) {
-        switch(Number(code)) {
-            case 1: return "缺少必填字段"; case 2: return "策略未绑定"; case 3: return "策略未激活"
-            case 4: return "价格无效"; case 5: return "信号太弱"; case 6: return "持仓快照未就绪"
-            case 7: return "非交易时段"; case 8: return "无可卖持仓"; case 9: return "卖出超量"
-            case 10: return "订单金额超限"; case 11: return "滑点超限"; case 12: return "日成交额超限"
-            case 13: return "止损触发"; case 14: return "止盈触发"
-            case 15: return "一级熔断"; case 16: return "二级熔断"; case 17: return "三级熔断"
-            case 18: return "最大回撤超限"; case 19: return "集中度超限"; case 20: return "总敞口超限"
-            case 21: return "交易暂停"; case 22: return "缺委托数量"
-            default: return "未知("+code+")"
-        }
+    property var tradeRows: {
+        if (backtestResult && backtestResult.tradeLog)
+            return backtestResult.tradeLog
+        return []
     }
 
-    onBacktestResultChanged: {
-        if (!backtestResult || !backtestResult.timeSeries) return
-        var tss = backtestResult.timeSeries
-        var pv=tss.portfolioValues||[]; var dd=tss.drawdowns||[]; var ret=tss.returns||[]
-        equityS.clear(); drawdownS.clear(); returnS.clear()
-        var pMin=1e18,pMax=-1e18,dMin=0,dMax=-1e18,rMin=1e18,rMax=-1e18
-        for(var i=0;i<pv.length;i++){
-            equityS.append(i,pv[i]);drawdownS.append(i,dd[i]||0)
-            if(pv[i]>pMax)pMax=pv[i];if(pv[i]<pMin)pMin=pv[i]
-            if(dd[i]<dMin)dMin=dd[i];if(dd[i]>dMax)dMax=dd[i]
+    property var stockSummary: {
+        var m={},a=[]
+        for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i],s=t.symbol
+        if(!m[s])m[s]={symbol:s,buys:0,sells:0,wins:0,totalPnl:0,maxWin:0,maxLoss:0}
+        if(t.isBuy)m[s].buys++;else{m[s].sells++;var p=t.realizedPnl||0;m[s].totalPnl+=p
+        if(p>m[s].maxWin)m[s].maxWin=p;if(p<m[s].maxLoss)m[s].maxLoss=p;if(p>=0)m[s].wins++}}
+        for(var k in m){var x=m[k];x.winRate=x.sells>0?(x.wins/x.sells*100).toFixed(1)+"%":"--";a.push(x)}
+        a.sort(function(a,b){return b.totalPnl-a.totalPnl});return a}
+
+    // 买卖点选中对比
+    property var selBuyInfo: null; property var selSellInfo: null
+    property var selPairStats: {
+        if(!selBuyInfo||!selSellInfo)return{days:"--",pnl:0,ratio:"--"}
+        var bd=selBuyInfo.dateD,sd=selSellInfo.dateD
+        var days=Math.round((sd-bd)/86400000)
+        var pnl=selSellInfo.pnl||0
+        var ratio=selBuyInfo.price>0?(pnl/selBuyInfo.price*100).toFixed(2)+"%":"--"
+        return{days:days,pnl:pnl,ratio:ratio}
+    }
+    function fmtTradeDate(d){var s=String(d||"");return s.length===8?s.substr(0,4)+"-"+s.substr(4,2)+"-"+s.substr(6,2):s}
+    function findTradeInfo(pt,isBuy){
+        for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i]
+        if(selSymbol&&t.symbol!==selSymbol)continue
+        if(t.isBuy!==isBuy)continue
+        var d2=new Date(parseInt(t.date.toString().substr(0,4)),parseInt(t.date.toString().substr(4,2))-1,parseInt(t.date.toString().substr(6,2)))
+        if(Math.abs(d2.getTime()-pt.x)<86400000&&Math.abs(t.price-pt.y)<t.price*0.02)
+            return{date:fmtTradeDate(t.date),dateD:d2,price:t.price,pnl:t.realizedPnl||0,isBuy:t.isBuy}}
+        return null
+    }
+
+    function buildSymbolChart(){
+        selBuyInfo=null;selSellInfo=null
+        buyPoints.clear();sellWin.clear();sellLoss.clear();priceLine.clear();selPnLTotal=0.0
+        var tMin=Infinity,tMax=-Infinity,pMin=Infinity,pMax=-Infinity
+        // 1. 日线收盘价走势
+        var sp=backtestResult&&backtestResult.symbolPrices?backtestResult.symbolPrices[selSymbol]:null
+        if(sp&&sp.dates) for(var di=0;di<sp.dates.length;di++){
+            var dd=sp.dates[di],dc=sp.closes[di]
+            var dObj=new Date(parseInt(String(dd).substr(0,4)),parseInt(String(dd).substr(4,2))-1,parseInt(String(dd).substr(6,2)))
+            var ms=dObj.getTime();if(ms<tMin)tMin=ms;if(ms>tMax)tMax=ms;if(dc<pMin)pMin=dc;if(dc>pMax)pMax=dc
+            priceLine.append(ms,dc)
         }
-        var n=Math.max(1,pv.length-1); eqX.max=n; ddX.max=n; retX.max=Math.max(1,ret.length-1)
-        eqY.min=pMin*0.95;eqY.max=pMax*1.05;ddY.min=dMin*1.1;ddY.max=dMax>0?dMax*1.1:0
-        var cum=0; for(var j=0;j<ret.length;j++){cum+=ret[j];returnS.append(j,cum);if(cum>rMax)rMax=cum;if(cum<rMin)rMin=cum}
-        retY.min=rMin*1.1;retY.max=rMax*1.1
-        console.log("分析页图形更新: "+pv.length+" 净值点, "+dd.length+" 回撤点, "+ret.length+" 收益点")
+        // 2. 买卖点叠加
+        var pts=[];for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i]
+        if(selSymbol&&t.symbol!==selSymbol)continue;pts.push(t)}
+        pts.sort(function(a,b){return a.date-b.date})
+        for(var j=0;j<pts.length;j++){var t=pts[j]
+        var d2=new Date(parseInt(t.date.toString().substr(0,4)),parseInt(t.date.toString().substr(4,2))-1,parseInt(t.date.toString().substr(6,2)))
+        var ms2=d2.getTime();if(ms2<tMin)tMin=ms2;if(ms2>tMax)tMax=ms2;if(t.price<pMin)pMin=t.price;if(t.price>pMax)pMax=t.price
+        if(t.isBuy){buyPoints.append(ms2,t.price)}
+        else{var pp=t.realizedPnl||0;selPnLTotal+=pp
+        if(pp>=0){sellWin.append(ms2,t.price)}else{sellLoss.append(ms2,t.price)}}}
+        if(isFinite(tMin)){symAxisX.min=new Date(tMin-86400000*30);symAxisX.max=new Date(tMax+86400000*30)}
+        if(isFinite(pMin)){var pad=(pMax-pMin)*0.1||pMax*0.02;symAxisY.min=pMin-pad;symAxisY.max=pMax+pad}
+    }
+
+    // 比例显示
+    function fp(v,d){var n=Number(v);return isNaN(n)?"--":(n*100).toFixed(d||2)+"%"}
+    function fn(v,d){var n=Number(v);return isNaN(n)?"--":n.toFixed(d||2)}
+
+    property var perf: (backtestResult&&backtestResult.performance)?backtestResult.performance:({})
+    property var trades: (backtestResult&&backtestResult.trades)?backtestResult.trades:({})
+    property var ts: (backtestResult&&backtestResult.timeSeries)?backtestResult.timeSeries:({})
+    property var params: (backtestResult&&backtestResult.parameters)?backtestResult.parameters:({})
+    property var risk: (backtestResult&&backtestResult.risk)?backtestResult.risk:({})
+    property var ddIndexByDate: ({})
+
+    // 空仓统计: 按标的汇总所有持仓日期, 统计空仓天数
+    property var positionDaysSet: {
+        var s=new Set()
+        for(var i=0;i<tradeRows.length;i++){var t=tradeRows[i];s.add(t.date)}
+        // 简化: 用首笔买入到末笔卖出之间的天数估算
+        var sorted=Array.from(s).sort()
+        if(sorted.length<2)return{totalDays:0,positionDays:0,emptyDays:0}
+        var first=parseInt(sorted[0]),last=parseInt(sorted[sorted.length-1])
+        var total=Math.ceil((new Date(parseInt(last.toString().substr(0,4)),parseInt(last.toString().substr(4,2))-1,parseInt(last.toString().substr(6,2)))
+                              -new Date(parseInt(first.toString().substr(0,4)),parseInt(first.toString().substr(4,2))-1,parseInt(first.toString().substr(6,2))))/86400000)+1
+        return{totalDays:total,positionDays:s.size,emptyDays:total-s.size}
+    }
+    property var tradeMeta: {
+        var tsd=ts.dates||[]
+        return{tradingDays:tsd.length,totalTrades:tradeRows.length}
+    }
+
+    function fmtDate(v){var s=String(v||"");return s.length===8?s.substr(0,4)+"-"+s.substr(4,2)+"-"+s.substr(6,2):(s||"--")}
+    function tradeReturnRatio(row){var c=(row.amount||0)-(row.realizedPnl||0);return c>0?(row.realizedPnl||0)/c:NaN}
+    function dayDrawdownOf(d){var i=ddIndexByDate[d];return(i!==undefined&&ts.drawdowns)?ts.drawdowns[i]:NaN}
+    function rejectionLabel(code){switch(Number(code)){case 1:return"缺少必填字段";case 2:return"策略未绑定";case 3:return"策略未激活";case 4:return"价格无效";case 5:return"信号太弱";case 6:return"持仓快照未就绪";case 7:return"非交易时段";case 8:return"无可卖持仓";case 9:return"卖出超量";case 10:return"订单金额超限";case 11:return"滑点超限";case 12:return"日成交额超限";case 13:return"止损触发";case 14:return"止盈触发";case 15:return"一级熔断";case 16:return"二级熔断";case 17:return"三级熔断";case 18:return"最大回撤超限";case 19:return"集中度超限";case 20:return"总敞口超限";case 21:return"交易暂停";case 22:return"缺委托数量";default:return"未知("+code+")"}}
+
+    onBacktestResultChanged: {
+        if(!backtestResult||!backtestResult.timeSeries)return
+        // 自动选第一个标的
+        if(tradeRows.length>0){selSymbol=tradeRows[0].symbol;buildSymbolChart()}
+        // 填充图表 — 使用真实日期作为 X 轴
+        var tss=backtestResult.timeSeries
+        var pv=tss.portfolioValues||[],dd=tss.drawdowns||[],ret=tss.returns||[]
+        var bv=tss.benchmarkValues||[],bdd=tss.benchmarkDrawdowns||[]
+        var dates=tss.dates||[]
+        equityS.clear();drawdownS.clear();returnS.clear();bmEquityS.clear();bmDrawdownS.clear()
+        var pM=-1e18,pm=1e18,tFirst=Infinity,tLast=-Infinity
+        for(var i=0;i<pv.length;i++){
+            if(i<dates.length){
+                var di=new Date(parseInt(String(dates[i]).substr(0,4)),parseInt(String(dates[i]).substr(4,2))-1,parseInt(String(dates[i]).substr(6,2)));
+                var msi=di.getTime();if(msi<tFirst)tFirst=msi;if(msi>tLast)tLast=msi}
+            else{var msi=i*86400000}
+            var sv=isFinite(pv[i])?pv[i]:(isFinite(pv[0])?pv[0]:1);
+            equityS.append(msi,sv);drawdownS.append(msi,isFinite(dd[i])?dd[i]:0);
+            if(sv>pM)pM=sv;if(sv<pm)pm=sv}
+        for(var k=0;k<bv.length;k++){
+            if(k<dates.length){
+                var dk=new Date(parseInt(String(dates[k]).substr(0,4)),parseInt(String(dates[k]).substr(4,2))-1,parseInt(String(dates[k]).substr(6,2)));
+                var msk=dk.getTime();if(msk<tFirst)tFirst=msk;if(msk>tLast)tLast=msk}
+            else{var msk=k*86400000}
+            var bmv=isFinite(bv[k])?bv[k]:(isFinite(bv[0])?bv[0]:1);
+            bmEquityS.append(msk,bmv);bmDrawdownS.append(msk,isFinite(bdd[k])?bdd[k]:0);
+            if(bmv>pM)pM=bmv;if(bmv<pm)pm=bmv}
+        if(isFinite(tFirst)){eqX.min=new Date(tFirst);eqX.max=new Date(tLast);ddX.min=new Date(tFirst);ddX.max=new Date(tLast);retX.min=new Date(tFirst);retX.max=new Date(tLast)}
+        eqY.min=pm*0.95;eqY.max=pM*1.05
+        var ddMinAll=0;for(var di2=0;di2<dd.length;di2++){var dv2=isFinite(dd[di2])?dd[di2]:0;if(dv2<ddMinAll)ddMinAll=dv2}
+        for(var dk2=0;dk2<bdd.length;dk2++){var bv2=isFinite(bdd[dk2])?bdd[dk2]:0;if(bv2<ddMinAll)ddMinAll=bv2}
+        ddY.min=Math.min(0,ddMinAll*1.05);ddY.max=0
+        var cum=0,rM=-1e18;for(var j=0;j<ret.length;j++){
+            if(j<dates.length){
+                var dj=new Date(parseInt(String(dates[j]).substr(0,4)),parseInt(String(dates[j]).substr(4,2))-1,parseInt(String(dates[j]).substr(6,2)));
+                var msj=dj.getTime()}
+            else{var msj=j*86400000}
+            cum+=ret[j];returnS.append(msj,cum);if(cum>rM)rM=cum}
+        retY.min=-0.5;retY.max=rM*1.1
+        var m={},td=dates;for(var di=0;di<td.length;di++)m[td[di]]=di;ddIndexByDate=m
     }
 
     Flickable { anchors.fill: parent; contentWidth: parent.width; contentHeight: content.implicitHeight+20; clip: true
-        ColumnLayout { id: content; width: parent.width; spacing:10
+    ColumnLayout { id: content; width: parent.width; spacing:10
 
-            RowLayout { Layout.fillWidth: true
-                Text{text:"回测分析 · "+(strategyName||strategyId||"");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
-                Item{Layout.fillWidth:true}
-                Text{text:"基准:";font.pixelSize:11;color:"#94A3B8"}
-                ComboBox { id: bmBox; width: 110; font.pixelSize: 11; currentIndex: 0
-                    model: ["全市场","沪深300","中证500","中证1000","创业板指","上证50","科创50"]
-                    background: Rectangle { radius: 4; color: "#1E293B"; border.color: "#334155" }
-                    contentItem: Text { text: parent.displayText; font.pixelSize: 11; color: "#F1F5F9"; verticalAlignment: Text.AlignVCenter; leftPadding: 6 } }
-                Item{width:12}
-                Rectangle{width:55;height:24;radius:4;color:"#475569";
-                    Text{anchors.centerIn:parent;text:"返回";font.pixelSize:10;color:"#F1F5F9"}
-                    MouseArea{anchors.fill:parent;onClicked:backToWorkbench()}} }
+        RowLayout { Layout.fillWidth: true
+            Text{text:"回测分析 · "+(backtestResult?backtestResult.strategyName||strategyId||"":"--");font.pixelSize:16;font.weight:Font.Bold;color:"#F1F5F9"}
+            Item{Layout.fillWidth:true}
+            Rectangle{width:55;height:24;radius:4;color:"#475569";Text{anchors.centerIn:parent;text:"返回";font.pixelSize:10;color:"#F1F5F9"}MouseArea{anchors.fill:parent;onClicked:backToWorkbench()}}}
 
-            // 参数摘要
-            Rectangle { Layout.fillWidth: true; visible: Object.keys(params).length>0; radius: 8; color: "#1E293B"
-                RowLayout { anchors.fill: parent; anchors.margins: 10; spacing: 12
-                    Text{text:"参数: 初始"+(params.initialCapital||"--")+" | "+(params.startDate||"--")+"~"+(params.endDate||"--")+" | 基准"+(params.benchmarkIndex||"--")+" | "+(params.dataFrequency||"--")+" "+params.priceAdjustment;font.pixelSize:10;color:"#64748B"} } }
+        Rectangle { Layout.fillWidth: true; visible: Object.keys(params).length>0; radius: 8; color: "#1E293B"
+            RowLayout { anchors.fill: parent; anchors.margins: 10; spacing: 12
+                Text{text:"参数: 初始"+(params.initialCapital||"--")+" | "+(params.startDate||"--")+"~"+(params.endDate||"--")+" | 基准"+(params.benchmarkIndex||"--");font.pixelSize:10;color:"#64748B"}}}
 
-            // 绩效指标卡片
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 200; radius: 8; color: "#1E293B"
-                GridLayout { anchors.fill: parent; anchors.margins: 10; columns: 5; columnSpacing: 8; rowSpacing: 6
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"总收益";   value:fp(perf.totalReturn);          accent:(perf.totalReturn||0)>=0?"#EF4444":"#10B981" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"年化收益"; value:fp(perf.annualizedReturn);     accent:(perf.annualizedReturn||0)>=0?"#EF4444":"#10B981" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"最大回撤"; value:fp(perf.maxDrawdown);          accent:"#F59E0B" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"夏普比率"; value:fn(perf.sharpeRatio,3);        accent:"#38BDF8" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Sortino";  value:fn(perf.sortinoRatio,3);       accent:"#38BDF8" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Calmar";   value:fn(perf.calmarRatio,3);        accent:"#38BDF8" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"胜率";     value:fp(perf.winRate);              accent:"#EF4444" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"利润因子"; value:fn(perf.profitFactor,2);       accent:"#EF4444" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Alpha";    value:fn(perf.alpha,3);             accent:"#F1F5F9" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"Beta";     value:fn(perf.beta,2);              accent:"#F1F5F9" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"信息比率"; value:fn(perf.informationRatio,3);   accent:"#F1F5F9" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"跟踪误差"; value:fn(perf.trackingError,3);      accent:"#F1F5F9" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"总交易";   value:fn(trades.totalTrades,0);       accent:"#64748B" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"胜/负";    value:fn(trades.winningTrades,0)+"/"+fn(trades.losingTrades,0); accent:"#64748B" }
-                    Card{ Layout.fillWidth:true; Layout.preferredHeight:55; label:"盈亏比";   value:trades.totalLoss&&trades.totalLoss!==0?fn(trades.totalProfit/Math.abs(trades.totalLoss),2):"--"; accent:"#64748B" }
-                }
-            }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 160; radius: 8; color: "#1E293B"
+            GridLayout { anchors.fill: parent; anchors.margins: 10; columns: 5; columnSpacing: 8; rowSpacing: 6
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"总收益";value:fp(perf.totalReturn);accent:(perf.totalReturn||0)>=0?"#EF4444":"#10B981"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"年化收益";value:fp(perf.annualizedReturn);accent:(perf.annualizedReturn||0)>=0?"#EF4444":"#10B981"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"最大回撤";value:fp(perf.maxDrawdown);accent:"#F59E0B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"夏普比率";value:fn(perf.sharpeRatio,3);accent:"#38BDF8"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"Sortino";value:fn(perf.sortinoRatio,3);accent:"#38BDF8"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"胜率";value:fp(perf.winRate);accent:"#EF4444"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"利润因子";value:fn(perf.profitFactor,2);accent:"#EF4444"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"Alpha";value:fn(perf.alpha,3);accent:"#F1F5F9"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"Beta";value:fn(perf.beta,2);accent:"#F1F5F9"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"总交易";value:fn(trades.totalTrades,0);accent:"#64748B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"交易日";value:fn(tradeMeta.tradingDays,0);accent:"#F1F5F9"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"持仓日";value:fn(tradeMeta.tradingDays-positionDaysSet.emptyDays,0);accent:"#F59E0B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"空仓日";value:fn(positionDaysSet.emptyDays,0);accent:"#64748B"}
+                Card{Layout.fillWidth:true;Layout.preferredHeight:45;label:"持仓比";value: tradeMeta.tradingDays>0?fn((tradeMeta.tradingDays-positionDaysSet.emptyDays)/tradeMeta.tradingDays*100,0)+"%":"--";accent:"#38BDF8"}}}
 
-            // 交易详情
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 90; radius: 8; color: "#1E293B"
-                RowLayout { anchors.fill: parent; anchors.margins: 10; spacing: 14
-                    Column { Layout.fillWidth: true; spacing: 2
-                        Text{text:"总盈利: "+fn(trades.totalProfit,0);font.pixelSize:12;color:"#EF4444";font.weight:Font.Bold}
-                        Text{text:"总亏损: "+fn(trades.totalLoss,0);font.pixelSize:12;color:"#10B981";font.weight:Font.Bold}
-                        Text{text:"净值: "+(trades.totalProfit&&trades.totalLoss?fn(trades.totalProfit/Math.abs(trades.totalLoss),2):"--");font.pixelSize:10;color:"#64748B"} }
-                    Column { Layout.fillWidth: true; spacing: 2
-                        Text{text:"最大盈利: "+fn(trades.largestWin,0);font.pixelSize:12;color:"#EF4444"}
-                        Text{text:"最大亏损: "+fn(trades.largestLoss,0);font.pixelSize:12;color:"#10B981"}
-                        Text{text:"平均持期: "+fn(trades.averageHoldingPeriodDays,0)+"天";font.pixelSize:10;color:"#64748B"} }
-                    Column { Layout.fillWidth: true; spacing: 2
-                        Text{text:"总交易: "+fn(trades.totalTrades,0);font.pixelSize:12;color:"#F1F5F9"}
-                        Text{text:"胜: "+fn(trades.winningTrades,0)+" | 负: "+fn(trades.losingTrades,0);font.pixelSize:10;color:"#94A3B8"}
-                        Text{text:"胜率: "+fp(perf.winRate);font.pixelSize:10;color:"#EF4444"} }
-                }
-            }
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 300; radius: 8; color: "#1E293B"
+            ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
+                Text{text:"净值曲线";font.pixelSize:11;color:"#94A3B8"}
+                ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
+                    DateTimeAxis{id:eqX;format:"yy/MM";labelsColor:"#64748B";gridLineColor:"#1E293B";labelsFont.pixelSize:8}
+                    ValueAxis{id:eqY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.0f"}
+                    LineSeries{id:equityS;axisX:eqX;axisY:eqY;color:"#EF4444";width:2}
+                    LineSeries{id:bmEquityS;axisX:eqX;axisY:eqY;color:"#94A3B8";width:1;style:Qt.DashLine}}}}
 
-            // 订单拒绝原因
-            Rectangle { Layout.fillWidth: true; visible: (risk.totalRejected||0)>0; radius: 8; color: "#1E293B"
-                implicitHeight: rejectCol.implicitHeight + 16
-                ColumnLayout { id: rejectCol; anchors.fill: parent; anchors.margins: 10; spacing: 4
-                    Text{text:"订单拒绝统计 (共 "+(risk.totalRejected||0)+" 笔)";font.pixelSize:11;color:"#94A3B8";font.weight:Font.Bold}
-                    GridLayout { columns: 4; columnSpacing: 12; rowSpacing: 2; Layout.fillWidth: true
-                        Repeater {
-                            model: {
-                                var list=[]; var d=risk.rejectionDetails||{}
-                                for(var k in d){if(d.hasOwnProperty(k))list.push({code:k,count:d[k]})}
-                                list.sort(function(a,b){return b.count-a.count})
-                                return list
-                            }
-                            delegate: RowLayout { spacing: 4
-                                Text{text:rejectionLabel(modelData.code);font.pixelSize:10;color:"#94A3B8";Layout.preferredWidth:80}
-                                Text{text:modelData.count;font.pixelSize:10;color:"#F59E0B";font.weight:Font.Bold}
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 净值曲线
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 250; radius: 8; color: "#1E293B"
+        RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 240; spacing: 8
+            Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: "#1E293B"
                 ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
-                    Text{text:"净值曲线";font.pixelSize:11;color:"#94A3B8"}
+                    Text{text:"回撤曲线";font.pixelSize:11;color:"#94A3B8"}
                     ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
-                        ValueAxis{id:eqX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
-                        ValueAxis{id:eqY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
-                        LineSeries{id:equityS;axisX:eqX;axisY:eqY;color:"#EF4444";width:2}} } }
+                        DateTimeAxis{id:ddX;format:"yy/MM";labelsColor:"#64748B";gridLineColor:"#1E293B";labelsFont.pixelSize:8}
+                        ValueAxis{id:ddY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
+                        LineSeries{id:drawdownS;axisX:ddX;axisY:ddY;color:"#F59E0B";width:2}
+                        LineSeries{id:bmDrawdownS;axisX:ddX;axisY:ddY;color:"#94A3B8";width:1;style:Qt.DashLine}}}}
+            Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: "#1E293B"
+                ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
+                    Text{text:"累计收益";font.pixelSize:11;color:"#94A3B8"}
+                    ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
+                        DateTimeAxis{id:retX;format:"yy/MM";labelsColor:"#64748B";gridLineColor:"#1E293B";labelsFont.pixelSize:8}
+                        ValueAxis{id:retY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
+                        LineSeries{id:returnS;axisX:retX;axisY:retY;color:"#38BDF8";width:2}}}}}
 
-            // 回撤+收益
-            RowLayout { Layout.fillWidth: true; Layout.preferredHeight: 220; spacing: 8
-                Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: "#1E293B"
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
-                        Text{text:"回撤曲线";font.pixelSize:11;color:"#94A3B8"}
-                        ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
-                            ValueAxis{id:ddX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
-                            ValueAxis{id:ddY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
-                            LineSeries{id:drawdownS;axisX:ddX;axisY:ddY;color:"#F59E0B";width:2}} } }
-                Rectangle { Layout.fillWidth: true; Layout.fillHeight: true; radius: 8; color: "#1E293B"
-                    ColumnLayout { anchors.fill: parent; anchors.margins: 8; spacing: 2
-                        Text{text:"累计收益";font.pixelSize:11;color:"#94A3B8"}
-                        ChartView{Layout.fillWidth:true;Layout.fillHeight:true;antialiasing:true;legend.visible:false;backgroundColor:"transparent";plotAreaColor:"transparent"
-                            ValueAxis{id:retX;min:0;labelsColor:"#64748B";gridLineColor:"#1E293B"}
-                            ValueAxis{id:retY;labelsColor:"#94A3B8";gridLineColor:"#1E293B";labelFormat:"%.2f"}
-                            LineSeries{id:returnS;axisX:retX;axisY:retY;color:"#38BDF8";width:2}} } }
-            }
-
-            // 每日明细
-            Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 200; radius: 8; color: "#1E293B"
-                ListView { anchors.fill: parent; anchors.margins: 8; clip: true; model: ts.dates||[]
-                    header: Rectangle { width: parent.width; height: 20; color: "transparent"
+        // 个股统计 + 买卖点图表
+        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 420; radius: 8; color: "#1E293B"
+            RowLayout { anchors.fill: parent; anchors.margins: 8; spacing: 12
+                ColumnLayout { Layout.fillWidth: true; Layout.fillHeight: true; spacing: 2
+                    Text{text:"持仓标的统计";font.pixelSize:11;color:"#94A3B8"}
+                    Rectangle { Layout.fillWidth: true; height: 20; color: "transparent"
                         Row { anchors.verticalCenter: parent.verticalCenter
-                            Text{width:90;text:"日期";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:70;text:"净值";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:70;text:"日收益";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
-                            Text{width:70;text:"回撤";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold} } }
-                    delegate: Rectangle { width: ListView.view.width; height: 22; color: index%2?"transparent":"#0B1220"
-                        Row { anchors.verticalCenter: parent.verticalCenter
-                            Text{width:90;text:modelData||"--";font.pixelSize:9;color:"#94A3B8"}
-                            Text{width:70;text:ts.portfolioValues&&ts.portfolioValues[index]?ts.portfolioValues[index].toFixed(4):"--";font.pixelSize:9;color:"#F1F5F9"}
-                            Text{width:70;text:ts.returns&&ts.returns[index]?fp(ts.returns[index]):"--";font.pixelSize:9;color:ts.returns&&ts.returns[index]>=0?"#FCA5A5":"#86EFAC"}
-                            Text{width:70;text:ts.drawdowns&&ts.drawdowns[index]?fp(ts.drawdowns[index]):"--";font.pixelSize:9;color:"#F59E0B"} } } } }
+                            Text{width:120;text:"标的";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:36;text:"买";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:36;text:"卖";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:40;text:"胜率";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}
+                            Text{width:68;text:"盈亏";font.pixelSize:9;color:"#64748B";font.weight:Font.Bold}}}
+                    ListView { Layout.fillWidth: true; Layout.fillHeight: true; clip: true; model: stockSummary
+                        delegate: Rectangle { width: ListView.view.width; height: 22; color: index%2?"transparent":"#0B1220"
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: { selSymbol=modelData.symbol; buildSymbolChart() }}
+                            Row { anchors.verticalCenter: parent.verticalCenter
+                                Text{width:120;text:StrategyBridge.stockDisplayName(modelData.symbol);font.pixelSize:9;color:selSymbol===modelData.symbol?"#F59E0B":"#F1F5F9";elide:Text.ElideRight}
+                                Text{width:36;text:modelData.buys;font.pixelSize:9;color:"#94A3B8"}
+                                Text{width:36;text:modelData.sells;font.pixelSize:9;color:"#94A3B8"}
+                                Text{width:40;text:modelData.winRate;font.pixelSize:9;color:parseFloat(modelData.winRate)>=50?"#EF4444":"#10B981"}
+                                Text{width:68;text:fn(modelData.totalPnl,0);font.pixelSize:9;color:modelData.totalPnl>=0?"#EF4444":"#10B981"}}}}}
+                ColumnLayout { Layout.fillWidth: true; Layout.fillHeight: true; spacing: 4
+                    RowLayout {
+                        Text{text:selSymbol?"买卖点 · "+StrategyBridge.stockDisplayName(selSymbol):"← 点击标的查看";font.pixelSize:11;color:"#94A3B8";elide:Text.ElideRight}
+                        Item{Layout.fillWidth:true}
+                        Text{text:selPnLTotal>=0?"盈":"亏";font.pixelSize:11;color:selPnLTotal>=0?"#EF4444":"#10B981"}
+                        Text{text:selPnLTotal?fn(selPnLTotal,0):"";font.pixelSize:11;color:selPnLTotal>=0?"#EF4444":"#10B981"}}
+                    // 买卖点选中对比
+                    Loader { Layout.fillWidth: true; Layout.preferredHeight: selBuyInfo&&selSellInfo?44:0; active: selBuyInfo&&selSellInfo
+                        sourceComponent: Rectangle { width:parent.width; height:44; radius:6; color:"#0F172A"; border.color:"#334155"; border.width:1
+                        RowLayout { anchors.fill:parent; anchors.margins:8; spacing:16
+                            Text{text:selBuyInfo?"买 "+selBuyInfo.date+" · "+fn(selBuyInfo.price,2):"";font.pixelSize:10;color:"#F59E0B"}
+                            Text{text:"→";font.pixelSize:14;color:"#64748B"}
+                            Text{text:selSellInfo?"卖 "+selSellInfo.date+" · "+fn(selSellInfo.price,2):"";font.pixelSize:10;color:selSellInfo&&selSellInfo.pnl>=0?"#EF4444":"#10B981"}
+                            Item{Layout.fillWidth:true}
+                            Text{text:selSymbol?StrategyBridge.stockDisplayName(selSymbol):"";font.pixelSize:9;color:"#64748B"}
+                            Text{text:"持仓 "+selPairStats.days+"天";font.pixelSize:11;color:"#F1F5F9";font.weight:Font.Bold}
+                            Text{text:"盈亏 "+fn(selPairStats.pnl,0);font.pixelSize:11;color:selPairStats.pnl>=0?"#EF4444":"#10B981";font.weight:Font.Bold}
+                            Text{text:selPairStats.ratio;font.pixelSize:10;color:"#94A3B8"}}}}
+                    ChartView { Layout.fillWidth: true; Layout.fillHeight: true; antialiasing: true; legend.visible: false
+                        backgroundColor: "#0B1220"; plotAreaColor: "#0B1220"
+                        DateTimeAxis { id: symAxisX; format: "yy/MM"; labelsColor: "#64748B"; gridVisible: true; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8 }
+                        ValueAxis { id: symAxisY; labelsColor: "#64748B"; gridVisible: true; gridLineColor: "#1F2937"; labelsFont.pixelSize: 8; labelFormat: "%.2f" }
+                        LineSeries { id: priceLine; axisX: symAxisX; axisY: symAxisY; color: "#94A3B8"; width: 2 }
+                        ScatterSeries { id: buyPoints; axisX: symAxisX; axisY: symAxisY; color: "#F59E0B"; markerSize: 9; borderColor: "#F59E0B"
+                            onClicked: function(point) { selBuyInfo=findTradeInfo(point,true); if(selBuyInfo)selSellInfo=null } }
+                        ScatterSeries { id: sellWin;  axisX: symAxisX; axisY: symAxisY; color: "#EF4444"; markerSize: 10
+                            onClicked: function(point) { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }
+                        ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10
+                            onClicked: function(point) { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }}}}}
 
-            Item { Layout.preferredHeight: 10 }
-        }
-    }
+        Item { Layout.preferredHeight: 10 }}}
 
     component Card: Rectangle {
         property string label: ""; property string value: ""; property color accent: "#F1F5F9"
         radius: 6; color: "#0B1220"
         Column { anchors.centerIn: parent; spacing: 1
             Text { anchors.horizontalCenter: parent.horizontalCenter; text: value; font.pixelSize: 16; font.weight: Font.Bold; color: accent }
-            Text { anchors.horizontalCenter: parent.horizontalCenter; text: label; font.pixelSize: 9; color: "#64748B" } }
-    }
+            Text { anchors.horizontalCenter: parent.horizontalCenter; text: label; font.pixelSize: 9; color: "#64748B" }}}
 }

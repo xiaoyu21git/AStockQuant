@@ -1,5 +1,6 @@
 #include "CleanedDataController.h"
 #include "DataCacheAdapter.h"
+#include "DataCleaningServiceRefactored.h"
 #include "AppStoragePaths.h"
 #include <QMetaObject>
 #include <QPointer>
@@ -22,94 +23,6 @@ bool fieldRequiresPositiveValues(const QString& field)
         "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap"
     };
     return positiveFields.contains(field.trimmed().toLower());
-}
-
-QVariantMap buildFieldDiagnosticsImpl(const QVariantList& data,
-                                     const QVariantMap& datasetInfo,
-                                     int* tradeDateCountOut = nullptr)
-{
-    QVariantMap diagnostics;
-    QString latestTradeDate = datasetInfo.value("endDate").toString().trimmed();
-    QSet<QString> tradeDates;
-
-    if (latestTradeDate.isEmpty()) {
-        for (const QVariant& item : data) {
-            if (!item.canConvert<QVariantMap>()) {
-                continue;
-            }
-            const QString tradeDate = resolveDatasetTradeDate(item.toMap());
-            if (!tradeDate.isEmpty() && (latestTradeDate.isEmpty() || tradeDate > latestTradeDate)) {
-                latestTradeDate = tradeDate;
-            }
-        }
-    }
-
-    QHash<QString, int> nonNullCounts;
-    QHash<QString, int> positiveCounts;
-    QHash<QString, int> latestDateNonNullCounts;
-    QHash<QString, int> latestDatePositiveCounts;
-
-    for (const QVariant& item : data) {
-        if (!item.canConvert<QVariantMap>()) {
-            continue;
-        }
-
-        const QVariantMap row = item.toMap();
-        const QString tradeDate = resolveDatasetTradeDate(row);
-        const bool onLatestDate = !latestTradeDate.isEmpty() && tradeDate == latestTradeDate;
-        if (!tradeDate.isEmpty()) {
-            tradeDates.insert(tradeDate);
-        }
-
-        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
-            const QString field = it.key().trimmed();
-            if (field.isEmpty() || !it.value().isValid() || it.value().isNull()) {
-                continue;
-            }
-
-            const QString textValue = it.value().toString().trimmed();
-            if (textValue.isEmpty()) {
-                continue;
-            }
-
-            nonNullCounts[field] += 1;
-            if (onLatestDate) {
-                latestDateNonNullCounts[field] += 1;
-            }
-
-            bool ok = false;
-            const double numericValue = it.value().toDouble(&ok);
-            if (ok && numericValue > 0.0) {
-                positiveCounts[field] += 1;
-                if (onLatestDate) {
-                    latestDatePositiveCounts[field] += 1;
-                }
-            }
-        }
-    }
-
-    if (tradeDateCountOut) {
-        *tradeDateCountOut = tradeDates.size();
-    }
-
-    const QVariantList availableFields = datasetInfo.value("availableFields").toList();
-    for (const QVariant& fieldVariant : availableFields) {
-        const QString field = fieldVariant.toString().trimmed();
-        if (field.isEmpty()) {
-            continue;
-        }
-
-        QVariantMap fieldInfo;
-        fieldInfo["latestTradeDate"] = latestTradeDate;
-        fieldInfo["nonNullCount"] = nonNullCounts.value(field, 0);
-        fieldInfo["positiveCount"] = positiveCounts.value(field, 0);
-        fieldInfo["latestDateNonNullCount"] = latestDateNonNullCounts.value(field, 0);
-        fieldInfo["latestDatePositiveCount"] = latestDatePositiveCounts.value(field, 0);
-        fieldInfo["requiresPositiveValues"] = fieldRequiresPositiveValues(field);
-        diagnostics[field] = fieldInfo;
-    }
-
-    return diagnostics;
 }
 
 bool isCleanedDatasetInfo(const QVariantMap& info)
@@ -198,9 +111,17 @@ bool CleanedDataController::initialize()
             }
         );
         
+        // 监听增量更新完成 → 自动刷新数据集列表
+        if (auto* svc = DataCleaningServiceRefactored::instance()) {
+            connect(svc, &DataCleaningServiceRefactored::incrementalUpdateFinished,
+                    this, [this](int, bool ok, int newRows, const QString&) {
+                if (ok && newRows > 0) refreshDatasets();
+            });
+        }
+
         // 刷新数据集列表
         refreshDatasets();
-        
+
         INTERNAL_DEBUG_STREAM << "✅ CleanedDataController: Initialized successfully";
         
         emit availabilityChanged(true);

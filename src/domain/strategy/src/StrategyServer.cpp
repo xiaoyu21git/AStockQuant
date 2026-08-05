@@ -3,29 +3,22 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <map>
+#include <set>
 
 namespace domain::strategy {
 
 namespace {
 DefaultOrderBuilder kDefaultOrderBuilder;
+
+using SigKey = std::pair<std::uint32_t, std::uint8_t>;
+std::map<StrategyInstanceId, std::set<SigKey>> s_lastKeys;
 }
 
 StrategyService::StrategyService(IRuntimeFactorService& factorService,
                                  IRuleEvaluationService& ruleEvaluationService)
     : factorService_(factorService)
     , ruleEvaluationService_(ruleEvaluationService)
-    , orderBuilder_(&kDefaultOrderBuilder)
-    , plan_(defaultExecutionPlan())
-{
-    reserveWorkingBuffers();
-}
-
-StrategyService::StrategyService(IRuntimeFactorService& factorService,
-                                 IRuleEvaluationService& ruleEvaluationService,
-                                 IRuntimeOrderSink& orderSink)
-    : factorService_(factorService)
-    , ruleEvaluationService_(ruleEvaluationService)
-    , orderSink_(&orderSink)
     , orderBuilder_(&kDefaultOrderBuilder)
     , plan_(defaultExecutionPlan())
 {
@@ -254,6 +247,8 @@ StrategyServiceFlowResult StrategyService::onMarketDataBatch(
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
     if (batch.size() > plan_.maxMarketDataPerBatch()) {
+        INTERNAL_WARN_STREAM << "[StrategyService] 行情批量超限被拒: batch=" << batch.size()
+                             << " max=" << plan_.maxMarketDataPerBatch();
         return StrategyServiceFlowResult(StrategyServiceFlowCode::CapacityExceeded);
     }
 
@@ -292,7 +287,8 @@ StrategyCount StrategyService::pendingOrderCount() const
 void StrategyService::copyPendingOrders(std::vector<OrderRequest>& outputOrders) const
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    outputOrders.assign(pendingOrderBuffer_.begin(), pendingOrderBuffer_.end());
+    outputOrders = std::move(pendingOrderBuffer_);
+    pendingOrderBuffer_.clear();
 }
 
 StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesBatch()
@@ -373,7 +369,7 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesBatch()
     stats_.setGeneratedSignalCount(generatedSignalCount);
     stats_.setPassedRuleCount(passedCount);
     stats_.setRejectedRuleCount(rejectedCount);
-    return flushPendingOrders();
+    return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 
 StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
@@ -411,6 +407,17 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
             return evaluateResult;
         }
 
+        if (!signalBuffer_.empty()) {
+            std::set<SigKey> cur;
+            for (const auto& s : signalBuffer_)
+                cur.emplace(s.instrumentId().value, static_cast<std::uint8_t>(s.side()));
+            if (cur == s_lastKeys[entry.strategy->instanceId()]) {
+                signalBuffer_.clear();
+                continue;
+            }
+            s_lastKeys[entry.strategy->instanceId()] = std::move(cur);
+        }
+
         for (const StrategySignal& signal : signalBuffer_) {
             const rules::RuleEvaluationContext evaluationContext(
                 rules::RuleEvaluationPhase::LowLatency,
@@ -441,15 +448,7 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
     stats_.setPassedRuleCount(passedCount);
     stats_.setRejectedRuleCount(rejectedCount);
 
-    s_evalRound++;
-    s_totalSignals += generatedSignalCount;
-    s_totalOrders += pendingOrderBuffer_.size();
-    if (s_evalRound % 50 == 0 || generatedSignalCount > 0)
-        INTERNAL_INFO_STREAM << "[评估] 第" << s_evalRound << "轮: 信号="
-                             << generatedSignalCount << " 订单=" << pendingOrderBuffer_.size()
-                             << " 累计信号=" << s_totalSignals << " 累计订单=" << s_totalOrders;
-
-    return flushPendingOrders();
+    return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 
 StrategyServiceFlowResult StrategyService::evaluateEntrySignals(
@@ -458,7 +457,11 @@ StrategyServiceFlowResult StrategyService::evaluateEntrySignals(
 {
     factorSnapshotBuffer_.clear();
     signalBuffer_.clear();
-    factorService_.copySnapshots(factorSnapshotBuffer_);
+    // 因子快照仅多因子选股策略消费; 非因子策略(含混合模式)跳过,
+    // 避免每日为 overlay 因子做全市场符号匹配的无效开销
+    if (entry.strategy->usesFactors()) {
+        factorService_.copySnapshots(factorSnapshotBuffer_);
+    }
     // 策略只消费当前因子结果快照，不接触因子服务更新职责。
     entry.strategy->evaluate(factorSnapshotBuffer_, entry.context, signalBuffer_);
     generatedSignalCount += signalBuffer_.size();
@@ -495,10 +498,10 @@ StrategyServiceFlowResult StrategyService::handleRuleEvaluationResult(
         publishDiagnostics(DiagnosticsEvent(
             DiagnosticsEventCode::OrderBuilt,
             StrategyServiceFlowCode::Ok,
-            orderRequest.strategyInstanceId(),
-            orderRequest.instrumentId(),
+            static_cast<std::uint64_t>(std::stoull(orderRequest.strategyId())),
+            InstrumentId(static_cast<std::uint32_t>(std::stoul(orderRequest.symbol()))),
             static_cast<double>(orderRequest.quantity()),
-            static_cast<double>(orderRequest.side() == RuntimeOrderSide::Buy ? 1 : -1)));
+            static_cast<double>(orderRequest.side() == OrderSide::Buy ? 1 : -1)));
         return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
     }
 
@@ -547,36 +550,6 @@ void StrategyService::publishDiagnostics(const DiagnosticsEvent& event)
     }
 }
 
-StrategyServiceFlowResult StrategyService::flushPendingOrders()
-{
-    if (pendingOrderBuffer_.empty()) {
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-    }
-    // 未配置下单出口：回测/仿真模式下由上层通过 copyPendingOrders 读取订单；
-    // 实盘场景下必须配置 orderSink_，否则订单将被丢弃。
-    if (!orderSink_) {
-        INTERNAL_WARN_STREAM << "[StrategyService] flushPendingOrders: orderSink_ is null, "
-                             << pendingOrderBuffer_.size() << " orders will not be submitted";
-        return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-    }
-
-    for (const OrderRequest& order : pendingOrderBuffer_) {
-        const StrategyServiceFlowResult submitResult = orderSink_->submit(order);
-        if (!submitResult.isOk()) {
-            return StrategyServiceFlowResult(StrategyServiceFlowCode::OrderSubmitFailed);
-        }
-
-        publishDiagnostics(DiagnosticsEvent(
-            DiagnosticsEventCode::OrderSubmitted,
-            StrategyServiceFlowCode::Ok,
-            order.strategyInstanceId(),
-            order.instrumentId(),
-            static_cast<double>(order.quantity()),
-            static_cast<double>(order.side() == RuntimeOrderSide::Buy ? 1 : -1)));
-    }
-    return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
-}
-
 void StrategyService::reserveWorkingBuffers()
 {
     factorSnapshotBuffer_.clear();
@@ -600,6 +573,40 @@ void StrategyService::setContextHistoricalView(const void* view)
 {
     for (auto& entry : strategyEntries_) {
         entry.context.setHistoricalView(view);
+    }
+}
+
+void StrategyService::setContextEvaluationRow(int row)
+{
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCurrentEvaluationRow(row);
+    }
+}
+
+void StrategyService::updateCurrentWeights(
+    const std::unordered_map<std::string, double>& weights)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCurrentWeights(weights);
+    }
+}
+
+void StrategyService::updateCandidatePool(
+    const std::unordered_set<std::string>& pool)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setCandidatePool(pool);
+    }
+}
+
+void StrategyService::updateFactorScores(
+    std::unordered_map<std::string, double> scores)
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (auto& entry : strategyEntries_) {
+        entry.context.setFactorScores(scores);
     }
 }
 

@@ -32,6 +32,8 @@ AccountEngine::AccountEngine() {
                 a.totalAsset    = e.get<double>("total_asset").value_or(0.0);
                 a.marketValue   = e.get<double>("market_value").value_or(0.0);
                 a.frozenCash    = e.get<double>("frozen").value_or(0.0);
+                a.unrealizedPnl = e.get<double>("unrealized_pnl").value_or(0.0);
+                a.realizedPnl   = e.get<double>("realized_pnl").value_or(0.0);
                 onCash(a);
             });
         m_positionSub = bus->subscribe("trading.position.updated",
@@ -52,7 +54,6 @@ AccountEngine::AccountEngine() {
                 auto price = e.get<double>("price");
                 if (!sym || !price) return;
                 m_cachedPositions[*sym].lastPrice = *price;
-                if (m_onDataChanged) m_onDataChanged();
             });
     }
 }

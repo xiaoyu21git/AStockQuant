@@ -40,6 +40,8 @@ public:
     [[nodiscard]] const std::vector<InstrumentId>& instruments() const override;
     [[nodiscard]] const std::vector<std::string>& symbolStrings() const;
 
+    [[nodiscard]] std::vector<std::string> fieldNames() const override;
+
     [[nodiscard]] std::unique_ptr<IMarketDataView>
     slice(DateRange dateRange) const override;
 
@@ -57,6 +59,11 @@ public:
 
     /// @brief 预加载指定列为全量矩阵（供非分块路径使用）
     void ensureColumns(const std::vector<std::string>& columnNames) const;
+
+    /// @brief 清除所有懒加载列缓存，保留 mmap + 日期/标的索引
+    /// 下次访问列时触发重新懒加载（从已打开的 mmap 读取，速度快）。
+    /// 不影响 makeChunkView() 的行为（分块视图直接从 Arrow batches 读取）。
+    void clearColumnCaches() const;
 
 private:
     class Impl;

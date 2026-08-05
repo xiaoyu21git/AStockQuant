@@ -115,7 +115,6 @@ namespace OptionalFields {
     namespace Financial {
         DEFINE_FIELD(GROSS_MARGIN, "gross_margin");
         DEFINE_FIELD(OPERATING_MARGIN, "operating_margin");
-        DEFINE_FIELD(NET_MARGIN, "net_margin");
         DEFINE_FIELD(ROIC, "roic");
         DEFINE_FIELD(DEBT_TO_EQUITY, "debt_to_equity");
         DEFINE_FIELD(CURRENT_RATIO, "current_ratio");

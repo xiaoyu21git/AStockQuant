@@ -1,8 +1,14 @@
 #include "TradeExecutionEngine.h"
+#include "../strategy/include/RiskManager.h"
 #include "../../engine/include/TradeEngine.h"
+#include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/Event/EventBus.hpp"
 #include "../../engine/include/Event/EventFormat.hpp"
 #include "../../engine/include/GlobalEventBusRegistry.h"
+#include "../market/include/MarketDataService.h"
+#include "../../../infrastructure/include/database/OrderRecorder.h"
+#include "../../../infrastructure/include/database/NativePgConnectionPool.h"
+#include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/Utils/Uuid.h"
 
@@ -75,12 +81,6 @@ ValidationResult TradeExecutionEngine::validateOrder(const TradeOrder& order) {
     }
     if (order.strategyId().empty()) {
         return ValidationResult::reject(OrderValidationCode::MissingRequiredFields, "strategyId is empty");
-    }
-
-    bool priceOptional = (order.actionKind() == ActionKind::CashRepay
-                       || order.actionKind() == ActionKind::ShareReturn);
-    if (!priceOptional && order.price() <= 0.0) {
-        return ValidationResult::reject(OrderValidationCode::InvalidPrice, "invalid price");
     }
 
     bool quantityOptional = (order.actionKind() == ActionKind::CashRepay);
@@ -202,6 +202,16 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order) {
     risk.setAutoStrategySignal(!order.strategyId().empty());
     risk.setPositionSnapshotReady(true);
     risk.setTradingSessionOpen(true);
+    // 卖单补 closeableQuantity，避免便利重载遗漏导致风控误拒
+    if (!risk.isBuyOrder()) {
+        auto& accEng = engine::AccountEngine::instance();
+        for (const auto& pos : accEng.positions()) {
+            if (pos.symbol == order.symbol()) {
+                risk.setCloseableQuantity(pos.availableQty);
+                break;
+            }
+        }
+    }
     return submitOrder(order, risk);
 }
 
@@ -210,60 +220,148 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     // Stage 1: validation
     auto vr = validateOrder(order);
     if (!vr.valid()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] validateOrder FAILED: " << vr.message()
+                             << " code=" << static_cast<int>(vr.code());
         return SubmitResult::rejected(vr.message(), vr.code());
     }
 
     // Stage 2: scheduling conflict checks
     auto conflict = m_impl->checkExecutionPause(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] checkExecutionPause blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkManualCheckpoint(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] manualCheckpoint blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkPartialFillAdvance(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] partialFillAdvance blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkPendingOrderConflict(order);
     if (conflict && conflict->hasConflict()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] pendingOrderConflict blocked: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
 
     // Stage 3: risk evaluation
     auto riskResult = strategy::RiskEvaluator::evaluateOrder(riskContext);
     if (!riskResult.approved()) {
+        INTERNAL_WARN_STREAM << "[TradeExec] risk rejected: " << riskResult.description();
         return SubmitResult::riskRejected(riskResult.code(), riskResult.description());
     }
 
     // Stage 4: submit via TradeEngine
     if (!engine::TradeEngine::instance().initialized()) {
+        INTERNAL_ERROR_STREAM << "[TradeExec] TradeEngine NOT initialized";
         return SubmitResult::rejected("TradeEngine not initialized",
                                        OrderValidationCode::MissingRequiredFields);
     }
 
     engine::OrderRequest engineReq;
-    engineReq.symbol     = order.symbol();
-    engineReq.strategyId = order.strategyId();
-    engineReq.price      = order.price();
-    engineReq.quantity   = order.quantity();
-    engineReq.side       = order.side() == strategy::OrderDirection::Buy
-                           ? engine::OrderRequest::Buy : engine::OrderRequest::Sell;
-    engineReq.orderType  = engine::OrderRequest::Limit;
+    engineReq.setSymbol(order.symbol());
+    engineReq.setStrategyId(order.strategyId());
+    engineReq.setPrice(order.price());
+    engineReq.setQuantity(order.quantity());
+    engineReq.setSide(order.side() == strategy::OrderDirection::Buy
+                      ? engine::OrderSide::Buy : engine::OrderSide::Sell);
+    engineReq.setOrderType(order.orderType() == OrderType::Market
+                           ? engine::OrderType::Market
+                           : engine::OrderType::Limit);
+    // A股规则: 买入=Open, 卖出=Close; 若已显式设置则尊重原值
+    {
+        auto pe = order.positionEffect();
+        if (pe == strategy::PositionEffect::Unspecified) {
+            pe = (order.side() == strategy::OrderDirection::Buy)
+                 ? strategy::PositionEffect::Open
+                 : strategy::PositionEffect::Close;
+        }
+        engineReq.setPositionEffect(
+            static_cast<PositionEffect>(static_cast<int>(pe)));
+    }
+    engineReq.setClOrdId(order.clOrdId());
+    engineReq.setAccountId(order.accountId());
+    engineReq.setCurrency(order.currency());
+    engineReq.setExchange(order.exchange());
+
+    INTERNAL_INFO_STREAM << "[TradeExecEng] submitOrder symbol=" << order.symbol()
+                         << " side=" << (order.side() == strategy::OrderDirection::Buy ? "Buy" : "Sell")
+                         << " price=" << order.price() << " qty=" << order.quantity()
+                         << " orderType=" << (riskContext.isAutoStrategySignal() ? "Market" : "Limit")
+                         << " posEffect=" << static_cast<int>(engineReq.positionEffect());
+
+    // 先注册到 recentOrders，再提交 — gmsdk 回调可能异步先到
+    {
+        TradeOrder pending = order;
+        pending.setStatus(OrderStatusValue::Pending);
+        m_impl->appendRecentOrder(pending);
+    }
 
     auto result = engine::TradeEngine::instance().submitOrder(engineReq);
 
-    // ── 仅网关成功受理后才触发回调 — 避免虚假 "已报" 状态 ──
+    // 回填 brokerOrderId
     if (result.accepted) {
-        TradeOrder accepted = order;
-        accepted.setStatus(OrderStatusValue::Submitted);
-        accepted.setStatusMessage("accepted");
-        accepted.setBrokerOrderId(result.brokerOrderId);
-        m_impl->appendRecentOrder(accepted);
+        std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+        for (auto& o : m_impl->m_recentOrders) {
+            if (o.clOrdId() == order.clOrdId() && o.brokerOrderId().empty()) {
+                o.setBrokerOrderId(result.brokerOrderId);
+                o.setStatus(OrderStatusValue::New);
+                o.setStatusMessage("accepted");
+                break;
+            }
+        }
         if (m_impl->m_orderAcceptedCallback) {
+            TradeOrder accepted = order;
+            accepted.setBrokerOrderId(result.brokerOrderId);
+            accepted.setStatus(OrderStatusValue::New);
             m_impl->m_orderAcceptedCallback(accepted);
         }
+    }
+
+    // ── 持久化: 订单写入 live_order 表 ──
+    {
+        using Rec = astock::infrastructure::database::OrderRecorder;
+        int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
+        if (td <= 0) {
+            auto now = std::chrono::system_clock::now();
+            auto tt = std::chrono::system_clock::to_time_t(now);
+            struct tm local;
+#if defined(_WIN32) || defined(_WIN64)
+            localtime_s(&local, &tt);
+#else
+            localtime_r(&tt, &local);
+#endif
+            td = (local.tm_year + 1900) * 10000 + (local.tm_mon + 1) * 100 + local.tm_mday;
+        }
+        auto side = (order.side() == strategy::OrderDirection::Buy)
+            ? astock::infrastructure::database::RecSide::Buy
+            : astock::infrastructure::database::RecSide::Sell;
+        auto otype = riskContext.isAutoStrategySignal()
+            ? astock::infrastructure::database::RecOrdType::Market
+            : astock::infrastructure::database::RecOrdType::Limit;
+        auto pe = (static_cast<int>(engineReq.positionEffect()) == 0)
+            ? astock::infrastructure::database::RecPosEff::Open
+            : astock::infrastructure::database::RecPosEff::Close;
+        Rec::instance().insertOrder(
+            order.clOrdId(), order.strategyId(), order.symbol(),
+            side, otype,
+            order.price(), static_cast<int>(order.quantity()),
+            order.signalStrength(), pe,
+            td > 0 ? td : 0,
+            std::to_string(order.basketId()));
+        if (result.accepted) {
+            Rec::instance().updateOrderStatus(order.clOrdId(),
+                astock::infrastructure::database::RecOrdStatus::Pending, result.brokerOrderId, "");
+        } else {
+            Rec::instance().updateOrderStatus(order.clOrdId(),
+                astock::infrastructure::database::RecOrdStatus::Rejected, "", result.message);
+        }
+    }
+
+    if (result.accepted) {
         return SubmitResult::success(BrokerOrderId(result.brokerOrderId));
     }
 
@@ -276,6 +374,17 @@ bool TradeExecutionEngine::cancelOrder(BrokerOrderId brokerOrderId) {
 
 void TradeExecutionEngine::registerOrder(const TradeOrder& order) {
     m_impl->appendRecentOrder(order);
+}
+
+void TradeExecutionEngine::updateOrderBrokerId(const std::string& clOrdId,
+                                                 const std::string& brokerOrderId) {
+    std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+    for (auto& o : m_impl->m_recentOrders) {
+        if (o.clOrdId() == clOrdId) {
+            o.setBrokerOrderId(brokerOrderId);
+            return;
+        }
+    }
 }
 
 // ============================================================================
@@ -334,7 +443,7 @@ void TradeExecutionEngine::initCallbacks() {
                 case 5: updated.setStatus(OrderStatusValue::Cancelled); break;
                 case 6: updated.setStatus(OrderStatusValue::Rejected); break;
                 case 7: updated.setStatus(OrderStatusValue::Expired); break;
-                default: updated.setStatus(OrderStatusValue::Submitted); break;
+                default: updated.setStatus(OrderStatusValue::New); break;
             }
             std::lock_guard<std::mutex> lock(m_impl->m_mutex);
             for (auto& o : m_impl->m_recentOrders) {
@@ -407,6 +516,20 @@ TradeExecutionEngine::TradeExecutionEngine()
                         if (status) {
                             OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
                             o.setStatus(st);
+                            // ── 持久化: 更新订单状态 ──
+                            {
+                                using RS = astock::infrastructure::database::RecOrdStatus;
+                                RS recSt = RS::Pending;
+                                switch (st) {
+                                    case OrderStatusValue::PartiallyFilled: recSt = RS::PartiallyFilled; break;
+                                    case OrderStatusValue::Filled:          recSt = RS::Filled; break;
+                                    case OrderStatusValue::Cancelled:       recSt = RS::Cancelled; break;
+                                    case OrderStatusValue::Rejected:        recSt = RS::Rejected; break;
+                                    default: break;
+                                }
+                                astock::infrastructure::database::OrderRecorder::instance()
+                                    .updateOrderStatus(o.clOrdId(), recSt, o.brokerOrderId(), "");
+                            }
                             INTERNAL_INFO_STREAM << "[TradeExecEng] order.updated id=" << *id
                                                  << " evtStatus=" << *status
                                                  << " newSt=" << static_cast<int>(st)
@@ -431,6 +554,24 @@ TradeExecutionEngine::TradeExecutionEngine()
                 fill.setFillId(FillId(e.get<std::string>("exec_id").value_or("")));
                 fill.setPrice(e.get<double>("price").value_or(0.0));
                 fill.setQuantity(e.get<std::int64_t>("quantity").value_or(0));
+
+                // ── 持久化: 更新 live_order 成交字段 ──
+                {
+                    auto clOrdId    = e.get<std::string>("cl_ord_id").value_or("");
+                    auto execId     = e.get<std::string>("exec_id").value_or("");
+                    auto fillPrice  = e.get<double>("price").value_or(0.0);
+                    auto fillQty    = e.get<std::int64_t>("quantity").value_or(0);
+                    auto fillAmount = e.get<double>("amount").value_or(fillPrice * static_cast<double>(fillQty));
+                    auto commission = e.get<double>("commission").value_or(0.0);
+                    auto fillTime   = e.get<std::string>("fill_time").value_or("");
+                    if (!clOrdId.empty()) {
+                        astock::infrastructure::database::OrderRecorder::instance().updateOrderFill(
+                            clOrdId, execId,
+                            fillPrice, static_cast<int>(fillQty), fillAmount,
+                            commission, fillTime);
+                    }
+                }
+
                 if (m_impl->m_tradeFillCallback)
                     m_impl->m_tradeFillCallback(fill);
             });
@@ -443,31 +584,197 @@ void TradeExecutionEngine::setOnOrderGenerated(OrderGeneratedHandler h) { m_onOr
 void TradeExecutionEngine::setOnOrderSubmitResult(OrderSubmitResultHandler h) { m_onOrderSubmitResult = std::move(h); }
 
 void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& orders) {
-    for (const auto& req : orders) {
-        if (!req.isValid()) continue;
+    if (orders.empty()) return;
 
-        TradeOrder order;
-        order.setSymbol(std::to_string(req.instrumentId().value));
-        order.setSide(req.side() == strategy::RuntimeOrderSide::Buy
-                          ? strategy::OrderDirection::Buy
-                          : strategy::OrderDirection::Sell);
-        order.setQuantity(static_cast<std::int64_t>(req.quantity()));
-        order.setStrategyId(std::to_string(req.strategyInstanceId()));
-        order.setPrice(0.0);
-
+    // 单条走快速路径
+    if (orders.size() == 1) {
+        auto& req = orders[0];
+        if (!req.isValid()) return;
+        TradeOrder order = buildTradeOrder(req);
         if (m_onOrderGenerated) m_onOrderGenerated(order);
-
-        strategy::RiskInput risk;
-        risk.setStrategyId(order.strategyId());
-        risk.setSymbol(order.symbol());
-        risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
-        risk.setPrice(order.price());
-        risk.setQuantity(order.quantity());
-        risk.setAutoStrategySignal(true);
-
+        auto risk = buildRiskInput(order);
         auto result = submitOrder(order, risk);
         if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+        return;
     }
+
+    // ── 篮子委托: 先卖后买, 卖款回笼支撑买单 ──
+    uint64_t basketId = orders.empty() ? 0
+        : orders[0].extensionAs<uint64_t>(domain::trading::ExtKey::kBasketId, 0);
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子委托: basketId=" << basketId
+                         << " orders=" << orders.size();
+
+    // 拆分为卖单和买单
+    std::vector<TradeOrder> sells, buys;
+    for (const auto& req : orders) {
+        if (!req.isValid()) continue;
+        auto order = buildTradeOrder(req);
+        order.setBasketId(req.extensionAs<uint64_t>(domain::trading::ExtKey::kBasketId, 0));
+        if (order.side() == strategy::OrderDirection::Sell)
+            sells.push_back(std::move(order));
+        else
+            buys.push_back(std::move(order));
+    }
+
+    // 获取当前可用现金
+    auto& accEng = engine::AccountEngine::instance();
+    auto account = accEng.account();
+    double cashAvailable = account.availableCash;
+
+    int submitted = 0, rejected = 0;
+
+    // ── 阶段1: 先卖 — 释放现金 ──
+    for (auto& order : sells) {
+        if (m_onOrderGenerated) m_onOrderGenerated(order);
+        auto risk = buildRiskInput(order);
+        auto result = submitOrder(order, risk);
+        if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+        if (result.succeeded()) {
+            cashAvailable += order.price() * static_cast<double>(order.quantity());
+            ++submitted;
+        } else {
+            ++rejected;
+        }
+    }
+
+    // ── 阶段2: 后买 — 现金约束 ──
+    for (auto& order : buys) {
+        double cost = order.price() * static_cast<double>(order.quantity());
+        if (cost > cashAvailable && cashAvailable > 0) {
+            // 缩量到可承受手数 (A股100股=1手)
+            auto newQty = static_cast<std::int64_t>(
+                cashAvailable / order.price() / 100.0) * 100;
+            if (newQty < 100) {
+                INTERNAL_WARN_STREAM << "[TradeExec] 篮子买单现金不足: "
+                    << order.symbol() << " need=" << static_cast<int64_t>(cost)
+                    << " cash=" << static_cast<int64_t>(cashAvailable) << " 跳过";
+                ++rejected;
+                continue;
+            }
+            order.setQuantity(newQty);
+            cost = order.price() * static_cast<double>(newQty);
+            INTERNAL_INFO_STREAM << "[TradeExec] 篮子买单缩量: "
+                << order.symbol() << " qty=" << newQty;
+        }
+
+        if (m_onOrderGenerated) m_onOrderGenerated(order);
+        auto risk = buildRiskInput(order);
+        auto result = submitOrder(order, risk);
+        if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
+        if (result.succeeded()) {
+            cashAvailable -= cost;
+            ++submitted;
+        } else {
+            ++rejected;
+        }
+    }
+
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子完成: basketId=" << basketId
+                         << " submitted=" << submitted
+                         << " rejected=" << rejected;
+}
+
+TradeOrder TradeExecutionEngine::buildTradeOrder(const strategy::OrderRequest& req) const {
+    TradeOrder order;
+    order.setSymbol(req.symbol());
+    order.setSide(req.side() == OrderSide::Buy
+                      ? strategy::OrderDirection::Buy
+                      : strategy::OrderDirection::Sell);
+    order.setQuantity(static_cast<std::int64_t>(req.quantity()));
+    order.setStrategyId(req.strategyId());
+    order.setPrice(req.price());
+    order.setSignalStrength(
+        req.extensionAs<double>(ExtKey::kSignalScore, 0.5));
+    // 从配置读取默认委托类型(若策略未指定)
+    if (req.orderType() == OrderType::Limit) {
+        auto cfg = foundation::config::ConfigManager::instance()
+            .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        std::string defType = "Limit";
+        if (cfg && !cfg->isNull() && cfg->has("defaultOrderType"))
+            defType = cfg->get("defaultOrderType").asString();
+        if (defType == "Market") order.setOrderType(OrderType::Market);
+        else order.setOrderType(OrderType::Limit);
+    } else {
+        order.setOrderType(req.orderType());
+    }
+    // 从配置读整手开关
+    {
+        auto cfg = foundation::config::ConfigManager::instance()
+            .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        if (cfg && !cfg->isNull() && cfg->has("useBoardLot"))
+            order.setBoardLotMode(cfg->get("useBoardLot").asBool());
+    }
+    order.setClOrdId(req.clOrdId());
+    order.setAccountId(req.accountId());
+    order.setCurrency(req.currency());
+    order.setExchange(req.exchange());
+    order.setPositionEffect(
+        static_cast<strategy::PositionEffect>(req.positionEffect()));
+    return order;
+}
+
+strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order) const {
+    strategy::RiskInput risk;
+    risk.setStrategyId(order.strategyId());
+    risk.setSymbol(order.symbol());
+    risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
+    risk.setPrice(order.price());
+    risk.setQuantity(order.quantity());
+    risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
+    risk.setStrategyBound(true);
+    risk.setStrategyActive(true);
+    risk.setAutoStrategySignal(true);
+    risk.setPositionSnapshotReady(true);
+    risk.setTradingSessionOpen(true);
+    if (!risk.isBuyOrder()) {
+        auto& accEng = engine::AccountEngine::instance();
+        for (const auto& pos : accEng.positions()) {
+            if (pos.symbol == order.symbol()) {
+                risk.setCloseableQuantity(pos.availableQty);
+                break;
+            }
+        }
+    }
+    // 填充前日收盘价供涨跌停检查
+    {
+        auto& d = domain::market::MarketDataService::instance().liveData(order.symbol());
+        if (d.valid() && d.preClose() > 0.0)
+            risk.setReferencePrice(d.preClose());
+    }
+
+    // ── 大盘指数回撤保护 ──
+    {
+        const auto& rcfg = domain::strategy::RiskManager::instance().riskConfig();
+        if (rcfg.indexDrawdownLimitPercent > 0.0 && !rcfg.indexSymbol.empty()) {
+            auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+            if (db && db->isOpen()) {
+                astock::infrastructure::database::MarketDataRepository repo(db);
+                // 取最近 lookbackDays 个交易日的 close
+                auto rows = repo.queryKlineDetail(
+                    rcfg.indexSymbol, "2000-01-01", "2100-01-01",
+                    rcfg.indexDrawdownLookbackDays, 0);
+                if (rows.size() >= 2) {
+                    double firstClose = 0.0, lastClose = 0.0;
+                    for (const auto& row : rows) {
+                        double c = row.getDouble("close");
+                        if (c > 0.0) {
+                            if (firstClose == 0.0) firstClose = c;
+                            lastClose = c;
+                        }
+                    }
+                    if (firstClose > 0.0 && lastClose > 0.0) {
+                        double drop = (firstClose - lastClose) / firstClose * 100.0;
+                        if (drop > 0.0) risk.setIndexDrawdownPct(drop);
+                    }
+                }
+            }
+        }
+        risk.setIndexDrawdownLimitPercent(rcfg.indexDrawdownLimitPercent);
+    }
+
+    strategy::RiskEvaluator::applyConfig(risk,
+        domain::strategy::RiskManager::instance().riskConfig());
+    return risk;
 }
 
 // ============================================================================

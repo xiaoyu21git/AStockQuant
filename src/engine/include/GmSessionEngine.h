@@ -14,6 +14,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include "../../domain/trading/TradingTypes.h"
+
 namespace engine {
 
 // ═══════════════════════════════════════════════════════════════════
@@ -25,6 +27,9 @@ struct GmTickData {
     double price = 0, open = 0, high = 0, low = 0;
     double cumVolume = 0, cumAmount = 0, lastVolume = 0;
     int64_t tradingDay = 0;
+    int64_t createdAt = 0;  // epoch seconds (tick->created_at)
+    int  tradeType  = 0;    // 交易类型 (GM SDK tick->trade_type)
+    bool isAuction  = false; // 是否为集合竞价期间 (9:15-9:25)
     std::vector<double> bidPrices, bidVolumes, askPrices, askVolumes;
 };
 
@@ -41,15 +46,10 @@ struct GmQuote {
     bool   isLimitDown() const;
 };
 
-struct OrderRequest {
-    std::string symbol, strategyId;
-    double price = 0;
-    int64_t quantity = 0;
-    enum Side { Buy, Sell };
-    enum Type { Limit, Market };
-    Side side = Buy;
-    Type orderType = Limit;
-};
+// 统一定单类型 (定义在 domain::trading::OrderRequest)
+using OrderRequest = domain::trading::OrderRequest;
+using OrderSide    = domain::trading::OrderSide;
+using OrderType    = domain::trading::OrderType;
 
 struct OrderResult {
     std::string brokerOrderId;
@@ -76,6 +76,7 @@ struct TradeFill {
 struct AccountInfo {
     std::string accountId;
     double totalAsset = 0, availableCash = 0, marketValue = 0, frozenCash = 0;
+    double unrealizedPnl = 0, realizedPnl = 0;
 };
 
 struct Position {
@@ -105,6 +106,10 @@ public:
     void shutdown();
     bool initialized() const;
 
+    // ── 交易时段查询（零副作用，纯基于系统时钟）──
+    bool isAfterHoursSession() const;  // 15:05-15:30
+    bool isInLockPeriod() const;       // 15:00-15:05
+
     // ── 行情订阅 ──
     void subscribeTick(const std::string& symbol);
     void unsubscribeTick(const std::string& symbol);
@@ -116,6 +121,9 @@ public:
     // ── 底层 Strategy 指针 ──
     void* strategy() const;
 
+    // ── GM SDK 全局互斥锁（非线程安全 SDK，JMC 和同步线程互斥）──
+    static std::recursive_mutex& gmSdkMutex();
+
     // ── 符号转换 ──
     static std::string toGmSymbol(const std::string& internal);
     static std::string fromGmSymbol(const std::string& gm);
@@ -123,6 +131,7 @@ public:
     // Impl — public，SessionStrategy 通过它访问回调
     struct Impl {
         std::atomic<bool> initialized{false};
+        std::atomic<bool> sessionReady{false};  // on_init() 后置 true
         std::thread       strategyThread;
     };
     struct StrategyDeleter { void operator()(void*); };
@@ -132,6 +141,7 @@ public:
     std::unique_ptr<void, StrategyDeleter> m_strategy;
     std::mutex m_tickMutex;
     std::unordered_map<std::string, int> m_tickRefCount;
+    std::unordered_map<std::string, GmQuote>  m_quoteCache;     // tick 实时缓存
 
 private:
     GmSessionEngine() = default;

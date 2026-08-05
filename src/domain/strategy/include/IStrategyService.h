@@ -4,17 +4,30 @@
 #include "StrategyServiceTypes.h"
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
+#include "DailyEodScheduler.h"
+#include "FactorSignalProcessor.h"
+#include "SignalBlendCompositor.h"
+#include "RuleGate.h"
+#include "RuleAttribution.h"
+#include "RulePipeline.h"
+#include "RiskEvaluator.h"
+#include "OrderGenerator.h"
+#include "MarketTimingGate.h"
+#include "TimedCircuitBreaker.h"
+#include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
 #include <condition_variable>
 #include <functional>
 #include <future>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
 #include <chrono>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace foundation {
@@ -23,7 +36,11 @@ class IExecutor;
 }
 }
 
-namespace astock { namespace database { class ISqlDatabase; } }
+namespace engine {
+struct AccountInfo;
+}
+
+namespace astock { namespace database { class ISqlDatabase; class SqlQueryResultRow; } }
 
 namespace domain::backtest {
 struct BacktestRequest;
@@ -32,6 +49,7 @@ struct BacktestRequest;
 namespace factor {
 namespace compute {
 class IMarketDataView;
+class BacktestDataService;
 }
 }
 
@@ -52,6 +70,36 @@ public:
         const MarketDataPoint& marketDataPoint) = 0;
     [[nodiscard]] virtual StrategyServiceFlowResult updateBatch(
         const std::vector<MarketDataPoint>& batch) = 0;
+
+    // ── 因子配置 ──
+    /// @brief 设置关注的因子实例 ID 列表（NoOpFactorService: no-op）
+    virtual void setFactorIds(const std::vector<std::string>& ids) = 0;
+
+    // ── 数据注入 ──
+    /// @brief 注入回测数据服务（生命周期由调用方管理；NoOpFactorService: no-op）
+    virtual void setDataService(factor::compute::BacktestDataService* dataSvc) = 0;
+    /// @brief 注入实盘行情视图（生命周期由调用方管理；NoOpFactorService: no-op）
+    virtual void setLiveMarketView(const factor::compute::IMarketDataView* view) = 0;
+
+    // ── 行情视图构建与访问 ──
+    /// @brief 从 SQL 查询结果构建实盘 MarketView（NoOpFactorService: no-op）
+    virtual void buildLiveView(
+        const std::vector<astock::database::SqlQueryResultRow>& rows,
+        const std::vector<std::string>& extraFields) = 0;
+    /// @brief 获取当前行情视图；无数据返回 nullptr；生命周期与 IRuntimeFactorService 实例一致
+    [[nodiscard]] virtual const factor::compute::IMarketDataView* liveView() const = 0;
+
+    // ── 因子元数据查询 ──
+    /// @brief 从因子需求收集所需的数据字段（NoOpFactorService: 返回空）
+    [[nodiscard]] virtual std::vector<std::string> getRequiredFields() const = 0;
+    /// @brief 从因子需求计算最大回溯窗口（日历日；NoOpFactorService: 返回 90）
+    [[nodiscard]] virtual int getMaxLookbackDays() const = 0;
+
+    // ── 回测因子值查询 ──
+    /// @brief 按日期查询因子的 symbol→value 映射；无数据返回 nullptr；
+    ///     返回值生命周期与 IRuntimeFactorService 实例一致，调用方不应持有
+    [[nodiscard]] virtual const std::map<std::string, double>* backtestValuesBySymbol(
+        const std::string& instanceId, std::int32_t date) const = 0;
 };
 
 namespace rules {
@@ -281,6 +329,13 @@ public:
     virtual void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const = 0;
 
     virtual void setContextHistoricalView(const void* view) = 0;
+    /// @brief 设置所有策略上下文的当前评估行号 (回测逐日推进用, -1=实盘)
+    virtual void setContextEvaluationRow(int row) = 0;
+    virtual void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) = 0;
+    /// @brief 更新所有已注册策略上下文的因子候选池（空池=扫全市场）
+    virtual void updateCandidatePool(const std::unordered_set<std::string>& pool) = 0;
+    /// @brief 更新所有已注册策略上下文的因子复合评分 (按策略权重加权)
+    virtual void updateFactorScores(std::unordered_map<std::string, double> scores) = 0;
 };
 
 class LocalRuleEvaluationService final : public IRuleEvaluationService,
@@ -357,9 +412,6 @@ class StrategyService final : public IStrategyService {
 public:
     StrategyService(IRuntimeFactorService& factorService,
                     IRuleEvaluationService& ruleEvaluationService);
-    StrategyService(IRuntimeFactorService& factorService,
-                    IRuleEvaluationService& ruleEvaluationService,
-                    IRuntimeOrderSink& orderSink);
 
     [[nodiscard]] StrategyServiceFlowResult configureExecutionPlan(
         const StrategyServiceExecutionPlan& plan) override;
@@ -390,6 +442,7 @@ public:
     [[nodiscard]] StrategyServiceFlowResult onMarketDataBatch(
         const std::vector<MarketDataPoint>& batch) override;
 
+
     [[nodiscard]] StrategyExecutionStats lastExecutionStats() const override;
     [[nodiscard]] StrategyCount pendingOrderCount() const override;
     void copyPendingOrders(std::vector<OrderRequest>& outputOrders) const override;
@@ -414,17 +467,20 @@ private:
         const RuntimeStrategyContext& context) const;
     [[nodiscard]] const RuntimeStrategyContext* findContext(StrategyInstanceId strategyInstanceId) const;
     void publishDiagnostics(const DiagnosticsEvent& event);
-    [[nodiscard]] StrategyServiceFlowResult flushPendingOrders();
     void reserveWorkingBuffers();
     void resetStats();
 
     /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
     void setContextHistoricalView(const void* view);
+    /// @brief 设置所有策略上下文的当前评估行号 (回测逐日推进用, -1=实盘)
+    void setContextEvaluationRow(int row) override;
+    void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) override;
+    void updateCandidatePool(const std::unordered_set<std::string>& pool) override;
+    void updateFactorScores(std::unordered_map<std::string, double> scores) override;
 
 private:
     IRuntimeFactorService& factorService_;
     IRuleEvaluationService& ruleEvaluationService_;
-    IRuntimeOrderSink* orderSink_{nullptr};
     IDiagnosticsSink* diagnosticsSink_{nullptr};
     const IOrderBuilder* orderBuilder_{nullptr};
     StrategyServiceState state_{StrategyServiceState::Stopped};
@@ -434,7 +490,7 @@ private:
     std::vector<RuntimeFactorSnapshot> factorSnapshotBuffer_;
     std::vector<StrategySignal> signalBuffer_;
     std::vector<RuleEvaluationResult> ruleResultBuffer_;
-    std::vector<OrderRequest> pendingOrderBuffer_;
+    mutable std::vector<OrderRequest> pendingOrderBuffer_;
     mutable std::mutex mutex_;
 };
 
@@ -444,6 +500,38 @@ public:
         const StrategySignal& signal,
         const RuntimeStrategyContext& context,
         OrderRequest& outputOrder) const override;
+};
+
+/// @brief 因子覆盖层配置 — 纯值类型，无行为，构造后不可变
+struct FactorOverlayConfig {
+    std::vector<FactorFilterConfig> filters;
+    std::vector<FactorScaleConfig> scalers;
+    std::unordered_map<std::string, double> factorInfluence;
+    int targetPositionCount{50};
+    double minimumCompositeScore{0.0};
+    FactorCombineMode combineMode{FactorCombineMode::RankOnly};
+    bool needsMarketCapField{false};
+    bool enabled{false};
+
+    [[nodiscard]] bool isValid() const noexcept { return enabled ? !filters.empty() : true; }
+};
+
+/// @brief 规则闸门配置 — 纯值类型
+struct RuleGateConfig {
+    std::vector<std::string> templateIds;
+    std::vector<std::string> ablatedTemplateIds;  // 消融测试: 跳过的模板
+    bool ablationEnabled{false};                   // 是否启用消融模式
+    bool enableCandlePatterns{false};              // 是否启用 TA-Lib 蜡烛形态计算
+
+    [[nodiscard]] bool enabled() const noexcept { return !templateIds.empty(); }
+};
+
+/// @brief 调仓频率配置 — 纯值类型
+struct RebalanceConfig {
+    int interval{1};                  // 调仓间隔(交易日), 0=从不调仓
+    bool isDailyFrequency{true};      // true=日频(不启动drainQueue), false=分钟频/高频
+
+    [[nodiscard]] bool isValid() const noexcept { return interval >= 0; }
 };
 
 class StrategyEngine final {
@@ -497,15 +585,14 @@ public:
     /// @brief 执行策略回测（逐日驱动引擎 → 模拟成交 → 指标计算）
     /// @param dataSvc 已加载数据的数据服务（由调用方构建，避免重复解析 JSON）
     [[nodiscard]] StrategyBacktestResult backtest(const domain::backtest::BacktestRequest& req,
-                                                   void* dataSvc,
+                                                   factor::compute::BacktestDataService* dataSvc,
                                                    const std::function<void(double)>& onProgress = {});
 
     // ─── 实盘异步专有接口 ───
 
-    /// @brief 向后台线程推送一条实时行情数据，唤醒后台自循环线程。
-    void enqueueMarketData(const MarketDataPoint& marketDataPoint);
-
-    /// @brief 启动专属后台线程（ThreadPoolExecutor(1,1)），进入 drainQueue 事件循环。
+    /// @brief 启动专属后台线程。
+    /// 日频策略: 只启 riskPatrolLoop (止损巡检) + 注册 EOD 回调
+    /// 分钟频/高频: 启 drainQueue (持续评估+下单+巡检)
     void startLiveLoop();
 
     /// @brief 安全停止后台线程并等待完成。
@@ -513,6 +600,20 @@ public:
 
     /// @brief 查询实盘循环是否正在运行
     [[nodiscard]] bool isLiveLoopRunning() const noexcept;
+
+    /// @brief 是否为日频策略 (fromDb 时根据 behaviorKind 自动设置)
+    [[nodiscard]] bool isDailyFrequency() const noexcept { return m_isDailyFrequency; }
+
+    /// @brief 日终评估: 跑一次完整策略评估并生成订单
+    /// @param tradingDay 评估目标交易日
+    /// @param isCompensation true=补单(历史收盘价), false=实时(当日 tick 价)
+    /// 由 DailyEodScheduler 触发，在专用线程中执行
+    /// @return 评估结果状态，用于决定是否持久化 lastEvalDay
+    EodEvaluationStatus evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
+
+    /// @brief 一键清仓：对所有持仓生成市价卖单，篮子提交
+    /// @return 生成的订单数量，-1 表示失败
+    int liquidateAll();
 
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
@@ -531,6 +632,11 @@ public:
 
     /// @brief 设置交易账户（风控需要）
     void setAccountId(std::string id) { m_accountId = std::move(id); }
+    /// @brief 设置策略ID（止损单必填）
+    void setStrategyId(std::string id) { m_strategyId = std::move(id); }
+
+    /// @brief 设置实盘数据目录（lastEvalDay JSON 持久化路径前缀）
+    void setLiveDataPath(std::string path) { m_liveDataPath = std::move(path); }
 
     /// @brief 距上次处理 tick 的毫秒数（>5000 可能卡死）
     [[nodiscard]] std::int64_t lastProcessedMsAgo() const noexcept {
@@ -551,11 +657,23 @@ public:
         return m_liveMarketView.get();
     }
 
+    /// @brief 获取规则闸门统计数据（评估/命中/拦截/数据缺失，按模板聚合）
+    [[nodiscard]] const rules::RuleGateStats& ruleGateStats() const noexcept {
+        return m_ruleGate.stats();
+    }
+
+    /// @brief 获取最近一次回测的规则归因 (P&L 影响)
+    [[nodiscard]] const std::map<std::string, rules::RuleAttribution>& ruleAttribution() const noexcept {
+        return m_ruleAttribution;
+    }
+    /// @brief 最近一次回测的日期区间
+    [[nodiscard]] std::string backtestDateRange() const noexcept { return m_backtestDateRange; }
+
 private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
 
-    /// @brief 后台线程主函数：阻塞等待行情 → step() → 通知订单。
+    /// @brief 后台线程主函数（分钟频/高频）：阻塞等待行情 → step() → 通知订单。
     void drainQueue();
 
 private:
@@ -572,12 +690,33 @@ private:
     static constexpr size_t kMaxQueueSize = 5000;
     std::atomic<bool> m_loopRunning{false};
     std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位，防御 drainQueue 误触发监听器
+    bool m_isDailyFrequency{false};             ///< 日频策略 → 只巡检+日终评估, 不启动 drainQueue
+    std::unique_ptr<DailyEodScheduler> m_dailyScheduler;  ///< 日频调度器 (EOD + 补单)
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
     std::string m_accountId;
+    std::string m_strategyId;
+    std::string m_liveDataPath;     // 实盘数据目录, 用于统一 JSON 持久化
+    domain::trading::OrderBuilder m_orderBuilder;
+    OrderGenerator m_orderGenerator{m_orderBuilder};  ///< 持仓感知建单器
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
+    bool m_needsMarketCapField{false};  ///< 权重方案为市值加权时置位，prepareMarketData 追加 market_cap 字段
+    FactorSignalProcessor m_factorSignalProcessor;  ///< 因子信号处理(过滤+缩放)
+    std::unique_ptr<ICandidatePoolSelector> m_poolSelector;  ///< 因子候选池选择器(因子定池,策略选点)
+    rules::RuleGate m_ruleGate;  ///< 规则管线: 市场闸/信号审核/出场, 绑定规则库+策略模板集
+    RulePipeline m_rulePipeline{m_ruleGate};  ///< 规则编排器(封装上下文构建+迭代样板代码)
+    bool m_enableCandlePatterns{false};       ///< 是否启用 TA-Lib 蜡烛形态计算
+    std::map<std::string, rules::RuleAttribution> m_ruleAttribution;  ///< 最近一次回测的规则归因
+    std::string m_backtestDateRange;  ///< 最近一次回测的日期区间 (如 "20200102-20260717")
+    RiskConfig m_riskConfig = RiskConfig::defaults();
+    MarketTimingGate m_timingGate;             ///< 大盘择时闸门
+    TimedCircuitBreaker m_circuitBreaker;      ///< 风控熔断器
+    std::unordered_set<std::string> m_liquidationBlocklist;  ///< 当天已清仓标的, 禁止当日再次买入
+    int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
+    std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
+    int m_minHoldDays{0};                  ///< 最少持有天数, 0=不启用
 };
 
 class StrategyEngine::Builder final {
@@ -586,7 +725,6 @@ public:
 
     Builder& withFactorService(std::unique_ptr<IRuntimeFactorService> factorService);
     Builder& withRuleEvaluationService(std::unique_ptr<IRuleEvaluationService> ruleEvaluationService);
-    Builder& withOrderSink(IRuntimeOrderSink& orderSink);
     Builder& withDiagnosticsSink(IDiagnosticsSink& diagnosticsSink);
     Builder& withOrderBuilder(const IOrderBuilder& orderBuilder);
     Builder& withAsyncExecutor(std::shared_ptr<foundation::thread::IExecutor> executor);
@@ -595,16 +733,48 @@ public:
     Builder& maxRuleResultsPerBatch(StrategyCount value);
     Builder& maxMarketDataPerBatch(StrategyCount value);
 
+    /// @brief 设置策略 ID（用于订单标识和持久化）
+    Builder& withStrategyId(std::string id);
+
+    /// @brief 配置因子覆盖层（过滤/缩放/融合/目标持仓数等）
+    Builder& withFactorOverlayConfig(const FactorOverlayConfig& cfg);
+
+    /// @brief 配置规则闸门（模板 ID 列表 × 共享规则库）
+    Builder& withRuleGateConfig(const RuleGateConfig& cfg);
+
+    /// @brief 配置风控参数（止损/止盈/回撤/熔断等）
+    Builder& withRiskConfig(const RiskConfig& cfg);
+
+    /// @brief 配置调仓频率
+    Builder& withRebalanceConfig(const RebalanceConfig& cfg);
+
+    /// @brief 启用择时闸门 (v0.13 规则模式)
+    Builder& withTimingGate(const MarketTimingGate& gate);
+
+    /// @brief 配置风控熔断器 (v0.13)
+    Builder& withCircuitBreaker(const TimedCircuitBreaker& breaker);
+
     [[nodiscard]] std::unique_ptr<StrategyEngine> build();
 
 private:
+    /// @brief 校验所有配置无冲突，返回 nullptr 表示通过
+    [[nodiscard]] std::string validate() const;
+
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;
-    IRuntimeOrderSink* orderSink_{nullptr};
     IDiagnosticsSink* diagnosticsSink_{nullptr};
     const IOrderBuilder* orderBuilder_{nullptr};
     std::shared_ptr<foundation::thread::IExecutor> asyncExecutor_;
     StrategyServiceExecutionPlan plan_{defaultExecutionPlan()};
+
+    // ── 策略配置（纯值类型，build() 时移动给 StrategyEngine）──
+    std::string strategyId_;
+    FactorOverlayConfig factorOverlayCfg_;
+    RuleGateConfig ruleGateCfg_;
+    RiskConfig riskCfg_{RiskConfig::defaults()};
+    RebalanceConfig rebalanceCfg_;
+    MarketTimingGate timingGate_;
+    TimedCircuitBreaker circuitBreaker_;
 };
 
 } // namespace domain::strategy

@@ -2,13 +2,18 @@
 
 #include "foundation/Utils/Timestamp.h"
 
+#include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <unordered_map>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace domain {
@@ -71,78 +76,267 @@ using BrokerName = StrongId<BrokerNameTag>;              // 券商名称 e.g. "j
 using CapabilityId = StrongId<CapabilityIdTag>;          // 能力ID e.g. "algo_twap"
 
 // ============================================================
-// 枚举
+// 枚举 — uint8_t 底层, 缓存友好
 // ============================================================
 
-enum class OrderSide { Buy, Sell };
-
-enum class OrderType { Limit, Market };
-
-enum class OrderStatusValue {
-    Pending,
-    Submitted,
-    PartiallyFilled,
-    Filled,
-    Cancelled,
-    Rejected,
-    Expired
+enum class OrderSide      : uint8_t { Buy = 0, Sell = 1 };
+enum class OrderType      : uint8_t { Limit = 0, Market = 1, Stop = 2, StopLimit = 3 };
+enum class PositionEffect : uint8_t { Open = 0, Close = 1, CloseToday = 2, CloseYesterday = 3 };
+enum class TimeInForce    : uint8_t { ROD = 0, IOC = 1, FOK = 2, GTD = 3, GTX = 4 };
+enum class OrderStatusValue : uint8_t {
+    Pending = 0,
+    New = 1,
+    PartiallyFilled = 2,
+    Filled = 3,
+    PendingCancel = 4,
+    Cancelled = 5,
+    Rejected = 6,
+    Expired = 7
 };
 
 // ============================================================
-// 订单请求
+// ExtensionSlot — 无堆分配的扩展字段载体
+// 固定 4 槽, std::variant 栈上存储, 覆盖 99% 品种特有参数
+// ============================================================
+
+struct ExtensionSlot {
+    uint64_t key = 0;  // 预定义常量: 0x01=Strike, 0x02=Multiplier, ...
+    std::variant<std::int64_t, double, uint64_t> value{0.0};
+
+    ExtensionSlot() = default;
+    ExtensionSlot(uint64_t k, double v)       : key(k), value(v) {}
+    ExtensionSlot(uint64_t k, std::int64_t v) : key(k), value(v) {}
+    ExtensionSlot(uint64_t k, uint64_t v)     : key(k), value(v) {}
+};
+
+// 扩展 Key 常量 (编译期哈希, 无字符串开销)
+namespace ExtKey {
+    constexpr uint64_t kStrike            = 0x01;  // 期权行权价
+    constexpr uint64_t kMultiplier        = 0x02;  // 合约乘数
+    constexpr uint64_t kSignalScore       = 0x10;  // 策略信号强度
+    constexpr uint64_t kTargetWeight     = 0x11;  // 策略目标权重（资金量级分配）
+    constexpr uint64_t kSignalIntent     = 0x12;  // 策略信号意图(SignalIntent枚举值)
+    constexpr uint64_t kPostOnly          = 0x20;  // 仅 Maker
+    constexpr uint64_t kReduceOnly        = 0x21;  // 仅减仓
+    constexpr uint64_t kSlippageTolerance = 0x30;  // 滑点容忍
+    constexpr uint64_t kBasketId          = 0x31;  // 篮子ID，同批次订单关联查询
+    constexpr uint64_t kAlgoType          = 0x40;  // 算法单类型
+    constexpr uint64_t kAlgoDuration      = 0x41;  // 算法单时长
+    constexpr uint64_t kStopPrice         = 0x50;  // 止损价 (gmsdk)
+    constexpr uint64_t kOrderBusiness     = 0x51;  // 业务类型 (gmsdk)
+}
+
+// ============================================================
+// OrderRequest — 下单指令 (紧凑 POD 风格)
+// 字符串字段依赖 SSO, 扩展用固定数组, clone() → trivial copy
 // ============================================================
 
 class OrderRequest {
 public:
-    OrderRequest() = default;
+    class Builder;
 
-    // 工厂方法
-    static OrderRequest create(
-        StrategyId strategyId,
-        SymbolCode symbol,
-        OrderSide side,
-        OrderType type,
-        double price,
-        std::int64_t quantity);
+    OrderRequest() noexcept = default;
 
-    // -- 基础属性 --
-    StrategyId strategyId() const;
-    void setStrategyId(StrategyId value);
+    // ── 核心 getter/setter (noexcept) ──
+    [[nodiscard]] const std::string& clOrdId()    const noexcept;
+    void setClOrdId(std::string v);
 
-    SymbolCode symbol() const;
-    void setSymbol(SymbolCode value);
+    [[nodiscard]] const std::string& accountId()  const noexcept;
+    void setAccountId(std::string v);
 
-    OrderSide side() const;
-    void setSide(OrderSide value);
+    [[nodiscard]] const std::string& symbol()     const noexcept;
+    void setSymbol(std::string v);
 
-    OrderType orderType() const;
-    void setOrderType(OrderType value);
+    [[nodiscard]] const std::string& exchange()   const noexcept;
+    void setExchange(std::string v);
 
-    double price() const;
-    void setPrice(double value);
+    [[nodiscard]] const std::string& strategyId() const noexcept;
+    void setStrategyId(std::string v);
 
-    std::int64_t quantity() const;
-    void setQuantity(std::int64_t value);
+    [[nodiscard]] OrderSide   side()      const noexcept;
+    void setSide(OrderSide v)             noexcept;
 
-    CorrelationId correlationId() const;
-    void setCorrelationId(CorrelationId value);
+    [[nodiscard]] OrderType   orderType() const noexcept;
+    void setOrderType(OrderType v)        noexcept;
 
-    // -- metadata (券商特有参数, 惰性分配) --
-    bool hasMetadata(const std::string& key) const;
-    std::string metadataValue(const std::string& key, const std::string& defaultValue = "") const;
-    void setMetadata(const std::string& key, std::string value);
-    const std::unordered_map<std::string, std::string>* metadata() const;
-    std::size_t metadataCount() const;
+    [[nodiscard]] double price()          const noexcept;
+    void setPrice(double v)               noexcept;
+
+    [[nodiscard]] double quantity()       const noexcept;
+    void setQuantity(double v)            noexcept;
+
+    [[nodiscard]] PositionEffect positionEffect() const noexcept;
+    void setPositionEffect(PositionEffect v)      noexcept;
+
+    [[nodiscard]] TimeInForce timeInForce() const noexcept;
+    void setTimeInForce(TimeInForce v)      noexcept;
+
+    [[nodiscard]] const std::string& expireTime() const noexcept;
+    void setExpireTime(std::string v);
+
+    [[nodiscard]] const std::string& currency() const noexcept;
+    void setCurrency(std::string v);
+
+    [[nodiscard]] double displayQty()    const noexcept;
+    void setDisplayQty(double v)         noexcept;
+
+    [[nodiscard]] double minQty()        const noexcept;
+    void setMinQty(double v)             noexcept;
+
+    // ── 扩展槽 (固定 4 槽, 无堆分配) ──
+    [[nodiscard]] const std::array<ExtensionSlot, 4>& extensions() const noexcept;
+    [[nodiscard]] ExtensionSlot* findExtension(uint64_t key) noexcept;
+    [[nodiscard]] const ExtensionSlot* findExtension(uint64_t key) const noexcept;
+    void setExtension(uint64_t key, double v)       noexcept;
+    void setExtension(uint64_t key, std::int64_t v) noexcept;
+    void setExtension(uint64_t key, uint64_t v)     noexcept;
+
+    /// @brief 按 key 取值, 类型不匹配返回 defaultVal
+    template <typename T>
+    [[nodiscard]] T extensionAs(uint64_t key, T defaultVal) const noexcept {
+        const auto* slot = findExtension(key);
+        if (!slot) return defaultVal;
+        if (auto* p = std::get_if<T>(&slot->value)) return *p;
+        return defaultVal;
+    }
+
+    // ── 核心方法 (全部 noexcept) ──
+    [[nodiscard]] static std::pair<bool, std::string> validate(const OrderRequest& req);
+
+    /// @brief 批量校验 — SIMD 友好的连续内存布局
+    [[nodiscard]] static size_t validateBatch(const OrderRequest* reqs, size_t count,
+                                              std::string* outErrors);
+
+    [[nodiscard]] bool isValid() const noexcept;
+
+    [[nodiscard]] std::string toCanonicalString() const;
+
+    /// @brief trivial copy (SSO 内字符串仅复制栈上缓冲区)
+    [[nodiscard]] OrderRequest clone() const noexcept { return *this; }
 
 private:
-    StrategyId m_strategyId;
-    SymbolCode m_symbol;
-    OrderSide m_side{OrderSide::Buy};
-    OrderType m_orderType{OrderType::Limit};
-    double m_price{0.0};
-    std::int64_t m_quantity{0};
-    CorrelationId m_correlationId;
-    std::unique_ptr<std::unordered_map<std::string, std::string>> m_metadata;
+    [[nodiscard]] static bool checkPriceSemantics(const OrderRequest& req,
+                                                  std::string& errDetail) noexcept;
+    [[nodiscard]] static bool checkQuantityPrecision(const OrderRequest& req,
+                                                     std::string& errDetail) noexcept;
+
+    // ── 数据成员 (按访问频率排列, 热字段在前) ──
+    std::string m_symbol;            // SSO: ≤15 字符零堆分配
+    std::string m_strategyId;        // SSO
+    std::string m_clOrdId;           // SSO
+    std::string m_accountId;         // SSO
+    std::string m_exchange;          // SSO
+    std::string m_currency;          // SSO (典型 "CNY"/"USD" 远小于 SSO)
+    std::string m_expireTime;        // SSO (ISO8601 格式)
+    double      m_price{0};
+    double      m_quantity{0};
+    double      m_displayQty{0};
+    double      m_minQty{0};
+    OrderSide   m_side{OrderSide::Buy};
+    OrderType   m_orderType{OrderType::Limit};
+    PositionEffect m_positionEffect{PositionEffect::Open};
+    TimeInForce    m_timeInForce{TimeInForce::ROD};
+    std::array<ExtensionSlot, 4> m_extensions{};  // 4×24字节=96字节, 无堆
+};
+
+// ============================================================
+// OrderRequest::Builder (链式构造)
+// ============================================================
+
+class OrderRequest::Builder final {
+public:
+    Builder() = default;
+
+    Builder& clOrdId(std::string v)      { m_req.setClOrdId(std::move(v)); return *this; }
+    Builder& accountId(std::string v)    { m_req.setAccountId(std::move(v)); return *this; }
+    Builder& symbol(std::string v)       { m_req.setSymbol(std::move(v));    return *this; }
+    Builder& exchange(std::string v)     { m_req.setExchange(std::move(v));  return *this; }
+    Builder& strategyId(std::string v)   { m_req.setStrategyId(std::move(v)); return *this; }
+    Builder& side(OrderSide v)           { m_req.setSide(v);  return *this; }
+    Builder& orderType(OrderType v)      { m_req.setOrderType(v); return *this; }
+    Builder& price(double v)             { m_req.setPrice(v); return *this; }
+    Builder& quantity(double v)          { m_req.setQuantity(v); return *this; }
+    Builder& positionEffect(PositionEffect v) { m_req.setPositionEffect(v); return *this; }
+    Builder& timeInForce(TimeInForce v)  { m_req.setTimeInForce(v); return *this; }
+    Builder& expireTime(std::string v)   { m_req.setExpireTime(std::move(v)); return *this; }
+    Builder& currency(std::string v)     { m_req.setCurrency(std::move(v)); return *this; }
+    Builder& displayQty(double v)        { m_req.setDisplayQty(v); return *this; }
+    Builder& minQty(double v)            { m_req.setMinQty(v); return *this; }
+    Builder& ext(uint64_t k, double v)   { m_req.setExtension(k, v); return *this; }
+
+    [[nodiscard]] std::pair<OrderRequest, std::string> build() const;
+
+private:
+    OrderRequest m_req;
+};
+
+// ============================================================
+// Order — 运行时订单实体 (无锁状态机 + 缓存行对齐)
+// 不持有引擎/网关指针, 不加锁, 不调外部API.
+// ============================================================
+
+class alignas(64) Order {
+public:
+    /// @brief 构造 — 传入柜台ID + 客户端ID + 原始请求
+    Order(std::string orderId, std::string clOrdId, const OrderRequest& origin);
+
+    // ── 不可变 ID (读多写少, 热缓存行) ──
+    [[nodiscard]] const std::string& orderId()  const noexcept;
+    [[nodiscard]] const std::string& clOrdId()  const noexcept;
+
+    // ── 原始请求回显 ──
+    [[nodiscard]] const OrderRequest& originRequest() const noexcept;
+    [[nodiscard]] const std::string& symbol()   const noexcept;
+    [[nodiscard]] OrderSide side()              const noexcept;
+    [[nodiscard]] double price()                const noexcept;
+    [[nodiscard]] double quantity()             const noexcept;
+
+    // ── 运行时状态 (原子读, 无锁) ──
+    [[nodiscard]] OrderStatusValue status()     const noexcept;
+    [[nodiscard]] double cumQty()               const noexcept;
+    [[nodiscard]] double leavesQty()            const noexcept;
+    [[nodiscard]] double avgPx()                const noexcept;
+    [[nodiscard]] double fee()                  const noexcept;
+    [[nodiscard]] bool   isFrozen()             const noexcept;
+    [[nodiscard]] bool   isTerminal()           const noexcept;
+
+    // ── 时间戳 (纳秒, 单调时钟) ──
+    [[nodiscard]] foundation::utils::Timestamp createTime()     const noexcept;
+    [[nodiscard]] foundation::utils::Timestamp lastUpdateTime() const noexcept;
+
+    // ── 状态管理 (无锁 CAS + 位图转换表) ──
+
+    /// @brief 应用成交. 纯算术, 无锁. 自动推导终态.
+    /// @return false = 数据异常
+    bool applyFill(double fillQty, double fillPx, double tradeFee = 0.0) noexcept;
+
+    /// @brief CAS 撤单. 仅 New/PartiallyFilled → PendingCancel.
+    bool tryCancel() noexcept;
+
+    void confirmCancelled() noexcept;
+    void confirmRejected(const std::string& reason) noexcept;
+    void markExpired() noexcept;
+    void freeze() noexcept;
+
+    /// @brief 编译期位图状态转换表 (8×8=64bits)
+    [[nodiscard]] static constexpr bool canTransition(uint8_t from, uint8_t to) noexcept;
+
+private:
+    void transitionTo(OrderStatusValue target) noexcept;
+
+    // ═══ 缓存行 1: 只读/少写 (构造后基本不变) ═══
+    char m_pad1[8];                              // 对齐填充
+    std::string m_orderId;                       // 柜台委托编号
+    std::string m_clOrdId;                       // 客户端ID
+    OrderRequest m_originRequest;                // 原始指令快照
+    foundation::utils::Timestamp m_createTime;    // 构造时刻
+    // ═══ 缓存行 2: 高频写入 (applyFill 热路径) ═══
+    alignas(64) std::atomic<uint8_t> m_status{static_cast<uint8_t>(OrderStatusValue::Pending)};
+    double m_cumQty{0};                          // 累计成交
+    double m_avgPx{0};                           // 成交均价
+    double m_fee{0};                             // 累计手续费
+    bool   m_frozen{false};                      // 冻结标志
+    foundation::utils::Timestamp m_lastUpdateTime; // 最后状态变更
 };
 
 // ============================================================

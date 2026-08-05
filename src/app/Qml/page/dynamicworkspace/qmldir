@@ -1,0 +1,2 @@
+module ConsoleUi.page.dynamicworkspace
+singleton WidgetRegistry 1.0 WidgetRegistry.qml

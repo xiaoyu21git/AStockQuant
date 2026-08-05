@@ -93,6 +93,22 @@ J MarketDataService::financialRowToJson(const astock::database::SqlQueryResultRo
     return obj;
 }
 
+// ── genericRowToJson ──（通用：遍历所有列转 JSON）
+J MarketDataService::genericRowToJson(const astock::database::SqlQueryResultRow& row) {
+    auto obj = J::createObject();
+    for (const auto& [col, val] : row.getValues()) {
+        if (val.empty()) continue;
+        char* end = nullptr;
+        double d = strtod(val.c_str(), &end);
+        if (end && end != val.c_str() && *end == '\0') {
+            obj.set(col, safeCreateDouble(d));
+        } else {
+            obj.set(col, J::createString(val));
+        }
+    }
+    return obj;
+}
+
 // ── symbolInfoRowToJson ──
 J MarketDataService::symbolInfoRowToJson(const astock::database::SqlQueryResultRow& row) {
     auto obj = J::createObject();
@@ -110,17 +126,19 @@ J MarketDataService::symbolInfoRowToJson(const astock::database::SqlQueryResultR
 MarketDataResult MarketDataService::query(const MarketDataQuery& q, ProgressCallback onProgress) {
     MarketDataResult result;
     try {
-        if (q.sourceType == DataSourceType::Financial) {
-            return queryFinancialData(q.symbols, q.startDate, q.endDate);
+        switch (q.sourceType) {
+        case DataSourceType::Financial:       return queryFinancialData(q.symbols, q.startDate, q.endDate);
+        case DataSourceType::SymbolInfo:      return querySymbolInfo(q.symbols);
+        case DataSourceType::NewsSentiment:   return queryNewsSentiment(q.symbols, q.startDate, q.endDate);
+        case DataSourceType::PolicyData:      return queryPolicyData(q.symbols, q.startDate, q.endDate);
+        case DataSourceType::AlternativeData: return queryAlternativeData(q.symbols, q.startDate, q.endDate);
+        case DataSourceType::MinuteBar:       return queryMinuteBar(q.symbols, q.startDate, q.endDate);
+        case DataSourceType::CleanedDailyBar: return queryCleanedDailyBar(q.symbols, q.startDate, q.endDate);
+        case DataSourceType::AllMarket:       return queryAllMarket(q.startDate, q.endDate);
+        case DataSourceType::Stock:
+        case DataSourceType::Index:
+        default: return queryDailyBar(q.symbols, q.startDate, q.endDate, q.extraFields);
         }
-        if (q.sourceType == DataSourceType::SymbolInfo) {
-            return querySymbolInfo(q.symbols);
-        }
-        if (q.sourceType == DataSourceType::AllMarket) {
-            return queryAllMarket(q.startDate, q.endDate);
-        }
-        // Stock / Index: daily_bar with extra fields
-        return queryDailyBar(q.symbols, q.startDate, q.endDate, q.extraFields);
     } catch (const std::exception& e) {
         result.error = e.what();
     }
@@ -202,6 +220,122 @@ MarketDataResult MarketDataService::querySymbolInfo(const std::vector<std::strin
 
 std::string MarketDataService::nextTradingDay(const std::string& anchorDate) {
     return m_repo->queryNextTradingDay(anchorDate);
+}
+
+// ── queryWeeklyBar ──
+
+MarketDataResult MarketDataService::queryWeeklyBar(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    MarketDataResult result;
+    auto bars = m_repo->queryWeeklyBar(symbols, startDate, endDate);
+    result.totalRows = static_cast<int>(bars.size());
+    result.rows.reserve(bars.size());
+    for (const auto& bar : bars) result.rows.push_back(barRowToJson(bar, {}));
+    result.availableFields = {field::SYMBOL, field::TRADE_DATE, field::OPEN, field::HIGH,
+                              field::LOW, field::CLOSE, field::VOLUME, field::TURNOVER};
+    result.success = true;
+    return result;
+}
+
+// ── queryMonthlyBar ──
+
+MarketDataResult MarketDataService::queryMonthlyBar(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    MarketDataResult result;
+    auto bars = m_repo->queryMonthlyBar(symbols, startDate, endDate);
+    result.totalRows = static_cast<int>(bars.size());
+    result.rows.reserve(bars.size());
+    for (const auto& bar : bars) result.rows.push_back(barRowToJson(bar, {}));
+    result.availableFields = {field::SYMBOL, field::TRADE_DATE, field::OPEN, field::HIGH,
+                              field::LOW, field::CLOSE, field::VOLUME, field::TURNOVER};
+    result.success = true;
+    return result;
+}
+
+// ── queryMinuteBar ──
+
+MarketDataResult MarketDataService::queryMinuteBar(
+    const std::vector<std::string>& symbols,
+    const std::string& startTime,
+    const std::string& endTime)
+{
+    MarketDataResult result;
+    auto rows = m_repo->queryMinuteBar(symbols, startTime, endTime);
+    result.totalRows = static_cast<int>(rows.size());
+    result.rows.reserve(rows.size());
+    for (const auto& row : rows) result.rows.push_back(genericRowToJson(row));
+    result.success = true;
+    return result;
+}
+
+// ── queryNewsSentiment ──
+
+MarketDataResult MarketDataService::queryNewsSentiment(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    MarketDataResult result;
+    auto rows = m_repo->queryNewsSentiment(symbols, startDate, endDate);
+    result.totalRows = static_cast<int>(rows.size());
+    result.rows.reserve(rows.size());
+    for (const auto& row : rows) result.rows.push_back(genericRowToJson(row));
+    result.success = true;
+    return result;
+}
+
+// ── queryPolicyData ──
+
+MarketDataResult MarketDataService::queryPolicyData(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    MarketDataResult result;
+    auto rows = m_repo->queryPolicyData(symbols, startDate, endDate);
+    result.totalRows = static_cast<int>(rows.size());
+    result.rows.reserve(rows.size());
+    for (const auto& row : rows) result.rows.push_back(genericRowToJson(row));
+    result.success = true;
+    return result;
+}
+
+// ── queryAlternativeData ──
+
+MarketDataResult MarketDataService::queryAlternativeData(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    MarketDataResult result;
+    auto rows = m_repo->queryAlternativeData(symbols, startDate, endDate);
+    result.totalRows = static_cast<int>(rows.size());
+    result.rows.reserve(rows.size());
+    for (const auto& row : rows) result.rows.push_back(genericRowToJson(row));
+    result.success = true;
+    return result;
+}
+
+// ── queryCleanedDailyBar ──
+
+MarketDataResult MarketDataService::queryCleanedDailyBar(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    MarketDataResult result;
+    auto rows = m_repo->queryCleanedDailyBar(symbols, startDate, endDate);
+    result.totalRows = static_cast<int>(rows.size());
+    result.rows.reserve(rows.size());
+    for (const auto& row : rows) result.rows.push_back(genericRowToJson(row));
+    result.success = true;
+    return result;
 }
 
 // ── 高效批量 JSON 输出（绕过逐行 JsonFacade 构建）──

@@ -1,4 +1,5 @@
 #include "../include/IStrategyService.h"
+#include "foundation/log/logging.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -65,18 +66,34 @@ RuleEvaluationResult LocalRuleEvaluationService::evaluate(
 
     bool passed = true;
     RuleRejectReason rejectReason = RuleRejectReason::None;
+    std::string failDetail;
     for (rules::RuleId ruleId : selectedRules) {
-        if (ruleId == kRuleScoreNonNegative && signal.score() < kMinSignalScore) {
+        // 买入单: 分数不能为负；卖出单: 不检查分数
+        if (ruleId == kRuleScoreNonNegative
+            && signal.side() == RuntimeOrderSide::Buy
+            && signal.score() < kMinSignalScore) {
             passed = false;
             rejectReason = RuleRejectReason::RuleTemplateBlocked;
+            failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";
             break;
         }
         if (ruleId == kRuleTargetWeightAbsLimit
             && std::fabs(signal.targetWeight()) > kMaxAbsoluteTargetWeight) {
             passed = false;
             rejectReason = RuleRejectReason::RiskGuardBlocked;
+            failDetail = "|targetWeight|≤1.0 不通过(weight=" + std::to_string(signal.targetWeight()) + ")";
             break;
         }
+    }
+
+    if (!passed) {
+        char symBuf[16];
+        std::snprintf(symBuf, sizeof(symBuf), "%06u", signal.instrumentId().value);
+        INTERNAL_WARN_STREAM << "[RuleEval] 规则拒绝: " << symBuf
+                             << " " << failDetail
+                             << " score=" << signal.score()
+                             << " targetWeight=" << signal.targetWeight()
+                             << " side=" << (signal.side() == RuntimeOrderSide::Buy ? 'B' : 'S');
     }
 
     const auto endAt = std::chrono::steady_clock::now();
@@ -142,19 +159,35 @@ StrategyServiceFlowResult LocalRuleEvaluationService::evaluateBatch(
 
         bool passed = true;
         RuleRejectReason rejectReason = RuleRejectReason::None;
+        std::string failDetail;
 
         for (rules::RuleId ruleId : selectedRules) {
-            if (ruleId == kRuleScoreNonNegative && signal.score() < kMinSignalScore) {
+            // 买入单: 分数不能为负；卖出单: 不检查分数
+            if (ruleId == kRuleScoreNonNegative
+                && signal.side() == RuntimeOrderSide::Buy
+                && signal.score() < kMinSignalScore) {
                 passed = false;
                 rejectReason = RuleRejectReason::RuleTemplateBlocked;
+                failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";
                 break;
             }
             if (ruleId == kRuleTargetWeightAbsLimit
                 && std::fabs(signal.targetWeight()) > kMaxAbsoluteTargetWeight) {
                 passed = false;
                 rejectReason = RuleRejectReason::RiskGuardBlocked;
+                failDetail = "|targetWeight|≤1.0 不通过(weight=" + std::to_string(signal.targetWeight()) + ")";
                 break;
             }
+        }
+
+        if (!passed) {
+            char symBuf[16];
+            std::snprintf(symBuf, sizeof(symBuf), "%06u", signal.instrumentId().value);
+            INTERNAL_WARN_STREAM << "[RuleEval] 规则拒绝: " << symBuf
+                                 << " " << failDetail
+                                 << " score=" << signal.score()
+                                 << " targetWeight=" << signal.targetWeight()
+                                 << " side=" << (signal.side() == RuntimeOrderSide::Buy ? 'B' : 'S');
         }
 
         const auto endAt = std::chrono::steady_clock::now();
@@ -247,15 +280,32 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
         return StrategyServiceFlowResult(StrategyServiceFlowCode::OrderBuildFailed);
     }
 
-    // 下单数量始终受运行时上下文约束；仅在未配置上限时使用默认值。
-    const std::uint32_t quantity = context.maxOrderQuantity() > 0
-        ? context.maxOrderQuantity()
-        : kDefaultOrderQuantity;
-    outputOrder = OrderRequest(
-        signal.strategyInstanceId(),
-        signal.instrumentId(),
-        signal.side(),
-        quantity);
+    const double weight = std::fabs(signal.targetWeight());
+    const std::uint32_t base = context.maxOrderQuantity() > 0
+        ? context.maxOrderQuantity() : kDefaultOrderQuantity;
+    std::uint32_t quantity = static_cast<std::uint32_t>(weight * base);
+    if (quantity < 100) quantity = 100;
+    quantity = quantity / 100 * 100;
+
+    // 契约: 信号必携真实完整代码 (isValid 已保证非空), 订单 symbol 与其逐字节一致
+    outputOrder.setSymbol(signal.fullSymbol());
+    outputOrder.setStrategyId(std::to_string(signal.strategyInstanceId()));
+    outputOrder.setSide((signal.side() == RuntimeOrderSide::Buy)
+                        ? OrderSide::Buy : OrderSide::Sell);
+    outputOrder.setQuantity(static_cast<int64_t>(quantity));
+    outputOrder.setExtension(domain::trading::ExtKey::kSignalScore, signal.score());
+    outputOrder.setExtension(domain::trading::ExtKey::kTargetWeight, signal.targetWeight());
+    outputOrder.setExtension(domain::trading::ExtKey::kSignalIntent,
+        static_cast<uint64_t>(signal.intent()));
+    outputOrder.setOrderType(OrderType::Market);
+    outputOrder.setPrice(0);                         // drainQueue 用 tick 价补
+
+    // 占位数量, 真实下单量由回测循环/实盘调度按权重×信号强度换算 — TRACE 防刷屏
+    INTERNAL_TRACE_STREAM << "[OrderBuild] signal->order: symbol=" << outputOrder.symbol()
+                          << " side=" << (outputOrder.side() == OrderSide::Buy ? "B" : "S")
+                          << " qty=" << outputOrder.quantity()
+                          << " weight=" << weight << " score=" << signal.score();
+
     return StrategyServiceFlowResult(StrategyServiceFlowCode::Ok);
 }
 

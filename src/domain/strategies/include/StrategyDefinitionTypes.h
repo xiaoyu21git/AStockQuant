@@ -238,12 +238,6 @@ struct RsiMeanReversionStrategySpec final {
     double overboughtLevel{70.0};
 };
 
-struct MultiFactorSelectionStrategySpec final {
-    std::vector<FactorWeight> factorWeights;
-    int topN{50};
-    bool industryNeutral{false};
-};
-
 struct EarningsSurpriseStrategySpec final {
     double surpriseThreshold{0.2};
     int holdDays{5};

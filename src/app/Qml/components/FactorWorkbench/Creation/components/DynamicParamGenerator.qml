@@ -270,10 +270,8 @@ Item {
             onLoaded: {
                 if (!item || !currentConfig) return
 
-                // 设置配置
                 item.config = currentConfig
 
-                // 设置初始值
                 var initialValue = root.values[currentConfig.id]
                 if (initialValue !== undefined) {
                     root.suppressParamValuePropagation = true
@@ -949,19 +947,13 @@ Item {
     
     // 重新加载参数配置
     function reloadConfigs(newConfigs, newGroups, initialValues) {
-        // 清除现有组件实例引用
         root.paramInstances = {}
         root.validationErrors = {}
-        
-        // 更新配置
         root.configs = newConfigs || []
         root.groups = newGroups || []
-        
-        // 更新配置列表
         updateConfigsList()
-        
-        // 使用现有值或默认值重新初始化，避免 schema 重建时丢失编辑中的参数
-        var sourceValues = initialValues && typeof initialValues === "object"
+
+        var sourceValues = (initialValues && typeof initialValues === "object" && !Array.isArray(initialValues))
             ? initialValues
             : ({})
         var newValues = {}

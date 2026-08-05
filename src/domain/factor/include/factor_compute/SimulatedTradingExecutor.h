@@ -38,6 +38,8 @@ public:
     /// @param factorValues 按日期×标的的因子值
     /// @param sortedDates 已排序的日期列表（升序 YYYY-MM-DD）
     /// @param priceView close 价格矩阵视图
+    /// @param preAdjustView 前复权因子矩阵（adjustPriceType=="pre" 时生效，空视图=不复权）
+    /// @param postAdjustView 后复权因子矩阵（adjustPriceType=="post" 时生效）
     /// @param instrumentIds 标的ID列表（uint32_t 值对应 priceView 中的列索引映射密钥）
     /// @param instrumentIdToSymbol 标的ID到字符串符号的映射
     /// @return 模拟成交结果
@@ -45,6 +47,8 @@ public:
         const FactorValuesByDate& factorValues,
         const std::vector<std::string>& sortedDates,
         NumericConstMatrixView priceView,
+        NumericConstMatrixView preAdjustView,
+        NumericConstMatrixView postAdjustView,
         const std::vector<InstrumentId>& instrumentIds,
         const std::unordered_map<uint32_t, std::string>& instrumentIdToSymbol) const;
 

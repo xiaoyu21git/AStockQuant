@@ -43,6 +43,7 @@ FactorBacktestMetrics::Rating FactorBacktestMetricsCalculator::evaluateCoreRatin
         return FactorBacktestMetrics::Rating::GOOD;
     }
 
+    // 合格: 5.1 核心评级表 — IC>0.02, P<0.05, IR>0.3, winRate>55%, |r|>0.7, Top>Bottom
     const bool pass = metrics.rankIcMean > 0.02
         && metrics.icPValue < 0.05
         && metrics.rankIcir > 0.3
@@ -338,6 +339,22 @@ double FactorBacktestMetricsCalculator::calculateMonthlyWinRate(const std::vecto
     return static_cast<double>(winMonths) / static_cast<double>(totalMonths);
 }
 
+double FactorBacktestMetricsCalculator::calculateTopBottomSpreadReturn(const Inputs& inputs)
+{
+    if (inputs.groupResult.groupReturns.size() < 2) {
+        return 0.0;
+    }
+    return inputs.groupResult.groupReturns.front() - inputs.groupResult.groupReturns.back();
+}
+
+bool FactorBacktestMetricsCalculator::calculateSpreadSignConsistency(const Inputs& inputs)
+{
+    const double spread = calculateTopBottomSpreadReturn(inputs);
+    const double icMean = inputs.icirResult.icMean;
+    // 同号：spread 为正且 IC 为正(因子值越大收益越高)，或两者都为负(因子值越小收益越高)
+    return (spread > 0.0 && icMean > 0.0) || (spread < 0.0 && icMean < 0.0);
+}
+
 FactorBacktestMetrics FactorBacktestMetricsCalculator::buildFactorMetrics(const Inputs& inputs)
 {
     FactorBacktestMetrics metrics;
@@ -357,6 +374,8 @@ FactorBacktestMetrics FactorBacktestMetricsCalculator::buildFactorMetrics(const 
     metrics.icTStat = calculateIcTStat(inputs);
     metrics.monthlyWinRate = calculateMetricMonthlyWinRate(inputs);
     metrics.numGroups = calculateNumGroups(inputs);
+    metrics.topBottomSpreadReturn = calculateTopBottomSpreadReturn(inputs);
+    metrics.spreadSignMatchIc = calculateSpreadSignConsistency(inputs);
     metrics.groupAnnualReturns = calculateGroupAnnualReturns(inputs);
     metrics.groupSharpes = calculateGroupSharpes(inputs);
 

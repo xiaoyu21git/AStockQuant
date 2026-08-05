@@ -47,6 +47,7 @@ enum class RiskRejectCode : int {
     MaxDrawdownExceeded,
     PositionConcentrationExceeded,
     TotalExposureExceeded,
+    IndexDrawdownExceeded,       // 大盘指数回撤超限，暂停开仓
     Level3TradingHaltActive,
     AutoStrategyWithoutQuantity,
 };
@@ -169,6 +170,13 @@ public:
     [[nodiscard]] double currentDrawdownPercent() const noexcept { return m_currentDrawdownPercent; }
     void setCurrentDrawdownPercent(double v) noexcept { m_currentDrawdownPercent = v; }
 
+    // 大盘指数保护: 调用方在 evaluateOrder 前填入; 0 表示不启用。
+    [[nodiscard]] double indexDrawdownPct() const noexcept { return m_indexDrawdownPct; }
+    void setIndexDrawdownPct(double v) noexcept { m_indexDrawdownPct = v; }
+
+    [[nodiscard]] double indexDrawdownLimitPercent() const noexcept { return m_indexDrawdownLimitPercent; }
+    void setIndexDrawdownLimitPercent(double v) noexcept { m_indexDrawdownLimitPercent = v; }
+
 private:
     std::string m_strategyId;
     std::string m_symbol;
@@ -208,6 +216,8 @@ private:
 
     bool m_level3TradingHaltActive{false};
     double m_currentDrawdownPercent{0.0};
+    double m_indexDrawdownPct{0.0};
+    double m_indexDrawdownLimitPercent{0.0};
 };
 
 // ── 风控输出 (纯 getter 封装) ──
@@ -296,6 +306,11 @@ struct RiskConfig final {
     double breakerLevel3Percent{0.0};    // 三级熔断（%）
     double maxPositionPercent{0.0};      // 单标的持仓集中度（%）
     double maxTotalExposurePercent{0.0}; // 总敞口上限（%）
+
+    // ── 大盘指数保护 ──
+    double indexDrawdownLimitPercent{3.0};   // 大盘回撤阈值（%，默认 3%）
+    int    indexDrawdownLookbackDays{5};     // 回看交易日数（默认 5 天）
+    std::string indexSymbol{"000001.SH"};    // 跟踪的指数代码
 
     // ── 费率 ──
     double commissionRate{0.0};          // 手续费率（如 0.0003 = 万三）

@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS core.symbol_info (
     name VARCHAR(100) NOT NULL,
     exchange VARCHAR(10) NOT NULL,
     asset_class VARCHAR(20) NOT NULL DEFAULT 'STOCK',
-    industry VARCHAR(50),
+    industry_code VARCHAR(50),
     list_date DATE,
     delist_date DATE,
     status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',

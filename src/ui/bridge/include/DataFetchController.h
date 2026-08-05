@@ -38,6 +38,8 @@ public:
 
     Q_INVOKABLE void cleanDataAsync(const QVariantMap& rules);
     Q_INVOKABLE void refreshDataSetInfos();
+    // 列出已清洗数据集(sourceType=="cleaning")，供清洗页增量更新选择器使用
+    Q_INVOKABLE void refreshCleanedDataSetInfos();
     Q_INVOKABLE void fetchDataTypesBySource(const QString& dataSource,
                                             const QString& symbol,
                                             const QStringList& dataTypes,
@@ -53,7 +55,12 @@ public:
     Q_INVOKABLE void onDropdownRefreshed(int count);
     Q_INVOKABLE void loadSymbolDetail(const QString& symbol, int page);
     Q_INVOKABLE void cleanDataFromDataSet(int dataSetId, const QVariantMap& rules);
+    // 增量更新已清洗数据集（转发到清洗服务，UI 入口放在数据清洗页）
+    Q_INVOKABLE void incrementalUpdateDataSet(int dataSetId);
     Q_INVOKABLE bool removeDataSet(int dataSetId);
+    // 缓存数据查看：列出全部数据集(含清洗集) + 按 symbol 读取某数据集的所有行(清洗前后对比)
+    Q_INVOKABLE QVariantList allDataSetInfos();
+    Q_INVOKABLE QVariantList loadCacheRowsBySymbol(int dataId, const QString& symbol);
 
     QString dataSource() const { return m_dataSource; }
     void setDataSource(const QString& source);
@@ -96,9 +103,15 @@ signals:
     void dataCleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
     void dataCleaningError(const QString& error);
     void dataSetInfosRefreshed(const QVariantList& dataSetInfos);
+    // 已清洗数据集列表(仅 sourceType=="cleaning")
+    void cleanedDataSetInfosRefreshed(const QVariantList& dataSetInfos);
     void symbolDetailLoaded(const QString& symbol, int page, const QVariantList& data);
     void dataSetCleaned(int dataSetId, int resultDataSetId, const QString& message,
                         int inputRows, int outputRows);
+    // 增量更新信号（转发自清洗服务）
+    void datasetUpdateStarted(int dataSetId);
+    void datasetUpdateProgress(int dataSetId, int pct, const QString& stage);
+    void datasetUpdateFinished(int dataSetId, bool success, int newRows, const QString& message);
     void dataSetReadyForCleaning(int dataSetId);
     void previewModelChanged();
     void requestCleanData(const QVariantList& data, const QVariantMap& rules);

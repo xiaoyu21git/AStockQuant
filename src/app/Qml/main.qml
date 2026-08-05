@@ -8,9 +8,9 @@ ApplicationWindow {
     width: 1440
     height: 900
     visible: true
-    // 去掉标题
+    visibility: Window.Maximized
     title: "量化交易系统"
-    flags: Qt.Window | Qt.FramelessWindowHint
+    flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinimizeButtonHint
     color: "#0F172A"
     
     // 属性定义
@@ -331,10 +331,10 @@ ApplicationWindow {
                         Layout.fillHeight: true
                         marketData: window.marketData
                     }
-                    
-                    // 实盘交易总览页面
+
+                    // 实盘总览 Dashboard（图表/跑马灯/市场热力/绩效分析）
                     MainContent {
-                        id: liveTradingPage
+                        id: liveTradingDashboard
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         pageMode: "live-trading"
@@ -348,7 +348,7 @@ ApplicationWindow {
                         positions: window.positions
                         strategies: window.strategies
                     }
-                    
+
                     // 监控面板页面
                     Loader {
                         id: monitoringPage
@@ -367,11 +367,23 @@ ApplicationWindow {
                         active: mainStack.currentIndex === 10 || item !== null
                         asynchronous: true
                         sourceComponent: settingsPageComponent
+                        onLoaded: if (item) item.settingsSubPage = window.currentPageCode
+                        Connections {
+                            target: window
+                            function onCurrentPageCodeChanged() {
+                                if (settingsPage.item) settingsPage.item.settingsSubPage = window.currentPageCode
+                            }
+                        }
                     }
 
-                    Item {
+                    // 动态工作区
+                    Loader {
+                        id: dynamicWorkspacePage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
+                        active: mainStack.currentIndex === 11 || item !== null
+                        asynchronous: true
+                        sourceComponent: dynamicWorkspacePageComponent
                     }
 
                     Item {
@@ -382,10 +394,40 @@ ApplicationWindow {
                             anchors.fill: parent
                         }
                     }
+
+                    // 因子绩效分析页 (索引13)
+                    Loader {
+                        id: factorPerformancePageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 13 || item !== null
+                        asynchronous: true
+                        sourceComponent: factorPerformancePageComponent
+                    }
+
+                    // 索引14: 清洗规则页面
+                    Loader {
+                        id: cleaningRulesPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 14 || item !== null
+                        asynchronous: true
+                        sourceComponent: cleaningRulesPageComponent
+                    }
+
+                    // 索引15: 策略规则管理页面
+                    Loader {
+                        id: strategyRulesPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 15 || item !== null
+                        asynchronous: true
+                        sourceComponent: strategyRulesPageComponent
+                    }
                 }
             }
             }
-        }   
+        }
     }
 
     Component {
@@ -448,15 +490,49 @@ ApplicationWindow {
     Component {
         id: settingsPageComponent
 
-        SystemSettingsPage {
-            configService: Bridge.TradingConnectionConfigService
+        Item {
+            property string settingsSubPage: ""
+            Loader {
+                anchors.fill: parent
+                sourceComponent: {
+                    if (parent.settingsSubPage === "global_settings") return globalSettingsComponent
+                    return systemSettingsComponent
+                }
+            }
         }
     }
+
+    Component { id: systemSettingsComponent; SystemSettingsPage { configService: Bridge.TradingConnectionConfigService } }
+    Component { id: globalSettingsComponent;  SettingsPage {} }
 
     Component {
         id: monitoringPageComponent
 
         MonitoringPage {}
+    }
+
+    Component {
+        id: dynamicWorkspacePageComponent
+
+        DynamicWorkspacePage {}
+    }
+
+    Component {
+        id: factorPerformancePageComponent
+
+        FactorPerformancePage {}
+    }
+
+    Component {
+        id: cleaningRulesPageComponent
+
+        CleaningRulesPage {}
+    }
+
+    Component {
+        id: strategyRulesPageComponent
+
+        StrategyRulesPage {}
     }
 
     DepositDialog {
@@ -552,6 +628,7 @@ ApplicationWindow {
     }
     // === 页面切换 ===
     property string currentPage: "dashboard" // 默认初始页面为仪表盘
+    property string currentPageCode: ""       // 当前页面代码（用于 settings 子页面切换）
     property int mainStackIndex: 0 // 当前页面索引，为仪表盘
     property string currentMenuCode: "data_dashboard" // 当前菜单代码，用于StackLayout切换
 
@@ -576,9 +653,8 @@ ApplicationWindow {
             "compliance_check": 4,
             "live_trading": 5,
             "trade_execution": 5,
-            "position_management": 5,
             "fund_management": 5,
-            "trade_records": 5,
+            "dynamic_workspace": 11,
             "performance_analysis": 5
         }
 
@@ -587,9 +663,10 @@ ApplicationWindow {
     
     function switchPage(menuCode, menuTitle) {
         console.log("切换页面:", menuCode, "菜单标题:", menuTitle)
-        
+
         // 更新当前菜单代码
         currentMenuCode = menuCode
+        currentPageCode = menuCode     // 供 settings 子页面切换
 
         // 确保侧边栏菜单状态同步
         if (sidebar && sidebar.setCurrentMenu) {
@@ -613,9 +690,10 @@ ApplicationWindow {
             "strategy_factor": 1,      // 策略与因子 -> StrategyLibraryPage (索引1)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
             "risk_management": 6,      // 风险管理 -> riskManagementPage (索引6)
+            "dynamic_workspace": 11,    // 动态区
             "live_trading": 7,         // 实盘交易 -> TradingPage (索引7)
-            "monitoring": 9,           // 监控面板 -> monitoringPage (索引9)
-            "settings": 10             // 系统设置 -> settingsPage (索引10)
+            "monitoring": 9,           // 监控面板 -> monitoringPage
+            "settings": 10             // 系统设置 -> settingsPage
         };
         
         // 二级菜单映射到对应的页面
@@ -629,25 +707,24 @@ ApplicationWindow {
             "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
             "factor_library": 5,              // 因子库 -> FactorWorkbench (索引5)
             "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
+            "factor_performance": 13,         // 因子绩效 -> FactorPerformancePage (索引13)
+            "cleaning_rule": 14,            // 清洗规则 -> CleaningRulesPage (索引14)
+            "strategy_rule": 15,            // 策略规则管理 -> StrategyRulesPage (索引15)
             "risk_configuration": 6,          // 风险配置 -> 风险管理 (索引6)
             "risk_monitoring": 6,             // 风险监控 -> 风险管理 (索引6)
             "stress_testing": 6,              // 压力测试 -> 风险管理 (索引6)
             "risk_reporting": 6,              // 风险报告 -> 风险管理 (索引6)
             "compliance_check": 6,            // 合规检查 -> 风险管理 (索引6)
-            "trade_execution": 7,             // 交易执行 -> 实盘交易 (索引7)
-            "position_management": 8,         // 仓位管理 -> 实盘总览 (索引8)
-            "fund_management": 8,             // 资金管理 -> 实盘总览 (索引8)
-            "trade_records": 8,               // 交易记录 -> 实盘总览 (索引8)
-            "performance_analysis": 8,        // 绩效分析 -> 实盘总览 (索引8)
-            "real_time_monitoring": 9,        // 实时监控 -> 监控面板 (索引9)
-            "alert_center": 9,                // 报警中心 -> 监控面板 (索引9)
-            "system_status": 9,               // 系统状态 -> 监控面板 (索引9)
-            "log_viewer": 9,                  // 日志查看 -> 监控面板 (索引9)
-            "personal_settings": 10,          // 个人设置 -> 系统设置 (索引10)
-            "trade_settings": 10,             // 交易设置 -> 系统设置 (索引10)
-            "notification_settings": 10,      // 通知设置 -> 系统设置 (索引10)
-            "permission_management": 10,      // 权限管理 -> 系统设置 (索引10)
-            "system_configuration": 10        // 系统配置 -> 系统设置 (索引10)
+            "fund_management": 8,             // 资金管理 -> 实盘总览 Dashboard
+            "performance_analysis": 8,        // 绩效分析 -> 实盘总览 Dashboard
+            "dynamic_workspace": 11,            // 实盘交易执行(原动态区) -> DynamicWorkspace
+            "real_time_monitoring": 9,        // 实时监控 -> 监控面板
+            "alert_center": 9,                // 报警中心 -> 监控面板
+            "system_status": 9,               // 系统状态 -> 监控面板
+            "log_viewer": 9,                  // 日志查看 -> 监控面板
+            "personal_settings": 10,          // 个人设置 -> 系统设置
+            "system_configuration": 10,       // 系统配置 -> 系统设置
+            "global_settings": 10              // 全局设置 -> 系统设置
         };
         
         // 首先检查一级菜单

@@ -9,6 +9,7 @@ target_sources(domain_backtest PRIVATE
     RebalanceScheduleBuilder.cpp
     GroupingAllocator.cpp
     ValuationEngine.cpp
+    SurvivorshipValidator.cpp
     ${DOMAIN_BACKTEST_SOURCES_CXX}
 )
 

@@ -41,14 +41,6 @@ double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBE
     return output[lastIndex];
 }
 
-double clampScore(double value)
-{
-    if (!std::isfinite(value)) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    return std::clamp(value, -1.0, 1.0);
-}
-
 double nanValue()
 {
     return std::numeric_limits<double>::quiet_NaN();
@@ -135,7 +127,7 @@ std::unordered_map<std::string, double> batchCalculateRsi(
             continue;
         }
 
-        results.emplace(symbol, clampScore((rsiValue - 50.0) / 50.0));
+        results.emplace(symbol, rsiValue);
     }
 
     return results;
@@ -188,7 +180,7 @@ std::unordered_map<std::string, double> batchCalculateMacd(
             continue;
         }
 
-        results.emplace(symbol, clampScore(std::tanh(histogramValue / (std::max)(1e-6, std::abs(closeValue)))));
+        results.emplace(symbol, histogramValue / (std::max)(1e-6, std::abs(closeValue)));
     }
 
     return results;
@@ -232,7 +224,7 @@ std::unordered_map<std::string, double> batchCalculateMa(
             continue;
         }
 
-        results.emplace(symbol, clampScore(std::tanh((closeValue - maValue) / (std::max)(1e-6, std::abs(maValue)))));
+        results.emplace(symbol, (closeValue - maValue) / (std::max)(1e-6, std::abs(maValue)));
     }
 
     return results;
@@ -275,7 +267,7 @@ std::unordered_map<std::string, double> batchCalculateEma(
             continue;
         }
 
-        results.emplace(symbol, clampScore(std::tanh((closeValue - emaValue) / (std::max)(1e-6, std::abs(emaValue)))));
+        results.emplace(symbol, (closeValue - emaValue) / (std::max)(1e-6, std::abs(emaValue)));
     }
 
     return results;
@@ -327,7 +319,7 @@ std::unordered_map<std::string, double> batchCalculateBoll(
             continue;
         }
 
-        results.emplace(symbol, clampScore(std::tanh((closeValue - middleValue) / (std::max)(1e-6, std::abs(upperValue - middleValue)))));
+        results.emplace(symbol, (closeValue - middleValue) / (std::max)(1e-6, std::abs(upperValue - middleValue)));
     }
 
     return results;
@@ -394,7 +386,7 @@ std::unordered_map<std::string, double> batchCalculateKdj(
         }
 
         const double jValue = 3.0 * slowK - 2.0 * slowD;
-        results.emplace(symbol, clampScore((jValue - 50.0) / 50.0));
+        results.emplace(symbol, jValue);
     }
 
     return results;
@@ -450,7 +442,7 @@ std::unordered_map<std::string, double> batchCalculateAtr(
             continue;
         }
 
-        results.emplace(symbol, clampScore(-atrValue / (std::max)(1e-6, std::abs(closeValue))));
+        results.emplace(symbol, atrValue / (std::max)(1e-6, std::abs(closeValue)));
     }
 
     return results;
@@ -516,7 +508,7 @@ std::unordered_map<std::string, double> batchCalculateVwap(
         }
 
         const double vwap = priceVolumeSum / volumeSum;
-        results.emplace(symbol, clampScore(std::tanh((closeValue - vwap) / (std::max)(1e-6, std::abs(vwap)))));
+        results.emplace(symbol, (closeValue - vwap) / (std::max)(1e-6, std::abs(vwap)));
     }
 
     return results;
@@ -559,7 +551,7 @@ std::unordered_map<std::string, double> batchCalculateVolumeRatio(
             continue;
         }
 
-        results.emplace(symbol, clampScore(std::tanh((lastValue - meanValue) / (std::max)(1e-6, std::abs(meanValue)))));
+        results.emplace(symbol, (lastValue - meanValue) / (std::max)(1e-6, std::abs(meanValue)));
     }
 
     return results;
@@ -615,7 +607,7 @@ std::unordered_map<std::string, double> batchCalculateObv(
             continue;
         }
 
-        results.emplace(symbol, clampScore(std::tanh(obvValue / (std::max)(1e-6, std::abs(averageVolume) * static_cast<double>(tailLength)))));
+        results.emplace(symbol, obvValue / (std::max)(1e-6, std::abs(averageVolume) * static_cast<double>(tailLength)));
     }
 
     return results;
@@ -671,7 +663,7 @@ std::unordered_map<std::string, double> batchCalculateTurnoverStability(
 
         const double coefficient = std::abs(meanValue) <= 1e-12 ? std::numeric_limits<double>::infinity() : stdValue / std::abs(meanValue);
         const double normalized = 1.0 - std::clamp(coefficient, 0.0, 2.0) / 2.0;
-        results.emplace(symbol, clampScore(normalized * 2.0 - 1.0));
+        results.emplace(symbol, normalized);
     }
 
     return results;

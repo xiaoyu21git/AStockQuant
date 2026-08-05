@@ -5,6 +5,7 @@ import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 import AStock.Bridge 1.0
 import "../../components/DataAnalysis" as DataAnalysisComponents
+import "../../components" as SharedComponents
 
 Item {
     id: root
@@ -12,6 +13,7 @@ Item {
 
     property int dataSourceCount: 0
     property int currentCacheIndex: -1
+    property bool cacheUpdating: false
     property var selectedRules: []
     property int selectedRulesRevision: 0
     property int selectedRulesCount: selectedRules ? selectedRules.length : 0
@@ -27,7 +29,7 @@ Item {
         { ruleId: "financialMetricSanitize", ruleName: "财务指标净化", icon: "📈", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "reportDateAlignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "survivorBias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "adjustedPrice", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "adjustedPrice", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "newStockFilter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "stFilter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "priceValidity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
@@ -159,7 +161,7 @@ Item {
                 }
             case "adjustedPrice":
                 return {
-                    "enabled": true,
+                    "enabled": false,
                     "preferAdjustedFields": true,
                     "applyFactorFallback": true
                 }
@@ -323,6 +325,7 @@ Item {
                 font.bold: true
                 color: "white"
             }
+
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -943,6 +946,66 @@ Item {
                                 }
                             }
                         }
+
+                        // 已清洗缓存增量更新（独立选择器：清洗集不在上方原始集下拉里）
+                        Column {
+                            width: parent.width
+                            spacing: 6
+
+                            Text {
+                                text: "已清洗缓存 (增量更新):"
+                                font.pixelSize: 12
+                                color: "#a0aec0"
+                            }
+
+                            ComboBox {
+                                id: cleanedCacheCombo
+                                width: parent.width
+                                height: 34
+                                model: cleanedCacheModel
+                                textRole: "displayName"
+                                enabled: cleanedCacheModel.count > 0 && !root.cacheUpdating
+                                contentItem: Text {
+                                    text: cleanedCacheModel.count > 0
+                                        ? (cleanedCacheCombo.currentText || "请选择已清洗缓存...")
+                                        : "暂无已清洗缓存"
+                                    color: "white"; font.pixelSize: 12; leftPadding: 8
+                                    verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight
+                                }
+                                background: Rectangle { radius: 4; color: "#374151"; border.width: 1; border.color: "#4b5563" }
+                            }
+
+                            Button {
+                                id: cacheIncrementalUpdateButton
+                                width: parent.width
+                                height: 32
+                                property int selIdx: cleanedCacheCombo.currentIndex
+                                property var selEntry: (selIdx >= 0 && selIdx < cleanedCacheModel.count)
+                                    ? cleanedCacheModel.get(selIdx) : null
+                                enabled: (selEntry ? (selEntry.id > 0) : false) && !root.cacheUpdating
+                                opacity: enabled ? 1.0 : 0.5
+                                text: root.cacheUpdating ? "增量更新中..." : "🔄 更新缓存(增量)"
+                                background: Rectangle { color: parent.enabled ? "#7c3aed" : "#374151"; radius: 4 }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: parent.enabled ? "white" : "#666"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    var i = cleanedCacheCombo.currentIndex
+                                    var e = (i >= 0 && i < cleanedCacheModel.count) ? cleanedCacheModel.get(i) : null
+                                    if (e && e.id > 0) {
+                                        root.handlePanelStatusRequested("⏳ 提交增量更新 #" + e.id + "...", "warning")
+                                        dataFetchController.incrementalUpdateDataSet(e.id)
+                                    } else {
+                                        root.handlePanelStatusRequested("❌ 没有可更新的已清洗缓存", "error")
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 
@@ -1023,7 +1086,12 @@ Item {
     ListModel {
         id: cacheDisplayModel
     }
-    
+
+    // 已清洗缓存模型（增量更新选择器用）
+    ListModel {
+        id: cleanedCacheModel
+    }
+
     // DataFetchController实例 - 用于数据获取和清洗（遵循不在QML中操作数据的原则）
     DataFetchController {
         id: dataFetchController
@@ -1059,6 +1127,21 @@ Item {
         onDataSetCleaned: function(inputId, resultId, message, inputRows, outputRows) {
             handlePanelStatusRequested("清洗完成: " + inputRows + " -> " + outputRows + " 行, 新数据集 ID=" + resultId, "success")
             dataFetchController.refreshDataSetInfos()
+            dataFetchController.refreshCleanedDataSetInfos()  // 新清洗集加入增量更新下拉
+        }
+
+        onDatasetUpdateStarted: function(datasetId) {
+            root.cacheUpdating = true
+            root.handlePanelStatusRequested("⏳ 开始增量更新缓存 #" + datasetId + "...", "warning")
+        }
+
+        onDatasetUpdateProgress: function(datasetId, pct, stage) {
+            root.handlePanelStatusRequested("⏳ " + stage + " (" + pct + "%)", "warning")
+        }
+
+        onDatasetUpdateFinished: function(datasetId, success, newRows, message) {
+            root.cacheUpdating = false
+            root.handlePanelStatusRequested((success ? "✓ " : "❌ ") + message, success ? "success" : "error")
         }
 
         onDataSetInfosRefreshed: function(infos) {
@@ -1075,6 +1158,20 @@ Item {
                     sourceType: info.sourceType || "",
                     rowCount: info.rowCount || 0,
                     stockCodes: info.stockCodes || [],
+                    startDate: info.startDate || "",
+                    endDate: info.endDate || ""
+                })
+            }
+        }
+
+        onCleanedDataSetInfosRefreshed: function(infos) {
+            cleanedCacheModel.clear()
+            for (var i = 0; i < infos.length; i++) {
+                var info = infos[i]
+                cleanedCacheModel.append({
+                    id: info.id,
+                    displayName: (info.displayName || ("清洗集 #" + info.id)),
+                    rowCount: info.rowCount || 0,
                     startDate: info.startDate || "",
                     endDate: info.endDate || ""
                 })

@@ -25,6 +25,7 @@ public:
     std::vector<CalculationResult> calculateBatch(const std::vector<CalculationContext>& contexts) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
+    int getLookbackDays() const override;
 
 private:
     struct ChildRuntime {

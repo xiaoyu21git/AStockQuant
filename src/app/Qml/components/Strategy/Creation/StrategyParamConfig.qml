@@ -5,8 +5,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
-import "../../../utils/StrategyCreationUtils.js" as Utils
-import "../../../utils/RuleTemplatePreviewUtils.js" as PreviewUtils
+// RuleTemplatePreviewUtils.js migrated to C++ StrategyBridge
 import "../../FactorWorkbench/Creation/components" as PluginComponents
 
 Rectangle {
@@ -17,9 +16,10 @@ Rectangle {
     }
     
     // ============ 属性 ============
-    
+
     property int selectedStrategyTypeIndex: 0
     property var factorService: null
+    property string strategyId: ""
     property var strategyParameters: ({})
     property var commonStrategyParameters: ({})
     property var personalizedStrategyParameters: ({})
@@ -43,7 +43,7 @@ Rectangle {
         typeof root.computeCurrentRuleComposerGroupQuickImportEntries === "function"
             ? (root.computeCurrentRuleComposerGroupQuickImportEntries() || [])
             : [])
-    readonly property int selectedStrategyBehaviorKind: Utils.StrategyCreationUtils.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
     readonly property bool ruleComposerConfigValid: (root.ruleComposerValidation.errorCount || 0) === 0
     readonly property bool useNarrowRulePanels: width >= 1180
     readonly property bool useWideParamGrid: width >= 1200
@@ -75,9 +75,19 @@ Rectangle {
         ruleComposerWidthBudget * (useRuleComposerColumns ? 0.26 : 0.27),
         ruleComposerSuggestionMaxWidth)
     readonly property bool hasPersonalizedParameterConfigs: (root.personalizedParameterConfigs || []).length > 0
-    property var factorOverlay: ({ enabled: false, targetPositionCount: 10, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
+    property var factorOverlay: ({ enabled: false, targetPositionCount: 50, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
     property var factorSelectorDialog: null
-    
+
+    // ── 标的黑名单 ──
+    property var blacklistSymbols: []
+    property string blacklistInput: ""
+
+    function reloadBlacklist() {
+        var sid = String(root.strategyId || "")
+        if (!sid) { blacklistSymbols = []; return }
+        var raw = Bridge.StrategyBridge.getSymbolBlacklist(sid)
+        blacklistSymbols = Array.isArray(raw) ? raw : []
+    }
     function factorOverlayCardWidth(containerWidth) {
         var widthBudget = Math.max(0, Number(containerWidth) || 0)
         if (widthBudget <= 0) {
@@ -135,14 +145,14 @@ Rectangle {
                 spacing: 4
                 
                 Text {
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Title')
+                    text: strategyService.tr('strategyCreation.step2Title')
                     font.pixelSize: 16
                     font.weight: Font.DemiBold
                     color: "#f1f5f9"
                 }
                 
                 Text {
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Description')
+                    text: strategyService.tr('strategyCreation.step2Description')
                     font.pixelSize: 12
                     color: "#94a3b8"
                     wrapMode: Text.WordWrap
@@ -154,8 +164,8 @@ Rectangle {
 
                     Repeater {
                         model: [
-                            Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters'),
-                            Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                            strategyService.tr('strategyCreation.commonParameters'),
+                            strategyService.tr('strategyCreation.personalizedParameters')
                         ]
 
                         delegate: Rectangle {
@@ -189,7 +199,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     radius: 8
-                    color: "#0f172a"
+                    color: "#1e293b"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: parameterPanelLayout.implicitHeight + 18
@@ -201,7 +211,7 @@ Rectangle {
                         spacing: 8
 
                         Text {
-                            text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConfigPanel')
+                            text: strategyService.tr('strategyCreation.parameterConfigPanel')
                             font.pixelSize: 14
                             font.weight: Font.Medium
                             color: "#f1f5f9"
@@ -212,7 +222,7 @@ Rectangle {
                             spacing: 8
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: strategyService.tr('strategyCreation.configuredParameters') + ": " +
                                       root.totalConfiguredParameterCount()
                                 font.pixelSize: 11
                                 color: "#94a3b8"
@@ -222,8 +232,8 @@ Rectangle {
 
                             Text {
                                 text: root.parametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      strategyService.tr('strategyCreation.parameterValidationPassed') :
+                                      strategyService.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 11
                                 font.weight: Font.Medium
                                 color: root.parametersValid ? "#10b981" : "#ef4444"
@@ -248,7 +258,7 @@ Rectangle {
                         spacing: 6
 
                         Text {
-                            text: Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
+                            text: strategyService.tr('strategyCreation.commonParameters')
                             font.pixelSize: 12
                             font.weight: Font.Medium
                             color: "#dbeafe"
@@ -259,7 +269,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: strategyService.tr('strategyCreation.configuredParameters') + ": " +
                                       (commonDynamicGenerator && commonDynamicGenerator.configsList ? commonDynamicGenerator.configsList.length : 0)
                                 font.pixelSize: 10
                                 color: "#93c5fd"
@@ -269,8 +279,8 @@ Rectangle {
 
                             Text {
                                 text: root.commonParametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      strategyService.tr('strategyCreation.parameterValidationPassed') :
+                                      strategyService.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                                 color: root.commonParametersValid ? "#10b981" : "#ef4444"
@@ -303,7 +313,7 @@ Rectangle {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     radius: 8
-                    color: "#111827"
+                    color: "#1a2332"
                     border.width: 1
                     border.color: "#334155"
                     implicitHeight: personalizedParameterCardLayout.implicitHeight + 14
@@ -319,7 +329,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+                                text: strategyService.tr('strategyCreation.personalizedParameters')
                                 font.pixelSize: 12
                                 font.weight: Font.Medium
                                 color: "#e2e8f0"
@@ -350,7 +360,7 @@ Rectangle {
                             spacing: 4
 
                             Text {
-                                text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " +
+                                text: strategyService.tr('strategyCreation.configuredParameters') + ": " +
                                       (personalizedDynamicGenerator && personalizedDynamicGenerator.configsList ? personalizedDynamicGenerator.configsList.length : 0)
                                 font.pixelSize: 10
                                 color: "#94a3b8"
@@ -360,8 +370,8 @@ Rectangle {
 
                             Text {
                                 text: root.personalizedParametersValid ?
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationPassed') :
-                                      Utils.StrategyCreationUtils.tr('strategyCreation.parameterValidationRequired')
+                                      strategyService.tr('strategyCreation.parameterValidationPassed') :
+                                      strategyService.tr('strategyCreation.parameterValidationRequired')
                                 font.pixelSize: 10
                                 font.weight: Font.Medium
                                 color: root.personalizedParametersValid ? "#10b981" : "#ef4444"
@@ -471,7 +481,7 @@ Rectangle {
 
                             Rectangle {
                                 radius: 9
-                                color: "#0f172a"
+                                color: "#1e293b"
                                 border.width: 1
                                 border.color: "#334155"
                                 implicitWidth: modeChipText.implicitWidth + 14
@@ -546,12 +556,63 @@ Rectangle {
 
                             GridLayout {
                                 Layout.fillWidth: true
-                                columns: 1
+                                columns: 3
                                 columnSpacing: 12
                                 rowSpacing: 10
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
+                                    spacing: 4
+
+                                    Text {
+                                        text: "因子组合模式"
+                                        font.pixelSize: 11
+                                        color: "#cbd5e1"
+                                    }
+
+                                    ComboBox {
+                                        id: combineModeCombo
+                                        Layout.fillWidth: true
+                                        textRole: "label"
+                                        valueRole: "value"
+                                        model: [
+                                            { label: "纯排名 (RankOnly)", value: "rank_only" },
+                                            { label: "交集 (Intersection)", value: "intersection" },
+                                            { label: "并集 (Union)", value: "union" },
+                                            { label: "配额 (Quota)", value: "quota" }
+                                        ]
+                                        currentIndex: {
+                                            var mode = String(root.factorOverlay.combineMode || "rank_only")
+                                            if (mode === "intersection") return 1
+                                            if (mode === "union") return 2
+                                            if (mode === "quota") return 3
+                                            return 0
+                                        }
+                                        onCurrentIndexChanged: {
+                                            var item = model[currentIndex]
+                                            if (item) {
+                                                root.factorOverlay.combineMode = item.value
+                                                root.syncDecoratedParameters()
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: currentIndex === 0
+                                              ? "所有标的按因子分排名"
+                                              : currentIndex === 1
+                                                ? "所有因子条件都满足才进池"
+                                                : currentIndex === 2
+                                                  ? "任一因子条件满足即可进池"
+                                                  : "各因子独立排名, 按权重比例分池"
+                                        font.pixelSize: 10
+                                        color: "#64748b"
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.preferredWidth: 100
                                     spacing: 4
 
                                     Text {
@@ -564,13 +625,43 @@ Rectangle {
                                         id: factorMinimumScoreField
                                         Layout.fillWidth: true
                                         text: String(root.factorOverlay.minimumCompositeScore || 0)
-                                        placeholderText: "默认 0"
+                                        placeholderText: "0"
                                         onEditingFinished: {
                                             var parsed = Number(text)
                                             root.factorOverlay.minimumCompositeScore = isNaN(parsed) ? 0 : parsed
                                             text = String(root.factorOverlay.minimumCompositeScore)
                                             root.syncDecoratedParameters()
                                         }
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.preferredWidth: 110
+                                    spacing: 4
+
+                                    Text {
+                                        text: "目标持仓数"
+                                        font.pixelSize: 11
+                                        color: "#cbd5e1"
+                                    }
+
+                                    TextField {
+                                        id: targetPositionField
+                                        Layout.fillWidth: true
+                                        text: String(root.factorOverlay.targetPositionCount || 50)
+                                        placeholderText: "50"
+                                        onEditingFinished: {
+                                            var parsed = parseInt(text, 10)
+                                            root.factorOverlay.targetPositionCount = (isNaN(parsed) || parsed < 1) ? 50 : parsed
+                                            text = String(root.factorOverlay.targetPositionCount)
+                                            root.syncDecoratedParameters()
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "候选池大小"
+                                        font.pixelSize: 10
+                                        color: "#64748b"
                                     }
                                 }
                             }
@@ -670,7 +761,7 @@ Rectangle {
                                                             Layout.preferredWidth: 96
                                                             implicitHeight: 28
                                                             radius: 8
-                                                            color: "#111827"
+                                                            color: "#1a2332"
                                                             border.width: 1
                                                             border.color: "#334155"
 
@@ -738,201 +829,234 @@ Rectangle {
                     }
                 }
 
+                // ── 标的黑名单 ──
+
+                function addToBlacklist() {
+                    var sid = String(root.strategyId || "")
+                    if (!sid) return
+                    var raw = blacklistInput.trim().toUpperCase()
+                    if (!raw) return
+                    var ids = raw.split(/[\s,;，；]+/)
+                    var current = blacklistSymbols.slice()
+                    var changed = false
+                    for (var i = 0; i < ids.length; i++) {
+                        var id = ids[i].trim()
+                        if (!id || current.indexOf(id) >= 0) continue
+                        if (id.length === 6) id = id + ".SZ"
+                        if (id.indexOf(".") < 0) continue
+                        current.push(id)
+                        changed = true
+                    }
+                    if (changed) {
+                        Bridge.StrategyBridge.updateSymbolBlacklist(sid, current)
+                        blacklistSymbols = current
+                    }
+                    blacklistInput = ""
+                }
+
+                function removeFromBlacklist(index) {
+                    var sid = String(root.strategyId || "")
+                    if (!sid) return
+                    var current = blacklistSymbols.slice()
+                    current.splice(index, 1)
+                    Bridge.StrategyBridge.updateSymbolBlacklist(sid, current)
+                    blacklistSymbols = current
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    radius: 8
+                    color: "#1a2332"
+                    border.width: 1
+                    border.color: "#334155"
+                    implicitHeight: blacklistCardLayout.implicitHeight + 14
+
+                    ColumnLayout {
+                        id: blacklistCardLayout
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text {
+                                text: "标的黑名单"
+                                font.pixelSize: 14
+                                font.weight: Font.Medium
+                                color: "#f1f5f9"
+                            }
+                            Item { Layout.fillWidth: true }
+                            Text {
+                                text: blacklistSymbols.length + " 只"
+                                font.pixelSize: 11
+                                color: blacklistSymbols.length > 0 ? "#f59e0b" : "#64748b"
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 32
+                                radius: 6
+                                color: "#1e293b"
+                                border.width: 1
+                                border.color: "#334155"
+                                TextInput {
+                                    id: blacklistInputField
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    text: root.blacklistInput
+                                    font.pixelSize: 12
+                                    color: "#e2e8f0"
+                                    onTextChanged: root.blacklistInput = text
+                                    Text {
+                                        anchors.fill: parent
+                                        verticalAlignment: Text.AlignVCenter
+                                        text: "输入股票代码，如 600001 或 600001.SH"
+                                        font: parent.font
+                                        color: "#64748b"
+                                        visible: !parent.text && !parent.activeFocus
+                                    }
+                                }
+                            }
+                            Button {
+                                text: "添加"
+                                onClicked: root.addToBlacklist()
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            visible: blacklistSymbols.length > 0
+                            spacing: 4
+
+                            Repeater {
+                                model: blacklistSymbols
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    height: 28
+                                    radius: 4
+                                    color: index % 2 ? "#0b1220" : "#111827"
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 6
+                                        spacing: 8
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: Bridge.StrategyBridge.stockDisplayName(modelData)
+                                            font.pixelSize: 11
+                                            color: "#e2e8f0"
+                                            elide: Text.ElideRight
+                                        }
+                                        Text {
+                                            text: modelData
+                                            font.pixelSize: 9
+                                            color: "#64748b"
+                                        }
+                                        Button {
+                                            text: "移除"
+                                            onClicked: root.removeFromBlacklist(index)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 ColumnLayout {
                     id: ruleComposerRow
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignTop
                     spacing: root.ruleComposerSpacing
-
-                    Rectangle {
-                        Layout.fillWidth: true
-                        radius: 10
-                        color: "#0b1220"
-                        border.width: 1
-                        border.color: "#1d4ed8"
-                        implicitHeight: defaultRulePackColumn.implicitHeight + 20
-
-                        ColumnLayout {
-                            id: defaultRulePackColumn
-                            anchors.fill: parent
-                            anchors.margins: 10
-                            spacing: 8
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 10
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-
-                                    Text {
-                                        text: "默认规则包入口"
-                                        font.pixelSize: 14
-                                        font.weight: Font.DemiBold
-                                        color: "#dbeafe"
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "先加载当前策略的默认规则包，再按当前阶段和规则组做局部增删改。右侧建议栏现在只作为补充入口。"
-                                        font.pixelSize: 11
-                                        color: "#bfdbfe"
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-
-                                Button {
-                                    text: "恢复整包默认项"
-                                    onClicked: root.restoreDefaultRuleComposerPack()
-                                }
-
-                                Button {
-                                    text: "恢复当前阶段"
-                                    enabled: !!root.currentSelectedRuleComposerStage()
-                                    onClicked: root.restoreSelectedRuleComposerStageDefaults()
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Rectangle {
-                                    radius: 8
-                                    color: "#111827"
-                                    border.width: 1
-                                    border.color: "#334155"
-                                    implicitWidth: currentStageChipText.implicitWidth + 16
-                                    implicitHeight: currentStageChipText.implicitHeight + 10
-
-                                    Text {
-                                        id: currentStageChipText
-                                        anchors.centerIn: parent
-                                        text: ((root.currentSelectedRuleComposerStage() && root.currentSelectedRuleComposerStage().title) || "未选择阶段")
-                                        font.pixelSize: 11
-                                        color: "#e2e8f0"
-                                    }
-                                }
-
-                                Rectangle {
-                                    radius: 8
-                                    color: "#111827"
-                                    border.width: 1
-                                    border.color: "#334155"
-                                    implicitWidth: currentGroupChipText.implicitWidth + 16
-                                    implicitHeight: currentGroupChipText.implicitHeight + 10
-
-                                    Text {
-                                        id: currentGroupChipText
-                                        anchors.centerIn: parent
-                                        text: ((root.currentSelectedRuleComposerGroup() && root.currentSelectedRuleComposerGroup().title) || "未选择规则组")
-                                        font.pixelSize: 11
-                                        color: "#e2e8f0"
-                                    }
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: "当前阶段已放入 " + root.selectedRuleComposerStageRuleCount()
-                                        + " 条规则，可快捷引入 " + root.currentRuleComposerGroupQuickImportList.length + " 个默认项。"
-                                    font.pixelSize: 11
-                                    color: "#93c5fd"
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 6
-
-                                Text {
-                                    text: "当前组快捷引入"
-                                    font.pixelSize: 12
-                                    font.weight: Font.Medium
-                                    color: "#f8fafc"
-                                }
-
-                                Flow {
-                                    width: parent.width
-                                    spacing: 8
-                                    visible: root.currentRuleComposerGroupQuickImportList.length > 0
-
-                                    Repeater {
-                                        model: root.currentRuleComposerGroupQuickImportList
-
-                                        delegate: Button {
-                                            required property var modelData
-                                            text: modelData.termDisplayName || modelData.templateDisplayName || modelData.templateId || "未命名默认项"
-                                            onClicked: root.applyDefaultRulePackEntryToCurrentGroup(modelData)
-                                        }
-                                    }
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    visible: root.currentRuleComposerGroupQuickImportList.length === 0
-                                    text: "当前组没有剩余的默认快捷项。可以先恢复当前阶段默认规则，或者再用右侧建议栏补充非默认模板。"
-                                    font.pixelSize: 11
-                                    color: "#94a3b8"
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-                        }
-                    }
-
                     RowLayout {
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
                         Layout.minimumHeight: root.ruleComposerMinHeight
-                        Layout.preferredHeight: root.ruleComposerMinHeight
                         spacing: root.ruleComposerSpacing
 
-                        StrategyProfilePanel {
-                            Layout.preferredWidth: root.ruleComposerProfileWidth
-                            Layout.minimumWidth: root.ruleComposerProfileMinWidth
-                            Layout.maximumWidth: root.ruleComposerProfileMaxWidth
-                            Layout.fillHeight: true
-                            selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
-                            strategyProfile: root.strategyProfile
-                            onProfileEdited: function(profile) {
-                                root.strategyProfile = profile
-                                root.rebuildRuleComposerState(false)
-                                root.syncDecoratedParameters()
-                            }
-                        }
+                        // StrategyProfilePanel removed — 策略画像已删除
 
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             spacing: 12
 
-                            RuleComposerSummaryBar {
+                            ColumnLayout {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: implicitHeight
-                                stages: root.ruleComposerStages
-                                strategyProfile: root.strategyProfile
-                                validationSummary: root.ruleComposerValidation
-                            }
+                                Layout.fillHeight: true
+                                spacing: 4
 
-                            RowLayout {
-                                Layout.fillWidth: true
-                                Layout.minimumHeight: root.ruleComposerMinHeight - 108
-                                Layout.preferredHeight: root.ruleComposerMinHeight - 108
-                                spacing: root.ruleComposerSpacing
-
-                                RuleStageNavigator {
-                                    Layout.preferredWidth: root.ruleComposerNavigatorWidth
-                                    Layout.minimumWidth: root.ruleComposerNavigatorMinWidth
-                                    Layout.maximumWidth: root.ruleComposerNavigatorMaxWidth
-                                    Layout.fillHeight: true
-                                    stages: root.ruleComposerStages
-                                    selectedStageId: root.selectedRuleComposerStageId
-                                    onStageSelected: function(stageId) {
-                                        root.selectedRuleComposerStageId = stageId
-                                        root.ensureSelectedRuleComposerGroup()
+                                // ── 标签切换栏 ──
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 4
+                                    Repeater {
+                                        model: Array.isArray(root.ruleComposerStages) ? root.ruleComposerStages : []
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            readonly property bool isActive: root.selectedRuleComposerStageId === modelData.stageId
+                                            implicitWidth: tabRow.implicitWidth + 28; implicitHeight: 38; radius: 8
+                                            color: isActive ? "#1e3a5f" : "#111827"
+                                            border.width: 1; border.color: isActive ? (modelData.accentColor || "#2563eb") : "#1f2937"
+                                            RowLayout {
+                                                id: tabRow; anchors.centerIn: parent; spacing: 6
+                                                Rectangle { width: 8; height: 8; radius: 4; color: modelData.accentColor || "#475569" }
+                                                Text { text: modelData.title || modelData.stageId; font.pixelSize: 14; font.weight: isActive ? Font.DemiBold : Font.Normal; color: isActive ? "#dbeafe" : "#94a3b8" }
+                                                Text {
+                                                    visible: root.countStageRules(modelData) > 0
+                                                    text: root.countStageRules(modelData); font.pixelSize: 11; color: "#64748b"
+                                                }
+                                            }
+                                            MouseArea {
+                                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.selectRuleComposerStage(modelData.stageId)
+                                            }
+                                            // 删除按钮
+                                            Rectangle {
+                                                anchors.right: parent.right; anchors.top: parent.top
+                                                anchors.margins: 2
+                                                width: 16; height: 16; radius: 8
+                                                color: "#1f2937"
+                                                visible: isActive
+                                                Text { anchors.centerIn: parent; text: "×"; font.pixelSize: 11; color: "#f87171" }
+                                                MouseArea {
+                                                    anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.removeRuleComposerStage(modelData.stageId)
+                                                }
+                                            }
+                                        }
                                     }
+
+                                    // 添加阶段
+                                    Rectangle {
+                                        implicitWidth: 38; implicitHeight: 38; radius: 8
+                                        color: "#1a2332"; border.width: 1; border.color: "#1f2937"
+                                        Text { anchors.centerIn: parent; text: "+"; font.pixelSize: 18; color: "#60a5fa" }
+                                        MouseArea {
+                                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                            onClicked: addStageMenu.open()
+                                        }
+                                        Menu {
+                                            id: addStageMenu; y: parent.height + 2
+                                            Instantiator {
+                                                model: root.availableRuleStages
+                                                MenuItem {
+                                                    text: modelData.title; height: 28
+                                                    onTriggered: root.addRuleComposerStage(modelData.stageId)
+                                                }
+                                                onObjectAdded: (idx, obj) => addStageMenu.insertItem(idx, obj)
+                                                onObjectRemoved: (idx, obj) => addStageMenu.removeItem(obj)
+                                            }
+                                        }
+                                    }
+                                    Item { Layout.fillWidth: true }
                                 }
 
+                                // ── 规则看板 ──
                                 RuleStageBoard {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
@@ -947,6 +1071,9 @@ Rectangle {
                                     onAddRuleRequested: function(stageId, groupId) {
                                         root.selectedRuleComposerStageId = stageId
                                         root.selectedRuleComposerGroupId = groupId
+                                        ruleTemplatePicker.stageId = stageId
+                                        ruleTemplatePicker.groupId = groupId
+                                        ruleTemplatePicker.open()
                                     }
                                     onGroupSelected: function(stageId, groupId) {
                                         root.selectedRuleComposerStageId = stageId
@@ -1022,7 +1149,7 @@ Rectangle {
                     Layout.alignment: Qt.AlignTop
                     Layout.minimumHeight: root.enableAdvancedOptions ? 184 : 56
                     radius: 10
-                    color: "#0f172a"
+                    color: "#1e293b"
                     border.width: 1
                     border.color: "#334155"
                     
@@ -1094,7 +1221,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRange')
+                                        text: strategyService.tr('strategyCreation.parameterOptimizationRange')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1102,13 +1229,13 @@ Rectangle {
                                     ComboBox {
                                         id: parameterOptimizationRangeCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRangeOptions')
+                                        model: strategyService.tr('strategyCreation.parameterOptimizationRangeOptions')
                                         currentIndex: 1
                                         
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1129,7 +1256,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysis')
+                                        text: strategyService.tr('strategyCreation.sensitivityAnalysis')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1137,13 +1264,13 @@ Rectangle {
                                     ComboBox {
                                         id: sensitivityAnalysisCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysisOptions')
+                                        model: strategyService.tr('strategyCreation.sensitivityAnalysisOptions')
                                         currentIndex: 1
                                         
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1164,7 +1291,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraints')
+                                        text: strategyService.tr('strategyCreation.parameterConstraints')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1172,13 +1299,13 @@ Rectangle {
                                     ComboBox {
                                         id: parameterConstraintsCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraintOptions')
+                                        model: strategyService.tr('strategyCreation.parameterConstraintOptions')
                                         currentIndex: 0
                                         
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1199,7 +1326,7 @@ Rectangle {
                                     spacing: 5
                                     
                                     Text {
-                                        text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethod')
+                                        text: strategyService.tr('strategyCreation.parameterInitializationMethod')
                                         font.pixelSize: 12
                                         color: "#cbd5e1"
                                     }
@@ -1207,13 +1334,13 @@ Rectangle {
                                     ComboBox {
                                         id: parameterInitializationMethodCombo
                                         Layout.fillWidth: true
-                                        model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethods')
+                                        model: strategyService.tr('strategyCreation.parameterInitializationMethods')
                                         currentIndex: 0
                                         
                                         background: Rectangle {
                                             implicitHeight: 36
                                             radius: 6
-                                            color: "#0f172a"
+                                            color: "#1e293b"
                                             border.width: 1
                                             border.color: "#334155"
                                         }
@@ -1235,7 +1362,7 @@ Rectangle {
                                 spacing: 6
                                 
                                 Text {
-                                    text: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScript')
+                                    text: strategyService.tr('strategyCreation.customParameterScript')
                                     font.pixelSize: 12
                                     color: "#cbd5e1"
                                 }
@@ -1244,12 +1371,12 @@ Rectangle {
                                     id: customParameterScriptTextArea
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 70
-                                    placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScriptPlaceholder')
+                                    placeholderText: strategyService.tr('strategyCreation.customParameterScriptPlaceholder')
                                     wrapMode: Text.WordWrap
                                     
                                     background: Rectangle {
                                         radius: 6
-                                        color: "#0f172a"
+                                        color: "#1e293b"
                                         border.width: 1
                                         border.color: "#334155"
                                     }
@@ -1262,446 +1389,23 @@ Rectangle {
                         }
                     }
                 }
-
-                Rectangle {
-                    Layout.fillWidth: !root.useNarrowRulePanels
-                    Layout.alignment: Qt.AlignTop | Qt.AlignHCenter
-                    Layout.preferredWidth: root.rulePanelWidth
-                    Layout.maximumWidth: root.rulePanelWidth
-                    visible: root.previewRuleComposerStages().length > 0
-                    radius: 10
-                    color: "#0f172a"
-                    border.width: 1
-                    border.color: "#334155"
-                    implicitHeight: selectedTemplateLayout.implicitHeight + 24
-
-                    ColumnLayout {
-                        id: selectedTemplateLayout
-                        anchors.fill: parent
-                        anchors.margins: 12
-                        spacing: 8
-
-                        Text {
-                            text: "已绑定规则模板"
-                            font.pixelSize: 14
-                            font.weight: Font.Medium
-                            color: "#f1f5f9"
-                        }
-
-                        Text {
-                            text: "这里直接按阶段、规则组、规则实例展示当前真实编排结果，和最终保存到策略里的结构保持一致。"
-                            font.pixelSize: 11
-                            color: "#93c5fd"
-                            wrapMode: Text.WordWrap
-                            Layout.fillWidth: true
-                        }
-
-                        Text {
-                            text: "共 " + root.previewRuleComposerStages().length + " 个阶段 / "
-                                  + root.previewRuleComposerGroupCount() + " 个规则组 / "
-                                  + root.previewRuleComposerRuleCount() + " 条规则"
-                            font.pixelSize: 11
-                            color: "#cbd5e1"
-                        }
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: !root.hasAnyMarketRuleComposerRules()
-                                      ? "当前市场环境阶段已清空，可手动添加规则或恢复系统默认组合。"
-                                      : (root.hasCustomizedMarketRuleComposerStage()
-                                      ? "恢复后只重置市场环境阶段，不影响标的准入、入场确认和退出规则。"
-                                      : "当前市场环境阶段已经是系统默认组合，可直接继续补充其它阶段规则。")
-                                font.pixelSize: 11
-                                color: "#94a3b8"
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Button {
-                                text: "清空市场规则"
-                                enabled: root.hasAnyMarketRuleComposerRules()
-                                onClicked: root.clearMarketRuleComposerStage()
-                            }
-
-                            Button {
-                                text: "恢复默认市场规则"
-                                enabled: root.hasCustomizedMarketRuleComposerStage()
-                                onClicked: root.restoreDefaultMarketRuleComposerStage()
-                            }
-                        }
-
-                        Repeater {
-                            model: root.previewRuleComposerStages()
-
-                            delegate: Rectangle {
-                                id: stagePreviewCard
-                                required property var modelData
-                                Layout.fillWidth: true
-                                radius: 8
-                                color: "#111827"
-                                border.width: 1
-                                border.color: modelData.accentColor || "#334155"
-                                implicitHeight: stageBindingColumn.implicitHeight + 16
-
-                                ColumnLayout {
-                                    id: stageBindingColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 8
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-
-                                        Rectangle {
-                                            radius: 10
-                                            color: "#1e293b"
-                                            border.width: 1
-                                            border.color: "#475569"
-                                            implicitWidth: phaseText.implicitWidth + 12
-                                            implicitHeight: 22
-
-                                            Text {
-                                                id: phaseText
-                                                anchors.centerIn: parent
-                                                text: PreviewUtils.phaseDisplayName(modelData.stageId, "short")
-                                                font.pixelSize: 11
-                                                color: "#cbd5e1"
-                                            }
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: (modelData.title || modelData.stageId || "阶段")
-                                                   + " · "
-                                                   + root.populatedRuleComposerGroups(modelData).length + " 个规则组 / "
-                                                   + root.previewRuleComposerRuleCountForStage(modelData) + " 条规则"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Medium
-                                            color: "#e2e8f0"
-                                            wrapMode: Text.WordWrap
-                                        }
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        visible: !!modelData.description
-                                        text: modelData.description || ""
-                                        font.pixelSize: 11
-                                        color: "#cbd5e1"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Repeater {
-                                        model: root.populatedRuleComposerGroups(modelData)
-
-                                        delegate: Rectangle {
-                                            id: groupPreviewCard
-                                            required property var modelData
-                                            property var stageData: stagePreviewCard.modelData
-                                            Layout.fillWidth: true
-                                            radius: 8
-                                            color: "#0b1220"
-                                            border.width: 1
-                                            border.color: "#1f2937"
-                                            implicitHeight: groupBindingColumn.implicitHeight + 14
-
-                                            ColumnLayout {
-                                                id: groupBindingColumn
-                                                anchors.fill: parent
-                                                anchors.margins: 8
-                                                spacing: 8
-
-                                                RowLayout {
-                                                    Layout.fillWidth: true
-                                                    spacing: 8
-
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        text: (modelData.title || modelData.groupId || "规则组")
-                                                              + " · " + root.roleDisplayName(modelData.role)
-                                                              + " / " + root.operatorDisplayName(modelData.operator)
-                                                              + " / " + ((Array.isArray(modelData.rules) ? modelData.rules.length : 0) + " 条规则")
-                                                        font.pixelSize: 11
-                                                        font.weight: Font.DemiBold
-                                                        color: "#f8fafc"
-                                                        wrapMode: Text.WordWrap
-                                                    }
-                                                }
-
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    visible: !!modelData.description
-                                                    text: modelData.description || ""
-                                                    font.pixelSize: 11
-                                                    color: "#94a3b8"
-                                                    wrapMode: Text.WordWrap
-                                                }
-
-                                                Repeater {
-                                                    model: Array.isArray(modelData.rules) ? modelData.rules : []
-
-                                                    delegate: Rectangle {
-                                                        id: rulePreviewCard
-                                                        required property var modelData
-                                                        property var stageData: groupPreviewCard.stageData
-                                                        property var groupData: groupPreviewCard.modelData
-                                                        property var bindingData: root.ruleComposerPreviewBinding(stageData, groupData, modelData)
-                                                        property var insight: PreviewUtils.getTemplateInsight(bindingData)
-                                                        property bool secondaryCollapsible: PreviewUtils.normalizePhaseKey(bindingData.stageId) === "market"
-                                                        property bool secondaryExpanded: !secondaryCollapsible
-                                                        Layout.fillWidth: true
-                                                        radius: 8
-                                                        color: "#111827"
-                                                        border.width: 1
-                                                        border.color: "#334155"
-                                                        implicitHeight: ruleBindingColumn.implicitHeight + 16
-
-                                                        ColumnLayout {
-                                                            id: ruleBindingColumn
-                                                            anchors.fill: parent
-                                                            anchors.margins: 8
-                                                            spacing: 8
-
-                                                            RowLayout {
-                                                                Layout.fillWidth: true
-                                                                spacing: 8
-
-                                                                Rectangle {
-                                                                    radius: 10
-                                                                    color: "#1e293b"
-                                                                    border.width: 1
-                                                                    border.color: "#475569"
-                                                                    implicitWidth: rulePhaseText.implicitWidth + 12
-                                                                    implicitHeight: 22
-
-                                                                    Text {
-                                                                        id: rulePhaseText
-                                                                        anchors.centerIn: parent
-                                                                        text: PreviewUtils.phaseDisplayName(bindingData.stageId, "short")
-                                                                        font.pixelSize: 11
-                                                                        color: "#cbd5e1"
-                                                                    }
-                                                                }
-
-                                                                Text {
-                                                                    Layout.fillWidth: true
-                                                                    text: bindingData.templateDisplayName || bindingData.templateId || "未命名模板"
-                                                                    font.pixelSize: 12
-                                                                    font.weight: Font.Medium
-                                                                    color: "#e2e8f0"
-                                                                    wrapMode: Text.WordWrap
-                                                                }
-
-                                                                Rectangle {
-                                                                    visible: !!bindingData.defaultInjected
-                                                                    radius: 9
-                                                                    color: "#3f2d16"
-                                                                    border.width: 1
-                                                                    border.color: "#f59e0b"
-                                                                    implicitWidth: presetBindingChipText.implicitWidth + 14
-                                                                    implicitHeight: 22
-
-                                                                    Text {
-                                                                        id: presetBindingChipText
-                                                                        anchors.centerIn: parent
-                                                                        text: "系统预置"
-                                                                        font.pixelSize: 10
-                                                                        font.weight: Font.Medium
-                                                                        color: "#fde68a"
-                                                                    }
-                                                                }
-
-                                                                Button {
-                                                                    text: "移除"
-                                                                    onClicked: root.removeRuleComposerInstance(stageData.stageId, groupData.groupId, modelData.instanceId)
-                                                                }
-                                                            }
-
-                                                            Text {
-                                                                Layout.fillWidth: true
-                                                                visible: !!(bindingData.summary || (insight && insight.summary))
-                                                                text: bindingData.summary || (insight && insight.summary) || ""
-                                                                font.pixelSize: 11
-                                                                color: "#cbd5e1"
-                                                                wrapMode: Text.WordWrap
-                                                            }
-
-                                                            Text {
-                                                                Layout.fillWidth: true
-                                                                visible: !!(bindingData.termDisplayName || bindingData.termId)
-                                                                text: "绑定术语: " + (bindingData.termDisplayName || bindingData.termId || "")
-                                                                font.pixelSize: 11
-                                                                color: "#7dd3fc"
-                                                                wrapMode: Text.WordWrap
-                                                            }
-
-                                                            RuleTemplateStructureView {
-                                                                Layout.fillWidth: true
-                                                                bindingData: rulePreviewCard.bindingData
-                                                                compact: false
-                                                                showTemplateHeader: false
-                                                            }
-
-                                                            Rectangle {
-                                                                Layout.fillWidth: true
-                                                                visible: insight !== null
-                                                                radius: 8
-                                                                color: "#0b1220"
-                                                                border.width: 1
-                                                                border.color: "#334155"
-                                                                implicitHeight: boundMarketInsightColumn.implicitHeight + 18
-
-                                                                ColumnLayout {
-                                                                    id: boundMarketInsightColumn
-                                                                    anchors.fill: parent
-                                                                    anchors.margins: 10
-                                                                    spacing: 8
-
-                                                                    Text {
-                                                                        Layout.fillWidth: true
-                                                                        text: PreviewUtils.insightSectionTitle(bindingData.stageId, true)
-                                                                        font.pixelSize: 12
-                                                                        font.weight: Font.DemiBold
-                                                                        color: "#f8fafc"
-                                                                    }
-
-                                                                    Rectangle {
-                                                                        Layout.fillWidth: true
-                                                                        radius: 6
-                                                                        color: "#1f2937"
-                                                                        border.width: 1
-                                                                        border.color: "#7c2d12"
-                                                                        implicitHeight: boundFreezeColumn.implicitHeight + 16
-
-                                                                        ColumnLayout {
-                                                                            id: boundFreezeColumn
-                                                                            anchors.fill: parent
-                                                                            anchors.margins: 8
-                                                                            spacing: 4
-
-                                                                            Text {
-                                                                                Layout.fillWidth: true
-                                                                                text: PreviewUtils.insightPrimaryTitle(insight)
-                                                                                font.pixelSize: 11
-                                                                                font.weight: Font.Medium
-                                                                                color: "#fdba74"
-                                                                            }
-
-                                                                            Repeater {
-                                                                                model: PreviewUtils.insightPrimaryItems(insight)
-
-                                                                                delegate: Text {
-                                                                                    Layout.fillWidth: true
-                                                                                    text: (index + 1) + ". " + modelData
-                                                                                    font.pixelSize: 11
-                                                                                    color: "#e5e7eb"
-                                                                                    wrapMode: Text.WordWrap
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-
-                                                                    Rectangle {
-                                                                        Layout.fillWidth: true
-                                                                        radius: 6
-                                                                        color: "#102a43"
-                                                                        border.width: 1
-                                                                        border.color: "#0369a1"
-                                                                        implicitHeight: boundRepairColumn.implicitHeight + 16
-
-                                                                        ColumnLayout {
-                                                                            id: boundRepairColumn
-                                                                            anchors.fill: parent
-                                                                            anchors.margins: 8
-                                                                            spacing: 6
-
-                                                                            Item {
-                                                                                Layout.fillWidth: true
-                                                                                implicitHeight: boundRepairHeader.implicitHeight
-
-                                                                                RowLayout {
-                                                                                    id: boundRepairHeader
-                                                                                    anchors.fill: parent
-                                                                                    spacing: 8
-
-                                                                                    Text {
-                                                                                        Layout.fillWidth: true
-                                                                                        text: PreviewUtils.insightSecondaryTitle(insight)
-                                                                                        font.pixelSize: 11
-                                                                                        font.weight: Font.Medium
-                                                                                        color: "#7dd3fc"
-                                                                                    }
-
-                                                                                    Text {
-                                                                                        visible: secondaryCollapsible
-                                                                                        text: secondaryExpanded ? "收起" : "展开"
-                                                                                        font.pixelSize: 10
-                                                                                        font.weight: Font.Medium
-                                                                                        color: "#bae6fd"
-                                                                                    }
-                                                                                }
-
-                                                                                MouseArea {
-                                                                                    anchors.fill: parent
-                                                                                    enabled: secondaryCollapsible
-                                                                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-                                                                                    onClicked: secondaryExpanded = !secondaryExpanded
-                                                                                }
-                                                                            }
-
-                                                                            ColumnLayout {
-                                                                                Layout.fillWidth: true
-                                                                                visible: !secondaryCollapsible || secondaryExpanded
-                                                                                spacing: 4
-
-                                                                                Repeater {
-                                                                                    model: PreviewUtils.insightSecondaryItems(insight)
-
-                                                                                    delegate: Text {
-                                                                                        Layout.fillWidth: true
-                                                                                        text: (index + 1) + ". " + modelData
-                                                                                        font.pixelSize: 11
-                                                                                        color: "#e0f2fe"
-                                                                                        wrapMode: Text.WordWrap
-                                                                                    }
-                                                                                }
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
         }
+    }
     }
     
     // ============ 功能函数 ============
     
     // 加载参数配置
-    function loadParamConfigs() {
-        var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyTypeIndex)
+    function loadParamConfigs(initialValues) {
+        var paramConfigs = strategyService.buildParamConfigs(root.selectedStrategyTypeIndex)
         var separatedConfigs = splitParameterConfigs(paramConfigs)
         root.commonParameterConfigs = separatedConfigs.common
         root.personalizedParameterConfigs = separatedConfigs.personalized
         if (commonDynamicGenerator) {
-            commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [])
+            commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [], initialValues)
         }
         if (personalizedDynamicGenerator) {
-            personalizedDynamicGenerator.reloadConfigs(root.personalizedParameterConfigs, [])
+            personalizedDynamicGenerator.reloadConfigs(root.personalizedParameterConfigs, [], initialValues)
         }
         root.personalizedCardExpanded = root.hasPersonalizedParameterConfigs
         root.commonParametersValid = true
@@ -1713,8 +1417,8 @@ Rectangle {
         var source = Array.isArray(paramConfigs) ? paramConfigs : []
         var common = []
         var personalized = []
-        var commonCategory = Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters')
-        var personalizedCategory = Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters')
+        var commonCategory = strategyService.tr('strategyCreation.commonParameters')
+        var personalizedCategory = strategyService.tr('strategyCreation.personalizedParameters')
 
         for (var index = 0; index < source.length; ++index) {
             var config = source[index]
@@ -1773,7 +1477,7 @@ Rectangle {
     function defaultFactorOverlay() {
         return {
             enabled: false,
-            targetPositionCount: 10,
+            targetPositionCount: 50,
             minimumCompositeScore: 0,
             combineMode: "rank_only",
             selectionScope: "rule_eligible",
@@ -2159,7 +1863,7 @@ Rectangle {
         }
 
         try {
-            var builtProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            var builtProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
             return isPlainObject(builtProfile) ? builtProfile : ({})
         } catch (error) {
             console.warn("buildDefaultStrategyProfile failed:", error)
@@ -2169,7 +1873,7 @@ Rectangle {
 
     function safeBuildDefaultRuleComposerSkeleton(profile, bindings) {
         try {
-            var stages = Utils.StrategyCreationUtils.buildDefaultRuleComposerSkeleton(profile, bindings || [])
+            var stages = strategyService.buildDefaultRuleComposerSkeleton(profile, bindings || [])
             return Array.isArray(stages) ? stages : []
         } catch (error) {
             return []
@@ -2178,7 +1882,7 @@ Rectangle {
 
     function safeBuildDefaultMarketRuleBindings(profile) {
         try {
-            var entries = Utils.StrategyCreationUtils.buildDefaultMarketRuleBindings(profile)
+            var entries = strategyService.buildDefaultMarketRuleBindings(profile)
             return Array.isArray(entries) ? entries : []
         } catch (error) {
             return []
@@ -2187,7 +1891,7 @@ Rectangle {
 
     function safeBuildDefaultBaseRuleBindings(profile) {
         try {
-            var entries = Utils.StrategyCreationUtils.buildDefaultBaseRuleBindings(profile)
+            var entries = strategyService.buildDefaultBaseRuleBindings(profile)
             return Array.isArray(entries) ? entries : []
         } catch (error) {
             return []
@@ -2626,7 +2330,7 @@ Rectangle {
         if (directFileName) {
             return directFileName
         }
-        return Utils.StrategyCreationUtils.resolveRuleTemplateFileName(
+        return strategyService.resolveRuleTemplateFileName(
             ruleLike && (ruleLike.templateId || "")
         )
     }
@@ -2804,7 +2508,7 @@ Rectangle {
     }
 
     function refreshRuleComposerValidation() {
-        root.ruleComposerValidation = Utils.StrategyCreationUtils.validateRuleComposerConfiguration(
+        root.ruleComposerValidation = strategyService.validateRuleComposerConfiguration(
             root.strategyProfile,
             root.ruleComposerStages)
         return root.ruleComposerValidation
@@ -2904,7 +2608,7 @@ Rectangle {
             return "signal"
         }
 
-        var normalized = PreviewUtils.normalizePhaseKey(rawPhase)
+        var normalized = strategyService.normalizePhaseKey(rawPhase)
         var validPhases = {
             market: true,
             eligibility: true,
@@ -3308,6 +3012,52 @@ Rectangle {
         }
     }
 
+    function countStageRules(stageData) {
+        var n = 0
+        var gs = Array.isArray(stageData && stageData.groups) ? stageData.groups : []
+        for (var i = 0; i < gs.length; i++)
+            n += Array.isArray(gs[i].rules) ? gs[i].rules.length : 0
+        return n
+    }
+
+    function selectRuleComposerStage(stageId) {
+        root.selectedRuleComposerStageId = stageId
+        root.ensureSelectedRuleComposerGroup()
+    }
+
+    // ── 阶段增删 ──
+    readonly property var availableRuleStages: [
+        { stageId: "market", title: "市场", accentColor: "#f59e0b" },
+        { stageId: "eligibility", title: "入场过滤", accentColor: "#10b981" },
+        { stageId: "signal", title: "入场信号", accentColor: "#3b82f6" },
+        { stageId: "rebalance", title: "出场", accentColor: "#ef4444" },
+        { stageId: "portfolio", title: "组合", accentColor: "#8b5cf6" }
+    ]
+
+    function addRuleComposerStage(stageId) {
+        var nextStages = cloneRuleComposerStages()
+        var def = root.availableRuleStages.find(function(s) { return s.stageId === stageId })
+        if (!def) return
+        nextStages.push({
+            stageId: def.stageId, title: def.title, accentColor: def.accentColor,
+            groups: [{ groupId: def.stageId + "_core", title: "默认组", role: "must_pass", operator: "any", rules: [] }]
+        })
+        root.ruleComposerStages = nextStages
+        root.selectedRuleComposerStageId = def.stageId
+        root.ensureSelectedRuleComposerGroup()
+        syncDecoratedParameters()
+    }
+
+    function removeRuleComposerStage(stageId) {
+        var nextStages = cloneRuleComposerStages().filter(function(s) { return s.stageId !== stageId })
+        if (nextStages.length === 0) return
+        root.ruleComposerStages = nextStages
+        if (root.selectedRuleComposerStageId === stageId)
+            root.selectedRuleComposerStageId = nextStages[0].stageId
+        root.ensureSelectedRuleComposerGroup()
+        syncDecoratedParameters()
+    }
+
     function removeRuleComposerInstance(stageId, groupId, instanceId) {
         var nextStages = cloneRuleComposerStages()
         for (var stageIndex = 0; stageIndex < nextStages.length; ++stageIndex) {
@@ -3433,7 +3183,12 @@ Rectangle {
             filePath: suggestion.filePath || "",
             stageId: normalizedRuleTemplatePhase(targetLocation.stageId || suggestion.stageId || "signal"),
             category: suggestion.category || "",
-            summary: suggestion.summary || ""
+            summary: suggestion.summary || "",
+            rules: suggestion.rules || [],
+            meta: {
+                name: suggestion.templateDisplayName || suggestion.templateName || "",
+                description: suggestion.summary || ""
+            }
         }
         var nextBindings = normalizeRuleTemplateBindings(boundRuleTemplateBindings)
         var nextEntries = normalizeRuleTemplateBindingEntries(boundRuleTemplateBindingEntries)
@@ -3480,7 +3235,7 @@ Rectangle {
             throw new Error("编辑参数缺少 rule_composer_state，当前仅支持新字段合同")
         }
         var mappedValues = importedFactorContextPayload(sourceParams)
-        var normalizedStrategyTypeIndex = Utils.StrategyCreationUtils.normalizeStrategyTypeIndex(strategyTypeIndex)
+        var normalizedStrategyTypeIndex = strategyService.normalizeStrategyTypeIndex(strategyTypeIndex)
         var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
         var persistedComposerState = normalizeStructuredValue(sourceParams.rule_composer_state) || ({})
         if (!Array.isArray(persistedComposerState.stages) || persistedComposerState.stages.length === 0) {
@@ -3517,63 +3272,68 @@ Rectangle {
         assignIfPresent("weightScheme", ["weightScheme"], Number)
         assignIfPresent("rebalanceFrequency", ["rebalanceFrequency"], Number)
 
-        if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.DoubleMovingAverage) {
+        if (normalizedStrategyTypeIndex === 0) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
             assignIfPresent("slowPeriod", ["slowPeriod"], Number)
             assignIfPresent("priceField", ["priceField"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.TurtleBreakout) {
+        } else if (normalizedStrategyTypeIndex === 1) {
             assignIfPresent("channelPeriod", ["channelPeriod"], Number)
             assignIfPresent("breakoutMultiplier", ["breakoutMultiplier"], Number)
             assignIfPresent("atrPeriod", ["atrPeriod"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.BollingerBandMeanReversion) {
+        } else if (normalizedStrategyTypeIndex === 2) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("standardDeviationMultiplier", ["standardDeviationMultiplier"], Number)
             assignIfPresent("entryThreshold", ["entryThreshold"], Number)
             assignIfPresent("exitThreshold", ["exitThreshold"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RsiMeanReversion) {
+        } else if (normalizedStrategyTypeIndex === 3) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactorSelection || normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MultiFactor) {
+        } else if (normalizedStrategyTypeIndex === 4 || normalizedStrategyTypeIndex === 6) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.EarningsSurprise) {
+        } else if (normalizedStrategyTypeIndex === 5) {
             assignIfPresent("surpriseThreshold", ["surpriseThreshold"], Number)
             assignIfPresent("holdDays", ["holdDays"], Number)
             assignIfPresent("eventSources", ["eventSources"])
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.StatisticalPairTrading) {
+        } else if (normalizedStrategyTypeIndex === 6) {
             assignIfPresent("tradingPair", ["tradingPair"])
             assignIfPresent("hedgeRatio", ["hedgeRatio"], Number)
             assignIfPresent("lookback", ["lookback"], Number)
             assignIfPresent("entryZScore", ["entryZScore"], Number)
             assignIfPresent("exitZScore", ["exitZScore"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.RiskParityAllocation) {
+        } else if (normalizedStrategyTypeIndex === 7) {
             assignIfPresent("assets", ["assets"])
             assignIfPresent("volatilityLookback", ["volatilityLookback"], Number)
             assignIfPresent("targetVolatility", ["targetVolatility"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.MachineLearningSelection) {
+        } else if (normalizedStrategyTypeIndex === 8) {
             assignIfPresent("modelId", ["modelId"], Number)
             assignIfPresent("featureIds", ["featureIds"])
             assignIfPresent("topN", ["topN"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.OrderFlowImbalance) {
+        } else if (normalizedStrategyTypeIndex === 9) {
             assignIfPresent("depthLevels", ["depthLevels"], Number)
             assignIfPresent("imbalanceThreshold", ["imbalanceThreshold"], Number)
             assignIfPresent("maxHoldSeconds", ["maxHoldSeconds"], Number)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.VolatilitySpread) {
+        } else if (normalizedStrategyTypeIndex === 10) {
             assignIfPresent("underlying", ["underlying"])
             assignIfPresent("optionChainFilter", ["optionChainFilter"])
             assignIfPresent("historicalVolatilityWindow", ["historicalVolatilityWindow"], Number)
             assignIfPresent("entrySpreadUpper", ["entrySpreadUpper"], Number)
             assignIfPresent("entrySpreadLower", ["entrySpreadLower"], Number)
             assignIfPresent("deltaNeutral", ["deltaNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === Utils.StrategyCreationUtils.StrategyTypeIndex.Custom) {
+        } else if (normalizedStrategyTypeIndex === 9) {
             assignIfPresent("customCode", ["customCode"])
         }
 
         root.suppressRuleComposerReset = true
         root.selectedStrategyTypeIndex = normalizedStrategyTypeIndex
-        loadParamConfigs()
+        if (commonDynamicGenerator) {
+            commonDynamicGenerator.setValues(mappedValues)
+        }
+        if (personalizedDynamicGenerator) {
+            personalizedDynamicGenerator.setValues(mappedValues)
+        }
         var persistedFactorOverlay = normalizeStructuredValue(sourceParams.factor_overlay) || ({})
         var hasPersistedComposerStages = true
         var persistedBindingEntries = normalizeRuleTemplateBindingEntries(
@@ -3620,6 +3380,10 @@ Rectangle {
 
         root.strategyParameters = decorateParameters(mappedValues)
         root.parametersChanged(root.strategyParameters)
+        // 读取凯利仓位并更新单票上限滑块
+        var fk = Number(sourceParams.fullKelly || 0)
+        var hk = Number(sourceParams.halfKelly || 0)
+        if (hk > 0) root.updateMaxWeightByKelly(fk, hk)
         if (commonDynamicGenerator) {
             commonDynamicGenerator.setValues(mappedValues)
             root.commonParametersValid = commonDynamicGenerator.validateAll()
@@ -3650,11 +3414,27 @@ Rectangle {
         }
         Qt.callLater(function() {
             root.suppressRuleComposerReset = false
+            // 重新加载当前策略类型的参数（切换类型时被 suppress 跳过了）
+            loadParamConfigs({})
         })
         root.advancedOptionsChanged(root.enableAdvancedOptions)
         emitValidationState(currentParameterValidationErrors())
     }
     
+    // ── 凯利仓位更新(仅改默认值, 不改上下限) ──
+    function updateMaxWeightByKelly(fullKelly, halfKelly) {
+        var hk = Number(halfKelly) || 0
+        if (hk <= 0) return
+        hk = Math.max(0.0, Math.min(0.50, hk))
+        for (var i = 0; i < root.commonParameterConfigs.length; i++) {
+            if (root.commonParameterConfigs[i].id === "maxWeightPerStock") {
+                root.commonParameterConfigs[i].default = hk
+                if (commonDynamicGenerator) commonDynamicGenerator.reloadConfigs(root.commonParameterConfigs, [], {})
+                break
+            }
+        }
+    }
+
     // 重置表单
     function reset() {
         if (commonDynamicGenerator) {
@@ -3671,7 +3451,7 @@ Rectangle {
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
         root.forbidDefaultRuleBuildInEdit = false
-        root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         root.factorOverlay = defaultFactorOverlay()
         rebuildRuleComposerState(false)
         root.strategyParameters = decorateParameters({})
@@ -3691,30 +3471,42 @@ Rectangle {
     
     // ============ 初始化和信号连接 ============
     
+    // 机器学习/多因子策略自动启用因子覆盖层
+    function autoEnableFactorOverlayIfNeeded() {
+        if (root.selectedStrategyBehaviorKind === 4     // MultiFactor
+            || root.selectedStrategyBehaviorKind === 5) { // MachineLearning
+            if (!root.factorOverlay.enabled) {
+                root.factorOverlay.enabled = true
+                root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
+            }
+        }
+    }
+
     Component.onCompleted: {
         // 注册参数组件
         paramComponents.registerAllComponents()
 
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = Utils.StrategyCreationUtils.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
         }
+        autoEnableFactorOverlayIfNeeded()
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
         if (!Array.isArray(root.ruleComposerStages) || root.ruleComposerStages.length === 0) {
             rebuildRuleComposerState(true)
         }
 
-        // 加载初始参数配置
-        loadParamConfigs()
+        // 加载初始参数配置 (新建策略无已保存值, 传空对象用默认值)
+        loadParamConfigs({})
     }
-    
+
     onSelectedStrategyTypeIndexChanged: {
-        loadParamConfigs()
-        if (root.suppressRuleComposerReset) {
-            return
-        }
+        loadParamConfigs({})
         root.forbidDefaultRuleBuildInEdit = false
+        autoEnableFactorOverlayIfNeeded()
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
-        rebuildRuleComposerState(true)
+        if (!root.suppressRuleComposerReset) {
+            rebuildRuleComposerState(true)
+        }
         syncDecoratedParameters()
     }
 
@@ -3723,11 +3515,36 @@ Rectangle {
         if (root.ruleComposerStages.length > 0) {
             syncDecoratedParameters()
         }
+        reloadBlacklist()
     }
 
     onSelectedRuleComposerGroupIdChanged: {
         if (root.ruleComposerStages.length > 0) {
             syncDecoratedParameters()
+        }
+    }
+
+    // ── 规则模板浏览弹窗 ──
+    RuleTemplatePickerDialog {
+        id: ruleTemplatePicker
+        selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
+        strategyProfile: root.strategyProfile
+
+        onRuleAdded: function(templateId) {
+            if (!templateId) return
+            // 从编译库查找完整模板信息
+            var all = ruleTemplateSuggestionService.suggestAllTemplates()
+            var suggestion = null
+            for (var i = 0; i < all.length; ++i) {
+                if (String(all[i].templateId || all[i].template_id || "") === templateId) {
+                    suggestion = all[i]
+                    break
+                }
+            }
+            if (suggestion) {
+                upsertRuleComposerSuggestion(suggestion)
+                syncDecoratedParameters()
+            }
         }
     }
 }

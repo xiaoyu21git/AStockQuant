@@ -77,7 +77,6 @@ bool Foundation::initialize(const Config& config) {
         // 6. 初始化工具类
         random_ = std::make_unique<utils::Random>(); 
         utils::Random::setGlobalSeed(config.random_seed);
-        time_ = std::make_unique<utils::Time>();
         string_ = std::make_unique<utils::String>();
         system_ = std::make_unique<utils::SystemUtilsImpl>();
         
@@ -147,7 +146,6 @@ void Foundation::shutdown() {
     app_config_.reset();
     system_.reset();
     string_.reset();
-    time_.reset();
     random_.reset();
     thread_pool_.reset();
     websocket_.reset();
@@ -229,13 +227,6 @@ utils::Random& Foundation::random() {
         throw RuntimeException("Random not initialized");
     }
     return *random_;
-}
-
-utils::Time& Foundation::time() {
-    if (!time_) {
-        throw RuntimeException("Time not initialized");
-    }
-    return *time_;
 }
 
 utils::String& Foundation::string() {

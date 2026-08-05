@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../utils/TradingConstants.js" as Const
 
 Rectangle {
     id: root
@@ -10,9 +11,9 @@ Rectangle {
     property string seedSymbol: ""
     property bool autoWatchSymbols: true
 
-    color: "#0b1220"
+    color: Const.chartBg
     radius: 18
-    border.color: "#1f2e45"
+    border.color: Const.chartBorder
     border.width: 1
 
     property string activeSymbol: ""
@@ -297,14 +298,14 @@ Rectangle {
 
                 Text {
                     text: String(activeSnapshot.name || "交易工作区")
-                    color: "#f8fafc"
+                    color: Const.tradingTitleText
                     font.pixelSize: 24
                     font.weight: Font.DemiBold
                 }
 
                 Text {
                     text: normalizeSymbol(activeSnapshot.symbol || activeSymbol)
-                    color: "#8ea3bd"
+                    color: Const.chartLabelText
                     font.pixelSize: 12
                 }
             }
@@ -313,8 +314,8 @@ Rectangle {
 
             Rectangle {
                 radius: 999
-                color: safeNumber(activeSnapshot.price, 0) > 0 ? "#0f2234" : "#2a1a1a"
-                border.color: safeNumber(activeSnapshot.price, 0) > 0 ? "#24517a" : "#6b2a2a"
+                color: safeNumber(activeSnapshot.price, 0) > 0 ? Const.chartPriceBadgeUpBg : Const.chartPriceBadgeDownBg
+                border.color: safeNumber(activeSnapshot.price, 0) > 0 ? Const.chartPriceBadgeUpBorder : Const.chartPriceBadgeDownBorder
                 border.width: 1
                 implicitHeight: 32
                 implicitWidth: stateLabel.width + 24
@@ -323,7 +324,7 @@ Rectangle {
                     id: stateLabel
                     anchors.centerIn: parent
                     text: safeNumber(activeSnapshot.price, 0) > 0 ? "行情已连接" : "等待行情"
-                    color: safeNumber(activeSnapshot.price, 0) > 0 ? "#7dd3fc" : "#fca5a5"
+                    color: safeNumber(activeSnapshot.price, 0) > 0 ? Const.chartPriceBadgeUpText : Const.chartLossText
                     font.pixelSize: 12
                     font.weight: Font.Medium
                 }
@@ -342,8 +343,8 @@ Rectangle {
 
                     radius: 12
                     height: 34
-                    color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? "#18314e" : "#101a2a"
-                    border.color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? "#4f8cff" : "#26364d"
+                    color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? Const.chartTabActiveBg : Const.chartTabInactiveBg
+                    border.color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? Const.chartTabActiveBorder : Const.chartTabInactiveBorder
                     border.width: 1
                     width: symbolText.width + 22
 
@@ -351,7 +352,7 @@ Rectangle {
                         id: symbolText
                         anchors.centerIn: parent
                         text: String(modelData.name || modelData.symbol)
-                        color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? "#dbeafe" : "#a5b4c7"
+                        color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? Const.tradingLightBlue : Const.chartTabText
                         font.pixelSize: 12
                     }
 
@@ -374,8 +375,8 @@ Rectangle {
                 Layout.fillHeight: true
                 Layout.minimumWidth: 420
                 radius: 16
-                color: "#0f1726"
-                border.color: "#223147"
+                color: Const.chartPanelBg
+                border.color: Const.chartPanelBorder
                 border.width: 1
 
                 ColumnLayout {
@@ -391,13 +392,13 @@ Rectangle {
 
                             Text {
                                 text: "最新报价"
-                                color: "#8ea3bd"
+                                color: Const.chartLabelText
                                 font.pixelSize: 12
                             }
 
                             Text {
                                 text: formatPrice(activeSnapshot.price, activeSymbol)
-                                color: safeNumber(activeSnapshot.change, 0) >= 0 ? "#f87171" : "#34d399"
+                                color: safeNumber(activeSnapshot.change, 0) >= 0 ? Const.tradingStatusPreTradeRisk : Const.tradingSellGreen
                                 font.pixelSize: 34
                                 font.weight: Font.Bold
                             }
@@ -410,13 +411,13 @@ Rectangle {
 
                             Text {
                                 text: "涨跌幅"
-                                color: "#8ea3bd"
+                                color: Const.chartLabelText
                                 font.pixelSize: 12
                             }
 
                             Text {
                                 text: formatPercent(activeSnapshot.change)
-                                color: safeNumber(activeSnapshot.change, 0) >= 0 ? "#fca5a5" : "#6ee7b7"
+                                color: safeNumber(activeSnapshot.change, 0) >= 0 ? Const.chartLossText : Const.chartProfitText
                                 font.pixelSize: 22
                                 font.weight: Font.DemiBold
                             }
@@ -447,8 +448,8 @@ Rectangle {
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 66
                                 radius: 12
-                                color: "#101d31"
-                                border.color: "#20324a"
+                                color: Const.chartCardBg
+                                border.color: Const.chartCardBorder
                                 border.width: 1
 
                                 Column {
@@ -460,13 +461,13 @@ Rectangle {
 
                                     Text {
                                         text: modelData.label
-                                        color: "#7c93af"
+                                        color: Const.chartInfoText
                                         font.pixelSize: 11
                                     }
 
                                     Text {
                                         text: modelData.value
-                                        color: "#eff6ff"
+                                        color: Const.tradingBrightText
                                         font.pixelSize: 14
                                         font.weight: Font.Medium
                                         elide: Text.ElideRight
@@ -480,8 +481,8 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 118
                         radius: 14
-                        color: "#0c1626"
-                        border.color: "#20314a"
+                        color: Const.chartOrderBookBg
+                        border.color: Const.chartCardAltBorder
                         border.width: 1
 
                         Column {
@@ -491,7 +492,7 @@ Rectangle {
 
                             Text {
                                 text: "日内价格区间"
-                                color: "#cbd5e1"
+                                color: Const.chartNeutralText
                                 font.pixelSize: 13
                                 font.weight: Font.Medium
                             }
@@ -500,13 +501,13 @@ Rectangle {
                                 width: parent.width
                                 height: 8
                                 radius: 999
-                                color: "#13233a"
+                                color: Const.chartOrderBookLevelBg
 
                                 Rectangle {
                                     width: 2
                                     height: 20
                                     radius: 1
-                                    color: "#93c5fd"
+                                    color: Const.chartBidLevelText
                                     x: Math.max(0, parent.width * marketRangeRatio(activeSnapshot.preClose) - width / 2)
                                     y: -6
                                 }
@@ -515,7 +516,7 @@ Rectangle {
                                     width: 2
                                     height: 20
                                     radius: 1
-                                    color: "#fbbf24"
+                                    color: Const.chartAskLevelText
                                     x: Math.max(0, parent.width * marketRangeRatio(activeSnapshot.open) - width / 2)
                                     y: -6
                                 }
@@ -524,8 +525,8 @@ Rectangle {
                                     width: 14
                                     height: 14
                                     radius: 7
-                                    color: safeNumber(activeSnapshot.change, 0) >= 0 ? "#ef4444" : "#10b981"
-                                    border.color: "#f8fafc"
+                                    color: safeNumber(activeSnapshot.change, 0) >= 0 ? Const.tradingStatusError : Const.tradingStatusSuccess
+                                    border.color: Const.tradingTitleText
                                     border.width: 1
                                     x: Math.max(0, parent.width * marketRangeRatio(activeSnapshot.price) - width / 2)
                                     y: -3
@@ -537,7 +538,7 @@ Rectangle {
 
                                 Text {
                                     text: "低点 " + formatPrice(activeSnapshot.low, activeSymbol)
-                                    color: "#7c93af"
+                                    color: Const.chartInfoText
                                     font.pixelSize: 11
                                 }
 
@@ -545,7 +546,7 @@ Rectangle {
 
                                 Text {
                                     text: "昨收 " + formatPrice(activeSnapshot.preClose, activeSymbol)
-                                    color: "#93c5fd"
+                                    color: Const.chartBidLevelText
                                     font.pixelSize: 11
                                 }
 
@@ -553,7 +554,7 @@ Rectangle {
 
                                 Text {
                                     text: "开盘 " + formatPrice(activeSnapshot.open, activeSymbol)
-                                    color: "#fbbf24"
+                                    color: Const.chartAskLevelText
                                     font.pixelSize: 11
                                 }
 
@@ -561,7 +562,7 @@ Rectangle {
 
                                 Text {
                                     text: "高点 " + formatPrice(activeSnapshot.high, activeSymbol)
-                                    color: "#7c93af"
+                                    color: Const.chartInfoText
                                     font.pixelSize: 11
                                 }
                             }
@@ -572,8 +573,8 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 14
-                        color: "#0c1626"
-                        border.color: "#20314a"
+                        color: Const.chartOrderBookBg
+                        border.color: Const.chartCardAltBorder
                         border.width: 1
 
                         ColumnLayout {
@@ -583,7 +584,7 @@ Rectangle {
 
                             Text {
                                 text: "五档盘口"
-                                color: "#cbd5e1"
+                                color: Const.chartNeutralText
                                 font.pixelSize: 13
                                 font.weight: Font.Medium
                             }
@@ -605,18 +606,18 @@ Rectangle {
 
                                             Text {
                                                 text: "买" + String(index + 1)
-                                                color: "#6ee7b7"
+                                                color: Const.chartProfitText
                                                 font.pixelSize: 11
                                             }
                                             Item { Layout.fillWidth: true }
                                             Text {
                                                 text: formatPrice(modelData.price, activeSymbol)
-                                                color: "#e2e8f0"
+                                                color: Const.tradingValueText
                                                 font.pixelSize: 11
                                             }
                                             Text {
                                                 text: formatAmount(modelData.volume)
-                                                color: "#7c93af"
+                                                color: Const.chartInfoText
                                                 font.pixelSize: 11
                                             }
                                         }
@@ -626,7 +627,7 @@ Rectangle {
                                 Rectangle {
                                     Layout.preferredWidth: 1
                                     Layout.fillHeight: true
-                                    color: "#20314a"
+                                    color: Const.chartCardAltBorder
                                 }
 
                                 ColumnLayout {
@@ -643,18 +644,18 @@ Rectangle {
 
                                             Text {
                                                 text: "卖" + String(index + 1)
-                                                color: "#fca5a5"
+                                                color: Const.chartLossText
                                                 font.pixelSize: 11
                                             }
                                             Item { Layout.fillWidth: true }
                                             Text {
                                                 text: formatPrice(modelData.price, activeSymbol)
-                                                color: "#e2e8f0"
+                                                color: Const.tradingValueText
                                                 font.pixelSize: 11
                                             }
                                             Text {
                                                 text: formatAmount(modelData.volume)
-                                                color: "#7c93af"
+                                                color: Const.chartInfoText
                                                 font.pixelSize: 11
                                             }
                                         }
@@ -665,7 +666,7 @@ Rectangle {
                             Text {
                                 visible: depthRows("bids").length === 0 && depthRows("asks").length === 0
                                 text: "当前没有实时盘口，已保留行情摘要与持仓联动。"
-                                color: "#7c93af"
+                                color: Const.chartInfoText
                                 font.pixelSize: 12
                             }
                         }
@@ -677,8 +678,8 @@ Rectangle {
                 Layout.preferredWidth: 340
                 Layout.fillHeight: true
                 radius: 16
-                color: "#0f1726"
-                border.color: "#223147"
+                color: Const.chartPanelBg
+                border.color: Const.chartPanelBorder
                 border.width: 1
 
                 ColumnLayout {
@@ -688,7 +689,7 @@ Rectangle {
 
                     Text {
                         text: "持仓概览"
-                        color: "#f8fafc"
+                        color: Const.tradingTitleText
                         font.pixelSize: 18
                         font.weight: Font.DemiBold
                     }
@@ -701,8 +702,8 @@ Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 72
                             radius: 12
-                            color: "#101d31"
-                            border.color: "#20324a"
+                            color: Const.chartCardBg
+                            border.color: Const.chartCardBorder
                             border.width: 1
 
                             Column {
@@ -710,12 +711,12 @@ Rectangle {
                                 spacing: 6
                                 Text {
                                     text: "仓位条目"
-                                    color: "#7c93af"
+                                    color: Const.chartInfoText
                                     font.pixelSize: 11
                                 }
                                 Text {
                                     text: String(displayPositions.length)
-                                    color: "#eff6ff"
+                                    color: Const.tradingBrightText
                                     font.pixelSize: 22
                                     font.weight: Font.Bold
                                 }
@@ -726,8 +727,8 @@ Rectangle {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 72
                             radius: 12
-                            color: "#101d31"
-                            border.color: "#20324a"
+                            color: Const.chartCardBg
+                            border.color: Const.chartCardBorder
                             border.width: 1
 
                             Column {
@@ -735,12 +736,12 @@ Rectangle {
                                 spacing: 6
                                 Text {
                                     text: "市值合计"
-                                    color: "#7c93af"
+                                    color: Const.chartInfoText
                                     font.pixelSize: 11
                                 }
                                 Text {
                                     text: formatAmount(totalPositionValue())
-                                    color: "#eff6ff"
+                                    color: Const.tradingBrightText
                                     font.pixelSize: 22
                                     font.weight: Font.Bold
                                 }
@@ -766,8 +767,8 @@ Rectangle {
                                     width: parent.width
                                     height: 78
                                     radius: 12
-                                    color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? "#15263c" : "#101d31"
-                                    border.color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? "#4f8cff" : "#20324a"
+                                    color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? Const.chartActivePositionBg : Const.chartCardBg
+                                    border.color: normalizeSymbol(modelData.symbol) === normalizeSymbol(activeSymbol) ? Const.chartTabActiveBorder : Const.chartCardBorder
                                     border.width: 1
 
                                     Column {
@@ -782,13 +783,13 @@ Rectangle {
                                                 spacing: 2
                                                 Text {
                                                     text: String(modelData.name || modelData.symbol)
-                                                    color: "#eff6ff"
+                                                    color: Const.tradingBrightText
                                                     font.pixelSize: 13
                                                     font.weight: Font.Medium
                                                 }
                                                 Text {
                                                     text: String(modelData.symbol || "")
-                                                    color: "#7c93af"
+                                                    color: Const.chartInfoText
                                                     font.pixelSize: 11
                                                 }
                                             }
@@ -797,7 +798,7 @@ Rectangle {
 
                                             Text {
                                                 text: formatPercent(modelData.pnlRate)
-                                                color: safeNumber(modelData.pnl, 0) >= 0 ? "#fca5a5" : "#6ee7b7"
+                                                color: safeNumber(modelData.pnl, 0) >= 0 ? Const.chartLossText : Const.chartProfitText
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                             }
@@ -808,19 +809,19 @@ Rectangle {
 
                                             Text {
                                                 text: "数量 " + String(Math.round(safeNumber(modelData.quantity, 0)))
-                                                color: "#cbd5e1"
+                                                color: Const.chartNeutralText
                                                 font.pixelSize: 11
                                             }
                                             Item { Layout.fillWidth: true }
                                             Text {
                                                 text: "市值 " + formatAmount(modelData.currentValue)
-                                                color: "#cbd5e1"
+                                                color: Const.chartNeutralText
                                                 font.pixelSize: 11
                                             }
                                             Item { Layout.fillWidth: true }
                                             Text {
                                                 text: "权重 " + formatPercent(modelData.weight)
-                                                color: "#cbd5e1"
+                                                color: Const.chartNeutralText
                                                 font.pixelSize: 11
                                             }
                                         }
@@ -838,7 +839,7 @@ Rectangle {
                                 visible: displayPositions.length === 0
                                 width: parent.width
                                 text: "当前没有可展示的仓位数据。"
-                                color: "#7c93af"
+                                color: Const.chartInfoText
                                 font.pixelSize: 12
                             }
                         }

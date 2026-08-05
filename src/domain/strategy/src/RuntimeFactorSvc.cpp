@@ -1,5 +1,6 @@
 #include "../include/RuntimeFactorSvc.h"
 #include "../../factor/include/FactorInstanceManager.h"
+#include "../../factor/include/EventDrivenFactor.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../infrastructure/include/database/ISqlDatabase.h"
@@ -34,15 +35,17 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
     m_liveMarketView = view;
     // 重建符号解析：tick 侧 InstrumentId 用股票代码段(000001→1, 600000→600000)
     // 解析后直接映射到 view 中的股票代码字符串，不再走顺序 ID
-    auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(view);
-    if (cachedView && !cachedView->symbolStrings().empty()) {
-        const auto& symbols = cachedView->symbolStrings();
+    if (view && !view->symbolStrings().empty()) {
+        const auto& symbols = view->symbolStrings();
         auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
         for (size_t i = 0; i < symbols.size(); ++i) {
             const std::string& sym = symbols[i];
             if (sym.empty()) continue;
+            std::string codeOnly = sym;
+            auto dotPos = codeOnly.find('.');
+            if (dotPos != std::string::npos) codeOnly.resize(dotPos);
             std::uint32_t codeId = 0;
-            try { codeId = static_cast<std::uint32_t>(std::stoul(sym)); }
+            try { codeId = static_cast<std::uint32_t>(std::stoul(codeOnly)); }
             catch (...) { continue; }
             (*idToSym)[codeId] = sym;
         }
@@ -65,16 +68,18 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
     if (svc) {
         auto batch = svc->loadBatch(0);
         if (batch.marketView && !batch.marketView->instruments().empty()) {
-            // 尝试从 CachedMarketDataView 获取真实股票代码
-            auto* cachedView = dynamic_cast<const factor::compute::CachedMarketDataView*>(batch.marketView);
-            if (cachedView && !cachedView->symbolStrings().empty()) {
-                const auto& symbols = cachedView->symbolStrings();
+            // 从 IMarketDataView 接口获取股票代码
+            if (batch.marketView && !batch.marketView->symbolStrings().empty()) {
+                const auto& symbols = batch.marketView->symbolStrings();
                 auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
                 for (size_t i = 0; i < symbols.size(); ++i) {
                     const std::string& sym = symbols[i];
                     if (sym.empty()) continue;
+                    std::string codeOnly = sym;
+                    auto dotPos = codeOnly.find('.');
+                    if (dotPos != std::string::npos) codeOnly.resize(dotPos);
                     std::uint32_t codeId = 0;
-                    try { codeId = static_cast<std::uint32_t>(std::stoul(sym)); }
+                    try { codeId = static_cast<std::uint32_t>(std::stoul(codeOnly)); }
                     catch (...) { continue; }
                     (*idToSym)[codeId] = sym;
                 }
@@ -91,6 +96,28 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
 void RuntimeFactorSvc::setFactorIds(const std::vector<std::string>& factorIds) {
     const std::lock_guard<std::mutex> lock(m_stateMutex);
     m_factorIds = factorIds;
+}
+
+const std::map<std::string, double>* RuntimeFactorSvc::backtestValuesBySymbol(
+    const std::string& instanceId, std::int32_t date) const
+{
+    if (!m_dataSvc || !m_engine) return nullptr;
+    // 与 getValues 回测分支共享同一份缓存: 首次访问全量计算
+    if (m_factorCache.find(instanceId) == m_factorCache.end()) {
+        factor::compute::FactorCacheKey key;
+        key.factorName = instanceId;
+        factor::compute::MarketMatrixBatch batch;
+        batch.batchIndex = 0;
+        m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
+        INTERNAL_INFO_STREAM << "[RFS] backtestValuesBySymbol cache FILLED: id=" << instanceId
+                             << " dates=" << m_factorCache[instanceId].size();
+    }
+    char dateBuf[16];
+    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                  date / 10000, (date / 100) % 100, date % 100);
+    const auto& cache = m_factorCache[instanceId];
+    const auto it = cache.find(dateBuf);
+    return it != cache.end() ? &it->second : nullptr;
 }
 
 std::vector<std::string> RuntimeFactorSvc::getRequiredFields() const {
@@ -128,6 +155,24 @@ int RuntimeFactorSvc::getMaxLookbackDays() const {
     // 交易日 → 日历日：×1.5 覆盖周末节假日，最少 30 天
     int calendarDays = std::max(30, static_cast<int>(maxDays * 1.5));
     return calendarDays;
+}
+
+void RuntimeFactorSvc::clearSignalCache() {
+    if (m_engine) m_engine->clearSignalCache();
+}
+
+void RuntimeFactorSvc::loadCommodityEvents(const std::string& startDate,
+                                            const std::string& endDate)
+{
+    for (const auto& fid : m_factorIds) {
+        if (fid.empty()) continue;
+        try {
+            auto factor = m_instanceManager.createInstance(fid);
+            if (!factor) continue;
+            auto* edf = dynamic_cast<factor::EventDrivenFactor*>(factor.get());
+            if (edf) edf->loadEventsFromDb(startDate, endDate);
+        } catch (...) {}
+    }
 }
 
 void RuntimeFactorSvc::buildLiveView(
@@ -184,8 +229,16 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         auto it = m_factorCache[instanceId].find(dateBuf);
         if (it != m_factorCache[instanceId].end()) {
             for (const auto& [sym, val] : it->second) {
-                for (uint32_t id : symbolIds)
-                    if (m_symbolResolver(id) == sym) { result[id] = val; break; }
+                // 缓存 key 可能带后缀 (如 "000001.SZ"), 统一去掉后缀再匹配
+                std::string codeOnly = sym;
+                auto dot = codeOnly.find('.');
+                if (dot != std::string::npos) codeOnly.resize(dot);
+                for (uint32_t id : symbolIds) {
+                    std::string resolved = m_symbolResolver(id);
+                    auto rd = resolved.find('.');
+                    if (rd != std::string::npos) resolved.resize(rd);
+                    if (resolved == codeOnly) { result[id] = val; break; }
+                }
             }
         } else {
             INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " NOT FOUND in cache (cache has " << m_factorCache[instanceId].size() << " dates)";
@@ -274,22 +327,61 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         syms = m_latestSymbols;
         instanceIds = m_factorIds;
     }
-    if (tradeDay == 0 || syms.empty() || instanceIds.empty()) {
+    if (tradeDay == 0 || instanceIds.empty()) {
         return;
     }
 
+    char dateBuf[16];
+    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
+                  tradeDay / 10000, (tradeDay / 100) % 100, tradeDay % 100);
+
+    // 回测路径: 直接从 m_factorCache 读值，用 view symbolStrings 做字符串匹配
+    // (与 FactorBacktestOrchestrator / backtestValuesBySymbol 保持一致，不经过 resolver)
+    if (m_dataSvc) {
+        // 从 view 构建 symbol → instrumentId 映射
+        std::unordered_map<std::string, std::uint32_t> symbolToId;
+        auto batch = m_dataSvc->loadBatch(0);
+        if (batch.marketView) {
+            const auto& viewSyms = batch.marketView->symbolStrings();
+            const auto& insts = batch.marketView->instruments();
+            for (size_t i = 0; i < viewSyms.size() && i < insts.size(); ++i)
+                symbolToId[viewSyms[i]] = insts[i].value;
+        }
+
+        for (const auto& iid : instanceIds) {
+            auto cacheIt = m_factorCache.find(iid);
+            if (cacheIt == m_factorCache.end()) continue;
+            auto dateIt = cacheIt->second.find(dateBuf);
+            if (dateIt == cacheIt->second.end()) continue;
+
+            size_t matched = 0;
+            double sampleVal = 0.0;
+            for (const auto& [sym, val] : dateIt->second) {
+                auto idIt = symbolToId.find(sym);
+                if (idIt == symbolToId.end()) continue;
+                if (matched == 0) sampleVal = val;
+                ++matched;
+                output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
+            }
+            static int diag = 0;
+            if (++diag <= 3)
+                INTERNAL_INFO_STREAM << "[RFS] copySnapshots cacheRead: iid=" << iid
+                                     << " date=" << dateBuf
+                                     << " cacheEntries=" << dateIt->second.size()
+                                     << " matched=" << matched
+                                     << " sampleVal=" << sampleVal;
+        }
+        return;
+    }
+
+    // 实盘路径: 通过 getValues 按需计算因子值
+    if (tradeDay == 0 || syms.empty()) return;
     auto* self = const_cast<RuntimeFactorSvc*>(this);
     for (const auto& iid : instanceIds) {
         auto values = self->getValues(iid, tradeDay, syms);
         for (auto& [sym, score] : values) {
             output.push_back(RuntimeFactorSnapshot{ sym, iid, score, 1 });
         }
-    }
-    if (output.empty()) {
-        static int emptySnapCount = 0;
-        if (++emptySnapCount % 50 == 0)
-            INTERNAL_WARN_STREAM << "[RFS] 快照连续空: count=" << emptySnapCount
-                                 << " day=" << tradeDay << " ids=" << instanceIds.size();
     }
 }
 
