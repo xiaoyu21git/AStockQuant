@@ -157,3 +157,71 @@ CrudeOilNews-Corpus/
 tools/commodity_event_model/
 tools/commodity_event_train.jsonl
 
+# ── 已删除的遗留文件(防恢复) ──
+# 交易UI (v0.9.0重构删除)
+src/app/Qml/components/Trading/
+src/app/Qml/utils/TradingPageAdapter.js
+src/app/Qml/utils/TradeTestingPageAdapter.js
+# MySQL残留 (PG迁移删除)
+src/infrastructure/include/database/NativeMySQLConnectionPool.*
+src/infrastructure/src/database/NativeMySQLConnectionPool.*
+# 旧策略工厂 (MultiFactorStrategy重写删除)
+src/domain/strategies/include/MultiFactorSelectionStrategy.*
+src/domain/strategies/src/MultiFactorSelectionStrategy.*
+src/domain/strategy/include/RuntimeStrategyFactory.*
+src/domain/strategy/src/RuntimeStrategyFactory.*
+src/domain/strategy/include/MarketDataAdapter.*
+# 旧DataProvider (Provider架构重构删除)
+src/domain/market/include/market/providers/DatabaseProvider.*
+src/domain/market/src/providers/DatabaseProvider.*
+# 旧UI控制器 (数据链路修复删除)
+src/ui/bridge/include/DataUIController.*
+src/ui/bridge/src/DataUIController.*
+src/ui/bridge/include/DatabaseConnection*
+# 一次性工具脚本
+tools/akshare_data_sources.py
+tools/apply_minimal_trend_rules.py
+tools/audit_strategy_parameter_coverage.py
+tools/backfill_*.py
+tools/check_data_latest.py
+tools/check_db_status.py
+tools/dump_remaining_by_asset_class.py
+tools/import_extended_market_data.py
+tools/import_financial_from_jq.py
+tools/import_from_akshare.py
+tools/import_test_data.py
+tools/migrate_*.py
+tools/patch_*.sql
+tools/prepare_factor_backtest_data.ps1
+tools/query_*.py
+tools/repair_*.py
+tools/report_*.py
+tools/restore_strategy_parameters_from_log.py
+tools/trim_*.py
+tools/validate_backtest_data_fields.py
+# 遗留脚本
+analyze_growth.py
+backfill_and_check.py
+diagnose_script.py
+get_config.py
+get_raw_config.py
+repair_factors.py
+temp_fix_dataset.py
+cmake_log.txt
+factor_backtest_suite_output.txt
+# 遗留数据/SQL
+astock_init.sql
+astock_init_enhanced.sql
+create_cleaned_daily_bar.sql
+# 遗留测试
+tests/run_factor_full_market_benchmark.cpp
+# 遗留源码
+src/foundation/include/foundation/Utils/time*.hpp
+src/foundation/src/Utils/time.cpp
+src/ui/bridge/include/factor_check/
+src/ui/bridge/src/factor_check/
+src/infrastructure/include/datasource/
+src/app/Qml/page/dashboard/QtCandlestickChart.qml
+src/app/Qml/utils/RuleTemplatePreviewUtils.js
+scripts/
+
