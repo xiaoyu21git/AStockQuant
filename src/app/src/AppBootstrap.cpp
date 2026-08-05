@@ -42,7 +42,9 @@ void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
 #include "../../../domain/strategy/include/EventRiskSubscriber.h"
+#include "EventDrivenFactor.h"
 #include "../include/PythonEventBridge.h"
+#include "database/EventBridgePoller.h"
 // MarketDataFacade/SymbolMapper/MarketDataRepository 已移除，行情桥接改用预留接口
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinMarketConnector.h"
@@ -338,8 +340,14 @@ bool AppBootstrap::initServices()
             // 启动事件风控订阅器（订阅 news.* 事件，动态调整风控参数）
             domain::strategy::EventRiskSubscriber::instance().start();
 
-            // 启动嵌入式Python金融事件感知调度器（路径相对于可执行文件）
+            // 启动事件驱动因子订阅 (接收 news.*, 为策略提供实时情绪信号)
+            factor::EventDrivenFactor::subscribeToEventBus();
+
+            // 启动 Python 金融事件感知调度器 (QProcess 子进程)
             app::PythonEventBridge::instance().start();
+
+            // 启动事件桥接轮询器 (消费 Python 写入的 live.event_bridge → C++ EventBus)
+            astock::infrastructure::database::EventBridgePoller::instance().start();
         }
 
         // ── GmSessionEngine（唯一 gmsdk 连接）在 QML 之前初始化 ──

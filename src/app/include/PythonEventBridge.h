@@ -1,34 +1,42 @@
 #pragma once
-// PythonEventBridge — 嵌入式Python金融事件感知调度器
-// App启动时初始化Python解释器, 加载astock_engine.events.scheduler
+// PythonEventBridge — QProcess 启动 Python 金融事件感知调度器
+// App 启动时以子进程方式运行 astock_engine.events.scheduler,
+// 输出通过 C++ 日志系统记录。
 
-#include <atomic>
-#include <memory>
-#include <string>
-#include <thread>
+#include <QObject>
+#include <QProcess>
+#include <QString>
 
 namespace app {
 
-class PythonEventBridge {
+class PythonEventBridge : public QObject {
 public:
     static PythonEventBridge& instance();
 
-    /// @brief 启动嵌入式Python解释器并运行事件感知调度器
-    /// 路径从可执行文件位置自动推导
+    /// @brief 启动 Python 事件调度子进程
     bool start();
 
+    /// @brief 终止子进程
     void stop();
-    bool isRunning() const { return m_running.load(); }
+
+    bool isRunning() const;
 
 private:
-    PythonEventBridge() = default;
-    ~PythonEventBridge();
+    PythonEventBridge();
+    ~PythonEventBridge() override;
 
-    static void schedulerThread(std::string eventsPath, std::string binPath);
+    void onReadyReadStdout();
+    void onReadyReadStderr();
+    void onFinished(int exitCode, QProcess::ExitStatus status);
+    void onError(QProcess::ProcessError error);
 
-    std::unique_ptr<std::thread> m_thread;
-    std::atomic<bool> m_running{false};
-    void* m_gilState{nullptr};  // PyThreadState*
+    QString findPython() const;
+    QString findProjectRoot() const;
+
+    QProcess* m_process = nullptr;
+    QString m_pythonExe;
+    QString m_projectRoot;
+    bool m_started = false;
 };
 
 } // namespace app

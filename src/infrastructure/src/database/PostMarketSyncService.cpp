@@ -7,6 +7,7 @@
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
+#include <cstdlib>
 
 #include <algorithm>
 #include <chrono>
@@ -86,6 +87,13 @@ bool PostMarketSyncService::forceSyncToday() {
         syncConceptMembership();
         if (isMonthlyMaintenanceDay()) syncFinancialData(today);
         computeConceptDailyStats(today);
+        // 商品突发事件检测 (Python 子进程, 静默失败不阻塞同步)
+        {
+            std::string cmd = "cd /d \"..\\..\\tools\" && python news_event_pipeline.py";
+            INTERNAL_INFO_STREAM << "[PostMktSync] 商品事件检测: news_event_pipeline.py";
+            int rc = std::system(cmd.c_str());
+            if (rc != 0) INTERNAL_WARN_STREAM << "[PostMktSync] 事件检测退出码=" << rc;
+        }
         m_lastSyncDay.store(today); saveLastSyncDay(today);
         INTERNAL_INFO_STREAM << "[PostMktSync] ====== 同步完成 ======";
         fillAdjFactors();
@@ -546,7 +554,12 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
     char sDate[32], eDate[32];
     { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
       snprintf(sDate,sizeof(sDate),"%04d-%02d-%02d",y,m,d);
-      snprintf(eDate,sizeof(eDate),"%04d-%02d-%02d",y,m,d); }
+      // endDate = nextDay (exclusive), 与 syncDaily 保持一致
+      int nd=d+1,nm=m,ny=y;
+      static const int md[]={0,31,28,31,30,31,30,31,31,30,31,30,31};
+      int maxd=md[nm]+(nm==2&&(ny%4==0&&(ny%100!=0||ny%400==0))?1:0);
+      if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
+      snprintf(eDate,sizeof(eDate),"%04d-%02d-%02d",ny,nm,nd); }
 
     std::unordered_map<std::string,std::string> gmToSym;
     std::vector<std::string> gmList;

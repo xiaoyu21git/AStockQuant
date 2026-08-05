@@ -91,6 +91,7 @@ COMMODITY_REGISTRY: Dict[str, dict] = {
     "corn_starch":        {"akshare_symbol": "CS0",  "name": "玉米淀粉"},
     "palm_oil":           {"akshare_symbol": "P0",   "name": "棕榈油"},
     "rapeseed_oil":       {"akshare_symbol": "OI0",  "name": "菜籽油"},
+    "rapeseed_meal":      {"akshare_symbol": "RM0",  "name": "菜粕"},
     "cotton":             {"akshare_symbol": "CF0",  "name": "棉花"},
     "cotton_yarn":        {"akshare_symbol": "CY0",  "name": "棉纱"},
     "sugar":              {"akshare_symbol": "SR0",  "name": "白糖"},
@@ -105,8 +106,24 @@ COMMODITY_REGISTRY: Dict[str, dict] = {
     # ── 硅/锰 ──
     "manganese":          {"akshare_symbol": "SM0",  "name": "锰硅"},
     "silicon_metal":      {"akshare_symbol": "SI0",  "name": "工业硅"},
+    "ferrosilicon":       {"akshare_symbol": "SF0",  "name": "硅铁"},
+    # ── 有色(续) ──
+    "alumina":            {"akshare_symbol": "AO0",  "name": "氧化铝"},
+    "stainless_steel":    {"akshare_symbol": "SS0",  "name": "不锈钢"},
+    "copper_intl":        {"akshare_symbol": "BC0",  "name": "国际铜"},
+    # ── 能化(续) ──
+    "lldpe":              {"akshare_symbol": "L0",   "name": "塑料(LLDPE)"},
+    "low_sulfur_oil":     {"akshare_symbol": "LU0",  "name": "低硫燃料油"},
+    "synth_rubber":       {"akshare_symbol": "BR0",  "name": "合成橡胶"},
+    "short_fiber":        {"akshare_symbol": "PF0",  "name": "短纤"},
+    # ── 农产品(续) ──
+    "soybean_2":          {"akshare_symbol": "B0",   "name": "豆二"},
+    "egg":                {"akshare_symbol": "JD0",  "name": "鸡蛋"},
+    "japonica_rice":      {"akshare_symbol": "RR0",  "name": "粳米"},
+    "nr_rubber":          {"akshare_symbol": "NR0",  "name": "20号胶"},
     # ── 新能源 ──
     "lithium_carbonate":  {"akshare_symbol": "LC0",  "name": "碳酸锂"},
+    "polysilicon":        {"akshare_symbol": "PS0",  "name": "多晶硅"},
 }
 
 # 动量计算窗口（交易日）

@@ -45,3 +45,23 @@ CREATE TABLE IF NOT EXISTS alpha.commodity_daily_rank (
 
 COMMENT ON TABLE alpha.commodity_daily_rank IS '商品日排名（传导链因子Top-N选择源）';
 COMMENT ON COLUMN alpha.commodity_daily_rank.score IS '综合评分（动量×0.5 + 库存偏离×0.3 + 景气×0.2）';
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4. Python → C++ 事件桥接表 (live schema)
+--     Python EventScheduler 写入, C++ EventBridgePoller 消费
+-- ══════════════════════════════════════════════════════════════════════════════
+CREATE TABLE IF NOT EXISTS live.event_bridge (
+    id          BIGSERIAL PRIMARY KEY,
+    created_at  TIMESTAMPTZ DEFAULT NOW(),
+    consumed    BOOLEAN DEFAULT FALSE,
+    event_type  VARCHAR(64)  NOT NULL,
+    data        JSONB        NOT NULL DEFAULT '{}',
+    metadata    JSONB        DEFAULT '{}'
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_bridge_consumed
+    ON live.event_bridge(consumed, id)
+    WHERE consumed = FALSE;
+
+COMMENT ON TABLE live.event_bridge IS 'Python→C++事件桥接表, C++侧每分钟轮询消费';
+COMMENT ON COLUMN live.event_bridge.consumed IS 'FALSE=待消费, TRUE=已发布到C++ EventBus';

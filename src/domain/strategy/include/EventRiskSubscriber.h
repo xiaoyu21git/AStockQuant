@@ -38,14 +38,31 @@ public:
         return m_blockedSymbols;
     }
 
-    /// @brief T+1 解禁: 每交易日开始时清空封禁名单
-    void clearBlockedSymbols() { m_blockedSymbols.clear(); }
+    /// @brief T+1 解禁: 每交易日清空临时风控限制
+    void clearBlockedSymbols() {
+        m_blockedSymbols.clear();
+        m_liquidatedSymbols.clear();
+        m_sectorLimits.clear();
+    }
+
+    /// @brief 需要立即清仓的标的 (由 RiskManager 巡检消费)
+    const std::unordered_set<std::string>& liquidatedSymbols() const {
+        return m_liquidatedSymbols;
+    }
 
 private:
     // ── EventBus 回调 ──
     void onFinancialEvent(const engine::EventFormat& event);
 
-    /// @brief 根据事件标签执行风控动作
+    /// @brief 收紧单只标的持仓上限
+    void tightenSingleSymbolLimit(const std::string& symbol, double maxPct);
+
+    /// @brief 限制行业敞口
+    void capSectorExposure(const std::string& sectorCodes,
+                          const std::string& productId,
+                          double maxPct);
+
+    /// @brief 根据事件标签执行风控动作 (原有方法)
     void applyEventTags(const std::string& eventType,
                         const std::string& symbol,
                         const std::unordered_map<std::string, std::string>& tags,
@@ -57,6 +74,10 @@ private:
 
     // 因事件被临时封禁的标的 (T+1 清空)
     std::unordered_set<std::string> m_blockedSymbols;
+    // 需要立即清仓的标的
+    std::unordered_set<std::string> m_liquidatedSymbols;
+    // 行业临时限制: sectorCode → maxPositionPct
+    std::unordered_map<std::string, double> m_sectorLimits;
 
     // 备份原始风控配置 (用于事件过期后恢复, 预留)
     struct PerSymbolOverride {

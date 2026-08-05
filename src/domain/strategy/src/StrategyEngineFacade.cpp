@@ -1023,7 +1023,14 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
 
     for (const auto& sym : symbols) {
         // 规则闸门冻结 或 择时不允新开仓 → 跳过
-        if (!ruleAllowEntriesEod || !eodTiming.allowNewEntries) break;
+        if (!ruleAllowEntriesEod || !eodTiming.allowNewEntries) {
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 冻结:"
+                << " ruleGate=" << (ruleAllowEntriesEod ? "允许" : "冻结")
+                << " timingGate=" << (eodTiming.allowNewEntries ? "允许" : "冻结")
+                << " timingReason=" << eodTiming.reason
+                << " liquidate=" << eodTiming.forceLiquidate;
+            break;
+        }
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
         if (!d.valid()) continue;
 

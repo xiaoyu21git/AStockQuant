@@ -24,6 +24,7 @@ add_library(infrastructure STATIC
     src/database/NativePgConnectionPool.cpp
     src/database/OrderRecorder.cpp
     src/database/PostMarketSyncService.cpp
+    src/database/EventBridgePoller.cpp
     src/database/StrategyRepository.cpp
     src/database/MarketDataRepository.cpp
     src/database/MarketDataService.cpp

@@ -57,8 +57,14 @@ if(ENABLE_JUJIN_MARKET)
     )
 endif()
 
-# 鐠佸墽鐤嗘惔鎾舵畱鐏炵偞鈧?
+# 编译宏
 target_compile_definitions(astockquantapp PRIVATE BUILD_DLL)
+
+# Python 可执行文件路径（QProcess 启动子进程用）
+if(Python_EXECUTABLE)
+    target_compile_definitions(astockquantapp PRIVATE
+        PYTHON_EXECUTABLE="${Python_EXECUTABLE}")
+endif()
 
 if(MSVC)
     target_compile_options(astockquantapp PRIVATE /FS)
@@ -76,7 +82,6 @@ target_link_libraries(astockquantapp
         Qt6::Sql
         Qt6::Qml
         Qt6::QuickWidgets
-        Python::Python
     PRIVATE
         engine
         domain
@@ -116,11 +121,6 @@ if(ENABLE_JUJIN_MARKET)
     target_link_libraries(astockquantapp
         PRIVATE
             thirdParty
-    )
-
-    # Python嵌入: 将CMake变量传递给C++
-    target_compile_definitions(astockquantapp PRIVATE
-        PYTHON_EXECUTABLE="${Python_EXECUTABLE}"
     )
 
     get_filename_component(GMSDK_RUNTIME_DIR "${GMSDK_LIBRARY}" DIRECTORY)

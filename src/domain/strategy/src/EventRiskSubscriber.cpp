@@ -5,6 +5,7 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <sstream>
 #include <string>
 
 namespace domain::strategy {
@@ -61,36 +62,96 @@ void EventRiskSubscriber::stop() {
 void EventRiskSubscriber::onFinancialEvent(
     const engine::EventFormat& event)
 {
-    // 解析标的列表
-    auto symbolsOpt = event.get<std::vector<std::string>>("symbols");
-    if (!symbolsOpt || symbolsOpt->empty()) return;
+    // 解析分级元数据 (Python 侧写入 event.tags, 序列化为 metadata["tag.xxx"])
+    auto tagGet = [&](const std::string& key) -> std::string {
+        auto it = event.metadata.find("tag." + key);
+        return (it != event.metadata.end()) ? it->second : "";
+    };
+    std::string level   = tagGet("level");
+    std::string action  = tagGet("action");
+    std::string sevStr  = tagGet("severity");
+    std::string title   = tagGet("cm_0_name");  // commodity event name
+    double severityVal  = 0.0;
+    try { severityVal = std::stod(tagGet("severity_val")); } catch (...) {}
 
-    // 解析标签
-    std::unordered_map<std::string, std::string> tags;
-    for (const auto& kv : event.metadata) {
-        if (kv.first.find("tag.") == 0) {
-            tags[kv.first.substr(4)] = kv.second;
+    if (level.empty() || action == "ignore") return;
+
+    // 解析标的列表 (仅 stock 级别)
+    auto symbolsOpt = event.get<std::vector<std::string>>("symbols");
+    std::vector<std::string> symbols;
+    if (symbolsOpt) symbols = *symbolsOpt;
+
+    // ── stock 级别 ──
+    if (level == "stock" && !symbols.empty()) {
+        for (const auto& sym : symbols) {
+            if (action == "liquidate") {
+                m_liquidatedSymbols.insert(sym);
+                INTERNAL_WARN_STREAM << "[EventRisk] 个股利空清仓: " << sym
+                    << " severity=" << severityVal
+                    << " title=" << tagGet("commodity_event_name");
+            } else if (action == "reduce_position") {
+                tightenSingleSymbolLimit(sym, 2.0);
+            }
         }
     }
-
-    // 解析情感分
-    double sentiment = 0.0;
-    auto sOpt = event.get<std::string>("sentiment_score");
-    if (sOpt) {
-        try { sentiment = std::stod(*sOpt); } catch (...) {}
+    // ── sector 级别 ──
+    else if (level == "sector") {
+        std::string sectorCodes = tagGet("sector_codes");
+        std::string productId   = tagGet("cm_0_pid");
+        if (!sectorCodes.empty() || !productId.empty()) {
+            if (action == "reduce_exposure") {
+                capSectorExposure(sectorCodes, productId, 30.0);
+            } else if (action == "reduce_position") {
+                capSectorExposure(sectorCodes, productId, 50.0);
+            }
+        }
     }
-
-    // 解析置信度
-    double confidence = 0.0;
-    auto cOpt = event.get<std::string>("confidence");
-    if (cOpt) {
-        try { confidence = std::stod(*cOpt); } catch (...) {}
-        confidence = (std::max)(0.0, (std::min)(1.0, confidence));
+    // ── market 级别 ──
+    else if (level == "market") {
+        auto& risk = domain::strategy::RiskManager::instance();
+        auto cfg = risk.riskConfig();
+        if (action == "reduce_exposure" && severityVal >= 0.5) {
+            cfg.maxTotalExposurePercent = (std::min)(cfg.maxTotalExposurePercent, 50.0);
+            INTERNAL_WARN_STREAM << "[EventRisk] 系统性风险: 总敞口降至50% severity="
+                << severityVal;
+        } else if (action == "alert") {
+            cfg.maxTotalExposurePercent = (std::min)(cfg.maxTotalExposurePercent, 80.0);
+            INTERNAL_INFO_STREAM << "[EventRisk] 市场预警: 总敞口降至80%";
+        }
+        risk.setRiskConfig(cfg);
     }
+}
 
-    // 对每个关联标的执行风控动作
-    for (const auto& sym : *symbolsOpt) {
-        applyEventTags(event.type, sym, tags, sentiment, confidence);
+void EventRiskSubscriber::tightenSingleSymbolLimit(
+    const std::string& symbol, double maxPct)
+{
+    auto cfg = RiskManager::instance().riskConfig();
+    const double old = cfg.maxPositionPercent;
+    cfg.maxPositionPercent = (std::min)(cfg.maxPositionPercent, maxPct);
+    if (cfg.maxPositionPercent < old) {
+        INTERNAL_WARN_STREAM << "[EventRisk] 单股限仓: " << symbol
+            << " " << old << "% -> " << cfg.maxPositionPercent << "%";
+        RiskManager::instance().setRiskConfig(cfg);
+    }
+}
+
+void EventRiskSubscriber::capSectorExposure(
+    const std::string& sectorCodes,
+    const std::string& productId,
+    double maxPct)
+{
+    // 解析逗号分隔的行业代码
+    std::stringstream ss(sectorCodes.empty() ? productId : sectorCodes);
+    std::string code;
+    while (std::getline(ss, code, ',')) {
+        code = code.empty() ? "" : code;
+        if (code.empty()) continue;
+        auto it = m_sectorLimits.find(code);
+        if (it == m_sectorLimits.end() || it->second > maxPct) {
+            m_sectorLimits[code] = maxPct;
+            INTERNAL_WARN_STREAM << "[EventRisk] 行业限仓: " << code
+                << " -> " << maxPct << "%";
+        }
     }
 }
 

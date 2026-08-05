@@ -6,13 +6,53 @@
 #include "foundation/log/logging.hpp"
 #include "infrastructure/include/database/NativePgConnectionPool.h"
 #include "infrastructure/include/database/ISqlDatabase.h"
+#include "../../../engine/include/GlobalEventBusRegistry.h"
+#include "../../../engine/include/Event/EventBus.hpp"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <mutex>
 #include <string>
 
 namespace factor {
+
+// ═══════════════════════════════════════════════════════════════
+// 静态实例注册 (广播 EventBus 事件到所有活跃实例)
+// ═══════════════════════════════════════════════════════════════
+
+static std::vector<EventDrivenFactor*> s_instances;
+static std::mutex s_instanceMutex;
+
+void EventDrivenFactor::registerInstance(EventDrivenFactor* instance) {
+    std::lock_guard<std::mutex> lock(s_instanceMutex);
+    s_instances.push_back(instance);
+}
+
+void EventDrivenFactor::unregisterInstance(EventDrivenFactor* instance) {
+    std::lock_guard<std::mutex> lock(s_instanceMutex);
+    auto it = std::find(s_instances.begin(), s_instances.end(), instance);
+    if (it != s_instances.end()) s_instances.erase(it);
+}
+
+void EventDrivenFactor::subscribeToEventBus() {
+    auto* bus = engine::get_engine_event_bus();
+    if (!bus) {
+        INTERNAL_WARN_STREAM << "[EventDriven] EventBus 不可用, 跳过订阅";
+        return;
+    }
+    engine::EventFormatHandler handler = [](const engine::EventFormat& event) {
+        std::lock_guard<std::mutex> lock(s_instanceMutex);
+        for (auto* instance : s_instances) {
+            instance->onEvent(event);
+        }
+    };
+    bus->subscribe(
+        std::string(engine::EventTypes::NEWS_ALL),  // "news."
+        std::move(handler),
+        nullptr, 0);
+    INTERNAL_INFO_STREAM << "[EventDriven] 已订阅 news.* 事件";
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Params — JSON 配置解析
@@ -340,12 +380,17 @@ void EventDrivenFactor::loadEventsFromDb(const std::string& startDate,
 // 工厂方法
 // ═══════════════════════════════════════════════════════════════
 
+EventDrivenFactor::~EventDrivenFactor() {
+    unregisterInstance(this);
+}
+
 std::unique_ptr<BaseFactor> EventDrivenFactor::create(
     const FactorInstanceInfo& info,
     std::shared_ptr<DataAvailabilityChecker> /*checker*/)
 {
     auto factor = std::make_unique<EventDrivenFactor>();
     factor->loadConfig(info.config);
+    registerInstance(factor.get());
     return factor;
 }
 

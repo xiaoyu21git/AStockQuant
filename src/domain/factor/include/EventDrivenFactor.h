@@ -48,6 +48,7 @@ public:
     };
 
     EventDrivenFactor() = default;
+    ~EventDrivenFactor() override;
 
     // ── BaseFactor 接口 ──
     CalculationResult calculate(const CalculationContext& ctx) override;
@@ -58,6 +59,14 @@ public:
     // ── EventBus 事件接收 ──
     /// @brief 接收来自 EventBus 的金融事件, 写入内存缓存
     void onEvent(const engine::EventFormat& event);
+
+    /// @brief 订阅 C++ EventBus (AppBootstrap 中调用一次)
+    static void subscribeToEventBus();
+
+    /// @brief 注册活跃实例 (构造时调用)
+    static void registerInstance(EventDrivenFactor* instance);
+    /// @brief 注销实例 (析构时调用)
+    static void unregisterInstance(EventDrivenFactor* instance);
 
     // ── 回测兼容 ──
     /// @brief 回测专用: 批量加载历史事件

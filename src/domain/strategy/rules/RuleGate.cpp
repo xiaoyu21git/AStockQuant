@@ -92,6 +92,9 @@ bool RuleGate::allowNewEntriesToday(const IRuleVariableProvider& provider)
     const RuleAction action = runRules(m_marketRules, provider);
     if (action == RuleAction::Block || action == RuleAction::Freeze) {
         ++m_stats.frozenDays;
+        INTERNAL_WARN_STREAM << "[RuleGate] 新开仓冻结:"
+            << " template=" << m_lastHitTemplateId
+            << " rule=" << m_lastHitRuleId;
         return false;
     }
     return true;
