@@ -39,6 +39,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <iomanip>
 #include <numeric>
 #include <string>
 #include <unordered_map>
@@ -1264,8 +1265,16 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             if (m_tradeJournal) {
                 for (const auto& o : finalOrders) {
                     std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
-                    m_tradeJournal->log(tradingDay + " 提交 " + side + " "
-                        + o.symbol() + " " + std::to_string(o.quantity()) + "股");
+                    double score = o.extensionAs<double>(
+                        domain::trading::ExtKey::kSignalScore, 0.0);
+                    double weight = o.extensionAs<double>(
+                        domain::trading::ExtKey::kTargetWeight, 0.0);
+                    std::ostringstream js;
+                    js << tradingDay << " 提交 " << side << " "
+                       << o.symbol() << " " << o.quantity() << "股";
+                    if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
+                    if (weight > 0.0) js << " 权重:" << std::fixed << std::setprecision(1) << (weight * 100.0) << "%";
+                    m_tradeJournal->log(js.str());
                 }
             }
         } catch (const std::exception& e) {
@@ -2219,10 +2228,14 @@ StrategyBacktestResult StrategyEngine::backtest(
                         // 交易日志: 买入成交
                         if (m_tradeJournal) {
                             auto dt = dates[static_cast<std::size_t>(r)].value;
-                            m_tradeJournal->log(
-                                std::to_string(dt) + " 买入 " + symbol
-                                + "  " + std::to_string(filledQty) + "股  "
-                                + std::to_string(closePrice));
+                            std::ostringstream js;
+                            js << dt << " 买入 " << symbol
+                               << " " << filledQty << "股 "
+                               << closePrice;
+                            auto bs = buySignalScoreMap.find(symbol);
+                            if (bs != buySignalScoreMap.end() && bs->second > 0.0)
+                                js << " 评分:" << std::fixed << std::setprecision(2) << bs->second;
+                            m_tradeJournal->log(js.str());
                         }
                     }
                 } else {
