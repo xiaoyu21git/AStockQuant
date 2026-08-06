@@ -4,6 +4,7 @@
 #include "StrategyServiceTypes.h"
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
+#include "TradeJournal.h"
 #include "DailyEodScheduler.h"
 #include "FactorSignalProcessor.h"
 #include "SignalBlendCompositor.h"
@@ -634,6 +635,10 @@ public:
     void setAccountId(std::string id) { m_accountId = std::move(id); }
     /// @brief 设置策略ID（止损单必填）
     void setStrategyId(std::string id) { m_strategyId = std::move(id); }
+    /// @brief 设置策略名称（用于交易日志目录名）
+    void setStrategyName(std::string name) { m_strategyName = std::move(name); }
+    /// @brief 获取交易日志（回测/实盘路径记录交易事件）
+    TradeJournal* tradeJournal() { return m_tradeJournal.get(); }
 
     /// @brief 设置实盘数据目录（lastEvalDay JSON 持久化路径前缀）
     void setLiveDataPath(std::string path) { m_liveDataPath = std::move(path); }
@@ -697,6 +702,8 @@ private:
     IOrderListener* m_orderListener{nullptr};
     std::string m_accountId;
     std::string m_strategyId;
+    std::string m_strategyName;
+    std::unique_ptr<TradeJournal> m_tradeJournal;  // 交易日志 (按策略名/日期分文件)
     std::string m_liveDataPath;     // 实盘数据目录, 用于统一 JSON 持久化
     domain::trading::OrderBuilder m_orderBuilder;
     OrderGenerator m_orderGenerator{m_orderBuilder};  ///< 持仓感知建单器

@@ -23,9 +23,8 @@ target_sources(domain_strategy_runtime PRIVATE
     src/OrderGenerator.cpp
     src/RiskManager.cpp
     src/RiskControl.cpp
-    src/StrategyFactory.cpp
-    src/StrategyLifecycleManager.cpp
     src/RulePipeline.cpp
+    src/TradeJournal.cpp
 )
 
 target_include_directories(domain_strategy_runtime

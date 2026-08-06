@@ -319,6 +319,11 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         return nullptr;
 
     engine->m_minHoldDays = params.minHoldDays;
+    engine->m_strategyName = params.strategyName;
+    // 初始化交易日志: logs/策略名/trade_YYYY-MM-DD.jsonl
+    if (!params.strategyName.empty()) {
+        engine->m_tradeJournal = std::make_unique<TradeJournal>("logs", params.strategyName);
+    }
     return engine;
 
     } catch (const std::exception& e) {
@@ -1031,6 +1036,12 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
                 << " timingGate=" << (eodTiming.allowNewEntries ? "允许" : "冻结")
                 << " timingReason=" << eodTiming.reason
                 << " liquidate=" << eodTiming.forceLiquidate;
+            // 交易日志: 冻结
+            if (m_tradeJournal) {
+                m_tradeJournal->log(tradingDay + " 冻结 原因:"
+                    + std::string(ruleAllowEntriesEod ? "" : "规则闸门")
+                    + std::string(!eodTiming.allowNewEntries ? "择时空仓" : ""));
+            }
             break;
         }
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
@@ -1249,10 +1260,26 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             totalSubmitted = static_cast<int>(finalOrders.size());
             INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 篮子提交: basketId=" << basketId
                                  << " orders=" << totalSubmitted;
+            // 交易日志: 订单提交
+            if (m_tradeJournal) {
+                for (const auto& o : finalOrders) {
+                    std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
+                    m_tradeJournal->log(tradingDay + " 提交 " + side + " "
+                        + o.symbol() + " " + std::to_string(o.quantity()) + "股");
+                }
+            }
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD onOrders 异常: basketId="
                                   << basketId << " " << e.what();
         }
+    }
+
+    // 交易日志: 日终快照
+    if (m_tradeJournal) {
+        int posCount = static_cast<int>(positions.size());
+        m_tradeJournal->log(tradingDay + " 日终 持仓:" + std::to_string(posCount)
+            + " 净值:" + std::to_string(static_cast<int>(account.totalAsset))
+            + " 现金:" + std::to_string(static_cast<int>(account.availableCash)));
     }
 
     int totalRejected = totalGenerated - totalSubmitted;
@@ -1751,6 +1778,12 @@ StrategyBacktestResult StrategyEngine::backtest(
         if (m_ruleGate.enabled()) {
             ruleProvider.setDay(view, dates[static_cast<std::size_t>(r)].value, &backtestPositions);
             ruleAllowEntriesToday = m_ruleGate.allowNewEntriesToday(ruleProvider);
+            if (!ruleAllowEntriesToday && m_tradeJournal) {
+                m_tradeJournal->log(
+                    std::to_string(dates[static_cast<std::size_t>(r)].value)
+                    + " 冻结 模板:" + m_ruleGate.lastHitTemplateId()
+                    + " 规则:" + m_ruleGate.lastHitRuleId());
+            }
         } else {
             ruleAllowEntriesToday = true;
         }
@@ -2050,6 +2083,14 @@ StrategyBacktestResult StrategyEngine::backtest(
                             m_ruleGate.lastHitRuleId(),
                             closePrice, r
                         });
+                        // 交易日志: 规则拒绝
+                        if (m_tradeJournal) {
+                            m_tradeJournal->log(
+                                std::to_string(dates[static_cast<std::size_t>(r)].value)
+                                + " 拒绝 " + symbol
+                                + " 规则:" + m_ruleGate.lastHitRuleId()
+                                + " 模板:" + m_ruleGate.lastHitTemplateId());
+                        }
                         continue;
                     }
                 }
@@ -2135,6 +2176,13 @@ StrategyBacktestResult StrategyEngine::backtest(
                 auto riskResult = domain::strategy::RiskEvaluator::evaluateOrder(riskInput);
                 if (!riskResult.approved()) {
                     ++riskRejectedCount;
+                    // 交易日志: 风控拒绝
+                    if (m_tradeJournal) {
+                        m_tradeJournal->log(
+                            std::to_string(dates[static_cast<std::size_t>(r)].value)
+                            + " 风控拒绝 " + symbol
+                            + " " + riskResult.description());
+                    }
                     continue;
                 }
 
@@ -2168,6 +2216,14 @@ StrategyBacktestResult StrategyEngine::backtest(
                         pos.setLastPrice(closePrice);
                         backtestPositions[symbol] = pos;
                         boughtToday.insert(symbol);  // T+1: 当日买入, 禁止同日卖出
+                        // 交易日志: 买入成交
+                        if (m_tradeJournal) {
+                            auto dt = dates[static_cast<std::size_t>(r)].value;
+                            m_tradeJournal->log(
+                                std::to_string(dt) + " 买入 " + symbol
+                                + "  " + std::to_string(filledQty) + "股  "
+                                + std::to_string(closePrice));
+                        }
                     }
                 } else {
                     // T+1: 当日买入的标的禁止同日卖出
@@ -2204,6 +2260,16 @@ StrategyBacktestResult StrategyEngine::backtest(
                         if (pnl > 0) { ++winningFills; totalProfit += pnl; if (pnl > largestWin) largestWin = pnl; }
                         else { ++losingFills; totalLoss += -pnl; if (-pnl > largestLoss) largestLoss = -pnl; }
                         symbolPnl[symbol] += pnl;
+                        // 交易日志: 卖出成交
+                        if (m_tradeJournal) {
+                            auto dt = dates[static_cast<std::size_t>(r)].value;
+                            auto pnlInt = static_cast<int>(pnl);
+                            m_tradeJournal->log(
+                                std::to_string(dt) + " 卖出 " + symbol
+                                + "  " + std::to_string(sellQty) + "股  "
+                                + std::to_string(closePrice)
+                                + "  盈亏:" + (pnlInt >= 0 ? "+" : "") + std::to_string(pnlInt));
+                        }
                         // ── 持仓诊断 ──
                         {
                             auto bdIt = buyDateMap.find(symbol);
@@ -2295,6 +2361,15 @@ StrategyBacktestResult StrategyEngine::backtest(
         todayStopLossSyms.clear();
         todayRuleExitSyms.clear();
         boughtToday.clear();  // T+1 次日解禁
+        // 交易日志: 每日快照
+        if (m_tradeJournal) {
+            int posCount = static_cast<int>(backtestPositions.size());
+            m_tradeJournal->log(
+                std::to_string(dates[static_cast<std::size_t>(r)].value)
+                + " 日终 持仓:" + std::to_string(posCount)
+                + " 净值:" + std::to_string(static_cast<int>(equity))
+                + " 现金:" + std::to_string(static_cast<int>(cash)));
+        }
         }  // else (非熔断/清仓路径)
         if (equity > peakEquity) peakEquity = equity;
 
