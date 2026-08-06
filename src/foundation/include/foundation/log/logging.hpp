@@ -3,6 +3,8 @@
 #define FOUNDATION_INTERNAL_LOGGING_HPP
 
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <string>
 #include <chrono>
 #include <iomanip>
@@ -60,15 +62,29 @@ public:
     void setColorEnabled(bool enabled) {
         color_enabled_ = enabled;
     }
-    
+
     // 设置运行时级别
     void setLevel(InternalLogLevel level) {
         runtime_level_ = level;
     }
-    
+
     // 获取当前级别
     InternalLogLevel getLevel() const {
         return runtime_level_;
+    }
+
+    // 启用文件日志: logs/system/system_YYYY-MM-DD.log
+    void enableFileLogging(const std::string& logDir) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        m_logDir = logDir;
+        m_fileLogEnabled = true;
+        ensureLogFile();
+    }
+
+    void disableFileLogging() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        m_fileLogEnabled = false;
+        if (m_logFile.is_open()) m_logFile.close();
     }
     
     // 原始日志接口
@@ -90,6 +106,15 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         if (output_stream_ && output_stream_->good()) {
             *output_stream_ << formatted << std::endl;
+        }
+        // 同步写入文件
+        if (m_fileLogEnabled) {
+            ensureLogFile();
+            if (m_logFile.is_open()) {
+                // 文件输出去掉颜色代码
+                m_logFile << stripColors(formatted) << std::endl;
+                m_logFile.flush();
+            }
         }
     }
     
@@ -230,9 +255,55 @@ private:
     }
     
 private:
-    std::ostream* output_stream_;
-    InternalLogLevel runtime_level_;
-    bool color_enabled_;
+    void ensureLogFile() const {
+        if (m_logDir.empty()) return;
+        auto now = std::chrono::system_clock::now();
+        auto t = std::chrono::system_clock::to_time_t(now);
+        std::tm tm;
+#ifdef _WIN32
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
+        char dateBuf[16];
+        std::strftime(dateBuf, sizeof(dateBuf), "%Y-%m-%d", &tm);
+        std::string today(dateBuf);
+
+        if (today == m_currentLogDate && m_logFile.is_open()) return;
+
+        if (m_logFile.is_open()) m_logFile.close();
+        m_currentLogDate = today;
+
+        std::filesystem::path dir = std::filesystem::path(m_logDir) / "system";
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+
+        std::string path = (dir / ("system_" + today + ".log")).string();
+        m_logFile.open(path, std::ios::app | std::ios::out);
+    }
+
+    static std::string stripColors(const std::string& msg) {
+        std::string result;
+        result.reserve(msg.size());
+        bool inEscape = false;
+        for (char c : msg) {
+            if (c == '\033') { inEscape = true; continue; }
+            if (inEscape) {
+                if (c == 'm') inEscape = false;
+                continue;
+            }
+            result += c;
+        }
+        return result;
+    }
+
+    std::ostream* output_stream_{&std::clog};
+    InternalLogLevel runtime_level_{static_cast<InternalLogLevel>(FOUNDATION_INTERNAL_LOG_LEVEL)};
+    bool color_enabled_{FOUNDATION_INTERNAL_LOG_ENABLE_COLOR != 0};
+    bool m_fileLogEnabled{false};
+    std::string m_logDir;
+    mutable std::string m_currentLogDate;
+    mutable std::ofstream m_logFile;
     mutable std::mutex mutex_;
 };
 

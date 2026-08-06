@@ -162,7 +162,11 @@ void AppBootstrap::init()
         INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
         return;
     }
-    
+
+    // 启用文件日志: logs/system/system_YYYY-MM-DD.log
+    foundation::internal::InternalLogger::instance().enableFileLogging("logs");
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 文件日志已启用: logs/system/";
+
     // 阶段2: 服务初始化
     if (!initServices()) {
         m_lastError = "Services initialization failed";

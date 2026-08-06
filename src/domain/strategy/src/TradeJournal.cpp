@@ -41,8 +41,8 @@ void TradeJournal::ensureFileForToday() {
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
 
-    // 文件名: trade_2026-08-06.jsonl
-    std::string filename = "trade_" + today + ".jsonl";
+    // 文件名: trade_2026-08-06.log
+    std::string filename = "trade_" + today + ".log";
     m_currentFilePath = (dir / filename).string();
 
     m_file.open(m_currentFilePath, std::ios::app | std::ios::out);
