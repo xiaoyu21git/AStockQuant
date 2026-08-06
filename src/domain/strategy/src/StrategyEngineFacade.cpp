@@ -1036,6 +1036,12 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
                 << " timingGate=" << (eodTiming.allowNewEntries ? "允许" : "冻结")
                 << " timingReason=" << eodTiming.reason
                 << " liquidate=" << eodTiming.forceLiquidate;
+            // 交易日志: 冻结
+            if (m_tradeJournal) {
+                m_tradeJournal->log(tradingDay + " 冻结 原因:"
+                    + std::string(ruleAllowEntriesEod ? "" : "规则闸门")
+                    + std::string(!eodTiming.allowNewEntries ? "择时空仓" : ""));
+            }
             break;
         }
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
@@ -1254,10 +1260,26 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             totalSubmitted = static_cast<int>(finalOrders.size());
             INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 篮子提交: basketId=" << basketId
                                  << " orders=" << totalSubmitted;
+            // 交易日志: 订单提交
+            if (m_tradeJournal) {
+                for (const auto& o : finalOrders) {
+                    std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
+                    m_tradeJournal->log(tradingDay + " 提交 " + side + " "
+                        + o.symbol() + " " + std::to_string(o.quantity()) + "股");
+                }
+            }
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[StrategyEngine] EOD onOrders 异常: basketId="
                                   << basketId << " " << e.what();
         }
+    }
+
+    // 交易日志: 日终快照
+    if (m_tradeJournal) {
+        int posCount = static_cast<int>(positions.size());
+        m_tradeJournal->log(tradingDay + " 日终 持仓:" + std::to_string(posCount)
+            + " 净值:" + std::to_string(static_cast<int>(account.totalAsset))
+            + " 现金:" + std::to_string(static_cast<int>(account.availableCash)));
     }
 
     int totalRejected = totalGenerated - totalSubmitted;
