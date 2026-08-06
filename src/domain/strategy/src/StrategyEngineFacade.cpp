@@ -893,20 +893,23 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
         return EodEvaluationStatus::Skipped;
     }
 
-    // ── 取全市场标的: 优先行情视图(5290只), 回退tick订阅 ──
-    std::vector<std::string> symbols;
-    const auto* v = liveMarketView();
-    INTERNAL_INFO_STREAM << "[StrategyEngine] EOD view=" << static_cast<const void*>(v)
-                         << " hasSymbols=" << (v ? v->symbolStrings().size() : -1);
-    if (v && !v->symbolStrings().empty()) {
-        symbols = v->symbolStrings();
-    } else {
-        symbols = domain::market::MarketDataService::instance().symbols();
-        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 回退tick订阅, 标的数=" << symbols.size();
-    }
+    // ── 从 MarketDataService 取所有已订阅标的 ──
+    auto symbols = domain::market::MarketDataService::instance().symbols();
     if (symbols.empty()) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无可用标的, 跳过";
+        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无订阅标的, 跳过";
         return EodEvaluationStatus::Skipped;
+    }
+
+    // 补单: tradingDay 转 "YYYY-MM-DD" 供 history_bars_n 用
+    std::string endDateStr;
+    if (isCompensation) {
+        auto dayInt = std::stoll(tradingDay);
+        int y = static_cast<int>(dayInt / 10000);
+        int m = static_cast<int>((dayInt % 10000) / 100);
+        int d = static_cast<int>(dayInt % 100);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+        endDateStr = buf;
     }
 
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size() << " 只标的";
@@ -1042,24 +1045,23 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             }
             break;
         }
-        // 取今日收盘价: tick数据优先, 回退行情视图
-        double price = 0;
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
-        if (d.valid()) {
-            price = d.dailyBar().close();
-        }
-        if (price <= 0 && liveMarketView()) {
-            const auto* v = liveMarketView();
-            const auto& ss = v->symbolStrings();
-            auto it = std::find(ss.begin(), ss.end(), sym);
-            if (it != ss.end()) {
-                int col = static_cast<int>(std::distance(ss.begin(), it));
-                int lastRow = static_cast<int>(v->dates().size()) - 1;
-                if (lastRow >= 0) {
-                    const auto& cm = v->close();
-                    price = cm.data[static_cast<size_t>(lastRow) * v->instruments().size() + static_cast<size_t>(col)];
-                }
+        if (!d.valid()) continue;
+
+        double price = 0;
+        if (isCompensation) {
+            std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
+            if (gm.empty()) continue;
+            auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, endDateStr.c_str(),
+                                           0, nullptr, true, nullptr);
+            if (!bars || bars->status() || bars->count() <= 0) {
+                if (bars) bars->release();
+                continue;
             }
+            price = bars->at(0).close;
+            bars->release();
+        } else {
+            price = d.dailyBar().close();
         }
         if (price <= 0) continue;
 
