@@ -45,7 +45,8 @@ void TradeJournal::ensureFileForToday() {
     std::string filename = "trade_" + today + ".log";
     m_currentFilePath = (dir / filename).string();
 
-    m_file.open(m_currentFilePath, std::ios::app | std::ios::out);
+    // binary模式避免Windows GBK/UTF-8编码转换崩溃
+    m_file.open(m_currentFilePath, std::ios::app | std::ios::out | std::ios::binary);
     if (!m_file) {
         INTERNAL_WARN_STREAM << "[TradeJournal] 无法创建日志文件: " << m_currentFilePath;
     } else {

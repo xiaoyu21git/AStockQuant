@@ -279,7 +279,7 @@ private:
         std::filesystem::create_directories(dir, ec);
 
         std::string path = (dir / ("system_" + today + ".log")).string();
-        m_logFile.open(path, std::ios::app | std::ios::out);
+        m_logFile.open(path, std::ios::app | std::ios::out | std::ios::binary);
     }
 
     static std::string stripColors(const std::string& msg) {
