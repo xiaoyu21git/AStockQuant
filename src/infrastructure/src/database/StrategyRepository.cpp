@@ -61,7 +61,10 @@ QVariantMap PersistedStrategyData::toVariantMap() const {
     m["sharpeRatio"]   = performanceMetrics.value("sharpeRatio", 0);
     m["maxDrawdown"]   = performanceMetrics.value("maxDrawdown", 0);
     m["winRate"]       = performanceMetrics.value("winRate", 0);
-    m["trades"]        = performanceMetrics.value("trades", 0);
+    m["runningDays"]   = createdAt.isValid() ? createdAt.daysTo(QDateTime::currentDateTime()) : 0;
+    m["trades"]        = 0;  // 实盘统计由 StrategyBridge::list() 填充
+    m["dailyPnL"]      = 0;
+    m["position"]      = 0;
     return m;
 }
 PersistedStrategyData PersistedStrategyData::fromVariantMap(const QVariantMap& m) {
@@ -134,7 +137,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
         if (!db) { INTERNAL_ERROR_STREAM << "[Repo] findAll FAILED: no db"; return {}; }
         auto r = db->executeQuery(
             "SELECT s.*, b.total_return, b.annualized_return, b.sharpe_ratio, b.max_drawdown, "
-            "b.win_rate, b.total_trades "
+            "b.win_rate "
             "FROM live.strategy s "
             "LEFT JOIN LATERAL ("
             "  SELECT * FROM live.strategy_backtest_results "
@@ -169,7 +172,6 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
             perf["maxDrawdown"]      = row.getDouble("max_drawdown");
             perf["winRate"]          = row.getDouble("win_rate");
             perf["returns"]          = row.getDouble("total_return") * 100.0;
-            perf["trades"]           = row.getInt("total_trades");
             d.performanceMetrics = perf;
             v.push_back(d);
         }

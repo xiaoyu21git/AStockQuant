@@ -27,27 +27,23 @@ DailyEodScheduler::~DailyEodScheduler() {
 void DailyEodScheduler::start() {
     loadLastEvalDay();
 
-    // ── 补单窗口: 0:00 ~ 9:30 ──
-    if (isCompensationWindow()) {
-        auto today = getCurrentTradingDay();
-        std::string todayStr = std::to_string(today);
-        std::string prevDay = getPreviousTradingDay(todayStr);
-        if (!prevDay.empty()) {
-            auto prev = std::stoll(prevDay);
-            if (m_lastEvalDay.load() < prev) {
-                INTERNAL_INFO_STREAM << "[DailyEod] 补单窗口, 缺失评估日: " << prev
-                                     << " 当前 lastEval=" << m_lastEvalDay.load();
-                doEvaluate(prevDay);
-            }
-        }
+    // ── 补单: 补评估 lastEvalDay 之后到上一交易日之间的所有缺失日 ──
+    auto today = getCurrentTradingDay();
+    std::string todayStr = std::to_string(today);
+    std::string prevDay = getPreviousTradingDay(todayStr);
+    while (!prevDay.empty()) {
+        auto prev = std::stoll(prevDay);
+        if (prev <= m_lastEvalDay.load()) break;
+        INTERNAL_INFO_STREAM << "[DailyEod] 补单: 缺失评估日 " << prev
+                             << " lastEval=" << m_lastEvalDay.load();
+        doEvaluate(prevDay);
+        prevDay = getPreviousTradingDay(prevDay);
     }
 
-    // ── 启动时检查: 如果当前时间已过EOD触发时间且今天未评估，立即补评估 ──
+    // ── 启动时: 如果已过EOD触发时间且今天未评估，立即评估 ──
     {
         int mins = getCurrentLocalMinutes();
-        auto today = getCurrentTradingDay();
-        std::string todayStr = std::to_string(today);
-        if (mins >= m_eodTriggerMinute && std::stoll(todayStr) > m_lastEvalDay.load()) {
+        if (mins >= m_eodTriggerMinute && today > m_lastEvalDay.load()) {
             INTERNAL_INFO_STREAM << "[DailyEod] 启动时已过触发时间 " << m_eodTriggerMinute << "min, 立即补评估: " << todayStr;
             doEvaluate(todayStr);
         }

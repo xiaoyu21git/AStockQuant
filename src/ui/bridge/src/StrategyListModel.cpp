@@ -57,6 +57,12 @@ QVariant StrategyListModel::data(const QModelIndex& index, int role) const
         return row.winRate;
     case TradesRole:
         return row.trades;
+    case RunningDaysRole:
+        return row.runningDays;
+    case DailyPnLRole:
+        return row.dailyPnL;
+    case PositionRole:
+        return row.position;
     default:
         return {};
     }
@@ -76,7 +82,10 @@ QHash<int, QByteArray> StrategyListModel::roleNames() const
         {SharpeRatioRole, "sharpeRatio"},
         {MaxDrawdownRole, "maxDrawdown"},
         {WinRateRole, "winRate"},
-        {TradesRole, "trades"}
+        {TradesRole, "trades"},
+        {RunningDaysRole, "runningDays"},
+        {DailyPnLRole, "dailyPnL"},
+        {PositionRole, "position"}
     };
 }
 
@@ -201,12 +210,16 @@ StrategyListModel::StrategyRow StrategyListModel::fromVariantMap(const QVariantM
     row.maxDrawdown  = map.value(QStringLiteral("maxDrawdown")).toDouble();
     row.winRate      = map.value(QStringLiteral("winRate")).toDouble();
     row.trades       = map.value(QStringLiteral("trades")).toInt();
+    row.runningDays  = map.value(QStringLiteral("runningDays")).toInt();
+    row.dailyPnL     = map.value(QStringLiteral("dailyPnL")).toDouble();
+    row.position     = map.value(QStringLiteral("position")).toDouble();
 
     INTERNAL_INFO_STREAM << "[StrategyListModel] fromVariantMap: "
                          << row.strategyId.toStdString()
                          << " returns=" << row.returns
                          << " sharpe=" << row.sharpeRatio
-                         << " trades=" << row.trades;
+                         << " trades=" << row.trades
+                         << " runningDays=" << row.runningDays;
 
     if (row.name.isEmpty()) {
         INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] mapped empty name for strategyId=%1 raw=%2")
@@ -233,6 +246,9 @@ QVariantMap StrategyListModel::toVariantMap(const StrategyRow& row) const
     map.insert(QStringLiteral("maxDrawdown"), row.maxDrawdown);
     map.insert(QStringLiteral("winRate"), row.winRate);
     map.insert(QStringLiteral("trades"), row.trades);
+    map.insert(QStringLiteral("runningDays"), row.runningDays);
+    map.insert(QStringLiteral("dailyPnL"), row.dailyPnL);
+    map.insert(QStringLiteral("position"), row.position);
     return map;
 }
 

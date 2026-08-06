@@ -24,7 +24,10 @@ public:
         SharpeRatioRole,
         MaxDrawdownRole,
         WinRateRole,
-        TradesRole
+        TradesRole,
+        RunningDaysRole,
+        DailyPnLRole,
+        PositionRole
     };
     Q_ENUM(Roles)
 
@@ -61,6 +64,9 @@ private:
         double maxDrawdown{0};
         double winRate{0};
         int trades{0};
+        int runningDays{0};
+        double dailyPnL{0};
+        double position{0};
     };
 
     static StrategyRow fromVariantMap(const QVariantMap& map);

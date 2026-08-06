@@ -13,6 +13,7 @@ StrategyBridge* StrategyBridge::s_instance = nullptr;
 #include "database/MarketDataRepository.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/ISqlDatabase.h"
+#include "../../engine/include/AccountEngine.h"
 #include "database/NativePgDatabase.h"
 #include "database/StrategyRepository.h"
 #include "FactorService.h"
@@ -605,11 +606,25 @@ QVariantList StrategyBridge::list()
         auto map = data.toVariantMap();
         QString sid = QString::fromStdString(data.strategyId);
         map["displayStatus"] = m_runtimeStatus.value(sid, QStringLiteral("已停止"));
-        auto perf = map["performanceMetrics"].toMap();
+        // 实盘实时数据: runningDays从DB, dailyPnL/position从AccountEngine
+        auto& accEng = engine::AccountEngine::instance();
+        auto positions = accEng.positions();
+        double totalPnl = 0.0, totalMv = 0.0;
+        int tradeCount = 0;
+        for (const auto& p : positions) {
+            totalPnl += p.unrealizedPnl;
+            totalMv += p.marketValue;
+            if (p.quantity > 0) ++tradeCount;
+        }
+        map["dailyPnL"] = totalPnl;
+        map["position"] = totalMv;
+        map["trades"]   = tradeCount;  // 实盘持仓数作为交易活跃度指标
         INTERNAL_INFO_STREAM << "[StrategyBridge] list: " << sid.toStdString()
                              << " returns=" << map["returns"].toDouble()
-                             << " sharpe=" << map["sharpeRatio"].toDouble()
-                             << " trades=" << map["trades"].toInt();
+                             << " runningDays=" << map["runningDays"].toInt()
+                             << " holdings=" << tradeCount
+                             << " dailyPnL=" << totalPnl
+                             << " position=" << totalMv;
         list.push_back(map);
     }
     return list;
