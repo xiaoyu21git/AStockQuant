@@ -895,10 +895,14 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
 
     // ── 取全市场标的: 优先行情视图(5290只), 回退tick订阅 ──
     std::vector<std::string> symbols;
-    if (liveMarketView() && !liveMarketView()->symbolStrings().empty()) {
-        symbols = liveMarketView()->symbolStrings();
+    const auto* v = liveMarketView();
+    INTERNAL_INFO_STREAM << "[StrategyEngine] EOD view=" << static_cast<const void*>(v)
+                         << " hasSymbols=" << (v ? v->symbolStrings().size() : -1);
+    if (v && !v->symbolStrings().empty()) {
+        symbols = v->symbolStrings();
     } else {
         symbols = domain::market::MarketDataService::instance().symbols();
+        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 回退tick订阅, 标的数=" << symbols.size();
     }
     if (symbols.empty()) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无可用标的, 跳过";
