@@ -36,16 +36,15 @@ void TradeJournal::ensureFileForToday() {
 
     m_currentDate = today;
 
-    // 创建目录: logs/策略名/
-    std::filesystem::path dir = std::filesystem::path(m_logDir) / m_strategyName;
+    // 创建目录: logs/策略名/ (u8path确保UTF-8中文路径正确)
+    std::filesystem::path dir = std::filesystem::u8path(m_logDir) / std::filesystem::u8path(m_strategyName);
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
 
     // 文件名: trade_2026-08-06.log
     std::string filename = "trade_" + today + ".log";
-    m_currentFilePath = (dir / filename).string();
+    m_currentFilePath = (dir / std::filesystem::u8path(filename)).u8string();
 
-    // binary模式避免Windows GBK/UTF-8编码转换崩溃
     m_file.open(m_currentFilePath, std::ios::app | std::ios::out | std::ios::binary);
     if (!m_file) {
         INTERNAL_WARN_STREAM << "[TradeJournal] 无法创建日志文件: " << m_currentFilePath;

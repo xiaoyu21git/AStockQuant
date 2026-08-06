@@ -274,11 +274,11 @@ private:
         if (m_logFile.is_open()) m_logFile.close();
         m_currentLogDate = today;
 
-        std::filesystem::path dir = std::filesystem::path(m_logDir) / "system";
+        std::filesystem::path dir = std::filesystem::u8path(m_logDir) / "system";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
 
-        std::string path = (dir / ("system_" + today + ".log")).string();
+        std::string path = (dir / ("system_" + today + ".log")).u8string();
         m_logFile.open(path, std::ios::app | std::ios::out | std::ios::binary);
     }
 
