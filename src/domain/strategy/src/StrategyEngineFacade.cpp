@@ -796,10 +796,8 @@ void StrategyEngine::drainQueue()
             for (const auto& sym : symbols) {
                 auto& d = domain::market::MarketDataService::instance().liveData(sym);
                 if (!d.valid()) continue;
-        ++eodValidCount;
                 double price = d.dailyBar().close();
                 if (price <= 0) continue;
-        ++eodPriceCount;
                 auto aSym = foundation::market::AStockSymbol::fromString(sym);
                 if (!aSym.isValid()) continue;
                 batch.emplace_back(
@@ -812,7 +810,6 @@ void StrategyEngine::drainQueue()
 
         for (const auto& mdp : batch) {
         try {
-            ++eodStepCount;
             auto orders = step(mdp);
             if (orders.has_value() && m_orderListener
                 && !m_isBacktestMode.load(std::memory_order_acquire)) {
@@ -1081,11 +1078,9 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             }
         }
         if (!d.valid()) continue;
-        ++eodValidCount;
 
         double price = d.dailyBar().close();
         if (price <= 0) continue;
-        ++eodPriceCount;
 
         auto aSym = foundation::market::AStockSymbol::fromString(sym);
         if (!aSym.isValid()) continue;
@@ -1106,7 +1101,6 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
                 continue;
             }
 
-            ++eodStepCount;
             auto orders = step(mdp);
             if (orders.has_value()) {
                 for (auto& order : *orders) {
@@ -1320,9 +1314,6 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
         std::chrono::steady_clock::now().time_since_epoch().count(),
         std::memory_order_release);
 
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估: valid=" << eodValidCount
-                         << " priceOk=" << eodPriceCount
-                         << " stepCalled=" << eodStepCount;
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成"
                          << " 信号=" << totalGenerated
                          << " 提交=" << totalSubmitted
