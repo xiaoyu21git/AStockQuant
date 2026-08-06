@@ -1050,28 +1050,23 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             break;
         }
         auto& d = domain::market::MarketDataService::instance().liveData(sym);
-        if (!d.valid()) {
-            // 无tick数据 → 从行情视图补填收盘价
-            if (liveMarketView()) {
-                const auto* v = liveMarketView();
-                const auto& ss = v->symbolStrings();
-                auto it = std::find(ss.begin(), ss.end(), sym);
-                if (it != ss.end()) {
-                    int col = static_cast<int>(std::distance(ss.begin(), it));
-                    int lastRow = static_cast<int>(v->dates().size()) - 1;
-                    if (lastRow >= 0) {
-                        const auto& cm = v->close();
-                        double px = cm.data[static_cast<size_t>(lastRow) * v->instruments().size() + static_cast<size_t>(col)];
-                        if (px > 0) {
-                            domain::market::MarketDataService::instance().mutableLiveData(sym).dailyBar().setClose(px);
-                        }
-                    }
-                }
-            }
-        }
         if (!d.valid()) continue;
 
-        double price = d.dailyBar().close();
+        double price = 0;
+        if (isCompensation) {
+            std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
+            if (gm.empty()) continue;
+            auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, endDateStr.c_str(),
+                                           0, nullptr, true, nullptr);
+            if (!bars || bars->status() || bars->count() <= 0) {
+                if (bars) bars->release();
+                continue;
+            }
+            price = bars->at(0).close;
+            bars->release();
+        } else {
+            price = d.dailyBar().close();
+        }
         if (price <= 0) continue;
 
         auto aSym = foundation::market::AStockSymbol::fromString(sym);
