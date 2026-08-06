@@ -1,5 +1,5 @@
 #include "../include/OrderGenerator.h"
-#include "../include/StrategyServiceTypes.h"  // SignalIntent
+#include "../include/StrategyServiceTypes.h"
 #include "../../../engine/include/AccountEngine.h"
 
 #include <algorithm>
@@ -9,29 +9,105 @@
 namespace domain::strategy {
 
 using OrderSide = domain::trading::OrderSide;
+using OrderRequest = domain::trading::OrderRequest;
 
-std::vector<domain::trading::OrderRequest> OrderGenerator::generate(
-    const std::vector<domain::trading::OrderRequest>& rawOrders,
+namespace {
+constexpr std::int64_t kMinLot = 100;
+
+std::string stripExchange(const std::string& sym) {
+    auto dot = sym.find('.');
+    return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
+}
+
+std::int64_t weightToQty(double weight, double totalAsset, double priceForWeight) {
+    if (priceForWeight <= 0 || totalAsset <= 0) return 0;
+    return static_cast<std::int64_t>(weight * totalAsset / priceForWeight / kMinLot) * kMinLot;
+}
+
+double qtyToWeight(std::int64_t qty, double totalAsset, double priceForWeight) {
+    if (priceForWeight <= 0 || totalAsset <= 0) return 0.0;
+    return static_cast<double>(qty) * priceForWeight / totalAsset;
+}
+} // namespace
+
+OrderGenerator::OrderDelta OrderGenerator::computeBuyDelta(
+    std::int64_t currentQty, double currentWeight,
+    double targetWeight, double priceForWeight, double totalAsset) const
+{
+    OrderDelta result;
+    if (currentWeight < 0.001) {
+        result.intent = SignalIntent::OPEN;
+        result.deltaQty = weightToQty(targetWeight, totalAsset, priceForWeight);
+    } else if (targetWeight > currentWeight) {
+        result.intent = SignalIntent::ADD;
+        std::int64_t targetQty = weightToQty(targetWeight, totalAsset, priceForWeight);
+        result.deltaQty = targetQty - currentQty;
+    }
+    return result;  // targetWeight <= currentWeight → deltaQty=0, caller discards
+}
+
+OrderGenerator::OrderDelta OrderGenerator::computeSellDelta(
+    std::int64_t currentQty, double currentWeight,
+    double targetWeight, double priceForWeight, double totalAsset,
+    std::int64_t requestedQty) const
+{
+    OrderDelta result;
+    if (currentQty <= 0) return result;
+    if (targetWeight >= currentWeight) return result;  // 矛盾
+
+    if (targetWeight > 0.0) {
+        // 策略卖出: targetWeight 表示期望的新持仓权重
+        std::int64_t targetQty = weightToQty(targetWeight, totalAsset, priceForWeight);
+        if (targetQty < kMinLot) {
+            result.intent = SignalIntent::CLOSE;
+            result.deltaQty = currentQty;
+        } else {
+            result.intent = SignalIntent::REDUCE;
+            result.deltaQty = currentQty - targetQty;
+        }
+    } else {
+        // 规则出场: 尊重显式数量; 策略清仓: 全卖
+        if (requestedQty > 0 && requestedQty < currentQty) {
+            result.intent = SignalIntent::REDUCE;
+            result.deltaQty = requestedQty;
+        } else {
+            result.intent = SignalIntent::CLOSE;
+            result.deltaQty = currentQty;
+        }
+    }
+    return result;
+}
+
+void OrderGenerator::compressBuyTotalWeight(std::vector<OrderRequest>& orders) const {
+    double totalWeight = 0.0;
+    for (const auto& o : orders) {
+        if (o.side() != OrderSide::Buy) continue;
+        totalWeight += o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+    }
+    if (totalWeight <= 1.0) return;
+
+    double scale = 1.0 / totalWeight;
+    for (auto& o : orders) {
+        if (o.side() != OrderSide::Buy) continue;
+        double w = o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+        std::int64_t newQty = static_cast<std::int64_t>(o.quantity() * scale / kMinLot) * kMinLot;
+        if (newQty >= kMinLot) o.setQuantity(newQty);
+        o.setExtension(domain::trading::ExtKey::kTargetWeight, w * scale);
+    }
+}
+
+std::vector<OrderRequest> OrderGenerator::generate(
+    const std::vector<OrderRequest>& rawOrders,
     const IPositionProvider& posProvider,
     const engine::AccountInfo& account,
     double priceForWeight) const
 {
-    using OrderRequest = domain::trading::OrderRequest;
-    using OrderSide = domain::trading::OrderSide;
-
     std::vector<OrderRequest> result;
-    constexpr std::int64_t kMinLot = 100;
-    std::unordered_set<std::string> seenKeys;  // 同标的+方向去重
-
-    auto stripExchange = [](const std::string& sym) -> std::string {
-        auto dot = sym.find('.');
-        return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
-    };
+    std::unordered_set<std::string> seenKeys;
 
     for (const auto& raw : rawOrders) {
         if (!raw.isValid()) continue;
 
-        // 同标的+方向去重
         std::string dedupKey = stripExchange(raw.symbol())
             + (raw.side() == OrderSide::Buy ? "_B" : "_S");
         if (seenKeys.count(dedupKey)) continue;
@@ -40,71 +116,33 @@ std::vector<domain::trading::OrderRequest> OrderGenerator::generate(
         double targetWeight = raw.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
         double signalScore  = raw.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
         std::string code = stripExchange(raw.symbol());
-
         std::int64_t currentQty = posProvider.quantityOf(code);
 
         if (priceForWeight <= 0 || account.totalAsset <= 0) continue;
 
-        double currentW = static_cast<double>(currentQty) * priceForWeight / account.totalAsset;
-        std::int64_t targetQty = static_cast<std::int64_t>(
-            targetWeight * account.totalAsset / priceForWeight / 100.0) * 100;
+        double currentWeight = qtyToWeight(currentQty, account.totalAsset, priceForWeight);
+        OrderDelta delta;
 
-        std::int64_t deltaQty = 0;
-        SignalIntent intent = SignalIntent::KEEP;
-        OrderSide side = raw.side();
-
-        if (side == OrderSide::Buy) {
-            if (currentW < 0.001) {
-                intent = SignalIntent::OPEN; deltaQty = targetQty;
-            } else if (targetWeight > currentW) {
-                intent = SignalIntent::ADD; deltaQty = targetQty - currentQty;
-            } else {
-                continue;  // Buy 但 target <= current → 矛盾，丢弃
-            }
-        } else { // Sell
-            if (currentQty <= 0) continue;  // 无持仓，丢弃
-            if (targetWeight >= currentW) continue;  // Sell 但 target >= current → 矛盾
-            if (targetWeight > 0.0) {
-                if (targetQty < kMinLot) {
-                    intent = SignalIntent::CLOSE;
-                    deltaQty = currentQty;
-                } else {
-                    intent = SignalIntent::REDUCE;
-                    deltaQty = currentQty - targetQty;
-                }
-            } else {
-                intent = SignalIntent::CLOSE; deltaQty = currentQty;
-            }
+        if (raw.side() == OrderSide::Buy) {
+            delta = computeBuyDelta(currentQty, currentWeight, targetWeight,
+                                    priceForWeight, account.totalAsset);
+        } else {
+            delta = computeSellDelta(currentQty, currentWeight, targetWeight,
+                                     priceForWeight, account.totalAsset,
+                                     static_cast<std::int64_t>(raw.quantity()));
         }
 
-        if (deltaQty < kMinLot) continue;  // 不足一手
+        if (delta.deltaQty < kMinLot) continue;
 
         OrderRequest order = m_orderBuilder->buildSignalOrder(
-            raw.symbol(), side, 0, deltaQty, signalScore);
-        order.setExtension(domain::trading::ExtKey::kSignalIntent, static_cast<std::uint64_t>(intent));
-        order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);  // 保留原始权重用于上限压缩
+            raw.symbol(), raw.side(), 0, delta.deltaQty, signalScore);
+        order.setExtension(domain::trading::ExtKey::kSignalIntent,
+                           static_cast<std::uint64_t>(delta.intent));
+        order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);
         result.push_back(std::move(order));
     }
 
-    // ── 总敞口上限: 超出100%时按比例压缩全部买单 ──
-    {
-        double totalWeight = 0.0;
-        for (const auto& o : result) {
-            if (o.side() != OrderSide::Buy) continue;
-            totalWeight += o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
-        }
-        if (totalWeight > 1.0) {
-            double scale = 1.0 / totalWeight;
-            for (auto& o : result) {
-                if (o.side() != OrderSide::Buy) continue;
-                double w = o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
-                std::int64_t newQty = static_cast<std::int64_t>(o.quantity() * scale / kMinLot) * kMinLot;
-                if (newQty >= kMinLot) o.setQuantity(newQty);
-                o.setExtension(domain::trading::ExtKey::kTargetWeight, w * scale);
-            }
-        }
-    }
-
+    compressBuyTotalWeight(result);
     return result;
 }
 

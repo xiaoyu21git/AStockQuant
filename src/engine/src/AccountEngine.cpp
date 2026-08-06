@@ -53,7 +53,10 @@ AccountEngine::AccountEngine() {
                 auto sym   = e.get<std::string>("symbol");
                 auto price = e.get<double>("price");
                 if (!sym || !price) return;
-                m_cachedPositions[*sym].lastPrice = *price;
+                std::unique_lock<std::shared_mutex> lock(m_mutex);
+                auto it = m_cachedPositions.find(*sym);
+                if (it != m_cachedPositions.end())
+                    it->second.lastPrice = *price;
             });
     }
 }
@@ -72,32 +75,47 @@ void AccountEngine::shutdown() {
         if (!m_tickSub.is_null())     bus->unsubscribe(m_tickSub);
     }
     m_strategy = nullptr;
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_cacheValid = false;
     m_cachedPositions.clear();
 }
+
 bool AccountEngine::initialized() const { return m_strategy != nullptr; }
 
 AccountInfo AccountEngine::account() {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
     return m_cachedAccount;
 }
 
 std::vector<Position> AccountEngine::positions() {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
     std::vector<Position> result;
-    for (auto& [sym, p] : m_cachedPositions) result.push_back(p);
+    result.reserve(m_cachedPositions.size());
+    for (const auto& [sym, p] : m_cachedPositions)
+        result.push_back(p);
     return result;
 }
 
-void AccountEngine::setOnDataChanged(DataFn cb) { m_onDataChanged = std::move(cb); }
+void AccountEngine::setOnDataChanged(DataFn cb) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    m_onDataChanged = std::move(cb);
+}
 
 void AccountEngine::onCash(const AccountInfo& a) {
-    m_cachedAccount = a;
-    m_cacheValid = true;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cachedAccount = a;
+        m_cacheValid = true;
+    }
     if (m_onDataChanged) m_onDataChanged();
 }
 
 void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
-    for (auto& p : positions)
-        m_cachedPositions[p.symbol] = p;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        for (const auto& p : positions)
+            m_cachedPositions[p.symbol] = p;
+    }
     if (m_onDataChanged) m_onDataChanged();
 }
 
@@ -106,7 +124,10 @@ void AccountEngine::applyAccountEvent(const AccountInfo& a) {
 }
 
 void AccountEngine::applyPositionEvent(const std::string& symbol, const Position& p) {
-    m_cachedPositions[symbol] = p;
+    {
+        std::unique_lock<std::shared_mutex> lock(m_mutex);
+        m_cachedPositions[symbol] = p;
+    }
     if (m_onDataChanged) m_onDataChanged();
 }
 

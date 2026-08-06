@@ -658,7 +658,12 @@ public:
     bool prepareMarketData();
 
     /// @brief 获取当前持有的行情视图（供外部读取元数据）
+    /// 因子策略返回 factorService 持有的视图，非因子策略返回 m_liveMarketView
     [[nodiscard]] const factor::compute::IMarketDataView* liveMarketView() const noexcept {
+        if (factorService_) {
+            auto* v = factorService_->liveView();
+            if (v) return v;
+        }
         return m_liveMarketView.get();
     }
 
@@ -680,6 +685,30 @@ private:
 
     /// @brief 后台线程主函数（分钟频/高频）：阻塞等待行情 → step() → 通知订单。
     void drainQueue();
+
+    // ── evaluateEndOfDay 子函数 ──
+    struct EodContext;
+    struct EodDayBar;
+    struct EodPriceData;
+    struct EodGateResult;
+    struct PendingOrder;
+
+    [[nodiscard]] bool checkRebalanceDay(const std::string& tradingDay);
+    [[nodiscard]] bool prepareEodContext(const std::string& tradingDay, EodContext& ctx);
+    [[nodiscard]] bool fetchTodayPrices(const EodContext& ctx, EodPriceData& prices);
+    void computeMarketBreadth(const EodContext& ctx, EodPriceData& prices);
+    EodGateResult evaluateEodGates(const EodContext& ctx, double todayBreadth);
+    std::vector<PendingOrder> collectEodSignals(
+        const EodContext& ctx, const EodPriceData& prices,
+        const EodGateResult& gates,
+        const std::unordered_map<std::string, std::int64_t>& posQtyMap,
+        const std::string& tradingDay);
+    EodEvaluationStatus finalizeAndSubmit(
+        const EodContext& ctx,
+        std::vector<PendingOrder>& pendingOrders,
+        const std::unordered_map<std::string, std::int64_t>& posQtyMap,
+        const EodPriceData& prices,
+        const std::string& tradingDay);
 
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
@@ -724,6 +753,7 @@ private:
     int m_rebalanceInterval{1};            ///< 调仓间隔(交易日), 0=从不调仓, 1=每日
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
     int m_minHoldDays{0};                  ///< 最少持有天数, 0=不启用
+    std::unordered_map<std::string, std::int64_t> m_positionEntryDates;  ///< symbol→首次建仓日期 YYYYMMDD
 };
 
 class StrategyEngine::Builder final {

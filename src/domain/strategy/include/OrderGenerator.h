@@ -8,6 +8,7 @@
 
 #include "../../trading/TradingTypes.h"
 #include "../../trading/include/OrderBuilder.h"
+#include "StrategyServiceTypes.h"
 
 #include <cstdint>
 #include <memory>
@@ -59,6 +60,26 @@ public:
         double priceForWeight) const;
 
 private:
+    struct OrderDelta {
+        SignalIntent intent = SignalIntent::KEEP;
+        std::int64_t deltaQty = 0;
+    };
+
+    /// @brief 计算买入增量: 新开仓 → OPEN, 加仓 → ADD, 矛盾 → 返回 0
+    [[nodiscard]] OrderDelta computeBuyDelta(
+        std::int64_t currentQty, double currentWeight,
+        double targetWeight, double priceForWeight, double totalAsset) const;
+
+    /// @brief 计算卖出减量: strategy signal(targetWeight>0) → REDUCE/CLOSE,
+    ///        rule exit(requestedQty>0) → 尊重显式数量, 否则 CLOSE
+    [[nodiscard]] OrderDelta computeSellDelta(
+        std::int64_t currentQty, double currentWeight,
+        double targetWeight, double priceForWeight, double totalAsset,
+        std::int64_t requestedQty) const;
+
+    /// @brief 买单总敞口压缩: 超出 100% 时按等比缩放所有买单
+    void compressBuyTotalWeight(std::vector<domain::trading::OrderRequest>& orders) const;
+
     domain::trading::OrderBuilder* m_orderBuilder;
 };
 

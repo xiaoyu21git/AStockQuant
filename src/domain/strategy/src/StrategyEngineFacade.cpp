@@ -739,17 +739,30 @@ int StrategyEngine::liquidateAll()
         m_liquidationBlocklist.insert(code);
     }
 
+    // 过 OrderGenerator 做持仓感知校验（不经过规则闸门 — 清仓是强制性指令）
+    auto account = accEng.account();
+    std::unordered_map<std::string, int64_t> liqPosMap;
+    for (const auto& p : positions)
+        liqPosMap[p.symbol] = p.quantity;
+    MapPositionProvider liqPosProvider(liqPosMap);
+    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, account, 0.0);
+
+    if (validatedOrders.empty()) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: OrderGenerator 过滤后无有效订单";
+        return 0;
+    }
+
     // 篮子ID
     static std::atomic<uint64_t> s_liqBasketSeq{0};
     uint64_t basketId = s_liqBasketSeq.fetch_add(1);
-    for (auto& o : orders)
+    for (auto& o : validatedOrders)
         o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
 
-    m_orderListener->onOrders(orders);
+    m_orderListener->onOrders(validatedOrders);
     INTERNAL_WARN_STREAM << "[StrategyEngine] 一键清仓: basketId=" << basketId
-                         << " orders=" << orders.size()
+                         << " orders=" << validatedOrders.size()
                          << " 笔订单, 持仓已提交";
-    return static_cast<int>(orders.size());
+    return static_cast<int>(validatedOrders.size());
 }
 
 void StrategyEngine::setOrderListener(IOrderListener* listener)
@@ -856,325 +869,374 @@ void StrategyEngine::drainQueue()
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// evaluateEndOfDay — 日频策略盘后评估: 当日 Bar 已封口, 跑一次完整策略
+// evaluateEndOfDay 子结构
 // ═════════════════════════════════════════════════════════════════════════
 
-EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isCompensation)
-{
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 tradingDay=" << tradingDay
-                         << " isCompensation=" << isCompensation;
-
-    // 调仓周期检查: 非调仓日跳过, 避免每日重复下单
-    if (m_rebalanceInterval > 1 && !m_lastRebalanceDate.empty()) {
-        std::string date = tradingDay;
-        int tradingDaysSince = 0;
-        for (int i = 0; i < m_rebalanceInterval && !date.empty(); ++i) {
-            char prevOut[32] = {};
-            if (::get_previous_trading_date("SZSE", date.c_str(), prevOut) != 0)
-                ::get_previous_trading_date("SHSE", date.c_str(), prevOut);
-            date = prevOut;
-            if (date.empty()) break;
-            ++tradingDaysSince;
-            if (date == m_lastRebalanceDate) break;
-        }
-        if (tradingDaysSince < m_rebalanceInterval) {
-            INTERNAL_INFO_STREAM << "[StrategyEngine] 非调仓日: 距上次调仓 "
-                << tradingDaysSince << "/" << m_rebalanceInterval << " 交易日, 跳过";
-            return EodEvaluationStatus::Skipped;
-        }
-    }
-
-    if (m_isBacktestMode.load(std::memory_order_acquire)) {
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 回测模式, 跳过日终评估";
-        return EodEvaluationStatus::Skipped;
-    }
-    if (!m_orderListener) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] 无订单监听器, 日终评估跳过";
-        return EodEvaluationStatus::Skipped;
-    }
-
-    // ── 从 MarketDataService 取所有已订阅标的 ──
-    auto symbols = domain::market::MarketDataService::instance().symbols();
-    if (symbols.empty()) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: 无订阅标的, 跳过";
-        return EodEvaluationStatus::Skipped;
-    }
-
-    // 补单: tradingDay 转 "YYYY-MM-DD" 供 history_bars_n 用
+struct StrategyEngine::EodContext {
+    const factor::compute::IMarketDataView* view = nullptr;
+    const std::vector<std::string>* symbols = nullptr;
+    const std::vector<domain::DomainDate>* dates = nullptr;
+    int numCols = 0;
+    int rowStride = 0;
+    std::unordered_map<std::string, int> symToCol;
+    std::int32_t tradingDayInt = 0;
     std::string endDateStr;
-    if (isCompensation) {
-        auto dayInt = std::stoll(tradingDay);
-        int y = static_cast<int>(dayInt / 10000);
-        int m = static_cast<int>((dayInt % 10000) / 100);
-        int d = static_cast<int>(dayInt % 100);
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
-        endDateStr = buf;
+};
+
+struct StrategyEngine::EodDayBar {
+    double close = 0.0;
+    double volume = 0.0;
+    double preClose = 0.0;  // 前一交易日的收盘价, 用于涨跌停计算
+};
+
+struct StrategyEngine::EodPriceData {
+    std::unordered_map<std::string, EodDayBar> bars; // sym → 当日日线
+    double breadthAboveMa60 = 0.5;
+};
+
+struct StrategyEngine::EodGateResult {
+    bool allowNewEntries = true;
+    TimingResult timing;
+};
+
+struct StrategyEngine::PendingOrder {
+    OrderRequest order;
+    double tickPrice = 0.0;
+    double targetWeight = 0.0;
+    double signalScore = 0.0;
+};
+
+// ═════════════════════════════════════════════════════════════════════════
+// evaluateEndOfDay 子函数
+// ═════════════════════════════════════════════════════════════════════════
+
+static std::string stripExchange(const std::string& sym) {
+    auto dot = sym.find('.');
+    return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
+}
+
+// ── 涨跌停检测 (A股主板 ±10%, 浮点宽容差) ──
+static bool isAtLimitUp(double close, double preClose) {
+    if (preClose <= 0.0 || close <= 0.0) return false;
+    return close >= preClose * 1.098;
+}
+
+static bool isAtLimitDown(double close, double preClose) {
+    if (preClose <= 0.0 || close <= 0.0) return false;
+    return close <= preClose * 0.902;
+}
+
+static int countTradingDaysBetween(std::int64_t fromDate, std::int64_t toDate) {
+    if (fromDate >= toDate) return 0;
+    std::string date = std::to_string(toDate);
+    int count = 0;
+    while (count < 365) {  // 安全上限
+        char prevOut[32] = {};
+        if (::get_previous_trading_date("SZSE", date.c_str(), prevOut) != 0)
+            ::get_previous_trading_date("SHSE", date.c_str(), prevOut);
+        if (prevOut[0] == '\0') break;
+        ++count;
+        std::int64_t prevInt = std::stoll(prevOut);
+        if (prevInt <= fromDate) break;
+        date = prevOut;
     }
+    return count;
+}
 
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 " << symbols.size() << " 只标的";
-
-    // ── 获取账户和持仓快照（一次，循环内不复查）──
-    auto& accEng = engine::AccountEngine::instance();
-    auto account   = accEng.account();     // 返回值拷贝
-    auto positions = accEng.positions();   // 返回值拷贝
-    m_orderBuilder.setAccountId(account.accountId);
-
-    if (account.totalAsset <= 0) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
-        return EodEvaluationStatus::Skipped;
+bool StrategyEngine::checkRebalanceDay(const std::string& tradingDay) {
+    if (m_rebalanceInterval <= 1 || m_lastRebalanceDate.empty()) return true;
+    std::string date = tradingDay;
+    int tradingDaysSince = 0;
+    for (int i = 0; i < m_rebalanceInterval && !date.empty(); ++i) {
+        char prevOut[32] = {};
+        if (::get_previous_trading_date("SZSE", date.c_str(), prevOut) != 0)
+            ::get_previous_trading_date("SHSE", date.c_str(), prevOut);
+        date = prevOut;
+        if (date.empty()) break;
+        ++tradingDaysSince;
+        if (date == m_lastRebalanceDate) break;
     }
-
-    auto stripExchange = [](const std::string& sym) -> std::string {
-        auto dot = sym.find('.');
-        return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
-    };
-
-    std::unordered_map<std::string, int64_t> posQtyMap;
-    for (const auto& p : positions) {
-        posQtyMap[stripExchange(p.symbol)] = p.quantity;
-        // quantity 非 availableQty: EOD 下单次日成交, 隔夜无冻结
+    if (tradingDaysSince < m_rebalanceInterval) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 非调仓日: 距上次调仓 "
+            << tradingDaysSince << "/" << m_rebalanceInterval << " 交易日, 跳过";
     }
+    return tradingDaysSince >= m_rebalanceInterval;
+}
 
-    if (EventRiskSubscriber::instance().isStarted())
-        EventRiskSubscriber::instance().clearBlockedSymbols();  // T+1 事件封禁解禁
-    // 买单资金按 pendingOrders 中顺序分配(先到先得),
-    // 策略信号已按信号强度排序, 核心标的优先获得资金
+bool StrategyEngine::prepareEodContext(const std::string& tradingDay, EodContext& ctx) {
+    ctx.view = liveMarketView();
+    if (!ctx.view || ctx.view->symbolStrings().empty()) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] 日终评估: liveMarketView 无数据, 跳过";
+        return false;
+    }
+    const auto& syms = ctx.view->symbolStrings();
+    ctx.symbols = &syms;
+    ctx.dates = &ctx.view->dates();
+    ctx.numCols = static_cast<int>(syms.size());
+    ctx.rowStride = ctx.view->close().rowStride;
 
-    // ═══════════════════════════════════════════════════════════
-    // Phase 1: 收集 — 遍历所有标的, 生成订单并规范化
-    // ═══════════════════════════════════════════════════════════
-    struct PendingOrder {
-        OrderRequest order;
-        double tickPrice;
-        double targetWeight;
-        double signalScore;
-    };
-    std::vector<PendingOrder> pendingOrders;
+    ctx.tradingDayInt = static_cast<int32_t>(std::stoll(tradingDay));
+    int y = static_cast<int>(ctx.tradingDayInt / 10000);
+    int m = static_cast<int>((ctx.tradingDayInt % 10000) / 100);
+    int d = static_cast<int>(ctx.tradingDayInt % 100);
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+    ctx.endDateStr = buf;
 
-    // ── 规则闸门: 市场审核(每日冻结) ──
-    bool ruleAllowEntriesEod = true;
-    std::unordered_map<std::string, int> eodSymToCol;
-    if (m_ruleGate.enabled() && liveMarketView()) {
-        const auto* view = liveMarketView();
-        const auto& instrs = view->instruments();
-        const auto& symStrs = view->symbolStrings();
-        for (size_t c = 0; c < symStrs.size() && c < instrs.size(); ++c)
-            eodSymToCol[stripExchange(symStrs[c])] = static_cast<int>(c);
+    for (int c = 0; c < ctx.numCols; ++c)
+        ctx.symToCol[stripExchange(syms[c])] = c;
+
+    return true;
+}
+
+bool StrategyEngine::fetchTodayPrices(const EodContext& ctx, EodPriceData& prices) {
+    std::ostringstream gmList;
+    for (const auto& sym : *ctx.symbols) {
+        std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
+        if (!gm.empty()) {
+            if (gmList.tellp() > 0) gmList << ',';
+            gmList << gm;
+        }
+    }
+    const std::string gmSymbols = gmList.str();
+    INTERNAL_INFO_STREAM << "[StrategyEngine] gmsdk 批量取价: "
+                         << ctx.symbols->size() << " 标的 endDate=" << ctx.endDateStr;
+
+    auto* bars = ::history_bars_n(gmSymbols.c_str(), "1d", 1, ctx.endDateStr.c_str(),
+                                   0, nullptr, true, nullptr);
+    if (bars && !bars->status() && bars->count() > 0) {
+        for (int i = 0; i < bars->count(); ++i) {
+            const auto& b = bars->at(i);
+            std::string internal = engine::GmSessionEngine::fromGmSymbol(b.symbol);
+            if (!internal.empty() && b.close > 0)
+                prices.bars[internal] = {static_cast<double>(b.close),
+                                         static_cast<double>(b.volume),
+                                         static_cast<double>(b.pre_close)};
+        }
+    }
+    if (bars) bars->release();
+    INTERNAL_INFO_STREAM << "[StrategyEngine] gmsdk 批量取价完成: "
+                         << prices.bars.size() << " 只标的有数据";
+    return !prices.bars.empty();
+}
+
+void StrategyEngine::computeMarketBreadth(const EodContext& ctx, EodPriceData& prices) {
+    const auto& closeMat = ctx.view->close();
+    const int lastRow = static_cast<int>(ctx.dates->size()) - 1;
+    int above = 0, counted = 0;
+    for (int c = 0; c < ctx.numCols; ++c) {
+        const auto& sym = (*ctx.symbols)[c];
+        auto pvIt = prices.bars.find(sym);
+        if (pvIt == prices.bars.end()) continue;
+        const double todayClose = pvIt->second.close;
+        if (!(todayClose > 0.0)) continue;
+        double maSum = 0.0; int maCnt = 0;
+        for (int i = 0; i < 60 && (lastRow - i) >= 0; ++i) {
+            const double v = static_cast<double>(
+                closeMat.data[(lastRow - i) * ctx.rowStride + c]);
+            if (!(v > 0.0)) break;
+            maSum += v; ++maCnt;
+        }
+        if (maCnt < 60) continue;
+        ++counted;
+        if (todayClose > maSum / 60.0) ++above;
+    }
+    if (counted > 0)
+        prices.breadthAboveMa60 = static_cast<double>(above) / counted;
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 当日市场宽度: above=" << above
+                         << " counted=" << counted
+                         << " ratio=" << prices.breadthAboveMa60;
+}
+
+StrategyEngine::EodGateResult StrategyEngine::evaluateEodGates(
+    const EodContext& ctx, double todayBreadth)
+{
+    EodGateResult gates;
+    constexpr double kBearBreadth = 0.35;
+
+    // ── 当日宽度冻结 ──
+    gates.allowNewEntries = (todayBreadth > kBearBreadth);
+    if (!gates.allowNewEntries)
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 当日市场宽度冻结: breadth="
+                             << todayBreadth << " <= " << kBearBreadth;
+
+    // ── 规则闸门叠加 ──
+    if (gates.allowNewEntries && m_ruleGate.enabled()) {
         rules::BacktestRuleVariableProvider eodProvider;
-        eodProvider.setDay(view, std::stoi(tradingDay), nullptr);
-        ruleAllowEntriesEod = m_ruleGate.allowNewEntriesToday(eodProvider);
-        if (!ruleAllowEntriesEod)
-            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 市场冻结, 当日不产生新买单";
+        eodProvider.setDay(ctx.view, ctx.tradingDayInt, nullptr);
+        gates.allowNewEntries = m_ruleGate.allowNewEntriesToday(eodProvider);
+        if (!gates.allowNewEntries)
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 市场冻结";
     }
 
-    // ── 择时闸门 (v0.13): 与回测一致, 每日盘前判断大盘状态 ──
-    TimingResult eodTiming;
-    if (liveMarketView()) {
-        const auto* view = liveMarketView();
-        auto closeMat = view->close();
-        const auto& viewInstrs = view->instruments();
-        int eodCols = static_cast<int>(viewInstrs.size());
-        int eodRows = static_cast<int>(view->dates().size());
-        // 查找沪深300列 (与回测一致)
-        int eodBmCol = -1;
-        const auto& eodSyms = view->symbolStrings();
-        for (int c = 0; c < eodCols && c < static_cast<int>(eodSyms.size()); ++c) {
-            if (eodSyms[c] == "000300.SH") { eodBmCol = c; break; }
-        }
-        if (eodBmCol >= 0 && eodRows > 60) {
-            int lastRow = eodRows - 1;
-            MarketTimingSnapshot ts;
-            const double idxClose = static_cast<double>(closeMat.data[
-                static_cast<size_t>(lastRow) * static_cast<size_t>(eodCols) + static_cast<size_t>(eodBmCol)]);
-            if (idxClose > 0.0) {
-                ts.indexClose = idxClose;
-                double sum20=0, sum60=0; int cnt20=0, cnt60=0;
-                for (int back=0; back<60 && (lastRow-back)>=0; ++back) {
-                    double c = static_cast<double>(closeMat.data[
-                        static_cast<size_t>(lastRow-back)*static_cast<size_t>(eodCols)+static_cast<size_t>(eodBmCol)]);
-                    if (c>0) { if (back<20) { sum20+=c; ++cnt20; } sum60+=c; ++cnt60; }
-                }
-                ts.ma20 = cnt20>0 ? sum20/cnt20 : idxClose;
-                ts.ma60 = cnt60>0 ? sum60/cnt60 : idxClose;
-                ts.ma20AboveMa60 = ts.ma20 > ts.ma60;
-                double sum20_5=0; int cnt20_5=0;
-                for (int back=5; back<25 && (lastRow-back)>=0; ++back) {
-                    double c = static_cast<double>(closeMat.data[
-                        static_cast<size_t>(lastRow-back)*static_cast<size_t>(eodCols)+static_cast<size_t>(eodBmCol)]);
-                    if (c>0) { sum20_5+=c; ++cnt20_5; }
-                }
-                ts.ma20Rising = cnt20_5>0 ? ts.ma20 > sum20_5/cnt20_5 : false;
-                if (eodCols>0) { int up=0,tot=0;
-                    for (int c=0; c<eodCols; ++c) {
-                        double t = static_cast<double>(closeMat.data[lastRow*static_cast<size_t>(eodCols)+c]);
-                        double p = static_cast<double>(closeMat.data[(lastRow-1)*static_cast<size_t>(eodCols)+c]);
-                        if (t>1e-9&&p>1e-9) { if(t>p)++up; ++tot; }
-                    }
-                    ts.advanceRatio = tot>0?static_cast<double>(up)/tot:0.5;
-                }
-                ts.atrPercent = 0.02;
-                eodTiming = m_timingGate.evaluate(ts);
-                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 择时: exposure=" << eodTiming.targetExposure
-                    << " allowNew=" << eodTiming.allowNewEntries
-                    << " liquidate=" << eodTiming.forceLiquidate
-                    << " reason=" << eodTiming.reason;
+    // ── 择时闸门 ──
+    auto closeMat = ctx.view->close();
+    int eodBmCol = -1;
+    for (int c = 0; c < ctx.numCols; ++c) {
+        if ((*ctx.symbols)[c] == "000300.SH") { eodBmCol = c; break; }
+    }
+    if (eodBmCol >= 0 && static_cast<int>(ctx.dates->size()) > 60) {
+        int lastRow = static_cast<int>(ctx.dates->size()) - 1;
+        MarketTimingSnapshot ts;
+        const double idxClose = static_cast<double>(closeMat.data[
+            static_cast<size_t>(lastRow) * static_cast<size_t>(ctx.rowStride) + static_cast<size_t>(eodBmCol)]);
+        if (idxClose > 0.0) {
+            ts.indexClose = idxClose;
+            double sum20=0, sum60=0; int cnt20=0, cnt60=0;
+            for (int back=0; back<60 && (lastRow-back)>=0; ++back) {
+                double c = static_cast<double>(closeMat.data[
+                    static_cast<size_t>(lastRow-back)*static_cast<size_t>(ctx.rowStride)+static_cast<size_t>(eodBmCol)]);
+                if (c>0) { if (back<20) { sum20+=c; ++cnt20; } sum60+=c; ++cnt60; }
             }
+            ts.ma20 = cnt20>0 ? sum20/cnt20 : idxClose;
+            ts.ma60 = cnt60>0 ? sum60/cnt60 : idxClose;
+            ts.ma20AboveMa60 = ts.ma20 > ts.ma60;
+            double sum20_5=0; int cnt20_5=0;
+            for (int back=5; back<25 && (lastRow-back)>=0; ++back) {
+                double c = static_cast<double>(closeMat.data[
+                    static_cast<size_t>(lastRow-back)*static_cast<size_t>(ctx.rowStride)+static_cast<size_t>(eodBmCol)]);
+                if (c>0) { sum20_5+=c; ++cnt20_5; }
+            }
+            ts.ma20Rising = cnt20_5>0 ? ts.ma20 > sum20_5/cnt20_5 : false;
+            if (ctx.numCols>0) { int up=0,tot=0;
+                for (int c=0; c<ctx.numCols; ++c) {
+                    double t = static_cast<double>(closeMat.data[lastRow*static_cast<size_t>(ctx.rowStride)+c]);
+                    double p = static_cast<double>(closeMat.data[(lastRow-1)*static_cast<size_t>(ctx.rowStride)+c]);
+                    if (t>1e-9&&p>1e-9) { if(t>p)++up; ++tot; }
+                }
+                ts.advanceRatio = tot>0?static_cast<double>(up)/tot:0.5;
+            }
+            ts.atrPercent = 0.02;
+            gates.timing = m_timingGate.evaluate(ts);
+            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 择时: exposure=" << gates.timing.targetExposure
+                << " allowNew=" << gates.timing.allowNewEntries
+                << " liquidate=" << gates.timing.forceLiquidate
+                << " reason=" << gates.timing.reason;
+        }
+    }
+    return gates;
+}
+
+std::vector<StrategyEngine::PendingOrder> StrategyEngine::collectEodSignals(
+    const EodContext& ctx,
+    const EodPriceData& prices,
+    const EodGateResult& gates,
+    const std::unordered_map<std::string, std::int64_t>& posQtyMap,
+    const std::string& tradingDay)
+{
+    std::vector<PendingOrder> pendingOrders;
+    const bool blockNewBuys = (!gates.allowNewEntries || !gates.timing.allowNewEntries);
+
+    if (blockNewBuys) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 冻结:"
+            << " ruleGate=" << (gates.allowNewEntries ? "允许" : "冻结")
+            << " timingGate=" << (gates.timing.allowNewEntries ? "允许" : "冻结")
+            << " timingReason=" << gates.timing.reason;
+        if (m_tradeJournal) {
+            m_tradeJournal->log(tradingDay + " 冻结 原因:"
+                + std::string(gates.allowNewEntries ? "" : "规则闸门")
+                + std::string(!gates.timing.allowNewEntries ? "择时空仓" : ""));
         }
     }
 
-    // 择时空仓: 一键清仓
-    if (eodTiming.forceLiquidate && !m_circuitBreaker.isHalted()) {
-        liquidateAll();
-        return EodEvaluationStatus::Submitted;
-    }
+    for (const auto& sym : *ctx.symbols) {
+        if (blockNewBuys && posQtyMap.count(stripExchange(sym)) == 0) continue;
 
-    for (const auto& sym : symbols) {
-        // 规则闸门冻结 或 择时不允新开仓 → 跳过
-        if (!ruleAllowEntriesEod || !eodTiming.allowNewEntries) {
-            INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 冻结:"
-                << " ruleGate=" << (ruleAllowEntriesEod ? "允许" : "冻结")
-                << " timingGate=" << (eodTiming.allowNewEntries ? "允许" : "冻结")
-                << " timingReason=" << eodTiming.reason
-                << " liquidate=" << eodTiming.forceLiquidate;
-            // 交易日志: 冻结
-            if (m_tradeJournal) {
-                m_tradeJournal->log(tradingDay + " 冻结 原因:"
-                    + std::string(ruleAllowEntriesEod ? "" : "规则闸门")
-                    + std::string(!eodTiming.allowNewEntries ? "择时空仓" : ""));
-            }
-            break;
-        }
-        auto& d = domain::market::MarketDataService::instance().liveData(sym);
-        if (!d.valid()) continue;
-
-        double price = 0;
-        if (isCompensation) {
-            std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
-            if (gm.empty()) continue;
-            auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, endDateStr.c_str(),
-                                           0, nullptr, true, nullptr);
-            if (!bars || bars->status() || bars->count() <= 0) {
-                if (bars) bars->release();
-                continue;
-            }
-            price = bars->at(0).close;
-            bars->release();
-        } else {
-            price = d.dailyBar().close();
-        }
+        auto pvIt = prices.bars.find(sym);
+        if (pvIt == prices.bars.end()) continue;
+        double price = pvIt->second.close;
+        double vol   = pvIt->second.volume;
         if (price <= 0) continue;
 
         auto aSym = foundation::market::AStockSymbol::fromString(sym);
         if (!aSym.isValid()) continue;
 
         MarketDataPoint mdp(
-            domain::strategy::InstrumentId{aSym.instrumentId()},
-            price,
-            d.dailyBar().volume(),
-            0);
+            domain::strategy::InstrumentId{aSym.instrumentId()}, price, vol, 0);
 
         try {
-            // Phase 1 预过滤: 跳过事件风控封禁的标的
             if (EventRiskSubscriber::instance().isStarted() &&
-                EventRiskSubscriber::instance().blockedSymbols().count(
-                    stripExchange(sym))) {
-                INTERNAL_INFO_STREAM
-                    << "[StrategyEngine] EOD Phase1 skip blocked: " << sym;
+                EventRiskSubscriber::instance().blockedSymbols().count(stripExchange(sym))) {
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD skip blocked: " << sym;
                 continue;
             }
 
             auto orders = step(mdp);
-            if (orders.has_value()) {
-                for (auto& order : *orders) {
-                    if (!order.isValid()) continue;
+            if (!orders.has_value()) continue;
 
-                    double signalScore = order.extensionAs<double>(
-                        domain::trading::ExtKey::kSignalScore, 0.5);
-                    double targetWeight = order.extensionAs<double>(
-                        domain::trading::ExtKey::kTargetWeight, 0.0);
-
-                    order = m_orderBuilder.buildSignalOrder(
-                        order.symbol(), order.side(),
-                        0,
-                        static_cast<int64_t>(order.quantity()), signalScore);
-                    // 保留 kTargetWeight — OrderGenerator 依赖此字段计算 delta
-                    if (targetWeight > 0.0)
-                        order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);
-
-                    auto& ld = domain::market::MarketDataService::instance()
-                        .liveData(order.symbol());
-                    double tickPrice = ld.valid() ? ld.dailyBar().close() : mdp.lastPrice();
-                    if (!std::isfinite(tickPrice) || tickPrice <= 0) continue;
-
-                    if (order.orderType() == OrderType::Market)
-                        order.setPrice(tickPrice);
-
-                    pendingOrders.push_back(
-                        {std::move(order), tickPrice, targetWeight, signalScore});
-                }
+            for (auto& order : *orders) {
+                if (!order.isValid()) continue;
+                // 涨跌停过滤: 涨停不买, 跌停不卖
+                if (order.side() == OrderSide::Buy  && isAtLimitUp(price, pvIt->second.preClose)) continue;
+                if (order.side() == OrderSide::Sell && isAtLimitDown(price, pvIt->second.preClose)) continue;
+                double signalScore = order.extensionAs<double>(
+                    domain::trading::ExtKey::kSignalScore, 0.5);
+                double targetWeight = order.extensionAs<double>(
+                    domain::trading::ExtKey::kTargetWeight, 0.0);
+                order = m_orderBuilder.buildSignalOrder(
+                    order.symbol(), order.side(), 0,
+                    static_cast<int64_t>(order.quantity()), signalScore);
+                if (targetWeight > 0.0)
+                    order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);
+                double tickPrice = mdp.lastPrice();
+                if (!std::isfinite(tickPrice) || tickPrice <= 0) continue;
+                if (order.orderType() == OrderType::Market)
+                    order.setPrice(tickPrice);
+                pendingOrders.push_back({std::move(order), tickPrice, targetWeight, signalScore});
             }
         } catch (const std::exception& e) {
             INTERNAL_WARN_STREAM << "[StrategyEngine] EOD collect 异常: " << sym
                                  << " " << e.what();
         }
     }
+    return pendingOrders;
+}
 
-    // ═══════════════════════════════════════════════════════════
-    // 规则闸门: 信号审核(实盘EOD, Phase1后/Phase2前)
-    // ═══════════════════════════════════════════════════════════
+EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
+    const EodContext& ctx,
+    std::vector<PendingOrder>& pendingOrders,
+    const std::unordered_map<std::string, std::int64_t>& posQtyMap,
+    const EodPriceData& prices,
+    const std::string& tradingDay)
+{
     int eodGateRejected = 0;
-    if (m_ruleGate.enabled() && liveMarketView()) {
-        const auto* view = liveMarketView();
-        const int dayValue = std::stoi(tradingDay);
-        // 构造当日 symbol → column 映射(用于 Provider 查均线/量比)
-        std::unordered_map<std::string, int> symToCol;
-        const auto& instrs = view->instruments();
-        const auto& symStrs = view->symbolStrings();
-        for (size_t c = 0; c < symStrs.size() && c < instrs.size(); ++c)
-            symToCol[stripExchange(symStrs[c])] = static_cast<int>(c);
 
+    // ── 规则闸门: 信号审核 ──
+    if (m_ruleGate.enabled()) {
         rules::BacktestRuleVariableProvider eodProvider;
-        eodProvider.setDay(view, dayValue, nullptr);
+        eodProvider.setDay(ctx.view, ctx.tradingDayInt, nullptr);
         std::vector<PendingOrder> filtered;
         filtered.reserve(pendingOrders.size());
         for (auto& po : pendingOrders) {
             if (po.order.side() == OrderSide::Buy) {
                 const std::string sym6 = stripExchange(po.order.symbol());
-                rules::RuleCandidateContext ctx;
-                auto cite = symToCol.find(sym6);
-                ctx.colIndex = cite != symToCol.end() ? cite->second : -1;
-                ctx.symbol = po.order.symbol();
-                ctx.code = sym6;
-                eodProvider.setCandidate(ctx);
-                if (!m_ruleGate.allowSignal(eodProvider)) {
-                    ++eodGateRejected; continue;
-                }
+                rules::RuleCandidateContext ruleCtx;
+                auto cite = ctx.symToCol.find(sym6);
+                ruleCtx.colIndex = cite != ctx.symToCol.end() ? cite->second : -1;
+                ruleCtx.symbol = po.order.symbol();
+                ruleCtx.code = sym6;
+                eodProvider.setCandidate(ruleCtx);
+                if (!m_ruleGate.allowSignal(eodProvider)) { ++eodGateRejected; continue; }
             }
             filtered.push_back(std::move(po));
         }
         pendingOrders = std::move(filtered);
     }
 
-    // ═══════════════════════════════════════════════════════════
-    // Phase 2+3: 持仓感知建单 (OrderGenerator)
-    // ═══════════════════════════════════════════════════════════
-
     // ── 规则闸门: 持仓出场审核 ──
+    auto positions = engine::AccountEngine::instance().positions();
     int eodPositionExits = 0;
-    if (m_ruleGate.enabled() && liveMarketView() && !positions.empty()) {
-        const auto* view = liveMarketView();
-        const int dayValue = std::stoi(tradingDay);
+    if (m_ruleGate.enabled() && !positions.empty()) {
         rules::BacktestRuleVariableProvider exitProvider;
-        exitProvider.setDay(view, dayValue, nullptr);
+        exitProvider.setDay(ctx.view, ctx.tradingDayInt, nullptr);
         for (const auto& pos : positions) {
             if (pos.quantity <= 0 || pos.costPrice <= 0.0) continue;
             const std::string sym6 = stripExchange(pos.symbol);
             rules::RuleCandidateContext posCtx;
             posCtx.symbol = pos.symbol;
             posCtx.code = sym6;
-            auto cite = eodSymToCol.find(sym6);
-            posCtx.colIndex = cite != eodSymToCol.end() ? cite->second : -1;
+            auto cite = ctx.symToCol.find(sym6);
+            posCtx.colIndex = cite != ctx.symToCol.end() ? cite->second : -1;
             posCtx.isHolding = true;
             posCtx.entryPrice = pos.costPrice;
             const double currentPrice = pos.lastPrice;
@@ -1183,15 +1245,24 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             exitProvider.setCandidate(posCtx);
             const rules::RuleAction action = m_ruleGate.positionAction(exitProvider);
             if (action == rules::RuleAction::Exit || action == rules::RuleAction::Reduce) {
-                OrderRequest exitOrderReq;
-                exitOrderReq.setSymbol(pos.symbol);
-                exitOrderReq.setSide(OrderSide::Sell);
-                exitOrderReq.setQuantity(action == rules::RuleAction::Exit
+                // 最少持有期检查: 买入后持有不足 minHoldDays 个交易日不卖出
+                if (m_minHoldDays > 0) {
+                    auto eit = m_positionEntryDates.find(pos.symbol);
+                    if (eit != m_positionEntryDates.end()) {
+                        int heldDays = countTradingDaysBetween(eit->second, ctx.tradingDayInt);
+                        if (heldDays < m_minHoldDays) continue;
+                    }
+                }
+                // 注意: 规则出场(止损/风控)不检查跌停 — 风控指令必须尝试执行
+                OrderRequest exitReq;
+                exitReq.setSymbol(pos.symbol);
+                exitReq.setSide(OrderSide::Sell);
+                exitReq.setQuantity(action == rules::RuleAction::Exit
                     ? pos.quantity : (std::max)(static_cast<std::int64_t>(1), pos.quantity / 2));
-                exitOrderReq.setOrderType(domain::trading::OrderType::Market);
-                exitOrderReq.setPrice(currentPrice);
+                exitReq.setOrderType(domain::trading::OrderType::Market);
+                exitReq.setPrice(currentPrice);
                 PendingOrder exitPo;
-                exitPo.order = std::move(exitOrderReq);
+                exitPo.order = std::move(exitReq);
                 exitPo.tickPrice = currentPrice;
                 exitPo.signalScore = 1.0;
                 exitPo.targetWeight = 0.0;
@@ -1204,46 +1275,33 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     }
 
     int totalGenerated = static_cast<int>(pendingOrders.size());
-
-    // 计算用于权重估算的参考价格
-    double priceForWeight = 0.0;
-    {
-        double sum = 0.0;
-        int cnt = 0;
-        for (const auto& sym : symbols) {
-            auto& d = domain::market::MarketDataService::instance().liveData(sym);
-            if (d.valid() && d.dailyBar().close() > 0) {
-                sum += d.dailyBar().close();
-                ++cnt;
-            }
-        }
-        if (cnt > 0) {
-            priceForWeight = sum / cnt;
-        } else {
-            // fallback: 使用 pendingOrder 的 tick price
-            for (const auto& po : pendingOrders) {
-                if (po.tickPrice > 0) { sum += po.tickPrice; ++cnt; }
-            }
-            if (cnt > 0) priceForWeight = sum / cnt;
-        }
+    if (pendingOrders.empty()) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估: 无待处理订单";
+        return EodEvaluationStatus::NoSignal;
     }
+
+    // ── 参考价格 ──
+    double priceForWeight = 0.0;
+    { double sum=0.0; int cnt=0;
+      for (const auto& po : pendingOrders)
+          if (po.tickPrice > 0) { sum += po.tickPrice; ++cnt; }
+      if (cnt>0) priceForWeight = sum / cnt; }
 
     std::vector<OrderRequest> rawOrders;
     rawOrders.reserve(pendingOrders.size());
-    for (auto& po : pendingOrders) {
+    for (auto& po : pendingOrders)
         rawOrders.push_back(std::move(po.order));
-    }
 
+    auto freshAccount = engine::AccountEngine::instance().account();
     MapPositionProvider posProvider(posQtyMap);
-    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, account, priceForWeight);
+    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, freshAccount, priceForWeight);
 
-    // ── 规则闸门输出(当日) ──
     if (m_ruleGate.enabled()) {
-        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门: 冻结=" << (!ruleAllowEntriesEod)
-                             << " 信号审核拒绝=" << eodGateRejected
-                             << "/" << (totalGenerated + eodGateRejected)
-                             << " 持仓出场=" << eodPositionExits
-                             << " (绑定模板=" << m_ruleGate.boundTemplateCount() << ")";
+        INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门:"
+            << " 信号审核拒绝=" << eodGateRejected
+            << "/" << (totalGenerated + eodGateRejected)
+            << " 持仓出场=" << eodPositionExits
+            << " (绑定模板=" << m_ruleGate.boundTemplateCount() << ")";
     }
 
     int totalSubmitted = 0;
@@ -1255,23 +1313,25 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
         uint64_t basketHash = std::hash<std::string>{}(basketId);
         for (auto& o : finalOrders)
             o.setExtension(domain::trading::ExtKey::kBasketId, basketHash);
-
         try {
             m_orderListener->onOrders(finalOrders);
             totalSubmitted = static_cast<int>(finalOrders.size());
+            // 记录买入标的的建仓日期 (用于最少持有期校验)
+            if (m_minHoldDays > 0) {
+                for (const auto& o : finalOrders) {
+                    if (o.side() == OrderSide::Buy)
+                        m_positionEntryDates[o.symbol()] = ctx.tradingDayInt;
+                }
+            }
             INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 篮子提交: basketId=" << basketId
                                  << " orders=" << totalSubmitted;
-            // 交易日志: 订单提交
             if (m_tradeJournal) {
                 for (const auto& o : finalOrders) {
                     std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
-                    double score = o.extensionAs<double>(
-                        domain::trading::ExtKey::kSignalScore, 0.0);
-                    double weight = o.extensionAs<double>(
-                        domain::trading::ExtKey::kTargetWeight, 0.0);
+                    double score = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+                    double weight = o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
                     std::ostringstream js;
-                    js << tradingDay << " 提交 " << side << " "
-                       << o.symbol() << " " << o.quantity() << "股";
+                    js << tradingDay << " 提交 " << side << " " << o.symbol() << " " << o.quantity() << "股";
                     if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
                     if (weight > 0.0) js << " 权重:" << std::fixed << std::setprecision(1) << (weight * 100.0) << "%";
                     m_tradeJournal->log(js.str());
@@ -1283,15 +1343,13 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
         }
     }
 
-    // 交易日志: 日终快照
     if (m_tradeJournal) {
+        auto acc = engine::AccountEngine::instance().account();
         int posCount = static_cast<int>(positions.size());
         m_tradeJournal->log(tradingDay + " 日终 持仓:" + std::to_string(posCount)
-            + " 净值:" + std::to_string(static_cast<int>(account.totalAsset))
-            + " 现金:" + std::to_string(static_cast<int>(account.availableCash)));
+            + " 净值:" + std::to_string(static_cast<int>(acc.totalAsset))
+            + " 现金:" + std::to_string(static_cast<int>(acc.availableCash)));
     }
-
-    int totalRejected = totalGenerated - totalSubmitted;
 
     m_lastProcessedAt.store(
         std::chrono::steady_clock::now().time_since_epoch().count(),
@@ -1300,13 +1358,11 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估完成"
                          << " 信号=" << totalGenerated
                          << " 提交=" << totalSubmitted
-                         << " 拒绝=" << totalRejected;
+                         << " 拒绝=" << (totalGenerated - totalSubmitted);
 
-    if (totalSubmitted > 0) {
+    if (totalSubmitted > 0)
         m_lastRebalanceDate = tradingDay;
-    }
 
-    // ── 每日账户快照 ──
     {
         auto acc = engine::AccountEngine::instance().account();
         int td = static_cast<int>(domain::market::MarketDataService::instance().activeTradingDay());
@@ -1317,10 +1373,70 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
         }
     }
 
-    // ── 返回篮子状态 ──
     if (totalGenerated == 0) return EodEvaluationStatus::NoSignal;
     if (totalSubmitted == 0) return EodEvaluationStatus::AllRejected;
     return EodEvaluationStatus::Submitted;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// evaluateEndOfDay — 日频策略盘后评估
+// ═════════════════════════════════════════════════════════════════════════
+
+EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool isCompensation)
+{
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 日终评估 tradingDay=" << tradingDay;
+
+    if (!checkRebalanceDay(tradingDay))
+        return EodEvaluationStatus::Skipped;
+
+    if (m_isBacktestMode.load(std::memory_order_acquire)) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 回测模式, 跳过日终评估";
+        return EodEvaluationStatus::Skipped;
+    }
+    if (!m_orderListener) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] 无订单监听器, 日终评估跳过";
+        return EodEvaluationStatus::Skipped;
+    }
+
+    // ── 1. 准备上下文 ──
+    EodContext ctx;
+    if (!prepareEodContext(tradingDay, ctx))
+        return EodEvaluationStatus::Skipped;
+
+    // ── 2. 获取当日价格 ──
+    EodPriceData prices;
+    fetchTodayPrices(ctx, prices);
+
+    // ── 3. 计算当日市场宽度 ──
+    computeMarketBreadth(ctx, prices);
+
+    // ── 4. 账户和持仓 ──
+    auto& accEng = engine::AccountEngine::instance();
+    auto account = accEng.account();
+    auto positions = accEng.positions();
+    m_orderBuilder.setAccountId(account.accountId);
+    if (account.totalAsset <= 0) {
+        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
+        return EodEvaluationStatus::Skipped;
+    }
+    std::unordered_map<std::string, int64_t> posQtyMap;
+    for (const auto& p : positions)
+        posQtyMap[stripExchange(p.symbol)] = p.quantity;
+    if (EventRiskSubscriber::instance().isStarted())
+        EventRiskSubscriber::instance().clearBlockedSymbols();
+
+    // ── 5. 闸门评估 ──
+    auto gates = evaluateEodGates(ctx, prices.breadthAboveMa60);
+    if (gates.timing.forceLiquidate && !m_circuitBreaker.isHalted()) {
+        liquidateAll();
+        return EodEvaluationStatus::Submitted;
+    }
+
+    // ── 6. 收集信号 ──
+    auto pendingOrders = collectEodSignals(ctx, prices, gates, posQtyMap, tradingDay);
+
+    // ── 7. 审核 + 提交 ──
+    return finalizeAndSubmit(ctx, pendingOrders, posQtyMap, prices, tradingDay);
 }
 
 StrategyEngine::Builder::Builder() = default;

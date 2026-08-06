@@ -64,10 +64,10 @@ private:
 
     PostFn m_post;
     EvalFn m_evalFn;
-    std::int64_t m_lastEvalDay = 0;
+    std::atomic<std::int64_t> m_lastEvalDay{0};
     std::string  m_persistPath;   // 统一 JSON 文件的全路径 (strategy_last_eval.json)
     std::string  m_strategyId;    // 当前策略 ID，JSON 中的键
-    bool m_eodRegistered = false;
+    std::atomic<bool> m_eodRegistered{false};
     int m_eodTriggerMinute{900};         // EOD 触发时间(分钟, 默认 15:00)
     std::atomic<bool> m_polling{false};
     std::shared_ptr<foundation::thread::ThreadPoolExecutor> m_pollExecutor;

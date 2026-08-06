@@ -19,7 +19,12 @@ public:
         StatusTextRole,
         UpdatedAtRole,
         RunningRole,
-        DisplayStatusRole   // 综合 DB 状态 + 引擎实际运行状态
+        DisplayStatusRole,   // 综合 DB 状态 + 引擎实际运行状态
+        ReturnsRole,
+        SharpeRatioRole,
+        MaxDrawdownRole,
+        WinRateRole,
+        TradesRole
     };
     Q_ENUM(Roles)
 
@@ -51,6 +56,11 @@ private:
         QString updatedAt;
         bool running{false};
         QString displayStatus;
+        double returns{0};
+        double sharpeRatio{0};
+        double maxDrawdown{0};
+        double winRate{0};
+        int trades{0};
     };
 
     static StrategyRow fromVariantMap(const QVariantMap& map);

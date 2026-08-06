@@ -34,9 +34,9 @@ void DailyEodScheduler::start() {
         std::string prevDay = getPreviousTradingDay(todayStr);
         if (!prevDay.empty()) {
             auto prev = std::stoll(prevDay);
-            if (m_lastEvalDay < prev) {
+            if (m_lastEvalDay.load() < prev) {
                 INTERNAL_INFO_STREAM << "[DailyEod] 补单窗口, 缺失评估日: " << prev
-                                     << " 当前 lastEval=" << m_lastEvalDay;
+                                     << " 当前 lastEval=" << m_lastEvalDay.load();
                 doEvaluate(prevDay);
             }
         }
@@ -47,7 +47,7 @@ void DailyEodScheduler::start() {
         int mins = getCurrentLocalMinutes();
         auto today = getCurrentTradingDay();
         std::string todayStr = std::to_string(today);
-        if (mins >= m_eodTriggerMinute && std::stoll(todayStr) > m_lastEvalDay) {
+        if (mins >= m_eodTriggerMinute && std::stoll(todayStr) > m_lastEvalDay.load()) {
             INTERNAL_INFO_STREAM << "[DailyEod] 启动时已过触发时间 " << m_eodTriggerMinute << "min, 立即补评估: " << todayStr;
             doEvaluate(todayStr);
         }
@@ -61,18 +61,18 @@ void DailyEodScheduler::start() {
     }
 
     // 注册 MarketDataService EOD 回调 (兜底)
-    if (!m_eodRegistered) {
+    if (!m_eodRegistered.load(std::memory_order_acquire)) {
         domain::market::MarketDataService::instance()
             .registerEndOfDayCallback([this](const std::string& tradingDay) {
                 onEodTrigger(tradingDay);
             });
-        m_eodRegistered = true;
+        m_eodRegistered.store(true, std::memory_order_release);
         INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调已注册";
     }
 }
 
 void DailyEodScheduler::stop() {
-    m_eodRegistered = false;
+    m_eodRegistered.store(false, std::memory_order_release);
     m_polling.store(false);
 }
 
@@ -84,7 +84,7 @@ void DailyEodScheduler::schedulePollCheck() {
     if (!m_polling.load()) return;
     int mins = getCurrentLocalMinutes();
     auto today = getCurrentTradingDay();
-    if (mins >= m_eodTriggerMinute && today > m_lastEvalDay) {
+    if (mins >= m_eodTriggerMinute && today > m_lastEvalDay.load()) {
         std::string todayStr = std::to_string(today);
         INTERNAL_INFO_STREAM << "[DailyEod] 轮询触发 " << todayStr
                              << " (" << mins << "min >= " << m_eodTriggerMinute << "min)";
@@ -108,8 +108,8 @@ void DailyEodScheduler::schedulePollCheck() {
 // ═══════════════════════════════════════════════════════════════════
 
 void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
-    // 已停止, 不投递 (executor 可能已销毁)
-    if (!m_eodRegistered) return;
+    // 已停止, 不投递 (stop() 先设标志, 再停 executor)
+    if (!m_eodRegistered.load(std::memory_order_acquire)) return;
 
     // 检查是否已达到触发时间（EOD 回调可能在触发时间之后到，此时立即执行）
     if (getCurrentLocalMinutes() < m_eodTriggerMinute) {
@@ -130,8 +130,8 @@ void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
 
 void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
     auto evalDay = std::stoll(tradingDay);
-    if (evalDay <= m_lastEvalDay) {
-        INTERNAL_INFO_STREAM << "[DailyEod] 交易日 " << tradingDay << " 已评估, 跳过 (last=" << m_lastEvalDay << ")";
+    if (evalDay <= m_lastEvalDay.load()) {
+        INTERNAL_INFO_STREAM << "[DailyEod] 交易日 " << tradingDay << " 已评估, 跳过 (last=" << m_lastEvalDay.load() << ")";
         return;
     }
 
@@ -139,9 +139,12 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
     auto today = getCurrentTradingDay();
     bool isCompensation = (evalDay < today);
 
-    // start() 路径需要窗口校验, onEodTrigger(MarketDataService已校验)跳过
-    if (isCompensation && !isCompensationWindow()) {
-        INTERNAL_WARN_STREAM << "[DailyEod] 补单窗口校验失败, 跳过";
+    // 补评: 仅更新日期, 不触发评估, 不下单
+    if (isCompensation) {
+        INTERNAL_INFO_STREAM << "[DailyEod] 补评: tradingDay=" << tradingDay
+                             << " 仅更新日期, 跳过评估";
+        m_lastEvalDay.store(evalDay);
+        persistLastEvalDay();
         return;
     }
 
@@ -155,7 +158,7 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
 
     EodEvaluationStatus status = EodEvaluationStatus::Error;
     try {
-        status = m_evalFn(tradingDay, isCompensation);
+        status = m_evalFn(tradingDay, false);
     } catch (const std::exception& e) {
         INTERNAL_ERROR_STREAM << "[DailyEod] 评估异常: " << e.what();
         status = EodEvaluationStatus::Error;
@@ -166,13 +169,13 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
 
     // 只在篮子已提交或无信号时持久化，其他状态允许补单重试
     if (status == EodEvaluationStatus::Submitted || status == EodEvaluationStatus::NoSignal) {
-        m_lastEvalDay = evalDay;
+        m_lastEvalDay.store(evalDay);
         persistLastEvalDay();
     } else {
         INTERNAL_WARN_STREAM << "[DailyEod] 不持久化 lastEvalDay, status="
                              << static_cast<int>(status) << " (等待补单重试)";
     }
-    INTERNAL_INFO_STREAM << "[DailyEod] 评估完成, lastEvalDay=" << m_lastEvalDay
+    INTERNAL_INFO_STREAM << "[DailyEod] 评估完成, lastEvalDay=" << m_lastEvalDay.load()
                          << " status=" << static_cast<int>(status);
 }
 
@@ -249,11 +252,11 @@ void DailyEodScheduler::loadLastEvalDay() {
     if (!evalMap.isObject() || !evalMap.has(m_strategyId)) return;
 
     try {
-        m_lastEvalDay = static_cast<std::int64_t>(evalMap.get(m_strategyId).asInt());
-        INTERNAL_INFO_STREAM << "[DailyEod] 加载 lastEvalDay=" << m_lastEvalDay
+        m_lastEvalDay.store(static_cast<std::int64_t>(evalMap.get(m_strategyId).asInt()));
+        INTERNAL_INFO_STREAM << "[DailyEod] 加载 lastEvalDay=" << m_lastEvalDay.load()
                              << " strategyId=" << m_strategyId;
     } catch (...) {
-        m_lastEvalDay = 0;
+        m_lastEvalDay.store(0);
     }
 }
 
@@ -282,7 +285,7 @@ void DailyEodScheduler::persistLastEvalDay() {
     }
     // 更新当前策略
     evalMap.set(m_strategyId, foundation::json::JsonFacade::createInt(
-        static_cast<int>(m_lastEvalDay)));
+        static_cast<int>(m_lastEvalDay.load())));
     root.set("strategyLastEval", evalMap);
 
     // 原子写入: 先写临时文件, 再重命名

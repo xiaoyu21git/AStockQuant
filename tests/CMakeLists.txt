@@ -442,3 +442,42 @@ target_link_libraries(test_rule_engine
 )
 
 message(STATUS "[TESTS] Configured test_rule_engine executable")
+
+# ─── EOD 下单流程测试 (日终评估, 需 PG) ───
+add_executable(test_eod_order_flow
+    test_eod_order_flow.cpp
+)
+
+set_target_properties(test_eod_order_flow PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_eod_order_flow
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+        ${CMAKE_SOURCE_DIR}/src/domain/strategies/include
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src/domain/trading/include
+        ${CMAKE_SOURCE_DIR}/src/domain/trading
+        ${CMAKE_SOURCE_DIR}/src/domain/market/include
+        ${CMAKE_SOURCE_DIR}/src/engine/include
+        ${CMAKE_SOURCE_DIR}/src/foundation/include
+        ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_eod_order_flow
+    PRIVATE
+        domain_strategy_runtime
+        domain_strategies
+        engine
+        astock_market
+        infrastructure
+        foundation
+)
+if(TARGET thirdParty)
+    target_link_libraries(test_eod_order_flow PRIVATE thirdParty)
+endif()
+
+message(STATUS "[TESTS] Configured test_eod_order_flow executable")

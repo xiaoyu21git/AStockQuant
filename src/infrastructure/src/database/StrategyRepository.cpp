@@ -56,6 +56,12 @@ QVariantMap PersistedStrategyData::toVariantMap() const {
     m["updatedAt"] = updatedAt;
     m["parameters"] = parameters;
     m["performanceMetrics"] = performanceMetrics;
+    // QML StrategyCard 直接属性
+    m["returns"]       = performanceMetrics.value("returns", 0);
+    m["sharpeRatio"]   = performanceMetrics.value("sharpeRatio", 0);
+    m["maxDrawdown"]   = performanceMetrics.value("maxDrawdown", 0);
+    m["winRate"]       = performanceMetrics.value("winRate", 0);
+    m["trades"]        = performanceMetrics.value("trades", 0);
     return m;
 }
 PersistedStrategyData PersistedStrategyData::fromVariantMap(const QVariantMap& m) {
@@ -73,7 +79,15 @@ bool StrategyRepository::clearAll() { auto db = sdb(); return db ? db->executeUp
 std::optional<PersistedStrategyData> StrategyRepository::findById(const QString& id) {
     auto db = sdb();
     if (!db) return {};
-    auto r = db->executeQuery("SELECT * FROM strategy WHERE strategy_id=?", {SqlParam{toS(id)}});
+    auto r = db->executeQuery(
+        "SELECT s.*, b.total_return, b.annualized_return, b.sharpe_ratio, b.max_drawdown, "
+        "b.win_rate, b.total_trades "
+        "FROM live.strategy s "
+        "LEFT JOIN LATERAL ("
+        "  SELECT * FROM live.strategy_backtest_results "
+        "  WHERE strategy_id = s.strategy_id ORDER BY run_at DESC LIMIT 1"
+        ") b ON true "
+        "WHERE s.strategy_id=?", {SqlParam{toS(id)}});
     if (r.isEmpty()) return {};
     auto& row = r.getRow(0);
     PersistedStrategyData d;
@@ -92,7 +106,15 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
     d.strategyTypeIndex = readStrategyTypeIndex(metaJson);
     d.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{};
     d.parameters = fromJson(row.getString("parameters"));
-    d.performanceMetrics = fromJson(row.getString("performance_metrics"));
+    QVariantMap perf;
+    perf["totalReturn"]      = row.getDouble("total_return");
+    perf["annualizedReturn"] = row.getDouble("annualized_return");
+    perf["sharpeRatio"]      = row.getDouble("sharpe_ratio");
+    perf["maxDrawdown"]      = row.getDouble("max_drawdown");
+    perf["winRate"]          = row.getDouble("win_rate");
+    perf["returns"]          = row.getDouble("total_return") * 100.0;
+    perf["trades"]           = row.getInt("total_trades");
+    d.performanceMetrics = perf;
     d.runtime = StrategyRuntimeProperties{};
     return d;
 }
@@ -110,7 +132,15 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
         INTERNAL_INFO_STREAM << "[Repo] findAll START";
         auto db = sdb();
         if (!db) { INTERNAL_ERROR_STREAM << "[Repo] findAll FAILED: no db"; return {}; }
-        auto r = db->executeQuery("SELECT * FROM strategy ORDER BY created_at DESC");
+        auto r = db->executeQuery(
+            "SELECT s.*, b.total_return, b.annualized_return, b.sharpe_ratio, b.max_drawdown, "
+            "b.win_rate, b.total_trades "
+            "FROM live.strategy s "
+            "LEFT JOIN LATERAL ("
+            "  SELECT * FROM live.strategy_backtest_results "
+            "  WHERE strategy_id = s.strategy_id ORDER BY run_at DESC LIMIT 1"
+            ") b ON true "
+            "ORDER BY s.created_at DESC");
         INTERNAL_INFO_STREAM << "[Repo] findAll query returned " << static_cast<int>(r.rowCount()) << " rows";
         std::vector<PersistedStrategyData> v;
         for (auto& row : r.getRows()) {
@@ -131,6 +161,16 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
                 metaJson.value("behaviorKind").toInt());
             d.metadata.enabled = metaJson.value("enabled").toBool();
             d.strategyTypeIndex = readStrategyTypeIndex(metaJson);
+            // 直接从最新回测记录取绩效 (LATERAL JOIN)
+            QVariantMap perf;
+            perf["totalReturn"]      = row.getDouble("total_return");
+            perf["annualizedReturn"] = row.getDouble("annualized_return");
+            perf["sharpeRatio"]      = row.getDouble("sharpe_ratio");
+            perf["maxDrawdown"]      = row.getDouble("max_drawdown");
+            perf["winRate"]          = row.getDouble("win_rate");
+            perf["returns"]          = row.getDouble("total_return") * 100.0;
+            perf["trades"]           = row.getInt("total_trades");
+            d.performanceMetrics = perf;
             v.push_back(d);
         }
         return v;

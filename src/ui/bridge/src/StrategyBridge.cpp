@@ -605,6 +605,11 @@ QVariantList StrategyBridge::list()
         auto map = data.toVariantMap();
         QString sid = QString::fromStdString(data.strategyId);
         map["displayStatus"] = m_runtimeStatus.value(sid, QStringLiteral("已停止"));
+        auto perf = map["performanceMetrics"].toMap();
+        INTERNAL_INFO_STREAM << "[StrategyBridge] list: " << sid.toStdString()
+                             << " returns=" << map["returns"].toDouble()
+                             << " sharpe=" << map["sharpeRatio"].toDouble()
+                             << " trades=" << map["trades"].toInt();
         list.push_back(map);
     }
     return list;

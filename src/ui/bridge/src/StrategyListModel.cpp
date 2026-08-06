@@ -47,6 +47,16 @@ QVariant StrategyListModel::data(const QModelIndex& index, int role) const
         return row.running;
     case DisplayStatusRole:
         return row.displayStatus.isEmpty() ? QStringLiteral("已停止") : row.displayStatus;
+    case ReturnsRole:
+        return row.returns;
+    case SharpeRatioRole:
+        return row.sharpeRatio;
+    case MaxDrawdownRole:
+        return row.maxDrawdown;
+    case WinRateRole:
+        return row.winRate;
+    case TradesRole:
+        return row.trades;
     default:
         return {};
     }
@@ -61,7 +71,12 @@ QHash<int, QByteArray> StrategyListModel::roleNames() const
         {StatusTextRole, "statusText"},
         {UpdatedAtRole, "updatedAt"},
         {RunningRole, "running"},
-        {DisplayStatusRole, "displayStatus"}
+        {DisplayStatusRole, "displayStatus"},
+        {ReturnsRole, "returns"},
+        {SharpeRatioRole, "sharpeRatio"},
+        {MaxDrawdownRole, "maxDrawdown"},
+        {WinRateRole, "winRate"},
+        {TradesRole, "trades"}
     };
 }
 
@@ -181,6 +196,17 @@ StrategyListModel::StrategyRow StrategyListModel::fromVariantMap(const QVariantM
     row.updatedAt = map.value(QStringLiteral("updatedAt")).toString().trimmed();
     row.running = map.value(QStringLiteral("running")).toBool();
     row.displayStatus = map.value(QStringLiteral("displayStatus")).toString();
+    row.returns      = map.value(QStringLiteral("returns")).toDouble();
+    row.sharpeRatio  = map.value(QStringLiteral("sharpeRatio")).toDouble();
+    row.maxDrawdown  = map.value(QStringLiteral("maxDrawdown")).toDouble();
+    row.winRate      = map.value(QStringLiteral("winRate")).toDouble();
+    row.trades       = map.value(QStringLiteral("trades")).toInt();
+
+    INTERNAL_INFO_STREAM << "[StrategyListModel] fromVariantMap: "
+                         << row.strategyId.toStdString()
+                         << " returns=" << row.returns
+                         << " sharpe=" << row.sharpeRatio
+                         << " trades=" << row.trades;
 
     if (row.name.isEmpty()) {
         INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] mapped empty name for strategyId=%1 raw=%2")
@@ -202,6 +228,11 @@ QVariantMap StrategyListModel::toVariantMap(const StrategyRow& row) const
     map.insert(QStringLiteral("updatedAt"), row.updatedAt);
     map.insert(QStringLiteral("running"), row.running);
     map.insert(QStringLiteral("displayStatus"), row.displayStatus.isEmpty() ? QStringLiteral("已停止") : row.displayStatus);
+    map.insert(QStringLiteral("returns"), row.returns);
+    map.insert(QStringLiteral("sharpeRatio"), row.sharpeRatio);
+    map.insert(QStringLiteral("maxDrawdown"), row.maxDrawdown);
+    map.insert(QStringLiteral("winRate"), row.winRate);
+    map.insert(QStringLiteral("trades"), row.trades);
     return map;
 }
 

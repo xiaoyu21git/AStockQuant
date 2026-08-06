@@ -4,6 +4,7 @@
 
 #include "GmSessionEngine.h"
 #include "foundation/Utils/Uuid.h"
+#include <shared_mutex>
 #include <unordered_map>
 
 namespace engine {
@@ -16,7 +17,7 @@ public:
     void shutdown();
     bool initialized() const;
 
-    // 同步查询（缓存优先，缓存空则查 gmsdk）
+    // 同步查询（线程安全: 返回快照副本）
     AccountInfo           account();
     std::vector<Position> positions();
 
@@ -24,11 +25,11 @@ public:
     using DataFn = std::function<void()>;
     void setOnDataChanged(DataFn cb);
 
-    // gmsdk 回调入口（GmSessionEngine 调用）
+    // gmsdk 回调入口（GmSessionEngine 调用, 线程安全）
     void onCash(const AccountInfo& a);
     void onPositionUpdate(const std::vector<Position>& positions);
 
-    // 对接 domain 层 PositionAccountEngine 的接口
+    // 对接 domain 层 PositionAccountEngine 的接口（线程安全）
     void applyAccountEvent(const AccountInfo& a);
     void applyPositionEvent(const std::string& symbol, const Position& p);
 
@@ -44,6 +45,7 @@ private:
     foundation::utils::Uuid m_accountSub;
     foundation::utils::Uuid m_positionSub;
     foundation::utils::Uuid m_tickSub;
+    mutable std::shared_mutex m_mutex;  // 保护 m_cachedAccount + m_cachedPositions
 };
 
 } // namespace engine
