@@ -523,6 +523,8 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
     try {
         // ── Phase 1: 因子定池 → 策略只在池内判买点 ──
         if (m_factorSignalProcessor.enabled() && m_poolSelector) {
+            INTERNAL_INFO_STREAM << "[step] factorEnabled=1 poolSelector="
+                                 << static_cast<const void*>(m_poolSelector.get());
             auto pool = m_poolSelector->selectPool(m_factorSignalProcessor);
             strategyService_->updateCandidatePool(
                 std::unordered_set<std::string>(pool.begin(), pool.end()));
@@ -530,10 +532,16 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                                  << m_factorSignalProcessor.targetPositionCount() << ")";
         } else {
             strategyService_->updateCandidatePool({});  // 因子关闭 → 策略扫全市场
+            INTERNAL_INFO_STREAM << "[step] factorDisabled poolSelecor="
+                                 << static_cast<const void*>(m_poolSelector.get());
         }
 
         // ── Phase 2: 策略在候选池内评估 → 生成买卖信号 ──
-        auto orders = collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
+        auto flowResult = strategyService_->onMarketDataPoint(marketDataPoint);
+        int pendingCount = strategyService_->pendingOrderCount();
+        if (pendingCount > 0)
+            INTERNAL_INFO_STREAM << "[step] pendingOrders=" << pendingCount;
+        auto orders = collectOrders(flowResult);
 
         // ── Phase 3: 规则闸门审核 ──
         if (m_rulePipeline.enabled() && orders.has_value() && liveMarketView()) {
