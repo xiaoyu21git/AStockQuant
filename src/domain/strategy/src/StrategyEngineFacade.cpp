@@ -1089,7 +1089,7 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
             domain::strategy::InstrumentId{aSym.instrumentId()},
             price,
             d.dailyBar().volume(),
-            static_cast<std::int32_t>(std::stoll(tradingDay)));
+            0);
 
         try {
             // Phase 1 预过滤: 跳过事件风控封禁的标的
