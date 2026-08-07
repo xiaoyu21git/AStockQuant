@@ -6,6 +6,11 @@ import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
 import "../../../utils/MarketEnvironmentProfile.js" as MarketEnvironmentProfile
+import "../../../utils/FormatUtils.js" as FormatUtils
+import "../../../utils/NormalizeUtils.js" as NormalizeUtils
+import "../../../utils/ColorLabelMaps.js" as ColorLabelMaps
+import "../../../utils/PureUtils.js" as PureUtils
+import "../../../Base" as BaseComponents
 
 /**
  * 因子回测页面组件 - 重新设计版本
@@ -72,35 +77,11 @@ Item {
         return factorBacktestController.backtestRuntimeParams
     }
 
-    function runtimePercentToText(rate) {
-        var numeric = Number(rate)
-        if (!isFinite(numeric)) {
-            numeric = 0
-        }
-        return (numeric * 100).toFixed(2)
-    }
+    function runtimePercentToText(rate) { return FormatUtils.runtimePercentToText(rate); }
 
-    function shallowCopyMap(source) {
-        var target = {}
-        if (!source) {
-            return target
-        }
+    function shallowCopyMap(source) { return PureUtils.shallowCopyMap(source); }
 
-        for (var key in source) {
-            if (Object.prototype.hasOwnProperty.call(source, key)) {
-                target[key] = source[key]
-            }
-        }
-
-        return target
-    }
-
-    function normalizedBenchmarkText(value) {
-        if (value === undefined || value === null) {
-            return ""
-        }
-        return String(value).trim().toUpperCase()
-    }
+    function normalizedBenchmarkText(value) { return NormalizeUtils.normalizedBenchmarkText(value); }
 
     function resolveBenchmarkSymbolFromValue(value, allowGenericKeys) {
         if (value === undefined || value === null) {
@@ -292,38 +273,9 @@ Item {
                 + " · 持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + commissionRate + "% · 滑点 " + slippageRate + "%"
     }
 
-    function normalizePreflightFailures(value) {
-        var normalized = []
-        if (!value || !value.length) {
-            return normalized
-        }
+    function normalizePreflightFailures(value) { return NormalizeUtils.normalizePreflightFailures(value); }
 
-        for (var i = 0; i < value.length; i++) {
-            var item = value[i]
-            if (!item) {
-                continue
-            }
-
-            normalized.push({
-                factorId: item.factorId !== undefined && item.factorId !== null ? String(item.factorId) : "",
-                instanceId: item.instanceId !== undefined && item.instanceId !== null ? String(item.instanceId) : "",
-                reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : "",
-                category: item.category !== undefined && item.category !== null ? String(item.category) : "",
-                runFailureReason: item.runFailureReason !== undefined && item.runFailureReason !== null ? String(item.runFailureReason) : "",
-                runErrorCode: item.runErrorCode !== undefined && item.runErrorCode !== null ? String(item.runErrorCode) : ""
-            })
-        }
-
-        return normalized
-    }
-
-    function positiveDatasetId(value) {
-        var numeric = Number(value)
-        if (!isFinite(numeric) || numeric <= 0) {
-            return 0
-        }
-        return Math.floor(numeric)
-    }
+    function positiveDatasetId(value) { return PureUtils.positiveDatasetId(value); }
 
     function resolvedSelectedDatasetId() {
         var selectedId = positiveDatasetId(selectedCacheDatasetId)
@@ -345,43 +297,7 @@ Item {
         return 0
     }
 
-    function normalizeStringList(value) {
-        var normalized = []
-        var seen = {}
-        if (value === undefined || value === null) {
-            return normalized
-        }
-
-        var values = []
-        if (Array.isArray(value)) {
-            values = value
-        } else if (typeof value === "string") {
-            values = value.split(/[,;\s，；]+/)
-        } else if (value.length !== undefined) {
-            for (var i = 0; i < value.length; i++) {
-                values.push(value[i])
-            }
-        } else {
-            values = [value]
-        }
-
-        for (var j = 0; j < values.length; j++) {
-            var item = values[j]
-            if (item === undefined || item === null) {
-                continue
-            }
-
-            var normalizedItem = String(item).trim()
-            if (!normalizedItem || seen[normalizedItem]) {
-                continue
-            }
-
-            seen[normalizedItem] = true
-            normalized.push(normalizedItem)
-        }
-
-        return normalized
-    }
+    function normalizeStringList(value) { return NormalizeUtils.normalizeStringList(value); }
 
     function currentCacheDatasetInfo() {
         var selectedId = resolvedSelectedDatasetId()
@@ -758,25 +674,7 @@ Item {
         return normalizeSelectedFactorIds(selectedFactorIds || [])
     }
 
-    function normalizedSupportMapFactorIds(factorIds) {
-        if (!factorIds || factorIds.length === 0) {
-            return []
-        }
-
-        var seen = ({})
-        var normalized = []
-        for (var index = 0; index < factorIds.length; index++) {
-            var factorId = String(factorIds[index] === undefined || factorIds[index] === null ? "" : factorIds[index]).trim()
-            if (!factorId || seen[factorId] === true) {
-                continue
-            }
-            seen[factorId] = true
-            normalized.push(factorId)
-        }
-
-        normalized.sort()
-        return normalized
-    }
+    function normalizedSupportMapFactorIds(factorIds) { return NormalizeUtils.normalizedSupportMapFactorIds(factorIds); }
 
     function normalizedSupportMapScopeFingerprint(cacheSnapshot) {
         var snapshot = cacheSnapshot && typeof cacheSnapshot === "object" ? cacheSnapshot : ({})
@@ -1198,18 +1096,9 @@ Item {
         selectedFactorIds = normalizeSelectedFactorIds(factorIds)
     }
 
-    function hasMetricValue(value) {
-        return value !== undefined && value !== null
-    }
+    function hasMetricValue(value) { return PureUtils.hasMetricValue(value); }
 
-    function hasNumericMetricValue(value) {
-        if (!hasMetricValue(value)) {
-            return false
-        }
-
-        var numericValue = Number(value)
-        return isFinite(numericValue)
-    }
+    function hasNumericMetricValue(value) { return PureUtils.hasNumericMetricValue(value); }
 
     function hasCompletedBacktestResult(result) {
         var target = result || displayedBacktestResult || backtestResult || ({})
@@ -1237,33 +1126,9 @@ Item {
         return (Number(value) * 100).toFixed(digits) + "%"
     }
 
-    function normalizedWinRate(value) {
-        if (!hasMetricValue(value)) {
-            return 0
-        }
+    function normalizedWinRate(value) { return NormalizeUtils.normalizedWinRate(value); }
 
-        var numeric = Number(value)
-        if (!isFinite(numeric)) {
-            return 0
-        }
-
-        // 兼容历史百分比口径（0~100）
-        if (Math.abs(numeric) > 1) {
-            numeric = numeric / 100
-        }
-
-        if (numeric < 0) {
-            return 0
-        }
-        if (numeric > 1) {
-            return 1
-        }
-        return numeric
-    }
-
-    function formatTextMetric(value, fallback) {
-        return hasMetricValue(value) && String(value).length > 0 ? String(value) : fallback
-    }
+    function formatTextMetric(value, fallback) { return FormatUtils.formatTextMetric(value, fallback); }
 
     function currentTradingPreview() {
         var result = currentDisplayedBacktestResult() || ({})
@@ -1280,52 +1145,9 @@ Item {
         return String(currentTradingPreview().status || "").trim().toLowerCase()
     }
 
-    function tradingPreviewStatusLabel(status) {
-        switch (String(status || "").trim().toLowerCase()) {
-        case "pass":
-            return "通过"
-        case "warn":
-            return "预警"
-        case "blocked":
-            return "阻断"
-        case "force_reduce":
-            return "强制减仓"
-        case "trading_halt":
-            return "停牌"
-        case "no_order_plan":
-            return "无委托计划"
-        case "invalid_backtest_result":
-            return "结果无效"
-        case "missing_factor_snapshot":
-            return "缺少因子截面"
-        case "invalid_batch":
-            return "交易批次无效"
-        case "invalid_context":
-            return "执行上下文无效"
-        default:
-            return "未生成"
-        }
-    }
+    function tradingPreviewStatusLabel(status) { return ColorLabelMaps.tradingPreviewStatusLabel(status); }
 
-    function tradingPreviewAccentColor(status) {
-        switch (String(status || "").trim().toLowerCase()) {
-        case "pass":
-            return "#10B981"
-        case "warn":
-        case "no_order_plan":
-            return "#F59E0B"
-        case "blocked":
-        case "force_reduce":
-        case "trading_halt":
-        case "invalid_backtest_result":
-        case "missing_factor_snapshot":
-        case "invalid_batch":
-        case "invalid_context":
-            return "#EF4444"
-        default:
-            return "#64748B"
-        }
-    }
+    function tradingPreviewAccentColor(status) { return ColorLabelMaps.tradingPreviewAccentColor(status); }
 
     function tradingPreviewSecondaryMessage() {
         var preview = currentTradingPreview()
@@ -1356,12 +1178,7 @@ Item {
         }
     }
 
-    function tradingPreviewCountText(value) {
-        if (!hasNumericMetricValue(value)) {
-            return "0"
-        }
-        return String(Math.max(0, Math.round(Number(value))))
-    }
+    function tradingPreviewCountText(value) { return FormatUtils.tradingPreviewCountText(value); }
 
     function currentFormalTradingExecution() {
         var result = currentDisplayedBacktestResult() || ({})
@@ -1377,35 +1194,9 @@ Item {
         return String(currentFormalTradingExecution().status || "").trim().toUpperCase()
     }
 
-    function formalTradingStatusLabel(status) {
-        switch (String(status || "").trim().toUpperCase()) {
-        case "SUCCESS":
-            return "已完成"
-        case "PARTIAL":
-            return "部分完成"
-        case "FAILED":
-            return "执行失败"
-        case "NOT_RUN":
-            return "未执行"
-        default:
-            return "未生成"
-        }
-    }
+    function formalTradingStatusLabel(status) { return ColorLabelMaps.formalTradingStatusLabel(status); }
 
-    function formalTradingAccentColor(status) {
-        switch (String(status || "").trim().toUpperCase()) {
-        case "SUCCESS":
-            return "#10B981"
-        case "PARTIAL":
-            return "#F59E0B"
-        case "FAILED":
-            return "#EF4444"
-        case "NOT_RUN":
-            return "#64748B"
-        default:
-            return "#64748B"
-        }
-    }
+    function formalTradingAccentColor(status) { return ColorLabelMaps.formalTradingAccentColor(status); }
 
     function formalTradingSecondaryMessage() {
         var formal = currentFormalTradingExecution()
@@ -1428,25 +1219,9 @@ Item {
         }
     }
 
-    function formatAssetMetric(value) {
-        if (!hasNumericMetricValue(value)) {
-            return "0.00"
-        }
+    function formatAssetMetric(value) { return FormatUtils.formatAssetMetric(value); }
 
-        var numericValue = Number(value)
-        var absoluteValue = Math.abs(numericValue)
-        if (absoluteValue >= 100000000) {
-            return (numericValue / 100000000).toFixed(2) + "亿"
-        }
-        if (absoluteValue >= 10000) {
-            return (numericValue / 10000).toFixed(2) + "万"
-        }
-        return numericValue.toFixed(2)
-    }
-
-    function formatOptionalAssetMetric(value) {
-        return hasNumericMetricValue(value) ? formatAssetMetric(value) : "N/A"
-    }
+    function formatOptionalAssetMetric(value) { return FormatUtils.formatOptionalAssetMetric(value); }
 
     function formalTradingNumericSeries(values) {
         var numericSeries = []
@@ -1607,72 +1382,15 @@ Item {
         return 158
     }
 
-    function coreRatingLabel(value, fallbackLabel) {
-        var resolvedLabel = formatTextMetric(fallbackLabel, "")
-        if (resolvedLabel.length > 0) {
-            return resolvedLabel
-        }
+    function coreRatingLabel(value, fallbackLabel) { return ColorLabelMaps.coreRatingLabel(value, fallbackLabel); }
 
-        var numeric = Number(value)
-        if (!isFinite(numeric)) {
-            numeric = 0
-        }
+    function coreRatingColor(value) { return ColorLabelMaps.coreRatingColor(value); }
 
-        switch (numeric) {
-        case 3:
-            return "优秀"
-        case 2:
-            return "良好"
-        case 1:
-            return "合格"
-        default:
-            return "不合格"
-        }
-    }
+    function returnMetricColor(value) { return ColorLabelMaps.returnMetricColor(value); }
 
-    function coreRatingColor(value) {
-        var numeric = Number(value)
-        if (!isFinite(numeric)) {
-            numeric = 0
-        }
+    function returnMetricTrend(value) { return ColorLabelMaps.returnMetricTrend(value); }
 
-        switch (numeric) {
-        case 3:
-            return "#10B981"
-        case 2:
-            return "#38BDF8"
-        case 1:
-            return "#F59E0B"
-        default:
-            return "#EF4444"
-        }
-    }
-
-    function returnMetricColor(value) {
-        var numericValue = hasNumericMetricValue(value) ? Number(value) : 0
-        if (numericValue > 0) {
-            return "#EF4444"
-        }
-        if (numericValue < 0) {
-            return "#10B981"
-        }
-        return "#94A3B8"
-    }
-
-    function returnMetricTrend(value) {
-        var numericValue = hasNumericMetricValue(value) ? Number(value) : 0
-        if (numericValue > 0) {
-            return "up"
-        }
-        if (numericValue < 0) {
-            return "down"
-        }
-        return "neutral"
-    }
-
-    function returnTrendColor(trend) {
-        return trend === "up" ? "#EF4444" : (trend === "down" ? "#10B981" : "#94A3B8")
-    }
+    function returnTrendColor(trend) { return ColorLabelMaps.returnTrendColor(trend); }
 
     function factorDefinitionForValidation(factorId) {
         if (!factorService || !factorService.getFactorById || !factorId) {
@@ -1784,33 +1502,9 @@ Item {
         return factorBacktestController.displayedBacktestResultName(entry || ({}))
     }
 
-    function normalizedListValue(value) {
-        if (!value) {
-            return []
-        }
+    function normalizedListValue(value) { return NormalizeUtils.normalizedListValue(value); }
 
-        if (Array.isArray(value)) {
-            return value
-        }
-
-        if (typeof value.length === "number") {
-            var normalized = []
-            for (var index = 0; index < value.length; index++) {
-                normalized.push(value[index])
-            }
-            return normalized
-        }
-
-        return []
-    }
-
-    function stringifyLogValue(value) {
-        try {
-            return JSON.stringify(value)
-        } catch (error) {
-            return String(value)
-        }
-    }
+    function stringifyLogValue(value) { return NormalizeUtils.stringifyLogValue(value); }
 
     function applyDisplayedBacktestResult(result) {
         var rawBacktestResult = result && typeof result === "object" ? result : ({})
@@ -1878,35 +1572,9 @@ Item {
         return batchResults && batchResults.length > 0
     }
 
-    function backtestResultStatusLabel(status) {
-        switch (String(status || "").trim().toUpperCase()) {
-        case "SUCCESS":
-            return "成功"
-        case "PARTIAL":
-            return "部分完成"
-        case "FAILED":
-            return "失败"
-        case "RUNNING":
-            return "运行中"
-        default:
-            return "待查看"
-        }
-    }
+    function backtestResultStatusLabel(status) { return ColorLabelMaps.backtestResultStatusLabel(status); }
 
-    function backtestResultStatusColor(status) {
-        switch (String(status || "").trim().toUpperCase()) {
-        case "SUCCESS":
-            return "#10B981"
-        case "PARTIAL":
-            return "#F59E0B"
-        case "FAILED":
-            return "#EF4444"
-        case "RUNNING":
-            return "#3B82F6"
-        default:
-            return "#64748B"
-        }
-    }
+    function backtestResultStatusColor(status) { return ColorLabelMaps.backtestResultStatusColor(status); }
 
     function backtestResultCardKey(entry) {
         var target = entry || ({})
@@ -4895,63 +4563,7 @@ Item {
     }
     
     // ============ 组件定义 ============
-    
-    // 关键指标卡片组件
-    component KeyMetricCard: Item {
-        id: metricCardRoot
-        property string title: ""
-        property string value: ""
-        property string description: ""
-        property string color: "#F1F5F9"
-        property string trend: "neutral"
-        property string trendColor: root.returnTrendColor(trend)
-        
-        Layout.fillWidth: true
-        Layout.preferredHeight: 70
-        
-        Rectangle {
-            anchors.fill: parent
-            radius: 8
-            color: "#0F172A"
-            
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 2
-                
-                Text {
-                    text: title
-                    font.pixelSize: 10
-                    color: "#94A3B8"
-                }
-                
-                Row {
-                    spacing: 4
-                    
-                    Text {
-                        text: value
-                        font.pixelSize: 16
-                        font.weight: Font.Bold
-                        color: metricCardRoot.color
-                    }
-                    
-                    // 趋势指示器
-                    Text {
-                        visible: trend !== "neutral"
-                        text: trend === "up" ? "↑" : "↓"
-                        font.pixelSize: 12
-                        color: trendColor
-                    }
-                }
-                
-                Text {
-                    text: description
-                    font.pixelSize: 9
-                    color: "#64748B"
-                }
-            }
-        }
-    }
+    // KeyMetricCard 已提取到 components/Base/KeyMetricCard.qml (Phase 31a.5)
     
     // ============ 内部函数 ============
     // 所有复杂逻辑已移至C++控制器，QML只负责UI显示和信号处理

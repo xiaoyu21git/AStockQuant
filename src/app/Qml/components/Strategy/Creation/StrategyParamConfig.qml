@@ -7,13 +7,14 @@ import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
 // RuleTemplatePreviewUtils.js migrated to C++ StrategyBridge
 import "../../FactorWorkbench/Creation/components" as PluginComponents
+import "../../../utils/ColorLabelMaps.js" as ColorLabelMaps
+import "../../../utils/PureUtils.js" as PureUtils
+import "../../../utils/DomainConstants.js" as DomainConstants
 
 Rectangle {
     id: root
 
-    function clampWidth(minWidth, preferredWidth, maxWidth) {
-        return Math.round(Math.max(minWidth, Math.min(maxWidth, preferredWidth)))
-    }
+    function clampWidth(minWidth, preferredWidth, maxWidth) { return PureUtils.clampWidth(minWidth, preferredWidth, maxWidth); }
     
     // ============ 属性 ============
 
@@ -1474,16 +1475,7 @@ Rectangle {
         emitValidationState(currentParameterValidationErrors())
     }
 
-    function defaultFactorOverlay() {
-        return {
-            enabled: false,
-            targetPositionCount: 50,
-            minimumCompositeScore: 0,
-            combineMode: "rank_only",
-            selectionScope: "rule_eligible",
-            allocations: []
-        }
-    }
+    function defaultFactorOverlay() { return DomainConstants.defaultFactorOverlay(); }
 
     function importedFactorContextPayload(sourceParameters) {
         var source = sourceParameters && typeof sourceParameters === "object" ? sourceParameters : ({})
@@ -1508,9 +1500,7 @@ Rectangle {
         return target
     }
 
-    function cloneValue(value) {
-        return JSON.parse(JSON.stringify(value))
-    }
+    function cloneValue(value) { return PureUtils.cloneValue(value); }
 
     function normalizedOverlayAllocation(rawAllocation) {
         var item = rawAllocation && typeof rawAllocation === "object" ? rawAllocation : ({})
@@ -1853,9 +1843,7 @@ Rectangle {
         }
     }
 
-    function isPlainObject(value) {
-        return !!value && typeof value === "object" && !Array.isArray(value)
-    }
+    function isPlainObject(value) { return PureUtils.isPlainObject(value); }
 
     function ensureStrategyProfile(profileCandidate) {
         if (isPlainObject(profileCandidate) && Object.keys(profileCandidate).length > 0) {
@@ -2335,28 +2323,9 @@ Rectangle {
         )
     }
 
-    function supportedRuleBindingPhaseIndex(value) {
-        var parsed = Number(value)
-        if (!isFinite(parsed)) {
-            return -1
-        }
-        parsed = Math.floor(parsed)
-        return parsed >= 0 && parsed <= 6 ? parsed : -1
-    }
+    function supportedRuleBindingPhaseIndex(value) { return DomainConstants.supportedRuleBindingPhaseIndex(value); }
 
-    function composerStagePhaseIndex(stageId) {
-        var normalizedStageId = String(stageId || "").trim().toLowerCase()
-        var mapping = {
-            market: 0,
-            eligibility: 1,
-            signal: 1,
-            portfolio: 5,
-            rebalance: 3,
-            execution: 5,
-            account_risk: 5
-        }
-        return mapping.hasOwnProperty(normalizedStageId) ? mapping[normalizedStageId] : -1
-    }
+    function composerStagePhaseIndex(stageId) { return DomainConstants.composerStagePhaseIndex(stageId); }
 
     function composerRulePhaseIndex(rule, stageId) {
         var configured = supportedRuleBindingPhaseIndex(rule && (rule.bindingPhase !== undefined ? rule.bindingPhase : rule.phase))
@@ -2453,17 +2422,9 @@ Rectangle {
         return payload
     }
 
-    function buildExecutionPolicyPayload(sourceParameters) {
-        return {
-            version: 1
-        }
-    }
+    function buildExecutionPolicyPayload(sourceParameters) { return DomainConstants.buildExecutionPolicyPayload(sourceParameters); }
 
-    function buildBacktestAssumptionsPayload(sourceParameters) {
-        return {
-            version: 1
-        }
-    }
+    function buildBacktestAssumptionsPayload(sourceParameters) { return DomainConstants.buildBacktestAssumptionsPayload(sourceParameters); }
 
     function buildRuleProfilePayload(sourceParameters) {
         var payload = {
@@ -2621,29 +2582,9 @@ Rectangle {
         return validPhases[normalized] ? normalized : ""
     }
 
-    function roleDisplayName(role) {
-        var mapping = {
-            must_pass: "必须满足",
-            any_pass: "任一满足",
-            veto: "否决条件",
-            score_boost: "评分增强",
-            position_management: "仓位管理",
-            execution_constraint: "执行限制",
-            account_guard: "账户保护"
-        }
-        return mapping[role] || role || "规则组"
-    }
+    function roleDisplayName(role) { return ColorLabelMaps.roleDisplayName(role); }
 
-    function operatorDisplayName(operatorValue) {
-        var mapping = {
-            all: "全部满足",
-            any: "任一满足",
-            at_least: "至少命中",
-            score_sum: "累计评分",
-            first_match: "首个命中"
-        }
-        return mapping[operatorValue] || operatorValue || "未设置"
-    }
+    function operatorDisplayName(operatorValue) { return ColorLabelMaps.operatorDisplayName(operatorValue); }
 
     function normalizeStructuredValue(rawValue) {
         if (rawValue === undefined || rawValue === null) {
@@ -3012,13 +2953,7 @@ Rectangle {
         }
     }
 
-    function countStageRules(stageData) {
-        var n = 0
-        var gs = Array.isArray(stageData && stageData.groups) ? stageData.groups : []
-        for (var i = 0; i < gs.length; i++)
-            n += Array.isArray(gs[i].rules) ? gs[i].rules.length : 0
-        return n
-    }
+    function countStageRules(stageData) { return PureUtils.countStageRules(stageData); }
 
     function selectRuleComposerStage(stageId) {
         root.selectedRuleComposerStageId = stageId

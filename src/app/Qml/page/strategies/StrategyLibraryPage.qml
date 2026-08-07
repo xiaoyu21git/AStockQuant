@@ -9,6 +9,10 @@ import "../../components/Base" as BaseComponents
 import "../../components" as Components
 
 import "../../utils/StartupGateFormatter.js" as StartupGateFormatter
+import "../../utils/FormatUtils.js" as FormatUtils
+import "../../utils/NormalizeUtils.js" as NormalizeUtils
+import "../../utils/DataAccessPatterns.js" as DataAccess
+import "../../utils/PureUtils.js" as PureUtils
 
 Rectangle {
     id: strategyLibraryPage
@@ -199,7 +203,7 @@ Rectangle {
     }
 
     function normalizeSymbolValue(symbol) {
-        return String(symbol || "").trim().toUpperCase()
+        return NormalizeUtils.normalizeSymbolValue(symbol);
     }
 
     function appendSymbolCollection(targetSymbols, seenSymbols, rawCollection) {
@@ -244,8 +248,7 @@ Rectangle {
     }
 
     function getStrategyDisplayStatus(strategy) {
-        // 由 C++ StrategyBridge::get/list 中的 computeDisplayStatus 计算，查询实际引擎状态
-        return (strategy && strategy.displayStatus) ? strategy.displayStatus : "已停止"
+        return DataAccess.getStrategyDisplayStatus(strategy);
     }
 
     function currentRuntimeSnapshot(strategy) {
@@ -275,36 +278,23 @@ Rectangle {
     }
 
     function isRunningStrategy(strategy) {
-        return (strategy && strategy.displayStatus) === "运行中"
+        return DataAccess.isRunningStrategy(strategy);
     }
 
     function hasRuntimeSnapshotData(snapshot) {
-        return snapshot && Object.keys(snapshot).length > 0
+        return DataAccess.hasRuntimeSnapshotData(snapshot);
     }
 
     function normalizeRuntimeDisplayValue(value, fallbackValue) {
-        var fallback = fallbackValue === undefined ? "--" : fallbackValue
-        if (value === undefined || value === null) {
-            return fallback
-        }
-
-        var text = String(value).trim()
-        return text.length > 0 ? text : fallback
+        return FormatUtils.normalizeRuntimeDisplayValue(value, fallbackValue);
     }
 
     function formatRuntimeBooleanValue(value, trueText, falseText, fallbackText) {
-        if (value === true) {
-            return trueText
-        }
-        if (value === false) {
-            return falseText
-        }
-        return fallbackText === undefined ? "--" : fallbackText
+        return FormatUtils.formatRuntimeBooleanValue(value, trueText, falseText, fallbackText);
     }
 
     function getStrategyDisplayStatusLabel(status) {
-        // displayStatus 已经是中文，直接返回
-        return status || "已停止"
+        return DataAccess.getStrategyDisplayStatusLabel(status);
     }
 
     function getRuntimeDiagnosticColor(status) {
@@ -346,16 +336,7 @@ Rectangle {
     }
 
     function isStrategyBoundToTradingConfiguration(strategy, configuration) {
-        var strategyId = strategy ? (strategy.strategyId || "") : ""
-        if (!strategyId) return false
-        var config = configuration || ({})
-        var boundStrategies = config.boundStrategies || []
-        for (var i = 0; i < boundStrategies.length; ++i) {
-            var entry = boundStrategies[i] || ({})
-            var bid = typeof entry === "string" ? String(entry).trim() : String(entry.strategyId || "").trim()
-            if (bid === strategyId) return true
-        }
-        return String(config.boundStrategyId || "").trim() === strategyId
+        return DataAccess.isStrategyBoundToTradingConfiguration(strategy, configuration);
     }
 
     function showActionFeedback(message, isError) {
@@ -370,19 +351,11 @@ Rectangle {
     }
 
     function resolveStrategyIdentifier(strategyCandidate) {
-        if (!strategyCandidate) {
-            return ""
-        }
-
-        return strategyCandidate.strategyId || ""
+        return DataAccess.resolveStrategyIdentifier(strategyCandidate);
     }
 
     function resolveStrategyName(strategyCandidate, strategyId) {
-        if (!strategyCandidate) {
-            return strategyId || ""
-        }
-
-        return strategyCandidate.strategyName || strategyCandidate.name || strategyId || ""
+        return DataAccess.resolveStrategyName(strategyCandidate, strategyId);
     }
 
     function resolveStrategyDetail(strategyCandidate) {
@@ -540,32 +513,15 @@ Rectangle {
     }
 
     function truncateDisplayText(value, maxLength) {
-        var text = normalizeRuntimeDisplayValue(value, "")
-        if (!text) {
-            return ""
-        }
-
-        var limit = maxLength === undefined ? 32 : maxLength
-        if (text.length <= limit) {
-            return text
-        }
-        return text.substring(0, Math.max(0, limit - 1)) + "..."
+        return FormatUtils.truncateDisplayText(value, maxLength);
     }
 
     function getMarketCalendarPhaseLabel(snapshot) {
-        return normalizeRuntimeDisplayValue(snapshot && snapshot.sessionPhaseLabel, "--")
+        return DataAccess.getMarketCalendarPhaseLabel(snapshot);
     }
 
     function getMarketCalendarSourceTag(snapshot) {
-        if (!snapshot || Object.keys(snapshot).length === 0) {
-            return "本地时间窗"
-        }
-
-        if (snapshot.holidayAware) {
-            return "真实日历"
-        }
-
-        return snapshot.error ? "日历降级" : "本地回退"
+        return DataAccess.getMarketCalendarSourceTag(snapshot);
     }
 
     function getMarketCalendarStatusAccent(snapshot) {
@@ -585,13 +541,11 @@ Rectangle {
     }
 
     function getStrategyStartGateState(strategyCandidate) {
-        return {
-            canStart: true
-        }
+        return DataAccess.getStrategyStartGateState(strategyCandidate);
     }
 
     function getStrategyStartActionLabel(strategyCandidate) {
-        return "启动实盘"
+        return DataAccess.getStrategyStartActionLabel(strategyCandidate);
     }
 
     function getStrategyStaticStartupGatePreview(strategyCandidate) {
@@ -632,33 +586,11 @@ Rectangle {
     }
 
     function getConfigurationSymbols(configuration) {
-        var config = configuration || ({})
-        var source = config.symbols || []
-        var values = Array.isArray(source) ? source : String(source || "").split(/[,;\s，；]+/)
-        var normalized = []
-        for (var index = 0; index < values.length; ++index) {
-            var token = String(values[index] || "").trim().toUpperCase()
-            if (!token || normalized.indexOf(token) !== -1) {
-                continue
-            }
-            normalized.push(token)
-        }
-        return normalized
+        return DataAccess.getConfigurationSymbols(configuration);
     }
 
     function getStrategySubscriptionSyncLabel(strategy, configuration) {
-        var config = configuration || ({})
-        var strategyId = strategy ? (strategy.strategyId || "") : ""
-        if (!strategyId || !isStrategyBoundToTradingConfiguration(strategy, config)) {
-            return "--"
-        }
-
-        var configSymbols = getConfigurationSymbols(config)
-        if (configSymbols.length === 0) {
-            return "全市场"   // SDK 自动订阅全市场，无需手动配置 symbols
-        }
-
-        return "已配置"
+        return DataAccess.getStrategySubscriptionSyncLabel(strategy, configuration);
     }
 
     function getStrategySubscriptionSyncAccent(strategy, configuration) {
@@ -884,26 +816,11 @@ Rectangle {
     }
 
     function toPlainJsValue(rawValue) {
-        if (rawValue === undefined || rawValue === null) {
-            return rawValue
-        }
-
-        if (typeof rawValue === "object") {
-            try {
-                return JSON.parse(JSON.stringify(rawValue))
-            } catch (error) {
-            }
-        }
-
-        return rawValue
+        return PureUtils.toPlainJsValue(rawValue);
     }
 
     function strategyHasEditableRulePayload(strategyObject) {
-        var strategyData = toPlainJsValue(strategyObject) || ({})
-        var parameters = toPlainJsValue(strategyData.parameters) || ({})
-        return !!(parameters.rule_profile
-                  || parameters.rule_composer_state
-                  || parameters.factor_overlay)
+        return DataAccess.strategyHasEditableRulePayload(strategyObject);
     }
 
     function enrichStrategyForEdit(strategyObject, strategyId) {

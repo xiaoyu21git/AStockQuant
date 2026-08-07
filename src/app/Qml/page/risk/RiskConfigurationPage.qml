@@ -5,6 +5,11 @@ import QtQuick.Layouts 1.15
 import ConsoleUi 1.0 as ConsoleUiComponents
 import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
+import "../../utils/NormalizeUtils.js" as NormalizeUtils
+import "../../utils/ColorLabelMaps.js" as ColorLabelMaps
+import "../../utils/DataAccessPatterns.js" as DataAccess
+import "../../utils/PureUtils.js" as PureUtils
+import "../../utils/DomainConstants.js" as DomainConstants
 
 
 Item {
@@ -1149,23 +1154,11 @@ Item {
         }
 
     function badgeBackground(type) {
-        if (type === "warning") {
-            return "#3A2A10"
-        }
-        if (type === "danger") {
-            return "#3B1215"
-        }
-        return "#0F2F22"
+        return ColorLabelMaps.badgeBackground(type);
     }
 
     function badgeTextColor(type) {
-        if (type === "warning") {
-            return "#FDBA74"
-        }
-        if (type === "danger") {
-            return "#FCA5A5"
-        }
-        return "#6EE7B7"
+        return ColorLabelMaps.badgeTextColor(type);
     }
 
     function statusDotColor(type) {
@@ -1252,40 +1245,7 @@ Item {
     }
 
     function preferredRiskParamGroups() {
-        return [
-            {
-                id: "riskCore",
-                name: "基础风险控制",
-                description: "先配置止损、止盈、最大回撤和自动止损等基础保护参数。",
-                minColumnWidth: 560,
-                maxColumns: 2,
-                params: ["stopLossPercent", "takeProfitPercent", "maxDrawdownLimit", "autoStopEnabled"]
-            },
-            {
-                id: "exposureControl",
-                name: "仓位与暴露控制",
-                description: "集中处理仓位分配、总暴露、集中度和持仓数量限制。",
-                minColumnWidth: 620,
-                maxColumns: 2,
-                params: ["positionSizingMethod", "maxTotalExposure", "maxPositionPercent", "maxIndustryExposure", "maxThemeExposure"]
-            },
-            {
-                id: "executionLimits",
-                name: "执行与交易限制",
-                description: "约束日内成交规模、VaR 预警和单日损失等执行风险。",
-                minColumnWidth: 760,
-                maxColumns: 1,
-                params: ["varWarningPercent", "orderSizeLimit", "turnoverLimit", "slippageLimit", "maxDailyLoss"]
-            },
-            {
-                id: "breakerRules",
-                name: "熔断与相关性限制",
-                description: "用于控制极端波动场景下的熔断阈值和持仓相关性。",
-                minColumnWidth: 760,
-                maxColumns: 1,
-                params: ["level1Breaker", "level2Breaker", "level3Breaker", "maxCorrelation"]
-            }
-        ]
+        return DomainConstants.preferredRiskParamGroups();
     }
 
     function buildDynamicParamGroups(configs) {
@@ -1354,93 +1314,51 @@ Item {
     }
 
     function numberOrDefault(value, fallback) {
-        var numericValue = Number(value)
-        return isNaN(numericValue) ? fallback : numericValue
+        return PureUtils.numberOrDefault(value, fallback);
     }
 
     function parseTimestamp(value) {
-        if (!value) {
-            return 0
-        }
-        var normalizedValue = String(value).replace(" ", "T")
-        var timestamp = Date.parse(normalizedValue)
-        return isNaN(timestamp) ? 0 : timestamp
+        return PureUtils.parseTimestamp(value);
     }
 
     function getStrategyParameters(strategy) {
-        if (!strategy) {
-            return ({})
-        }
-        return strategy.parameters || ({})
+        return DataAccess.getStrategyParameters(strategy);
     }
 
     function getStrategyPerformance(strategy) {
-        if (!strategy) {
-            return ({})
-        }
-        return strategy.performanceMetrics || ({})
+        return DataAccess.getStrategyPerformance(strategy);
     }
 
     function getLatestBacktest(strategy) {
-        var performance = getStrategyPerformance(strategy)
-        return performance.latestBacktest || ({})
+        return DataAccess.getLatestBacktest(strategy);
     }
 
     function getStrategyAdvancedOptions(strategy) {
-        return ({})
+        return DomainConstants.getStrategyAdvancedOptions(strategy);
     }
 
     function getBacktestHistory(strategy) {
-        var performance = getStrategyPerformance(strategy)
-        return performance.backtestHistory || []
+        return DataAccess.getBacktestHistory(strategy);
     }
 
     function resolveStrategyName(strategy) {
-        if (!strategy) {
-            return "未命名策略"
-        }
-        return strategy.strategyName || "未命名策略"
+        return DataAccess.resolveStrategyNameFromBacktest(strategy);
     }
 
     function resolveStrategyId(strategy) {
-        if (!strategy) {
-            return ""
-        }
-        return strategy.strategyId || ""
+        return DataAccess.resolveStrategyId(strategy);
     }
 
     function normalizePercentFromRuntime(value) {
-        var numericValue = Number(value)
-        if (isNaN(numericValue)) {
-            return 0
-        }
-        return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue
+        return NormalizeUtils.normalizePercentFromRuntime(value);
     }
 
     function firstDefinedValue(source, keys) {
-        if (!source) {
-            return undefined
-        }
-
-        for (var index = 0; index < keys.length; ++index) {
-            var key = keys[index]
-            if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
-                return source[key]
-            }
-        }
-
-        return undefined
+        return PureUtils.firstDefinedValue(source, keys);
     }
 
     function resolveStrategyConfigAliases(key) {
-        switch (key) {
-        case "maxPositionPercent":
-            return ["maxPositionPercent"]
-        case "maxTotalExposure":
-            return ["maxTotalExposure"]
-        default:
-            return [key]
-        }
+        return DomainConstants.resolveStrategyConfigAliases(key);
     }
 
     function resolveFocusedStrategyConfigValue(key) {
@@ -1503,8 +1421,7 @@ Item {
     }
 
     function hasBacktestRecord(strategy) {
-        var latest = getLatestBacktest(strategy)
-        return latest && Object.keys(latest).length > 0
+        return DataAccess.hasBacktestRecord(strategy);
     }
 
     function isPortfolioStrategy(strategy) {
@@ -1565,51 +1482,19 @@ Item {
     }
 
     function parseAllocationList(rawValue) {
-        if (!rawValue) {
-            return []
-        }
-        if (rawValue instanceof Array) {
-            return rawValue
-        }
-        if (typeof rawValue === "string") {
-            try {
-                var parsed = JSON.parse(rawValue)
-                return parsed instanceof Array ? parsed : []
-            } catch (error) {
-                console.warn("RiskConfigurationPage: failed to parse allocations", error)
-            }
-        }
-        return []
+        return NormalizeUtils.parseAllocationList(rawValue);
     }
 
     function normalizeAllocationName(item, index) {
-        if (!item) {
-            return "配置项 " + (index + 1)
-        }
-        return item.display_name
-            || item.factor_id
-            || ("配置项 " + (index + 1))
+        return NormalizeUtils.normalizeAllocationName(item, index);
     }
 
     function normalizeAllocationWeight(item) {
-        if (!item) {
-            return 0
-        }
-        return normalizePercentFromRuntime(
-            item.weight !== undefined ? item.weight
-                : (item.ratio !== undefined ? item.ratio
-                    : (item.allocation !== undefined ? item.allocation : item.value))
-        )
+        return NormalizeUtils.normalizeAllocationWeight(item);
     }
 
     function getBacktestTradeRecords(backtestRecord) {
-        if (!backtestRecord || typeof backtestRecord !== "object") {
-            return []
-        }
-        if (backtestRecord.tradeRecords instanceof Array) {
-            return backtestRecord.tradeRecords
-        }
-        return []
+        return DataAccess.getBacktestTradeRecords(backtestRecord);
     }
 
     function findLatestTradeSnapshotTimestamp(tradeRecords) {
@@ -1624,8 +1509,7 @@ Item {
     }
 
     function normalizeTradeDirection(direction) {
-        var normalized = String(direction || "long").toLowerCase()
-        return normalized === "short" ? "short" : "long"
+        return NormalizeUtils.normalizeTradeDirection(direction);
     }
 
     function buildActualPositionRisks(backtestRecord) {
@@ -2256,16 +2140,7 @@ Item {
     }
 
     function cloneObject(source) {
-        var target = {}
-        if (!source) {
-            return target
-        }
-        for (var key in source) {
-            if (Object.prototype.hasOwnProperty.call(source, key)) {
-                target[key] = source[key]
-            }
-        }
-        return target
+        return PureUtils.cloneObject(source);
     }
 
     function auxiliaryRiskConfiguration() {
@@ -2282,11 +2157,7 @@ Item {
     }
 
     function normalizePositiveIntOrDefault(value, fallback) {
-        var numericValue = Number(value)
-        if (isNaN(numericValue) || numericValue <= 0) {
-            return fallback
-        }
-        return Math.floor(numericValue)
+        return NormalizeUtils.normalizePositiveIntOrDefault(value, fallback);
     }
 
     function buildPersistedConfiguration() {
@@ -2332,12 +2203,7 @@ Item {
     }
 
     function configurationHasValues(values) {
-        for (var key in values) {
-            if (Object.prototype.hasOwnProperty.call(values, key)) {
-                return true
-            }
-        }
-        return false
+        return PureUtils.configurationHasValues(values);
     }
 
     function loadPersistedConfiguration() {
@@ -2398,19 +2264,11 @@ Item {
     }
 
     function normalizePercentValue(value, fallback) {
-        var numericValue = Number(value)
-        if (isNaN(numericValue)) {
-            return fallback
-        }
-        return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue
+        return NormalizeUtils.normalizePercentValue(value, fallback);
     }
 
     function normalizeSignedPercentValue(value, fallback) {
-        var numericValue = Number(value)
-        if (isNaN(numericValue)) {
-            return fallback
-        }
-        return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue
+        return NormalizeUtils.normalizeSignedPercentValue(value, fallback);
     }
 
     function saveRiskConfiguration() {

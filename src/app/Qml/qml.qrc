@@ -59,6 +59,7 @@
         <file>components/Base/MetaCard.qml</file>
         <file>components/Base/MetaForm.qml</file>
         <file>components/Base/MetaTable.qml</file>
+        <file>components/Base/KeyMetricCard.qml</file>
         <file>components/BaseQuantCard.qml</file>
         <file>components/ButtonBuy.qml</file>
         <file>components/ButtonIcon.qml</file>
@@ -196,6 +197,12 @@
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StartupGateFormatter.js</file>
         <file>utils/TradingConstants.js</file>
+        <file>utils/FormatUtils.js</file>
+        <file>utils/NormalizeUtils.js</file>
+        <file>utils/ColorLabelMaps.js</file>
+        <file>utils/PureUtils.js</file>
+        <file>utils/DataAccessPatterns.js</file>
+        <file>utils/DomainConstants.js</file>
 
 
         <file>components/Base/qmldir</file>
