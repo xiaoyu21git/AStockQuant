@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include "foundation/Utils/DateUtils.h"
 
 namespace domain::scheduler {
 
@@ -29,9 +30,7 @@ void BatchScheduler::loadTradingCalendar(
 
     // 模拟：按 yyyymmdd 自增遍历
     auto ymdToDays = [](int32_t ymd) -> int32_t {
-        int32_t y = ymd / 10000;
-        int32_t m = (ymd % 10000) / 100;
-        int32_t d = ymd % 100;
+        int y,m,d; foundation::utils::decomposeDate(static_cast<int>(ymd), y, m, d);
         return y * 365 + y / 4 - y / 100 + y / 400 + (m - 1) * 30 + d;
     };
 

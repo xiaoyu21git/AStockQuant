@@ -714,8 +714,7 @@ void BacktestRuleVariableProvider::setDay(
     m_impl->minuteBarCache.clear();
     // 预加载分钟线聚合 (分时形态变量需要)
     {
-        char ds[16]; int ly=date/10000, lm=(date/100)%100, ld=date%100;
-        std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
+        char ds[16]; foundation::utils::formatTradingDayTo(date, ds, sizeof(ds));
         try {
             auto& pool = astock::database::NativePgConnectionPool::instance();
             auto db = pool.getConnection();
@@ -761,8 +760,7 @@ void BacktestRuleVariableProvider::setDay(
             m_impl->marketReady = true;
             // 加载当日龙头排名缓存 (仅规则引用 concept.* 变量时启用)
             if (m_impl->conceptQueriesEnabled) {
-                char ds[16]; int ly=date/10000, lm=(date/100)%100, ld=date%100;
-                std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", ly, lm, ld);
+                char ds[16]; foundation::utils::formatTradingDayTo(date, ds, sizeof(ds));
                 try {
                     auto& pool = astock::database::NativePgConnectionPool::instance();
                     auto db = pool.getConnection();

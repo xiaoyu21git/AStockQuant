@@ -112,8 +112,7 @@ const std::map<std::string, double>* RuntimeFactorSvc::backtestValuesBySymbol(
                              << " dates=" << m_factorCache[instanceId].size();
     }
     char dateBuf[16];
-    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
-                  date / 10000, (date / 100) % 100, date % 100);
+    foundation::utils::formatTradingDayTo(date, dateBuf, sizeof(dateBuf));
     const auto& cache = m_factorCache[instanceId];
     const auto it = cache.find(dateBuf);
     return it != cache.end() ? &it->second : nullptr;
@@ -201,9 +200,9 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
     }
     if (symbolStrList.empty()) return result;
 
-    const int y = date / 10000, m = (date / 100) % 100, d = date % 100;
+    const std::string dateKey = foundation::utils::formatTradingDay(date);
     char dateBuf[16];
-    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", y, m, d);
+    foundation::utils::formatTradingDayTo(date, dateBuf, sizeof(dateBuf));
 
     // ── 回测: FactorEngine 全量算一次, 缓存 ──
     if (m_dataSvc) {
@@ -253,8 +252,7 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         const auto& dates = m_liveMarketView->dates();
         if (!dates.empty()) {
             int lastDate = dates.back().value;
-            int ly = lastDate / 10000, lm = (lastDate / 100) % 100, ld = lastDate % 100;
-            std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", ly, lm, ld);
+            foundation::utils::formatTradingDayTo(lastDate, dateBuf, sizeof(dateBuf));
         }
         auto factorValues = m_engine->computeSingleDate(instanceId, dateBuf, symbolStrList, m_liveMarketView);
         for (const auto& [sym, val] : factorValues) {

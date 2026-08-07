@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace foundation::thread { class ThreadPoolExecutor; }
 namespace astock::database { class ISqlDatabase; }
@@ -116,7 +117,47 @@ private:
     int getCurrentLocalMinutes();
     int getCurrentTradingDay();
     bool isTradingDay(int date);
-    std::string toGmSymbol(const std::string& sym);
+    std::string toGmSymbol(const std::string& sym) const;
+
+    /// @brief 构造 gm符号↔原始符号 双向映射, 供批量拉取方法共用
+    struct GmSymbolMapping {
+        std::unordered_map<std::string, std::string> gmToSym;  // gm → 原始
+        std::vector<std::string> gmList;                       // gm 符号列表（批量迭代）
+    };
+    GmSymbolMapping buildGmSymbolMap(const std::vector<std::string>& symbols) const;
+
+    // ── syncDailyRange 管线 (Phase 27) ──
+    struct DailyBarRow { int sid; std::string sym, dt; double o,h,l,c,pc,vol,amt; };
+
+    /// @brief Pass1: 批量拉取日线, 填充 rows + gotSyms; 全空返回 false
+    bool fetchDailyBarRange(
+        const std::vector<std::string>& gmList,
+        const std::unordered_map<std::string,std::string>& gmToSym,
+        const std::unordered_map<std::string,int>& symToId,
+        const std::unordered_set<std::string>& targets,
+        const char* startDate, const char* endDate,
+        std::vector<DailyBarRow>& rows,
+        std::unordered_set<std::string>& gotSyms,
+        int totalSymbols) const;
+
+    /// @brief 重试批量遗漏的标的, 追加到 rows
+    void retryFetchFailed(
+        const std::vector<std::string>& gmList,
+        const std::unordered_set<std::string>& gotSyms,
+        const std::unordered_map<std::string,std::string>& gmToSym,
+        const std::unordered_map<std::string,int>& symToId,
+        const std::unordered_set<std::string>& targets,
+        const char* startDate, const char* endDate,
+        std::vector<DailyBarRow>& rows) const;
+
+    /// @brief 日线 UPSERT 入库, 返回写入行数
+    int writeDailyBars(std::shared_ptr<astock::database::ISqlDatabase> db,
+                       const std::vector<DailyBarRow>& rows) const;
+
+    /// @brief Pass2: 补 PE/PB/市值/换手率 估值字段, 失败不影响已入库日线
+    void syncValuationForRange(std::shared_ptr<astock::database::ISqlDatabase> db,
+                               const std::vector<DailyBarRow>& rows,
+                               const std::vector<std::string>& targetDates) const;
 
     std::unique_ptr<std::thread> m_scheduler;
     std::shared_ptr<foundation::thread::ThreadPoolExecutor> m_executor;

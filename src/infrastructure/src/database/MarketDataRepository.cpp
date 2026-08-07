@@ -132,7 +132,8 @@ std::vector<std::string> MarketDataRepository::queryIndexConstituents(
     std::ostringstream sql;
     sql << "SELECT constituent_symbol FROM index_constituents"
         << " WHERE index_symbol = " << safeStr(indexSymbol)
-        << " AND snapshot_date = " << safeStr(date);
+        << " AND start_date <= " << safeStr(date)
+        << " AND (end_date IS NULL OR end_date >= " << safeStr(date) << ")";
 
     auto result = db_->executeQuery(sql.str());
     std::vector<std::string> symbols;
@@ -455,7 +456,8 @@ MarketDataRepository::queryIndexCodeMap(const std::string& anchorDate)
     std::ostringstream sql;
     sql << "SELECT constituent_symbol, index_symbol"
         << " FROM index_constituents"
-        << " WHERE snapshot_date = " << safeStr(anchorDate);
+        << " WHERE start_date <= " << safeStr(anchorDate)
+        << " AND (end_date IS NULL OR end_date >= " << safeStr(anchorDate) << ")";
     auto qr = db_->executeQuery(sql.str());
     for (std::size_t i = 0; i < qr.rowCount(); ++i) {
         const auto& row = qr.getRow(i);

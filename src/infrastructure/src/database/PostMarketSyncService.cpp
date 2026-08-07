@@ -7,6 +7,7 @@
 #include "foundation/log/logging.hpp"
 #include "foundation/market/AStockSymbol.h"
 #include "foundation/market/ExchangeMapper.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
@@ -391,8 +392,7 @@ void PostMarketSyncService::schedulerLoop() {
 void PostMarketSyncService::syncAll(int tradingDay) {
     // 直接查今天日线是否有数据，有就跳过
     {
-        int y = tradingDay / 10000, m = (tradingDay % 10000) / 100, d = tradingDay % 100;
-        char ds[32]; snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
+        char ds[32]; foundation::utils::formatTradingDayTo(tradingDay, ds, sizeof(ds));
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (db && db->isOpen()) {
             auto r = db->executeQuery(
@@ -439,8 +439,7 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     INTERNAL_INFO_STREAM << "[PostMktSync] ====== 日线完成 ======";
     // ── 补衍生字段 + 换手率 ──
     {
-        char dt[16]; int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-        snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
+        char dt[16]; foundation::utils::formatTradingDayTo(tradingDay, dt, sizeof(dt));
         db->executeUpdate("UPDATE mkt.daily_bar SET change_pct=CASE WHEN pre_close>0 THEN (close-pre_close)/pre_close*100 ELSE NULL END,change_amt=close-pre_close,amplitude=CASE WHEN pre_close>0 THEN (high-low)/pre_close*100 ELSE NULL END WHERE trade_date=$1::date AND (change_pct IS NULL OR amplitude IS NULL)",{astock::database::SqlParam{std::string(dt)}});
         INTERNAL_INFO_STREAM<<"[PostMktSync] 衍生字段 updated";
         // 换手率
@@ -486,27 +485,27 @@ bool PostMarketSyncService::syncDaily(std::shared_ptr<astock::database::ISqlData
 
     // 与 syncDailyRange 一致: %Y-%m-%d 格式, startDay=tradingDay, endDay=tradingDay+1
     int nextDay = tradingDay;
-    { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
+    { int y,m,d; foundation::utils::decomposeDate(tradingDay, y, m, d);
       int nd=d+1,nm=m,ny=y;
       static const int md[]={0,31,28,31,30,31,30,31,31,30,31,30,31};
       int maxd=md[nm]+(nm==2&&(ny%4==0&&(ny%100!=0||ny%400==0))?1:0);
       if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
       nextDay = ny*10000 + nm*100 + nd; }
     char startStr[16], endStr[16], dateParam[16];
-    snprintf(startStr,sizeof(startStr),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
-    snprintf(endStr,sizeof(endStr),"%04d-%02d-%02d",nextDay/10000,(nextDay%10000)/100,nextDay%100);
-    snprintf(dateParam,sizeof(dateParam),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
+    foundation::utils::formatTradingDayTo(tradingDay, startStr, sizeof(startStr));
+    foundation::utils::formatTradingDayTo(nextDay, endStr, sizeof(endStr));
+    foundation::utils::formatTradingDayTo(tradingDay, dateParam, sizeof(dateParam));
     const std::string dateParamStr(dateParam);  // 持久化，避免临时对象析构后 SqlParam 悬空
 
     // gmsdk符号 → 原始符号 反向映射
-    std::unordered_map<std::string,std::string> gmToSym;
-    std::vector<std::string> gmList;
-    for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
+    auto gmMap = buildGmSymbolMap(symbols);
+    auto& gmToSym = gmMap.gmToSym;
+    auto& gmList = gmMap.gmList;
 
     std::vector<std::vector<astock::database::SqlParam>> batch;
     // 构造日期字符串，与 syncDailyRange 678行一样：$2::date + 传 std::string
     char dateBuf[16];
-    snprintf(dateBuf,sizeof(dateBuf),"%04d-%02d-%02d",tradingDay/10000,(tradingDay%10000)/100,tradingDay%100);
+    foundation::utils::formatTradingDayTo(tradingDay, dateBuf, sizeof(dateBuf));
     std::string dateStr(dateBuf);
 
     auto flush=[&](){if(batch.empty())return;
@@ -559,8 +558,8 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
     int ok = 0, err = 0;
 
     char sDate[32], eDate[32];
-    { int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-      snprintf(sDate,sizeof(sDate),"%04d-%02d-%02d",y,m,d);
+    { int y,m,d; foundation::utils::decomposeDate(tradingDay, y, m, d);
+      foundation::utils::formatTradingDayTo(tradingDay, sDate, sizeof(sDate));
       // endDate = nextDay (exclusive), 与 syncDaily 保持一致
       int nd=d+1,nm=m,ny=y;
       static const int md[]={0,31,28,31,30,31,30,31,31,30,31,30,31};
@@ -568,9 +567,9 @@ bool PostMarketSyncService::syncMinute(std::shared_ptr<astock::database::ISqlDat
       if(nd>maxd){nd=1;if(++nm>12){nm=1;++ny;}}
       snprintf(eDate,sizeof(eDate),"%04d-%02d-%02d",ny,nm,nd); }
 
-    std::unordered_map<std::string,std::string> gmToSym;
-    std::vector<std::string> gmList;
-    for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
+    auto gmMap = buildGmSymbolMap(symbols);
+    auto& gmToSym = gmMap.gmToSym;
+    auto& gmList = gmMap.gmList;
 
     std::vector<std::vector<astock::database::SqlParam>> batch;
     auto flush=[&](){if(batch.empty())return;
@@ -625,12 +624,10 @@ bool PostMarketSyncService::syncMinuteRange(int startDay, int endDay)
     // 获取交易日历
     char sBuf[16], eBuf[16];
     {
-        int y = startDay / 10000, m = (startDay % 10000) / 100, d = startDay % 100;
-        snprintf(sBuf, sizeof(sBuf), "%04d-%02d-%02d", y, m, d);
+        foundation::utils::formatTradingDayTo(startDay, sBuf, sizeof(sBuf));
     }
     {
-        int y = endDay / 10000, m = (endDay % 10000) / 100, d = endDay % 100;
-        snprintf(eBuf, sizeof(eBuf), "%04d-%02d-%02d", y, m, d);
+        foundation::utils::formatTradingDayTo(endDay, eBuf, sizeof(eBuf));
     }
 
     auto calRes = db->executeQuery(
@@ -721,8 +718,7 @@ bool PostMarketSyncService::syncWeekly(std::shared_ptr<astock::database::ISqlDat
           open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
           volume=EXCLUDED.volume,turnover=EXCLUDED.turnover
     )";
-    int y = tradingDay/10000, m = (tradingDay%10000)/100, d = tradingDay%100;
-    char buf[16]; snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+    char buf[16]; foundation::utils::formatTradingDayTo(tradingDay, buf, sizeof(buf));
     db->executeUpdate(sql, {astock::database::SqlParam{std::string(buf)}});
     logTaskEnd("WEEKLY", tradingDay, true, 0);
     return true;
@@ -752,8 +748,7 @@ bool PostMarketSyncService::syncMonthly(std::shared_ptr<astock::database::ISqlDa
           open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,
           volume=EXCLUDED.volume,turnover=EXCLUDED.turnover
     )";
-    int y = tradingDay/10000, m = (tradingDay%10000)/100, d = tradingDay%100;
-    char buf[16]; snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+    char buf[16]; foundation::utils::formatTradingDayTo(tradingDay, buf, sizeof(buf));
     db->executeUpdate(sql, {astock::database::SqlParam{std::string(buf)}});
     logTaskEnd("MONTHLY", tradingDay, true, 0);
     return true;
@@ -813,8 +808,7 @@ bool PostMarketSyncService::isTradingDay(int date) {
     if (db && db->isOpen()) {
         // date 是 int(YYYYMMDD), 需要转为 "YYYY-MM-DD" 字符串才能被 PG ::date 正确解析
         char dateBuf[16];
-        std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
-                      date / 10000, (date / 100) % 100, date % 100);
+        foundation::utils::formatTradingDayTo(date, dateBuf, sizeof(dateBuf));
         auto r = db->executeQuery(
             "SELECT is_trading_day FROM ref.trade_calendar WHERE trade_date=$1::date",
             {astock::database::SqlParam{std::string(dateBuf)}});
@@ -822,18 +816,32 @@ bool PostMarketSyncService::isTradingDay(int date) {
     }
     // DB 不可用或查不到时，用 tm_wday 兜底：跳过周六日
     struct tm t = {};
-    t.tm_year = date / 10000 - 1900;
-    t.tm_mon = (date % 10000) / 100 - 1;
-    t.tm_mday = date % 100;
+    int _y,_m,_d; foundation::utils::decomposeDate(date, _y, _m, _d);
+    t.tm_year = _y - 1900;
+    t.tm_mon = _m - 1;
+    t.tm_mday = _d;
     t.tm_isdst = -1;
     mktime(&t);
     return t.tm_wday != 0 && t.tm_wday != 6;
 }
 
-std::string PostMarketSyncService::toGmSymbol(const std::string& sym) {
+std::string PostMarketSyncService::toGmSymbol(const std::string& sym) const {
     auto s = foundation::market::AStockSymbol::fromString(sym);
     if (!s.isValid()) return "";
     return s.gmSymbol();
+}
+
+PostMarketSyncService::GmSymbolMapping PostMarketSyncService::buildGmSymbolMap(
+    const std::vector<std::string>& symbols) const {
+    GmSymbolMapping m;
+    for (const auto& sym : symbols) {
+        std::string g = toGmSymbol(sym);
+        if (!g.empty()) {
+            m.gmToSym[g] = sym;
+            m.gmList.push_back(std::move(g));
+        }
+    }
+    return m;
 }
 
 void PostMarketSyncService::loadLastSyncDay() {
@@ -869,141 +877,278 @@ void PostMarketSyncService::saveLastSyncDay(int tradingDay) {
     std::rename(tmpPath.c_str(), m_persistPath.c_str());
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// syncDailyRange 管线 (Phase 27)
+// ═══════════════════════════════════════════════════════════════════════════
+
+bool PostMarketSyncService::fetchDailyBarRange(
+    const std::vector<std::string>& gmList,
+    const std::unordered_map<std::string,std::string>& gmToSym,
+    const std::unordered_map<std::string,int>& symToId,
+    const std::unordered_set<std::string>& targets,
+    const char* startDate, const char* endDate,
+    std::vector<DailyBarRow>& rows,
+    std::unordered_set<std::string>& gotSyms,
+    int totalSymbols) const
+{
+    static constexpr int kBatchSize = 100;
+    int batchReq = 0, batchEmpty = 0, batchErr = 0, batchTotalBars = 0, batchMatchMiss = 0;
+
+    for (size_t i = 0; i < gmList.size(); i += kBatchSize) {
+        size_t end = std::min(i + kBatchSize, gmList.size());
+        std::string gmBatch;
+        for (size_t j = i; j < end; ++j) { if (!gmBatch.empty()) gmBatch += ","; gmBatch += gmList[j]; }
+        ++batchReq;
+        auto* bars = ::history_bars(gmBatch.c_str(), "1d", startDate, endDate, 0, nullptr, true, nullptr);
+        if (!bars || bars->status() != 0 || bars->count() <= 0) {
+            if (!bars) ++batchErr; else if (bars->count() <= 0) ++batchEmpty; else ++batchErr;
+            if (bars) bars->release();
+            continue;
+        }
+        batchTotalBars += static_cast<int>(bars->count());
+        // 第一批打印 gm 返回的 symbol 和日期样本
+        if (i == 0 && bars->count() > 0) {
+            std::string s1(bars->at(0).symbol ? bars->at(0).symbol : "");
+            time_t bob0 = static_cast<time_t>(static_cast<int64_t>(bars->at(0).bob));
+            struct tm t0; gmtime_s(&t0, &bob0);
+            char ds0[16]; snprintf(ds0, sizeof(ds0), "%04d-%02d-%02d", t0.tm_year + 1900, t0.tm_mon + 1, t0.tm_mday);
+            INTERNAL_INFO_STREAM << "[PostMktSync] gm首个: sym=[" << s1 << "] dt=" << ds0 << " targets=" << targets.size();
+        }
+        for (size_t k = 0; k < bars->count(); ++k) {
+            auto& b = bars->at(k);
+            if (!std::isfinite(b.close) || b.close <= 0.01 || b.close >= 10000.0) continue;
+            std::string gsym(b.symbol ? b.symbol : "");
+            auto sit = gmToSym.find(gsym);
+            if (sit == gmToSym.end()) { ++batchMatchMiss; continue; }
+            std::string sym = sit->second;
+            gotSyms.insert(gsym);
+            auto it = symToId.find(sym);
+            if (it == symToId.end()) continue;
+            time_t bob = static_cast<time_t>(static_cast<int64_t>(b.bob));
+            struct tm t; localtime_s(&t, &bob);
+            char ds[16]; snprintf(ds, sizeof(ds), "%04d-%02d-%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+            std::string dt(ds);
+            if (!targets.count(dt)) continue;
+            rows.push_back({it->second, sym, dt, b.open, b.high, b.low, b.close, b.pre_close,
+                            static_cast<double>(b.volume), b.amount});
+        }
+        bars->release();
+        if (i % 500 == 0 || end >= gmList.size())
+            INTERNAL_INFO_STREAM << "[PostMktSync] Pass1 " << (std::min(end, gmList.size()) * 100 / totalSymbols) << "% "
+                                 << std::min(end, gmList.size()) << "/" << totalSymbols
+                                 << " gmBars=" << batchTotalBars << " rows=" << rows.size();
+    }
+    INTERNAL_INFO_STREAM << "[PostMktSync] Pass1 批量统计: 请求 " << batchReq << " 批, 空 " << batchEmpty
+                         << " 批, 错 " << batchErr << " 批, gm返回 " << batchTotalBars
+                         << " 条, 符号匹配失败 " << batchMatchMiss << " 条, 收集 " << rows.size()
+                         << " 行(目标日期=" << targets.size() << "天), 覆盖 " << gotSyms.size() << " 标的";
+    return !rows.empty();
+}
+
+void PostMarketSyncService::retryFetchFailed(
+    const std::vector<std::string>& gmList,
+    const std::unordered_set<std::string>& gotSyms,
+    const std::unordered_map<std::string,std::string>& gmToSym,
+    const std::unordered_map<std::string,int>& symToId,
+    const std::unordered_set<std::string>& targets,
+    const char* startDate, const char* endDate,
+    std::vector<DailyBarRow>& rows) const
+{
+    std::vector<std::string> missing;
+    for (auto& g : gmList) if (!gotSyms.count(g)) missing.push_back(g);
+    if (missing.empty()) return;
+
+    int retryTotal = static_cast<int>(missing.size()), retryOk = 0, retryIdx = 0,
+        retryNull = 0, retryEmpty = 0, retryErr = 0, retryStatusNonZero = 0;
+    INTERNAL_INFO_STREAM << "[PostMktSync] 重试 " << retryTotal << " 只遗漏标的 (批量覆盖="
+                         << gotSyms.size() << "/" << gmList.size() << ")";
+    for (auto& g : missing) {
+        bool ok = false; int lastStatus = -1;
+        for (int retry = 0; retry < 3 && !ok; ++retry) {
+            if (retry > 0) std::this_thread::sleep_for(std::chrono::milliseconds(500 * (1 << retry)));
+            auto* bars = ::history_bars(g.c_str(), "1d", startDate, endDate, 0, nullptr, true, nullptr);
+            if (!bars) { lastStatus = -1; continue; }
+            lastStatus = bars->status();
+            if (bars->status() != 0 || bars->count() <= 0) {
+                if (bars->status() != 0) ++retryStatusNonZero; else ++retryEmpty;
+                bars->release(); continue;
+            }
+            for (size_t k = 0; k < bars->count(); ++k) {
+                auto& b = bars->at(k);
+                if (!std::isfinite(b.close) || b.close <= 0.01) continue;
+                std::string gsym(b.symbol ? b.symbol : g);
+                auto sit = gmToSym.find(gsym);
+                if (sit == gmToSym.end()) continue;
+                auto it = symToId.find(sit->second);
+                if (it == symToId.end()) continue;
+                time_t bob = static_cast<time_t>(static_cast<int64_t>(b.bob));
+                struct tm t; localtime_s(&t, &bob);
+                char ds[16]; snprintf(ds, sizeof(ds), "%04d-%02d-%02d", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
+                std::string dt(ds);
+                if (!targets.count(dt)) continue;
+                rows.push_back({it->second, sit->second, dt, b.open, b.high, b.low, b.close, b.pre_close,
+                                static_cast<double>(b.volume), b.amount});
+            }
+            ok = true; ++retryOk;
+            bars->release();
+        }
+        ++retryIdx;
+        if (!ok) { ++retryNull;
+            if (retryIdx <= 5) INTERNAL_WARN_STREAM << "[PostMktSync] 重试失败 " << g << " lastStatus=" << lastStatus; }
+        if (retryIdx % 50 == 0 || retryIdx == retryTotal)
+            INTERNAL_INFO_STREAM << "[PostMktSync] 重试进度 " << (retryIdx * 100 / retryTotal) << "% "
+                                 << retryIdx << "/" << retryTotal << " (ok=" << retryOk << ")";
+    }
+    INTERNAL_INFO_STREAM << "[PostMktSync] 重试完成: ok=" << retryOk << " null=" << retryNull
+                         << " empty=" << retryEmpty << " statusErr=" << retryStatusNonZero
+                         << " / total=" << retryTotal;
+}
+
+int PostMarketSyncService::writeDailyBars(std::shared_ptr<astock::database::ISqlDatabase> db,
+                                          const std::vector<DailyBarRow>& rows) const
+{
+    std::vector<std::vector<astock::database::SqlParam>> batch;
+    int writeOk = 0;
+    auto flush = [&]() {
+        if (batch.empty()) return;
+        std::string sql =
+            "INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,pre_close,volume,turnover,"
+            "change_pct,change_amt,amplitude,data_source) VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'GMSDK') "
+            "ON CONFLICT(symbol_id,trade_date) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,"
+            "close=EXCLUDED.close,pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,"
+            "change_pct=EXCLUDED.change_pct,change_amt=EXCLUDED.change_amt,amplitude=EXCLUDED.amplitude";
+        for (auto& p : batch) db->executeUpdate(sql, p);
+        batch.clear();
+    };
+    for (auto& r : rows) {
+        double chg = (r.pc > 0) ? (r.c - r.pc) / r.pc * 100 : 0,
+               amp = (r.pc > 0 && r.h - r.l > 0) ? (r.h - r.l) / r.pc * 100 : 0;
+        using P = astock::database::SqlParam;
+        batch.push_back({P{r.sid}, P{r.dt}, P{r.o}, P{r.h}, P{r.l}, P{r.c}, P{r.pc},
+                         P{static_cast<int64_t>(r.vol)}, P{r.amt}, P{chg}, P{r.c - r.pc}, P{amp}});
+        if (batch.size() >= 500) flush();
+        ++writeOk;
+    }
+    flush();
+    return writeOk;
+}
+
+void PostMarketSyncService::syncValuationForRange(std::shared_ptr<astock::database::ISqlDatabase> db,
+                                                  const std::vector<DailyBarRow>& rows,
+                                                  const std::vector<std::string>& targetDates) const
+{
+    INTERNAL_INFO_STREAM << "[PostMktSync] 开始补估值数据...";
+    std::unordered_map<std::string, int> gmToId;
+    for (auto& r : rows) { std::string g = toGmSymbol(r.sym); if (!g.empty()) gmToId[g] = r.sid; }
+
+    for (const auto& dt : targetDates) {
+        std::string chunk;
+        for (const auto& r : rows)
+            if (r.dt == dt) { std::string g = toGmSymbol(r.sym); if (!g.empty()) { if (!chunk.empty()) chunk += ","; chunk += g; } }
+        if (chunk.empty()) continue;
+
+        // PE / PB
+        auto* v = ::stk_get_daily_valuation_pt(chunk.c_str(), "pe_lyr,pb_mrq", dt.c_str());
+        if (v && v->status() == 0) {
+            std::vector<std::vector<astock::database::SqlParam>> ub;
+            auto uf = [&]() { if (ub.empty()) return;
+                std::string us = "UPDATE mkt.daily_bar SET pe_ratio=$1,pb_ratio=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
+                for (auto& p : ub) db->executeUpdate(us, p); ub.clear(); };
+            while (!v->is_end()) {
+                const char* s = v->get_string("symbol");
+                if (s && s[0]) {
+                    auto it = gmToId.find(std::string(s));
+                    if (it != gmToId.end()) { double pe = v->get_real("pe_lyr"), pb = v->get_real("pb_mrq");
+                        if (std::isfinite(pe) && pe >= -10000 && pe <= 100000) ub.push_back({astock::database::SqlParam{pe}, astock::database::SqlParam{pb}, astock::database::SqlParam{it->second}, astock::database::SqlParam{dt}});
+                        if (ub.size() >= 500) uf(); }
+                }
+                v->next();
+            }
+            uf();
+        }
+        if (v) { v->release(); v = nullptr; }
+
+        // 市值
+        auto* mv = ::stk_get_daily_mktvalue_pt(chunk.c_str(), "tot_mv,a_mv", dt.c_str());
+        if (mv && mv->status() == 0) {
+            std::vector<std::vector<astock::database::SqlParam>> mb;
+            auto mf = [&]() { if (mb.empty()) return;
+                std::string ms = "UPDATE mkt.daily_bar SET market_cap=$1,circulating_market_cap=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
+                for (auto& p : mb) db->executeUpdate(ms, p); mb.clear(); };
+            while (!mv->is_end()) {
+                const char* s = mv->get_string("symbol");
+                if (s && s[0]) {
+                    auto it = gmToId.find(std::string(s));
+                    if (it != gmToId.end()) { double mc = mv->get_real("tot_mv"), cc = mv->get_real("a_mv");
+                        if (std::isfinite(mc) && mc >= 0 && mc <= 1e16) mb.push_back({astock::database::SqlParam{mc}, astock::database::SqlParam{cc}, astock::database::SqlParam{it->second}, astock::database::SqlParam{dt}});
+                        if (mb.size() >= 500) mf(); }
+                }
+                mv->next();
+            }
+            mf();
+        }
+        if (mv) { mv->release(); mv = nullptr; }
+
+        // 换手率
+        auto* b = ::stk_get_daily_basic_pt(chunk.c_str(), "turnrate", dt.c_str());
+        if (b && b->status() == 0) {
+            std::vector<std::vector<astock::database::SqlParam>> tb;
+            auto tf = [&]() { if (tb.empty()) return;
+                std::string ts = "UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date";
+                for (auto& p : tb) db->executeUpdate(ts, p); tb.clear(); };
+            while (!b->is_end()) {
+                const char* s = b->get_string("symbol");
+                if (s && s[0]) {
+                    auto it = gmToId.find(std::string(s));
+                    if (it != gmToId.end()) { double tr = b->get_real("turnrate");
+                        if (std::isfinite(tr) && tr >= 0) tb.push_back({astock::database::SqlParam{tr}, astock::database::SqlParam{it->second}, astock::database::SqlParam{dt}});
+                        if (tb.size() >= 500) tf(); }
+                }
+                b->next();
+            }
+            tf();
+        }
+        if (b) { b->release(); b = nullptr; }
+        INTERNAL_INFO_STREAM << "[PostMktSync] Pass2 " << dt;
+    }
+}
+
 bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISqlDatabase> db,
     const std::unordered_map<std::string,int>& symToId, const std::vector<std::string>& symbols,
     int startDay, int endDay, const std::vector<std::string>& targetDates) {
-    std::unordered_set<std::string> targets(targetDates.begin(),targetDates.end());
-    char sBuf[32],eBuf[32];
-    {int y=startDay/10000,m=(startDay%10000)/100,d=startDay%100;snprintf(sBuf,sizeof(sBuf),"%04d-%02d-%02d",y,m,d);}
-    {int ed=(foundation::utils::Timestamp::from_yyyymmdd(endDay)+foundation::utils::Duration::days(1)).to_yyyymmdd();
-     int y=ed/10000,m=(ed%10000)/100,d=ed%100;snprintf(eBuf,sizeof(eBuf),"%04d-%02d-%02d",y,m,d);}
-    INTERNAL_INFO_STREAM<<"[PostMktSync] syncDailyRange "<<sBuf<<" ~ "<<eBuf;
-    struct Row{int sid;std::string sym,dt;double o,h,l,c,pc,vol,amt;};
-    std::vector<Row> rows;int total=static_cast<int>(symbols.size());
-    // gm符号→原始符号 映射
-    std::unordered_map<std::string,std::string> gmToSym;
-    std::vector<std::string> gmList;
-    for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToSym[g]=sym;gmList.push_back(g);}}
+    std::unordered_set<std::string> targets(targetDates.begin(), targetDates.end());
+    char sBuf[32], eBuf[32];
+    { foundation::utils::formatTradingDayTo(startDay, sBuf, sizeof(sBuf)); }
+    { int ed = (foundation::utils::Timestamp::from_yyyymmdd(endDay) + foundation::utils::Duration::days(1)).to_yyyymmdd();
+      foundation::utils::formatTradingDayTo(ed, eBuf, sizeof(eBuf)); }
+    INTERNAL_INFO_STREAM << "[PostMktSync] syncDailyRange " << sBuf << " ~ " << eBuf;
+
+    auto gmMap = buildGmSymbolMap(symbols);
+    auto& gmToSym = gmMap.gmToSym;
+    auto& gmList = gmMap.gmList;
 
     // Pass1: 批量查询
+    std::vector<DailyBarRow> rows;
     std::unordered_set<std::string> gotSyms;
-    static constexpr int kBatchSize=100;
-    int batchReq=0,batchEmpty=0,batchErr=0,batchTotalBars=0,batchMatchMiss=0;
-    for(size_t i=0;i<gmList.size();i+=kBatchSize){
-        size_t end=std::min(i+kBatchSize,gmList.size());
-        std::string gmBatch;for(size_t j=i;j<end;++j){if(!gmBatch.empty())gmBatch+=",";gmBatch+=gmList[j];}
-        ++batchReq;
-        auto* bars=::history_bars(gmBatch.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
-        if(!bars||bars->status()!=0||bars->count()<=0){
-            if(!bars)++batchErr; else if(bars->count()<=0)++batchEmpty; else ++batchErr;
-            if(bars)bars->release();continue;
-        }
-        batchTotalBars+=static_cast<int>(bars->count());
-        // 第一批打印gm返回的symbol和日期样本
-        if(i==0&&bars->count()>0){
-            std::string s1(bars->at(0).symbol?bars->at(0).symbol:"");time_t bob0=static_cast<time_t>(static_cast<int64_t>(bars->at(0).bob));struct tm t0;gmtime_s(&t0,&bob0);char ds0[16];snprintf(ds0,sizeof(ds0),"%04d-%02d-%02d",t0.tm_year+1900,t0.tm_mon+1,t0.tm_mday);
-            INTERNAL_INFO_STREAM<<"[PostMktSync] gm首个: sym=["<<s1<<"] dt="<<ds0<<" targets="<<targetDates.size()<<" 样例:"<<(targetDates.empty()?"无":targetDates[0]);
-        }
-        for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
-            if(!std::isfinite(b.close)||b.close<=0.01||b.close>=10000.0)continue;
-            std::string gsym(b.symbol?b.symbol:"");auto sit=gmToSym.find(gsym);
-            if(sit==gmToSym.end()){++batchMatchMiss;continue;}std::string sym=sit->second;gotSyms.insert(gsym);
-            auto it=symToId.find(sym);if(it==symToId.end())continue;
-            time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;localtime_s(&t,&bob);
-            char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-            std::string dt(ds);if(!targets.count(dt))continue;
-            rows.push_back({it->second,sym,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
-        bars->release();
-        if(i%500==0||end>=gmList.size())INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 "<<(std::min(end,gmList.size())*100/total)<<"% "
-            <<std::min(end,gmList.size())<<"/"<<total<<" gmBars="<<batchTotalBars<<" rows="<<rows.size();
-    }
-    INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 批量统计: 请求 "<<batchReq<<" 批, 空 "<<batchEmpty<<" 批, 错 "<<batchErr
-        <<" 批, gm返回 "<<batchTotalBars<<" 条, 符号匹配失败 "<<batchMatchMiss
-        <<" 条, 收集 "<<rows.size()<<" 行(目标日期="<<targetDates.size()<<"天), 覆盖 "<<gotSyms.size()<<" 标的";
-
-    // 批量全空→gmsdk暂无数据，跳过重试
-    if(rows.empty()){
-        INTERNAL_WARN_STREAM<<"[PostMktSync] syncDailyRange 全空(掘金暂无数据), 跳过重试";
+    if (!fetchDailyBarRange(gmList, gmToSym, symToId, targets, sBuf, eBuf, rows, gotSyms,
+                            static_cast<int>(symbols.size()))) {
+        INTERNAL_WARN_STREAM << "[PostMktSync] syncDailyRange 全空(掘金暂无数据), 跳过重试";
         return false;
     }
 
     // 重试: 批量遗漏的标的单独拉
-    std::vector<std::string> missing;
-    for(auto&g:gmList)if(!gotSyms.count(g))missing.push_back(g);
-    if(!missing.empty()){
-        int retryTotal=static_cast<int>(missing.size()),retryOk=0,retryIdx=0,
-            retryNull=0,retryEmpty=0,retryErr=0,retryStatusNonZero=0;
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试 "<<retryTotal<<" 只遗漏标的 (批量覆盖="<<gotSyms.size()<<"/"<<gmList.size()<<")";
-        for(auto&g:missing){
-            bool ok=false;int lastStatus=-1;
-            for(int retry=0;retry<3&&!ok;++retry){
-                if(retry>0)std::this_thread::sleep_for(std::chrono::milliseconds(500*(1<<retry)));
-                auto* bars=::history_bars(g.c_str(),"1d",sBuf,eBuf,0,nullptr,true,nullptr);
-                if(!bars){lastStatus=-1;continue;}
-                lastStatus=bars->status();
-                if(bars->status()!=0||bars->count()<=0){
-                    if(bars->status()!=0)++retryStatusNonZero; else ++retryEmpty;
-                    bars->release();continue;
-                }
-                for(size_t k=0;k<bars->count();++k){auto&b=bars->at(k);
-                    if(!std::isfinite(b.close)||b.close<=0.01)continue;
-                    std::string gsym(b.symbol?b.symbol:g);auto sit=gmToSym.find(gsym);
-                    if(sit==gmToSym.end())continue;
-                    auto it=symToId.find(sit->second);if(it==symToId.end())continue;
-                    time_t bob=static_cast<time_t>(static_cast<int64_t>(b.bob));struct tm t;localtime_s(&t,&bob);
-                    char ds[16];snprintf(ds,sizeof(ds),"%04d-%02d-%02d",t.tm_year+1900,t.tm_mon+1,t.tm_mday);
-                    std::string dt(ds);if(!targets.count(dt))continue;
-                    rows.push_back({it->second,sit->second,dt,b.open,b.high,b.low,b.close,b.pre_close,static_cast<double>(b.volume),b.amount});}
-                ok=true;++retryOk;bars->release();
-            }
-            ++retryIdx;if(!ok){++retryNull;
-                if(retryIdx<=5)INTERNAL_WARN_STREAM<<"[PostMktSync] 重试失败 "<<g<<" lastStatus="<<lastStatus;}
-            if(retryIdx%50==0||retryIdx==retryTotal)
-                INTERNAL_INFO_STREAM<<"[PostMktSync] 重试进度 "<<(retryIdx*100/retryTotal)<<"% "<<retryIdx<<"/"<<retryTotal<<" (ok="<<retryOk<<")";
-        }
-        INTERNAL_INFO_STREAM<<"[PostMktSync] 重试完成: ok="<<retryOk<<" null="<<retryNull
-            <<" empty="<<retryEmpty<<" statusErr="<<retryStatusNonZero<<" / total="<<retryTotal;
-    }
+    retryFetchFailed(gmList, gotSyms, gmToSym, symToId, targets, sBuf, eBuf, rows);
+    if (rows.empty()) { INTERNAL_ERROR_STREAM << "[PostMktSync] syncDailyRange 无数据"; return false; }
+    INTERNAL_INFO_STREAM << "[PostMktSync] Pass1 done, " << rows.size() << " 行";
 
-    if(rows.empty()){INTERNAL_ERROR_STREAM<<"[PostMktSync] syncDailyRange 无数据";return false;}
-    INTERNAL_INFO_STREAM<<"[PostMktSync] Pass1 done, "<<rows.size()<<" 行";
-
-    // 先写日线基础数据，再异步补估值 — 保证日线先入库
-    std::vector<std::vector<astock::database::SqlParam>> batch;int writeOk=0;
-    auto flush=[&](){if(batch.empty())return;
-        std::string sql="INSERT INTO mkt.daily_bar(symbol_id,trade_date,open,high,low,close,pre_close,volume,turnover,change_pct,change_amt,amplitude,data_source) VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'GMSDK') ON CONFLICT(symbol_id,trade_date) DO UPDATE SET open=EXCLUDED.open,high=EXCLUDED.high,low=EXCLUDED.low,close=EXCLUDED.close,pre_close=EXCLUDED.pre_close,volume=EXCLUDED.volume,turnover=EXCLUDED.turnover,change_pct=EXCLUDED.change_pct,change_amt=EXCLUDED.change_amt,amplitude=EXCLUDED.amplitude";
-        for(auto&p:batch)db->executeUpdate(sql,p);batch.clear();};
-    for(auto&r:rows){double chg=(r.pc>0)?(r.c-r.pc)/r.pc*100:0,amp=(r.pc>0&&r.h-r.l>0)?(r.h-r.l)/r.pc*100:0;using P=astock::database::SqlParam;batch.push_back({P{r.sid},P{r.dt},P{r.o},P{r.h},P{r.l},P{r.c},P{r.pc},P{static_cast<int64_t>(r.vol)},P{r.amt},P{chg},P{r.c-r.pc},P{amp}});if(batch.size()>=500)flush();++writeOk;}
-    flush();
-    INTERNAL_INFO_STREAM<<"[PostMktSync] 日线已入库 "<<writeOk<<" 行, 开始补估值数据...";
+    // 先写日线基础数据
+    int writeOk = writeDailyBars(db, rows);
+    INTERNAL_INFO_STREAM << "[PostMktSync] 日线已入库 " << writeOk << " 行";
 
     // Pass2: 估值数据异步补 (pe/pb/市值/换手率), 失败不影响已入库的日线
-    std::unordered_map<std::string,int> gmToId;
-    for(auto&r:rows){std::string g=toGmSymbol(r.sym);if(!g.empty())gmToId[g]=r.sid;}
-    for(const auto& dt:targetDates){
-        std::string chunk;for(const auto&r:rows)if(r.dt==dt){std::string g=toGmSymbol(r.sym);if(!g.empty()){if(!chunk.empty())chunk+=",";chunk+=g;}}
-        if(chunk.empty())continue;
-        auto* v=::stk_get_daily_valuation_pt(chunk.c_str(),"pe_lyr,pb_mrq",dt.c_str());
-        if(v&&v->status()==0){std::vector<std::vector<astock::database::SqlParam>> ub;auto uf=[&](){if(ub.empty())return;
-            std::string us="UPDATE mkt.daily_bar SET pe_ratio=$1,pb_ratio=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
-            for(auto&p:ub)db->executeUpdate(us,p);ub.clear();};
-            while(!v->is_end()){const char* s=v->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double pe=v->get_real("pe_lyr"),pb=v->get_real("pb_mrq");if(std::isfinite(pe)&&pe>=-10000&&pe<=100000)ub.push_back({astock::database::SqlParam{pe},astock::database::SqlParam{pb},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(ub.size()>=500)uf();}}v->next();}uf();}
-        if(v){v->release();v=nullptr;}
-        auto* mv=::stk_get_daily_mktvalue_pt(chunk.c_str(),"tot_mv,a_mv",dt.c_str());
-        if(mv&&mv->status()==0){std::vector<std::vector<astock::database::SqlParam>> mb;auto mf=[&](){if(mb.empty())return;
-            std::string ms="UPDATE mkt.daily_bar SET market_cap=$1,circulating_market_cap=$2 WHERE symbol_id=$3 AND trade_date=$4::date";
-            for(auto&p:mb)db->executeUpdate(ms,p);mb.clear();};
-            while(!mv->is_end()){const char* s=mv->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double mc=mv->get_real("tot_mv"),cc=mv->get_real("a_mv");if(std::isfinite(mc)&&mc>=0&&mc<=1e16)mb.push_back({astock::database::SqlParam{mc},astock::database::SqlParam{cc},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(mb.size()>=500)mf();}}mv->next();}mf();}
-        if(mv){mv->release();mv=nullptr;}
-        auto* b=::stk_get_daily_basic_pt(chunk.c_str(),"turnrate",dt.c_str());
-        if(b&&b->status()==0){std::vector<std::vector<astock::database::SqlParam>> tb;auto tf=[&](){if(tb.empty())return;
-            std::string ts="UPDATE mkt.daily_bar SET turnover_rate=$1 WHERE symbol_id=$2 AND trade_date=$3::date";
-            for(auto&p:tb)db->executeUpdate(ts,p);tb.clear();};
-            while(!b->is_end()){const char* s=b->get_string("symbol");if(s&&s[0]){auto it=gmToId.find(std::string(s));if(it!=gmToId.end()){double tr=b->get_real("turnrate");if(std::isfinite(tr)&&tr>=0)tb.push_back({astock::database::SqlParam{tr},astock::database::SqlParam{it->second},astock::database::SqlParam{dt}});if(tb.size()>=500)tf();}}b->next();}tf();}
-        if(b){b->release();b=nullptr;}
-        INTERNAL_INFO_STREAM<<"[PostMktSync] Pass2 "<<dt;
-    }
-    INTERNAL_INFO_STREAM<<"[PostMktSync] ====== syncDailyRange 完成 "<<writeOk<<" 行 "<<targetDates.size()<<" 天 ======";
+    syncValuationForRange(db, rows, targetDates);
+    INTERNAL_INFO_STREAM << "[PostMktSync] ====== syncDailyRange 完成 " << writeOk << " 行 "
+                         << targetDates.size() << " 天 ======";
     return true;
 }
 
@@ -1032,8 +1177,7 @@ auto [s2i, syms] = loadActiveSymbols(db);
     if(!dailyExists){if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return;}}
     // ── 补派生字段: change_pct/change_amt/amplitude(从已有OHLC计算,一条SQL完成)──
     {
-        char dt[16]; int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-        snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
+        char dt[16]; foundation::utils::formatTradingDayTo(tradingDay, dt, sizeof(dt));
         auto ur=db->executeUpdate("UPDATE mkt.daily_bar SET "
             "change_pct=CASE WHEN pre_close>0 THEN (close-pre_close)/pre_close*100 ELSE NULL END,"
             "change_amt=close-pre_close,"
@@ -1047,8 +1191,7 @@ auto [s2i, syms] = loadActiveSymbols(db);
         std::unordered_map<std::string,int> gmToId;std::string chunk;
         for(const auto& sym:syms){std::string g=toGmSymbol(sym);if(!g.empty()){gmToId[g]=s2i.at(sym);if(!chunk.empty())chunk+=",";chunk+=g;}}
         if(!chunk.empty()){
-            char dt[16];int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-            snprintf(dt,sizeof(dt),"%04d-%02d-%02d",y,m,d);
+            char dt[16]; foundation::utils::formatTradingDayTo(tradingDay, dt, sizeof(dt));
             std::string dtStr(dt);
             auto* b=::stk_get_daily_basic_pt(chunk.c_str(),"turnrate",dtStr.c_str());
             if(b&&b->status()==0){std::vector<std::vector<astock::database::SqlParam>> tb;auto tf=[&](){if(tb.empty())return;
@@ -1066,7 +1209,7 @@ auto [s2i, syms] = loadActiveSymbols(db);
 // 估值补全: PE/PB/市值/换手率 (gmsdk批量)
 void PostMarketSyncService::syncValuation(std::shared_ptr<astock::database::ISqlDatabase> db,
     const std::unordered_map<std::string,int>& symToId, const std::vector<std::string>& symbols, int tradingDay) {
-    char dtBuf[16];{int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;snprintf(dtBuf,sizeof(dtBuf),"%04d-%02d-%02d",y,m,d);}
+    char dtBuf[16]; foundation::utils::formatTradingDayTo(tradingDay, dtBuf, sizeof(dtBuf));
     std::string dt(dtBuf);
     std::unordered_map<std::string,int> gmToId;std::string chunk;
     for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty()){gmToId[g]=symToId.at(sym);if(!chunk.empty())chunk+=",";chunk+=g;}}
@@ -1097,8 +1240,7 @@ void PostMarketSyncService::syncWeeklyMonthly(int tradingDay) {
     if(!db||!db->isOpen())return;
 
     char buf[16];
-    int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;
-    snprintf(buf,sizeof(buf),"%04d-%02d-%02d",y,m,d);
+    foundation::utils::formatTradingDayTo(tradingDay, buf, sizeof(buf));
     std::string today(buf);
 
     // ── 周线缺口补齐 ──
@@ -1183,7 +1325,7 @@ bool PostMarketSyncService::isMonthlyMaintenanceDay() {
 bool PostMarketSyncService::syncFinancial(std::shared_ptr<astock::database::ISqlDatabase> db,
     const std::unordered_map<std::string,int>& symToId,const std::vector<std::string>& symbols,int tradingDay) {
     logTaskStart("FINANCIAL",tradingDay);int ok=0,skip=0;char dateStr[32];
-    {int y=tradingDay/10000,m=(tradingDay%10000)/100,d=tradingDay%100;snprintf(dateStr,sizeof(dateStr),"%04d-%02d-%02d",y,m,d);}
+    foundation::utils::formatTradingDayTo(tradingDay, dateStr, sizeof(dateStr));
     std::string gmList;for(const auto& sym:symbols){std::string gm=toGmSymbol(sym);if(gm.empty())continue;if(!gmList.empty())gmList+=",";gmList+=gm;}
     if(gmList.empty()){logTaskEnd("FINANCIAL",tradingDay,true,0,"no valid symbols");return true;}
     auto* prime=::stk_get_finance_prime_pt(gmList.c_str(),"eps_basic,bps_pcom_ps,roe,net_prof_pcom,ttl_inc_oper,ttl_ast,ttl_liab,ttl_eqy_pcom,net_cf_oper,ttl_prof",0,0,dateStr);
@@ -1291,8 +1433,7 @@ void PostMarketSyncService::syncConceptMembership()
 void PostMarketSyncService::computeConceptDailyStats(int tradingDay)
 {
     char dateBuf[16];
-    int y = tradingDay / 10000, m = (tradingDay / 100) % 100, d = tradingDay % 100;
-    std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d", y, m, d);
+    foundation::utils::formatTradingDayTo(tradingDay, dateBuf, sizeof(dateBuf));
 
     auto db = astock::database::NativePgConnectionPool::instance().getConnection();
     if (!db || !db->isOpen()) return;

@@ -972,11 +972,8 @@ bool StrategyEngine::prepareEodContext(const std::string& tradingDay, EodContext
     ctx.rowStride = ctx.view->close().rowStride;
 
     ctx.tradingDayInt = static_cast<int32_t>(std::stoll(tradingDay));
-    int y = static_cast<int>(ctx.tradingDayInt / 10000);
-    int m = static_cast<int>((ctx.tradingDayInt % 10000) / 100);
-    int d = static_cast<int>(ctx.tradingDayInt % 100);
     char buf[32];
-    snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+    foundation::utils::formatTradingDayTo(static_cast<int>(ctx.tradingDayInt), buf, sizeof(buf));
     ctx.endDateStr = buf;
 
     for (int c = 0; c < ctx.numCols; ++c)

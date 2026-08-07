@@ -28,6 +28,7 @@
 #include "../../domain/factor/include/FactorBacktestOrchestrator.h"
 #include "../../domain/factor/include/BacktestRunConfig.h"
 #include "BacktestScheduler.h"
+#include "FactorBacktestTypes.h"
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -164,14 +165,16 @@ private:
     /// @brief 统一放出缓存的批量回测结果 (UI 线程执行, 每份结果各发一次 backtestCompleted)
     void publishBatchResults(const QVariantList& results);
 
-    static QVariantList buildCoreMetrics(const factor::compute::FactorQualityMetrics16View& metrics,
-                                         const factor::compute::FactorQualityMetrics16DiagnosticsView& diag);
+    static std::vector<factor::bridge::MetricItem> buildCoreMetrics(
+        const factor::compute::FactorQualityMetrics16View& metrics,
+        const factor::compute::FactorQualityMetrics16DiagnosticsView& diag);
     static QVariantList buildGroupCharts(const factor::compute::SimulatedTradingResult& tradingResult);
     static QVariantMap buildReturnSeries(const factor::compute::SimulatedTradingResult& tradingResult);
     static QString coreRatingLabel(int32_t rating);
     static QString coreRatingTitle(int32_t rating);
     static QString coreRatingSummary(const factor::compute::FactorQualityMetrics16View& metrics);
-    static QVariantList buildRatingChecks(const factor::compute::FactorQualityMetrics16View& metrics);
+    static std::vector<factor::bridge::RatingCheckItem> buildRatingChecks(
+        const factor::compute::FactorQualityMetrics16View& metrics);
 
     QVariantMap m_backtestRuntimeParams;
     QVariantMap m_backtestResult;

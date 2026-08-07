@@ -20,6 +20,7 @@
 #include <map>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -57,6 +58,173 @@ std::vector<std::string> FactorBacktestOrchestrator::sortedDatesFrom(
     }
     std::sort(dates.begin(), dates.end());
     return dates;
+}
+
+FactorBacktestOrchestrator::FactorFieldInfo
+FactorBacktestOrchestrator::collectFactorFields(const BacktestRunConfig& config,
+                                                const std::vector<std::string>& factorIdList,
+                                                bool isComposite) const
+{
+    FactorFieldInfo info;
+    if (config.hasPreResolvedFields) {
+        info.neededExtraFields = config.preResolvedExtraFields;
+        return info;
+    }
+    auto collectFields = [&](const std::string& fid) {
+        auto factor = m_engine->instanceManager()->createInstance(fid);
+        if (factor) {
+            for (const auto& f : factor->getDataRequirements().requiredFields)
+                info.neededExtraFields.push_back(f);
+            for (const auto& f : factor->getDataRequirements().optionalFields)
+                info.neededExtraFields.push_back(f);
+            int lb = factor->getLookbackDays();
+            if (lb > info.maxLookback) info.maxLookback = lb;
+        }
+    };
+    if (isComposite) {
+        for (const auto& child : config.compositeChildren)
+            collectFields(child.instanceId);
+    } else {
+        for (const auto& fid : factorIdList)
+            collectFields(fid);
+    }
+    std::sort(info.neededExtraFields.begin(), info.neededExtraFields.end());
+    info.neededExtraFields.erase(
+        std::unique(info.neededExtraFields.begin(), info.neededExtraFields.end()),
+        info.neededExtraFields.end());
+    info.neededExtraFields.erase(
+        std::remove_if(info.neededExtraFields.begin(), info.neededExtraFields.end(),
+            [](const std::string& f) {
+                return f == "open" || f == "high" || f == "low" || f == "close"
+                    || f == "volume" || f == "symbol" || f == "trade_date";
+            }),
+        info.neededExtraFields.end());
+    return info;
+}
+
+std::shared_ptr<std::unordered_map<std::string,
+    std::unordered_map<std::string, std::map<std::string, double>>>>
+FactorBacktestOrchestrator::setupDbFallback(const std::vector<domain::DomainDate>& arrowDates,
+                                            int maxLookback) const
+{
+    auto dbCache = std::make_shared<std::unordered_map<std::string,
+        std::unordered_map<std::string, std::map<std::string, double>>>>();
+
+    std::string minReportDate = "2014-01-01", cacheStartDate = "2021-01-01";
+    if (!arrowDates.empty()) {
+        int firstDateVal = arrowDates.front().value;
+        int y,m,d; foundation::utils::decomposeDate(firstDateVal, y, m, d);
+        int totalBack = maxLookback + 60;
+        while (totalBack-- > 0) {
+            if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
+        }
+        char buf[16]; snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
+        minReportDate = buf;
+        foundation::utils::formatTradingDayTo(firstDateVal, buf, sizeof(buf));
+        cacheStartDate = buf;
+    }
+
+    factor::compute::BacktestDataService::DbFallbackFn dbFn =
+        [minReportDate, cacheStartDate, dbCache](const std::string& date, const std::string& field,
+           const std::vector<std::string>& symbols)
+        -> std::unordered_map<std::string, double> {
+        auto& fieldCache = (*dbCache)[field];
+
+        auto cacheIt = fieldCache.find("__loaded__");
+        if (cacheIt == fieldCache.end()) {
+            auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+            if (db && db->isOpen()) {
+                astock::infrastructure::database::MarketDataRepository repo(db);
+
+                const auto& klineNames = cleaning::kline_columns::names();
+                const auto& symInfoNames = cleaning::symbol_info_columns::names();
+                const auto& finNames = cleaning::financial_columns::names();
+                const auto& idxNames = cleaning::index_columns::names();
+                const auto& minNames = cleaning::minute_daily_columns::names();
+
+                const bool isSymInfo = std::find(symInfoNames.begin(), symInfoNames.end(), field) != symInfoNames.end();
+                const bool isFin    = std::find(finNames.begin(),    finNames.end(),    field) != finNames.end();
+                const bool isKline  = std::find(klineNames.begin(),  klineNames.end(),  field) != klineNames.end();
+                const bool isIndex  = std::find(idxNames.begin(),    idxNames.end(),    field) != idxNames.end();
+                const bool isMinute = std::find(minNames.begin(),    minNames.end(),    field) != minNames.end();
+
+                if (isSymInfo) {
+                    auto rows = db->executeQuery(
+                        "SELECT s.symbol, s." + field
+                        + " FROM ref.symbol_info s");
+                    for (std::size_t i = 0; i < rows.rowCount(); ++i) {
+                        auto row = rows.getRow(i);
+                        std::string sym = row.getString("symbol");
+                        double val = row.getDouble(field);
+                        if (!sym.empty() && std::isfinite(val))
+                            fieldCache[sym]["_"] = val;
+                    }
+                } else if (isFin) {
+                    auto rows = repo.queryFinancialFieldAllReports(field, minReportDate, cacheStartDate, symbols);
+                    for (const auto& r : rows)
+                        fieldCache[r.symbol][r.tradeDate] = r.value;
+                } else if (isKline) {
+                    auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
+                    for (const auto& r : rows)
+                        fieldCache[r.symbol][r.tradeDate] = r.value;
+                } else if (isMinute) {
+                    auto rows = repo.queryMinuteDailyAgg(symbols, minReportDate, cacheStartDate);
+                    for (const auto& mr : rows) {
+                        const auto& mv = mr.getValues();
+                        auto si = mv.find("symbol");
+                        auto ti = mv.find("trade_date");
+                        auto fi = mv.find(field);
+                        if (si != mv.end() && ti != mv.end() && fi != mv.end())
+                            fieldCache[si->second][ti->second] = std::stod(fi->second);
+                    }
+                } else if (isIndex) {
+                    auto rows = db->executeQuery(
+                        "SELECT s.symbol, " + field
+                        + " FROM ref.symbol_info s");
+                    for (std::size_t i = 0; i < rows.rowCount(); ++i) {
+                        auto row = rows.getRow(i);
+                        std::string sym = row.getString("symbol");
+                        double val = row.getDouble(field);
+                        if (!sym.empty() && std::isfinite(val))
+                            fieldCache[sym]["_"] = val;
+                    }
+                } else {
+                    INTERNAL_WARN_STREAM << "[DB查库] 未知字段 '" << field
+                        << "' — 不在 kline/symbol_info/financial/minute_daily 中";
+                }
+                fieldCache["__loaded__"]["_"] = 1.0;
+            }
+        }
+
+        static const std::unordered_set<std::string> symInfoSet(
+            cleaning::symbol_info_columns::names().begin(),
+            cleaning::symbol_info_columns::names().end());
+        static const std::unordered_set<std::string> finSet(
+            cleaning::financial_columns::names().begin(),
+            cleaning::financial_columns::names().end());
+        const bool isStatic = symInfoSet.count(field);
+        const bool isFinLookup = finSet.count(field);
+
+        std::unordered_map<std::string, double> result;
+        for (const auto& sym : symbols) {
+            auto si = fieldCache.find(sym);
+            if (si == fieldCache.end()) continue;
+            if (isStatic) {
+                auto it = si->second.find("_");
+                if (it != si->second.end()) result[sym] = it->second;
+            } else if (isFinLookup) {
+                auto it = si->second.upper_bound(date);
+                if (it != si->second.begin()) { --it; result[sym] = it->second; }
+            } else {
+                auto it = si->second.find(date);
+                if (it != si->second.end()) result[sym] = it->second;
+            }
+        }
+        return result;
+    };
+
+    m_dataService->setDbFallback(std::move(dbFn));
+    return dbCache;
 }
 
 void FactorBacktestOrchestrator::run(
@@ -113,42 +281,9 @@ void FactorBacktestOrchestrator::run(
         << " rebalance=" << config.rebalanceDays << "d";
 
     // ── 收集因子需要的额外字段 ──
-    // 优先使用预检阶段预注入的字段，避免重复 createInstance + getDataRequirements
-    std::vector<std::string> neededExtraFields;
-    int maxLookback = 0;
-    if (config.hasPreResolvedFields) {
-        neededExtraFields = config.preResolvedExtraFields;
-    } else {
-        auto collectFields = [&](const std::string& fid) {
-            auto factor = m_engine->instanceManager()->createInstance(fid);
-            if (factor) {
-                for (const auto& f : factor->getDataRequirements().requiredFields)
-                    neededExtraFields.push_back(f);
-                for (const auto& f : factor->getDataRequirements().optionalFields)
-                    neededExtraFields.push_back(f);
-                int lb = factor->getLookbackDays();
-                if (lb > maxLookback) maxLookback = lb;
-            }
-        };
-        if (isComposite) {
-            for (const auto& child : config.compositeChildren)
-                collectFields(child.instanceId);
-        } else {
-            for (const auto& fid : factorIdList)
-                collectFields(fid);
-        }
-        std::sort(neededExtraFields.begin(), neededExtraFields.end());
-        neededExtraFields.erase(
-            std::unique(neededExtraFields.begin(), neededExtraFields.end()),
-            neededExtraFields.end());
-        neededExtraFields.erase(
-            std::remove_if(neededExtraFields.begin(), neededExtraFields.end(),
-                [](const std::string& f) {
-                    return f == "open" || f == "high" || f == "low" || f == "close" || f == "volume"
-                        || f == "symbol" || f == "trade_date";
-                }),
-            neededExtraFields.end());
-    }
+    auto fieldInfo = collectFactorFields(config, factorIdList, isComposite);
+    std::vector<std::string>& neededExtraFields = fieldInfo.neededExtraFields;
+    int maxLookback = fieldInfo.maxLookback;
 
     if (onProgress) onProgress(5.0, "data indexed");
 
@@ -156,131 +291,8 @@ void FactorBacktestOrchestrator::run(
     const auto& arrowDates = arrowView->dates();
 
     // ── 首块 DB 回看：缓存首日 - 回看 - 60 交易日 → 一次全部拉回 ──
-    if (m_dataService) {
-        std::string minReportDate = "2014-01-01", cacheStartDate = "2021-01-01"; // 注明只是初始化
-        if (!arrowDates.empty()) {
-            int firstDateVal = arrowDates.front().value;
-            int y = firstDateVal / 10000, m = (firstDateVal % 10000) / 100, d = firstDateVal % 100;
-            int totalBack = maxLookback + 60;
-            while (totalBack-- > 0) {
-                if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
-            }
-            char buf[16]; snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
-            minReportDate = buf;
-            snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
-                firstDateVal / 10000, (firstDateVal % 10000) / 100, firstDateVal % 100);
-            cacheStartDate = buf;
-        }
-
-        auto dbCache = std::make_shared<std::unordered_map<std::string,
-            std::unordered_map<std::string, std::map<std::string, double>>>>();
-        factor::compute::BacktestDataService::DbFallbackFn dbFn =
-            [minReportDate, cacheStartDate, dbCache](const std::string& date, const std::string& field,
-               const std::vector<std::string>& symbols)
-            -> std::unordered_map<std::string, double> {
-            auto& fieldCache = (*dbCache)[field];
-
-            // ── 统一查库：缓存有什么表，DB 就查什么表 ──
-            auto cacheIt = fieldCache.find("__loaded__");
-            if (cacheIt == fieldCache.end()) {
-                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-                if (db && db->isOpen()) {
-                    astock::infrastructure::database::MarketDataRepository repo(db);
-
-                    const auto& klineNames = cleaning::kline_columns::names();
-                    const auto& symInfoNames = cleaning::symbol_info_columns::names();
-                    const auto& finNames = cleaning::financial_columns::names();
-                    const auto& idxNames = cleaning::index_columns::names();
-                    const auto& minNames = cleaning::minute_daily_columns::names();
-
-                    const bool isSymInfo = std::find(symInfoNames.begin(), symInfoNames.end(), field) != symInfoNames.end();
-                    const bool isFin = std::find(finNames.begin(), finNames.end(), field) != finNames.end();
-                    const bool isKline = std::find(klineNames.begin(), klineNames.end(), field) != klineNames.end();
-                    const bool isIndex = std::find(idxNames.begin(), idxNames.end(), field) != idxNames.end();
-                    const bool isMinute = std::find(minNames.begin(), minNames.end(), field) != minNames.end();
-
-                    if (isSymInfo) {
-                        auto rows = db->executeQuery(
-                            "SELECT s.symbol, s." + field
-                            + " FROM ref.symbol_info s");
-                        for (std::size_t i = 0; i < rows.rowCount(); ++i) {
-                            auto row = rows.getRow(i);
-                            std::string sym = row.getString("symbol");
-                            double val = row.getDouble(field);
-                            if (!sym.empty() && std::isfinite(val))
-                                fieldCache[sym]["_"] = val;
-                        }
-                    } else if (isFin) {
-                        auto rows = repo.queryFinancialFieldAllReports(field, minReportDate, cacheStartDate, symbols);
-                        for (const auto& r : rows)
-                            fieldCache[r.symbol][r.tradeDate] = r.value;
-                    } else if (isKline) {
-                        auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
-                        for (const auto& r : rows)
-                            fieldCache[r.symbol][r.tradeDate] = r.value;
-                    } else if (isMinute) {
-                        auto rows = repo.queryMinuteDailyAgg(symbols, minReportDate, cacheStartDate);
-                        for (const auto& mr : rows) {
-                            const auto& mv = mr.getValues();
-                            auto si = mv.find("symbol");
-                            auto ti = mv.find("trade_date");
-                            auto fi = mv.find(field);
-                            if (si != mv.end() && ti != mv.end() && fi != mv.end())
-                                fieldCache[si->second][ti->second] = std::stod(fi->second);
-                        }
-                    } else if (isIndex) {
-                        // index_code — 与日期无关，从 ref.symbol_info 获取
-                        auto rows = db->executeQuery(
-                            "SELECT s.symbol, " + field
-                            + " FROM ref.symbol_info s");
-                        for (std::size_t i = 0; i < rows.rowCount(); ++i) {
-                            auto row = rows.getRow(i);
-                            std::string sym = row.getString("symbol");
-                            double val = row.getDouble(field);
-                            if (!sym.empty() && std::isfinite(val))
-                                fieldCache[sym]["_"] = val;
-                        }
-                    } else {
-                        INTERNAL_WARN_STREAM << "[DB查库] 未知字段 '" << field
-                            << "' — 不在 kline/symbol_info/financial/minute_daily 中";
-                    }
-                    fieldCache["__loaded__"]["_"] = 1.0;
-                }
-            }
-
-            // ── 统一取值 ──
-            static const std::unordered_set<std::string> symInfoSet(
-                cleaning::symbol_info_columns::names().begin(),
-                cleaning::symbol_info_columns::names().end());
-            static const std::unordered_set<std::string> finSet(
-                cleaning::financial_columns::names().begin(),
-                cleaning::financial_columns::names().end());
-            const bool isStatic = symInfoSet.count(field);
-            const bool isFin = finSet.count(field);
-
-            std::unordered_map<std::string, double> result;
-            for (const auto& sym : symbols) {
-                auto si = fieldCache.find(sym);
-                if (si == fieldCache.end()) continue;
-                if (isStatic) {
-                    auto it = si->second.find("_");
-                    if (it != si->second.end()) result[sym] = it->second;
-                } else if (isFin) {
-                    auto it = si->second.upper_bound(date);
-                    if (it != si->second.begin()) { --it; result[sym] = it->second; }
-                } else {
-                    auto it = si->second.find(date);
-                    if (it != si->second.end()) result[sym] = it->second;
-                }
-            }
-            return result;
-        };
-        m_dataService->setDbFallback(std::move(dbFn));
-        INTERNAL_INFO_STREAM << "[MEM] DB回退查询范围: ["
-            << minReportDate << " ~ " << cacheStartDate << "]"
-            << " (Arrow首日" << cacheStartDate << " - maxLookback" << maxLookback << " - 60)"
-            << " use_count=" << dbCache.use_count();
-    }
+    auto dbCache = setupDbFallback(arrowDates, maxLookback);
+    INTERNAL_INFO_STREAM << "[MEM] DB回退查询 use_count=" << dbCache.use_count();
     std::vector<factor::compute::DateKey> filteredDatesStorage;
     const std::vector<factor::compute::DateKey>* effectiveDatesPtr = &arrowDates;
     if (config.cacheStartDate.isValid() || config.cacheEndDate.isValid()) {
@@ -437,14 +449,13 @@ void FactorBacktestOrchestrator::run(
                     if (db && db->isOpen()) {
                         astock::infrastructure::database::MarketDataRepository repo(db);
                         int sv = chunkDates[0].value;
-                        int y = sv / 10000, m = (sv % 10000) / 100, d = sv % 100;
+                        int y,m,d; foundation::utils::decomposeDate(sv, y, m, d);
                         int back = static_cast<int>(warmupRowCount) * 2;
                         while (back-- > 0) {
                             if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
                         }
                         char ds[16]; std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
-                        char de[16]; std::snprintf(de, sizeof(de), "%04d-%02d-%02d",
-                            sv / 10000, (sv % 10000) / 100, sv % 100);
+                        char de[16]; foundation::utils::formatTradingDayTo(sv, de, sizeof(de));
                         auto td = repo.queryTradeCalendar(ds, de);
                         size_t start = (td.size() > warmupRowCount) ? (td.size() - warmupRowCount) : 0;
                         for (size_t i = start; i < td.size(); ++i) {

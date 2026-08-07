@@ -13,6 +13,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <unordered_map>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,24 @@ private:
     // 从 reporterInput.factorValuesByDate 构建排序日期列表
     static std::vector<std::string> sortedDatesFrom(
         const std::map<std::string, std::map<std::string, double>>& fvByDate);
+
+    // ── run() 子步骤 (Phase 30a 拆分) ──
+
+    /// @brief 收集因子所需额外字段 + 最大回看天数
+    struct FactorFieldInfo {
+        std::vector<std::string> neededExtraFields;
+        int maxLookback = 0;
+    };
+    FactorFieldInfo collectFactorFields(const BacktestRunConfig& config,
+                                        const std::vector<std::string>& factorIdList,
+                                        bool isComposite) const;
+
+    /// @brief 构造 DB 回看 fallback (dbCache + lambda), 注入 m_dataService
+    /// 返回 dbCache 的 shared_ptr 供 chunk compute 复用
+    std::shared_ptr<std::unordered_map<std::string,
+        std::unordered_map<std::string, std::map<std::string, double>>>>
+    setupDbFallback(const std::vector<domain::DomainDate>& arrowDates,
+                    int maxLookback) const;
 
     // ── 持有的下层组件引用 ──
     domain::scheduler::BacktestScheduler* m_scheduler = nullptr;
