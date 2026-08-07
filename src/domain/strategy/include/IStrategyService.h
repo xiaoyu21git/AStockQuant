@@ -790,6 +790,27 @@ private:
         const std::function<void(double)>& onProgress,
         rules::AttributionCollector& attributionCollector);
 
+    /// @brief 回测后处理: 指标计算 (Phase 30c 拆分)
+    /// 从 backtest() L1989-2099 提取, 纯计算, 无日志输出
+    void computeBacktestMetrics(
+        StrategyBacktestResult& result,
+        const BacktestDayContext& ctx,
+        const domain::backtest::BacktestRequest& req,
+        const factor::compute::IMarketDataView* view,
+        int totalDays);
+
+    /// @brief 回测后处理: 诊断输出 + 归因 + 持久化 (Phase 30c 拆分)
+    /// 从 backtest() L2101-2322 提取, 含日志 + 凯利 + 归因 + RankIC + 持久化
+    /// 注意: ctx 非 const — 诊断中原地排序 holdingDaysVec / entryFactorScores
+    void buildBacktestDiagnostics(
+        StrategyBacktestResult& result,
+        BacktestDayContext& ctx,
+        const domain::backtest::BacktestRequest& req,
+        const factor::compute::IMarketDataView* view,
+        int totalDays,
+        const std::function<void(double)>& onProgress,
+        rules::AttributionCollector& attributionCollector);
+
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
     std::unique_ptr<IRuleEvaluationService> ruleEvaluationService_;

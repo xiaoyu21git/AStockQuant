@@ -1986,340 +1986,11 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     if (onProgress) onProgress(kLoopEnd);
 
-    // 4. 指标计算
-    std::vector<double> dailyReturns;
-    if (!equityCurve.empty()) {
-        const double initialCapital = req.costSpec.initialCapital.value;
-        result.metrics.totalReturn = (equityCurve.back() - initialCapital) / initialCapital;
-        dailyReturns.reserve(equityCurve.size() - 1);
-        for (std::size_t i = 1; i < equityCurve.size(); ++i) {
-            if (equityCurve[i - 1] > 0.0)
-                dailyReturns.push_back(equityCurve[i] / equityCurve[i - 1] - 1.0);
-        }
+    // 4. 指标计算 (Phase 30c: 提取到 computeBacktestMetrics)
+    computeBacktestMetrics(result, ctx, req, view, totalDays);
 
-        using Metrics = ::factor::FactorBacktestMetricsCalculator;
-        result.metrics.maxDrawdown   = Metrics::calculateMaxDrawdown(dailyReturns);
-        // 胜率/盈亏比为按笔口径: 盈利笔数/总卖出笔数, 总盈利/总亏损
-        result.metrics.winRate       = totalFills > 0
-            ? static_cast<double>(winningFills) / static_cast<double>(totalFills) : 0.0;
-        result.metrics.profitFactor  = totalLoss > 0.0 ? totalProfit / totalLoss : 0.0;
-        result.metrics.volatility       = Metrics::calculateVolatility(dailyReturns);
-        result.metrics.annualizedReturn = Metrics::calculateAnnualizedReturn(
-            equityCurve.back(), initialCapital, totalDays);
-        double downsideDev = Metrics::calculateDownsideDeviation(dailyReturns);
-        result.metrics.sortinoRatio = Metrics::calculateSortinoRatio(
-            result.metrics.annualizedReturn, downsideDev);
-        result.metrics.calmarRatio  = Metrics::calculateCalmarRatio(
-            result.metrics.annualizedReturn, result.metrics.maxDrawdown);
-        result.metrics.sharpeRatio  = Metrics::calculateSharpeRatio(
-            result.metrics.annualizedReturn, result.metrics.volatility);
-    }
-
-    // 交易统计
-    result.tradeStats.totalTrades   = static_cast<int>(totalFills);
-    result.tradeStats.winningTrades = static_cast<int>(winningFills);
-    result.tradeStats.losingTrades  = static_cast<int>(losingFills);
-    result.tradeStats.totalProfit   = domain::strategy::Money{totalProfit};
-    result.tradeStats.totalLoss     = domain::strategy::Money{totalLoss};
-    result.tradeStats.largestWin    = domain::strategy::Money{largestWin};
-    result.tradeStats.largestLoss   = domain::strategy::Money{largestLoss};
-
-    // 时间序列
-    for (const auto& dk : view->dates()) result.timeSeries.dates.push_back(domain::DomainDate{dk.value});
-    result.timeSeries.portfolioValues = equityCurve;
-    result.timeSeries.returns         = dailyReturns;
-    {
-        std::vector<double> dds; dds.reserve(equityCurve.size()); double pk = equityCurve.empty()?0:equityCurve[0];
-        for (double e : equityCurve) { if (e > pk) pk = e; dds.push_back(pk > 0 ? (e-pk)/pk : 0); }
-        result.timeSeries.drawdowns = dds;
-    }
-
-    // 基准对比 (沪深300)，从 PG 查询指数日K线，按回测日期对齐
-    {
-        std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
-        const auto& dates = view->dates();
-        if (!dates.empty()) {
-            auto& pool = astock::database::NativePgConnectionPool::instance();
-            auto db = pool.getConnection();
-            auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
-            std::string startStr = std::to_string(dates.front().value);
-            std::string endStr   = std::to_string(dates.back().value);
-            auto rows = repo->queryDailyBar(bmSym, startStr, endStr);
-            if (!rows.empty()) {
-                // date → close 映射（tradeDate 是 YYYY-MM-DD 格式 → YYYYMMDD int）
-                std::unordered_map<int, double> dateClose;
-                for (const auto& r : rows) {
-                    std::string ds = r.tradeDate;
-                    ds.erase(std::remove(ds.begin(), ds.end(), '-'), ds.end());
-                    int d = 0;
-                    try { d = std::stoi(ds); } catch (...) { continue; }
-                    if (d > 0 && r.close > 0) dateClose[d] = r.close;
-                }
-                // 逐回测日计算基准收益 — 与 dailyReturns 逐下标对齐:
-                // bmRet[k] 与 dailyReturns[k] 同为第 k+1 个交易日相对前一交易日的收益
-                std::vector<double> bmRet;
-                bmRet.reserve(dates.size() - 1);
-                double prevClose = 0.0;
-                {
-                    auto it0 = dateClose.find(dates.front().value);
-                    if (it0 != dateClose.end()) prevClose = it0->second;
-                }
-                for (size_t i = 1; i < dates.size(); ++i) {
-                    auto it = dateClose.find(dates[i].value);
-                    const double currClose = (it != dateClose.end()) ? it->second : 0.0;
-                    bmRet.push_back((prevClose > 0.0 && currClose > 0.0)
-                        ? currClose / prevClose - 1.0 : 0.0);  // 缺数据日记 0 收益
-                    if (currClose > 0.0) prevClose = currClose;
-                }
-                // 指标计算
-                auto benchMetrics = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
-                    dailyReturns, bmRet);
-                result.metrics.beta             = benchMetrics.beta;
-                result.metrics.alpha            = benchMetrics.alpha;
-                result.metrics.trackingError    = benchMetrics.trackingError;
-                result.metrics.informationRatio = benchMetrics.informationRatio;
-                // 净值曲线 + 回撤曲线 — 与 portfolioValues 同长: 首点为初始资金
-                const double initialCapital = req.costSpec.initialCapital.value > 0
-                    ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
-                result.timeSeries.benchmarkValues.reserve(bmRet.size() + 1);
-                result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size() + 1);
-                double bmEquity = initialCapital;
-                double bmPeak = bmEquity;
-                result.timeSeries.benchmarkValues.push_back(bmEquity);
-                result.timeSeries.benchmarkDrawdowns.push_back(0.0);
-                for (double r : bmRet) {
-                    bmEquity *= (1.0 + r);
-                    if (bmEquity > bmPeak) bmPeak = bmEquity;
-                    double dd = bmPeak > 0.0 ? (bmPeak - bmEquity) / bmPeak : 0.0;
-                    result.timeSeries.benchmarkValues.push_back(bmEquity);
-                    result.timeSeries.benchmarkDrawdowns.push_back(dd);
-                }
-            }
-        }
-    }
-
-    // ── 回测指标全量打印 ──
-    INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
-    INTERNAL_INFO_STREAM << "[回测结果] 策略: " << req.strategyIdentity.strategyCode.text();
-    INTERNAL_INFO_STREAM << "[回测结果] 区间: " << (view->dates().empty() ? 0 : view->dates().front().value)
-                         << " → " << (view->dates().empty() ? 0 : view->dates().back().value)
-                         << "  交易日: " << totalDays;
-    INTERNAL_INFO_STREAM << "[回测结果] 初始资金: " << req.costSpec.initialCapital.value
-                         << "  最终净值: " << (equityCurve.empty() ? 0 : static_cast<int64_t>(equityCurve.back()));
-    INTERNAL_INFO_STREAM << "[交易明细] 止损扫描: " << stopLossExitCount << "次"
-                         << "  到达sell段: " << totalStopLossOrders << "次"
-                         << "  实际卖出: " << stopLossFilled << "笔"
-                         << "  跳过(无持仓): " << stopLossSkippedNoHeld << "次";
-    // 卖单按盈亏排序，打印 top20
-    std::vector<const BacktestTradeRecord*> sells;
-    for (const auto& t : result.tradeLog)
-        if (!t.isBuy) sells.push_back(&t);
-    std::sort(sells.begin(), sells.end(),
-              [](const auto* a, const auto* b) { return a->realizedPnl > b->realizedPnl; });
-    int showNTrades = (std::min)(20, static_cast<int>(sells.size()));
-    INTERNAL_INFO_STREAM << "[交易明细] === 最佳" << showNTrades << "笔 ===";
-    for (int i = 0; i < showNTrades; ++i)
-        INTERNAL_INFO_STREAM << "[交易明细] " << sells[i]->tradeDate << " " << sells[i]->symbol
-                             << " 盈亏:" << static_cast<int>(sells[i]->realizedPnl);
-    INTERNAL_INFO_STREAM << "[交易明细] === 最差" << showNTrades << "笔 ===";
-    for (int i = 0; i < showNTrades; ++i)
-        INTERNAL_INFO_STREAM << "[交易明细] " << sells[sells.size()-1-i]->tradeDate << " "
-                             << sells[sells.size()-1-i]->symbol
-                             << " 盈亏:" << static_cast<int>(sells[sells.size()-1-i]->realizedPnl);
-    INTERNAL_INFO_STREAM << "[回测指标] 总收益率: " << (result.metrics.totalReturn * 100.0) << "%";
-    INTERNAL_INFO_STREAM << "[回测指标] 年化收益: " << (result.metrics.annualizedReturn * 100.0) << "%";
-    INTERNAL_INFO_STREAM << "[回测指标] 最大回撤: " << (result.metrics.maxDrawdown * 100.0) << "%";
-    INTERNAL_INFO_STREAM << "[回测指标] 胜率: " << (result.metrics.winRate * 100.0) << "%";
-    INTERNAL_INFO_STREAM << "[回测指标] 盈亏比: " << result.metrics.profitFactor;
-    INTERNAL_INFO_STREAM << "[回测指标] 夏普比率: " << result.metrics.sharpeRatio;
-    INTERNAL_INFO_STREAM << "[回测指标] 索提诺比率: " << result.metrics.sortinoRatio;
-    INTERNAL_INFO_STREAM << "[回测指标] 卡玛比率: " << result.metrics.calmarRatio;
-    INTERNAL_INFO_STREAM << "[回测指标] 年化波动率: " << (result.metrics.volatility * 100.0) << "%";
-    INTERNAL_INFO_STREAM << "[回测指标] Alpha: " << result.metrics.alpha;
-    INTERNAL_INFO_STREAM << "[回测指标] Beta: " << result.metrics.beta;
-    INTERNAL_INFO_STREAM << "[回测指标] 跟踪误差: " << result.metrics.trackingError;
-    INTERNAL_INFO_STREAM << "[回测指标] 信息比率: " << result.metrics.informationRatio;
-    INTERNAL_INFO_STREAM << "[交易统计] 总成交: " << result.tradeStats.totalTrades
-                         << "  盈利: " << result.tradeStats.winningTrades
-                         << "  亏损: " << result.tradeStats.losingTrades;
-    INTERNAL_INFO_STREAM << "[交易统计] 总盈利: " << result.tradeStats.totalProfit.value
-                         << "  总亏损: " << result.tradeStats.totalLoss.value;
-    INTERNAL_INFO_STREAM << "[交易统计] 最大单笔盈利: " << result.tradeStats.largestWin.value
-                         << "  最大单笔亏损: " << result.tradeStats.largestLoss.value;
-    // ── 凯利公式: f* = p - (1-p)/b, b = avgWin/avgLoss ──
-    if (result.tradeStats.winningTrades > 0 && result.tradeStats.losingTrades > 0
-        && result.tradeStats.totalLoss.value > 0.0) {
-        double winRate = static_cast<double>(result.tradeStats.winningTrades)
-            / static_cast<double>(result.tradeStats.totalTrades);
-        double avgWin  = result.tradeStats.totalProfit.value
-            / static_cast<double>(result.tradeStats.winningTrades);
-        double avgLoss = result.tradeStats.totalLoss.value
-            / static_cast<double>(result.tradeStats.losingTrades);
-        double odds = avgWin / avgLoss;
-        double fullKelly = winRate - (1.0 - winRate) / odds;
-        double halfKelly = fullKelly * 0.5;
-        INTERNAL_INFO_STREAM << "[仓位建议] 胜率=" << (winRate * 100.0)
-                             << "% 均盈=" << avgWin
-                             << " 均亏=" << avgLoss
-                             << " 赔率=" << odds;
-        INTERNAL_INFO_STREAM << "[仓位建议] 全凯=" << (fullKelly * 100.0)
-                             << "% 半凯(建议)=" << (halfKelly * 100.0) << "%";
-        result.fullKelly = fullKelly;
-        result.halfKelly = halfKelly;
-    }
-    // ── 规则归因: 计算后输出 + 存到 engine ──
-    attributionCollector.compute(view);
-    m_ruleAttribution = attributionCollector.results();
-    // 存储回测日期区间
-    {
-        const auto& d = view->dates();
-        if (!d.empty())
-            m_backtestDateRange = std::to_string(d.front().value) + "-" + std::to_string(d.back().value);
-    }
-    const auto& attrResults = m_ruleAttribution;
-    for (const auto& [tid, attr] : attrResults) {
-        INTERNAL_INFO_STREAM << "[规则归因] 模板=" << tid
-                             << " 封堵=" << attr.preventedTrades
-                             << " 假设盈亏=" << attr.preventedHypotheticalPnL << "%"
-                             << " 封堵胜率=" << (attr.preventedWinRate * 100.0) << "%"
-                             << " 出场=" << attr.triggeredExits
-                             << " 已实现盈亏=" << attr.exitRealizedPnL << "%";
-    }
-    INTERNAL_INFO_STREAM << "[规则闸门] 冻结天数: " << m_ruleGate.stats().frozenDays
-                         << "  信号拒绝: " << m_ruleGate.stats().signalsBlocked
-                         << "  规则出场: " << m_ruleGate.stats().positionExits;
-    INTERNAL_INFO_STREAM << "[基准对比] 基准净值点数: " << result.timeSeries.benchmarkValues.size()
-                         << "  策略净值点数: " << result.timeSeries.portfolioValues.size();
-    INTERNAL_INFO_STREAM << "───────────────────────────────────────────";
-    // ── 诊断: 持仓结构 ──
-    {
-        double avgPositions = totalDays > 0
-            ? static_cast<double>(dailyPositionSum) / static_cast<double>(totalDays) : 0.0;
-        double avgDeployed = totalDays > 0
-            ? deployedCapitalSum / static_cast<double>(totalDays) : 0.0;
-        // 用日均净值做分母, 避免盈利放大后利用率虚高
-        double avgEquity = equityCurve.empty() ? 0.0
-            : std::accumulate(equityCurve.begin(), equityCurve.end(), 0.0)
-                / static_cast<double>(equityCurve.size());
-        double utilizationPct = avgEquity > 0.0 ? (avgDeployed / avgEquity * 100.0) : 0.0;
-        double activeDayPct = totalDays > 0
-            ? static_cast<double>(daysWithTrades) / static_cast<double>(totalDays) * 100.0 : 0.0;
-
-        INTERNAL_INFO_STREAM << "[诊断-持仓] 日均持仓数: " << avgPositions
-                             << "  资金利用率: " << utilizationPct << "%"
-                             << "  有持仓天数: " << daysWithTrades << "/" << totalDays
-                             << " (" << activeDayPct << "%)";
-    }
-    // ── 诊断: 持仓周期 ──
-    if (!holdingDaysVec.empty()) {
-        std::sort(holdingDaysVec.begin(), holdingDaysVec.end());
-        double avgHold = 0.0;
-        for (double h : holdingDaysVec) avgHold += h;
-        avgHold /= static_cast<double>(holdingDaysVec.size());
-        double medHold = holdingDaysVec[holdingDaysVec.size() / 2];
-        double minHold = holdingDaysVec.front();
-        double maxHold = holdingDaysVec.back();
-        // 分段分布
-        int shortTerm=0, midTerm=0, longTerm=0; // <5 / 5-20 / >20
-        for (double h : holdingDaysVec) {
-            if (h < 5) ++shortTerm; else if (h <= 20) ++midTerm; else ++longTerm;
-        }
-        INTERNAL_INFO_STREAM << "[诊断-持仓周期] 平均: " << avgHold << "天  中位数: " << medHold
-                             << "天  最短: " << minHold << "天  最长: " << maxHold << "天";
-        INTERNAL_INFO_STREAM << "[诊断-持仓周期] 分布: <5天=" << shortTerm
-                             << " (占" << (100.0*shortTerm/holdingDaysVec.size()) << "%)"
-                             << "  5~20天=" << midTerm
-                             << " (占" << (100.0*midTerm/holdingDaysVec.size()) << "%)"
-                             << "  >20天=" << longTerm
-                             << " (占" << (100.0*longTerm/holdingDaysVec.size()) << "%)";
-        // 分层盈亏: 按持仓天数分组
-        double pnlShort=0, pnlMid=0, pnlLong=0; int cntS=0, cntM=0, cntL=0;
-        for (size_t i=0; i<holdingDaysVec.size() && i<tradePnlVec.size(); ++i) {
-            if (holdingDaysVec[i] < 5)       { pnlShort+=tradePnlVec[i]; ++cntS; }
-            else if (holdingDaysVec[i]<=20)  { pnlMid+=tradePnlVec[i]; ++cntM; }
-            else                              { pnlLong+=tradePnlVec[i]; ++cntL; }
-        }
-        INTERNAL_INFO_STREAM << "[诊断-分层盈亏] <5天: " << (cntS>0?pnlShort/cntS:0)
-                             << "/笔 (" << cntS << "笔)"
-                             << "  5~20天: " << (cntM>0?pnlMid/cntM:0)
-                             << "/笔 (" << cntM << "笔)"
-                             << "  >20天: " << (cntL>0?pnlLong/cntL:0)
-                             << "/笔 (" << cntL << "笔)";
-    }
-    // ── 诊断: 卖出分类 ──
-    {
-        int totalSells = stopLossFilled + ruleExitFilled + normalSellFilled;
-        if (totalSells > 0) {
-            INTERNAL_INFO_STREAM << "[诊断-卖出分类] 止损: " << stopLossFilled
-                                 << "  规则出场: " << ruleExitFilled
-                                 << "  策略卖出: " << normalSellFilled
-                                 << "  合计: " << totalSells;
-        }
-    }
-    // ── 诊断: 因子池 ──
-    if (poolSelectionDays > 0) {
-        double avgPool = static_cast<double>(totalPoolCandidates)
-            / static_cast<double>(poolSelectionDays);
-        INTERNAL_INFO_STREAM << "[诊断-因子池] 选池天数: " << poolSelectionDays
-                             << "/" << totalDays
-                             << "  日均候选: " << avgPool
-                             << "  目标持仓: " << m_factorSignalProcessor.targetPositionCount();
-    }
-    // ── 诊断: 因子分与盈亏相关性 (Rank IC) ──
-    if (entryFactorScores.size() >= 30) {
-        // Spearman rank correlation between entryFactorScore and pnl
-        std::vector<size_t> idx(entryFactorScores.size());
-        for (size_t i=0; i<idx.size(); ++i) idx[i]=i;
-        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-            return entryFactorScores[a] < entryFactorScores[b]; });
-        std::vector<double> rankS(idx.size()), rankP(idx.size());
-        for (size_t i=0; i<idx.size(); ++i) rankS[idx[i]] = static_cast<double>(i);
-        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
-            return tradePnlVec[a] < tradePnlVec[b]; });
-        for (size_t i=0; i<idx.size(); ++i) rankP[idx[i]] = static_cast<double>(i);
-        double meanR=(idx.size()-1)/2.0, cov=0, varS=0, varP=0;
-        for (size_t i=0; i<idx.size(); ++i) {
-            double ds=rankS[i]-meanR, dp=rankP[i]-meanR;
-            cov+=ds*dp; varS+=ds*ds; varP+=dp*dp;
-        }
-        double rankIC = (varS>0&&varP>0) ? cov/std::sqrt(varS*varP) : 0.0;
-        INTERNAL_INFO_STREAM << "[诊断-因子IC] Rank_IC: " << rankIC
-                             << "  样本: " << entryFactorScores.size() << "笔"
-                             << "  (正=因子分与盈亏正相关)";
-    }
-    INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
-
-    if (riskRejectedCount > 0) {
-        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
-    }
-    if (onProgress) onProgress(100.0);
-    INTERNAL_INFO_STREAM << "[backtest] success, returning result";
-    // ── 诊断持久化 ──
-    result.stopLossFills   = stopLossFilled;
-    result.ruleExitFills   = ruleExitFilled;
-    result.normalSellFills = normalSellFilled;
-    {
-        double sumHold = 0; for (auto h : holdingDaysVec) sumHold += h;
-        result.avgHoldingDays = holdingDaysVec.empty() ? 0 : sumHold / holdingDaysVec.size();
-        result.avgPositions = totalDays > 0 ? static_cast<double>(dailyPositionSum) / totalDays : 0;
-        result.avgPoolSize  = poolSelectionDays > 0 ? static_cast<double>(totalPoolCandidates) / poolSelectionDays : 0;
-        // Rank IC
-        if (entryFactorScores.size() >= 30 && tradePnlVec.size() >= 30) {
-            std::vector<size_t> idx(entryFactorScores.size());
-            for (size_t i=0; i<idx.size(); ++i) idx[i]=i;
-            std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return entryFactorScores[a] < entryFactorScores[b]; });
-            std::vector<double> rankS(idx.size()), rankP(idx.size());
-            for (size_t i=0; i<idx.size(); ++i) rankS[idx[i]] = static_cast<double>(i);
-            std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return tradePnlVec[a] < tradePnlVec[b]; });
-            for (size_t i=0; i<idx.size(); ++i) rankP[idx[i]] = static_cast<double>(i);
-            double meanR=(idx.size()-1)/2.0, cov=0, varS=0, varP=0;
-            for (size_t i=0; i<idx.size(); ++i) {
-                double ds=rankS[i]-meanR, dp=rankP[i]-meanR;
-                cov+=ds*dp; varS+=ds*ds; varP+=dp*dp;
-            }
-            result.rankIC = (varS>0&&varP>0) ? cov/std::sqrt(varS*varP) : 0;
-        }
-    }
+    // ── 诊断输出 (Phase 30c: 提取到 buildBacktestDiagnostics) ──
+    buildBacktestDiagnostics(result, ctx, req, view, totalDays, onProgress, attributionCollector);
 
     result.success = true;
     return result;
@@ -3033,6 +2704,411 @@ void StrategyEngine::runBacktestLoop(
             double loopFrac = static_cast<double>(r + 1) / static_cast<double>(totalDays);
             double pct = kLoopStart + loopFrac * (kLoopEnd - kLoopStart);
             onProgress(pct);
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Phase 30c: computeBacktestMetrics — 回测后处理指标计算 (从 backtest() 提取)
+// ══════════════════════════════════════════════════════════════════════════════
+
+void StrategyEngine::computeBacktestMetrics(
+    StrategyBacktestResult& result,
+    const BacktestDayContext& ctx,
+    const domain::backtest::BacktestRequest& req,
+    const factor::compute::IMarketDataView* view,
+    int totalDays)
+{
+    // ── 引用别名: ctx 成员映射为原局部变量名, 函数体零改动 ──
+    const auto& equityCurve = ctx.equityCurve;
+    const auto& totalFills = ctx.totalFills;
+    const auto& winningFills = ctx.winningFills;
+    const auto& losingFills = ctx.losingFills;
+    const auto& totalProfit = ctx.totalProfit;
+    const auto& totalLoss = ctx.totalLoss;
+    const auto& largestWin = ctx.largestWin;
+    const auto& largestLoss = ctx.largestLoss;
+
+    // ═══════════════════════════════════════════════════════════════
+    // 函数体: 与原 backtest() L1989-2099 逐字一致
+    // ═══════════════════════════════════════════════════════════════
+
+    // 4. 指标计算
+    std::vector<double> dailyReturns;
+    if (!equityCurve.empty()) {
+        const double initialCapital = req.costSpec.initialCapital.value;
+        result.metrics.totalReturn = (equityCurve.back() - initialCapital) / initialCapital;
+        dailyReturns.reserve(equityCurve.size() - 1);
+        for (std::size_t i = 1; i < equityCurve.size(); ++i) {
+            if (equityCurve[i - 1] > 0.0)
+                dailyReturns.push_back(equityCurve[i] / equityCurve[i - 1] - 1.0);
+        }
+
+        using Metrics = ::factor::FactorBacktestMetricsCalculator;
+        result.metrics.maxDrawdown   = Metrics::calculateMaxDrawdown(dailyReturns);
+        // 胜率/盈亏比为按笔口径: 盈利笔数/总卖出笔数, 总盈利/总亏损
+        result.metrics.winRate       = totalFills > 0
+            ? static_cast<double>(winningFills) / static_cast<double>(totalFills) : 0.0;
+        result.metrics.profitFactor  = totalLoss > 0.0 ? totalProfit / totalLoss : 0.0;
+        result.metrics.volatility       = Metrics::calculateVolatility(dailyReturns);
+        result.metrics.annualizedReturn = Metrics::calculateAnnualizedReturn(
+            equityCurve.back(), initialCapital, totalDays);
+        double downsideDev = Metrics::calculateDownsideDeviation(dailyReturns);
+        result.metrics.sortinoRatio = Metrics::calculateSortinoRatio(
+            result.metrics.annualizedReturn, downsideDev);
+        result.metrics.calmarRatio  = Metrics::calculateCalmarRatio(
+            result.metrics.annualizedReturn, result.metrics.maxDrawdown);
+        result.metrics.sharpeRatio  = Metrics::calculateSharpeRatio(
+            result.metrics.annualizedReturn, result.metrics.volatility);
+    }
+
+    // 交易统计
+    result.tradeStats.totalTrades   = static_cast<int>(totalFills);
+    result.tradeStats.winningTrades = static_cast<int>(winningFills);
+    result.tradeStats.losingTrades  = static_cast<int>(losingFills);
+    result.tradeStats.totalProfit   = domain::strategy::Money{totalProfit};
+    result.tradeStats.totalLoss     = domain::strategy::Money{totalLoss};
+    result.tradeStats.largestWin    = domain::strategy::Money{largestWin};
+    result.tradeStats.largestLoss   = domain::strategy::Money{largestLoss};
+
+    // 时间序列
+    for (const auto& dk : view->dates()) result.timeSeries.dates.push_back(domain::DomainDate{dk.value});
+    result.timeSeries.portfolioValues = equityCurve;
+    result.timeSeries.returns         = dailyReturns;
+    {
+        std::vector<double> dds; dds.reserve(equityCurve.size()); double pk = equityCurve.empty()?0:equityCurve[0];
+        for (double e : equityCurve) { if (e > pk) pk = e; dds.push_back(pk > 0 ? (e-pk)/pk : 0); }
+        result.timeSeries.drawdowns = dds;
+    }
+
+    // 基准对比 (沪深300)，从 PG 查询指数日K线，按回测日期对齐
+    {
+        std::string bmSym = req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
+        const auto& dates = view->dates();
+        if (!dates.empty()) {
+            auto& pool = astock::database::NativePgConnectionPool::instance();
+            auto db = pool.getConnection();
+            auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+            std::string startStr = std::to_string(dates.front().value);
+            std::string endStr   = std::to_string(dates.back().value);
+            auto rows = repo->queryDailyBar(bmSym, startStr, endStr);
+            if (!rows.empty()) {
+                // date → close 映射（tradeDate 是 YYYY-MM-DD 格式 → YYYYMMDD int）
+                std::unordered_map<int, double> dateClose;
+                for (const auto& r : rows) {
+                    std::string ds = r.tradeDate;
+                    ds.erase(std::remove(ds.begin(), ds.end(), '-'), ds.end());
+                    int d = 0;
+                    try { d = std::stoi(ds); } catch (...) { continue; }
+                    if (d > 0 && r.close > 0) dateClose[d] = r.close;
+                }
+                // 逐回测日计算基准收益 — 与 dailyReturns 逐下标对齐:
+                // bmRet[k] 与 dailyReturns[k] 同为第 k+1 个交易日相对前一交易日的收益
+                std::vector<double> bmRet;
+                bmRet.reserve(dates.size() - 1);
+                double prevClose = 0.0;
+                {
+                    auto it0 = dateClose.find(dates.front().value);
+                    if (it0 != dateClose.end()) prevClose = it0->second;
+                }
+                for (size_t i = 1; i < dates.size(); ++i) {
+                    auto it = dateClose.find(dates[i].value);
+                    const double currClose = (it != dateClose.end()) ? it->second : 0.0;
+                    bmRet.push_back((prevClose > 0.0 && currClose > 0.0)
+                        ? currClose / prevClose - 1.0 : 0.0);  // 缺数据日记 0 收益
+                    if (currClose > 0.0) prevClose = currClose;
+                }
+                // 指标计算
+                auto benchMetrics = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
+                    dailyReturns, bmRet);
+                result.metrics.beta             = benchMetrics.beta;
+                result.metrics.alpha            = benchMetrics.alpha;
+                result.metrics.trackingError    = benchMetrics.trackingError;
+                result.metrics.informationRatio = benchMetrics.informationRatio;
+                // 净值曲线 + 回撤曲线 — 与 portfolioValues 同长: 首点为初始资金
+                const double initialCapital = req.costSpec.initialCapital.value > 0
+                    ? static_cast<double>(req.costSpec.initialCapital.value) : 1.0;
+                result.timeSeries.benchmarkValues.reserve(bmRet.size() + 1);
+                result.timeSeries.benchmarkDrawdowns.reserve(bmRet.size() + 1);
+                double bmEquity = initialCapital;
+                double bmPeak = bmEquity;
+                result.timeSeries.benchmarkValues.push_back(bmEquity);
+                result.timeSeries.benchmarkDrawdowns.push_back(0.0);
+                for (double r : bmRet) {
+                    bmEquity *= (1.0 + r);
+                    if (bmEquity > bmPeak) bmPeak = bmEquity;
+                    double dd = bmPeak > 0.0 ? (bmPeak - bmEquity) / bmPeak : 0.0;
+                    result.timeSeries.benchmarkValues.push_back(bmEquity);
+                    result.timeSeries.benchmarkDrawdowns.push_back(dd);
+                }
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Phase 30c: buildBacktestDiagnostics — 回测后处理诊断输出 (从 backtest() 提取)
+// ══════════════════════════════════════════════════════════════════════════════
+
+void StrategyEngine::buildBacktestDiagnostics(
+    StrategyBacktestResult& result,
+    BacktestDayContext& ctx,
+    const domain::backtest::BacktestRequest& req,
+    const factor::compute::IMarketDataView* view,
+    int totalDays,
+    const std::function<void(double)>& onProgress,
+    rules::AttributionCollector& attributionCollector)
+{
+    // ── 引用别名: ctx 成员映射为原局部变量名, 函数体零改动 ──
+    const auto& equityCurve = ctx.equityCurve;
+    const auto& totalFills = ctx.totalFills;
+    const auto& winningFills = ctx.winningFills;
+    const auto& losingFills = ctx.losingFills;
+    const auto& stopLossExitCount = ctx.stopLossExitCount;
+    const auto& totalStopLossOrders = ctx.totalStopLossOrders;
+    const auto& stopLossFilled = ctx.stopLossFilled;
+    const auto& stopLossSkippedNoHeld = ctx.stopLossSkippedNoHeld;
+    const auto& ruleExitFilled = ctx.ruleExitFilled;
+    const auto& normalSellFilled = ctx.normalSellFilled;
+    const auto& totalProfit = ctx.totalProfit;
+    const auto& totalLoss = ctx.totalLoss;
+    const auto& largestWin = ctx.largestWin;
+    const auto& largestLoss = ctx.largestLoss;
+    const auto& symbolPnl = ctx.symbolPnl;
+    const auto& dailyPositionSum = ctx.dailyPositionSum;
+    const auto& deployedCapitalSum = ctx.deployedCapitalSum;
+    const auto& daysWithTrades = ctx.daysWithTrades;
+    auto& holdingDaysVec = ctx.holdingDaysVec;
+    const auto& tradePnlVec = ctx.tradePnlVec;
+    auto& entryFactorScores = ctx.entryFactorScores;
+    const auto& poolSelectionDays = ctx.poolSelectionDays;
+    const auto& totalPoolCandidates = ctx.totalPoolCandidates;
+    const auto& riskRejectedCount = ctx.riskRejectedCount;
+
+    // ═══════════════════════════════════════════════════════════════
+    // 函数体: 与原 backtest() L2101-2322 逐字一致
+    // ═══════════════════════════════════════════════════════════════
+
+    // ── 回测指标全量打印 ──
+    INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
+    INTERNAL_INFO_STREAM << "[回测结果] 策略: " << req.strategyIdentity.strategyCode.text();
+    INTERNAL_INFO_STREAM << "[回测结果] 区间: " << (view->dates().empty() ? 0 : view->dates().front().value)
+                         << " → " << (view->dates().empty() ? 0 : view->dates().back().value)
+                         << "  交易日: " << totalDays;
+    INTERNAL_INFO_STREAM << "[回测结果] 初始资金: " << req.costSpec.initialCapital.value
+                         << "  最终净值: " << (equityCurve.empty() ? 0 : static_cast<int64_t>(equityCurve.back()));
+    INTERNAL_INFO_STREAM << "[交易明细] 止损扫描: " << stopLossExitCount << "次"
+                         << "  到达sell段: " << totalStopLossOrders << "次"
+                         << "  实际卖出: " << stopLossFilled << "笔"
+                         << "  跳过(无持仓): " << stopLossSkippedNoHeld << "次";
+    // 卖单按盈亏排序，打印 top20
+    std::vector<const BacktestTradeRecord*> sells;
+    for (const auto& t : result.tradeLog)
+        if (!t.isBuy) sells.push_back(&t);
+    std::sort(sells.begin(), sells.end(),
+              [](const auto* a, const auto* b) { return a->realizedPnl > b->realizedPnl; });
+    int showNTrades = (std::min)(20, static_cast<int>(sells.size()));
+    INTERNAL_INFO_STREAM << "[交易明细] === 最佳" << showNTrades << "笔 ===";
+    for (int i = 0; i < showNTrades; ++i)
+        INTERNAL_INFO_STREAM << "[交易明细] " << sells[i]->tradeDate << " " << sells[i]->symbol
+                             << " 盈亏:" << static_cast<int>(sells[i]->realizedPnl);
+    INTERNAL_INFO_STREAM << "[交易明细] === 最差" << showNTrades << "笔 ===";
+    for (int i = 0; i < showNTrades; ++i)
+        INTERNAL_INFO_STREAM << "[交易明细] " << sells[sells.size()-1-i]->tradeDate << " "
+                             << sells[sells.size()-1-i]->symbol
+                             << " 盈亏:" << static_cast<int>(sells[sells.size()-1-i]->realizedPnl);
+    INTERNAL_INFO_STREAM << "[回测指标] 总收益率: " << (result.metrics.totalReturn * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 年化收益: " << (result.metrics.annualizedReturn * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 最大回撤: " << (result.metrics.maxDrawdown * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 胜率: " << (result.metrics.winRate * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] 盈亏比: " << result.metrics.profitFactor;
+    INTERNAL_INFO_STREAM << "[回测指标] 夏普比率: " << result.metrics.sharpeRatio;
+    INTERNAL_INFO_STREAM << "[回测指标] 索提诺比率: " << result.metrics.sortinoRatio;
+    INTERNAL_INFO_STREAM << "[回测指标] 卡玛比率: " << result.metrics.calmarRatio;
+    INTERNAL_INFO_STREAM << "[回测指标] 年化波动率: " << (result.metrics.volatility * 100.0) << "%";
+    INTERNAL_INFO_STREAM << "[回测指标] Alpha: " << result.metrics.alpha;
+    INTERNAL_INFO_STREAM << "[回测指标] Beta: " << result.metrics.beta;
+    INTERNAL_INFO_STREAM << "[回测指标] 跟踪误差: " << result.metrics.trackingError;
+    INTERNAL_INFO_STREAM << "[回测指标] 信息比率: " << result.metrics.informationRatio;
+    INTERNAL_INFO_STREAM << "[交易统计] 总成交: " << result.tradeStats.totalTrades
+                         << "  盈利: " << result.tradeStats.winningTrades
+                         << "  亏损: " << result.tradeStats.losingTrades;
+    INTERNAL_INFO_STREAM << "[交易统计] 总盈利: " << result.tradeStats.totalProfit.value
+                         << "  总亏损: " << result.tradeStats.totalLoss.value;
+    INTERNAL_INFO_STREAM << "[交易统计] 最大单笔盈利: " << result.tradeStats.largestWin.value
+                         << "  最大单笔亏损: " << result.tradeStats.largestLoss.value;
+    // ── 凯利公式: f* = p - (1-p)/b, b = avgWin/avgLoss ──
+    if (result.tradeStats.winningTrades > 0 && result.tradeStats.losingTrades > 0
+        && result.tradeStats.totalLoss.value > 0.0) {
+        double winRate = static_cast<double>(result.tradeStats.winningTrades)
+            / static_cast<double>(result.tradeStats.totalTrades);
+        double avgWin  = result.tradeStats.totalProfit.value
+            / static_cast<double>(result.tradeStats.winningTrades);
+        double avgLoss = result.tradeStats.totalLoss.value
+            / static_cast<double>(result.tradeStats.losingTrades);
+        double odds = avgWin / avgLoss;
+        double fullKelly = winRate - (1.0 - winRate) / odds;
+        double halfKelly = fullKelly * 0.5;
+        INTERNAL_INFO_STREAM << "[仓位建议] 胜率=" << (winRate * 100.0)
+                             << "% 均盈=" << avgWin
+                             << " 均亏=" << avgLoss
+                             << " 赔率=" << odds;
+        INTERNAL_INFO_STREAM << "[仓位建议] 全凯=" << (fullKelly * 100.0)
+                             << "% 半凯(建议)=" << (halfKelly * 100.0) << "%";
+        result.fullKelly = fullKelly;
+        result.halfKelly = halfKelly;
+    }
+    // ── 规则归因: 计算后输出 + 存到 engine ──
+    attributionCollector.compute(view);
+    m_ruleAttribution = attributionCollector.results();
+    // 存储回测日期区间
+    {
+        const auto& d = view->dates();
+        if (!d.empty())
+            m_backtestDateRange = std::to_string(d.front().value) + "-" + std::to_string(d.back().value);
+    }
+    const auto& attrResults = m_ruleAttribution;
+    for (const auto& [tid, attr] : attrResults) {
+        INTERNAL_INFO_STREAM << "[规则归因] 模板=" << tid
+                             << " 封堵=" << attr.preventedTrades
+                             << " 假设盈亏=" << attr.preventedHypotheticalPnL << "%"
+                             << " 封堵胜率=" << (attr.preventedWinRate * 100.0) << "%"
+                             << " 出场=" << attr.triggeredExits
+                             << " 已实现盈亏=" << attr.exitRealizedPnL << "%";
+    }
+    INTERNAL_INFO_STREAM << "[规则闸门] 冻结天数: " << m_ruleGate.stats().frozenDays
+                         << "  信号拒绝: " << m_ruleGate.stats().signalsBlocked
+                         << "  规则出场: " << m_ruleGate.stats().positionExits;
+    INTERNAL_INFO_STREAM << "[基准对比] 基准净值点数: " << result.timeSeries.benchmarkValues.size()
+                         << "  策略净值点数: " << result.timeSeries.portfolioValues.size();
+    INTERNAL_INFO_STREAM << "───────────────────────────────────────────";
+    // ── 诊断: 持仓结构 ──
+    {
+        double avgPositions = totalDays > 0
+            ? static_cast<double>(dailyPositionSum) / static_cast<double>(totalDays) : 0.0;
+        double avgDeployed = totalDays > 0
+            ? deployedCapitalSum / static_cast<double>(totalDays) : 0.0;
+        // 用日均净值做分母, 避免盈利放大后利用率虚高
+        double avgEquity = equityCurve.empty() ? 0.0
+            : std::accumulate(equityCurve.begin(), equityCurve.end(), 0.0)
+                / static_cast<double>(equityCurve.size());
+        double utilizationPct = avgEquity > 0.0 ? (avgDeployed / avgEquity * 100.0) : 0.0;
+        double activeDayPct = totalDays > 0
+            ? static_cast<double>(daysWithTrades) / static_cast<double>(totalDays) * 100.0 : 0.0;
+
+        INTERNAL_INFO_STREAM << "[诊断-持仓] 日均持仓数: " << avgPositions
+                             << "  资金利用率: " << utilizationPct << "%"
+                             << "  有持仓天数: " << daysWithTrades << "/" << totalDays
+                             << " (" << activeDayPct << "%)";
+    }
+    // ── 诊断: 持仓周期 ──
+    if (!holdingDaysVec.empty()) {
+        std::sort(holdingDaysVec.begin(), holdingDaysVec.end());
+        double avgHold = 0.0;
+        for (double h : holdingDaysVec) avgHold += h;
+        avgHold /= static_cast<double>(holdingDaysVec.size());
+        double medHold = holdingDaysVec[holdingDaysVec.size() / 2];
+        double minHold = holdingDaysVec.front();
+        double maxHold = holdingDaysVec.back();
+        // 分段分布
+        int shortTerm=0, midTerm=0, longTerm=0; // <5 / 5-20 / >20
+        for (double h : holdingDaysVec) {
+            if (h < 5) ++shortTerm; else if (h <= 20) ++midTerm; else ++longTerm;
+        }
+        INTERNAL_INFO_STREAM << "[诊断-持仓周期] 平均: " << avgHold << "天  中位数: " << medHold
+                             << "天  最短: " << minHold << "天  最长: " << maxHold << "天";
+        INTERNAL_INFO_STREAM << "[诊断-持仓周期] 分布: <5天=" << shortTerm
+                             << " (占" << (100.0*shortTerm/holdingDaysVec.size()) << "%)"
+                             << "  5~20天=" << midTerm
+                             << " (占" << (100.0*midTerm/holdingDaysVec.size()) << "%)"
+                             << "  >20天=" << longTerm
+                             << " (占" << (100.0*longTerm/holdingDaysVec.size()) << "%)";
+        // 分层盈亏: 按持仓天数分组
+        double pnlShort=0, pnlMid=0, pnlLong=0; int cntS=0, cntM=0, cntL=0;
+        for (size_t i=0; i<holdingDaysVec.size() && i<tradePnlVec.size(); ++i) {
+            if (holdingDaysVec[i] < 5)       { pnlShort+=tradePnlVec[i]; ++cntS; }
+            else if (holdingDaysVec[i]<=20)  { pnlMid+=tradePnlVec[i]; ++cntM; }
+            else                              { pnlLong+=tradePnlVec[i]; ++cntL; }
+        }
+        INTERNAL_INFO_STREAM << "[诊断-分层盈亏] <5天: " << (cntS>0?pnlShort/cntS:0)
+                             << "/笔 (" << cntS << "笔)"
+                             << "  5~20天: " << (cntM>0?pnlMid/cntM:0)
+                             << "/笔 (" << cntM << "笔)"
+                             << "  >20天: " << (cntL>0?pnlLong/cntL:0)
+                             << "/笔 (" << cntL << "笔)";
+    }
+    // ── 诊断: 卖出分类 ──
+    {
+        int totalSells = stopLossFilled + ruleExitFilled + normalSellFilled;
+        if (totalSells > 0) {
+            INTERNAL_INFO_STREAM << "[诊断-卖出分类] 止损: " << stopLossFilled
+                                 << "  规则出场: " << ruleExitFilled
+                                 << "  策略卖出: " << normalSellFilled
+                                 << "  合计: " << totalSells;
+        }
+    }
+    // ── 诊断: 因子池 ──
+    if (poolSelectionDays > 0) {
+        double avgPool = static_cast<double>(totalPoolCandidates)
+            / static_cast<double>(poolSelectionDays);
+        INTERNAL_INFO_STREAM << "[诊断-因子池] 选池天数: " << poolSelectionDays
+                             << "/" << totalDays
+                             << "  日均候选: " << avgPool
+                             << "  目标持仓: " << m_factorSignalProcessor.targetPositionCount();
+    }
+    // ── 诊断: 因子分与盈亏相关性 (Rank IC) ──
+    if (entryFactorScores.size() >= 30) {
+        // Spearman rank correlation between entryFactorScore and pnl
+        std::vector<size_t> idx(entryFactorScores.size());
+        for (size_t i=0; i<idx.size(); ++i) idx[i]=i;
+        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+            return entryFactorScores[a] < entryFactorScores[b]; });
+        std::vector<double> rankS(idx.size()), rankP(idx.size());
+        for (size_t i=0; i<idx.size(); ++i) rankS[idx[i]] = static_cast<double>(i);
+        std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) {
+            return tradePnlVec[a] < tradePnlVec[b]; });
+        for (size_t i=0; i<idx.size(); ++i) rankP[idx[i]] = static_cast<double>(i);
+        double meanR=(idx.size()-1)/2.0, cov=0, varS=0, varP=0;
+        for (size_t i=0; i<idx.size(); ++i) {
+            double ds=rankS[i]-meanR, dp=rankP[i]-meanR;
+            cov+=ds*dp; varS+=ds*ds; varP+=dp*dp;
+        }
+        double rankIC = (varS>0&&varP>0) ? cov/std::sqrt(varS*varP) : 0.0;
+        INTERNAL_INFO_STREAM << "[诊断-因子IC] Rank_IC: " << rankIC
+                             << "  样本: " << entryFactorScores.size() << "笔"
+                             << "  (正=因子分与盈亏正相关)";
+    }
+    INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
+
+    if (riskRejectedCount > 0) {
+        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
+    }
+    if (onProgress) onProgress(100.0);
+    INTERNAL_INFO_STREAM << "[backtest] success, returning result";
+    // ── 诊断持久化 ──
+    result.stopLossFills   = stopLossFilled;
+    result.ruleExitFills   = ruleExitFilled;
+    result.normalSellFills = normalSellFilled;
+    {
+        double sumHold = 0; for (auto h : holdingDaysVec) sumHold += h;
+        result.avgHoldingDays = holdingDaysVec.empty() ? 0 : sumHold / holdingDaysVec.size();
+        result.avgPositions = totalDays > 0 ? static_cast<double>(dailyPositionSum) / totalDays : 0;
+        result.avgPoolSize  = poolSelectionDays > 0 ? static_cast<double>(totalPoolCandidates) / poolSelectionDays : 0;
+        // Rank IC
+        if (entryFactorScores.size() >= 30 && tradePnlVec.size() >= 30) {
+            std::vector<size_t> idx(entryFactorScores.size());
+            for (size_t i=0; i<idx.size(); ++i) idx[i]=i;
+            std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return entryFactorScores[a] < entryFactorScores[b]; });
+            std::vector<double> rankS(idx.size()), rankP(idx.size());
+            for (size_t i=0; i<idx.size(); ++i) rankS[idx[i]] = static_cast<double>(i);
+            std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return tradePnlVec[a] < tradePnlVec[b]; });
+            for (size_t i=0; i<idx.size(); ++i) rankP[idx[i]] = static_cast<double>(i);
+            double meanR=(idx.size()-1)/2.0, cov=0, varS=0, varP=0;
+            for (size_t i=0; i<idx.size(); ++i) {
+                double ds=rankS[i]-meanR, dp=rankP[i]-meanR;
+                cov+=ds*dp; varS+=ds*ds; varP+=dp*dp;
+            }
+            result.rankIC = (varS>0&&varP>0) ? cov/std::sqrt(varS*varP) : 0;
         }
     }
 }
