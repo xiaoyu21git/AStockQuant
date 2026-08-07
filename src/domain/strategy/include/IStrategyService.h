@@ -45,6 +45,7 @@ namespace astock { namespace database { class ISqlDatabase; class SqlQueryResult
 
 namespace domain::backtest {
 struct BacktestRequest;
+class BacktestFillSimulator;
 }
 
 namespace factor {
@@ -710,6 +711,84 @@ private:
         const EodPriceData& prices,
         const std::string& tradingDay,
         bool isCompensation);
+
+    // ── backtest 子函数 (Phase 30b 拆分) ──
+
+    /// @brief 回测循环全部可变状态（原 backtest() 中 ~35 个局部变量）
+    /// 各子函数通过引用操作, 保持与原内联代码完全一致的语义
+    struct BacktestDayContext {
+        // 账户
+        double cash = 0.0;
+        double latestEquity = 0.0;
+        double peakEquity = 0.0;
+        std::unordered_map<std::string, domain::trading::Position> backtestPositions;
+
+        // 成交统计 (累加型)
+        int totalFills = 0, winningFills = 0, losingFills = 0;
+        int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
+        int riskRejectedCount = 0, stopLossSkippedNoHeld = 0, totalStopLossOrders = 0;
+        int stopLossExitCount = 0, ruleExitCount = 0;  // 诊断计数器
+        double totalProfit = 0.0, totalLoss = 0.0;
+        double largestWin = 0.0, largestLoss = 0.0;
+
+        // 每日临时状态 (每日 clearDaily())
+        std::unordered_set<std::string> todayStopLossSyms;
+        std::unordered_set<std::string> todayRuleExitSyms;
+        std::unordered_set<std::string> boughtToday;
+
+        // 买入记录 (累加型, 卖出时 erase)
+        std::unordered_map<std::string, double> buyPriceMap;
+        std::unordered_map<std::string, double> buySignalScoreMap;
+        std::unordered_map<std::string, double> buyDateMap;       // symbol → entryRow
+        std::unordered_map<std::string, double> buyFactorScoreMap2;
+        std::unordered_map<std::string, double> symbolPnl;        // 逐标的累计盈亏
+
+        // 时间序列 (追加型)
+        std::vector<double> equityCurve;
+
+        // 诊断数据 (累加型)
+        std::vector<double> holdingDaysVec;
+        std::vector<double> tradePnlVec;
+        std::vector<double> entryFactorScores;
+        int dailyPositionSum = 0;
+        int daysWithTrades = 0;
+        double deployedCapitalSum = 0.0;
+        size_t totalBuySignals = 0;
+        size_t totalPoolCandidates = 0;
+        int poolSelectionDays = 0;
+        std::unordered_map<std::string, int> hybridFactorCoveredDays;
+
+        /// @brief 每日清空临时状态 (日终调用)
+        void clearDaily() {
+            todayStopLossSyms.clear();
+            todayRuleExitSyms.clear();
+            boughtToday.clear();
+        }
+
+        /// @brief 构建账户快照 (风控/日志用)
+        [[nodiscard]] domain::trading::AccountSnapshot accountSnapshot() const {
+            domain::trading::AccountSnapshot a;
+            a.setTotalAsset(latestEquity);
+            a.setAvailableCash(cash);
+            a.setMarketValue(latestEquity - cash);
+            return a;
+        }
+    };
+
+    /// @brief 回测主循环: for(r=0; r<totalDays; ++r) 逐日驱动
+    /// 将原 backtest() 中 ~755 行的循环体提取为独立函数,
+    /// 通过 BacktestDayContext 封装 ~35 个可变状态变量
+    /// @param attributionCollector 归因收集器, 由 backtest() 持有, 循环中写入, 后处理中读取
+    void runBacktestLoop(
+        BacktestDayContext& ctx,
+        StrategyBacktestResult& result,
+        factor::compute::BacktestDataService* dataSvc,
+        const domain::backtest::BacktestRequest& req,
+        domain::backtest::BacktestFillSimulator& fillSim,
+        const std::unordered_map<std::string, int>& symbolToCol,
+        int bmColIdx,
+        const std::function<void(double)>& onProgress,
+        rules::AttributionCollector& attributionCollector);
 
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
