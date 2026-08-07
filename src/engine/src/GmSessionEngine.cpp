@@ -198,13 +198,13 @@ public:
         u.filledPrice   = static_cast<double>(o->filled_vwap);
         u.filledQuantity = static_cast<int64_t>(o->filled_volume);
         u.message       = o->ord_rej_reason_detail;
-        switch (o->status) {
-            case 2: u.status = OrderUpdate::PartialFilled; break;
-            case 3: u.status = OrderUpdate::Filled;        break;
-            case 5: u.status = OrderUpdate::Cancelled;     break;
-            case 6: u.status = OrderUpdate::Rejected;      break;
-            case 7: u.status = OrderUpdate::Expired;       break;
-            case 8: u.status = OrderUpdate::Rejected;      break; // 废单/拒绝
+        switch (static_cast<session::GmOrderStatus>(o->status)) {
+            case session::GmOrderStatus::kPartialFilled:  u.status = OrderUpdate::PartialFilled; break;
+            case session::GmOrderStatus::kFilled:         u.status = OrderUpdate::Filled;        break;
+            case session::GmOrderStatus::kCancelled:      u.status = OrderUpdate::Cancelled;     break;
+            case session::GmOrderStatus::kWastedRejected: u.status = OrderUpdate::Rejected;      break;
+            case session::GmOrderStatus::kExpired:        u.status = OrderUpdate::Expired;       break;
+            case session::GmOrderStatus::kOtherRejected:  u.status = OrderUpdate::Rejected;      break; // 废单/拒绝
             default: u.status = OrderUpdate::Submitted;    break;
         }
 

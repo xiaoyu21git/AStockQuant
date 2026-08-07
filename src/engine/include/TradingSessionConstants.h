@@ -18,4 +18,15 @@ constexpr double kMainBoardLimitRatio    = 10.0;
 constexpr double kGemStarBoardLimitRatio = 20.0;
 constexpr double kNewThirdBoardLimitRatio = 30.0;
 
+// ── gmsdk 订单状态码 → OrderUpdate 映射 ──
+
+enum class GmOrderStatus : int {
+    kPartialFilled  = 2,
+    kFilled         = 3,
+    kCancelled      = 5,
+    kWastedRejected = 6,  // 废单/拒绝
+    kExpired        = 7,
+    kOtherRejected  = 8,
+};
+
 } // namespace engine::session

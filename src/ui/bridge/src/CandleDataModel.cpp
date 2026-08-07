@@ -1,7 +1,8 @@
 // CandleDataModel.cpp
-// v2: 指标 Role 从自身 m_data 计算, 适用于任意周期
+// v3: 技术指标委托 domain::market::indicators, 桥接层不再持有算法
 #include "CandleDataModel.h"
 #include "../../../domain/market/include/LiveData.h"
+#include "../../../domain/market/include/TechnicalIndicators.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,46 +18,6 @@ int CandleDataModel::rowCount(const QModelIndex& parent) const {
 
 int CandleDataModel::columnCount(const QModelIndex& parent) const {
     return parent.isValid() ? 0 : ColumnCount;
-}
-
-// ─── 辅助: 从 m_data 的第 row 根向前取 n 个 close 的 SMA ───
-static double smaAt(const std::vector<CandleItem>& data, int row, int n) {
-    if (row < n - 1 || n <= 0) return std::numeric_limits<double>::quiet_NaN();
-    double sum = 0.0;
-    for (int i = row - n + 1; i <= row; ++i)
-        sum += data[static_cast<size_t>(i)].close;
-    return sum / n;
-}
-
-// ─── 辅助: 从 m_data 的第 row 根向前取 n 个 volume 的 SMA ───
-static double smaVolAt(const std::vector<CandleItem>& data, int row, int n) {
-    if (row < n - 1 || n <= 0) return std::numeric_limits<double>::quiet_NaN();
-    double sum = 0.0;
-    for (int i = row - n + 1; i <= row; ++i)
-        sum += data[static_cast<size_t>(i)].volume;
-    return sum / n;
-}
-
-// ─── 辅助: 从 m_data 的第 row 根处的 EMA(n) ───
-static double emaAt(const std::vector<CandleItem>& data, int row, int n) {
-    if (row < n - 1 || n <= 0 || data.empty()) return std::numeric_limits<double>::quiet_NaN();
-    double alpha = 2.0 / (n + 1.0);
-    double ema = data[0].close;
-    for (int i = 1; i <= row; ++i)
-        ema = ema + alpha * (data[static_cast<size_t>(i)].close - ema);
-    return ema;
-}
-
-// ─── 辅助: 从 m_data 的第 row 根处的 VWAP (累计 amount/volume) ───
-static double vwapAt(const std::vector<CandleItem>& data, int row) {
-    if (row < 0 || data.empty()) return std::numeric_limits<double>::quiet_NaN();
-    double sumAmt = 0.0, sumVol = 0.0;
-    for (int i = 0; i <= row; ++i) {
-        // CandleItem 没有 amount 字段! 用 close * volume 近似
-        sumAmt += data[static_cast<size_t>(i)].close * data[static_cast<size_t>(i)].volume;
-        sumVol += data[static_cast<size_t>(i)].volume;
-    }
-    return sumVol > 0.0 ? sumAmt / sumVol : std::numeric_limits<double>::quiet_NaN();
 }
 
 QVariant CandleDataModel::data(const QModelIndex& idx, int role) const {
@@ -88,89 +49,55 @@ QVariant CandleDataModel::data(const QModelIndex& idx, int role) const {
         default: break;
     }
 
-    // ── 指标 Role — 从自身 m_data 计算 ──
+    // ── 指标 Role — 委托 domain::market::indicators ──
+    using namespace domain::market::indicators;
+    auto closeAt = [this](int i) -> double { return m_data[static_cast<size_t>(i)].close; };
+    auto highAt  = [this](int i) -> double { return m_data[static_cast<size_t>(i)].high; };
+    auto lowAt   = [this](int i) -> double { return m_data[static_cast<size_t>(i)].low; };
+    auto volAt   = [this](int i) -> double { return m_data[static_cast<size_t>(i)].volume; };
+    int count = static_cast<int>(m_data.size());
+
     double val = std::numeric_limits<double>::quiet_NaN();
 
     switch (role) {
-        case Ma5Role:   val = smaAt(m_data, row, 5);   break;
-        case Ma10Role:  val = smaAt(m_data, row, 10);  break;
-        case Ma20Role:  val = smaAt(m_data, row, 20);  break;
-        case Ma60Role:  val = smaAt(m_data, row, 60);  break;
-        case Ema5Role:  val = emaAt(m_data, row, 5);   break;
-        case Ema10Role: val = emaAt(m_data, row, 10);  break;
-        case Ema20Role: val = emaAt(m_data, row, 20);  break;
-        case Ema60Role: val = emaAt(m_data, row, 60);  break;
-        case MaVol5Role:  val = smaVolAt(m_data, row, 5);  break;
-        case MaVol10Role: val = smaVolAt(m_data, row, 10); break;
-        case VwapRole:  val = vwapAt(m_data, row); break;
+        // ── 任意行查询: SMA / EMA / VWAP ──
+        case Ma5Role:   val = smaAt(closeAt, row, 5);   break;
+        case Ma10Role:  val = smaAt(closeAt, row, 10);  break;
+        case Ma20Role:  val = smaAt(closeAt, row, 20);  break;
+        case Ma60Role:  val = smaAt(closeAt, row, 60);  break;
+        case Ema5Role:  val = emaAt(closeAt, row, 5);   break;
+        case Ema10Role: val = emaAt(closeAt, row, 10);  break;
+        case Ema20Role: val = emaAt(closeAt, row, 20);  break;
+        case Ema60Role: val = emaAt(closeAt, row, 60);  break;
+        case MaVol5Role:  val = smaAt(volAt, row, 5);  break;
+        case MaVol10Role: val = smaAt(volAt, row, 10); break;
+        case VwapRole:  val = vwapAt(closeAt, volAt, row); break;
 
-        // MACD/KDJ/RSI: 只在最后一行返回有效值 (递推计算, 历史值成本高)
+        // ── 递推指标: MACD / KDJ / RSI (仅末尾行) ──
         case MacdDifRole:
         case MacdDeaRole:
         case MacdHistRole: {
-            if (row != static_cast<int>(m_data.size()) - 1) return QVariant();
-            if (m_data.size() < 26) return QVariant();
-            // MACD(12,26,9)
-            double a12 = 2.0/13.0, a26 = 2.0/27.0, a9 = 2.0/10.0;
-            double ema12 = m_data[0].close, ema26 = m_data[0].close, dea = 0.0;
-            bool deaInit = false;
-            for (size_t i = 1; i < m_data.size(); ++i) {
-                double c = m_data[i].close;
-                ema12 += a12 * (c - ema12);
-                ema26 += a26 * (c - ema26);
-                double dif = ema12 - ema26;
-                if (!deaInit) { dea = dif; deaInit = true; }
-                else dea += a9 * (dif - dea);
-                if (i == m_data.size() - 1) {
-                    double difFinal = ema12 - ema26;
-                    if (role == MacdDifRole)  return difFinal;
-                    if (role == MacdDeaRole)  return dea;
-                    if (role == MacdHistRole) return 2.0 * (difFinal - dea);
-                }
-            }
+            if (row != count - 1 || count < 26) return QVariant();
+            auto macd = macdLatest(closeAt, count);
+            if (role == MacdDifRole)  return macd.dif;
+            if (role == MacdDeaRole)  return macd.dea;
+            if (role == MacdHistRole) return macd.histogram;
             return QVariant();
         }
         case KdjKRole: case KdjDRole: case KdjJRole: {
-            if (row != static_cast<int>(m_data.size()) - 1) return QVariant();
-            if (m_data.size() < 9 + 3) return QVariant();
-            // KDJ(9,3,3)
-            double aK = 2.0/4.0, aD = 2.0/4.0;
-            double kval = 50.0, dval = 50.0;
-            for (int i = 8; i < static_cast<int>(m_data.size()); ++i) {
-                double hh = m_data[static_cast<size_t>(i)].high;
-                double ll = m_data[static_cast<size_t>(i)].low;
-                for (int j = i - 8; j < i; ++j) {
-                    if (m_data[static_cast<size_t>(j)].high > hh) hh = m_data[static_cast<size_t>(j)].high;
-                    if (m_data[static_cast<size_t>(j)].low  < ll) ll = m_data[static_cast<size_t>(j)].low;
-                }
-                double rsv = (hh - ll > 0) ? (m_data[static_cast<size_t>(i)].close - ll) / (hh - ll) * 100.0 : 50.0;
-                kval += aK * (rsv - kval);
-                dval += aD * (kval - dval);
-            }
-            if (role == KdjKRole) return kval;
-            if (role == KdjDRole) return dval;
-            if (role == KdjJRole) return 3.0 * kval - 2.0 * dval;
+            if (row != count - 1 || count < 12) return QVariant();
+            auto kdj = kdjLatest(closeAt, highAt, lowAt, count);
+            if (role == KdjKRole) return kdj.k;
+            if (role == KdjDRole) return kdj.d;
+            if (role == KdjJRole) return kdj.j;
             return QVariant();
         }
         case Rsi6Role: case Rsi14Role: {
-            if (row != static_cast<int>(m_data.size()) - 1) return QVariant();
+            if (row != count - 1) return QVariant();
             int n = (role == Rsi6Role) ? 6 : 14;
-            if (static_cast<int>(m_data.size()) < n + 1) return QVariant();
-            double avgGain = 0.0, avgLoss = 0.0;
-            for (int i = 1; i <= n; ++i) {
-                double diff = m_data[static_cast<size_t>(i)].close - m_data[static_cast<size_t>(i-1)].close;
-                if (diff > 0) avgGain += diff; else avgLoss += -diff;
-            }
-            avgGain /= n; avgLoss /= n;
-            for (size_t i = static_cast<size_t>(n) + 1; i < m_data.size(); ++i) {
-                double diff = m_data[i].close - m_data[i-1].close;
-                double gain = (diff > 0) ? diff : 0.0;
-                double loss = (diff > 0) ? 0.0 : -diff;
-                avgGain = (avgGain * (n - 1) + gain) / n;
-                avgLoss = (avgLoss * (n - 1) + loss) / n;
-            }
-            if (avgLoss == 0.0) return 100.0;
-            return 100.0 - 100.0 / (1.0 + avgGain / avgLoss);
+            double rsi = rsiLatest(closeAt, count, n);
+            if (std::isnan(rsi)) return QVariant();
+            return rsi;
         }
         default: return QVariant();
     }

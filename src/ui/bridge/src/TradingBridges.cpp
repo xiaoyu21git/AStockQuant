@@ -2,6 +2,7 @@
 #include "TradingConnectionConfigService.h"
 #include "TradingRuntimeStatusService.h"
 #include "StockNameResolver.h"
+#include "OrderFieldKeys.h"
 #include "../../engine/include/GmSessionEngine.h"
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/TradeEngine.h"
@@ -55,6 +56,7 @@ std::string generateClOrdId() {
 } // anonymous namespace
 
 namespace bridge {
+using namespace bridge::keys;
 
 // ═══════════════════════════════════════════════════════════════════
 // TradeExecutionBridge
@@ -90,10 +92,10 @@ void TradeExecutionBridge::ensureInitialized() {
     // ── 注册回调：TradeExecutionEngine → QML 信号 ──
     engine.setOnTradeFill([this](const domain::trading::TradeFill& fill) {
         QVariantMap entry;
-        entry["brokerOrderId"] = QString::fromStdString(fill.brokerOrderId().text());
+        entry[kBrokerOrderId] = QString::fromStdString(fill.brokerOrderId().text());
         entry["fillId"]      = QString::fromStdString(fill.fillId().text());
-        entry["price"]       = fill.price();
-        entry["quantity"]    = static_cast<double>(fill.quantity());
+        entry[kPrice]       = fill.price();
+        entry[kQuantity]    = static_cast<double>(fill.quantity());
         entry["commission"]  = fill.commission();
         entry["tradeTime"]   = QString::fromStdString(fill.tradeTime().to_string());
         emit tradeFilled(entry);
@@ -118,16 +120,16 @@ void TradeExecutionBridge::ensureInitialized() {
         const auto& brokerId = updated.brokerOrderId();
         const QString brokerIdStr = QString::fromStdString(brokerId);
         if (!brokerId.empty())
-            statusEntry["brokerOrderId"] = brokerIdStr;
+            statusEntry[kBrokerOrderId] = brokerIdStr;
         const auto& symbol = updated.symbol();
         if (!symbol.empty())
-            statusEntry["symbol"] = QString::fromStdString(symbol);
-        statusEntry["side"]   = toQmlSide(updated.side());
-        statusEntry["price"]    = updated.price();
-        statusEntry["quantity"] = static_cast<double>(updated.quantity());
+            statusEntry[kSymbol] = QString::fromStdString(symbol);
+        statusEntry[kSide]   = toQmlSide(updated.side());
+        statusEntry[kPrice]    = updated.price();
+        statusEntry[kQuantity] = static_cast<double>(updated.quantity());
         const QString rawStatus = orderStatusValueToString(updated.status());
-        statusEntry["rawStatus"] = rawStatus;
-        statusEntry["status"]    = rawStatus;
+        statusEntry[kRawStatus] = rawStatus;
+        statusEntry[kStatus]    = rawStatus;
         statusEntry["filledQty"]   = static_cast<double>(updated.filledQuantity());
         statusEntry["filledPrice"] = updated.filledPrice();
         const auto& msg = updated.statusMessage();
@@ -135,7 +137,7 @@ void TradeExecutionBridge::ensureInitialized() {
             statusEntry["message"] = QString::fromStdString(msg);
         const auto& sid = updated.strategyId();
         if (!sid.empty())
-            statusEntry["strategyId"] = QString::fromStdString(sid);
+            statusEntry[kStrategyId] = QString::fromStdString(sid);
 
         // ── 同步更新 m_recentOrders — QML syncPendingOrders 从这里读数据 ──
         bool didUpdateRecent = false;
@@ -143,9 +145,9 @@ void TradeExecutionBridge::ensureInitialized() {
             QMutexLocker lock(&m_recentOrdersMutex);
             for (int i = 0; i < m_recentOrders.size(); ++i) {
                 QVariantMap item = m_recentOrders[i].toMap();
-                if (item.value("brokerOrderId").toString() == brokerIdStr) {
-                    item["status"]      = rawStatus;
-                    item["rawStatus"]   = rawStatus;
+                if (item.value(kBrokerOrderId).toString() == brokerIdStr) {
+                    item[kStatus]      = rawStatus;
+                    item[kRawStatus]   = rawStatus;
                     item["filledQty"]   = static_cast<double>(updated.filledQuantity());
                     item["filledPrice"] = updated.filledPrice();
                     if (!msg.empty())
@@ -174,15 +176,15 @@ void TradeExecutionBridge::ensureInitialized() {
 
         // ── 写入 recentOrders (QML syncPendingOrders 的数据源) ──
         QVariantMap recentEntry;
-        recentEntry["brokerOrderId"] = brokerId;
-        recentEntry["symbol"]        = symbol;
-        recentEntry["side"]          = side;
-        recentEntry["price"]         = accepted.price();
-        recentEntry["quantity"]      = static_cast<double>(accepted.quantity());
-        recentEntry["status"]        = rawStatus;
-        recentEntry["rawStatus"]     = rawStatus;
+        recentEntry[kBrokerOrderId] = brokerId;
+        recentEntry[kSymbol]        = symbol;
+        recentEntry[kSide]          = side;
+        recentEntry[kPrice]         = accepted.price();
+        recentEntry[kQuantity]      = static_cast<double>(accepted.quantity());
+        recentEntry[kStatus]        = rawStatus;
+        recentEntry[kRawStatus]     = rawStatus;
         recentEntry["message"]       = QString::fromStdString(accepted.statusMessage());
-        recentEntry["strategyId"]    = strategyId;
+        recentEntry[kStrategyId]    = strategyId;
         recentEntry["filledQty"]     = static_cast<double>(accepted.filledQuantity());
         recentEntry["filledPrice"]   = accepted.filledPrice();
         recentEntry["submittedAt"]   = QDateTime::currentDateTime().toString(Qt::ISODate);
@@ -200,11 +202,11 @@ void TradeExecutionBridge::ensureInitialized() {
 
     engine.setOnOrderGenerated([this](const domain::trading::TradeOrder& order) {
         QVariantMap entry;
-        entry["symbol"]     = QString::fromStdString(order.symbol());
-        entry["side"]       = toQmlSide(order.side());
-        entry["price"]      = order.price();
-        entry["quantity"]   = static_cast<double>(order.quantity());
-        entry["strategyId"] = QString::fromStdString(order.strategyId());
+        entry[kSymbol]     = QString::fromStdString(order.symbol());
+        entry[kSide]       = toQmlSide(order.side());
+        entry[kPrice]      = order.price();
+        entry[kQuantity]   = static_cast<double>(order.quantity());
+        entry[kStrategyId] = QString::fromStdString(order.strategyId());
         QMetaObject::invokeMethod(this, [this, entry]() {
             emit orderGenerated(entry);
         }, Qt::QueuedConnection);
@@ -215,26 +217,26 @@ void TradeExecutionBridge::ensureInitialized() {
         const QString side   = toQmlSide(order.side());
 
         QVariantMap entry;
-        entry["symbol"]     = symbol;
-        entry["side"]       = side;
-        entry["price"]      = order.price();
-        entry["quantity"]   = static_cast<double>(order.quantity());
-        entry["strategyId"] = QString::fromStdString(order.strategyId());
+        entry[kSymbol]     = symbol;
+        entry[kSide]       = side;
+        entry[kPrice]      = order.price();
+        entry[kQuantity]   = static_cast<double>(order.quantity());
+        entry[kStrategyId] = QString::fromStdString(order.strategyId());
         entry["accepted"]   = result.succeeded();
         entry["reason"]     = QString::fromStdString(result.message());
 
         // ── 失败时写入 recentOrders, 确保 QML 能看到被拒绝的策略订单 ──
         if (!result.succeeded()) {
             QVariantMap recentEntry;
-            recentEntry["brokerOrderId"] = QString::fromStdString(result.brokerOrderId().text());
-            recentEntry["symbol"]        = symbol;
-            recentEntry["side"]          = side;
-            recentEntry["price"]         = order.price();
-            recentEntry["quantity"]      = static_cast<double>(order.quantity());
-            recentEntry["status"]        = QStringLiteral("REJECTED");
-            recentEntry["rawStatus"]     = QStringLiteral("REJECTED");
+            recentEntry[kBrokerOrderId] = QString::fromStdString(result.brokerOrderId().text());
+            recentEntry[kSymbol]        = symbol;
+            recentEntry[kSide]          = side;
+            recentEntry[kPrice]         = order.price();
+            recentEntry[kQuantity]      = static_cast<double>(order.quantity());
+            recentEntry[kStatus]        = QStringLiteral("REJECTED");
+            recentEntry[kRawStatus]     = QStringLiteral("REJECTED");
             recentEntry["message"]       = QString::fromStdString(result.message());
-            recentEntry["strategyId"]    = QString::fromStdString(order.strategyId());
+            recentEntry[kStrategyId]    = QString::fromStdString(order.strategyId());
             recentEntry["submittedAt"]   = QDateTime::currentDateTime().toString(Qt::ISODate);
             appendRecentOrder(recentEntry);
 
@@ -268,7 +270,7 @@ void TradeExecutionBridge::ensureInitialized() {
                         QMutexLocker lock(&m_recentOrdersMutex);
                         for (int i = 0; i < m_recentOrders.size(); ++i) {
                             QVariantMap item = m_recentOrders[i].toMap();
-                            if (item.value("brokerOrderId").toString() == brokerId) {
+                            if (item.value(kBrokerOrderId).toString() == brokerId) {
                                 if (st) {
                                     // EventBus status = OrderUpdate::Status (0-based)
                                     // Map to QML rawStatus
@@ -281,8 +283,8 @@ void TradeExecutionBridge::ensureInitialized() {
                                         case 4: statusStr = "REJECTED";        break;
                                         case 5: statusStr = "EXPIRED";         break;
                                     }
-                                    item["status"]    = QString::fromLatin1(statusStr);
-                                    item["rawStatus"] = QString::fromLatin1(statusStr);
+                                    item[kStatus]    = QString::fromLatin1(statusStr);
+                                    item[kRawStatus] = QString::fromLatin1(statusStr);
                                 }
                                 if (fp)  item["filledPrice"] = *fp;
                                 if (fq)  item["filledQty"]   = static_cast<double>(*fq);
@@ -319,7 +321,7 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     ensureInitialized();
 
     domain::trading::TradeOrder order;
-    QString strategyId = orderMap.value("strategyId").toString().trimmed();
+    QString strategyId = orderMap.value(kStrategyId).toString().trimmed();
     if (strategyId.isEmpty()) {
         // QML 没传就从底层配置服务取 boundStrategyId
         strategyId = TradingConnectionConfigService::instance()
@@ -327,12 +329,12 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
                          .value("boundStrategyId").toString().trimmed();
     }
     order.setStrategyId(strategyId.toStdString());
-    order.setSymbol(orderMap.value("symbol").toString().toStdString());
-    order.setPrice(orderMap.value("price").toDouble());
-    order.setQuantity(static_cast<std::int64_t>(orderMap.value("quantity").toDouble()));
+    order.setSymbol(orderMap.value(kSymbol).toString().toStdString());
+    order.setPrice(orderMap.value(kPrice).toDouble());
+    order.setQuantity(static_cast<std::int64_t>(orderMap.value(kQuantity).toDouble()));
 
     // ── 方向：使用 RiskEvaluator 枚举转换（领域层纯 C++，无字符串比较） ──
-    const std::string sideRaw = orderMap.value("side").toString().toUpper().toStdString();
+    const std::string sideRaw = orderMap.value(kSide).toString().toUpper().toStdString();
     order.setSide(domain::strategy::RiskEvaluator::directionFromString(sideRaw));
 
     // ── 仓位效应 ──
@@ -346,7 +348,7 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
         const QString ot = orderMap.value("orderType").toString().toUpper();
         if (ot == "MARKET") {
             // 市价单：使用最近价作为参考价格，标记为市价
-            order.setPrice(orderMap.value("lastPrice", orderMap.value("price")).toDouble());
+            order.setPrice(orderMap.value(kLastPrice, orderMap.value(kPrice)).toDouble());
         }
     }
 
@@ -428,13 +430,13 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     // 回调完成 appendRecentOrder + 信号发射, 桥接层不重复处理。
     if (!result.brokerOrderId().valid()) {
         QVariantMap recentEntry;
-        recentEntry["brokerOrderId"] = QString::fromStdString(result.brokerOrderId().text());
-        recentEntry["symbol"] = orderMap.value("symbol");
-        recentEntry["side"] = orderMap.value("side");
-        recentEntry["price"] = orderMap.value("price");
-        recentEntry["quantity"] = orderMap.value("quantity");
-        recentEntry["status"] = QStringLiteral("REJECTED");
-        recentEntry["rawStatus"] = QStringLiteral("REJECTED");
+        recentEntry[kBrokerOrderId] = QString::fromStdString(result.brokerOrderId().text());
+        recentEntry[kSymbol] = orderMap.value(kSymbol);
+        recentEntry[kSide] = orderMap.value(kSide);
+        recentEntry[kPrice] = orderMap.value(kPrice);
+        recentEntry[kQuantity] = orderMap.value(kQuantity);
+        recentEntry[kStatus] = QStringLiteral("REJECTED");
+        recentEntry[kRawStatus] = QStringLiteral("REJECTED");
         recentEntry["message"] = QString::fromStdString(result.message());
         recentEntry["submittedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
         appendRecentOrder(recentEntry);
@@ -460,11 +462,11 @@ void TradeExecutionBridge::publishOrderStatusUpdate(const QString& orderId,
         QMutexLocker lock(&m_recentOrdersMutex);
         for (int i = 0; i < m_recentOrders.size(); ++i) {
             QVariantMap item = m_recentOrders[i].toMap();
-            if (item.value("brokerOrderId").toString() == orderId
+            if (item.value(kBrokerOrderId).toString() == orderId
                     || item.value("clientOrderId").toString() == orderId
                     || item.value("id").toString() == orderId) {
-                item["status"]    = status;
-                item["rawStatus"] = status;
+                item[kStatus]    = status;
+                item[kRawStatus] = status;
                 if (!message.isEmpty())
                     item["message"] = message;
                 m_recentOrders[i] = item;
@@ -608,13 +610,13 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
 
     // 5. 记录到 recentOrders
     QVariantMap recentEntry;
-    recentEntry["brokerOrderId"] = QString::fromStdString(brokerId);
-    recentEntry["symbol"]        = searchSym;
-    recentEntry["side"]          = side;
-    recentEntry["price"]         = price;
-    recentEntry["quantity"]      = static_cast<double>(closeQty);
-    recentEntry["status"]        = accepted ? QStringLiteral("SUBMITTED") : QStringLiteral("REJECTED");
-    recentEntry["rawStatus"]     = recentEntry["status"];
+    recentEntry[kBrokerOrderId] = QString::fromStdString(brokerId);
+    recentEntry[kSymbol]        = searchSym;
+    recentEntry[kSide]          = side;
+    recentEntry[kPrice]         = price;
+    recentEntry[kQuantity]      = static_cast<double>(closeQty);
+    recentEntry[kStatus]        = accepted ? QStringLiteral("SUBMITTED") : QStringLiteral("REJECTED");
+    recentEntry[kRawStatus]     = recentEntry[kStatus];
     recentEntry["message"]       = accepted
         ? QStringLiteral("平仓已提交") : QString::fromStdString(gwError);
     recentEntry["submittedAt"]   = QDateTime::currentDateTime().toString(Qt::ISODate);
@@ -637,7 +639,7 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
     }
 
     out["accepted"] = accepted;
-    out["status"]   = recentEntry["status"];
+    out[kStatus]   = recentEntry[kStatus];
     out["message"]  = recentEntry["message"];
     if (!gwError.empty())
         out["gwError"] = QString::fromStdString(gwError);
@@ -746,7 +748,7 @@ QVariantMap PositionAccountBridge::accountSnapshot() const {
             unrealized += p.unrealizedPnl;
     }
     map["unrealizedPnl"] = unrealized;
-    map["accountId"]     = QString::fromStdString(acc.accountId);
+    map[kAccountId]     = QString::fromStdString(acc.accountId);
     return map;
 }
 
@@ -757,15 +759,15 @@ QVariantList PositionAccountBridge::positions() const {
     for (auto& p : engine::AccountEngine::instance().positions()) {
         QVariantMap item;
         const QString sym = QString::fromStdString(p.symbol);
-        item["symbol"] = sym;
+        item[kSymbol] = sym;
         item["name"]   = StockNameResolver::name(sym);
-        item["side"]   = p.quantity >= 0 ? "LONG" : "SHORT";
+        item[kSide]   = p.quantity >= 0 ? "LONG" : "SHORT";
         item["type"]   = "stock";
-        item["quantity"]          = static_cast<double>(p.quantity);
+        item[kQuantity]          = static_cast<double>(p.quantity);
         item["availableQuantity"] = static_cast<double>(p.availableQty);
         item["closeableQuantity"] = static_cast<double>(p.availableQty);
         item["costBasis"]         = p.costPrice;
-        item["lastPrice"]         = p.lastPrice;
+        item[kLastPrice]         = p.lastPrice;
         item["marketValue"]       = p.marketValue;
         item["unrealizedPnl"]     = p.unrealizedPnl;
         list.append(item);
@@ -783,10 +785,10 @@ void PositionAccountBridge::appendOrderStatus(const QVariantMap& status) {
     {
         QMutexLocker lock(&m_orderStatusesMutex);
         // 去重：按 brokerOrderId 更新已有条目
-        const QString id = status.value("brokerOrderId").toString();
+        const QString id = status.value(kBrokerOrderId).toString();
         for (int i = 0; i < m_recentOrderStatuses.size(); ++i) {
             QVariantMap item = m_recentOrderStatuses[i].toMap();
-            if (item.value("brokerOrderId").toString() == id) {
+            if (item.value(kBrokerOrderId).toString() == id) {
                 m_recentOrderStatuses[i] = status;
                 updated = true;
                 break;
@@ -887,10 +889,10 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
                                                         const QVariantMap& backtestRecord) {
     QVariantMap snapshot;
     snapshot["timestamp"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    snapshot["strategyId"] = strategy.value("strategyId");
+    snapshot[kStrategyId] = strategy.value(kStrategyId);
 
     if (!engine::AccountEngine::instance().initialized()) {
-        snapshot["status"] = "unavailable";
+        snapshot[kStatus] = "unavailable";
         snapshot["positions"] = QVariantList();
         snapshot["diagnostics"] = QVariantMap();
         return snapshot;
@@ -903,20 +905,20 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
     snapshot["availableCash"] = acc.availableCash;
     snapshot["realizedPnl"] = acc.realizedPnl;
     snapshot["unrealizedPnl"] = acc.unrealizedPnl;
-    snapshot["status"] = "ok";
+    snapshot[kStatus] = "ok";
 
     auto& positions = snap.positions;
     QVariantList posList;
     for (auto& p : positions) {
         QVariantMap item;
         const QString sym = QString::fromStdString(p.symbol);
-        item["symbol"] = sym;
+        item[kSymbol] = sym;
         item["name"]   = StockNameResolver::name(sym);
-        item["side"]     = p.quantity >= 0 ? "LONG" : "SHORT";
+        item[kSide]     = p.quantity >= 0 ? "LONG" : "SHORT";
         item["type"]     = "stock";
-        item["quantity"]   = static_cast<double>(p.quantity);
+        item[kQuantity]   = static_cast<double>(p.quantity);
         item["costBasis"]  = p.costPrice;
-        item["lastPrice"]  = p.lastPrice;
+        item[kLastPrice]  = p.lastPrice;
         item["marketValue"] = p.marketValue;
         item["unrealizedPnl"] = p.unrealizedPnl;
         posList.append(item);
