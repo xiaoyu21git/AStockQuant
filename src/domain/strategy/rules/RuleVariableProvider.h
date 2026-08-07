@@ -36,6 +36,7 @@ struct RuleMarketSnapshot {
 
     // 市场宽度
     double breadthAboveMa60Ratio{0.0};
+    double breadthAboveMa20Ratio{0.0};
     double breadthAboveMa200Ratio{0.0};
     double advanceDeclineRatio{0.0};
 

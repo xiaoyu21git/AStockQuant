@@ -817,6 +817,7 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (impl.marketReady) {
         const auto& market = impl.market;
         if (varPath == "market.breadth_above_ma60_ratio")  return market.breadthAboveMa60Ratio;
+        if (varPath == "market.breadth_above_ma20_ratio")  return market.breadthAboveMa20Ratio;
         if (varPath == "market.drawdown_from_recent_high") return market.indexDrawdownFromRecentHigh;
         if (varPath == "market.index_above_ma120_ratio")   return market.indexClose > 0.0 && market.indexMa120 > 0.0
             ? std::optional<double>(market.indexClose / market.indexMa120) : std::nullopt;
@@ -1178,18 +1179,22 @@ RuleMarketSnapshot computeMarketSnapshot(
     const int cols = static_cast<int>(view->instruments().size());
     if (cols == 0) return snapshot;
 
-    // ── 宽度: 全市场站上 MA60 的比例 ──
-    int above = 0, counted = 0;
-    for (int c = 0; c < cols; ++c) {
-        auto ma60 = columnMa(closeMat, lastRow, c, 60);
-        if (!ma60.has_value()) continue;
-        const double close = columnClose(closeMat, lastRow, c);
-        if (!(close > 0.0)) continue;
-        ++counted;
-        if (close > *ma60) ++above;
+    // ── 宽度: 全市场站上 MA60 / MA20 的比例 ──
+    {
+        int above60 = 0, counted60 = 0, above20 = 0, counted20 = 0;
+        for (int c = 0; c < cols; ++c) {
+            auto ma60 = columnMa(closeMat, lastRow, c, 60);
+            auto ma20 = columnMa(closeMat, lastRow, c, 20);
+            const double close = columnClose(closeMat, lastRow, c);
+            if (!(close > 0.0)) continue;
+            if (ma60.has_value()) { ++counted60; if (close > *ma60) ++above60; }
+            if (ma20.has_value()) { ++counted20; if (close > *ma20) ++above20; }
+        }
+        if (counted60 > 0)
+            snapshot.breadthAboveMa60Ratio = static_cast<double>(above60) / counted60;
+        if (counted20 > 0)
+            snapshot.breadthAboveMa20Ratio = static_cast<double>(above20) / counted20;
     }
-    if (counted > 0)
-        snapshot.breadthAboveMa60Ratio = static_cast<double>(above) / counted;
 
     // ── 等权市场指数: 每日全市场平均收益累积, 近 lookback 高点回撤 ──
     // (从 lastRow-lookback 起点归一为 1.0, 同时收集日收益用于波动率冲击评分)
@@ -1258,11 +1263,12 @@ RuleMarketSnapshot computeMarketSnapshot(
     // ── 市场状态编码: 宽度阈值 + 结构确认 ──
     // 单纯宽度无法区分"震荡市"和"牛熊转折": 指数在狭窄箱体横盘时宽度也会摆动
     // 加结构层: 指数偏离 MA120 在 ±12% 内且宽度非极端 → 强制震荡
+    // MA20 短期恢复覆盖: MA60 长期被压制但 MA20 已修复 → 升级为震荡, 不冻结
     const char* regime = "sideways";
     if (snapshot.breadthAboveMa60Ratio >= kRegimeBullBreadth) regime = "bull";
-    else if (snapshot.breadthAboveMa60Ratio <= kRegimeBearBreadth) regime = "bear";
+    else if (snapshot.breadthAboveMa60Ratio <= kRegimeBearBreadth
+             && snapshot.breadthAboveMa20Ratio <= kRegimeBearBreadth) regime = "bear";
     // 结构确认: 宽度在中间值(0.30~0.55)且指数贴近MA120(±12%), 强制sideways
-    // 这正确捕获了"3700-4000箱体18个月横盘"的场景 — 模板语义不依赖回测美化
     if (snapshot.breadthAboveMa60Ratio > kRegimeBearBreadth
         && snapshot.breadthAboveMa60Ratio < kRegimeBullBreadth
         && snapshot.indexMa120 > 0.0) {

@@ -522,8 +522,13 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
             auto pool = m_poolSelector->selectPool(m_factorSignalProcessor);
             strategyService_->updateCandidatePool(
                 std::unordered_set<std::string>(pool.begin(), pool.end()));
-            INTERNAL_INFO_STREAM << "[step] 因子候选池: " << pool.size() << " 标的 (targetPosition="
-                                 << m_factorSignalProcessor.targetPositionCount() << ")";
+            // 变化汇总: 候选池大小变化时打印一次, 不变时静默 (日终补单 5000+ 次调用不能打日志)
+            static size_t s_lastPoolSize = SIZE_MAX;
+            if (pool.size() != s_lastPoolSize) {
+                s_lastPoolSize = pool.size();
+                INTERNAL_INFO_STREAM << "[step] 因子候选池: " << pool.size() << " 标的 (targetPosition="
+                                     << m_factorSignalProcessor.targetPositionCount() << ")";
+            }
         } else {
             strategyService_->updateCandidatePool({});  // 因子关闭 → 策略扫全市场
         }
@@ -892,6 +897,7 @@ struct StrategyEngine::EodDayBar {
 struct StrategyEngine::EodPriceData {
     std::unordered_map<std::string, EodDayBar> bars; // sym → 当日日线
     double breadthAboveMa60 = 0.5;
+    double breadthAboveMa20 = 0.5;
 };
 
 struct StrategyEngine::EodGateResult {
@@ -989,7 +995,34 @@ bool StrategyEngine::prepareEodContext(const std::string& tradingDay, EodContext
     return true;
 }
 
-bool StrategyEngine::fetchTodayPrices(const EodContext& ctx, EodPriceData& prices) {
+bool StrategyEngine::fetchTodayPrices(const EodContext& ctx, EodPriceData& prices, bool isCompensation) {
+    if (isCompensation) {
+        // 补单: 从数据库取历史日线, 不调 GMSDK
+        auto& pool = astock::database::NativePgConnectionPool::instance();
+        auto db = pool.getConnection();
+        if (db && db->isOpen()) {
+            auto res = db->executeQuery(
+                "SELECT si.symbol, d.close, d.volume, d.pre_close "
+                "FROM mkt.daily_bar d "
+                "JOIN ref.symbol_info si ON d.symbol_id = si.id "
+                "WHERE d.trade_date = $1::date",
+                {astock::database::SqlParam{ctx.endDateStr}});
+            for (auto& row : res.getRows()) {
+                std::string sym = row.getString("symbol");
+                double c = row.getDouble("close");
+                if (!sym.empty() && c > 0)
+                    prices.bars[sym] = {c,
+                                        row.getDouble("volume"),
+                                        row.getDouble("pre_close")};
+            }
+        }
+        INTERNAL_INFO_STREAM << "[StrategyEngine] DB 取价: "
+                             << prices.bars.size() << " 只标的有数据 (补单 "
+                             << ctx.endDateStr << ")";
+        return !prices.bars.empty();
+    }
+
+    // 实时: 从 GMSDK 取价
     std::ostringstream gmList;
     for (const auto& sym : *ctx.symbols) {
         std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
@@ -1023,42 +1056,58 @@ bool StrategyEngine::fetchTodayPrices(const EodContext& ctx, EodPriceData& price
 void StrategyEngine::computeMarketBreadth(const EodContext& ctx, EodPriceData& prices) {
     const auto& closeMat = ctx.view->close();
     const int lastRow = static_cast<int>(ctx.dates->size()) - 1;
-    int above = 0, counted = 0;
+    int above60 = 0, above20 = 0, counted60 = 0, counted20 = 0;
     for (int c = 0; c < ctx.numCols; ++c) {
         const auto& sym = (*ctx.symbols)[c];
         auto pvIt = prices.bars.find(sym);
         if (pvIt == prices.bars.end()) continue;
         const double todayClose = pvIt->second.close;
         if (!(todayClose > 0.0)) continue;
-        double maSum = 0.0; int maCnt = 0;
+
+        // MA60 宽度
+        double maSum60 = 0.0; int maCnt60 = 0;
         for (int i = 0; i < 60 && (lastRow - i) >= 0; ++i) {
             const double v = static_cast<double>(
                 closeMat.data[(lastRow - i) * ctx.rowStride + c]);
             if (!(v > 0.0)) break;
-            maSum += v; ++maCnt;
+            maSum60 += v; ++maCnt60;
         }
-        if (maCnt < 60) continue;
-        ++counted;
-        if (todayClose > maSum / 60.0) ++above;
+        if (maCnt60 >= 60) { ++counted60; if (todayClose > maSum60 / 60.0) ++above60; }
+
+        // MA20 宽度
+        double maSum20 = 0.0; int maCnt20 = 0;
+        for (int i = 0; i < 20 && (lastRow - i) >= 0; ++i) {
+            const double v = static_cast<double>(
+                closeMat.data[(lastRow - i) * ctx.rowStride + c]);
+            if (!(v > 0.0)) break;
+            maSum20 += v; ++maCnt20;
+        }
+        if (maCnt20 >= 20) { ++counted20; if (todayClose > maSum20 / 20.0) ++above20; }
     }
-    if (counted > 0)
-        prices.breadthAboveMa60 = static_cast<double>(above) / counted;
-    INTERNAL_INFO_STREAM << "[StrategyEngine] 当日市场宽度: above=" << above
-                         << " counted=" << counted
-                         << " ratio=" << prices.breadthAboveMa60;
+    if (counted60 > 0)
+        prices.breadthAboveMa60 = static_cast<double>(above60) / counted60;
+    if (counted20 > 0)
+        prices.breadthAboveMa20 = static_cast<double>(above20) / counted20;
+    INTERNAL_INFO_STREAM << "[StrategyEngine] 当日市场宽度: MA60=" << prices.breadthAboveMa60
+                         << " (above=" << above60 << " counted=" << counted60 << ")"
+                         << " MA20=" << prices.breadthAboveMa20
+                         << " (above=" << above20 << " counted=" << counted20 << ")";
 }
 
 StrategyEngine::EodGateResult StrategyEngine::evaluateEodGates(
-    const EodContext& ctx, double todayBreadth)
+    const EodContext& ctx, const EodPriceData& prices)
 {
     EodGateResult gates;
     constexpr double kBearBreadth = 0.35;
 
-    // ── 当日宽度冻结 ──
-    gates.allowNewEntries = (todayBreadth > kBearBreadth);
+    // ── 当日宽度冻结: MA60 和 MA20 都低于阈值才冻结 ──
+    const bool ma60Bear = (prices.breadthAboveMa60 <= kBearBreadth);
+    const bool ma20Bear = (prices.breadthAboveMa20 <= kBearBreadth);
+    gates.allowNewEntries = !(ma60Bear && ma20Bear);
     if (!gates.allowNewEntries)
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 当日市场宽度冻结: breadth="
-                             << todayBreadth << " <= " << kBearBreadth;
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 当日市场宽度冻结: MA60="
+                             << prices.breadthAboveMa60 << " MA20="
+                             << prices.breadthAboveMa20 << " 均 <= " << kBearBreadth;
 
     // ── 规则闸门叠加 ──
     if (gates.allowNewEntries && m_ruleGate.enabled()) {
@@ -1152,7 +1201,7 @@ std::vector<StrategyEngine::PendingOrder> StrategyEngine::collectEodSignals(
         if (!aSym.isValid()) continue;
 
         MarketDataPoint mdp(
-            domain::strategy::InstrumentId{aSym.instrumentId()}, price, vol, 0);
+            domain::strategy::InstrumentId{aSym.instrumentId()}, price, vol, ctx.tradingDayInt);
 
         try {
             if (EventRiskSubscriber::instance().isStarted() &&
@@ -1197,7 +1246,8 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
     std::vector<PendingOrder>& pendingOrders,
     const std::unordered_map<std::string, std::int64_t>& posQtyMap,
     const EodPriceData& prices,
-    const std::string& tradingDay)
+    const std::string& tradingDay,
+    bool isCompensation)
 {
     int eodGateRejected = 0;
 
@@ -1405,7 +1455,7 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
 
     // ── 2. 获取当日价格 ──
     EodPriceData prices;
-    fetchTodayPrices(ctx, prices);
+    fetchTodayPrices(ctx, prices, isCompensation);
 
     // ── 3. 计算当日市场宽度 ──
     computeMarketBreadth(ctx, prices);
@@ -1426,7 +1476,7 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
         EventRiskSubscriber::instance().clearBlockedSymbols();
 
     // ── 5. 闸门评估 ──
-    auto gates = evaluateEodGates(ctx, prices.breadthAboveMa60);
+    auto gates = evaluateEodGates(ctx, prices);
     if (gates.timing.forceLiquidate && !m_circuitBreaker.isHalted()) {
         liquidateAll();
         return EodEvaluationStatus::Submitted;
@@ -1436,7 +1486,7 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     auto pendingOrders = collectEodSignals(ctx, prices, gates, posQtyMap, tradingDay);
 
     // ── 7. 审核 + 提交 ──
-    return finalizeAndSubmit(ctx, pendingOrders, posQtyMap, prices, tradingDay);
+    return finalizeAndSubmit(ctx, pendingOrders, posQtyMap, prices, tradingDay, isCompensation);
 }
 
 StrategyEngine::Builder::Builder() = default;

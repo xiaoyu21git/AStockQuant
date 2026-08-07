@@ -1,6 +1,5 @@
 #include "DailyEodScheduler.h"
 #include "../../market/include/MarketDataService.h"
-#include "../../../thirdparty/gmsdk/gmapi.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/json/json_facade.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -27,17 +26,14 @@ DailyEodScheduler::~DailyEodScheduler() {
 void DailyEodScheduler::start() {
     loadLastEvalDay();
 
-    // ── 补单: 补评估 lastEvalDay 之后到上一交易日之间的所有缺失日 ──
+    // ── 补单: 启动时始终补偿上一交易日 ──
     auto today = getCurrentTradingDay();
     std::string todayStr = std::to_string(today);
     std::string prevDay = getPreviousTradingDay(todayStr);
-    while (!prevDay.empty()) {
+    if (!prevDay.empty()) {
         auto prev = std::stoll(prevDay);
-        if (prev <= m_lastEvalDay.load()) break;
-        INTERNAL_INFO_STREAM << "[DailyEod] 补单: 缺失评估日 " << prev
-                             << " lastEval=" << m_lastEvalDay.load();
+        INTERNAL_INFO_STREAM << "[DailyEod] 启动补单: " << prev << " lastEval=" << m_lastEvalDay.load();
         doEvaluate(prevDay);
-        prevDay = getPreviousTradingDay(prevDay);
     }
 
     // ── 启动时: 如果已过EOD触发时间且今天未评估，立即评估 ──
@@ -126,21 +122,12 @@ void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
 
 void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
     auto evalDay = std::stoll(tradingDay);
-    if (evalDay <= m_lastEvalDay.load()) {
-        INTERNAL_INFO_STREAM << "[DailyEod] 交易日 " << tradingDay << " 已评估, 跳过 (last=" << m_lastEvalDay.load() << ")";
-        return;
-    }
-
-    // 自动判定: 评估日 < 今天 → 补偿 (用历史收盘价)
     auto today = getCurrentTradingDay();
     bool isCompensation = (evalDay < today);
 
-    // 补评: 仅更新日期, 不触发评估, 不下单
-    if (isCompensation) {
-        INTERNAL_INFO_STREAM << "[DailyEod] 补评: tradingDay=" << tradingDay
-                             << " 仅更新日期, 跳过评估";
-        m_lastEvalDay.store(evalDay);
-        persistLastEvalDay();
+    // 非补单: 已评估过则跳过; 补单: 允许重评估
+    if (!isCompensation && evalDay <= m_lastEvalDay.load()) {
+        INTERNAL_INFO_STREAM << "[DailyEod] 交易日 " << tradingDay << " 已评估, 跳过 (last=" << m_lastEvalDay.load() << ")";
         return;
     }
 
@@ -154,7 +141,7 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
 
     EodEvaluationStatus status = EodEvaluationStatus::Error;
     try {
-        status = m_evalFn(tradingDay, false);
+        status = m_evalFn(tradingDay, isCompensation);
     } catch (const std::exception& e) {
         INTERNAL_ERROR_STREAM << "[DailyEod] 评估异常: " << e.what();
         status = EodEvaluationStatus::Error;
@@ -164,7 +151,7 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
     }
 
     // 只在篮子已提交或无信号时持久化，其他状态允许补单重试
-    if (status == EodEvaluationStatus::Submitted || status == EodEvaluationStatus::NoSignal) {
+    if (status == EodEvaluationStatus::Submitted) {
         m_lastEvalDay.store(evalDay);
         persistLastEvalDay();
     } else {
@@ -180,27 +167,16 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
 // ═══════════════════════════════════════════════════════════════════
 
 std::string DailyEodScheduler::getPreviousTradingDay(const std::string& date) {
-    char out[32] = {};
-    // date 格式: "YYYYMMDD", gmsdk 接口接受此格式
-    int ret = ::get_previous_trading_date("SZSE", date.c_str(), out);
-    if (ret != 0 || out[0] == '\0') {
-        // 试 SHSE
-        ret = ::get_previous_trading_date("SHSE", date.c_str(), out);
-    }
-    if (ret != 0 || out[0] == '\0') {
-        INTERNAL_WARN_STREAM << "[DailyEod] gmsdk get_previous_trading_date 失败, 本地回退 date=" << date;
-        // 本地回退: 减1天, 跳过周末
-        int y = std::stoi(date.substr(0,4)), m = std::stoi(date.substr(4,2)), d = std::stoi(date.substr(6,2));
-        struct tm t = {}; t.tm_year=y-1900; t.tm_mon=m-1; t.tm_mday=d;
-        time_t epoch = mktime(&t);
-        do { epoch -= 86400; struct tm prev; localtime_s(&prev, &epoch);
-             if (prev.tm_wday != 0 && prev.tm_wday != 6) { // 非周六日
-                 char buf[16]; snprintf(buf,sizeof(buf),"%04d%02d%02d",prev.tm_year+1900,prev.tm_mon+1,prev.tm_mday);
-                 return std::string(buf);
-             }
-        } while (true);
-    }
-    return std::string(out);
+    // 本地计算: 减1天, 跳过周末
+    int y = std::stoi(date.substr(0,4)), m = std::stoi(date.substr(4,2)), d = std::stoi(date.substr(6,2));
+    struct tm t = {}; t.tm_year=y-1900; t.tm_mon=m-1; t.tm_mday=d;
+    time_t epoch = mktime(&t);
+    do { epoch -= 86400; struct tm prev; localtime_s(&prev, &epoch);
+         if (prev.tm_wday != 0 && prev.tm_wday != 6) {
+             char buf[16]; snprintf(buf,sizeof(buf),"%04d%02d%02d",prev.tm_year+1900,prev.tm_mon+1,prev.tm_mday);
+             return std::string(buf);
+         }
+    } while (true);
 }
 
 // ═══════════════════════════════════════════════════════════════════

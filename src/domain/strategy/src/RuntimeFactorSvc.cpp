@@ -374,14 +374,100 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         return;
     }
 
-    // 实盘路径: 通过 getValues 按需计算因子值
+    // 实盘路径: EOD/补单需要全市场截面因子做 Z-score 归一化
     if (tradeDay == 0 || syms.empty()) return;
-    auto* self = const_cast<RuntimeFactorSvc*>(this);
-    for (const auto& iid : instanceIds) {
-        auto values = self->getValues(iid, tradeDay, syms);
-        for (auto& [sym, score] : values) {
-            output.push_back(RuntimeFactorSnapshot{ sym, iid, score, 1 });
+
+    // 截面因子: updateIncremental 只传了当前 tick 的单个标的,
+    // 此处从 liveMarketView 展开为全量标的, 一次计算全截面并缓存
+    if (m_liveMarketView && m_engine) {
+        const auto& instruments = m_liveMarketView->instruments();
+        if (instruments.size() > syms.size()) {
+            syms.clear();
+            syms.reserve(instruments.size());
+            for (const auto& inst : instruments)
+                syms.push_back(inst.value);
         }
+    }
+
+    auto* self = const_cast<RuntimeFactorSvc*>(this);
+
+    // 构建 codeOnly → instrumentId 映射 (缓存 key 用无后缀码, 统一查找)
+    // 同时构建 fullSymbol → instrumentId 映射 (因子计算结果 key 是完整 symbol)
+    std::unordered_map<std::string, std::uint32_t> codeOnlyToId;
+    std::unordered_map<std::string, std::uint32_t> fullSymToId;
+    if (m_liveMarketView) {
+        const auto& viewSyms = m_liveMarketView->symbolStrings();
+        const auto& viewInsts = m_liveMarketView->instruments();
+        for (size_t i = 0; i < viewSyms.size() && i < viewInsts.size(); ++i) {
+            const auto& fullSym = viewSyms[i];
+            std::uint32_t instId = viewInsts[i].value;
+            fullSymToId[fullSym] = instId;
+            std::string code = fullSym;
+            auto dot = code.find('.');
+            if (dot != std::string::npos) code.resize(dot);
+            codeOnlyToId[code] = instId;
+        }
+    }
+
+    // 工具 lambda: 完整 symbol → 去后缀码
+    auto stripSuffix = [](const std::string& s) -> std::string {
+        auto dot = s.find('.');
+        return (dot != std::string::npos) ? s.substr(0, dot) : s;
+    };
+
+    for (const auto& iid : instanceIds) {
+        // ── 缓存读: 首次计算后后续 step() 调用直接读缓存 ──
+        auto cacheIt = m_factorCache.find(iid);
+        if (cacheIt != m_factorCache.end()) {
+            auto dateIt = cacheIt->second.find(std::string(dateBuf));
+            if (dateIt != cacheIt->second.end()) {
+                for (const auto& [sym, val] : dateIt->second) {
+                    auto idIt = codeOnlyToId.find(sym);
+                    if (idIt != codeOnlyToId.end())
+                        output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
+                }
+                static int cacheDiag = 0;
+                if (++cacheDiag <= 3)
+                    INTERNAL_INFO_STREAM << "[RFS] copySnapshots liveCache: iid=" << iid
+                                         << " date=" << dateBuf
+                                         << " entries=" << dateIt->second.size();
+                continue;
+            }
+        }
+
+        // ── 缓存未命中: 批量计算全截面因子值 ──
+        // 关键: 必须传完整 symbol (如 "000001.SZ") 给 computeSingleDate,
+        // MarketDataViewHistoricalAdapter 内部存的是带后缀的 symbol, 去后缀会导致 findSymbolIndex 失败
+        std::vector<std::string> symbolStrs;
+        symbolStrs.reserve(syms.size());
+        for (uint32_t id : syms) {
+            std::string resolved = m_symbolResolver ? m_symbolResolver(id) : std::string();
+            if (resolved.empty()) continue;
+            symbolStrs.push_back(std::move(resolved));  // 保留完整 symbol, 不去后缀
+        }
+
+        auto factorValues = self->m_engine->computeSingleDate(
+            iid, std::string(dateBuf), symbolStrs, m_liveMarketView);
+
+        // 写入缓存: key 用无后缀码, 与 codeOnlyToId 一致
+        std::map<std::string, double> dateCache;
+        for (const auto& [sym, val] : factorValues)
+            dateCache[stripSuffix(sym)] = val;
+        m_factorCache[iid][std::string(dateBuf)] = std::move(dateCache);
+
+        // 输出快照: 通过 fullSymbol 查找 instrumentId
+        for (const auto& [sym, val] : factorValues) {
+            auto idIt = fullSymToId.find(sym);
+            if (idIt != fullSymToId.end())
+                output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
+        }
+
+        static int computeDiag = 0;
+        if (++computeDiag <= 3)
+            INTERNAL_INFO_STREAM << "[RFS] copySnapshots liveCompute: iid=" << iid
+                                 << " date=" << dateBuf
+                                 << " computed=" << factorValues.size()
+                                 << " totalSyms=" << symbolStrs.size();
     }
 }
 

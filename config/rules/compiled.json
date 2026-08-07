@@ -1,7 +1,7 @@
 {
   "version": 1,
   "namespace": "a_share_short_term",
-  "compiled_at": "2026-08-06T09:01:04",
+  "compiled_at": "2026-08-07T01:51:45",
   "template_count": 82,
   "templates": [
     {
@@ -9925,7 +9925,7 @@
           "name": "准熊市退潮冻结",
           "stage": "market",
           "priority": 97,
-          "description": "市场宽度不足30%且等权指数回撤超过10%, 虽未触发熊市体制但已处于系统性退潮边缘, 冻结新开仓。",
+          "description": "市场宽度不足30%(MA60和MA20均不足)且等权指数回撤超过10%, 虽未触发熊市体制但已处于系统性退潮边缘, 冻结新开仓。MA20恢复则不放行。",
           "tags": [
             "market",
             "risk",
@@ -9939,6 +9939,13 @@
                 "op": "lt",
                 "left": {
                   "var": "market.breadth_above_ma60_ratio"
+                },
+                "right": 0.3
+              },
+              {
+                "op": "lt",
+                "left": {
+                  "var": "market.breadth_above_ma20_ratio"
                 },
                 "right": 0.3
               },

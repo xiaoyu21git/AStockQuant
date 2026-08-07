@@ -695,9 +695,9 @@ private:
 
     [[nodiscard]] bool checkRebalanceDay(const std::string& tradingDay);
     [[nodiscard]] bool prepareEodContext(const std::string& tradingDay, EodContext& ctx);
-    [[nodiscard]] bool fetchTodayPrices(const EodContext& ctx, EodPriceData& prices);
+    [[nodiscard]] bool fetchTodayPrices(const EodContext& ctx, EodPriceData& prices, bool isCompensation = false);
     void computeMarketBreadth(const EodContext& ctx, EodPriceData& prices);
-    EodGateResult evaluateEodGates(const EodContext& ctx, double todayBreadth);
+    EodGateResult evaluateEodGates(const EodContext& ctx, const EodPriceData& prices);
     std::vector<PendingOrder> collectEodSignals(
         const EodContext& ctx, const EodPriceData& prices,
         const EodGateResult& gates,
@@ -708,7 +708,8 @@ private:
         std::vector<PendingOrder>& pendingOrders,
         const std::unordered_map<std::string, std::int64_t>& posQtyMap,
         const EodPriceData& prices,
-        const std::string& tradingDay);
+        const std::string& tradingDay,
+        bool isCompensation);
 
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
