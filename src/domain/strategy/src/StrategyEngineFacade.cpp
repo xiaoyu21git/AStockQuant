@@ -69,6 +69,23 @@ std::string generateClOrdId() {
     return oss.str();
 }
 
+/// @brief 生成统一篮子ID (时间戳 + 原子计数器 → hash)
+/// 替代散落在 liquidateAll/drainQueue/finalizeAndSubmit 的三套不同策略
+uint64_t generateBasketId() {
+    static std::atomic<uint64_t> s_basketSeq{0};
+    auto ts = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto id = std::to_string(ts) + "_" + std::to_string(s_basketSeq.fetch_add(1));
+    return std::hash<std::string>{}(id);
+}
+
+/// @brief 为订单列表打上篮子ID标签，返回生成的篮子ID
+uint64_t tagBasketOrders(std::vector<strategy::OrderRequest>& orders) {
+    uint64_t basketId = generateBasketId();
+    for (auto& o : orders)
+        o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
+    return basketId;
+}
+
 /// @brief 非因子策略使用的空因子服务 — 所有操作均为 no-op
 class NoOpFactorService final : public IRuntimeFactorService {
 public:
@@ -711,8 +728,8 @@ int StrategyEngine::liquidateAll()
         return -1;
     }
 
-    auto& accEng = engine::AccountEngine::instance();
-    auto positions = accEng.positions();
+    auto snap = engine::AccountEngine::instance().snapshot();
+    auto& positions = snap.positions;
 
     if (positions.empty()) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: 无持仓";
@@ -723,7 +740,7 @@ int StrategyEngine::liquidateAll()
     for (const auto& pos : positions) {
         if (pos.quantity <= 0) continue;
         orders.push_back(m_orderBuilder.buildLiquidationExit(
-            pos.symbol, pos.quantity, m_strategyId, accEng.account().accountId));
+            pos.symbol, pos.quantity, m_strategyId, snap.account.accountId));
 
         // 去后缀加入清仓名单
         std::string code = foundation::market::AStockSymbol::codeOnly(pos.symbol);
@@ -731,12 +748,11 @@ int StrategyEngine::liquidateAll()
     }
 
     // 过 OrderGenerator 做持仓感知校验（不经过规则闸门 — 清仓是强制性指令）
-    auto account = accEng.account();
     std::unordered_map<std::string, int64_t> liqPosMap;
     for (const auto& p : positions)
         liqPosMap[p.symbol] = p.quantity;
     MapPositionProvider liqPosProvider(liqPosMap);
-    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, account, 0.0, m_strategyId, accEng.account().accountId);
+    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, snap.account, 0.0, m_strategyId, snap.account.accountId);
 
     if (validatedOrders.empty()) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: OrderGenerator 过滤后无有效订单";
@@ -744,8 +760,7 @@ int StrategyEngine::liquidateAll()
     }
 
     // 篮子ID
-    static std::atomic<uint64_t> s_liqBasketSeq{0};
-    uint64_t basketId = s_liqBasketSeq.fetch_add(1);
+    uint64_t basketId = generateBasketId();
     for (auto& o : validatedOrders)
         o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
 
@@ -806,9 +821,9 @@ void StrategyEngine::drainQueue()
             if (orders.has_value() && m_orderListener
                 && !m_isBacktestMode.load(std::memory_order_acquire)) {
 
-                auto& accEng = engine::AccountEngine::instance();
-                auto account = accEng.account();
-                auto positions = accEng.positions();
+                auto snap = engine::AccountEngine::instance().snapshot();
+                auto& account = snap.account;
+                auto& positions = snap.positions;
 
                 if (account.totalAsset <= 0) continue;
 
@@ -821,13 +836,7 @@ void StrategyEngine::drainQueue()
                 MapPositionProvider posProvider(posQtyMap);
                 auto finalOrders = m_orderGenerator.generate(*orders, posProvider, account, mdp.lastPrice(), m_strategyId, m_accountId);
                 if (!finalOrders.empty()) {
-                    static std::atomic<uint64_t> s_basketSeq{0};
-                    auto basketId = std::to_string(
-                        std::chrono::steady_clock::now().time_since_epoch().count())
-                        + "_" + std::to_string(s_basketSeq.fetch_add(1));
-                    uint64_t basketHash = std::hash<std::string>{}(basketId);
-                    for (auto& o : finalOrders)
-                        o.setExtension(domain::trading::ExtKey::kBasketId, basketHash);
+                    auto basketId = tagBasketOrders(finalOrders);
 
                     try {
                         m_orderListener->onOrders(finalOrders);
@@ -1254,7 +1263,8 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
     }
 
     // ── 规则闸门: 持仓出场审核 ──
-    auto positions = engine::AccountEngine::instance().positions();
+    auto snap = engine::AccountEngine::instance().snapshot();
+    auto& positions = snap.positions;
     int eodPositionExits = 0;
     if (m_ruleGate.enabled() && !positions.empty()) {
         rules::BacktestRuleVariableProvider exitProvider;
@@ -1319,7 +1329,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
     for (auto& po : pendingOrders)
         rawOrders.push_back(std::move(po.order));
 
-    auto freshAccount = engine::AccountEngine::instance().account();
+    auto& freshAccount = snap.account;
     MapPositionProvider posProvider(posQtyMap);
     // 诊断: 打印 generate() 入参
     INTERNAL_INFO_STREAM << "[EOD QtyDiag] priceForWeight=" << priceForWeight
@@ -1350,13 +1360,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
 
     int totalSubmitted = 0;
     if (!finalOrders.empty() && m_orderListener) {
-        static std::atomic<uint64_t> s_eodBasketSeq{0};
-        auto basketId = std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count())
-            + "_" + std::to_string(s_eodBasketSeq.fetch_add(1));
-        uint64_t basketHash = std::hash<std::string>{}(basketId);
-        for (auto& o : finalOrders)
-            o.setExtension(domain::trading::ExtKey::kBasketId, basketHash);
+        auto basketId = tagBasketOrders(finalOrders);
         try {
             m_orderListener->onOrders(finalOrders);
             totalSubmitted = static_cast<int>(finalOrders.size());
@@ -1388,7 +1392,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
     }
 
     if (m_tradeJournal) {
-        auto acc = engine::AccountEngine::instance().account();
+        auto& acc = snap.account;
         int posCount = static_cast<int>(positions.size());
         m_tradeJournal->log(tradingDay + " 日终 持仓:" + std::to_string(posCount)
             + " 净值:" + std::to_string(static_cast<int>(acc.totalAsset))
@@ -1455,9 +1459,9 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     computeMarketBreadth(ctx, prices);
 
     // ── 4. 账户和持仓 ──
-    auto& accEng = engine::AccountEngine::instance();
-    auto account = accEng.account();
-    auto positions = accEng.positions();
+    auto snap = engine::AccountEngine::instance().snapshot();
+    auto& account = snap.account;
+    auto& positions = snap.positions;
     if (account.totalAsset <= 0) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
         return EodEvaluationStatus::Skipped;
@@ -2035,12 +2039,9 @@ StrategyBacktestResult StrategyEngine::backtest(
             std::vector<OrderRequest> exitOrders;
             for (const auto& kvPos : backtestPositions) {
                 if (kvPos.second.quantity() > 0) {
-                    OrderRequest exitOrder;
-                    exitOrder.setSymbol(kvPos.first);
-                    exitOrder.setSide(OrderSide::Sell);
-                    exitOrder.setQuantity(kvPos.second.quantity());
-                    exitOrder.setOrderType(domain::trading::OrderType::Market);
-                    exitOrders.push_back(std::move(exitOrder));
+                    exitOrders.push_back(m_orderBuilder.buildLiquidationExit(
+                        kvPos.first, kvPos.second.quantity(),
+                        m_strategyId, m_accountId));
                 }
             }
             if (!exitOrders.empty()) ordersOpt = std::move(exitOrders);
@@ -2189,11 +2190,10 @@ StrategyBacktestResult StrategyEngine::backtest(
                         (exitPrice - posCtx.entryPrice) / posCtx.entryPrice * 100.0,
                         -1, r
                     });
-                    OrderRequest exitOrder;
-                    exitOrder.setSymbol(fullSymbol);
-                    exitOrder.setSide(OrderSide::Sell);
-                    exitOrder.setQuantity(exitAction == rules::RuleAction::Exit
-                        ? pos.quantity() : (std::max)(static_cast<std::int64_t>(1), pos.quantity() / 2));
+                    OrderRequest exitOrder = m_orderBuilder.buildRuleExit(
+                        fullSymbol, pos.quantity(),
+                        exitAction == rules::RuleAction::Exit,
+                        m_strategyId, m_accountId, exitPrice);
                     ++ruleExitCount;
                     todayRuleExitSyms.insert(fullSymbol);
                     generatedExits.push_back(std::move(exitOrder));

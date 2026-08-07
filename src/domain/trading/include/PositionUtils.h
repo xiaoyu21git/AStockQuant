@@ -4,8 +4,9 @@
 // 供 Bridge 层调用, 替代 QML 中内联的 JS 字符串比较
 // ─────────────────────────────────────────────────────────────────────
 
-#include <string>
+#include <cmath>
 #include <cstdint>
+#include <string>
 
 namespace domain::trading {
 
@@ -46,6 +47,24 @@ inline const char* positionSideLabel(const std::string& side) noexcept {
 inline const char* closeableLabel(const std::string& type, const std::string& side) noexcept {
     if (type == "futures" || type == "options" || side == "SHORT") return "可平";
     return "可卖";
+}
+
+// ── A股涨跌停板比例 ──
+// 主板 10%, 创业板/科创板 20%, 北交所/新三板 30%
+// symbol 应为纯代码 (如 "300001") 或完整代码 (如 "300001.SZ")，函数内部取 codeOnly
+inline double boardLimitRatio(const std::string& symbol) noexcept {
+    // 提取纯代码：取最后一个 '.' 之前的部分，或无点则原样
+    std::string code = symbol;
+    auto dotPos = code.rfind('.');
+    if (dotPos != std::string::npos)
+        code = code.substr(0, dotPos);
+    // 创业板: 300/301开头; 科创板: 688开头
+    if (code.rfind("300", 0) == 0 || code.rfind("301", 0) == 0 || code.rfind("688", 0) == 0)
+        return 0.20;
+    // 北交所: 8开头; 新三板: 4开头
+    if (code.rfind("8", 0) == 0 || code.rfind("4", 0) == 0)
+        return 0.30;
+    return 0.10;  // 主板
 }
 
 } // namespace domain::trading

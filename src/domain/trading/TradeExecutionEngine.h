@@ -160,6 +160,13 @@ public:
             || m_status == OrderStatusValue::Expired;
     }
 
+    /// @brief 是否异常终态（用于触发执行暂停）。Filled 是正常成交，不在此列
+    [[nodiscard]] bool isAbnormalTerminal() const noexcept {
+        return m_status == OrderStatusValue::Cancelled
+            || m_status == OrderStatusValue::Rejected
+            || m_status == OrderStatusValue::Expired;
+    }
+
 private:
     std::string m_strategyId;
     std::string m_symbol;
@@ -295,6 +302,15 @@ public:
     // ── 篮子委托辅助 ──
     TradeOrder buildTradeOrder(const strategy::OrderRequest& req) const;
     strategy::RiskInput buildRiskInput(const TradeOrder& order) const;
+
+private:
+    /// @brief RiskInput 公共构造 — 统一 submitOrder()+buildRiskInput() 的重复逻辑
+    /// @param order 订单
+    /// @param isAutoStrategySignal 是否策略自动信号（手动单=取决于有无strategyId，篮子单=true）
+    strategy::RiskInput buildRiskInputCommon(const TradeOrder& order,
+                                              bool isAutoStrategySignal) const;
+
+public:
 
     // ── Queries ──
     [[nodiscard]] const std::vector<TradeOrder>& recentOrders() const noexcept;

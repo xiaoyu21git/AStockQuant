@@ -124,6 +124,15 @@ std::string AStockSymbol::codeOnly(const std::string& symbol) {
     return (dot != std::string::npos) ? symbol.substr(0, dot) : symbol;
 }
 
+std::string AStockSymbol::normalizeToFullSymbol(const std::string& input) {
+    if (input.find('.') == std::string::npos && input.size() == 6) {
+        auto symObj = fromCode(input);
+        if (symObj.isValid())
+            return symObj.fullSymbol();
+    }
+    return input;
+}
+
 std::string AStockSymbol::fromInstrumentId(uint32_t id) {
     if (id > 999999) return "";
     char buf[16];

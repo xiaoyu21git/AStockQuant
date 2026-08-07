@@ -32,6 +32,15 @@
 #include <atomic>
 #include <chrono>
 
+// ── 工具函数 ──
+namespace {
+/// @brief OrderDirection → QML 侧边字符串
+inline QString toQmlSide(domain::strategy::OrderDirection d) {
+    return d == domain::strategy::OrderDirection::Buy
+        ? QStringLiteral("BUY") : QStringLiteral("SELL");
+}
+} // anonymous namespace
+
 namespace {
 
 std::string generateClOrdId() {
@@ -64,6 +73,7 @@ bool TradeExecutionBridge::isLiveBridgeReady() {
 QVariantList TradeExecutionBridge::recentRuleHits() const { return {}; }
 QVariantList TradeExecutionBridge::recentOrders() const {
     const_cast<TradeExecutionBridge*>(this)->ensureInitialized();
+    QMutexLocker lock(&m_recentOrdersMutex);
     return m_recentOrders;
 }
 QString TradeExecutionBridge::lastErrorMessage() const { return m_lastErrorMessage; }
@@ -112,8 +122,7 @@ void TradeExecutionBridge::ensureInitialized() {
         const auto& symbol = updated.symbol();
         if (!symbol.empty())
             statusEntry["symbol"] = QString::fromStdString(symbol);
-        statusEntry["side"]   = updated.side() == domain::strategy::OrderDirection::Buy
-                                    ? QStringLiteral("BUY") : QStringLiteral("SELL");
+        statusEntry["side"]   = toQmlSide(updated.side());
         statusEntry["price"]    = updated.price();
         statusEntry["quantity"] = static_cast<double>(updated.quantity());
         const QString rawStatus = orderStatusValueToString(updated.status());
@@ -129,7 +138,9 @@ void TradeExecutionBridge::ensureInitialized() {
             statusEntry["strategyId"] = QString::fromStdString(sid);
 
         // ── 同步更新 m_recentOrders — QML syncPendingOrders 从这里读数据 ──
+        bool didUpdateRecent = false;
         if (!brokerIdStr.isEmpty()) {
+            QMutexLocker lock(&m_recentOrdersMutex);
             for (int i = 0; i < m_recentOrders.size(); ++i) {
                 QVariantMap item = m_recentOrders[i].toMap();
                 if (item.value("brokerOrderId").toString() == brokerIdStr) {
@@ -140,21 +151,24 @@ void TradeExecutionBridge::ensureInitialized() {
                     if (!msg.empty())
                         item["message"] = QString::fromStdString(msg);
                     m_recentOrders[i] = item;
+                    didUpdateRecent = true;
                     break;
                 }
             }
-            emit recentOrdersChanged();
-        }
+        } // 锁释放
 
-        emit orderStatusChanged(statusEntry);
-        emit orderStatusPublished(statusEntry);
+        // 信号发射延迟到主线程（回调可能来自 gmsdk 线程）
+        QMetaObject::invokeMethod(this, [this, statusEntry, didUpdateRecent]() {
+            if (didUpdateRecent) emit recentOrdersChanged();
+            emit orderStatusChanged(statusEntry);
+            emit orderStatusPublished(statusEntry);
+        }, Qt::QueuedConnection);
     });
 
     engine.setOnOrderAccepted([this, orderStatusValueToString](const domain::trading::TradeOrder& accepted) {
         const QString rawStatus = orderStatusValueToString(accepted.status());
         const QString symbol    = QString::fromStdString(accepted.symbol());
-        const QString side      = accepted.side() == domain::strategy::OrderDirection::Buy
-                                    ? QStringLiteral("BUY") : QStringLiteral("SELL");
+        const QString side      = toQmlSide(accepted.side());
         const QString brokerId  = QString::fromStdString(accepted.brokerOrderId());
         const QString strategyId = QString::fromStdString(accepted.strategyId());
 
@@ -177,16 +191,17 @@ void TradeExecutionBridge::ensureInitialized() {
             recentEntry["clientOrderId"] = QString::fromStdString(clientOid);
         appendRecentOrder(recentEntry);
 
-        // ── 发射信号 → QML 更新日志 + 刷新列表 ──
-        emit orderStatusChanged(recentEntry);
-        emit orderStatusPublished(recentEntry);
+        // 信号发射延迟到主线程（回调可能来自 gmsdk 线程）
+        QMetaObject::invokeMethod(this, [this, recentEntry]() {
+            emit orderStatusChanged(recentEntry);
+            emit orderStatusPublished(recentEntry);
+        }, Qt::QueuedConnection);
     });
 
     engine.setOnOrderGenerated([this](const domain::trading::TradeOrder& order) {
         QVariantMap entry;
         entry["symbol"]     = QString::fromStdString(order.symbol());
-        entry["side"]       = order.side() == domain::strategy::OrderDirection::Buy
-                                  ? "BUY" : "SELL";
+        entry["side"]       = toQmlSide(order.side());
         entry["price"]      = order.price();
         entry["quantity"]   = static_cast<double>(order.quantity());
         entry["strategyId"] = QString::fromStdString(order.strategyId());
@@ -197,8 +212,7 @@ void TradeExecutionBridge::ensureInitialized() {
     engine.setOnOrderSubmitResult([this](const domain::trading::TradeOrder& order,
                                         const domain::trading::SubmitResult& result) {
         const QString symbol = QString::fromStdString(order.symbol());
-        const QString side   = order.side() == domain::strategy::OrderDirection::Buy
-                                    ? QStringLiteral("BUY") : QStringLiteral("SELL");
+        const QString side   = toQmlSide(order.side());
 
         QVariantMap entry;
         entry["symbol"]     = symbol;
@@ -248,34 +262,43 @@ void TradeExecutionBridge::ensureInitialized() {
                     auto fq = e.get<std::int64_t>("filled_quantity");
                     auto msg = e.get<std::string>("message");
 
-                    for (int i = 0; i < m_recentOrders.size(); ++i) {
-                        QVariantMap item = m_recentOrders[i].toMap();
-                        if (item.value("brokerOrderId").toString() == brokerId) {
-                            if (st) {
-                                // EventBus status = OrderUpdate::Status (0-based)
-                                // Map to QML rawStatus
-                                const char* statusStr = "SUBMITTED";
-                                switch (static_cast<int>(*st)) {
-                                    case 0: statusStr = "SUBMITTED";        break;
-                                    case 1: statusStr = "PARTIAL_FILLED";  break;
-                                    case 2: statusStr = "FILLED";          break;
-                                    case 3: statusStr = "CANCELLED";       break;
-                                    case 4: statusStr = "REJECTED";        break;
-                                    case 5: statusStr = "EXPIRED";         break;
+                    QVariantMap capturedItem;
+                    bool foundItem = false;
+                    {
+                        QMutexLocker lock(&m_recentOrdersMutex);
+                        for (int i = 0; i < m_recentOrders.size(); ++i) {
+                            QVariantMap item = m_recentOrders[i].toMap();
+                            if (item.value("brokerOrderId").toString() == brokerId) {
+                                if (st) {
+                                    // EventBus status = OrderUpdate::Status (0-based)
+                                    // Map to QML rawStatus
+                                    const char* statusStr = "SUBMITTED";
+                                    switch (static_cast<int>(*st)) {
+                                        case 0: statusStr = "SUBMITTED";        break;
+                                        case 1: statusStr = "PARTIAL_FILLED";  break;
+                                        case 2: statusStr = "FILLED";          break;
+                                        case 3: statusStr = "CANCELLED";       break;
+                                        case 4: statusStr = "REJECTED";        break;
+                                        case 5: statusStr = "EXPIRED";         break;
+                                    }
+                                    item["status"]    = QString::fromLatin1(statusStr);
+                                    item["rawStatus"] = QString::fromLatin1(statusStr);
                                 }
-                                item["status"]    = QString::fromLatin1(statusStr);
-                                item["rawStatus"] = QString::fromLatin1(statusStr);
+                                if (fp)  item["filledPrice"] = *fp;
+                                if (fq)  item["filledQty"]   = static_cast<double>(*fq);
+                                if (msg) item["message"]     = QString::fromStdString(*msg);
+                                m_recentOrders[i] = item;
+                                capturedItem = item;
+                                foundItem = true;
+                                break;
                             }
-                            if (fp)  item["filledPrice"] = *fp;
-                            if (fq)  item["filledQty"]   = static_cast<double>(*fq);
-                            if (msg) item["message"]     = QString::fromStdString(*msg);
-                            m_recentOrders[i] = item;
-
-                            emit orderStatusChanged(item);
-                            emit orderStatusPublished(item);
-                            emit recentOrdersChanged();
-                            return;
                         }
+                    } // 锁释放 — emit 在锁外避免与 recentOrders() getter 死锁
+
+                    if (foundItem) {
+                        emit orderStatusChanged(capturedItem);
+                        emit orderStatusPublished(capturedItem);
+                        emit recentOrdersChanged();
                     }
                 });
         }
@@ -431,25 +454,36 @@ bool TradeExecutionBridge::submitBridgeOrder(const QVariantMap& request) {
 void TradeExecutionBridge::publishOrderStatusUpdate(const QString& orderId,
                                                      const QString& status,
                                                      const QString& message) {
-    for (int i = 0; i < m_recentOrders.size(); ++i) {
-        QVariantMap item = m_recentOrders[i].toMap();
-        if (item.value("brokerOrderId").toString() == orderId
-                || item.value("clientOrderId").toString() == orderId
-                || item.value("id").toString() == orderId) {
-            item["status"]    = status;
-            item["rawStatus"] = status;
-            if (!message.isEmpty())
-                item["message"] = message;
-            m_recentOrders[i] = item;
-            emit orderStatusChanged(item);
-            emit orderStatusPublished(item);
-            emit recentOrdersChanged();
-            return;
+    QVariantMap capturedItem;
+    bool foundItem = false;
+    {
+        QMutexLocker lock(&m_recentOrdersMutex);
+        for (int i = 0; i < m_recentOrders.size(); ++i) {
+            QVariantMap item = m_recentOrders[i].toMap();
+            if (item.value("brokerOrderId").toString() == orderId
+                    || item.value("clientOrderId").toString() == orderId
+                    || item.value("id").toString() == orderId) {
+                item["status"]    = status;
+                item["rawStatus"] = status;
+                if (!message.isEmpty())
+                    item["message"] = message;
+                m_recentOrders[i] = item;
+                capturedItem = item;
+                foundItem = true;
+                break;
+            }
         }
+    } // 锁释放
+
+    if (foundItem) {
+        emit orderStatusChanged(capturedItem);
+        emit orderStatusPublished(capturedItem);
+        emit recentOrdersChanged();
     }
 }
 
 bool TradeExecutionBridge::cancelOrder(const QString& brokerOrderId) {
+    ensureInitialized();
     if (!m_initialized) return false;
     domain::trading::BrokerOrderId id(brokerOrderId.toStdString());
     auto* engine = &domain::trading::TradeExecutionEngine::instance();
@@ -535,12 +569,7 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
     auto quote = engine::GmSessionEngine::instance().fetchQuote(found->symbol);
     if (quote && quote->valid && quote->preClose > 0) {
         double preClose = quote->preClose;
-        double limitRatio = 0.10;
-        std::string code = foundation::market::AStockSymbol::codeOnly(found->symbol);
-        if (code.rfind("300", 0) == 0 || code.rfind("301", 0) == 0 || code.rfind("688", 0) == 0)
-            limitRatio = 0.20;
-        else if (code.rfind("8", 0) == 0 || code.rfind("4", 0) == 0)
-            limitRatio = 0.30;
+        double limitRatio = domain::trading::boardLimitRatio(found->symbol);
         price = (side == "SELL") ? (preClose * (1.0 - limitRatio))
                                  : (preClose * (1.0 + limitRatio));
         if (m == "futures") price = qRound(price);
@@ -619,7 +648,10 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
 }
 
 void TradeExecutionBridge::clearRecentOrders() {
-    m_recentOrders.clear();
+    {
+        QMutexLocker lock(&m_recentOrdersMutex);
+        m_recentOrders.clear();
+    }
     emit recentOrdersChanged();
 }
 
@@ -650,8 +682,11 @@ bool TradeExecutionBridge::isFuturesExchange(const QString& exchange) const {
 }
 
 void TradeExecutionBridge::appendRecentOrder(const QVariantMap& order) {
-    m_recentOrders.prepend(order);
-    if (m_recentOrders.size() > 50) m_recentOrders.removeLast();
+    {
+        QMutexLocker lock(&m_recentOrdersMutex);
+        m_recentOrders.prepend(order);
+        if (m_recentOrders.size() > 50) m_recentOrders.removeLast();
+    }
     emit recentOrdersChanged();
 }
 
@@ -701,7 +736,8 @@ QVariantMap PositionAccountBridge::accountSnapshot() const {
     const_cast<PositionAccountBridge*>(this)->initialize();
     QVariantMap map;
     if (!m_initialized) return map;
-    auto acc = engine::AccountEngine::instance().account();
+    auto snap = engine::AccountEngine::instance().snapshot();
+    auto& acc = snap.account;
     map["totalAsset"]    = acc.totalAsset;
     map["marketValue"]   = acc.marketValue;
     map["availableCash"] = acc.availableCash;
@@ -709,7 +745,7 @@ QVariantMap PositionAccountBridge::accountSnapshot() const {
     // 浮动盈亏优先用 gmsdk 推送值，否则汇总各持仓
     double unrealized = acc.unrealizedPnl;
     if (unrealized == 0.0) {
-        for (const auto& p : engine::AccountEngine::instance().positions())
+        for (const auto& p : snap.positions)
             unrealized += p.unrealizedPnl;
     }
     map["unrealizedPnl"] = unrealized;
@@ -741,22 +777,29 @@ QVariantList PositionAccountBridge::positions() const {
 }
 
 QVariantList PositionAccountBridge::recentOrderStatuses() const {
+    QMutexLocker lock(&m_orderStatusesMutex);
     return m_recentOrderStatuses;
 }
 
 void PositionAccountBridge::appendOrderStatus(const QVariantMap& status) {
-    // 去重：按 brokerOrderId 更新已有条目
-    const QString id = status.value("brokerOrderId").toString();
-    for (int i = 0; i < m_recentOrderStatuses.size(); ++i) {
-        QVariantMap item = m_recentOrderStatuses[i].toMap();
-        if (item.value("brokerOrderId").toString() == id) {
-            m_recentOrderStatuses[i] = status;
-            emit recentOrderStatusesChanged();
-            return;
+    bool updated = false;
+    {
+        QMutexLocker lock(&m_orderStatusesMutex);
+        // 去重：按 brokerOrderId 更新已有条目
+        const QString id = status.value("brokerOrderId").toString();
+        for (int i = 0; i < m_recentOrderStatuses.size(); ++i) {
+            QVariantMap item = m_recentOrderStatuses[i].toMap();
+            if (item.value("brokerOrderId").toString() == id) {
+                m_recentOrderStatuses[i] = status;
+                updated = true;
+                break;
+            }
+        }
+        if (!updated) {
+            m_recentOrderStatuses.prepend(status);
+            if (m_recentOrderStatuses.size() > 50) m_recentOrderStatuses.removeLast();
         }
     }
-    m_recentOrderStatuses.prepend(status);
-    if (m_recentOrderStatuses.size() > 50) m_recentOrderStatuses.removeLast();
     emit recentOrderStatusesChanged();
 }
 
@@ -856,7 +899,8 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
         return snapshot;
     }
 
-    auto acc = engine::AccountEngine::instance().account();
+    auto snap = engine::AccountEngine::instance().snapshot();
+    auto& acc = snap.account;
     snapshot["totalAsset"] = acc.totalAsset;
     snapshot["marketValue"] = acc.marketValue;
     snapshot["availableCash"] = acc.availableCash;
@@ -864,7 +908,7 @@ QVariantMap RiskControlBridge::buildPortfolioSnapshot(const QVariantMap& strateg
     snapshot["unrealizedPnl"] = acc.unrealizedPnl;
     snapshot["status"] = "ok";
 
-    auto positions = engine::AccountEngine::instance().positions();
+    auto& positions = snap.positions;
     QVariantList posList;
     for (auto& p : positions) {
         QVariantMap item;

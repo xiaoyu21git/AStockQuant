@@ -602,20 +602,22 @@ QVariantList StrategyBridge::list()
     QVariantList list;
     const std::vector<PersistedStrategyData> all = m_repo->findAll();
     list.reserve(static_cast<int>(all.size()));
+
+    // 实盘实时数据: runningDays从DB, dailyPnL/position从AccountEngine
+    // 提升到循环外: positions() 与策略无关，所有策略共享同一账户汇总
+    auto snap = engine::AccountEngine::instance().snapshot();
+    double totalPnl = 0.0, totalMv = 0.0;
+    int tradeCount = 0;
+    for (const auto& p : snap.positions) {
+        totalPnl += p.unrealizedPnl;
+        totalMv += p.marketValue;
+        if (p.quantity > 0) ++tradeCount;
+    }
+
     for (const PersistedStrategyData& data : all) {
         auto map = data.toVariantMap();
         QString sid = QString::fromStdString(data.strategyId);
         map["displayStatus"] = m_runtimeStatus.value(sid, QStringLiteral("已停止"));
-        // 实盘实时数据: runningDays从DB, dailyPnL/position从AccountEngine
-        auto& accEng = engine::AccountEngine::instance();
-        auto positions = accEng.positions();
-        double totalPnl = 0.0, totalMv = 0.0;
-        int tradeCount = 0;
-        for (const auto& p : positions) {
-            totalPnl += p.unrealizedPnl;
-            totalMv += p.marketValue;
-            if (p.quantity > 0) ++tradeCount;
-        }
         map["dailyPnL"] = totalPnl;
         map["position"] = totalMv;
         map["trades"]   = tradeCount;  // 实盘持仓数作为交易活跃度指标

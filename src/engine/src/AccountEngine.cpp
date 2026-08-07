@@ -3,18 +3,10 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
+#include "foundation/market/AStockSymbol.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 namespace engine {
-
-namespace {
-std::string fromGm(const std::string& gm) {
-    if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";
-    if (gm.compare(0, 5, "SZSE.") == 0) return gm.substr(5) + ".SZ";
-    if (gm.compare(0, 4, "BSE.")  == 0) return gm.substr(4) + ".BJ";
-    return gm;
-}
-}
 
 AccountEngine& AccountEngine::instance() {
     static AccountEngine engine;
@@ -94,6 +86,23 @@ std::vector<Position> AccountEngine::positions() {
     for (const auto& [sym, p] : m_cachedPositions)
         result.push_back(p);
     return result;
+}
+
+AccountEngine::Snapshot AccountEngine::snapshot() {
+    std::shared_lock<std::shared_mutex> lock(m_mutex);
+    Snapshot s;
+    s.account = m_cachedAccount;
+    s.positions.reserve(m_cachedPositions.size());
+    for (const auto& [sym, p] : m_cachedPositions)
+        s.positions.push_back(p);
+    return s;
+}
+
+std::unordered_map<std::string, int64_t> AccountEngine::Snapshot::posQtyByCode() const {
+    std::unordered_map<std::string, int64_t> map;
+    for (const auto& p : positions)
+        map[foundation::market::AStockSymbol::codeOnly(p.symbol)] = p.quantity;
+    return map;
 }
 
 void AccountEngine::setOnDataChanged(DataFn cb) {

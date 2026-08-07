@@ -15,6 +15,27 @@
 #include <cmath>
 #include <mutex>
 
+// ── OrderUpdate::Status → OrderStatusValue 映射 ──
+// engine::OrderUpdate::Status 枚举: Submitted=0, PartialFilled=1, Filled=2,
+//   Cancelled=3, Rejected=4, Expired=5
+// 注意：不能用简单 +1 偏移，因为 OrderStatusValue::Cancelled=5（跳过了 PendingCancel=4）
+namespace {
+using engine::OrderUpdate;
+[[nodiscard]] constexpr domain::trading::OrderStatusValue
+toOrderStatusValue(OrderUpdate::Status s) noexcept {
+    using domain::trading::OrderStatusValue;
+    switch (s) {
+        case OrderUpdate::Status::Filled:           return OrderStatusValue::Filled;
+        case OrderUpdate::Status::PartialFilled:    return OrderStatusValue::PartiallyFilled;
+        case OrderUpdate::Status::Cancelled:        return OrderStatusValue::Cancelled;
+        case OrderUpdate::Status::Rejected:         return OrderStatusValue::Rejected;
+        case OrderUpdate::Status::Expired:          return OrderStatusValue::Expired;
+        case OrderUpdate::Status::Submitted:
+        default: return OrderStatusValue::New;
+    }
+}
+} // anonymous namespace
+
 namespace domain::trading {
 
 // ============================================================================
@@ -190,28 +211,8 @@ TradeExecutionEngine::Impl::checkPendingOrderConflict(const TradeOrder& order) c
 // Submit pipeline
 // ============================================================================
 SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order) {
-    strategy::RiskInput risk;
-    risk.setStrategyId(order.strategyId());
-    risk.setSymbol(order.symbol());
-    risk.setBuyOrder(order.side() == strategy::OrderDirection::Buy);
-    risk.setPrice(order.price());
-    risk.setQuantity(order.quantity());
-    risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
-    risk.setStrategyBound(true);
-    risk.setStrategyActive(true);
-    risk.setAutoStrategySignal(!order.strategyId().empty());
-    risk.setPositionSnapshotReady(true);
-    risk.setTradingSessionOpen(true);
-    // 卖单补 closeableQuantity，避免便利重载遗漏导致风控误拒
-    if (!risk.isBuyOrder()) {
-        auto& accEng = engine::AccountEngine::instance();
-        for (const auto& pos : accEng.positions()) {
-            if (pos.symbol == order.symbol()) {
-                risk.setCloseableQuantity(pos.availableQty);
-                break;
-            }
-        }
-    }
+    // 手动单：autoStrategySignal 取决于是否有策略 ID 绑定
+    auto risk = buildRiskInputCommon(order, !order.strategyId().empty());
     return submitOrder(order, risk);
 }
 
@@ -438,11 +439,11 @@ void TradeExecutionEngine::initCallbacks() {
             updated.setFilledQuantity(u.filledQuantity);
             updated.setStatusMessage(u.message);
             switch (u.status) {
-                case 3: updated.setStatus(OrderStatusValue::Filled); break;
-                case 2: updated.setStatus(OrderStatusValue::PartiallyFilled); break;
-                case 5: updated.setStatus(OrderStatusValue::Cancelled); break;
-                case 6: updated.setStatus(OrderStatusValue::Rejected); break;
-                case 7: updated.setStatus(OrderStatusValue::Expired); break;
+                case OrderUpdate::Status::Filled:           updated.setStatus(OrderStatusValue::Filled); break;
+                case OrderUpdate::Status::PartialFilled:    updated.setStatus(OrderStatusValue::PartiallyFilled); break;
+                case OrderUpdate::Status::Cancelled:        updated.setStatus(OrderStatusValue::Cancelled); break;
+                case OrderUpdate::Status::Rejected:         updated.setStatus(OrderStatusValue::Rejected); break;
+                case OrderUpdate::Status::Expired:          updated.setStatus(OrderStatusValue::Expired); break;
                 default: updated.setStatus(OrderStatusValue::New); break;
             }
             std::lock_guard<std::mutex> lock(m_impl->m_mutex);
@@ -514,7 +515,8 @@ TradeExecutionEngine::TradeExecutionEngine()
                         if (filledPrice) o.setFilledPrice(*filledPrice);
                         if (filledQty)  o.setFilledQuantity(*filledQty);
                         if (status) {
-                            OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
+                            OrderStatusValue st = toOrderStatusValue(
+                                static_cast<OrderUpdate::Status>(*status));
                             o.setStatus(st);
                             // ── 持久化: 更新订单状态 ──
                             {
@@ -548,7 +550,8 @@ TradeExecutionEngine::TradeExecutionEngine()
                                          << " not in recentOrders (count="
                                          << m_impl->m_recentOrders.size() << "), sync DB directly";
                     if (status) {
-                        OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
+                        OrderStatusValue st = toOrderStatusValue(
+                            static_cast<OrderUpdate::Status>(*status));
                         using RS = astock::infrastructure::database::RecOrdStatus;
                         RS recSt = RS::Pending;
                         switch (st) {
@@ -730,6 +733,13 @@ TradeOrder TradeExecutionEngine::buildTradeOrder(const strategy::OrderRequest& r
 }
 
 strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order) const {
+    // 篮子委托单：autoStrategySignal 恒为 true
+    return buildRiskInputCommon(order, true);
+}
+
+strategy::RiskInput TradeExecutionEngine::buildRiskInputCommon(
+    const TradeOrder& order, bool isAutoStrategySignal) const {
+
     strategy::RiskInput risk;
     risk.setStrategyId(order.strategyId());
     risk.setSymbol(order.symbol());
@@ -739,9 +749,11 @@ strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order
     risk.setSignalStrength(order.signalStrength() > 0.0 ? order.signalStrength() : 0.5);
     risk.setStrategyBound(true);
     risk.setStrategyActive(true);
-    risk.setAutoStrategySignal(true);
+    risk.setAutoStrategySignal(isAutoStrategySignal);
     risk.setPositionSnapshotReady(true);
     risk.setTradingSessionOpen(true);
+
+    // 卖单补 closeableQuantity，避免风控误拒
     if (!risk.isBuyOrder()) {
         auto& accEng = engine::AccountEngine::instance();
         for (const auto& pos : accEng.positions()) {
@@ -751,21 +763,21 @@ strategy::RiskInput TradeExecutionEngine::buildRiskInput(const TradeOrder& order
             }
         }
     }
-    // 填充前日收盘价供涨跌停检查
+
+    // 填充前日收盘价供涨跌停检查（手动单之前遗漏，现补齐）
     {
         auto& d = domain::market::MarketDataService::instance().liveData(order.symbol());
         if (d.valid() && d.preClose() > 0.0)
             risk.setReferencePrice(d.preClose());
     }
 
-    // ── 大盘指数回撤保护 ──
+    // ── 大盘指数回撤保护（手动单之前遗漏，现补齐）──
     {
         const auto& rcfg = domain::strategy::RiskManager::instance().riskConfig();
         if (rcfg.indexDrawdownLimitPercent > 0.0 && !rcfg.indexSymbol.empty()) {
             auto db = astock::database::NativePgConnectionPool::instance().getConnection();
             if (db && db->isOpen()) {
                 astock::infrastructure::database::MarketDataRepository repo(db);
-                // 取最近 lookbackDays 个交易日的 close
                 auto rows = repo.queryKlineDetail(
                     rcfg.indexSymbol, "2000-01-01", "2100-01-01",
                     rcfg.indexDrawdownLookbackDays, 0);
@@ -811,8 +823,8 @@ bool TradeExecutionEngine::Impl::updateExecutionPauseLocked(const TradeOrder& or
     const std::string key = scopeKey(order.executionScopeId());
     if (key.empty()) return false;
 
-    // On reject → pause
-    if (isOrderClosed(order)) {
+    // 仅异常终态（撤单/拒绝/过期）触发暂停。Filled 是正常成交，不应暂停
+    if (order.isAbnormalTerminal()) {
         PauseState ps;
         ps.executionScopeId = order.executionScopeId();
         ps.pausedBatchId = order.batchId();

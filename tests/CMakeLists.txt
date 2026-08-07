@@ -481,3 +481,29 @@ if(TARGET thirdParty)
 endif()
 
 message(STATUS "[TESTS] Configured test_eod_order_flow executable")
+
+# ─── Phase 1-5 重构回归测试 (纯函数, 零外部依赖) ───
+add_executable(test_phase1_5_smoke
+    test_phase1_5_smoke.cpp
+)
+
+set_target_properties(test_phase1_5_smoke PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_phase1_5_smoke
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/trading/include
+        ${CMAKE_SOURCE_DIR}/src/domain/trading
+        ${CMAKE_SOURCE_DIR}/src/foundation/include
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_phase1_5_smoke
+    PRIVATE
+        domain_trading
+        foundation
+)
+
+message(STATUS "[TESTS] Configured test_phase1_5_smoke executable")

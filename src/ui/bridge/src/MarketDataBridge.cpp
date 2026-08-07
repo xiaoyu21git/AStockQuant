@@ -93,10 +93,7 @@ void MarketDataBridge::processTick(const QString& symbol) {
 void MarketDataBridge::updateSnapshot(const QString& symbol) {
     if (symbol.isEmpty()) return;
     std::string sym = symbol.toStdString();
-    if (sym.find('.') == std::string::npos && sym.size() == 6) {
-        auto symObj = foundation::market::AStockSymbol::fromCode(sym);
-        if (symObj.isValid()) sym = symObj.fullSymbol();
-    }
+    sym = foundation::market::AStockSymbol::normalizeToFullSymbol(sym);
 
     auto& d = domain::market::MarketDataService::instance().liveData(sym);
     if (!d.valid() || d.dailyBar().close() <= 0.0) {
@@ -210,12 +207,8 @@ void MarketDataBridge::updateSnapshot(const QString& symbol) {
 void MarketDataBridge::ensureWatchSymbol(const QString& symbol) {
     if (symbol.isEmpty()) return;
 
-    QString resolved = symbol;
-    std::string sym = symbol.toStdString();
-    if (sym.find('.') == std::string::npos && sym.size() == 6) {
-        auto symObj = foundation::market::AStockSymbol::fromCode(sym);
-        if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
-    }
+    QString resolved = QString::fromStdString(
+        foundation::market::AStockSymbol::normalizeToFullSymbol(symbol.toStdString()));
 
     m_trackedSymbols.insert(resolved);
     updateSnapshot(resolved);
@@ -234,12 +227,8 @@ void MarketDataBridge::activateDefaultWatchlist() {
 }
 
 QVariantMap MarketDataBridge::resolveInstrument(const QString& symbol) const {
-    QString resolved = symbol;
-    std::string sym = symbol.toStdString();
-    if (sym.find('.') == std::string::npos && sym.size() == 6) {
-        auto symObj = foundation::market::AStockSymbol::fromCode(sym);
-        if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
-    }
+    QString resolved = QString::fromStdString(
+        foundation::market::AStockSymbol::normalizeToFullSymbol(symbol.toStdString()));
 
     auto it = m_marketSnapshots.find(resolved);
     if (it != m_marketSnapshots.end()) return it->toMap();
@@ -303,12 +292,8 @@ QString MarketDataBridge::getNextTradingDay(const QString& d) {
 
 void MarketDataBridge::subscribeRealtime(const QStringList& symbols) {
     for (const auto& s : symbols) {
-        QString resolved = s;
-        std::string sym = s.toStdString();
-        if (sym.find('.') == std::string::npos && sym.size() == 6) {
-            auto symObj = foundation::market::AStockSymbol::fromCode(sym);
-            if (symObj.isValid()) resolved = QString::fromStdString(symObj.fullSymbol());
-        }
+        QString resolved = QString::fromStdString(
+            foundation::market::AStockSymbol::normalizeToFullSymbol(s.toStdString()));
         m_trackedSymbols.insert(resolved);
         engine::GmSessionEngine::instance().subscribeTick(resolved.toStdString());
     }
@@ -525,10 +510,7 @@ static QVariantList loadDailyBars(const std::string& gmSym, int lookback) {
 void MarketDataBridge::loadHistory(const QString& code, int period) {
     if (code.isEmpty()) return;
     std::string sym = code.toStdString();
-    if (sym.find('.') == std::string::npos && sym.size() == 6) {
-        auto obj = foundation::market::AStockSymbol::fromCode(sym);
-        if (obj.isValid()) sym = obj.fullSymbol();
-    }
+    sym = foundation::market::AStockSymbol::normalizeToFullSymbol(sym);
     m_symbol = QString::fromStdString(sym);
     m_period = period;
     resetSyncState();
@@ -538,10 +520,7 @@ void MarketDataBridge::loadHistory(const QString& code, int period) {
 void MarketDataBridge::loadFromDB(const QString& code, int period) {
     if (!m_model) return;
     std::string sym = code.toStdString();
-    if (sym.find('.') == std::string::npos && sym.size() == 6) {
-        auto obj = foundation::market::AStockSymbol::fromCode(sym);
-        if (obj.isValid()) sym = obj.fullSymbol();
-    }
+    sym = foundation::market::AStockSymbol::normalizeToFullSymbol(sym);
     m_symbol = QString::fromStdString(sym);
     m_period = period;
     resetSyncState();

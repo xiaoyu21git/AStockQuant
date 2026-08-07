@@ -78,17 +78,14 @@ void TradingSystem::initialize(IAccountProvider* provider) {
 }
 
 bool TradingSystem::isReady() const {
-    auto& gse = engine::GmSessionEngine::instance();
     return m_impl->m_initialized
-        && gse.m_impl
-        && gse.m_impl->sessionReady.load()
+        && engine::GmSessionEngine::instance().isSessionReady()
         && m_impl->m_accountProvider
         && m_impl->m_accountProvider->hasReceivedData();
 }
 
 bool TradingSystem::isTradingSession() const {
-    auto& gse = engine::GmSessionEngine::instance();
-    return gse.m_impl && gse.m_impl->sessionReady.load();
+    return engine::GmSessionEngine::instance().isSessionReady();
 }
 bool TradingSystem::isAfterHoursSession() const {
     return engine::GmSessionEngine::instance().isAfterHoursSession();

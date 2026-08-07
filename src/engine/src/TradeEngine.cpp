@@ -21,12 +21,6 @@ std::string toGm(const std::string& internal) {
     if (!sym.isValid()) return "";
     return sym.gmSymbol();
 }
-std::string fromGm(const std::string& gm) {
-    if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";
-    if (gm.compare(0, 5, "SZSE.") == 0) return gm.substr(5) + ".SZ";
-    if (gm.compare(0, 4, "BSE.")  == 0) return gm.substr(4) + ".BJ";
-    return gm;
-}
 } // anonymous namespace
 
 // ═══════════════════════════════════════════════════════════════════

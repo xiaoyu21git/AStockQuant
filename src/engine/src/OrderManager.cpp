@@ -1,5 +1,6 @@
 // OrderManager.cpp — 订单管理器实现，共享 GmSessionEngine 的 ::Strategy
 #include "OrderManager.h"
+#include "GmSessionEngine.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 #include <mutex>
@@ -7,17 +8,11 @@
 namespace engine {
 
 namespace {
-std::string fromGm(const std::string& gm) {
-    if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";
-    if (gm.compare(0, 5, "SZSE.") == 0) return gm.substr(5) + ".SZ";
-    if (gm.compare(0, 4, "BSE.")  == 0) return gm.substr(4) + ".BJ";
-    return gm;
-}
 
 OrderRecord fromGmOrder(const Order& o) {
     OrderRecord r;
     r.brokerOrderId = o.cl_ord_id;
-    r.symbol        = fromGm(o.symbol);
+    r.symbol        = GmSessionEngine::fromGmSymbol(o.symbol);
     r.strategyId    = o.strategy_id;
     r.price         = static_cast<double>(o.price);
     r.quantity      = static_cast<int64_t>(o.volume);

@@ -128,7 +128,7 @@ public:
     static std::string toGmSymbol(const std::string& internal);
     static std::string fromGmSymbol(const std::string& gm);
 
-    // Impl — public，SessionStrategy 通过它访问回调
+    // Impl — SessionStrategy 通过 Impl& 参数访问
     struct Impl {
         std::atomic<bool> initialized{false};
         std::atomic<bool> sessionReady{false};  // on_init() 后置 true
@@ -136,14 +136,26 @@ public:
     };
     struct StrategyDeleter { void operator()(void*); };
 
-    // 内部状态 — 由 SessionStrategy（匿名 namespace）直接访问
-    std::unique_ptr<Impl> m_impl;
+    /// @brief 会话是否就绪（on_init 回调已完成）
+    [[nodiscard]] bool isSessionReady() const {
+        return m_impl && m_impl->sessionReady.load(std::memory_order_acquire);
+    }
+
+    /// @brief 内部访问器 — GmSessionEngine.cpp 的 SessionStrategy 使用
+    /// 外部代码请使用 isSessionReady() 等命名的公共方法
+    Impl* impl() { return m_impl.get(); }
+    const Impl* impl() const { return m_impl.get(); }
+
+    // ── SessionStrategy 需要直接访问的内部状态 ──
     std::unique_ptr<void, StrategyDeleter> m_strategy;
     std::mutex m_tickMutex;
     std::unordered_map<std::string, int> m_tickRefCount;
     std::unordered_map<std::string, GmQuote>  m_quoteCache;     // tick 实时缓存
 
 private:
+
+private:
+    std::unique_ptr<Impl> m_impl;  // 仅通过 isSessionReady() / impl() 访问
     GmSessionEngine() = default;
     ~GmSessionEngine();
     GmSessionEngine(const GmSessionEngine&) = delete;

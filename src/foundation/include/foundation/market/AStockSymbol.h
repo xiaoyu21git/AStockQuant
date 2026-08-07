@@ -35,6 +35,13 @@ public:
     /// @brief 从纯 6 位代码构造，根据前缀自动推断交易所
     static AStockSymbol fromCode(const std::string& code);
 
+    /// @brief 将任意格式标准化为完整 symbol（codeOnly → fullSymbol，有后缀原样返回）
+    /// "000001"   → "000001.SZ"（根据前缀推断交易所）
+    /// "300001"   → "300001.SZ"
+    /// "000001.SZ"→ "000001.SZ"（已有后缀，原样返回）
+    /// "abc"      → "abc"（非 6 位代码，原样返回）
+    [[nodiscard]] static std::string normalizeToFullSymbol(const std::string& input);
+
     [[nodiscard]] bool isValid() const noexcept { return !m_code.empty(); }
 
     /// @brief 6 位代码 如 "000001"

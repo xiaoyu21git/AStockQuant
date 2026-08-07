@@ -26,84 +26,13 @@ RuleEvaluationResult LocalRuleEvaluationService::evaluate(
     rules::RuleSetId ruleSetId,
     const rules::RuleEvaluationContext& context)
 {
-    const auto beginAt = std::chrono::steady_clock::now();
-    if (context.phase() != rules::RuleEvaluationPhase::LowLatency
-        || context.candidateSignalCount() != kSingleSignalCount
-        || signal.strategyInstanceId() != context.strategyInstanceId()) {
-        return RuleEvaluationResult(
-            false,
-            signal,
-            RuleRejectReason::RuleTemplateBlocked,
-            kZeroLatency);
-    }
-
-    std::vector<rules::RuleId> selectedRules;
-    {
-        const std::lock_guard<std::mutex> lock(ruleSetsMutex_);
-        const auto found = std::find_if(
-            ruleSets_.begin(),
-            ruleSets_.end(),
-            [ruleSetId](const rules::RuleSet& set) {
-                return set.id() == ruleSetId;
-            });
-        if (found == ruleSets_.end()) {
-            return RuleEvaluationResult(
-                false,
-                signal,
-                RuleRejectReason::RuleTemplateBlocked,
-                kZeroLatency);
-        }
-        selectedRules = found->rules();
-    }
-
-    if (!signal.isValid()) {
-        return RuleEvaluationResult(
-            false,
-            signal,
-            RuleRejectReason::InvalidSignal,
-            kZeroLatency);
-    }
-
-    bool passed = true;
-    RuleRejectReason rejectReason = RuleRejectReason::None;
-    std::string failDetail;
-    for (rules::RuleId ruleId : selectedRules) {
-        // 买入单: 分数不能为负；卖出单: 不检查分数
-        if (ruleId == kRuleScoreNonNegative
-            && signal.side() == RuntimeOrderSide::Buy
-            && signal.score() < kMinSignalScore) {
-            passed = false;
-            rejectReason = RuleRejectReason::RuleTemplateBlocked;
-            failDetail = "score≥0 不通过(score=" + std::to_string(signal.score()) + ")";
-            break;
-        }
-        if (ruleId == kRuleTargetWeightAbsLimit
-            && std::fabs(signal.targetWeight()) > kMaxAbsoluteTargetWeight) {
-            passed = false;
-            rejectReason = RuleRejectReason::RiskGuardBlocked;
-            failDetail = "|targetWeight|≤1.0 不通过(weight=" + std::to_string(signal.targetWeight()) + ")";
-            break;
-        }
-    }
-
-    if (!passed) {
-        char symBuf[16];
-        std::snprintf(symBuf, sizeof(symBuf), "%06u", signal.instrumentId().value);
-        INTERNAL_WARN_STREAM << "[RuleEval] 规则拒绝: " << symBuf
-                             << " " << failDetail
-                             << " score=" << signal.score()
-                             << " targetWeight=" << signal.targetWeight()
-                             << " side=" << (signal.side() == RuntimeOrderSide::Buy ? 'B' : 'S');
-    }
-
-    const auto endAt = std::chrono::steady_clock::now();
-    const auto latency =
-        std::chrono::duration_cast<std::chrono::microseconds>(endAt - beginAt);
-    return RuleEvaluationResult(
-        passed,
-        signal,
-        rejectReason,
-        latency);
+    // 委托给 evaluateBatch()，消除重复的规则检查逻辑
+    std::vector<StrategySignal> signals{signal};
+    std::vector<RuleEvaluationResult> results;
+    [[maybe_unused]] auto batchResult = evaluateBatch(signals, ruleSetId, context, results);
+    return results.empty()
+        ? RuleEvaluationResult(false, signal, RuleRejectReason::RuleTemplateBlocked, kZeroLatency)
+        : results.front();
 }
 
 StrategyServiceFlowResult LocalRuleEvaluationService::evaluateBatch(
@@ -115,7 +44,8 @@ StrategyServiceFlowResult LocalRuleEvaluationService::evaluateBatch(
     outputResults.clear();
     outputResults.reserve(candidateSignals.size());
 
-    if (context.phase() != rules::RuleEvaluationPhase::Batch) {
+    if (context.phase() != rules::RuleEvaluationPhase::Batch
+        && context.phase() != rules::RuleEvaluationPhase::LowLatency) {
         return StrategyServiceFlowResult(StrategyServiceFlowCode::InvalidInput);
     }
 

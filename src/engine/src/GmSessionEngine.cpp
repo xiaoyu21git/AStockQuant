@@ -323,12 +323,6 @@ private:
 
 int toGmSide(OrderSide s) { return s == OrderSide::Buy ? 1 : 2; }
 int toGmType(OrderType t) { return t == OrderType::Limit ? 1 : 2; }
-std::string fromGm(const std::string& gm) {
-    if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";
-    if (gm.compare(0, 5, "SZSE.") == 0) return gm.substr(5) + ".SZ";
-    if (gm.compare(0, 4, "BSE.")  == 0) return gm.substr(4) + ".BJ";
-    return gm;
-}
 
 } // anonymous namespace
 

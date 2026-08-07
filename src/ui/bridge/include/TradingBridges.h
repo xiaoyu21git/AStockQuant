@@ -11,6 +11,7 @@
 #include <QVariantList>
 #include <QTimer>
 #include <QDateTime>
+#include <QMutex>
 #include "foundation/Utils/Uuid.h"
 
 namespace bridge {
@@ -99,6 +100,7 @@ private:
     bool m_initialized{false};
     QVariantMap m_tradingConfig;
     QVariantList m_recentOrders;
+    mutable QMutex m_recentOrdersMutex;        // 保护 m_recentOrders 多线程访问
     foundation::utils::Uuid m_orderUpdateSub;  // EventBus subscription
     QString m_lastErrorMessage;
 };
@@ -147,6 +149,7 @@ private:
 
     bool m_initialized{false};
     QVariantList m_recentOrderStatuses;
+    mutable QMutex m_orderStatusesMutex;       // 保护 m_recentOrderStatuses 多线程访问
 };
 
 // ═══════════════════════════════════════════════════════════════════
