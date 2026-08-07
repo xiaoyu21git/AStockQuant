@@ -176,7 +176,10 @@ public:
                 cached.bids.push_back({td.bidPrices[i], td.bidVolumes[i]});
             for (size_t i = 0; i < td.askPrices.size() && i < td.askVolumes.size(); ++i)
                 cached.asks.push_back({td.askPrices[i], td.askVolumes[i]});
-            e.m_quoteCache[td.symbol] = std::move(cached);
+            {
+                std::lock_guard<std::mutex> lock(e.m_tickMutex);
+                e.m_quoteCache[td.symbol] = std::move(cached);
+            }
         }
 
         domain::market::MarketDataService::instance().onTick(td);
