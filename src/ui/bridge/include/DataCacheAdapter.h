@@ -34,9 +34,9 @@ public:
     cleaning::DataCache::ArrowWriteToken beginArrowWrite(int dataId,
         const std::vector<std::string>& fieldNames,
         const std::unordered_set<std::string>& numericFields);
-    void appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
+    void appendArrowBatch(const cleaning::DataCache::ArrowWriteToken& token,
                            const std::vector<foundation::json::JsonFacade>& rows);
-    void appendArrowTable(cleaning::DataCache::ArrowWriteToken token,
+    void appendArrowTable(const cleaning::DataCache::ArrowWriteToken& token,
                            const std::shared_ptr<arrow::Table>& table);
     void finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount);
     QVariantList getDataSetById(int dataId);

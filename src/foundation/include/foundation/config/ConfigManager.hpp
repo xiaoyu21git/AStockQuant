@@ -53,11 +53,6 @@ public:
     // 批量变更接口
     void batch_set(const std::vector<ConfigChange>& changes);
 
-    // 快照存储
-    std::map<std::string, ConfigNode::Ptr> snapshots_;
-    // 变更历史
-    std::vector<std::vector<ConfigChange>> change_history_;
-
     // 快照保存与回滚
     void save_snapshot(const std::string& snapshot_id);
     void rollback(const std::string& snapshot_id);
@@ -235,7 +230,11 @@ private:
     std::map<std::string, ConfigNode::Ptr> moduleConfigs_;
     ConfigNode::Ptr runtimeConfig_;
     ConfigNode::Ptr appConfig_;  // 缓存的应用配置
-    
+
+    // 快照存储与变更历史
+    std::map<std::string, ConfigNode::Ptr> snapshots_;
+    std::vector<std::vector<ConfigChange>> change_history_;
+
     std::string currentProfile_;
     std::string configBaseDir_;
     

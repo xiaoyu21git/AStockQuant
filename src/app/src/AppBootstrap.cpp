@@ -338,7 +338,7 @@ bool AppBootstrap::initServices()
                 return false;
             }
 
-            engine::register_engine_event_bus(m_eventBus.get());
+            engine::register_engine_event_bus(m_eventBus);
             INTERNAL_INFO_STREAM << "[AppBootstrap] Application EventBus initialized";
 
             // 启动事件风控订阅器（订阅 news.* 事件，动态调整风控参数）

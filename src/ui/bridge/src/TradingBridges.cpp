@@ -250,7 +250,7 @@ void TradeExecutionBridge::ensureInitialized() {
     // ── 直接订阅 EventBus, 不依赖 TradeExecutionEngine 的 recentOrders ──
     //    确保 quickClosePosition 等直连网关的订单也能收到状态回调
     {
-        auto* bus = engine::get_engine_event_bus();
+        auto bus = engine::get_engine_event_bus();
         if (bus) {
             m_orderUpdateSub = bus->subscribe("trading.order.updated",
                 [this](const engine::EventFormat& e) {
@@ -572,16 +572,13 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
         double limitRatio = domain::trading::boardLimitRatio(found->symbol);
         price = (side == "SELL") ? (preClose * (1.0 - limitRatio))
                                  : (preClose * (1.0 + limitRatio));
-        if (m == "futures") price = qRound(price);
-        else if (m == "options") price = qRound(price * 10000.0) / 10000.0;
-        else price = qRound(price * 100.0) / 100.0;
+        price = domain::trading::roundPriceForBoard(price, m.toStdString());
     }
     if (price <= 0) price = found->lastPrice > 0 ? found->lastPrice : found->costPrice;
     if (price <= 0) price = 0.01;
 
     // 3. 直连网关, 不做本地风控/T+1/数量校验, 全部由网关裁决
-    auto* strategy = static_cast<::Strategy*>(
-        engine::GmSessionEngine::instance().strategy());
+    auto* strategy = engine::GmSessionEngine::instance().strategy();
     if (!strategy) {
         out["message"] = QStringLiteral("交易会话未就绪");
         return out;
@@ -872,7 +869,7 @@ void RiskControlBridge::refresh() {
     };
 
     double exposurePct = totalAsset > 0.0 ? (marketValue / totalAsset) * 100.0 : 0.0;
-    double varUsage = exposurePct * 1.49;  // 简化的VaR使用率
+    double varUsage = domain::strategy::RiskManager::estimateVar(exposurePct);
 
     check(m_exposurePct, exposurePct);
     check(m_varUsagePct, varUsage);

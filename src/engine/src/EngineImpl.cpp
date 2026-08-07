@@ -338,15 +338,15 @@ Error EngineImpl::initialize(const Config& config) {
         INTERNAL_DEBUG_STREAM << "Clock created at: " << now_str;
         
         // 创建事件总线
-        event_bus_ = EventBus::create();
+        event_bus_ = std::shared_ptr<EventBus>(EventBus::create());
         if (!event_bus_) {
             throw std::runtime_error("Failed to create event bus");
         }
-        
+
         INTERNAL_DEBUG_STREAM << "Event bus created";
 
         // 向全局注册这只引擎 EventBus，供 Python 绑定等模块共享
-        register_engine_event_bus(event_bus_.get());
+        register_engine_event_bus(event_bus_);
 
         // 注册 Trigger → 引擎 事件发布桥接，使 EventEmitAction 产生的新事件
         // 能通过 EngineImpl::publish_event 回到统一事件处理管线
@@ -561,7 +561,7 @@ Error EngineImpl::reset() {
         // 重置事件总线
         if (event_bus_) {
             // EventBus没有reset方法，创建新的
-            event_bus_ = EventBus::create();
+            event_bus_ = std::shared_ptr<EventBus>(EventBus::create());
         }
         
         // 重置时钟

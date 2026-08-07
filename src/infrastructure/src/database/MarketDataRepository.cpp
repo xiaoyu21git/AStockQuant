@@ -1,4 +1,5 @@
 #include "database/MarketDataRepository.h"
+#include "database/SqlEscape.h"
 #include "DataSourceRegistry.h"
 
 #include <sstream>
@@ -9,17 +10,7 @@ namespace astock::infrastructure::database {
 
 // ═══ 辅助函数 ═══
 
-static std::string safeStr(const std::string& v) {
-    std::string escaped;
-    escaped.reserve(v.size() + 2);
-    escaped += '\'';
-    for (char c : v) {
-        if (c == '\'' || c == '\\') escaped += '\\';
-        escaped += c;
-    }
-    escaped += '\'';
-    return escaped;
-}
+using astock::database::safeStr;
 
 static std::string symbolList(const std::vector<std::string>& symbols) {
     std::ostringstream ss;

@@ -67,4 +67,12 @@ inline double boardLimitRatio(const std::string& symbol) noexcept {
     return 0.10;  // 主板
 }
 
+// ── 价格板级舍入 ──
+// 期货: 整数; 期权: 4位小数; A股: 2位小数 (分)
+inline double roundPriceForBoard(double price, const std::string& board) noexcept {
+    if (board == "futures") return std::round(price);
+    if (board == "options") return std::round(price * 10000.0) / 10000.0;
+    return std::round(price * 100.0) / 100.0;
+}
+
 } // namespace domain::trading

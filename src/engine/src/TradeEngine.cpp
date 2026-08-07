@@ -3,6 +3,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
+#include "GmSessionEngine.h"
 #include "foundation/market/AStockSymbol.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
@@ -13,8 +14,6 @@ namespace engine {
 // ═══════════════════════════════════════════════════════════════════
 
 namespace {
-int toGmSide(OrderSide s)                 { return s == OrderSide::Buy ? 1 : 2; }
-int toGmOrderType(OrderType t)             { return t == OrderType::Limit ? 1 : 2; }
 int toGmPositionEffect(domain::trading::PositionEffect pe) { return static_cast<int>(pe) + 1; }
 std::string toGm(const std::string& internal) {
     auto sym = foundation::market::AStockSymbol::fromString(internal);
@@ -36,11 +35,11 @@ TradeEngine& TradeEngine::instance() {
 // 初始化 — 接收 GmSdkSingleton 持有的 Strategy
 // ═══════════════════════════════════════════════════════════════════
 
-bool TradeEngine::initialize(void* strategy) {
+bool TradeEngine::initialize(::Strategy* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
 
-    auto* bus = get_engine_event_bus();
+    auto bus = get_engine_event_bus();
     if (bus) {
         m_orderSub = bus->subscribe("trading.order.updated",
             [this](const EventFormat& e) {
@@ -70,7 +69,7 @@ bool TradeEngine::initialize(void* strategy) {
 }
 
 void TradeEngine::shutdown() {
-    auto* bus = get_engine_event_bus();
+    auto bus = get_engine_event_bus();
     if (bus) {
         if (!m_orderSub.is_null()) bus->unsubscribe(m_orderSub);
         if (!m_fillSub.is_null())  bus->unsubscribe(m_fillSub);
@@ -88,7 +87,7 @@ bool TradeEngine::initialized() const {
 
 OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     OrderResult r;
-    auto* s = static_cast<::Strategy*>(m_strategy);
+    auto* s = m_strategy;
     if (!s) { r.message = "TradeEngine not initialized"; return r; }
     std::string gmSym = toGm(req.symbol());
     if (gmSym.empty()) { r.message = "invalid symbol: " + req.symbol(); return r; }
@@ -96,9 +95,9 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     // 构造 gmsdk 原生结构体，字段完整映射
     ::OrderRequest gmReq{};
     std::strncpy(gmReq.symbol, gmSym.c_str(), sizeof(gmReq.symbol) - 1);
-    gmReq.side            = toGmSide(req.side());
+    gmReq.side            = GmSessionEngine::toGmSide(req.side());
     gmReq.position_effect = toGmPositionEffect(req.positionEffect());
-    gmReq.order_type      = toGmOrderType(req.orderType());
+    gmReq.order_type      = GmSessionEngine::toGmOrderType(req.orderType());
     gmReq.price           = req.price();
     gmReq.volume          = static_cast<long long>(req.quantity());
     gmReq.stop_price      = req.extensionAs<double>(
@@ -131,7 +130,7 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
 
 bool TradeEngine::cancelOrder(const std::string& orderId) {
     if (orderId.empty()) return false;
-    auto* s = static_cast<::Strategy*>(m_strategy);
+    auto* s = m_strategy;
     if (!s) return false;
 
     std::string brokerId, clOrdKey;
@@ -168,7 +167,7 @@ std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest
     std::vector<OrderResult> results;
     if (reqs.empty()) return results;
 
-    auto* s = static_cast<::Strategy*>(m_strategy);
+    auto* s = m_strategy;
     if (!s) {
         for (size_t i = 0; i < reqs.size(); ++i) {
             OrderResult r; r.message = "TradeEngine not initialized"; results.push_back(r);
@@ -185,7 +184,7 @@ std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest
         gmSyms[i] = toGm(reqs[i].symbol());
         if (gmSyms[i].empty()) continue;
         std::strncpy(gmReq.symbol, gmSyms[i].c_str(), sizeof(gmReq.symbol) - 1);
-        gmReq.side       = toGmSide(reqs[i].side());
+        gmReq.side       = GmSessionEngine::toGmSide(reqs[i].side());
         gmReq.volume     = static_cast<double>(reqs[i].quantity());
         gmReq.price      = reqs[i].price();
         gmReq.order_type = reqs[i].orderType() == OrderType::Market

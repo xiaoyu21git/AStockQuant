@@ -16,6 +16,9 @@
 
 #include "../../domain/trading/TradingTypes.h"
 
+// gmsdk 前向声明 (避免头文件依赖)
+class Strategy;
+
 namespace engine {
 
 // ═══════════════════════════════════════════════════════════════════
@@ -119,7 +122,7 @@ public:
     double fetchPreClose(const std::string& symbol);
 
     // ── 底层 Strategy 指针 ──
-    void* strategy() const;
+    ::Strategy* strategy() const;
 
     // ── GM SDK 全局互斥锁（非线程安全 SDK，JMC 和同步线程互斥）──
     static std::recursive_mutex& gmSdkMutex();
@@ -128,13 +131,17 @@ public:
     static std::string toGmSymbol(const std::string& internal);
     static std::string fromGmSymbol(const std::string& gm);
 
+    // ── 订单属性映射 (统一定义，消除 TradeEngine 重复) ──
+    static int toGmSide(OrderSide s);
+    static int toGmOrderType(OrderType t);
+
     // Impl — SessionStrategy 通过 Impl& 参数访问
     struct Impl {
         std::atomic<bool> initialized{false};
         std::atomic<bool> sessionReady{false};  // on_init() 后置 true
         std::thread       strategyThread;
     };
-    struct StrategyDeleter { void operator()(void*); };
+    struct StrategyDeleter { void operator()(::Strategy*) noexcept; };
 
     /// @brief 会话是否就绪（on_init 回调已完成）
     [[nodiscard]] bool isSessionReady() const {
@@ -146,15 +153,17 @@ public:
     Impl* impl() { return m_impl.get(); }
     const Impl* impl() const { return m_impl.get(); }
 
-    // ── SessionStrategy 需要直接访问的内部状态 ──
-    std::unique_ptr<void, StrategyDeleter> m_strategy;
+    // ── 行情缓存 (供 on_tick 回调写入) ──
+    void cacheTickQuote(const std::string& symbol, GmQuote&& quote);
+
+private:
+
+private:
+    std::unique_ptr<::Strategy, StrategyDeleter> m_strategy;
     std::mutex m_tickMutex;
     std::unordered_map<std::string, int> m_tickRefCount;
-    std::unordered_map<std::string, GmQuote>  m_quoteCache;     // tick 实时缓存
+    std::unordered_map<std::string, GmQuote> m_quoteCache;     // tick 实时缓存
 
-private:
-
-private:
     std::unique_ptr<Impl> m_impl;  // 仅通过 isSessionReady() / impl() 访问
     GmSessionEngine() = default;
     ~GmSessionEngine();

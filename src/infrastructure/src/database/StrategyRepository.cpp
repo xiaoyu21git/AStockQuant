@@ -1,4 +1,5 @@
 #include "database/StrategyRepository.h"
+#include "database/ConnectionGuard.h"
 #include "database/NativePgConnectionPool.h"
 #include "foundation/log/logging.hpp"
 #include <QJsonDocument>

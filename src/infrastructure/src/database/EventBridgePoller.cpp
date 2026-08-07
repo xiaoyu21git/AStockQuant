@@ -1,4 +1,5 @@
 #include "database/EventBridgePoller.h"
+#include "database/ConnectionGuard.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/ISqlDatabase.h"
 #include "../../../engine/include/GlobalEventBusRegistry.h"
@@ -44,21 +45,20 @@ using P = astock::database::SqlParam;
 void EventBridgePoller::pollLoop() {
     while (m_running.load()) {
         try {
-            engine::EventBus* bus = engine::get_engine_event_bus();
+            auto bus = engine::get_engine_event_bus();
             if (!bus) {
                 std::this_thread::sleep_for(std::chrono::seconds(60));
                 continue;
             }
 
-            std::shared_ptr<astock::database::ISqlDatabase> db =
-                astock::database::NativePgConnectionPool::instance().getConnection();
-            if (!db || !db->isOpen()) {
+            astock::database::ConnectionGuard conn;
+            if (!conn.isValid()) {
                 std::this_thread::sleep_for(std::chrono::seconds(10));
                 continue;
             }
 
             // 查询未消费事件 (最多 200 条/轮)
-            auto rows = db->executeQuery(
+            auto rows = conn->executeQuery(
                 "SELECT id, event_type, data, metadata "
                 "FROM live.event_bridge "
                 "WHERE consumed = FALSE "
@@ -113,7 +113,7 @@ void EventBridgePoller::pollLoop() {
                 // 标记已消费
                 std::ostringstream updateSql;
                 updateSql << "UPDATE live.event_bridge SET consumed=TRUE WHERE id=" << id;
-                db->executeUpdate(updateSql.str());
+                conn->executeUpdate(updateSql.str());
             }
 
             m_totalPublished += published;
@@ -127,7 +127,7 @@ void EventBridgePoller::pollLoop() {
 
             // 每 10 轮清理一次旧数据
             if (m_pollCount % 10 == 0) {
-                db->executeUpdate(
+                conn->executeUpdate(
                     "DELETE FROM live.event_bridge "
                     "WHERE created_at < NOW() - INTERVAL '7 days'");
             }

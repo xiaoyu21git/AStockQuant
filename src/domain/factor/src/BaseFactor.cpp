@@ -1,4 +1,5 @@
 #include "domain/factor/include/BaseFactor.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 
 #include "domain/factor/include/FactorConfigAccess.h"

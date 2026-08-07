@@ -5,13 +5,14 @@
 // ═════════════════════════════════════════════════════════════════════════
 
 #include <cstdint>
+#include "../../trading/include/TradingCosts.h"
 
 namespace domain::backtest {
 
 struct FillSimulatorParams {
-    double commissionRate{0.0003};
-    double slippageRate{0.001};
-    double taxRate{0.001};        // A股印花税(仅卖出)
+    double commissionRate{trading::TradingCosts::kDefaultCommissionRate};
+    double slippageRate{trading::TradingCosts::kDefaultSlippageRate};
+    double taxRate{trading::TradingCosts::kDefaultStampTaxRate};   // A股印花税(仅卖出)
 };
 
 struct FillSimulatorResult {

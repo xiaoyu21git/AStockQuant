@@ -16,8 +16,6 @@
 #include <unordered_map>
 #include <vector>
 
-namespace engine { struct AccountInfo; }
-
 namespace domain::strategy {
 
 /// @brief 持仓查询接口（解耦 AccountEngine 全局单例）
@@ -50,16 +48,14 @@ public:
     /// @brief 从策略原始信号生成持仓感知订单
     /// @param rawOrders 策略原始信号订单（含 symbol / side / targetWeight / signalScore）
     /// @param posProvider 当前持仓查询接口
-    /// @param account 账户信息（totalAsset 用于计算目标股数）
-    /// @param priceForWeight 参考价格（用于权重→股数换算）
+    /// @param maxOrderQuantity 权重建仓基数（targetWeight × base = 目标股数）
     /// @param strategyId 策略ID（透传给 OrderBuilder）
     /// @param accountId 账户ID（透传给 OrderBuilder）
     /// @return 最终可提交的订单列表（已去重、已校验最小手数）
     [[nodiscard]] std::vector<domain::trading::OrderRequest> generate(
         const std::vector<domain::trading::OrderRequest>& rawOrders,
         const IPositionProvider& posProvider,
-        const engine::AccountInfo& account,
-        double priceForWeight,
+        std::uint32_t maxOrderQuantity,
         const std::string& strategyId,
         const std::string& accountId) const;
 
@@ -70,15 +66,17 @@ private:
     };
 
     /// @brief 计算买入增量: 新开仓 → OPEN, 加仓 → ADD, 矛盾 → 返回 0
+    /// 目标股数 = targetWeight × maxOrderQuantity（取整到整手）
     [[nodiscard]] OrderDelta computeBuyDelta(
-        std::int64_t currentQty, double currentWeight,
-        double targetWeight, double priceForWeight, double totalAsset) const;
+        std::int64_t currentQty, double targetWeight,
+        std::uint32_t maxOrderQuantity) const;
 
     /// @brief 计算卖出减量: strategy signal(targetWeight>0) → REDUCE/CLOSE,
     ///        rule exit(requestedQty>0) → 尊重显式数量, 否则 CLOSE
+    /// 目标股数 = targetWeight × maxOrderQuantity（取整到整手）
     [[nodiscard]] OrderDelta computeSellDelta(
-        std::int64_t currentQty, double currentWeight,
-        double targetWeight, double priceForWeight, double totalAsset,
+        std::int64_t currentQty, double targetWeight,
+        std::uint32_t maxOrderQuantity,
         std::int64_t requestedQty) const;
 
     /// @brief 买单总敞口压缩: 超出 100% 时按等比缩放所有买单

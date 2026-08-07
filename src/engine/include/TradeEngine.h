@@ -21,7 +21,7 @@ class TradeEngine {
 public:
     static TradeEngine& instance();
 
-    bool initialize(void* strategy);
+    bool initialize(::Strategy* strategy);
     void shutdown();
     bool initialized() const;
 
@@ -65,7 +65,7 @@ private:
     mutable std::mutex m_ordersMutex;
     std::unordered_map<std::string, OrderRecord> m_activeOrders; // key=clOrdId
 
-    void* m_strategy = nullptr;
+    ::Strategy* m_strategy = nullptr;
     foundation::utils::Uuid m_orderSub;
     foundation::utils::Uuid m_fillSub;
     OrderUpdateFn m_onOrderUpdate;

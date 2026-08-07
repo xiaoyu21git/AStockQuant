@@ -6,6 +6,7 @@
 #include "BaseFactor.h"
 #include "HistoricalView.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 #include <algorithm>
 #include <cmath>

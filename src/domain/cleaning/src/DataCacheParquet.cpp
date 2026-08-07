@@ -596,34 +596,38 @@ struct ArrowWriteSession : public DataCache::WriteSession {
     std::unordered_set<std::string> numericFields;
 };
 
+void DataCache::WriteSessionDeleter::operator()(WriteSession* p) const noexcept {
+    delete static_cast<ArrowWriteSession*>(p);
+}
+
 DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId)
 {
-    auto session = new ArrowWriteSession();
+    auto session = std::make_unique<ArrowWriteSession>();
     session->dataId = dataId;
     ensureDir(datasetDir(dataId));
     ensureDir(datasetDir(dataId) + "/raw");
     session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
-    return session;
+    return ArrowWriteToken(session.release());
 }
 
 DataCache::ArrowWriteToken DataCache::beginArrowWrite(int dataId,
     const std::vector<std::string>& fieldNames,
     const std::unordered_set<std::string>& numericFields)
 {
-    auto session = new ArrowWriteSession();
+    auto session = std::make_unique<ArrowWriteSession>();
     session->dataId = dataId;
     session->fieldNames = fieldNames;
     session->numericFields = numericFields;
     ensureDir(datasetDir(dataId));
     ensureDir(datasetDir(dataId) + "/raw");
     session->stream = arrow::io::FileOutputStream::Open(dataFilePath(dataId)).ValueOrDie();
-    return session;
+    return ArrowWriteToken(session.release());
 }
 
-void DataCache::appendArrowBatch(ArrowWriteToken token, const std::vector<J>& rows)
+void DataCache::appendArrowBatch(const ArrowWriteToken& token, const std::vector<J>& rows)
 {
     if (!token || rows.empty()) return;
-    auto* s = static_cast<ArrowWriteSession*>(token);
+    auto* s = static_cast<ArrowWriteSession*>(token.get());
 
     // 首次写入：若 schema 未预设则扫描字段
     if (!s->writer) {
@@ -643,11 +647,11 @@ void DataCache::appendArrowBatch(ArrowWriteToken token, const std::vector<J>& ro
     s->totalRows += table->num_rows();
 }
 
-void DataCache::appendArrowTable(ArrowWriteToken token,
+void DataCache::appendArrowTable(const ArrowWriteToken& token,
                                   const std::shared_ptr<arrow::Table>& table)
 {
     if (!token || !table) return;
-    auto* s = static_cast<ArrowWriteSession*>(token);
+    auto* s = static_cast<ArrowWriteSession*>(token.get());
     if (!s->writer) {
         s->schema = table->schema();
         s->writer = arrow::ipc::MakeFileWriter(s->stream, s->schema).ValueOrDie();
@@ -660,11 +664,11 @@ void DataCache::appendArrowTable(ArrowWriteToken token,
 void DataCache::finishArrowWrite(ArrowWriteToken token)
 {
     if (!token) return;
-    auto* s = static_cast<ArrowWriteSession*>(token);
+    auto* s = static_cast<ArrowWriteSession*>(token.get());
     if (s->writer) s->writer->Close();
     s->stream.reset();
     INTERNAL_INFO_STREAM << "[DataCache] saved Arrow IPC " << dataFilePath(s->dataId) << ": " << s->totalRows << " rows x " << s->fieldNames.size() << " cols";
-    delete s;
+    // token 析构时 WriteSessionDeleter 自动 delete s
 }
 
 } // namespace cleaning

@@ -191,9 +191,9 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             std::string path = cleaning::DataCache::instance().dataFilePath(dataSetId);
             auto inR = arrow::io::ReadableFile::Open(path);
             if (!inR.ok()) { emit self->dataSetCleaned(dataSetId, -1, "无法打开数据文件", 0, 0); return; }
-            auto rdR = arrow::ipc::RecordBatchFileReader::Open(inR.ValueOrDie());
+            auto rdR = arrow::ipc::RecordBatchFileReader::Open(*inR);
             if (!rdR.ok()) { emit self->dataSetCleaned(dataSetId, -1, "无法读取数据文件", 0, 0); return; }
-            auto reader = rdR.ValueOrDie();
+            auto reader = *rdR;
             int numBatches = reader->num_record_batches();
             if (numBatches == 0) { emit self->dataSetCleaned(dataSetId, -1, "数据集为空", 0, 0); return; }
 
@@ -260,7 +260,13 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             INTERNAL_INFO_STREAM << "[CleaningSvc] rules=" << ruleCount << " batches=" << numBatches;
 
             for (int bi = 0; bi < numBatches; ++bi) {
-                auto batch = reader->ReadRecordBatch(bi).ValueOrDie();
+                auto batchR = reader->ReadRecordBatch(bi);
+                if (!batchR.ok()) {
+                    emit self->dataSetCleaned(dataSetId, -1,
+                        QStringLiteral("批次 %1 读取失败: %2").arg(bi).arg(QString::fromStdString(batchR.status().ToString())), 0, 0);
+                    return;
+                }
+                auto batch = *batchR;
                 int64_t n = batch->num_rows();
                 if (n == 0) continue;
                 // 关键修复：pool 精确调成本批 n 行。原逻辑只增不减，导致 pool[n..size] 残留
@@ -341,7 +347,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
                     emit self->cleaningProgress(QString::number(dataSetId), pct, QStringLiteral("清洗中 %1/%2 批").arg(bi + 1).arg(numBatches));
                 }, Qt::QueuedConnection);
             }
-            DataCacheAdapter::instance().finishArrowWrite(token, outputRows);
+            DataCacheAdapter::instance().finishArrowWrite(std::move(token), outputRows);
             message = QString("清洗完成: %1 → %2 条").arg(inputRows).arg(outputRows);
             INTERNAL_INFO_STREAM << "[CleaningSvc] done: " << inputRows << " -> " << outputRows << " rows removed=" << (inputRows - outputRows);
 
@@ -513,9 +519,9 @@ void DataCleaningServiceRefactored::incrementalUpdateDataSet(int dataSetId,
             auto concatR = arrow::ConcatenateTables(tables);
             tables.clear();
             if (!concatR.ok()) { emitFinished(false, 0, QStringLiteral("合并原始数据失败")); return; }
-            auto combineR = concatR.ValueOrDie()->CombineChunks();
+            auto combineR = (*concatR)->CombineChunks();
             if (!combineR.ok()) { emitFinished(false, 0, QStringLiteral("整理原始数据失败")); return; }
-            auto rawTable = combineR.ValueOrDie();
+            auto rawTable = *combineR;
 
             emitProgress(55, QStringLiteral("清洗增量..."));
 

@@ -7,12 +7,10 @@
 namespace domain::scheduler {
 
 BacktestScheduler::BacktestScheduler(std::uint64_t memoryLimitBytes) {
-    m_governor = new ResourceGovernor(memoryLimitBytes);
+    m_governor = std::make_unique<ResourceGovernor>(memoryLimitBytes);
 }
 
-BacktestScheduler::~BacktestScheduler() {
-    delete m_governor;
-}
+BacktestScheduler::~BacktestScheduler() = default;
 
 void BacktestScheduler::setDataService(factor::compute::BacktestDataService* dataService) {
     m_dataService = dataService;

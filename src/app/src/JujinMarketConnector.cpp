@@ -238,7 +238,7 @@ bool JujinMarketConnector::start()
         return true;
     }
 
-    auto* eventBus = engine::get_engine_event_bus();
+    auto eventBus = engine::get_engine_event_bus();
     if (!eventBus) {
         m_lastError = "engine event bus is not initialized";
         return false;
@@ -345,7 +345,7 @@ const std::string& JujinMarketConnector::lastError() const
     return m_lastError;
 }
 
-void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
+void JujinMarketConnector::publishExistingOrders(std::shared_ptr<engine::EventBus> eventBus,
                                                 const std::string& token,
                                                 const std::string& accountId,
                                                 const std::string& runtimeStrategyId,
@@ -356,17 +356,16 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
     if (m_initialOrderSyncThread.joinable())
         m_initialOrderSyncThread.join();
 
-    auto* rawEventBus = eventBus;
     const std::string configuredRuntimeId = trim(runtimeStrategyId);
     const std::unordered_set<std::string> configuredBoundIds = boundStrategyIds;
 
-    m_initialOrderSyncThread = std::thread([this, rawEventBus,
+    m_initialOrderSyncThread = std::thread([this, eventBus,
                                             configuredRuntimeId, configuredBoundIds]() {
         try {
         INTERNAL_DEBUG_STREAM << "[JMC] unfinished-order sync 开始";
 
         auto& engine = engine::GmSessionEngine::instance();
-        auto* s = static_cast<::Strategy*>(engine.strategy());
+        auto* s = engine.strategy();
         if (!s) {
             INTERNAL_ERROR_STREAM << "[JujinMarketConnector] gmsdk strategy not initialized";
             return;
@@ -381,7 +380,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
 
         std::size_t publishedCount = 0, filteredCount = 0;
         for (size_t i = 0; i < arr->count() && !m_stopRequested.load()
-             && rawEventBus && rawEventBus->is_running(); ++i) {
+             && eventBus && eventBus->is_running(); ++i) {
             auto& o = arr->at(i);
 
             std::string orderId = o.cl_ord_id ? o.cl_ord_id : "";
@@ -420,7 +419,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
             event.metadata["source"]   = "snapshot.async";
             event.metadata["event_contract"] = "canonical";
 
-            rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+            eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
             ++publishedCount;
         }
         arr->release();

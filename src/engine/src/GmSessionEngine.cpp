@@ -3,6 +3,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
+#include "TradingSessionConstants.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/market/AStockSymbol.h"
 #include "../../domain/market/include/MarketDataService.h"
@@ -19,11 +20,12 @@ namespace engine {
 // ═══════════════════════════════════════════════════════════════════
 
 double GmQuote::limitPct() const {
-    if (symbol.size() < 3) return 10.0;
+    using namespace engine::session;
+    if (symbol.size() < 3) return kMainBoardLimitRatio;
     std::string code = symbol.substr(0, symbol.size() - 3);
-    if (code.size() == 6 && (code[0] == '3' || (code[0] == '6' && code[1] == '8'))) return 20.0;
-    if (symbol[symbol.size() - 2] == 'B') return 30.0;
-    return 10.0;
+    if (code.size() == 6 && (code[0] == '3' || (code[0] == '6' && code[1] == '8'))) return kGemStarBoardLimitRatio;
+    if (symbol[symbol.size() - 2] == 'B') return kNewThirdBoardLimitRatio;
+    return kMainBoardLimitRatio;
 }
 double GmQuote::changePct() const { return preClose > 0 ? (price - preClose) / preClose * 100.0 : 0; }
 bool GmQuote::isLimitUp()   const { return preClose > 0 && changePct() >= limitPct() - 0.05; }
@@ -65,7 +67,7 @@ public:
     void on_init() override {
         m_impl->sessionReady.store(true);
         try {
-        auto* bus = get_engine_event_bus();
+        auto bus = get_engine_event_bus();
         if (!bus || !bus->is_running()) return;
         auto* arr = get_cash(nullptr);
         if (arr && arr->status() == 0 && arr->count() > 0) {
@@ -147,7 +149,7 @@ public:
             }
         }
 
-        auto* bus = get_engine_event_bus();
+        auto bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.market.tick", Event_Core::EventSource::MARKET_DATA);
             evt.set("symbol", td.symbol);
@@ -176,10 +178,7 @@ public:
                 cached.bids.push_back({td.bidPrices[i], td.bidVolumes[i]});
             for (size_t i = 0; i < td.askPrices.size() && i < td.askVolumes.size(); ++i)
                 cached.asks.push_back({td.askPrices[i], td.askVolumes[i]});
-            {
-                std::lock_guard<std::mutex> lock(e.m_tickMutex);
-                e.m_quoteCache[td.symbol] = std::move(cached);
-            }
+            e.cacheTickQuote(td.symbol, std::move(cached));
         }
 
         domain::market::MarketDataService::instance().onTick(td);
@@ -217,7 +216,7 @@ public:
                              << " filledPrice=" << u.filledPrice
                              << " msg=" << u.message;
 
-        auto* bus = get_engine_event_bus();
+        auto bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.order.updated", Event_Core::EventSource::MARKET_DATA);
             evt.set("broker_order_id", u.brokerOrderId);
@@ -256,7 +255,7 @@ public:
                  local.tm_year + 1900, local.tm_mon + 1, local.tm_mday,
                  local.tm_hour, local.tm_min, local.tm_sec);
 
-        auto* bus = get_engine_event_bus();
+        auto bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.execution.report", Event_Core::EventSource::MARKET_DATA);
             evt.set("cl_ord_id", std::string(rpt->cl_ord_id));
@@ -281,7 +280,7 @@ public:
         a.frozenCash = cash->frozen;
         a.unrealizedPnl = cash->fpnl; a.realizedPnl = cash->pnl;
 
-        auto* bus = get_engine_event_bus();
+        auto bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.account.updated", Event_Core::EventSource::MARKET_DATA);
             evt.set("account_id", a.accountId);
@@ -305,7 +304,7 @@ public:
         p.lastPrice = pos->price; p.marketValue = pos->market_value;
         p.unrealizedPnl = pos->fpnl;
 
-        auto* bus = get_engine_event_bus();
+        auto bus = get_engine_event_bus();
         if (bus && bus->is_running()) {
             EventFormat evt("trading.position.updated", Event_Core::EventSource::MARKET_DATA);
             evt.set("symbol", p.symbol);
@@ -324,16 +323,13 @@ private:
     GmSessionEngine::Impl* m_impl = nullptr;
 };
 
-int toGmSide(OrderSide s) { return s == OrderSide::Buy ? 1 : 2; }
-int toGmType(OrderType t) { return t == OrderType::Limit ? 1 : 2; }
-
 } // anonymous namespace
 
 // ═══════════════════════════════════════════════════════════════════
 // StrategyDeleter
 // ═══════════════════════════════════════════════════════════════════
 
-void GmSessionEngine::StrategyDeleter::operator()(void* p) {
+void GmSessionEngine::StrategyDeleter::operator()(::Strategy* p) noexcept {
     delete static_cast<SessionStrategy*>(p);
 }
 
@@ -386,7 +382,7 @@ bool GmSessionEngine::isAfterHoursSession() const {
     localtime_r(&tt, &local);
 #endif
     int minutes = local.tm_hour * 60 + local.tm_min;
-    return minutes >= 905 && minutes <= 930;  // 15:05-15:30
+    return minutes >= session::kLockEndMinutes && minutes <= session::kAfterHoursEndMinutes;
 }
 
 bool GmSessionEngine::isInLockPeriod() const {
@@ -399,7 +395,7 @@ bool GmSessionEngine::isInLockPeriod() const {
     localtime_r(&tt, &local);
 #endif
     int minutes = local.tm_hour * 60 + local.tm_min;
-    return minutes >= 900 && minutes < 905;  // 15:00-15:05
+    return minutes >= session::kCloseMinutes && minutes < session::kLockEndMinutes;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -533,7 +529,12 @@ double GmSessionEngine::fetchPreClose(const std::string& symbol) {
 
 // ═══════════════════════════════════════════════════════════════════
 
-void* GmSessionEngine::strategy() const { return m_strategy.get(); }
+void GmSessionEngine::cacheTickQuote(const std::string& symbol, GmQuote&& quote) {
+    std::lock_guard<std::mutex> lock(m_tickMutex);
+    m_quoteCache[symbol] = std::move(quote);
+}
+
+::Strategy* GmSessionEngine::strategy() const { return m_strategy.get(); }
 
 
 // 符号转换
@@ -550,6 +551,9 @@ std::string GmSessionEngine::fromGmSymbol(const std::string& gm) {
     if (gm.compare(0, 4, "BSE.")  == 0) return gm.substr(4) + ".BJ";
     return gm;
 }
+
+int GmSessionEngine::toGmSide(OrderSide s) { return s == OrderSide::Buy ? 1 : 2; }
+int GmSessionEngine::toGmOrderType(OrderType t) { return t == OrderType::Limit ? 1 : 2; }
 
 std::recursive_mutex& GmSessionEngine::gmSdkMutex() {
     static std::recursive_mutex m;

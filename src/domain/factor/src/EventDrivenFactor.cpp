@@ -36,7 +36,7 @@ void EventDrivenFactor::unregisterInstance(EventDrivenFactor* instance) {
 }
 
 void EventDrivenFactor::subscribeToEventBus() {
-    auto* bus = engine::get_engine_event_bus();
+    auto bus = engine::get_engine_event_bus();
     if (!bus) {
         INTERNAL_WARN_STREAM << "[EventDriven] EventBus 不可用, 跳过订阅";
         return;

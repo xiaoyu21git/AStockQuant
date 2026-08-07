@@ -6,6 +6,7 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <string>
 
@@ -71,8 +72,8 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions(
     auto positions = accEng.positions();
     if (positions.empty()) return orders;
 
-    static int patrolRound = 0;
-    if (++patrolRound == 1) {
+    static std::atomic<int> patrolRound{0};
+    if (patrolRound.fetch_add(1, std::memory_order_relaxed) == 0) {
         INTERNAL_INFO_STREAM << "[RiskManager] 巡检启动, 持仓数=" << positions.size();
     }
     for (const auto& pos : positions) {

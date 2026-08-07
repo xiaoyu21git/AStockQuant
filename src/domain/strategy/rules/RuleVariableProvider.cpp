@@ -8,6 +8,7 @@
 #include "RuleVariableProvider.h"
 #include "RuleConditionEvaluator.h"
 
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/ISqlDatabase.h"

@@ -1,5 +1,6 @@
 #include "database/PostMarketSyncService.h"
 #include "database/NativePgConnectionPool.h"
+#include "database/SchemaNames.h"
 #include "database/ISqlDatabase.h"
 #include "../../../engine/include/GmSessionEngine.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
@@ -21,6 +22,19 @@
 #include <vector>
 
 namespace astock::infrastructure::database {
+
+// ── 活跃标的加载（6 处 sync 方法共用）──
+std::pair<std::unordered_map<std::string,int>, std::vector<std::string>>
+PostMarketSyncService::loadActiveSymbols(std::shared_ptr<astock::database::ISqlDatabase> db) {
+    auto res = db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
+    std::unordered_map<std::string,int> symToId;
+    std::vector<std::string> symbols;
+    for (auto& row : res.getRows()) {
+        symToId[row.getString("symbol")] = row.getInt("id");
+        symbols.push_back(row.getString("symbol"));
+    }
+    return {symToId, symbols};
+}
 
 PostMarketSyncService& PostMarketSyncService::instance() {
     static PostMarketSyncService s;
@@ -109,9 +123,8 @@ void PostMarketSyncService::forceSyncDate(int tradingDay) {
     m_executor->post([this,tradingDay](){
         auto db=astock::database::NativePgConnectionPool::instance().getConnection();
         if(!db||!db->isOpen())return;
-        auto res=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-        std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
-        for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
+auto [s2i, syms] = loadActiveSymbols(db);
+
         if(syncDaily(db,s2i,syms,tradingDay))syncMinute(db,s2i,syms,tradingDay);
         syncWeekly(db,tradingDay);syncMonthly(db,tradingDay);
     });
@@ -136,13 +149,7 @@ void PostMarketSyncService::forceSyncHistory(
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) return;
 
-        auto symRes = db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-        std::unordered_map<std::string, int> s2i;
-        std::vector<std::string> syms;
-        for (auto& r : symRes.getRows()) {
-            s2i[r.getString("symbol")] = r.getInt("id");
-            syms.push_back(r.getString("symbol"));
-        }
+auto [s2i, syms] = loadActiveSymbols(db);
         // 从日线最早日期补到分钟线最早日期，不逐日检测缺口
         auto sdRes = db->executeQuery("SELECT COALESCE(MIN(trade_date),'2015-01-01')::text AS sd FROM mkt.daily_bar");
         auto edRes = db->executeQuery("SELECT COALESCE(MIN(trade_ts::date),CURRENT_DATE)::text AS ed FROM mkt.minute_bar");
@@ -183,9 +190,8 @@ void PostMarketSyncService::forceSyncMissingDays(int lookbackDays) {
         auto cal=db->executeQuery("SELECT trade_date::text AS dt FROM ref.trade_calendar WHERE is_trading_day=true AND trade_date>=CURRENT_DATE-"+std::to_string(lookbackDays)+" AND trade_date<=CURRENT_DATE ORDER BY trade_date");
         std::vector<std::string> tds;for(auto&r:cal.getRows())tds.push_back(r.getString("dt"));
         if(tds.empty())return;
-        auto sr=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-        std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
-        for(auto&r:sr.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
+auto [s2i, syms] = loadActiveSymbols(db);
+
         auto cr=db->executeQuery("SELECT trade_date::text AS dt,COUNT(DISTINCT symbol_id) AS cnt FROM mkt.daily_bar WHERE trade_date>=CURRENT_DATE-"+std::to_string(lookbackDays)+" GROUP BY trade_date");
         std::unordered_map<std::string,int> cov;int mc=0;
         for(auto&r:cr.getRows()){int c=r.getInt("cnt");cov[r.getString("dt")]=c;if(c>mc)mc=c;}
@@ -642,15 +648,8 @@ bool PostMarketSyncService::syncMinuteRange(int startDay, int endDay)
     }
 
     // 获取活跃标的
-    auto symRes = db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-    std::unordered_map<std::string, int> s2i;
-    std::vector<std::string> syms;
-    for (auto& r : symRes.getRows()) {
-        s2i[r.getString("symbol")] = r.getInt("id");
-        syms.push_back(r.getString("symbol"));
-    }
-
-    int total = static_cast<int>(tradingDays.size());
+auto [s2i, syms] = loadActiveSymbols(db);
+	    int total = static_cast<int>(tradingDays.size());
     int filled = 0, skipped = 0, failed = 0;
 
     for (int i = 0; i < total; ++i) {
@@ -1012,9 +1011,8 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
 void PostMarketSyncService::syncDailyMinute(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
     if(!db||!db->isOpen())return;
-    auto res=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-    std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
-    for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
+auto [s2i, syms] = loadActiveSymbols(db);
+
     // 日线: 缺则补，满则跳过
     auto cntRes=db->executeQuery("SELECT COUNT(*) FROM mkt.daily_bar WHERE trade_date=$1::date",
         {astock::database::SqlParam{std::to_string(tradingDay)}});
@@ -1167,9 +1165,8 @@ void PostMarketSyncService::syncWeeklyMonthly(int tradingDay) {
 void PostMarketSyncService::syncFinancialData(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
     if(!db||!db->isOpen())return;
-    auto res=db->executeQuery("SELECT id,symbol FROM ref.symbol_info WHERE status='ACTIVE'");
-    std::unordered_map<std::string,int> s2i;std::vector<std::string> syms;
-    for(auto&r:res.getRows()){s2i[r.getString("symbol")]=r.getInt("id");syms.push_back(r.getString("symbol"));}
+auto [s2i, syms] = loadActiveSymbols(db);
+
     syncFinancial(db,s2i,syms,tradingDay);
 }
 

@@ -113,7 +113,7 @@ private:
     
     // 核心组件
     std::unique_ptr<Clock> clock_;
-    std::unique_ptr<EventBus> event_bus_;
+    std::shared_ptr<EventBus> event_bus_;
     
     // 数据管理
     std::unordered_map<std::string, std::unique_ptr<DataSource>> data_sources_;

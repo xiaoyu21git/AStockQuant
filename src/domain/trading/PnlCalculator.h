@@ -3,6 +3,7 @@
 // 统一手续费/印花税/已实现盈亏/未实现盈亏的计算逻辑
 
 #include <cstdint>
+#include "TradingCosts.h"
 
 namespace domain::trading {
 
@@ -17,9 +18,9 @@ public:
     [[nodiscard]] double stampTaxRate()   const noexcept { return m_stampTaxRate; }
 
 private:
-    double m_commissionRate{0.0003};
-    double m_minCommission{5.0};
-    double m_stampTaxRate{0.001};
+    double m_commissionRate{TradingCosts::kDefaultCommissionRate};
+    double m_minCommission{TradingCosts::kDefaultMinCommission};
+    double m_stampTaxRate{TradingCosts::kDefaultStampTaxRate};
 };
 
 // ── 已实现盈亏结果 ──

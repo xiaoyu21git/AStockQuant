@@ -2,10 +2,11 @@
 // 所有数据类型的字段定义唯一定点，禁止其它文件写字面量字段名
 #pragma once
 
-#include <string>
-#include <vector>
-#include <unordered_set>
+#include "../../../infrastructure/include/database/SchemaNames.h"
 #include <sstream>
+#include <string>
+#include <unordered_set>
+#include <vector>
 
 namespace cleaning {
 
@@ -252,7 +253,7 @@ public:
 class KlineDataSource : public IDataSource {
 public:
     std::string typeName() const override { return "kline_daily"; }
-    std::string tableName() const override { return "mkt.daily_bar"; }
+    std::string tableName() const override { return std::string(astock::database::schema::kMarket) + ".daily_bar"; }
     std::string dateColumn() const override { return "trade_date"; }
 
     std::string buildGroupQuery(const std::string& start,

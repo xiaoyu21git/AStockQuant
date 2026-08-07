@@ -241,7 +241,8 @@ public:
 
     // 批次写入会话（由 beginArrowWrite 创建）
     struct WriteSession { int dataId = -1; int64_t totalRows = 0; };
-    typedef WriteSession* ArrowWriteToken;
+    struct WriteSessionDeleter { void operator()(WriteSession*) const noexcept; };
+    using ArrowWriteToken = std::unique_ptr<WriteSession, WriteSessionDeleter>;
 
 #ifdef ASTOCK_HAS_PARQUET
 
@@ -290,10 +291,10 @@ public:
         const std::unordered_set<std::string>& numericFields);
 
     /// @brief 批量写入：追加一批行（token 由 beginArrowWrite 返回）
-    void appendArrowBatch(ArrowWriteToken token, const std::vector<JCache>& rows);
+    void appendArrowBatch(const ArrowWriteToken& token, const std::vector<JCache>& rows);
 
     /// @brief 批量写入：直接追加 Arrow Table（跳过 JsonFacade）
-    void appendArrowTable(ArrowWriteToken token, const std::shared_ptr<arrow::Table>& table);
+    void appendArrowTable(const ArrowWriteToken& token, const std::shared_ptr<arrow::Table>& table);
 
     /// @brief 批量写入：完成并关闭文件
     void finishArrowWrite(ArrowWriteToken token);

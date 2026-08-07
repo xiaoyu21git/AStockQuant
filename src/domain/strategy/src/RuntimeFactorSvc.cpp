@@ -4,9 +4,11 @@
 #include "../../factor/include/factor_compute/FactorEngine.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../infrastructure/include/database/ISqlDatabase.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/market/AStockSymbol.h"
 
+#include <atomic>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -354,8 +356,8 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                 ++matched;
                 output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
             }
-            static int diag = 0;
-            if (++diag <= 3)
+            static std::atomic<int> diag{0};
+            if (diag.fetch_add(1, std::memory_order_relaxed) < 3)
                 INTERNAL_INFO_STREAM << "[RFS] copySnapshots cacheRead: iid=" << iid
                                      << " date=" << dateBuf
                                      << " cacheEntries=" << dateIt->second.size()
@@ -414,8 +416,8 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                     if (idIt != codeOnlyToId.end())
                         output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
                 }
-                static int cacheDiag = 0;
-                if (++cacheDiag <= 3)
+                static std::atomic<int> cacheDiag{0};
+                if (cacheDiag.fetch_add(1, std::memory_order_relaxed) < 3)
                     INTERNAL_INFO_STREAM << "[RFS] copySnapshots liveCache: iid=" << iid
                                          << " date=" << dateBuf
                                          << " entries=" << dateIt->second.size();
@@ -450,8 +452,8 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                 output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
         }
 
-        static int computeDiag = 0;
-        if (++computeDiag <= 3)
+        static std::atomic<int> computeDiag{0};
+        if (computeDiag.fetch_add(1, std::memory_order_relaxed) < 3)
             INTERNAL_INFO_STREAM << "[RFS] copySnapshots liveCompute: iid=" << iid
                                  << " date=" << dateBuf
                                  << " computed=" << factorValues.size()

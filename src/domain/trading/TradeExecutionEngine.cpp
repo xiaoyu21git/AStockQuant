@@ -439,14 +439,7 @@ void TradeExecutionEngine::initCallbacks() {
             updated.setFilledPrice(u.filledPrice);
             updated.setFilledQuantity(u.filledQuantity);
             updated.setStatusMessage(u.message);
-            switch (u.status) {
-                case OrderUpdate::Status::Filled:           updated.setStatus(OrderStatusValue::Filled); break;
-                case OrderUpdate::Status::PartialFilled:    updated.setStatus(OrderStatusValue::PartiallyFilled); break;
-                case OrderUpdate::Status::Cancelled:        updated.setStatus(OrderStatusValue::Cancelled); break;
-                case OrderUpdate::Status::Rejected:         updated.setStatus(OrderStatusValue::Rejected); break;
-                case OrderUpdate::Status::Expired:          updated.setStatus(OrderStatusValue::Expired); break;
-                default: updated.setStatus(OrderStatusValue::New); break;
-            }
+            updated.setStatus(toOrderStatusValue(u.status));
             std::lock_guard<std::mutex> lock(m_impl->m_mutex);
             for (auto& o : m_impl->m_recentOrders) {
                 if (o.brokerOrderId() == u.brokerOrderId) {
@@ -496,7 +489,7 @@ TradeExecutionEngine::TradeExecutionEngine()
     : m_impl(std::make_unique<Impl>()) {
     m_initialized = true;
 
-    auto* bus = engine::get_engine_event_bus();
+    auto bus = engine::get_engine_event_bus();
     if (bus) {
         m_impl->m_orderSub = bus->subscribe("trading.order.updated",
             [this](const engine::EventFormat& e) {

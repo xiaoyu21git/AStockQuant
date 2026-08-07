@@ -14,7 +14,7 @@ AccountEngine& AccountEngine::instance() {
 }
 
 AccountEngine::AccountEngine() {
-    auto* bus = get_engine_event_bus();
+    auto bus = get_engine_event_bus();
     if (bus) {
         m_accountSub = bus->subscribe("trading.account.updated",
             [this](const EventFormat& e) {
@@ -53,14 +53,14 @@ AccountEngine::AccountEngine() {
     }
 }
 
-bool AccountEngine::initialize(void* strategy) {
+bool AccountEngine::initialize(::Strategy* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
     return true;
 }
 
 void AccountEngine::shutdown() {
-    auto* bus = get_engine_event_bus();
+    auto bus = get_engine_event_bus();
     if (bus) {
         if (!m_accountSub.is_null())  bus->unsubscribe(m_accountSub);
         if (!m_positionSub.is_null()) bus->unsubscribe(m_positionSub);

@@ -28,7 +28,7 @@ public:
     const std::string& lastError() const;
 
 private:
-    void publishExistingOrders(engine::EventBus* eventBus,
+    void publishExistingOrders(std::shared_ptr<engine::EventBus> eventBus,
                                const std::string& token,
                                const std::string& accountId,
                                const std::string& runtimeStrategyId,

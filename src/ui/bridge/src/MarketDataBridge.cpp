@@ -25,7 +25,7 @@ MarketDataBridge::MarketDataBridge(QObject* parent) : QObject(parent) {}
 
 MarketDataBridge::~MarketDataBridge() {
     if (m_tickSub.is_valid()) {
-        auto* bus = engine::get_engine_event_bus();
+        auto bus = engine::get_engine_event_bus();
         if (bus) bus->unsubscribe(m_tickSub);
     }
 }
@@ -39,7 +39,7 @@ void MarketDataBridge::initialize() {
     // 注意: GmSessionEngine::on_tick() 先 publish 后调 MarketDataService::onTick(),
     // 但桥接层用 Qt::QueuedConnection 延迟到主线程处理, gmsdk 线程已跑完 onTick(),
     // LiveData 保证是最新的。
-    auto* bus = engine::get_engine_event_bus();
+    auto bus = engine::get_engine_event_bus();
     if (bus && bus->is_running()) {
         m_tickSub = bus->subscribe("trading.market.tick",
             [this](const engine::EventFormat& evt) { onTickEvent(evt); });

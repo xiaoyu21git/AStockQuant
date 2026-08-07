@@ -1,11 +1,12 @@
 #pragma once
 
+#include "../../../infrastructure/include/database/SchemaNames.h"
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <vector>
-#include <map>
 #include <unordered_map>
+#include <vector>
 #include "factor_enums.h"
 #include "foundation/json/json_facade.h"
 #include "JsonFacadeHelpers.h"
@@ -180,7 +181,7 @@ private:
     // 检查字段列表
     DataStatus checkFields(const std::vector<std::string>& fields,
                            const std::string& date,
-                           const std::string& table = "mkt.daily_bar");
+                           const std::string& table = std::string(astock::database::schema::kMarket) + ".daily_bar");
     
     // 数据类型到字段映射
     std::vector<std::string> getFieldsForType(DataType type);

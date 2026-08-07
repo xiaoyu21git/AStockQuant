@@ -737,6 +737,7 @@ private:
     std::string m_liveDataPath;     // 实盘数据目录, 用于统一 JSON 持久化
     domain::trading::OrderBuilder m_orderBuilder;
     OrderGenerator m_orderGenerator{m_orderBuilder};  ///< 持仓感知建单器
+    std::uint32_t m_maxOrderQuantity{10000};  ///< 权重建仓基数（targetWeight × base = 目标股数），由策略配置注入
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
     bool m_needsMarketCapField{false};  ///< 权重方案为市值加权时置位，prepareMarketData 追加 market_cap 字段
@@ -786,6 +787,9 @@ public:
     /// @brief 配置调仓频率
     Builder& withRebalanceConfig(const RebalanceConfig& cfg);
 
+    /// @brief 设置权重建仓基数（targetWeight × base = 目标股数）
+    Builder& withMaxOrderQuantity(std::uint32_t value);
+
     /// @brief 启用择时闸门 (v0.13 规则模式)
     Builder& withTimingGate(const MarketTimingGate& gate);
 
@@ -813,6 +817,7 @@ private:
     RebalanceConfig rebalanceCfg_;
     MarketTimingGate timingGate_;
     TimedCircuitBreaker circuitBreaker_;
+    std::uint32_t maxOrderQuantity_{10000};  ///< 权重建仓基数，由策略 JSON 的 maxOrderQuantity 字段注入
 };
 
 } // namespace domain::strategy

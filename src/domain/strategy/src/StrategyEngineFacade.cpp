@@ -33,6 +33,7 @@
 
 #include "foundation/json/json_facade.h"
 #include "foundation/market/AStockSymbol.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -319,6 +320,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         .withRuleGateConfig(ruleGateCfg)
         .withRiskConfig(riskCfg)
         .withRebalanceConfig(rebalanceCfg)
+        .withMaxOrderQuantity(params.maxOrderQuantity)
         .maxStrategies(params.maxPositions)
         .maxMarketDataPerBatch(kAllMarketDataBatchCapacity)
         .withFactorService(std::move(factorSvc))
@@ -752,7 +754,7 @@ int StrategyEngine::liquidateAll()
     for (const auto& p : positions)
         liqPosMap[p.symbol] = p.quantity;
     MapPositionProvider liqPosProvider(liqPosMap);
-    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, snap.account, 0.0, m_strategyId, snap.account.accountId);
+    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, m_maxOrderQuantity, m_strategyId, snap.account.accountId);
 
     if (validatedOrders.empty()) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: OrderGenerator 过滤后无有效订单";
@@ -834,7 +836,7 @@ void StrategyEngine::drainQueue()
                 }
 
                 MapPositionProvider posProvider(posQtyMap);
-                auto finalOrders = m_orderGenerator.generate(*orders, posProvider, account, mdp.lastPrice(), m_strategyId, m_accountId);
+                auto finalOrders = m_orderGenerator.generate(*orders, posProvider, m_maxOrderQuantity, m_strategyId, m_accountId);
                 if (!finalOrders.empty()) {
                     auto basketId = tagBasketOrders(finalOrders);
 
@@ -1317,37 +1319,67 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
         return EodEvaluationStatus::NoSignal;
     }
 
-    // ── 参考价格 ──
-    double priceForWeight = 0.0;
-    { double sum=0.0; int cnt=0;
-      for (const auto& po : pendingOrders)
-          if (po.tickPrice > 0) { sum += po.tickPrice; ++cnt; }
-      if (cnt>0) priceForWeight = sum / cnt; }
-
     std::vector<OrderRequest> rawOrders;
     rawOrders.reserve(pendingOrders.size());
     for (auto& po : pendingOrders)
         rawOrders.push_back(std::move(po.order));
 
-    auto& freshAccount = snap.account;
     MapPositionProvider posProvider(posQtyMap);
     // 诊断: 打印 generate() 入参
-    INTERNAL_INFO_STREAM << "[EOD QtyDiag] priceForWeight=" << priceForWeight
-                         << " totalAsset=" << freshAccount.totalAsset
+    INTERNAL_INFO_STREAM << "[EOD QtyDiag] maxOrderQuantity=" << m_maxOrderQuantity
                          << " rawOrders=" << rawOrders.size();
-    for (size_t di = 0; di < rawOrders.size() && di < 3; ++di) {
-        double diW = rawOrders[di].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
-        INTERNAL_INFO_STREAM << "[EOD QtyDiag] raw[" << di << "] " << rawOrders[di].symbol()
-                             << " qty=" << rawOrders[di].quantity()
-                             << " tw=" << diW;
+
+    // ── 原始信号: Top-3 买入/卖出 按权重排名 ──
+    {
+        std::vector<OrderRequest> rawBuys, rawSells;
+        for (const auto& ro : rawOrders) {
+            if (ro.side() == OrderSide::Buy) rawBuys.push_back(ro);
+            else rawSells.push_back(ro);
+        }
+        auto byWeight = [](const OrderRequest& a, const OrderRequest& b) {
+            return a.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0)
+                 > b.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+        };
+        std::sort(rawBuys.begin(), rawBuys.end(), byWeight);
+        std::sort(rawSells.begin(), rawSells.end(), byWeight);
+        for (size_t i = 0; i < rawBuys.size() && i < 3; ++i) {
+            double tw = rawBuys[i].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
+            INTERNAL_INFO_STREAM << "[EOD Signal] 买入TOP" << (i+1) << " " << rawBuys[i].symbol()
+                                 << " tw=" << tw << " qty=" << rawBuys[i].quantity();
+        }
+        for (size_t i = 0; i < rawSells.size() && i < 3; ++i) {
+            double tw = rawSells[i].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
+            INTERNAL_INFO_STREAM << "[EOD Signal] 卖出TOP" << (i+1) << " " << rawSells[i].symbol()
+                                 << " tw=" << tw << " qty=" << rawSells[i].quantity();
+        }
     }
-    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, freshAccount, priceForWeight, m_strategyId, m_accountId);
+
+    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, m_maxOrderQuantity, m_strategyId, m_accountId);
     INTERNAL_INFO_STREAM << "[EOD QtyDiag] finalOrders=" << finalOrders.size();
-    for (size_t di = 0; di < finalOrders.size() && di < 3; ++di) {
-        double diW = finalOrders[di].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
-        INTERNAL_INFO_STREAM << "[EOD QtyDiag] final[" << di << "] " << finalOrders[di].symbol()
-                             << " qty=" << finalOrders[di].quantity()
-                             << " tw=" << diW;
+
+    // ── 最终订单: Top-3 买入/卖出 按权重排名 ──
+    {
+        std::vector<OrderRequest> finalBuys, finalSells;
+        for (const auto& fo : finalOrders) {
+            if (fo.side() == OrderSide::Buy) finalBuys.push_back(fo);
+            else finalSells.push_back(fo);
+        }
+        auto byWeight = [](const OrderRequest& a, const OrderRequest& b) {
+            return a.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0)
+                 > b.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+        };
+        std::sort(finalBuys.begin(), finalBuys.end(), byWeight);
+        std::sort(finalSells.begin(), finalSells.end(), byWeight);
+        for (size_t i = 0; i < finalBuys.size() && i < 3; ++i) {
+            double tw = finalBuys[i].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
+            INTERNAL_INFO_STREAM << "[EOD Order] 买入TOP" << (i+1) << " " << finalBuys[i].symbol()
+                                 << " tw=" << tw << " qty=" << finalBuys[i].quantity();
+        }
+        for (size_t i = 0; i < finalSells.size() && i < 3; ++i) {
+            double tw = finalSells[i].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
+            INTERNAL_INFO_STREAM << "[EOD Order] 卖出TOP" << (i+1) << " " << finalSells[i].symbol()
+                                 << " tw=" << tw << " qty=" << finalSells[i].quantity();
+        }
     }
 
     if (m_ruleGate.enabled()) {
@@ -1591,6 +1623,12 @@ StrategyEngine::Builder& StrategyEngine::Builder::withRebalanceConfig(const Reba
     return *this;
 }
 
+StrategyEngine::Builder& StrategyEngine::Builder::withMaxOrderQuantity(std::uint32_t value)
+{
+    maxOrderQuantity_ = value;
+    return *this;
+}
+
 StrategyEngine::Builder& StrategyEngine::Builder::withTimingGate(const MarketTimingGate& gate)
 {
     timingGate_ = gate;
@@ -1720,6 +1758,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     // ── 调仓频率配置 ──
     engine->m_isDailyFrequency = rebalanceCfg_.isDailyFrequency;
     engine->m_rebalanceInterval = rebalanceCfg_.interval;
+    engine->m_maxOrderQuantity = maxOrderQuantity_;
 
     INTERNAL_INFO_STREAM << "[Builder] 风控: stopLoss=" << riskCfg_.stopLossPercent
                          << " takeProfit=" << riskCfg_.takeProfitPercent

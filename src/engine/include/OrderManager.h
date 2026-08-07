@@ -11,7 +11,7 @@ class OrderManager {
 public:
     static OrderManager& instance();
 
-    bool initialize(void* strategy);
+    bool initialize(::Strategy* strategy);
     void shutdown();
     bool initialized() const;
 
@@ -26,7 +26,7 @@ private:
     OrderManager() = default;
     ~OrderManager() = default;
 
-    void* m_strategy = nullptr;
+    ::Strategy* m_strategy = nullptr;
     std::unordered_map<std::string, OrderRecord> m_orders; // brokerOrderId → order
 };
 

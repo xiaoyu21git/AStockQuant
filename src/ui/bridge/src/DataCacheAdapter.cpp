@@ -111,19 +111,19 @@ cleaning::DataCache::ArrowWriteToken DataCacheAdapter::beginArrowWrite(int dataI
     return m_cache->beginArrowWrite(dataId, fieldNames, numericFields);
 }
 
-void DataCacheAdapter::appendArrowBatch(cleaning::DataCache::ArrowWriteToken token,
+void DataCacheAdapter::appendArrowBatch(const cleaning::DataCache::ArrowWriteToken& token,
                                          const std::vector<foundation::json::JsonFacade>& rows) {
     m_cache->appendArrowBatch(token, rows);
 }
 
-void DataCacheAdapter::appendArrowTable(cleaning::DataCache::ArrowWriteToken token,
+void DataCacheAdapter::appendArrowTable(const cleaning::DataCache::ArrowWriteToken& token,
                                          const std::shared_ptr<arrow::Table>& table) {
     m_cache->appendArrowTable(token, table);
 }
 
 void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken token, int rowCount) {
     int dataId = token ? token->dataId : -1;
-    m_cache->finishArrowWrite(token);
+    m_cache->finishArrowWrite(std::move(token));
     if (dataId > 0) {
         m_cache->updateDataSetRowCount(dataId, rowCount);
         auto updated = m_cache->getDataSetInfo(dataId);

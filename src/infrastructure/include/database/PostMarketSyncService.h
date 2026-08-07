@@ -55,6 +55,10 @@ public:
     void setLiveDataPath(const std::string& path) { m_liveDataPath = path; }
 
 private:
+    /// @brief 从 ref.symbol_info 加载活跃标的映射（6 处共用）
+    static std::pair<std::unordered_map<std::string,int>, std::vector<std::string>>
+        loadActiveSymbols(std::shared_ptr<astock::database::ISqlDatabase> db);
+
     void schedulerLoop();
 
     /// @brief 同步屏蔽窗口 [start, end) — end 由 EOD 下单时间派生, 不可独立配置/写死

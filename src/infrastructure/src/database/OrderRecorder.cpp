@@ -1,4 +1,5 @@
 #include "database/OrderRecorder.h"
+#include "database/ConnectionGuard.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/ISqlDatabase.h"
 #include "foundation/log/logging.hpp"
@@ -55,8 +56,8 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
                                 double price, int quantity, double signalScore,
                                 RecPosEff positionEffect, int tradingDay,
                                 const std::string& basketId) {
-    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-    if (!db || !db->isOpen()) {
+    astock::database::ConnectionGuard conn;
+    if (!conn.isValid()) {
         INTERNAL_WARN_STREAM << "[OrderRecorder] DB 不可用, 订单记录丢失: " << clOrdId;
         return 0;
     }
@@ -74,7 +75,7 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
         SqlParam{static_cast<std::int32_t>(tradingDay)},
         SqlParam{basketId}
     };
-    int ret = db->executeUpdate(sql, params);
+    int ret = conn->executeUpdate(sql, params);
     if (ret <= 0) {
         INTERNAL_WARN_STREAM << "[OrderRecorder] insertOrder 失败: " << clOrdId;
     }
@@ -84,8 +85,8 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
 int OrderRecorder::updateOrderStatus(const std::string& clOrdId, RecOrdStatus status,
                                       const std::string& brokerOrderId,
                                       const std::string& message) {
-    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-    if (!db || !db->isOpen()) return 0;
+    astock::database::ConnectionGuard conn;
+    if (!conn.isValid()) return 0;
     using astock::database::SqlParam;
     std::string sql =
         "UPDATE data.live_order SET status=?, broker_order_id=IF(?<>'',?,broker_order_id), "
@@ -96,14 +97,14 @@ int OrderRecorder::updateOrderStatus(const std::string& clOrdId, RecOrdStatus st
         SqlParam{message}, SqlParam{message},
         SqlParam{clOrdId}
     };
-    return db->executeUpdate(sql, params);
+    return conn->executeUpdate(sql, params);
 }
 
 int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string& execId,
                                     double fillPrice, int fillQty, double fillAmount,
                                     double commission, const std::string& fillTime) {
-    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-    if (!db || !db->isOpen()) return 0;
+    astock::database::ConnectionGuard conn;
+    if (!conn.isValid()) return 0;
     using astock::database::SqlParam;
     std::string sql =
         "UPDATE data.live_order SET status='FILLED', exec_id=?, fill_price=?, fill_qty=?, "
@@ -114,14 +115,14 @@ int OrderRecorder::updateOrderFill(const std::string& clOrdId, const std::string
         SqlParam{fillAmount}, SqlParam{commission},
         SqlParam{fillTime}, SqlParam{clOrdId}
     };
-    return db->executeUpdate(sql, params);
+    return conn->executeUpdate(sql, params);
 }
 
 int OrderRecorder::insertAccountSnapshot(int tradingDay, double totalAsset, double availableCash,
                                           double marketValue, double frozenCash,
                                           double realizedPnl, double unrealizedPnl) {
-    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-    if (!db || !db->isOpen()) return 0;
+    astock::database::ConnectionGuard conn;
+    if (!conn.isValid()) return 0;
     using astock::database::SqlParam;
     std::string sql =
         "INSERT INTO data.live_account_daily "
@@ -138,7 +139,7 @@ int OrderRecorder::insertAccountSnapshot(int tradingDay, double totalAsset, doub
         SqlParam{marketValue}, SqlParam{frozenCash},
         SqlParam{realizedPnl}, SqlParam{unrealizedPnl}
     };
-    return db->executeUpdate(sql, params);
+    return conn->executeUpdate(sql, params);
 }
 
 } // namespace astock::infrastructure::database

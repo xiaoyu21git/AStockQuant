@@ -13,6 +13,7 @@
 #include <QJsonArray>
 #include <QCoreApplication>
 #include <QDir>
+#include "foundation/log/logging.hpp"
 #include <cstdio>
 #include <cmath>
 
@@ -598,9 +599,11 @@ QVariantMap FactorBacktestBridge::processRunResult(
             std::string summaryJson = QJsonDocument(QJsonObject::fromVariantMap(metrics)).toJson(QJsonDocument::Compact).toStdString();
             std::string groupsJsonStr = QJsonDocument(QJsonArray::fromVariantList(groupsList)).toJson(QJsonDocument::Compact).toStdString();
 
-            db->executeUpdate(
+            int runsAffected = db->executeUpdate(
                 "INSERT INTO alpha.factor_backtest_runs(id,factor_id,config_json,summary_json,groups_json) VALUES($1,$2,$3,$4,$5)",
                 {P{runId}, P{fid}, P{cfgJson}, P{summaryJson}, P{groupsJsonStr}});
+            if (runsAffected < 0)
+                INTERNAL_ERROR_STREAM << "[FactorBacktest] save runs failed: affected=" << runsAffected;
 
             // ── 每日收益序列 ──
             QJsonArray dateList = rootObj.value("dateList").toArray();
@@ -622,13 +625,15 @@ QVariantMap FactorBacktestBridge::processRunResult(
                     if (di < grpData[gi].size())
                         grArr.append(grpData[gi][di].toDouble());
                 std::string grJson = QJsonDocument(grArr).toJson(QJsonDocument::Compact).toStdString();
-                db->executeUpdate(
+                int dailyAffected = db->executeUpdate(
                     "INSERT INTO alpha.factor_backtest_daily(run_id,trade_date,group_returns_json,"
                     "raw_long_short,cost_adj_long_short,risk_adj_long_short) "
                     "VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(run_id,trade_date) DO UPDATE SET "
                     "raw_long_short=EXCLUDED.raw_long_short,cost_adj_long_short=EXCLUDED.cost_adj_long_short,"
                     "risk_adj_long_short=EXCLUDED.risk_adj_long_short",
                     {P{runId}, P{ds}, P{grJson}, P{rls}, P{cls}, P{rks}});
+                if (dailyAffected < 0)
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save daily failed: date=" << ds << " affected=" << dailyAffected;
             }
 
             // ── IC 日序列 ──
@@ -636,40 +641,46 @@ QVariantMap FactorBacktestBridge::processRunResult(
             for (int ii = 0; ii < icArr.size() && ii < dateList.size(); ++ii) {
                 std::string ds = dateList[ii].toString().toStdString();
                 double icv = icArr[ii].toDouble();
-                db->executeUpdate(
+                int icAffected = db->executeUpdate(
                     "INSERT INTO alpha.factor_backtest_ic_daily(run_id,trade_date,rank_ic) "
                     "VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO UPDATE SET rank_ic=EXCLUDED.rank_ic",
                     {P{runId}, P{ds}, P{icv}});
+                if (icAffected < 0)
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save ic_daily failed: date=" << ds << " affected=" << icAffected;
             }
 
             // ── 交易记录 ──
             QJsonArray tradeArr = metricsObj.value("tradeLog").toArray();
             for (int ti = 0; ti < tradeArr.size(); ++ti) {
                 QJsonObject tr = tradeArr[ti].toObject();
-                db->executeUpdate(
+                std::string td = tr.value("date").toString().toStdString();
+                int tradeAffected = db->executeUpdate(
                     "INSERT INTO alpha.factor_backtest_trades(run_id,trade_date,symbol,side,basket,price,cost_rate) "
                     "VALUES($1,$2,$3,$4,$5,$6,$7)",
                     {P{runId},
-                     P{tr.value("date").toString().toStdString()},
+                     P{td},
                      P{tr.value("symbol").toString().toStdString()},
                      P{tr.value("side").toString().toStdString()},
                      P{tr.value("basket").toString().toStdString()},
                      P{tr.value("price").toDouble()},
                      P{tr.value("costRate").toDouble()}});
+                if (tradeAffected < 0)
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save trade failed: symbol=" << tr.value("symbol").toString().toStdString() << " affected=" << tradeAffected;
             }
 
             // ── 每期追踪 ──
             QJsonArray periodArr = metricsObj.value("periodTrackings").toArray();
             for (int pi = 0; pi < periodArr.size(); ++pi) {
                 QJsonObject pr = periodArr[pi].toObject();
-                db->executeUpdate(
+                std::string pd = pr.value("date").toString().toStdString();
+                int periodAffected = db->executeUpdate(
                     "INSERT INTO alpha.factor_backtest_periods(run_id,trade_date,"
                     "long_held,short_held,long_bought,long_sold,short_bought,short_sold,"
                     "long_turnover,short_turnover,long_raw_return,short_raw_return,strategy_net_return) "
                     "VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) "
                     "ON CONFLICT(run_id,trade_date) DO NOTHING",
                     {P{runId},
-                     P{pr.value("date").toString().toStdString()},
+                     P{pd},
                      P{static_cast<int>(pr.value("longHeld").toDouble())},
                      P{static_cast<int>(pr.value("shortHeld").toDouble())},
                      P{static_cast<int>(pr.value("longBought").toDouble())},
@@ -681,6 +692,8 @@ QVariantMap FactorBacktestBridge::processRunResult(
                      P{pr.value("longRawReturn").toDouble()},
                      P{pr.value("shortRawReturn").toDouble()},
                      P{pr.value("strategyNetReturn").toDouble()}});
+                if (periodAffected < 0)
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save period failed: date=" << pd << " affected=" << periodAffected;
             }
         }
     }

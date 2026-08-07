@@ -29,7 +29,7 @@ OrderManager& OrderManager::instance() {
     return mgr;
 }
 
-bool OrderManager::initialize(void* strategy) {
+bool OrderManager::initialize(::Strategy* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
     return true;
@@ -39,7 +39,7 @@ void OrderManager::shutdown() { m_strategy = nullptr; m_orders.clear(); }
 bool OrderManager::initialized() const { return m_strategy != nullptr; }
 
 std::vector<OrderRecord> OrderManager::queryOrders(const std::string& account) {
-    auto* s = static_cast<::Strategy*>(m_strategy);
+    auto* s = m_strategy;
     if (!s) return {};
     auto* arr = s->get_orders(account.empty() ? nullptr : account.c_str());
     if (!arr || arr->status() != 0) { if (arr) arr->release(); return {}; }
@@ -52,7 +52,7 @@ std::vector<OrderRecord> OrderManager::queryOrders(const std::string& account) {
 }
 
 std::vector<OrderRecord> OrderManager::queryUnfinishedOrders(const std::string& account) {
-    auto* s = static_cast<::Strategy*>(m_strategy);
+    auto* s = m_strategy;
     if (!s) return {};
     auto* arr = s->get_unfinished_orders(account.empty() ? nullptr : account.c_str());
     if (!arr || arr->status() != 0) { if (arr) arr->release(); return {}; }
@@ -67,7 +67,7 @@ std::vector<OrderRecord> OrderManager::queryUnfinishedOrders(const std::string& 
 }
 
 std::vector<OrderRecord> OrderManager::syncOrders(const std::string& account) {
-    auto* s = static_cast<::Strategy*>(m_strategy);
+    auto* s = m_strategy;
     if (!s) return {};
     auto* arr = s->get_orders(account.empty() ? nullptr : account.c_str());
     if (!arr || arr->status() != 0) { if (arr) arr->release(); return {}; }

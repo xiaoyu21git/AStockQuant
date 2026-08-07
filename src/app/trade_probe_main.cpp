@@ -143,7 +143,7 @@ bool initializeRuntimeEnvironment()
     return true;
 }
 
-void shutdownRuntimeEnvironment(std::unique_ptr<engine::EventBus>& ownedBus)
+void shutdownRuntimeEnvironment(std::shared_ptr<engine::EventBus>& ownedBus)
 {
     if (ownedBus) {
         engine::register_engine_event_bus(nullptr);
@@ -225,15 +225,15 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::unique_ptr<engine::EventBus> ownedBus;
+    std::shared_ptr<engine::EventBus> ownedBus;
     if (!engine::get_engine_event_bus()) {
-        ownedBus = engine::EventBus::create();
+        ownedBus = std::shared_ptr<engine::EventBus>(engine::EventBus::create());
         if (!ownedBus || !ownedBus->start()) {
             INTERNAL_ERROR_STREAM << "[tradeprobe] failed to initialize EventBus";
             shutdownRuntimeEnvironment(ownedBus);
             return 1;
         }
-        engine::register_engine_event_bus(ownedBus.get());
+        engine::register_engine_event_bus(ownedBus);
     }
 
     auto* configService = TradingConnectionConfigService::instance();

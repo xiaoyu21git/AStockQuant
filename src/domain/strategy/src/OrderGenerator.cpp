@@ -1,10 +1,10 @@
 #include "../include/OrderGenerator.h"
 #include "../include/StrategyServiceTypes.h"
-#include "../../../engine/include/AccountEngine.h"
 #include "foundation/market/AStockSymbol.h"
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <unordered_set>
 
@@ -16,45 +16,47 @@ using OrderRequest = domain::trading::OrderRequest;
 namespace {
 constexpr std::int64_t kMinLot = 100;
 
-std::int64_t weightToQty(double weight, double totalAsset, double priceForWeight) {
-    if (priceForWeight <= 0 || totalAsset <= 0) return 0;
-    return static_cast<std::int64_t>(weight * totalAsset / priceForWeight / kMinLot) * kMinLot;
-}
-
-double qtyToWeight(std::int64_t qty, double totalAsset, double priceForWeight) {
-    if (priceForWeight <= 0 || totalAsset <= 0) return 0.0;
-    return static_cast<double>(qty) * priceForWeight / totalAsset;
+/// @brief 权重 → 目标股数（按权重建仓基数，取整到整手）
+inline std::int64_t weightToTargetQty(double weight, std::uint32_t baseQty) noexcept {
+    if (baseQty == 0) return 0;
+    std::int64_t qty = static_cast<std::int64_t>(weight * static_cast<double>(baseQty));
+    qty = qty / kMinLot * kMinLot;
+    if (qty < kMinLot) qty = kMinLot;
+    return qty;
 }
 } // namespace
 
 OrderGenerator::OrderDelta OrderGenerator::computeBuyDelta(
-    std::int64_t currentQty, double currentWeight,
-    double targetWeight, double priceForWeight, double totalAsset) const
+    std::int64_t currentQty, double targetWeight,
+    std::uint32_t maxOrderQuantity) const
 {
     OrderDelta result;
-    if (currentWeight < 0.001) {
+    std::int64_t targetQty = weightToTargetQty(targetWeight, maxOrderQuantity);
+
+    if (currentQty < kMinLot) {
+        // 无现有持仓 → 新开仓
         result.intent = SignalIntent::OPEN;
-        result.deltaQty = weightToQty(targetWeight, totalAsset, priceForWeight);
-    } else if (targetWeight > currentWeight) {
+        result.deltaQty = targetQty;
+    } else if (targetQty > currentQty) {
+        // 已有持仓, 但目标数量更大 → 加仓
         result.intent = SignalIntent::ADD;
-        std::int64_t targetQty = weightToQty(targetWeight, totalAsset, priceForWeight);
         result.deltaQty = targetQty - currentQty;
     }
-    return result;  // targetWeight <= currentWeight → deltaQty=0, caller discards
+    return result;  // targetQty <= currentQty → deltaQty=0, caller discards
 }
 
 OrderGenerator::OrderDelta OrderGenerator::computeSellDelta(
-    std::int64_t currentQty, double currentWeight,
-    double targetWeight, double priceForWeight, double totalAsset,
+    std::int64_t currentQty, double targetWeight,
+    std::uint32_t maxOrderQuantity,
     std::int64_t requestedQty) const
 {
     OrderDelta result;
     if (currentQty <= 0) return result;
-    if (targetWeight >= currentWeight) return result;  // 矛盾
 
     if (targetWeight > 0.0) {
         // 策略卖出: targetWeight 表示期望的新持仓权重
-        std::int64_t targetQty = weightToQty(targetWeight, totalAsset, priceForWeight);
+        std::int64_t targetQty = weightToTargetQty(targetWeight, maxOrderQuantity);
+        if (targetQty >= currentQty) return result;  // 目标不低于当前 → 不卖
         if (targetQty < kMinLot) {
             result.intent = SignalIntent::CLOSE;
             result.deltaQty = currentQty;
@@ -96,8 +98,7 @@ void OrderGenerator::compressBuyTotalWeight(std::vector<OrderRequest>& orders) c
 std::vector<OrderRequest> OrderGenerator::generate(
     const std::vector<OrderRequest>& rawOrders,
     const IPositionProvider& posProvider,
-    const engine::AccountInfo& account,
-    double priceForWeight,
+    std::uint32_t maxOrderQuantity,
     const std::string& strategyId,
     const std::string& accountId) const
 {
@@ -117,37 +118,32 @@ std::vector<OrderRequest> OrderGenerator::generate(
         std::string code = foundation::market::AStockSymbol::codeOnly(raw.symbol());
         std::int64_t currentQty = posProvider.quantityOf(code);
 
-        if (priceForWeight <= 0 || account.totalAsset <= 0) {
-            static int skipDiag = 0;
-            if (++skipDiag <= 3)
-                INTERNAL_INFO_STREAM << "[OrdGen] SKIP: priceForWeight=" << priceForWeight
-                                     << " totalAsset=" << account.totalAsset
-                                     << " sym=" << raw.symbol();
+        if (maxOrderQuantity == 0) {
+            static std::atomic<int> skipDiag{0};
+            if (skipDiag.fetch_add(1, std::memory_order_relaxed) < 3)
+                INTERNAL_INFO_STREAM << "[OrdGen] SKIP: maxOrderQuantity=0 sym=" << raw.symbol();
             continue;
         }
 
-        double currentWeight = qtyToWeight(currentQty, account.totalAsset, priceForWeight);
         OrderDelta delta;
 
         if (raw.side() == OrderSide::Buy) {
-            delta = computeBuyDelta(currentQty, currentWeight, targetWeight,
-                                    priceForWeight, account.totalAsset);
+            delta = computeBuyDelta(currentQty, targetWeight, maxOrderQuantity);
         } else {
-            delta = computeSellDelta(currentQty, currentWeight, targetWeight,
-                                     priceForWeight, account.totalAsset,
+            delta = computeSellDelta(currentQty, targetWeight, maxOrderQuantity,
                                      static_cast<std::int64_t>(raw.quantity()));
         }
 
         if (delta.deltaQty < kMinLot) continue;
 
-        static int genDiag = 0;
-        if (++genDiag <= 5)
+        static std::atomic<int> genDiag{0};
+        if (genDiag.fetch_add(1, std::memory_order_relaxed) < 5)
             INTERNAL_INFO_STREAM << "[OrdGen] " << raw.symbol()
                                  << " tw=" << targetWeight
                                  << " deltaQty=" << delta.deltaQty
-                                 << " priceForWeight=" << priceForWeight
-                                 << " totalAsset=" << account.totalAsset
-                                 << " w2q=" << weightToQty(targetWeight, account.totalAsset, priceForWeight);
+                                 << " maxOrderQty=" << maxOrderQuantity
+                                 << " currentQty=" << currentQty
+                                 << " targetQty=" << weightToTargetQty(targetWeight, maxOrderQuantity);
 
         OrderRequest order = m_orderBuilder->buildSignalOrder(
             raw.symbol(), raw.side(), 0, delta.deltaQty, signalScore, strategyId, accountId);

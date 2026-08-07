@@ -11,6 +11,7 @@
 #include "FactorMetricsCalculator.h"
 #include "FactorIcUtils.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 
 #include "../../../domain/cleaning/include/DataSourceRegistry.h"

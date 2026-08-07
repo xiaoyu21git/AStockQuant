@@ -1,37 +1,16 @@
 #include "TradingConnectionConfigService.h"
+#include "ConfigVariantAdapter.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include <QJsonArray>
 #include <QMutexLocker>
 #include <QTimer>
 #include "foundation/config/ConfigManager.hpp"
-#include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
 namespace bridge {
-
-namespace {
-
-/// QVariantMap → ConfigNode (通过 JSON 字符串中转)
-foundation::config::ConfigNode toConfigNode(const QVariantMap& map) {
-    QJsonDocument doc(QJsonObject::fromVariantMap(map));
-    auto json = foundation::json::JsonFacade::parse(doc.toJson().toStdString());
-    return foundation::config::ConfigNode(json);
-}
-
-/// ConfigNode → QVariantMap (通过 JSON 字符串中转)
-QVariantMap toVariantMap(const foundation::config::ConfigNode& node) {
-    if (node.isNull()) return {};
-    auto doc = QJsonDocument::fromJson(
-        QByteArray::fromStdString(node.toJsonString()));
-    return doc.object().toVariantMap();
-}
-
-} // namespace
 
 TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
     : QObject(parent) {

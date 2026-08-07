@@ -1,32 +1,13 @@
 #include "RiskConfigService.h"
+#include "ConfigVariantAdapter.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
-#include <QJsonDocument>
-#include <QJsonObject>
 #include "foundation/config/ConfigManager.hpp"
-#include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 
 namespace bridge {
-
-namespace {
-
-foundation::config::ConfigNode toConfigNode(const QVariantMap& map) {
-    QJsonDocument doc(QJsonObject::fromVariantMap(map));
-    auto json = foundation::json::JsonFacade::parse(doc.toJson().toStdString());
-    return foundation::config::ConfigNode(json);
-}
-
-QVariantMap toVariantMap(const foundation::config::ConfigNode& node) {
-    if (node.isNull()) return {};
-    auto doc = QJsonDocument::fromJson(
-        QByteArray::fromStdString(node.toJsonString()));
-    return doc.object().toVariantMap();
-}
-
-} // namespace
 
 RiskConfigService::RiskConfigService(QObject* parent)
     : QObject(parent) {}

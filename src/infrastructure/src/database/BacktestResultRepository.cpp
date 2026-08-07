@@ -1,5 +1,6 @@
 #include "database/BacktestResultRepository.h"
 #include "database/ISqlDatabase.h"
+#include "database/SqlEscape.h"
 #include "foundation/log/logging.hpp"
 
 #include <QJsonDocument>
@@ -16,6 +17,10 @@ BacktestResultRepository::BacktestResultRepository(astock::database::ISqlDatabas
 bool BacktestResultRepository::ensureTables()
 {
     if (m_tablesEnsured) return true;
+    if (!m_db.isOpen()) {
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables: DB not open";
+        return false;
+    }
 
     m_db.executeUpdate("SET client_min_messages = WARNING");
 
@@ -32,7 +37,7 @@ bool BacktestResultRepository::ensureTables()
         if (!exists.isEmpty() && probe.isEmpty()) {
             INTERNAL_WARN_STREAM << "[BacktestRepo] 检测到旧版 strategy_backtest_results schema, 重建";
             m_db.executeUpdate("DROP TABLE live.strategy_backtest_results");
-        } 
+        }
     }
 
     // 旧版 JSONB/TEXT 表已在上面按需重建，不再每次回测无条件 DROP CASCADE
@@ -121,13 +126,24 @@ bool BacktestResultRepository::ensureTables()
             UNIQUE (strategy_id, snap_date)
         ))SQL";
 
-    m_db.executeQuery(kCreateStrategyBacktest);
-    m_db.executeQuery(kIdxStrategyBacktest);
-    m_db.executeQuery(kCreateStrategyTrades);
-    m_db.executeQuery(kIdxStrategyTrades);
-    m_db.executeQuery(kCreateFactorBacktest);
-    m_db.executeQuery(kIdxFactorBacktest);
-    m_db.executeQuery(kCreateDailySnapshots);
+    try {
+        m_db.executeUpdate(kCreateStrategyBacktest);
+        m_db.executeUpdate(kIdxStrategyBacktest);
+        m_db.executeUpdate(kCreateStrategyTrades);
+        m_db.executeUpdate(kIdxStrategyTrades);
+        m_db.executeUpdate(kCreateFactorBacktest);
+        m_db.executeUpdate(kIdxFactorBacktest);
+        m_db.executeUpdate(kCreateDailySnapshots);
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables DDL failed: " << e.what();
+        return false;
+    }
+
+    if (!m_db.isOpen()) {
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables: DB connection lost during DDL";
+        return false;
+    }
+
     m_tablesEnsured = true;
     return true;
 }
@@ -220,8 +236,8 @@ std::vector<StoredStrategyBacktest> BacktestResultRepository::loadStrategyBackte
 {
     ensureTables();
     std::ostringstream sql;
-    sql << "SELECT * FROM live.strategy_backtest_results WHERE strategy_id='"
-        << strategyId << "' ORDER BY run_at DESC LIMIT " << limit;
+    sql << "SELECT * FROM live.strategy_backtest_results WHERE strategy_id="
+        << astock::database::safeStr(strategyId) << " ORDER BY run_at DESC LIMIT " << limit;
 
     auto result = m_db.executeQuery(sql.str());
     std::vector<StoredStrategyBacktest> records;
@@ -280,13 +296,21 @@ bool BacktestResultRepository::saveFactorBacktest(const StoredFactorBacktest& r)
     ensureTables();
     std::ostringstream sql;
     sql << "INSERT INTO alpha.factor_backtest_results "
-           "(id, factor_id, run_at, num_groups, metrics_json) VALUES ('"
-        << r.id << "','" << r.factorId << "','" << r.runAt << "',"
-        << r.numGroups << ",'" << r.metricsJson
-        << "') ON CONFLICT(id) DO UPDATE SET "
+           "(id, factor_id, run_at, num_groups, metrics_json) VALUES ("
+        << astock::database::safeStr(r.id) << "," << astock::database::safeStr(r.factorId)
+        << "," << astock::database::safeStr(r.runAt) << ","
+        << r.numGroups << "," << astock::database::safeStr(r.metricsJson)
+        << ") ON CONFLICT(id) DO UPDATE SET "
            "factor_id=EXCLUDED.factor_id, run_at=EXCLUDED.run_at, "
            "num_groups=EXCLUDED.num_groups, metrics_json=EXCLUDED.metrics_json";
-    m_db.executeQuery(sql.str()); return true;
+    const int affected = m_db.executeUpdate(sql.str());
+    if (affected <= 0) {
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveFactorBacktest FAILED id=" << r.id
+                              << " affected=" << affected << " error=" << m_db.lastError();
+        return false;
+    }
+    INTERNAL_INFO_STREAM << "[BacktestRepo] saveFactorBacktest OK id=" << r.id;
+    return true;
 }
 
 std::vector<StoredFactorBacktest> BacktestResultRepository::loadFactorBacktests(
@@ -295,8 +319,8 @@ std::vector<StoredFactorBacktest> BacktestResultRepository::loadFactorBacktests(
     ensureTables();
     std::ostringstream sql;
     sql << "SELECT id, factor_id, run_at, num_groups, metrics_json "
-           "FROM alpha.factor_backtest_results WHERE factor_id='"
-        << factorId << "' ORDER BY run_at DESC LIMIT " << limit;
+           "FROM alpha.factor_backtest_results WHERE factor_id="
+        << astock::database::safeStr(factorId) << " ORDER BY run_at DESC LIMIT " << limit;
 
     auto result = m_db.executeQuery(sql.str());
     std::vector<StoredFactorBacktest> records;
@@ -320,12 +344,21 @@ bool BacktestResultRepository::saveDailySnapshot(const DailyEquitySnapshot& snap
     ensureTables();
     std::ostringstream sql;
     sql << "INSERT INTO live.daily_equity_snapshots "
-           "(id, strategy_id, snap_date, total_asset, daily_return) VALUES ('"
-        << snap.id << "','" << snap.strategyId << "','" << snap.date << "',"
+           "(id, strategy_id, snap_date, total_asset, daily_return) VALUES ("
+        << astock::database::safeStr(snap.id) << "," << astock::database::safeStr(snap.strategyId)
+        << "," << astock::database::safeStr(snap.date) << ","
         << snap.totalAsset << "," << snap.dailyReturn
         << ") ON CONFLICT(strategy_id, snap_date) DO UPDATE SET "
            "total_asset=EXCLUDED.total_asset, daily_return=EXCLUDED.daily_return";
-    m_db.executeQuery(sql.str()); return true;
+    const int affected = m_db.executeUpdate(sql.str());
+    if (affected <= 0) {
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveDailySnapshot FAILED id=" << snap.id
+                              << " strategy=" << snap.strategyId
+                              << " affected=" << affected << " error=" << m_db.lastError();
+        return false;
+    }
+    INTERNAL_INFO_STREAM << "[BacktestRepo] saveDailySnapshot OK id=" << snap.id;
+    return true;
 }
 
 std::vector<DailyEquitySnapshot> BacktestResultRepository::loadDailySnapshots(
@@ -334,8 +367,8 @@ std::vector<DailyEquitySnapshot> BacktestResultRepository::loadDailySnapshots(
     ensureTables();
     std::ostringstream sql;
     sql << "SELECT id, strategy_id, snap_date, total_asset, daily_return "
-           "FROM live.daily_equity_snapshots WHERE strategy_id='"
-        << strategyId << "' ORDER BY snap_date DESC LIMIT " << limit;
+           "FROM live.daily_equity_snapshots WHERE strategy_id="
+        << astock::database::safeStr(strategyId) << " ORDER BY snap_date DESC LIMIT " << limit;
 
     auto result = m_db.executeQuery(sql.str());
     std::vector<DailyEquitySnapshot> records;

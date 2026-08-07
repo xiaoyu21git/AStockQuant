@@ -59,7 +59,7 @@ private:
     std::string m_lastError;
     
     std::shared_ptr<IExecutor> executor_;
-    std::unique_ptr<engine::EventBus> m_eventBus;
+    std::shared_ptr<engine::EventBus> m_eventBus;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     std::unique_ptr<wang::VasAurora> m_vasAurora;
     bool m_deferredStartupScheduled = false;

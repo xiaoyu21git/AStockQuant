@@ -23,7 +23,7 @@ public:
 
     static AccountEngine& instance();
 
-    bool initialize(void* strategy);
+    bool initialize(::Strategy* strategy);
     void shutdown();
     bool initialized() const;
 
@@ -51,7 +51,7 @@ private:
     AccountEngine();
     ~AccountEngine() = default;
 
-    void* m_strategy = nullptr;
+    ::Strategy* m_strategy = nullptr;
     AccountInfo m_cachedAccount;
     std::unordered_map<std::string, Position> m_cachedPositions;
     DataFn m_onDataChanged;

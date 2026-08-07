@@ -3,6 +3,7 @@
 #include "MarketDataService.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <unordered_set>
@@ -70,8 +71,8 @@ void MultiFactorStrategy::evaluate(
     if (!m_config.isValid() || !context.isValid()
         || context.strategyInstanceId() != m_instanceId
         || factorSnapshots.empty()) {
-        static int diagCount = 0;
-        if (++diagCount <= kMaxDiagLogs) {
+        static std::atomic<int> diagCount{0};
+        if (diagCount.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
             std::string reason;
             if (!m_config.isValid()) reason = "!config.isValid";
             else if (!context.isValid()) reason = "!context.isValid";
@@ -88,8 +89,8 @@ void MultiFactorStrategy::evaluate(
     // ── 解析行情视图（用于 symbol 映射 + 权重方案数据）──
     const auto* view = resolveMarketView(context);
     if (!view) {
-        static int noViewDiag = 0;
-        if (++noViewDiag <= kMaxDiagLogs) {
+        static std::atomic<int> noViewDiag{0};
+        if (noViewDiag.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
             INTERNAL_WARN_STREAM << "[MultiFactor] evaluate skipped: no market view";
         }
         return;
@@ -103,8 +104,8 @@ void MultiFactorStrategy::evaluate(
     auto allScores = computeCompositeScores(normalized);
     if (allScores.empty()) return;
 
-    static int scoreDiag = 0;
-    if (++scoreDiag <= kMaxDiagLogs) {
+    static std::atomic<int> scoreDiag{0};
+    if (scoreDiag.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
         double maxScore = kZeroValue;
         for (auto& s : allScores) {
             if (s.compositeScore > maxScore) maxScore = s.compositeScore;
@@ -193,8 +194,8 @@ MultiFactorStrategy::normalizeCrossSectional(
             if (std::abs(snap.factorValue) > kEpsilon)
                 ++nonZeroByFactor[snap.factorId];
         }
-        static int rawDiag = 0;
-        if (++rawDiag <= kMaxDiagLogs) {
+        static std::atomic<int> rawDiag{0};
+        if (rawDiag.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
             for (const auto& fid : m_config.factorIds) {
                 INTERNAL_INFO_STREAM << "[MultiFactor] rawFactor: fid=" << fid
                     << " count=" << countByFactor[fid]
@@ -372,8 +373,8 @@ void MultiFactorStrategy::emitExitSignals(
     const auto& currentWeights = context.currentWeights();
 
     // 诊断：无条件打印前5次，确认是否进入此方法
-    static int enterDiag = 0;
-    if (++enterDiag <= 5) {
+    static std::atomic<int> enterDiag{0};
+    if (enterDiag.fetch_add(1, std::memory_order_relaxed) < 5) {
         int hc = 0;
         for (const auto& [sym, w] : currentWeights) if (w > kZeroValue) ++hc;
         INTERNAL_INFO_STREAM << "[MultiFactor] emitExitSignals #" << enterDiag
@@ -400,7 +401,7 @@ void MultiFactorStrategy::emitExitSignals(
     const auto& viewSymbols = view->symbolStrings();
     const auto& viewInstruments = view->instruments();
 
-    static int exitDiag = 0;
+    static std::atomic<int> exitDiag{0};
     int scoreExits = 0, rankExits = 0;
 
     for (const auto& [sym, weight] : currentWeights) {
@@ -449,7 +450,7 @@ void MultiFactorStrategy::emitExitSignals(
         }
     }
 
-    if (++exitDiag <= 5) {
+    if (exitDiag.fetch_add(1, std::memory_order_relaxed) < 5) {
         int heldCount = 0, lookedUp = 0;
         for (const auto& [sym, w] : currentWeights) {
             if (w > kZeroValue) ++heldCount;

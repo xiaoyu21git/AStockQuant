@@ -69,7 +69,7 @@ private:
                         double sentiment,
                         double confidence);
 
-    engine::EventBus* m_bus = nullptr;
+    std::shared_ptr<engine::EventBus> m_bus;
     foundation::utils::Uuid m_subscriptionId;
 
     // 因事件被临时封禁的标的 (T+1 清空)

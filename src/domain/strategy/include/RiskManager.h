@@ -33,6 +33,11 @@ public:
     static bool isPriceAtLimit(double currentPrice, double preClose, bool isBuy,
                                const std::string& symbol = "");
 
+    /// @brief 简化 VaR 估算：敞口比率 × 波动率系数（默认 1.49 ≈ 年化 15% × 1.645 正态分位数）
+    static double estimateVar(double exposurePct, double volatilityFactor = 1.49) {
+        return exposurePct * volatilityFactor;
+    }
+
 private:
     RiskManager() : m_config(RiskConfig::defaults()) {}
     RiskConfig m_config;

@@ -139,7 +139,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         for (const QString& dt : dataTypes) {
             std::vector<astock::database::SqlQueryResultRow> coverage;
             if (dt == "kline_daily") {
-                coverage = repo.querySymbolCoverage("mkt.daily_bar", "trade_date", sd, ed, "id");
+                coverage = repo.querySymbolCoverage(std::string(astock::database::schema::kMarket) + ".daily_bar", "trade_date", sd, ed, "id");
             } else if (dt == "financial") {
                 coverage = repo.querySymbolCoverage("fund.financial_indicator_daily", "report_date", sd, ed, "id");
             } else {
@@ -222,14 +222,14 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         }
 
         int dataId = DataCacheAdapter::instance().storeDataSet(QVariantList(), infoMap);
-        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId, allFields, numericFields) : nullptr;
+        auto token = dataId > 0 ? DataCacheAdapter::instance().beginArrowWrite(dataId, allFields, numericFields) : cleaning::DataCache::ArrowWriteToken{};
         if (!token) { /* error handling */ return; }
 
         // ── 委托共享组装器：按月分片装配原始行情，逐块写入 token（与增量路径同源）──
         bridge::RawMarketDataAssembler assembler;
         auto asmResult = assembler.assemble(
             typeNames, allSymbolsVec, startDate.toStdString(), endDate.toStdString(),
-            [token](const std::shared_ptr<arrow::Table>& table) {
+            [&token](const std::shared_ptr<arrow::Table>& table) {
                 DataCacheAdapter::instance().appendArrowTable(token, table);
             },
             [self](int dm, int tm, int tr) {
@@ -241,7 +241,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                 }, Qt::QueuedConnection);
             });
         int totalRows = asmResult.totalRows;
-        DataCacheAdapter::instance().finishArrowWrite(token, totalRows);
+        DataCacheAdapter::instance().finishArrowWrite(std::move(token), totalRows);
         int did = dataId, tr = totalRows;
         QMetaObject::invokeMethod(self.get(), [self, did, tr]() {
             if (!self || did <= 0) return;

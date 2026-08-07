@@ -53,7 +53,7 @@ public:
                       BatchDataCallback callback);
 
 private:
-    ResourceGovernor* m_governor = nullptr;      // 暂不持 ownership
+    std::unique_ptr<ResourceGovernor> m_governor;
     factor::compute::BacktestDataService* m_dataService = nullptr; // Scheduler 内部调它
 };
 
