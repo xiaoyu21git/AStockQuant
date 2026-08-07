@@ -19,8 +19,13 @@ public:
 
     /// @brief 巡检所有持仓，触发止损止盈时委托 OrderBuilder 生成退出订单
     /// @param builder 调用方传入，不持有，避免悬空指针
+    /// @param strategyId 策略ID（全局巡检可传空字符串）
+    /// @param accountId 账户ID
     /// @return 需要执行的退出订单列表
-    std::vector<engine::OrderRequest> patrolPositions(domain::trading::OrderBuilder& builder);
+    std::vector<engine::OrderRequest> patrolPositions(
+        domain::trading::OrderBuilder& builder,
+        const std::string& strategyId,
+        const std::string& accountId);
 
     void setRiskConfig(const RiskConfig& config);
     const RiskConfig& riskConfig() const;

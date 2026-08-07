@@ -58,6 +58,16 @@ public:
     /// @brief 转为 InstrumentId（保留 6 位代码的完整数值，避免去前导零碰撞）
     [[nodiscard]] uint32_t instrumentId() const;
 
+    // ── 静态便捷方法 ──
+
+    /// @brief 去掉交易所后缀，返回纯 6 位代码。如 "000001.SZ" → "000001"
+    /// 若不含 '.' 则原样返回
+    [[nodiscard]] static std::string codeOnly(const std::string& symbol);
+
+    /// @brief InstrumentId → 完整 symbol。如 1 → "000001.SZ", 600000 → "600000.SH"
+    /// id > 999999 返回空字符串（非 A 股代码）
+    [[nodiscard]] static std::string fromInstrumentId(uint32_t id);
+
 private:
     std::string m_code;        // 6 位数字字符串
     Exchange m_exchange{Exchange::Unknown};

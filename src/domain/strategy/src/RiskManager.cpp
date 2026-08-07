@@ -59,7 +59,10 @@ namespace {
 // 主动巡检 — 止损止盈退出（委托 OrderBuilder 构建订单）
 // ═══════════════════════════════════════════════════════════════════
 
-std::vector<engine::OrderRequest> RiskManager::patrolPositions(domain::trading::OrderBuilder& builder) {
+std::vector<engine::OrderRequest> RiskManager::patrolPositions(
+    domain::trading::OrderBuilder& builder,
+    const std::string& strategyId,
+    const std::string& accountId) {
     std::vector<engine::OrderRequest> orders;
     if (m_config.stopLossPercent <= 0 && m_config.takeProfitPercent <= 0)
         return orders;
@@ -88,7 +91,7 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions(domain::trading::
             INTERNAL_WARN_STREAM << "[RiskManager] 止损触发: " << pos.symbol
                                  << " 成本=" << pos.costPrice << " 现价=" << price
                                  << " 浮亏=" << static_cast<int>(std::abs(pnlPct)) << "%";
-            orders.push_back(builder.buildStopOrder(pos.symbol, price, pos.availableQty));
+            orders.push_back(builder.buildStopOrder(pos.symbol, price, pos.availableQty, strategyId, accountId));
             continue;
         }
 
@@ -98,7 +101,7 @@ std::vector<engine::OrderRequest> RiskManager::patrolPositions(domain::trading::
             INTERNAL_INFO_STREAM << "[RiskManager] 止盈触发: " << pos.symbol
                                  << " 成本=" << pos.costPrice << " 现价=" << price
                                  << " 浮盈=" << static_cast<int>(pnlPct) << "%";
-            orders.push_back(builder.buildStopOrder(pos.symbol, price, pos.availableQty));
+            orders.push_back(builder.buildStopOrder(pos.symbol, price, pos.availableQty, strategyId, accountId));
         }
     }
 

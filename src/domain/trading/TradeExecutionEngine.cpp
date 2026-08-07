@@ -542,9 +542,25 @@ TradeExecutionEngine::TradeExecutionEngine()
                     }
                 }
                 if (!found) {
-                    INTERNAL_ERROR_STREAM << "[TradeExecEng] order.updated id=" << *id
-                                          << " NOT found in recentOrders (count="
-                                          << m_impl->m_recentOrders.size() << ")";
+                    // 订单已从内存缓存挤出 (如批量提交后旧批次被新批次替换, 或外部撤单),
+                    // broker_order_id 即 clOrdId, 直接落 DB
+                    INTERNAL_INFO_STREAM << "[TradeExecEng] order.updated id=" << *id
+                                         << " not in recentOrders (count="
+                                         << m_impl->m_recentOrders.size() << "), sync DB directly";
+                    if (status) {
+                        OrderStatusValue st = static_cast<OrderStatusValue>(*status + 1);
+                        using RS = astock::infrastructure::database::RecOrdStatus;
+                        RS recSt = RS::Pending;
+                        switch (st) {
+                            case OrderStatusValue::PartiallyFilled: recSt = RS::PartiallyFilled; break;
+                            case OrderStatusValue::Filled:          recSt = RS::Filled; break;
+                            case OrderStatusValue::Cancelled:       recSt = RS::Cancelled; break;
+                            case OrderStatusValue::Rejected:        recSt = RS::Rejected; break;
+                            default: break;
+                        }
+                        astock::infrastructure::database::OrderRecorder::instance()
+                            .updateOrderStatus(*id, recSt, *id, "");
+                    }
                 }
             });
         m_impl->m_fillSub = bus->subscribe("trading.execution.report",

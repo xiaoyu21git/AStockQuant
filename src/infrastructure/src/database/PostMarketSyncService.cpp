@@ -4,6 +4,8 @@
 #include "../../../engine/include/GmSessionEngine.h"
 #include "../../../thirdparty/gmsdk/gmapi.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
+#include "foundation/market/ExchangeMapper.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
@@ -197,8 +199,7 @@ void PostMarketSyncService::forceSyncMissingDays(int lookbackDays) {
 }
 
 void PostMarketSyncService::probeGmCoverage(const std::string& symbol, const std::vector<std::string>& dates) {
-    auto d=symbol.find('.');std::string gm;
-    if(d!=std::string::npos){std::string c=symbol.substr(0,d),e=symbol.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}
+    std::string gm = foundation::market::AStockSymbol::fromString(symbol).gmSymbol();
     if(gm.empty()){INTERNAL_ERROR_STREAM<<"[GmProbe] 无效标的: "<<symbol;return;}
     for(auto&dt:dates){
         auto* bars=::history_bars_n(gm.c_str(),"1d",1,dt.c_str(),0,nullptr,true,nullptr);
@@ -242,7 +243,7 @@ void PostMarketSyncService::fillAdjFactors() {
         std::string sql="UPDATE mkt.daily_bar SET pre_adjust_factor=$1,post_adjust_factor=$2 WHERE symbol_id=$3 AND (pre_adjust_factor=1.0 OR trade_date>=$4::date)";
         int ok=0,proc=0,fail=0,firstFailStreak=0;
         for(auto&s:syms){
-            std::string gm;{auto d=s.sym.find('.');if(d!=std::string::npos){std::string c=s.sym.substr(0,d),e=s.sym.substr(d+1);if(e=="SH")gm="SHSE."+c;else if(e=="SZ")gm="SZSE."+c;else if(e=="BJ")gm="BSE."+c;}}
+            std::string gm = foundation::market::AStockSymbol::fromString(s.sym).gmSymbol();
             if(gm.empty()){++proc;continue;}++proc;
             if(proc>1)std::this_thread::sleep_for(std::chrono::milliseconds(50));
             int symOk=0;bool gotData=false;
@@ -831,13 +832,9 @@ bool PostMarketSyncService::isTradingDay(int date) {
 }
 
 std::string PostMarketSyncService::toGmSymbol(const std::string& sym) {
-    auto d = sym.find('.');
-    if (d == std::string::npos) return "";
-    std::string code = sym.substr(0, d), ex = sym.substr(d + 1);
-    if (ex == "SH") return "SHSE." + code;
-    if (ex == "SZ") return "SZSE." + code;
-    if (ex == "BJ") return "BSE." + code;
-    return "";
+    auto s = foundation::market::AStockSymbol::fromString(sym);
+    if (!s.isValid()) return "";
+    return s.gmSymbol();
 }
 
 void PostMarketSyncService::loadLastSyncDay() {
@@ -1273,8 +1270,8 @@ void PostMarketSyncService::syncConceptMembership()
             auto dot = sym.find('.');
             std::string code6 = dot != std::string::npos ? sym.substr(dot + 1) : sym;
             std::string exchCode = dot != std::string::npos ? sym.substr(0, dot) : "";
-            std::string exchange = (exchCode == "SHSE") ? "SH" :
-                                   (exchCode == "SZSE") ? "SZ" : "BJ";
+            std::string exchange = foundation::market::ExchangeMapper::prefixToSuffix(exchCode);
+            if (!exchange.empty() && exchange[0] == '.') exchange = exchange.substr(1);
             std::string dbSymbol = code6 + "." + exchange;
             db->executeUpdate(
                 "INSERT INTO live.concept_membership(concept_code,symbol_id,symbol) "

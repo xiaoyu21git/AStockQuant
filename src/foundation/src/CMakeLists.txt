@@ -13,6 +13,7 @@ target_sources(foundation PRIVATE
     json/json_facade.cpp
     log/logger.cpp
     market/AStockSymbol.cpp
+    market/ExchangeMapper.cpp
     net/Net_facade.cpp
     net/http_request_builder.cpp
     thread/ThreadPoolExecutor.cpp

@@ -2,6 +2,7 @@
 #include "../include/RuntimeFactorSvc.h"
 #include "../../factor/include/FactorInstanceManager.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
 
 #include <cstdio>
 #include <sstream>
@@ -124,9 +125,7 @@ std::unique_ptr<IRuntimeFactorService> StrategyManager::createFactorService()
     if (!m_factorInstanceManager) return nullptr;
 
     auto symbolResolver = [](std::uint32_t id) -> std::string {
-        char buf[16];
-        std::snprintf(buf, sizeof(buf), "%06u", id);
-        return buf;
+        return foundation::market::AStockSymbol::fromInstrumentId(id);
     };
     auto factorNameResolver = [](std::uint64_t fid) -> std::string {
         return std::to_string(fid);

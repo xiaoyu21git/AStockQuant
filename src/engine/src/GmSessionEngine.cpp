@@ -4,6 +4,7 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 #include "foundation/config/ConfigManager.hpp"
+#include "foundation/market/AStockSymbol.h"
 #include "../../domain/market/include/MarketDataService.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
@@ -542,10 +543,9 @@ void* GmSessionEngine::strategy() const { return m_strategy.get(); }
 // ═══════════════════════════════════════════════════════════════════
 
 std::string GmSessionEngine::toGmSymbol(const std::string& in) {
-    auto d = in.find('.'); if (d == std::string::npos) return "";
-    std::string c = in.substr(0, d), e = in.substr(d + 1);
-    if (e == "SH") return "SHSE." + c; if (e == "SZ") return "SZSE." + c;
-    if (e == "BJ") return "BSE." + c; return "";
+    auto sym = foundation::market::AStockSymbol::fromString(in);
+    if (!sym.isValid()) return "";
+    return sym.gmSymbol();
 }
 std::string GmSessionEngine::fromGmSymbol(const std::string& gm) {
     if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";

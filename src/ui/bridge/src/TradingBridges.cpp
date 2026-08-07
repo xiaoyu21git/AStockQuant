@@ -358,15 +358,14 @@ QVariantMap TradeExecutionBridge::submitOrder(const QVariantMap& orderMap) {
     auto account   = accEng.account();
 
     domain::trading::OrderBuilder manualBuilder;
-    manualBuilder.setStrategyId(strategyId.toStdString());
-    manualBuilder.setAccountId(account.accountId);
     bool isBuy = (order.side() == domain::strategy::OrderDirection::Buy);
     auto pe = isBuy ? domain::trading::PositionEffect::Open
                     : domain::trading::PositionEffect::Close;
     engineReq = manualBuilder.buildManualOrder(
         order.symbol(),
         isBuy ? engine::OrderSide::Buy : engine::OrderSide::Sell,
-        order.price(), order.quantity(), pe);
+        order.price(), order.quantity(), pe,
+        strategyId.toStdString(), account.accountId);
 
     if (!engineReq.isValid()) {
         QVariantMap out;
@@ -537,9 +536,7 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
     if (quote && quote->valid && quote->preClose > 0) {
         double preClose = quote->preClose;
         double limitRatio = 0.10;
-        std::string code = found->symbol;
-        auto dot = code.find('.');
-        if (dot != std::string::npos) code = code.substr(0, dot);
+        std::string code = foundation::market::AStockSymbol::codeOnly(found->symbol);
         if (code.rfind("300", 0) == 0 || code.rfind("301", 0) == 0 || code.rfind("688", 0) == 0)
             limitRatio = 0.20;
         else if (code.rfind("8", 0) == 0 || code.rfind("4", 0) == 0)
@@ -561,17 +558,7 @@ QVariantMap TradeExecutionBridge::quickClosePosition(const QString& symbol, cons
         return out;
     }
 
-    std::string gmSym;
-    {
-        auto dot = found->symbol.find('.');
-        if (dot != std::string::npos) {
-            std::string code = found->symbol.substr(0, dot);
-            std::string exch = found->symbol.substr(dot + 1);
-            if (exch == "SH") gmSym = "SHSE." + code;
-            else if (exch == "SZ") gmSym = "SZSE." + code;
-            else if (exch == "BJ") gmSym = "BSE." + code;
-        }
-    }
+    std::string gmSym = foundation::market::AStockSymbol::fromString(found->symbol).gmSymbol();
     if (gmSym.empty()) {
         out["message"] = QStringLiteral("无效代码: ") + searchSym;
         return out;

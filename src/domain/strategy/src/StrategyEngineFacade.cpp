@@ -18,6 +18,7 @@
 #include "../../trading/TradingTypes.h"
 #include "../include/EventRiskSubscriber.h"
 #include "RuleGate.h"
+#include "foundation/market/AStockSymbol.h"
 #include "RuleVariableProvider.h"
 #include "RuleConditionEvaluator.h"
 #include "RuleAttribution.h"
@@ -350,7 +351,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromParams(const StrategyCreatio
         .build();
     if (engine) {
         engine->setStrategyId(params.strategyId);
-        engine->m_orderBuilder.setStrategyId(params.strategyId);
     }
     return engine;
 }
@@ -547,9 +547,7 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                 auto filtered = m_rulePipeline.filterBuySignals(*orders,
                     [view, &gateProvider](rules::RuleCandidateContext& ctx, const std::string& symbol) {
                         ctx.symbol = symbol;
-                        auto dot = symbol.find('.');
-                        ctx.code = dot != std::string::npos
-                            ? symbol.substr(0, dot) : symbol;
+                        ctx.code = foundation::market::AStockSymbol::codeOnly(symbol);
                         const auto& symStrs = view->symbolStrings();
                         for (size_t cc = 0; cc < symStrs.size(); ++cc)
                             if (symStrs[cc] == symbol) { ctx.colIndex = static_cast<int>(cc); break; }
@@ -724,23 +722,11 @@ int StrategyEngine::liquidateAll()
     std::vector<OrderRequest> orders;
     for (const auto& pos : positions) {
         if (pos.quantity <= 0) continue;
-        OrderRequest order;
-        order.setSymbol(pos.symbol);
-        order.setSide(domain::trading::OrderSide::Sell);
-        order.setQuantity(static_cast<double>(pos.quantity));
-        order.setPrice(0);  // 市价
-        order.setOrderType(domain::trading::OrderType::Market);
-        order.setPositionEffect(domain::trading::PositionEffect::Close);
-        order.setStrategyId(m_strategyId);
-        m_orderBuilder.setAccountId(accEng.account().accountId);
-        order.setAccountId(accEng.account().accountId);
-
-        orders.push_back(std::move(order));
+        orders.push_back(m_orderBuilder.buildLiquidationExit(
+            pos.symbol, pos.quantity, m_strategyId, accEng.account().accountId));
 
         // 去后缀加入清仓名单
-        auto dot = pos.symbol.find('.');
-        std::string code = (dot != std::string::npos)
-            ? pos.symbol.substr(0, dot) : pos.symbol;
+        std::string code = foundation::market::AStockSymbol::codeOnly(pos.symbol);
         m_liquidationBlocklist.insert(code);
     }
 
@@ -750,7 +736,7 @@ int StrategyEngine::liquidateAll()
     for (const auto& p : positions)
         liqPosMap[p.symbol] = p.quantity;
     MapPositionProvider liqPosProvider(liqPosMap);
-    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, account, 0.0);
+    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, account, 0.0, m_strategyId, accEng.account().accountId);
 
     if (validatedOrders.empty()) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: OrderGenerator 过滤后无有效订单";
@@ -828,14 +814,12 @@ void StrategyEngine::drainQueue()
 
                 std::unordered_map<std::string, int64_t> posQtyMap;
                 for (const auto& p : positions) {
-                    auto dot = p.symbol.find('.');
-                    std::string code = (dot != std::string::npos)
-                        ? p.symbol.substr(0, dot) : p.symbol;
+                    std::string code = foundation::market::AStockSymbol::codeOnly(p.symbol);
                     posQtyMap[code] = p.quantity;
                 }
 
                 MapPositionProvider posProvider(posQtyMap);
-                auto finalOrders = m_orderGenerator.generate(*orders, posProvider, account, mdp.lastPrice());
+                auto finalOrders = m_orderGenerator.generate(*orders, posProvider, account, mdp.lastPrice(), m_strategyId, m_accountId);
                 if (!finalOrders.empty()) {
                     static std::atomic<uint64_t> s_basketSeq{0};
                     auto basketId = std::to_string(
@@ -916,11 +900,6 @@ struct StrategyEngine::PendingOrder {
 // evaluateEndOfDay 子函数
 // ═════════════════════════════════════════════════════════════════════════
 
-static std::string stripExchange(const std::string& sym) {
-    auto dot = sym.find('.');
-    return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
-}
-
 // ── 涨跌停检测 (A股主板 ±10%, 浮点宽容差) ──
 static bool isAtLimitUp(double close, double preClose) {
     if (preClose <= 0.0 || close <= 0.0) return false;
@@ -990,7 +969,7 @@ bool StrategyEngine::prepareEodContext(const std::string& tradingDay, EodContext
     ctx.endDateStr = buf;
 
     for (int c = 0; c < ctx.numCols; ++c)
-        ctx.symToCol[stripExchange(syms[c])] = c;
+        ctx.symToCol[foundation::market::AStockSymbol::codeOnly(syms[c])] = c;
 
     return true;
 }
@@ -1025,7 +1004,7 @@ bool StrategyEngine::fetchTodayPrices(const EodContext& ctx, EodPriceData& price
     // 实时: 从 GMSDK 取价
     std::ostringstream gmList;
     for (const auto& sym : *ctx.symbols) {
-        std::string gm = engine::GmSessionEngine::toGmSymbol(sym);
+        std::string gm = foundation::market::AStockSymbol::fromString(sym).gmSymbol();
         if (!gm.empty()) {
             if (gmList.tellp() > 0) gmList << ',';
             gmList << gm;
@@ -1189,7 +1168,7 @@ std::vector<StrategyEngine::PendingOrder> StrategyEngine::collectEodSignals(
     }
 
     for (const auto& sym : *ctx.symbols) {
-        if (blockNewBuys && posQtyMap.count(stripExchange(sym)) == 0) continue;
+        if (blockNewBuys && posQtyMap.count(foundation::market::AStockSymbol::codeOnly(sym)) == 0) continue;
 
         auto pvIt = prices.bars.find(sym);
         if (pvIt == prices.bars.end()) continue;
@@ -1205,7 +1184,7 @@ std::vector<StrategyEngine::PendingOrder> StrategyEngine::collectEodSignals(
 
         try {
             if (EventRiskSubscriber::instance().isStarted() &&
-                EventRiskSubscriber::instance().blockedSymbols().count(stripExchange(sym))) {
+                EventRiskSubscriber::instance().blockedSymbols().count(foundation::market::AStockSymbol::codeOnly(sym))) {
                 INTERNAL_INFO_STREAM << "[StrategyEngine] EOD skip blocked: " << sym;
                 continue;
             }
@@ -1224,13 +1203,14 @@ std::vector<StrategyEngine::PendingOrder> StrategyEngine::collectEodSignals(
                     domain::trading::ExtKey::kTargetWeight, 0.0);
                 order = m_orderBuilder.buildSignalOrder(
                     order.symbol(), order.side(), 0,
-                    static_cast<int64_t>(order.quantity()), signalScore);
+                    static_cast<int64_t>(order.quantity()), signalScore,
+                    m_strategyId, m_accountId);
                 if (targetWeight > 0.0)
                     order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);
                 double tickPrice = mdp.lastPrice();
                 if (!std::isfinite(tickPrice) || tickPrice <= 0) continue;
                 if (order.orderType() == OrderType::Market)
-                    order.setPrice(tickPrice);
+                    order.setPrice(0.0);  // 市价单不设限价, 避免掘金拒绝
                 pendingOrders.push_back({std::move(order), tickPrice, targetWeight, signalScore});
             }
         } catch (const std::exception& e) {
@@ -1259,7 +1239,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
         filtered.reserve(pendingOrders.size());
         for (auto& po : pendingOrders) {
             if (po.order.side() == OrderSide::Buy) {
-                const std::string sym6 = stripExchange(po.order.symbol());
+                const std::string sym6 = foundation::market::AStockSymbol::codeOnly(po.order.symbol());
                 rules::RuleCandidateContext ruleCtx;
                 auto cite = ctx.symToCol.find(sym6);
                 ruleCtx.colIndex = cite != ctx.symToCol.end() ? cite->second : -1;
@@ -1281,7 +1261,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
         exitProvider.setDay(ctx.view, ctx.tradingDayInt, nullptr);
         for (const auto& pos : positions) {
             if (pos.quantity <= 0 || pos.costPrice <= 0.0) continue;
-            const std::string sym6 = stripExchange(pos.symbol);
+            const std::string sym6 = foundation::market::AStockSymbol::codeOnly(pos.symbol);
             rules::RuleCandidateContext posCtx;
             posCtx.symbol = pos.symbol;
             posCtx.code = sym6;
@@ -1304,13 +1284,10 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
                     }
                 }
                 // 注意: 规则出场(止损/风控)不检查跌停 — 风控指令必须尝试执行
-                OrderRequest exitReq;
-                exitReq.setSymbol(pos.symbol);
-                exitReq.setSide(OrderSide::Sell);
-                exitReq.setQuantity(action == rules::RuleAction::Exit
-                    ? pos.quantity : (std::max)(static_cast<std::int64_t>(1), pos.quantity / 2));
-                exitReq.setOrderType(domain::trading::OrderType::Market);
-                exitReq.setPrice(currentPrice);
+                OrderRequest exitReq = m_orderBuilder.buildRuleExit(
+                    pos.symbol, pos.quantity,
+                    action == rules::RuleAction::Exit,
+                    m_strategyId, m_accountId, currentPrice);
                 PendingOrder exitPo;
                 exitPo.order = std::move(exitReq);
                 exitPo.tickPrice = currentPrice;
@@ -1344,7 +1321,24 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
 
     auto freshAccount = engine::AccountEngine::instance().account();
     MapPositionProvider posProvider(posQtyMap);
-    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, freshAccount, priceForWeight);
+    // 诊断: 打印 generate() 入参
+    INTERNAL_INFO_STREAM << "[EOD QtyDiag] priceForWeight=" << priceForWeight
+                         << " totalAsset=" << freshAccount.totalAsset
+                         << " rawOrders=" << rawOrders.size();
+    for (size_t di = 0; di < rawOrders.size() && di < 3; ++di) {
+        double diW = rawOrders[di].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
+        INTERNAL_INFO_STREAM << "[EOD QtyDiag] raw[" << di << "] " << rawOrders[di].symbol()
+                             << " qty=" << rawOrders[di].quantity()
+                             << " tw=" << diW;
+    }
+    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, freshAccount, priceForWeight, m_strategyId, m_accountId);
+    INTERNAL_INFO_STREAM << "[EOD QtyDiag] finalOrders=" << finalOrders.size();
+    for (size_t di = 0; di < finalOrders.size() && di < 3; ++di) {
+        double diW = finalOrders[di].extensionAs<double>(domain::trading::ExtKey::kTargetWeight, -1.0);
+        INTERNAL_INFO_STREAM << "[EOD QtyDiag] final[" << di << "] " << finalOrders[di].symbol()
+                             << " qty=" << finalOrders[di].quantity()
+                             << " tw=" << diW;
+    }
 
     if (m_ruleGate.enabled()) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 规则闸门:"
@@ -1464,14 +1458,13 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     auto& accEng = engine::AccountEngine::instance();
     auto account = accEng.account();
     auto positions = accEng.positions();
-    m_orderBuilder.setAccountId(account.accountId);
     if (account.totalAsset <= 0) {
         INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
         return EodEvaluationStatus::Skipped;
     }
     std::unordered_map<std::string, int64_t> posQtyMap;
     for (const auto& p : positions)
-        posQtyMap[stripExchange(p.symbol)] = p.quantity;
+        posQtyMap[foundation::market::AStockSymbol::codeOnly(p.symbol)] = p.quantity;
     if (EventRiskSubscriber::instance().isStarted())
         EventRiskSubscriber::instance().clearBlockedSymbols();
 
@@ -1662,7 +1655,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     // ── 应用配置（值类型移动，构建后 Builder 失效）──
     if (!strategyId_.empty()) {
         engine->setStrategyId(strategyId_);
-        engine->m_orderBuilder.setStrategyId(strategyId_);
     }
 
     // ── 因子覆盖层配置 ──
@@ -2108,8 +2100,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 for (const auto& sym : allSyms) {
                     rules::RuleCandidateContext candidateCtx;
                     candidateCtx.symbol = sym;
-                    auto dot = sym.find('.');
-                    candidateCtx.code = dot != std::string::npos ? sym.substr(0, dot) : sym;
+                    candidateCtx.code = foundation::market::AStockSymbol::codeOnly(sym);
                     candidateCtx.isHolding = false;
                     ruleProvider.setCandidate(candidateCtx);
                     ruleScoreMap[sym] = m_ruleGate.entryScore(ruleProvider);
@@ -2153,8 +2144,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                 if (pos.quantity() <= 0) continue;
                 rules::RuleCandidateContext posCtx;
                 posCtx.symbol = fullSymbol;
-                auto dot = fullSymbol.find('.');
-                posCtx.code = dot != std::string::npos ? fullSymbol.substr(0, dot) : fullSymbol;
+                posCtx.code = foundation::market::AStockSymbol::codeOnly(fullSymbol);
                 posCtx.isHolding = true;
                 posCtx.holdDays = 0.0;
                 auto bpIt = buyPriceMap.find(fullSymbol);
@@ -2245,9 +2235,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                     if (!ruleAllowEntriesToday) continue;  // 市场冻结
                     rules::RuleCandidateContext signalCtx;
                     signalCtx.symbol = symbol;
-                    auto dot = signalCtx.symbol.find('.');
-                    signalCtx.code = dot != std::string::npos
-                        ? signalCtx.symbol.substr(0, dot) : signalCtx.symbol;
+                    signalCtx.code = foundation::market::AStockSymbol::codeOnly(signalCtx.symbol);
                     signalCtx.colIndex = col;
                     ruleProvider.setCandidate(signalCtx);
                     if (!m_ruleGate.allowSignal(ruleProvider)) {

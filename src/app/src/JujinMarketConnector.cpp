@@ -442,8 +442,8 @@ void JujinMarketConnector::riskPatrolLoop()
         std::this_thread::sleep_for(std::chrono::seconds(1));
         try {
             auto& accEng = engine::AccountEngine::instance();
-            builder.setAccountId(accEng.account().accountId);
-            auto stopOrders = domain::strategy::RiskManager::instance().patrolPositions(builder);
+            auto accId = accEng.account().accountId;
+            auto stopOrders = domain::strategy::RiskManager::instance().patrolPositions(builder, "", accId);
             auto& tradeEng = engine::TradeEngine::instance();
             for (const auto& o : stopOrders) {
                 INTERNAL_WARN_STREAM << "[JMC] 止损/止盈触发: " << o.symbol()

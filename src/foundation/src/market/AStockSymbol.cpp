@@ -1,7 +1,9 @@
 #include "foundation/market/AStockSymbol.h"
+#include "foundation/market/ExchangeMapper.h"
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 
@@ -69,17 +71,11 @@ AStockSymbol AStockSymbol::fromString(const std::string& symbol) {
     std::transform(suffix.begin(), suffix.end(), suffix.begin(),
                    [](unsigned char c) { return std::toupper(c); });
 
-    Exchange ex = Exchange::Unknown;
-    if (suffix == "SH")      ex = Exchange::SSE;
-    else if (suffix == "SZ") ex = Exchange::SZSE;
-    else if (suffix == "BJ") ex = Exchange::BSE;
-    else {
-        // 掘金格式 SZSE.000001 / SHSE.600000
-        if (suffix == "SHSE") ex = Exchange::SSE;
-        else if (suffix == "SZSE") ex = Exchange::SZSE;
-        else if (suffix == "BSE") ex = Exchange::BSE;
-        else ex = inferExchange(code);  // fallback: 从代码推断
-    }
+    Exchange ex = ExchangeMapper::fromSuffix(suffix);
+    if (ex == Exchange::Unknown)
+        ex = ExchangeMapper::fromPrefix(suffix);  // 掘金格式 SZSE / SHSE / BSE
+    if (ex == Exchange::Unknown)
+        ex = inferExchange(code);  // fallback: 从代码推断
 
     return {code, ex, inferBoard(code)};
 }
@@ -121,6 +117,18 @@ uint32_t AStockSymbol::instrumentId() const {
     } catch (...) {
         return 0;
     }
+}
+
+std::string AStockSymbol::codeOnly(const std::string& symbol) {
+    auto dot = symbol.find('.');
+    return (dot != std::string::npos) ? symbol.substr(0, dot) : symbol;
+}
+
+std::string AStockSymbol::fromInstrumentId(uint32_t id) {
+    if (id > 999999) return "";
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "%06u", id);
+    return fromCode(std::string(buf)).fullSymbol();
 }
 
 } // namespace market

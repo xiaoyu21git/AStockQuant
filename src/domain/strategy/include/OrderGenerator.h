@@ -52,12 +52,16 @@ public:
     /// @param posProvider 当前持仓查询接口
     /// @param account 账户信息（totalAsset 用于计算目标股数）
     /// @param priceForWeight 参考价格（用于权重→股数换算）
+    /// @param strategyId 策略ID（透传给 OrderBuilder）
+    /// @param accountId 账户ID（透传给 OrderBuilder）
     /// @return 最终可提交的订单列表（已去重、已校验最小手数）
     [[nodiscard]] std::vector<domain::trading::OrderRequest> generate(
         const std::vector<domain::trading::OrderRequest>& rawOrders,
         const IPositionProvider& posProvider,
         const engine::AccountInfo& account,
-        double priceForWeight) const;
+        double priceForWeight,
+        const std::string& strategyId,
+        const std::string& accountId) const;
 
 private:
     struct OrderDelta {

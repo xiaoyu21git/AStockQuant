@@ -24,6 +24,7 @@
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 #include "../../domain/factor/include/factor_compute/FactorEngine.h"
+#include "../../foundation/include/foundation/market/AStockSymbol.h"
 
 #include <QDebug>
 #include <QJsonArray>
@@ -200,9 +201,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 auto* instanceMgr = factorSvcBridge->instanceManager();
                 if (instanceMgr) {
                     auto symbolResolver = [](std::uint32_t id) -> std::string {
-                        char buf[16];
-                        std::snprintf(buf, sizeof(buf), "%06u.SZ", id);
-                        return buf;
+                        return foundation::market::AStockSymbol::fromInstrumentId(id);
                     };
                     auto factorNameResolver = [](std::uint64_t fid) -> std::string {
                         return std::to_string(fid);

@@ -3,6 +3,7 @@
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
+#include "foundation/market/AStockSymbol.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
 namespace engine {
@@ -16,14 +17,9 @@ int toGmSide(OrderSide s)                 { return s == OrderSide::Buy ? 1 : 2; 
 int toGmOrderType(OrderType t)             { return t == OrderType::Limit ? 1 : 2; }
 int toGmPositionEffect(domain::trading::PositionEffect pe) { return static_cast<int>(pe) + 1; }
 std::string toGm(const std::string& internal) {
-    auto dot = internal.find('.');
-    if (dot == std::string::npos) return "";
-    std::string code = internal.substr(0, dot);
-    std::string exch = internal.substr(dot + 1);
-    if (exch == "SH") return "SHSE." + code;
-    if (exch == "SZ") return "SZSE." + code;
-    if (exch == "BJ") return "BSE."  + code;
-    return "";
+    auto sym = foundation::market::AStockSymbol::fromString(internal);
+    if (!sym.isValid()) return "";
+    return sym.gmSymbol();
 }
 std::string fromGm(const std::string& gm) {
     if (gm.compare(0, 5, "SHSE.") == 0) return gm.substr(5) + ".SH";

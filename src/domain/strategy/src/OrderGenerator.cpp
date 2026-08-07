@@ -1,6 +1,8 @@
 #include "../include/OrderGenerator.h"
 #include "../include/StrategyServiceTypes.h"
 #include "../../../engine/include/AccountEngine.h"
+#include "foundation/market/AStockSymbol.h"
+#include "foundation/log/logging.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,11 +15,6 @@ using OrderRequest = domain::trading::OrderRequest;
 
 namespace {
 constexpr std::int64_t kMinLot = 100;
-
-std::string stripExchange(const std::string& sym) {
-    auto dot = sym.find('.');
-    return (dot != std::string::npos) ? sym.substr(0, dot) : sym;
-}
 
 std::int64_t weightToQty(double weight, double totalAsset, double priceForWeight) {
     if (priceForWeight <= 0 || totalAsset <= 0) return 0;
@@ -100,7 +97,9 @@ std::vector<OrderRequest> OrderGenerator::generate(
     const std::vector<OrderRequest>& rawOrders,
     const IPositionProvider& posProvider,
     const engine::AccountInfo& account,
-    double priceForWeight) const
+    double priceForWeight,
+    const std::string& strategyId,
+    const std::string& accountId) const
 {
     std::vector<OrderRequest> result;
     std::unordered_set<std::string> seenKeys;
@@ -108,17 +107,24 @@ std::vector<OrderRequest> OrderGenerator::generate(
     for (const auto& raw : rawOrders) {
         if (!raw.isValid()) continue;
 
-        std::string dedupKey = stripExchange(raw.symbol())
+        std::string dedupKey = foundation::market::AStockSymbol::codeOnly(raw.symbol())
             + (raw.side() == OrderSide::Buy ? "_B" : "_S");
         if (seenKeys.count(dedupKey)) continue;
         seenKeys.insert(dedupKey);
 
         double targetWeight = raw.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
         double signalScore  = raw.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.5);
-        std::string code = stripExchange(raw.symbol());
+        std::string code = foundation::market::AStockSymbol::codeOnly(raw.symbol());
         std::int64_t currentQty = posProvider.quantityOf(code);
 
-        if (priceForWeight <= 0 || account.totalAsset <= 0) continue;
+        if (priceForWeight <= 0 || account.totalAsset <= 0) {
+            static int skipDiag = 0;
+            if (++skipDiag <= 3)
+                INTERNAL_INFO_STREAM << "[OrdGen] SKIP: priceForWeight=" << priceForWeight
+                                     << " totalAsset=" << account.totalAsset
+                                     << " sym=" << raw.symbol();
+            continue;
+        }
 
         double currentWeight = qtyToWeight(currentQty, account.totalAsset, priceForWeight);
         OrderDelta delta;
@@ -134,8 +140,17 @@ std::vector<OrderRequest> OrderGenerator::generate(
 
         if (delta.deltaQty < kMinLot) continue;
 
+        static int genDiag = 0;
+        if (++genDiag <= 5)
+            INTERNAL_INFO_STREAM << "[OrdGen] " << raw.symbol()
+                                 << " tw=" << targetWeight
+                                 << " deltaQty=" << delta.deltaQty
+                                 << " priceForWeight=" << priceForWeight
+                                 << " totalAsset=" << account.totalAsset
+                                 << " w2q=" << weightToQty(targetWeight, account.totalAsset, priceForWeight);
+
         OrderRequest order = m_orderBuilder->buildSignalOrder(
-            raw.symbol(), raw.side(), 0, delta.deltaQty, signalScore);
+            raw.symbol(), raw.side(), 0, delta.deltaQty, signalScore, strategyId, accountId);
         order.setExtension(domain::trading::ExtKey::kSignalIntent,
                            static_cast<std::uint64_t>(delta.intent));
         order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);

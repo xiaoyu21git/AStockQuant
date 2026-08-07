@@ -5,6 +5,7 @@
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../infrastructure/include/database/ISqlDatabase.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
 
 #include <string>
 #include <sstream>
@@ -41,9 +42,7 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
         for (size_t i = 0; i < symbols.size(); ++i) {
             const std::string& sym = symbols[i];
             if (sym.empty()) continue;
-            std::string codeOnly = sym;
-            auto dotPos = codeOnly.find('.');
-            if (dotPos != std::string::npos) codeOnly.resize(dotPos);
+            std::string codeOnly = foundation::market::AStockSymbol::codeOnly(sym);
             std::uint32_t codeId = 0;
             try { codeId = static_cast<std::uint32_t>(std::stoul(codeOnly)); }
             catch (...) { continue; }
@@ -75,9 +74,7 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
                 for (size_t i = 0; i < symbols.size(); ++i) {
                     const std::string& sym = symbols[i];
                     if (sym.empty()) continue;
-                    std::string codeOnly = sym;
-                    auto dotPos = codeOnly.find('.');
-                    if (dotPos != std::string::npos) codeOnly.resize(dotPos);
+                    std::string codeOnly = foundation::market::AStockSymbol::codeOnly(sym);
                     std::uint32_t codeId = 0;
                     try { codeId = static_cast<std::uint32_t>(std::stoul(codeOnly)); }
                     catch (...) { continue; }
@@ -198,9 +195,7 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         std::string sym = m_symbolResolver(id);
         if (sym.empty()) continue;
         // 去掉 .SH / .SZ 后缀，对齐 view 的 symbolStrings
-        auto dot = sym.find('.');
-        if (dot != std::string::npos) sym.resize(dot);
-        symbolStrList.push_back(std::move(sym));
+        symbolStrList.push_back(foundation::market::AStockSymbol::codeOnly(sym));
     }
     if (symbolStrList.empty()) return result;
 
@@ -230,13 +225,9 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
         if (it != m_factorCache[instanceId].end()) {
             for (const auto& [sym, val] : it->second) {
                 // 缓存 key 可能带后缀 (如 "000001.SZ"), 统一去掉后缀再匹配
-                std::string codeOnly = sym;
-                auto dot = codeOnly.find('.');
-                if (dot != std::string::npos) codeOnly.resize(dot);
+                std::string codeOnly = foundation::market::AStockSymbol::codeOnly(sym);
                 for (uint32_t id : symbolIds) {
-                    std::string resolved = m_symbolResolver(id);
-                    auto rd = resolved.find('.');
-                    if (rd != std::string::npos) resolved.resize(rd);
+                    std::string resolved = foundation::market::AStockSymbol::codeOnly(m_symbolResolver(id));
                     if (resolved == codeOnly) { result[id] = val; break; }
                 }
             }
@@ -402,17 +393,14 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
             const auto& fullSym = viewSyms[i];
             std::uint32_t instId = viewInsts[i].value;
             fullSymToId[fullSym] = instId;
-            std::string code = fullSym;
-            auto dot = code.find('.');
-            if (dot != std::string::npos) code.resize(dot);
+            std::string code = foundation::market::AStockSymbol::codeOnly(fullSym);
             codeOnlyToId[code] = instId;
         }
     }
 
-    // 工具 lambda: 完整 symbol → 去后缀码
-    auto stripSuffix = [](const std::string& s) -> std::string {
-        auto dot = s.find('.');
-        return (dot != std::string::npos) ? s.substr(0, dot) : s;
+    // 工具 lambda: 完整 symbol → 去后缀码 (委托 AStockSymbol)
+    auto stripSuffix = [](const std::string& s) {
+        return foundation::market::AStockSymbol::codeOnly(s);
     };
 
     for (const auto& iid : instanceIds) {
