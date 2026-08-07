@@ -37,7 +37,17 @@ std::shared_ptr<ISqlDatabase> NativePgConnectionPool::getConnection()
             cfg.port     = cfgMgr.get_app_config_int("pg.port", 5432);
             cfg.database = cfgMgr.get_app_config_string("pg.database", "astock_quant");
             cfg.username = cfgMgr.get_app_config_string("pg.user", "astock");
-            cfg.password = cfgMgr.get_app_config_string("pg.password", "astock123");
+            cfg.password = cfgMgr.get_app_config_string("pg.password", "");
+            if (cfg.password.empty()) {
+                const char* env = std::getenv("ASTOCK_PG_PASSWORD");
+                if (env && *env) {
+                    cfg.password = env;
+                } else {
+                    INTERNAL_ERROR_STREAM << "[Pool] pg.password not configured"
+                                          << " and ASTOCK_PG_PASSWORD not set — refusing connection";
+                    return nullptr;
+                }
+            }
             cfg.charset  = "utf8";
             config_ = cfg; initialized_ = true;
         }
