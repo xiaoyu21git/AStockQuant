@@ -313,7 +313,7 @@ private:
 public:
 
     // ── Queries ──
-    [[nodiscard]] const std::vector<TradeOrder>& recentOrders() const noexcept;
+    [[nodiscard]] std::vector<TradeOrder> recentOrders() const noexcept;
 
     // ── Scheduling controls ──
     bool approveExecutionCheckpoint(const std::string& executionScopeId,

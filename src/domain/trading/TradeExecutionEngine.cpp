@@ -413,7 +413,8 @@ bool TradeExecutionEngine::resumeExecutionPause(
 // ============================================================================
 // Queries
 // ============================================================================
-const std::vector<TradeOrder>& TradeExecutionEngine::recentOrders() const noexcept {
+std::vector<TradeOrder> TradeExecutionEngine::recentOrders() const noexcept {
+    std::lock_guard<std::mutex> lock(m_impl->m_mutex);
     return m_impl->m_recentOrders;
 }
 
