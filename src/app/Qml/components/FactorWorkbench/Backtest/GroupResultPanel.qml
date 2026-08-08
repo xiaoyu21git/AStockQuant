@@ -119,13 +119,13 @@ Rectangle {
                             spacing: 16
 
                             Text {
-                                text: "股票: " + formatMetric(modelData.stockCount, 0, false)
+                                text: "股票: " + (isFinite(Number(modelData.stockCount)) ? Number(modelData.stockCount).toFixed(0) : "0")
                                 font.pixelSize: 11
                                 color: "#94A3B8"
                             }
 
                             Text {
-                                text: "因子值: " + formatMetric(modelData.minFactorValue, 2, false) + " - " + formatMetric(modelData.maxFactorValue, 2, false)
+                                text: "因子值: " + (isFinite(Number(modelData.minFactorValue)) ? Number(modelData.minFactorValue).toFixed(2) : "0.00") + " - " + (isFinite(Number(modelData.maxFactorValue)) ? Number(modelData.maxFactorValue).toFixed(2) : "0.00")
                                 font.pixelSize: 11
                                 color: "#94A3B8"
                             }
@@ -137,10 +137,15 @@ Rectangle {
                         spacing: 2
 
                         Text {
-                            text: formatPercentMetric(modelData.returnRate, 2, false)
+                            text: (isFinite(Number(modelData.returnRate)) ? (Number(modelData.returnRate) * 100).toFixed(2) + "%" : "0.00%")
                             font.pixelSize: 16
                             font.weight: Font.Bold
-                            color: returnMetricColor(modelData.returnRate)
+                            color: {
+                                var v = Number(modelData.returnRate || 0)
+                                if (v > 0) return "#EF4444"
+                                if (v < 0) return "#10B981"
+                                return "#94A3B8"
+                            }
                         }
 
                         Text {
