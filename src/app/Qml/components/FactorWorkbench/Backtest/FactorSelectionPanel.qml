@@ -18,6 +18,7 @@ Rectangle {
     signal compositeChildDirectionToggled(string instanceId, bool ascending)
     signal compositeChildNormalizeModeChanged(string instanceId, int mode)
 
+    color: "transparent"
     implicitHeight: contentColumn.implicitHeight
 
     ColumnLayout {
@@ -99,6 +100,7 @@ Rectangle {
 
         // 因子选择区域
         RowLayout {
+            Layout.fillWidth: true
             spacing: 12
 
             Rectangle {
@@ -175,9 +177,9 @@ Rectangle {
         }
 
         Rectangle {
-            width: parent ? parent.width : undefined
+            Layout.fillWidth: true
             implicitHeight: selectedFactorsPanelContent.implicitHeight + 24
-            height: implicitHeight
+            Layout.preferredHeight: implicitHeight
             radius: 10
             color: "#0F172A"
             border.width: 1
