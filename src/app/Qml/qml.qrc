@@ -105,6 +105,16 @@
         <file>components/FactorWorkbench/Backtest/FactorSelectorDialog.qml</file>
         <file>components/FactorWorkbench/Backtest/GroupConfigPanel.qml</file>
         <file>components/FactorWorkbench/Backtest/GroupResultChart.qml</file>
+        <file>components/FactorWorkbench/Backtest/GroupResultPanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/FactorSelectionPanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/PreflightFailureDialog.qml</file>
+        <file>components/FactorWorkbench/Backtest/RuntimeParamsDialog.qml</file>
+        <file>components/FactorWorkbench/Backtest/BacktestConfigPanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/ResultComparisonPanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/ProgressPanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/PreflightFailurePanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/FormalExecutionDetailPanel.qml</file>
+        <file>components/FactorWorkbench/Backtest/TradingDiagnosticsPanel.qml</file>
         <file>components/FactorWorkbench/Creation/CreationPagePluginIntegrated.qml</file>
         <file>components/FactorWorkbench/Creation/FactorTypeCard.qml</file>
         <file>components/FactorWorkbench/Creation/components/DynamicParamGenerator.qml</file>

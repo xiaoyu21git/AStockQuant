@@ -176,6 +176,10 @@ qt_add_qml_module(astockquantapp
         Qml/page/DataAnalysis/CleaningRulesPage.qml
         Qml/page/DataAnalysis/StrategyRulesPage.qml
             Qml/page/risk/RiskConfigurationPage.qml
+            Qml/page/risk/RiskConfigCard.qml
+            Qml/page/risk/PositionRiskPanel.qml
+            Qml/page/risk/AlertPanel.qml
+            Qml/page/risk/RiskActionPanel.qml
         Qml/components/BaseQuantCard.qml
         Qml/components/FactorCard.qml
         Qml/components/StrategyCard.qml
@@ -207,9 +211,16 @@ qt_add_qml_module(astockquantapp
         Qml/components/Trading/OrderFormSection.qml
         Qml/components/Trading/OrderActionBar.qml
         Qml/components/Trading/RuntimeRuleObserverPanel.qml
+        Qml/components/Trading/StockTradeForm.qml
+        Qml/components/Trading/FuturesTradeForm.qml
+        Qml/components/Trading/MarginBuyTradeForm.qml
+        Qml/components/Trading/MarginSellTradeForm.qml
+        Qml/components/Trading/OptionsTradeForm.qml
+        Qml/components/Trading/PendingOrderList.qml
         Qml/components/Base/ActionButton.qml
         Qml/components/Base/ActionChip.qml
         Qml/components/Base/Constants.qml
+        Qml/components/Base/KeyMetricCard.qml
         Qml/components/Base/MetaTable.qml
         Qml/components/Base/MetaForm.qml
         Qml/components/Base/MetaCard.qml
@@ -239,6 +250,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/RuleTemplateSuggestionPanel.qml
         Qml/components/Strategy/Creation/RuleTemplatePickerDialog.qml
         Qml/components/Strategy/Creation/StrategyProfilePanel.qml
+        Qml/components/Strategy/Creation/CommonParamCard.qml
+        Qml/components/Strategy/Creation/PersonalizedParamCard.qml
+        Qml/components/Strategy/Creation/FactorOverlayPanel.qml
+        Qml/components/Strategy/Creation/BlacklistPanel.qml
+        Qml/components/Strategy/Creation/RuleComposerPanel.qml
+        Qml/components/Strategy/Creation/AdvancedOptionsPanel.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
@@ -280,6 +297,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Creation/components/ParamRegistry.qml
         Qml/components/Factor/FactorParamForm.qml
         Qml/components/Factor/DynamicParamForm.qml
+        Qml/components/Factor/FactorDesignSystem.qml
         Qml/utils/FactorMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
         Qml/utils/I18n.js
@@ -294,6 +312,12 @@ qt_add_qml_module(astockquantapp
 
         Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
+        Qml/utils/ColorLabelMaps.js
+        Qml/utils/FormatUtils.js
+        Qml/utils/NormalizeUtils.js
+        Qml/utils/PureUtils.js
+        Qml/utils/DataAccessPatterns.js
+        Qml/utils/DomainConstants.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorAnalysisCharts.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml
@@ -304,6 +328,16 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
         Qml/components/FactorWorkbench/Backtest/GroupConfigPanel.qml
         Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
+        Qml/components/FactorWorkbench/Backtest/GroupResultPanel.qml
+        Qml/components/FactorWorkbench/Backtest/PreflightFailureDialog.qml
+        Qml/components/FactorWorkbench/Backtest/PreflightFailurePanel.qml
+        Qml/components/FactorWorkbench/Backtest/RuntimeParamsDialog.qml
+        Qml/components/FactorWorkbench/Backtest/FactorSelectionPanel.qml
+        Qml/components/FactorWorkbench/Backtest/BacktestConfigPanel.qml
+        Qml/components/FactorWorkbench/Backtest/ResultComparisonPanel.qml
+        Qml/components/FactorWorkbench/Backtest/ProgressPanel.qml
+        Qml/components/FactorWorkbench/Backtest/FormalExecutionDetailPanel.qml
+        Qml/components/FactorWorkbench/Backtest/TradingDiagnosticsPanel.qml
         Qml/page/dynamicworkspace/DynamicWorkspacePage.qml
         Qml/page/dynamicworkspace/WidgetRegistry.qml
         Qml/components/DynamicWorkspace/WidgetCanvas.qml
@@ -317,6 +351,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/DynamicWorkspace/widgets/OrderListWidget.qml
         Qml/components/DynamicWorkspace/widgets/PositionListWidget.qml
         Qml/components/DynamicWorkspace/widgets/StrategyMonitorWidget.qml
+        Qml/components/DynamicWorkspace/widgets/QuoteCardWidget.qml
     SOURCES
        # Qml/resources/
     RESOURCES
