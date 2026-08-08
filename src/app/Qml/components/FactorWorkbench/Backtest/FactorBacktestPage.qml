@@ -2152,7 +2152,7 @@ Item {
     }
 
     function syncSelectedDatasetIndex() {
-        if (!datasetComboBox) {
+        if (!backtestConfigPanel.datasetComboBox) {
             return
         }
 
@@ -2165,8 +2165,8 @@ Item {
 
         for (var index = 0; index < options.length; index++) {
             if (options[index].value === targetId) {
-                if (datasetComboBox.currentIndex !== index) {
-                    datasetComboBox.currentIndex = index
+                if (backtestConfigPanel.datasetComboBox.currentIndex !== index) {
+                    backtestConfigPanel.datasetComboBox.currentIndex = index
                 }
                 return
             }
@@ -2188,8 +2188,8 @@ Item {
             return
         }
 
-        if (datasetComboBox.currentIndex !== index) {
-            datasetComboBox.currentIndex = index
+        if (backtestConfigPanel.datasetComboBox.currentIndex !== index) {
+            backtestConfigPanel.datasetComboBox.currentIndex = index
         }
 
         var selectedId = positiveDatasetId(selected.value)
@@ -2324,6 +2324,7 @@ Item {
 
                         // 回测配置
                         BacktestConfigPanel {
+                            id: backtestConfigPanel
                             Layout.fillWidth: true
                         }
 
@@ -2534,7 +2535,7 @@ Item {
         // 调用C++控制器开始回测，传递当前选中数据集对应的日期范围
         factorBacktestController.startBacktestWithFactors(
             factorIdList,
-            groupComboBox.currentText,
+            backtestConfigPanel.groupComboBox.currentText,
             selectedStartDate,
             selectedEndDate,
             currentCacheSupportSnapshot())
@@ -2578,7 +2579,7 @@ Item {
         factorBacktestController.dataSourceMode = selectedDataSourceMode
         factorBacktestController.startCompositeBacktest(
             buildCompositeDraft(),
-            groupComboBox.currentText,
+            backtestConfigPanel.groupComboBox.currentText,
             selectedStartDate,
             selectedEndDate,
             currentCacheSupportSnapshot())
