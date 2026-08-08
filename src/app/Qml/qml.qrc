@@ -129,6 +129,12 @@
         <file>components/Strategy/Creation/RuleStageNavigator.qml</file>
         <file>components/Strategy/Creation/StrategyBasicInfo.qml</file>
         <file>components/Strategy/Creation/StrategyParamConfig.qml</file>
+        <file>components/Strategy/Creation/CommonParamCard.qml</file>
+        <file>components/Strategy/Creation/PersonalizedParamCard.qml</file>
+        <file>components/Strategy/Creation/FactorOverlayPanel.qml</file>
+        <file>components/Strategy/Creation/BlacklistPanel.qml</file>
+        <file>components/Strategy/Creation/RuleComposerPanel.qml</file>
+        <file>components/Strategy/Creation/AdvancedOptionsPanel.qml</file>
         <file>components/Strategy/Creation/StrategyProfilePanel.qml</file>
         <file>components/Strategy/Creation/RuleTemplateStructureView.qml</file>
         <file>components/Strategy/Creation/RuleTemplateSuggestionPanel.qml</file>
@@ -176,6 +182,10 @@
         <file>page/leftSidebar/PrimaryMenu.qml</file>
         <file>page/leftSidebar/SecondaryMenu.qml</file>
         <file>page/risk/RiskConfigurationPage.qml</file>
+        <file>page/risk/RiskConfigCard.qml</file>
+        <file>page/risk/PositionRiskPanel.qml</file>
+        <file>page/risk/AlertPanel.qml</file>
+        <file>page/risk/RiskActionPanel.qml</file>
         <file>page/SettingsPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>

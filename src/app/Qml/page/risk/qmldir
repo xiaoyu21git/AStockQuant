@@ -1,2 +1,6 @@
 module RiskPages
 RiskConfigurationPage 1.0 RiskConfigurationPage.qml
+RiskConfigCard 1.0 RiskConfigCard.qml
+PositionRiskPanel 1.0 PositionRiskPanel.qml
+AlertPanel 1.0 AlertPanel.qml
+RiskActionPanel 1.0 RiskActionPanel.qml
