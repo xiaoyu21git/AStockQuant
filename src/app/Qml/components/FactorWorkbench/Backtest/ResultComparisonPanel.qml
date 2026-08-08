@@ -83,7 +83,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: root.buildFactorStockPoolComparisonText() + " 回测完成后，系统会自动比较上一轮和本轮结果；结果明显时自动覆盖，结果接近时再让你确认。"
+                    text: buildFactorStockPoolComparisonText() + " 回测完成后，系统会自动比较上一轮和本轮结果；结果明显时自动覆盖，结果接近时再让你确认。"
                     font.pixelSize: 10
                     color: "#94A3B8"
                     wrapMode: Text.WordWrap

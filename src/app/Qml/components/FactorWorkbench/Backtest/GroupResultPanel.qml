@@ -31,17 +31,17 @@ Rectangle {
                 id: resultSelector
                 Layout.preferredWidth: 220
                 visible: false
-                model: root.displayedBacktestResults()
-                currentIndex: root.selectedBacktestResultIndex
+                model: displayedBacktestResults()
+                currentIndex: selectedBacktestResultIndex
 
                 delegate: ItemDelegate {
                     width: resultSelector.width
-                    text: root.displayedBacktestResultName(modelData)
+                    text: displayedBacktestResultName(modelData)
                 }
 
                 contentItem: Text {
-                    text: resultSelector.currentIndex >= 0 && resultSelector.currentIndex < root.displayedBacktestResults().length
-                        ? root.displayedBacktestResultName(root.displayedBacktestResults()[resultSelector.currentIndex])
+                    text: resultSelector.currentIndex >= 0 && resultSelector.currentIndex < displayedBacktestResults().length
+                        ? displayedBacktestResultName(displayedBacktestResults()[resultSelector.currentIndex])
                         : "选择回测结果"
                     font.pixelSize: 12
                     color: "#F1F5F9"
@@ -57,13 +57,13 @@ Rectangle {
                 }
 
                 onActivated: function(index) {
-                    root.selectedBacktestResultIndex = index
-                    root.applyDisplayedBacktestResult(root.backtestResult)
+                    selectedBacktestResultIndex = index
+                    applyDisplayedBacktestResult(backtestResult)
                 }
             }
 
             Text {
-                text: root.groupResults.length > 0 ? "共 " + root.groupResults.length + " 个分组" : "等待回测结果"
+                text: groupResults.length > 0 ? "共 " + groupResults.length + " 个分组" : "等待回测结果"
                 font.pixelSize: 12
                 color: "#94A3B8"
             }
@@ -74,7 +74,7 @@ Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.minimumHeight: 220
-            model: root.groupResults
+            model: groupResults
             clip: true
             spacing: 8
 
@@ -119,13 +119,13 @@ Rectangle {
                             spacing: 16
 
                             Text {
-                                text: "股票: " + root.formatMetric(modelData.stockCount, 0, false)
+                                text: "股票: " + formatMetric(modelData.stockCount, 0, false)
                                 font.pixelSize: 11
                                 color: "#94A3B8"
                             }
 
                             Text {
-                                text: "因子值: " + root.formatMetric(modelData.minFactorValue, 2, false) + " - " + root.formatMetric(modelData.maxFactorValue, 2, false)
+                                text: "因子值: " + formatMetric(modelData.minFactorValue, 2, false) + " - " + formatMetric(modelData.maxFactorValue, 2, false)
                                 font.pixelSize: 11
                                 color: "#94A3B8"
                             }
@@ -137,10 +137,10 @@ Rectangle {
                         spacing: 2
 
                         Text {
-                            text: root.formatPercentMetric(modelData.returnRate, 2, false)
+                            text: formatPercentMetric(modelData.returnRate, 2, false)
                             font.pixelSize: 16
                             font.weight: Font.Bold
-                            color: root.returnMetricColor(modelData.returnRate)
+                            color: returnMetricColor(modelData.returnRate)
                         }
 
                         Text {
@@ -157,16 +157,16 @@ Rectangle {
                     color: "#3B82F620"
                     border.width: 2
                     border.color: "#3B82F6"
-                    visible: root.isBacktesting && root.currentGroup === (index + 1)
+                    visible: isBacktesting && currentGroup === (index + 1)
                 }
             }
 
             Text {
                 anchors.centerIn: parent
-                text: root.isBacktesting ? "正在计算分组..." : "请开始回测查看分组内容"
+                text: isBacktesting ? "正在计算分组..." : "请开始回测查看分组内容"
                 font.pixelSize: 14
                 color: "#94A3B8"
-                visible: root.groupResults.length === 0
+                visible: groupResults.length === 0
             }
         }
     }

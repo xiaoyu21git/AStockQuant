@@ -239,23 +239,23 @@ Rectangle {
                         Flow {
                             id: selectedFactorsFlow
                             width: parent.width
-                            spacing: root.compactCardSpacing
+                            spacing: compactCardSpacing
 
                             Repeater {
                                 model: selectedFactorIds
 
                                 delegate: Rectangle {
-                                    width: root.compactCardWidth(
+                                    width: compactCardWidth(
                                                selectedFactorsFlow.width,
-                                               root.selectedFactorCardMinWidth,
-                                               root.selectedFactorCardMaxWidth)
+                                               selectedFactorCardMinWidth,
+                                               selectedFactorCardMaxWidth)
                                     radius: 8
                                     color: "#111827"
                                     border.width: 1
                                     border.color: validationState.accentColor
                                     implicitHeight: selectedFactorCardColumn.implicitHeight + 20
 
-                                    property var validationState: root.factorValidationState(modelData)
+                                    property var validationState: factorValidationState(modelData)
 
                                     ColumnLayout {
                                         id: selectedFactorCardColumn
@@ -270,7 +270,7 @@ Rectangle {
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: root.resolveFactorDisplayName(modelData)
+                                                text: resolveFactorDisplayName(modelData)
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 color: "#F1F5F9"
@@ -394,7 +394,7 @@ Rectangle {
 
                             ComboBox {
                                 Layout.fillWidth: true
-                                model: root.compositeCombineModeOptions
+                                model: compositeCombineModeOptions
                                 textRole: "label"
                                 currentIndex: compositeCombineMode
                                 onActivated: function(index) {
@@ -416,7 +416,7 @@ Rectangle {
 
                             ComboBox {
                                 Layout.fillWidth: true
-                                model: root.compositeMissingPolicyOptions
+                                model: compositeMissingPolicyOptions
                                 textRole: "label"
                                 currentIndex: compositeMissingPolicy
                                 onActivated: function(index) {
@@ -465,16 +465,16 @@ Rectangle {
                         Flow {
                             id: compositeChildFlow
                             width: parent.width
-                            spacing: root.compactCardSpacing
+                            spacing: compactCardSpacing
 
                             Repeater {
                                 model: compositeChildAllocations
 
                                 delegate: Rectangle {
-                                    width: root.compactCardWidth(
+                                    width: compactCardWidth(
                                                compositeChildFlow.width,
-                                               root.compositeChildCardMinWidth,
-                                               root.compositeChildCardMaxWidth)
+                                               compositeChildCardMinWidth,
+                                               compositeChildCardMaxWidth)
                                     radius: 8
                                     color: "#111827"
                                     border.width: 1
@@ -482,7 +482,7 @@ Rectangle {
                                     implicitHeight: compositeChildColumn.implicitHeight + 18
 
                                     property string childInstanceId: String((modelData || {}).instanceId || "")
-                                    property var childSupport: root.currentCacheFactorSupportMap()[childInstanceId] || ({})
+                                    property var childSupport: currentCacheFactorSupportMap()[childInstanceId] || ({})
 
                                     ColumnLayout {
                                         id: compositeChildColumn
@@ -495,7 +495,7 @@ Rectangle {
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: String((modelData || {}).displayName || root.resolveFactorDisplayName(childInstanceId))
+                                                text: String((modelData || {}).displayName || resolveFactorDisplayName(childInstanceId))
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 color: "#F8FAFC"
@@ -604,7 +604,7 @@ Rectangle {
 
                                                 ComboBox {
                                                     Layout.fillWidth: true
-                                                    model: root.compositeNormalizeModeOptions
+                                                    model: compositeNormalizeModeOptions
                                                     textRole: "label"
                                                     currentIndex: Number((modelData || {}).normalizeMode || 0)
                                                     onActivated: function(index) {

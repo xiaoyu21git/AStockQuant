@@ -73,7 +73,7 @@ Rectangle {
                     implicitHeight: failureSummaryColumn.implicitHeight + 14
 
                     property var failure: lastPreflightFailures[index]
-                    property var failureMeta: root.preflightCategoryMeta(failure && failure.category)
+                    property var failureMeta: preflightCategoryMeta(failure && failure.category)
 
                     ColumnLayout {
                         id: failureSummaryColumn
@@ -87,7 +87,7 @@ Rectangle {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: root.resolveFactorDisplayName((failure && failure.factorId) || "")
+                                text: resolveFactorDisplayName((failure && failure.factorId) || "")
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
                                 color: "#FEE2E2"

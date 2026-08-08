@@ -98,7 +98,7 @@ Rectangle {
                     spacing: 8
 
                     Repeater {
-                        model: root.formalTradingDetailRows()
+                        model: formalTradingDetailRows()
 
                         delegate: Rectangle {
                             width: formalTradingDetailColumn.width
@@ -123,24 +123,24 @@ Rectangle {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: root.formatOptionalAssetMetric(modelData.cash)
+                                    text: formatOptionalAssetMetric(modelData.cash)
                                     font.pixelSize: 10
                                     color: "#CBD5E1"
                                 }
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: root.formatOptionalAssetMetric(modelData.marketValue)
+                                    text: formatOptionalAssetMetric(modelData.marketValue)
                                     font.pixelSize: 10
                                     color: "#CBD5E1"
                                 }
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: root.formatOptionalAssetMetric(modelData.totalAsset)
+                                    text: formatOptionalAssetMetric(modelData.totalAsset)
                                     font.pixelSize: 10
                                     font.weight: Font.DemiBold
-                                    color: root.formalTradingAccentColor(root.formalTradingStatus())
+                                    color: formalTradingAccentColor(formalTradingStatus())
                                 }
                             }
                         }
