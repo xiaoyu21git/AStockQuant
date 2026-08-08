@@ -7,6 +7,11 @@ Rectangle {
 
     // 暴露内部 Switch 供 root.onEnableAdvancedOptionsChanged 访问
     property alias advancedParamsSwitch: advancedParamsSwitch
+    property alias parameterOptimizationRangeCombo: parameterOptimizationRangeCombo
+    property alias sensitivityAnalysisCombo: sensitivityAnalysisCombo
+    property alias parameterConstraintsCombo: parameterConstraintsCombo
+    property alias parameterInitializationMethodCombo: parameterInitializationMethodCombo
+    property alias customParameterScriptTextArea: customParameterScriptTextArea
 
     Layout.fillWidth: true
     Layout.alignment: Qt.AlignTop

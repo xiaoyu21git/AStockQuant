@@ -973,17 +973,13 @@ Page {
             strategyBasicInfo.setBasicInfo(strategySnapshot)
         }
         if (step2Content && step2Content.applyPersistedStrategy) {
-            Qt.callLater(function() {
-                if (step2Content && step2Content.applyPersistedStrategy) {
-                    try {
-                        step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
-                    } catch (error) {
-                        isEditMode = false
-                        editingStrategyId = ""
-                        showErrorDialog("当前策略不符合新字段合同，无法进入编辑态: " + error)
-                    }
-                }
-            })
+            try {
+                step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
+            } catch (error) {
+                isEditMode = false
+                editingStrategyId = ""
+                showErrorDialog("加载策略参数失败，无法进入编辑态: " + error)
+            }
         }
 
         strategyParameters = step2Content.strategyParameters || ({})

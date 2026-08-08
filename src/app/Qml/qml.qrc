@@ -200,6 +200,11 @@
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
         <file>page/strategies/BacktestResultAnalysisView.qml</file>
+        <file>page/strategies/StrategyLibraryDialogs.qml</file>
+        <file>page/strategies/StrategyLibrarySearchBar.qml</file>
+        <file>page/strategies/StrategyGridPanel.qml</file>
+        <file>page/strategies/StrategyDetailPanel.qml</file>
+        <file>page/strategies/StrategyRuntimeDiagnostics.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>

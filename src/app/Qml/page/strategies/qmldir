@@ -1,3 +1,8 @@
 module Strategies
 StrategyCreationPagePro 1.0 StrategyCreationPagePro.qml
 StrategyLibraryPage 1.0 StrategyLibraryPage.qml
+StrategyLibraryDialogs 1.0 StrategyLibraryDialogs.qml
+StrategyLibrarySearchBar 1.0 StrategyLibrarySearchBar.qml
+StrategyGridPanel 1.0 StrategyGridPanel.qml
+StrategyDetailPanel 1.0 StrategyDetailPanel.qml
+StrategyRuntimeDiagnostics 1.0 StrategyRuntimeDiagnostics.qml

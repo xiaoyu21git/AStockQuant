@@ -1,5 +1,8 @@
 .pragma library
 
+.import "./PureUtils.js" as PureUtils
+.import "./FormatUtils.js" as Fmt
+
 function getStrategyParameters(strategy) {
     if (!strategy) {
         return ({})
@@ -148,7 +151,7 @@ function getMarketCalendarSourceTag(snapshot) {
 }
 
 function getMarketCalendarPhaseLabel(snapshot) {
-    return normalizeRuntimeDisplayValue(snapshot && snapshot.sessionPhaseLabel, "--")
+    return Fmt.normalizeRuntimeDisplayValue(snapshot && snapshot.sessionPhaseLabel, "--")
 }
 
 function getStrategyDisplayStatusLabel(status) {
@@ -157,8 +160,8 @@ function getStrategyDisplayStatusLabel(status) {
 }
 
 function strategyHasEditableRulePayload(strategyObject) {
-    var strategyData = toPlainJsValue(strategyObject) || ({})
-    var parameters = toPlainJsValue(strategyData.parameters) || ({})
+    var strategyData = PureUtils.toPlainJsValue(strategyObject) || ({})
+    var parameters = PureUtils.toPlainJsValue(strategyData.parameters) || ({})
     return !!(parameters.rule_profile
               || parameters.rule_composer_state
               || parameters.factor_overlay)

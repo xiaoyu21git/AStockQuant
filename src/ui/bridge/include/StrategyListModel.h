@@ -67,6 +67,12 @@ private:
         int runningDays{0};
         double dailyPnL{0};
         double position{0};
+        // 编辑链路必需字段（原先丢失导致 loadStrategyForEdit 校验失败）
+        int strategyTypeIndex{0};
+        QVariantMap parameters;
+        int strategyBehaviorKind{0};
+        QString description;
+        QVariantList tags;
     };
 
     static StrategyRow fromVariantMap(const QVariantMap& map);

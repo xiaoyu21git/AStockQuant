@@ -65,10 +65,14 @@ Rectangle {
             Switch {
                 id: factorOverlaySwitch
                 checked: !!root.factorOverlay.enabled
+                property bool _guard: false
                 onCheckedChanged: {
+                    if (_guard) return
+                    _guard = true
                     root.factorOverlay.enabled = checked
                     root.factorOverlay = root.normalizeFactorOverlay(root.factorOverlay)
                     root.syncDecoratedParameters()
+                    _guard = false
                 }
             }
         }
@@ -162,11 +166,11 @@ Rectangle {
                     }
 
                     Text {
-                        text: currentIndex === 0
+                        text: combineModeCombo.currentIndex === 0
                               ? "所有标的按因子分排名"
-                              : currentIndex === 1
+                              : combineModeCombo.currentIndex === 1
                                 ? "所有因子条件都满足才进池"
-                                : currentIndex === 2
+                                : combineModeCombo.currentIndex === 2
                                   ? "任一因子条件满足即可进池"
                                   : "各因子独立排名, 按权重比例分池"
                         font.pixelSize: 10

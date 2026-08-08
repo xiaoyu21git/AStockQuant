@@ -214,6 +214,13 @@ StrategyListModel::StrategyRow StrategyListModel::fromVariantMap(const QVariantM
     row.dailyPnL     = map.value(QStringLiteral("dailyPnL")).toDouble();
     row.position     = map.value(QStringLiteral("position")).toDouble();
 
+    // 编辑链路必需字段
+    row.strategyTypeIndex     = map.value(QStringLiteral("strategyTypeIndex")).toInt();
+    row.parameters            = map.value(QStringLiteral("parameters")).toMap();
+    row.strategyBehaviorKind  = map.value(QStringLiteral("strategyBehaviorKind")).toInt();
+    row.description           = map.value(QStringLiteral("description")).toString().trimmed();
+    row.tags                  = map.value(QStringLiteral("tags")).toList();
+
     INTERNAL_INFO_STREAM << "[StrategyListModel] fromVariantMap: "
                          << row.strategyId.toStdString()
                          << " returns=" << row.returns
@@ -235,7 +242,7 @@ QVariantMap StrategyListModel::toVariantMap(const StrategyRow& row) const
 {
     QVariantMap map;
     map.insert(QStringLiteral("strategyId"), row.strategyId);
-    map.insert(QStringLiteral("name"), row.name);
+    map.insert(QStringLiteral("strategyName"), row.name);
     map.insert(QStringLiteral("status"), row.status);
     map.insert(QStringLiteral("statusText"), row.statusText);
     map.insert(QStringLiteral("updatedAt"), row.updatedAt);
@@ -249,6 +256,11 @@ QVariantMap StrategyListModel::toVariantMap(const StrategyRow& row) const
     map.insert(QStringLiteral("runningDays"), row.runningDays);
     map.insert(QStringLiteral("dailyPnL"), row.dailyPnL);
     map.insert(QStringLiteral("position"), row.position);
+    map.insert(QStringLiteral("strategyTypeIndex"), row.strategyTypeIndex);
+    map.insert(QStringLiteral("parameters"), row.parameters);
+    map.insert(QStringLiteral("strategyBehaviorKind"), row.strategyBehaviorKind);
+    map.insert(QStringLiteral("description"), row.description);
+    map.insert(QStringLiteral("tags"), row.tags);
     return map;
 }
 

@@ -830,16 +830,17 @@ QString StrategyBridge::stockDisplayName(const QString& symbol) const
 using SBK = ::domain::strategies::StrategyBehaviorKind;
 
 static const std::vector<std::tuple<int, QString, QString, QString>> kStrategyTypeMeta = {
-    {0, QStringLiteral("趋势跟随"), QStringLiteral("📈"), QStringLiteral("基于双均线金叉死叉的趋势跟踪策略")},
-    {1, QStringLiteral("均值回归"), QStringLiteral("🔄"), QStringLiteral("捕捉超买超卖后的价格回归机会")},
-    {2, QStringLiteral("动量"),       QStringLiteral("🚀"), QStringLiteral("追踪强势股的持续上涨趋势")},
-    {3, QStringLiteral("套利"),       QStringLiteral("⚖️"), QStringLiteral("利用价差偏离进行统计套利")},
-    {4, QStringLiteral("多因子"),     QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
-    {5, QStringLiteral("机器学习"),   QStringLiteral("🤖"), QStringLiteral("ML模型驱动的智能选股")},
-    {6, QStringLiteral("多因子"),     QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
-    {7, QStringLiteral("事件驱动"),   QStringLiteral("📰"), QStringLiteral("基于财报/公告事件的交易策略")},
-    {8, QStringLiteral("高频"),       QStringLiteral("⚡"), QStringLiteral("分钟级别高频交易策略")},
-    {9, QStringLiteral("自定义"),     QStringLiteral("🛠"), QStringLiteral("用户自定义参数的灵活策略")},
+    {0,  QStringLiteral("双均线趋势"), QStringLiteral("📈"), QStringLiteral("基于双均线金叉死叉的趋势跟踪策略")},
+    {1,  QStringLiteral("海龟突破"),   QStringLiteral("🐢"), QStringLiteral("基于唐奇安通道突破的趋势跟踪策略")},
+    {2,  QStringLiteral("布林带回归"), QStringLiteral("📊"), QStringLiteral("基于布林带的均值回归策略")},
+    {3,  QStringLiteral("RSI回归"),    QStringLiteral("📉"), QStringLiteral("基于RSI超买超卖的均值回归策略")},
+    {4,  QStringLiteral("多因子选股"), QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
+    {5,  QStringLiteral("财报超预期"), QStringLiteral("📰"), QStringLiteral("基于财报超预期事件的交易策略")},
+    {6,  QStringLiteral("统计配对"),   QStringLiteral("⚖️"), QStringLiteral("基于价差偏离的统计套利配对交易")},
+    {7,  QStringLiteral("风险平价"),   QStringLiteral("🛡️"), QStringLiteral("基于风险平价的资产配置策略")},
+    {8,  QStringLiteral("机器学习"),   QStringLiteral("🤖"), QStringLiteral("ML模型驱动的智能选股策略")},
+    {9,  QStringLiteral("订单流"),     QStringLiteral("⚡"), QStringLiteral("基于订单流不平衡的高频交易策略")},
+    {10, QStringLiteral("波动率套利"), QStringLiteral("📐"), QStringLiteral("基于波动率价差的期权套利策略")},
 };
 
 static const std::vector<std::tuple<int, QString, QString>> kRiskLevelMeta = {
@@ -851,16 +852,17 @@ static const std::vector<std::tuple<int, QString, QString>> kRiskLevelMeta = {
 
 static int toBk(int typeIndex) {
     switch (typeIndex) {
-    case 0: return (int)SBK::TrendFollowing;
-    case 1: return (int)SBK::MeanReversion;
-    case 2: return (int)SBK::Momentum;
-    case 3: return (int)SBK::Arbitrage;
-    case 4: return (int)SBK::MultiFactor;
-    case 5: return (int)SBK::MachineLearning;
-    case 6: return (int)SBK::MultiFactor;    // 兼容旧JS: StrategyTypeIndex.MultiFactor=6
-    case 7: return (int)SBK::EventDriven;
-    case 8: return (int)SBK::HighFrequency;
-    case 9: return (int)SBK::Custom;
+    case 0:  return (int)SBK::TrendFollowing;
+    case 1:  return (int)SBK::Momentum;
+    case 2:  return (int)SBK::MeanReversion;
+    case 3:  return (int)SBK::MeanReversion;
+    case 4:  return (int)SBK::MultiFactor;
+    case 5:  return (int)SBK::EventDriven;
+    case 6:  return (int)SBK::Arbitrage;
+    case 7:  return (int)SBK::MultiFactor;
+    case 8:  return (int)SBK::MachineLearning;
+    case 9:  return (int)SBK::HighFrequency;
+    case 10: return (int)SBK::Arbitrage;
     default: return (int)SBK::Custom;
     }
 }
@@ -868,14 +870,14 @@ static int toBk(int typeIndex) {
 static int fromBk(int bk) {
     switch (bk) {
     case (int)SBK::TrendFollowing:  return 0;
-    case (int)SBK::MeanReversion:   return 1;
-    case (int)SBK::Momentum:        return 2;
-    case (int)SBK::Arbitrage:       return 3;
+    case (int)SBK::MeanReversion:   return 2;
+    case (int)SBK::Momentum:        return 1;
+    case (int)SBK::Arbitrage:       return 6;
     case (int)SBK::MultiFactor:     return 4;
-    case (int)SBK::MachineLearning: return 5;
-    case (int)SBK::EventDriven:     return 6;
-    case (int)SBK::HighFrequency:   return 7;
-    case (int)SBK::Custom:          return 8;
+    case (int)SBK::MachineLearning: return 8;
+    case (int)SBK::EventDriven:     return 5;
+    case (int)SBK::HighFrequency:   return 9;
+    case (int)SBK::Custom:          return 10;
     default: return 0;
     }
 }
@@ -1023,17 +1025,9 @@ QVariantList StrategyBridge::buildParamConfigs(int typeIndex) const {
 
 QVariantMap StrategyBridge::buildCompleteStrategyData(const QVariantMap& context) const {
     int ti = normalizeStrategyTypeIndex(context.value("selectedStrategyTypeIndex", 0).toInt());
-    int bk = strategyBehaviorKindFromTypeIndex(ti);
+    int bk = toBk(ti);
 
-    // 有因子配置时 → 强制 MultiFactor (4)
     auto params = context.value("strategyParameters", QVariantMap()).toMap();
-    auto overlay = params.value("factor_overlay", QVariantMap()).toMap();
-    bool hasFactorOverlay = overlay.value("enabled", false).toBool()
-                         && !overlay.value("allocations", QVariantList()).toList().isEmpty();
-    if (hasFactorOverlay || !params.value("factorIds", QVariantList()).toList().isEmpty()) {
-        bk = 4;  // StrategyBehaviorKind::MultiFactor
-        ti = 4;  // strategyTypeIndex 同步到多因子
-    }
 
     QVariantMap data;
     data["name"] = context.value("strategyName", QStringLiteral("新策略"));

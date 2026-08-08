@@ -2102,11 +2102,11 @@ Rectangle {
 
         return {
             enabled: !!root.enableAdvancedOptions,
-            parameter_optimization_range: optionValue(parameterOptimizationRangeCombo.currentIndex, ["none", "small", "medium", "large"], "small"),
-            sensitivity_analysis: optionValue(sensitivityAnalysisCombo.currentIndex, ["none", "basic", "detailed"], "basic"),
-            parameter_constraints: optionValue(parameterConstraintsCombo.currentIndex, ["none", "linear", "nonlinear"], "none"),
-            parameter_initialization_method: optionValue(parameterInitializationMethodCombo.currentIndex, ["random", "uniform", "empirical"], "random"),
-            custom_parameter_script: customParameterScriptTextArea.text || ""
+            parameter_optimization_range: optionValue(advancedOptionsPanel.parameterOptimizationRangeCombo.currentIndex, ["none", "small", "medium", "large"], "small"),
+            sensitivity_analysis: optionValue(advancedOptionsPanel.sensitivityAnalysisCombo.currentIndex, ["none", "basic", "detailed"], "basic"),
+            parameter_constraints: optionValue(advancedOptionsPanel.parameterConstraintsCombo.currentIndex, ["none", "linear", "nonlinear"], "none"),
+            parameter_initialization_method: optionValue(advancedOptionsPanel.parameterInitializationMethodCombo.currentIndex, ["random", "uniform", "empirical"], "random"),
+            custom_parameter_script: advancedOptionsPanel.customParameterScriptTextArea.text || ""
         }
     }
 
@@ -2181,7 +2181,7 @@ Rectangle {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === 4 || normalizedStrategyTypeIndex === 6) {
+        } else if (normalizedStrategyTypeIndex === 4) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
@@ -2214,8 +2214,6 @@ Rectangle {
             assignIfPresent("entrySpreadUpper", ["entrySpreadUpper"], Number)
             assignIfPresent("entrySpreadLower", ["entrySpreadLower"], Number)
             assignIfPresent("deltaNeutral", ["deltaNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === 9) {
-            assignIfPresent("customCode", ["customCode"])
         }
 
         root.suppressRuleComposerReset = true
@@ -2289,20 +2287,20 @@ Rectangle {
 
         var options = advancedOptions || ({})
         root.enableAdvancedOptions = !!options.enabled
-        if (parameterOptimizationRangeCombo) {
-            parameterOptimizationRangeCombo.currentIndex = Math.max(0, ["none", "small", "medium", "large"].indexOf(options.parameter_optimization_range || "small"))
+        if (advancedOptionsPanel.parameterOptimizationRangeCombo) {
+            advancedOptionsPanel.parameterOptimizationRangeCombo.currentIndex = Math.max(0, ["none", "small", "medium", "large"].indexOf(options.parameter_optimization_range || "small"))
         }
-        if (sensitivityAnalysisCombo) {
-            sensitivityAnalysisCombo.currentIndex = Math.max(0, ["none", "basic", "detailed"].indexOf(options.sensitivity_analysis || "basic"))
+        if (advancedOptionsPanel.sensitivityAnalysisCombo) {
+            advancedOptionsPanel.sensitivityAnalysisCombo.currentIndex = Math.max(0, ["none", "basic", "detailed"].indexOf(options.sensitivity_analysis || "basic"))
         }
-        if (parameterConstraintsCombo) {
-            parameterConstraintsCombo.currentIndex = Math.max(0, ["none", "linear", "nonlinear"].indexOf(options.parameter_constraints || "none"))
+        if (advancedOptionsPanel.parameterConstraintsCombo) {
+            advancedOptionsPanel.parameterConstraintsCombo.currentIndex = Math.max(0, ["none", "linear", "nonlinear"].indexOf(options.parameter_constraints || "none"))
         }
-        if (parameterInitializationMethodCombo) {
-            parameterInitializationMethodCombo.currentIndex = Math.max(0, ["random", "uniform", "empirical"].indexOf(options.parameter_initialization_method || "random"))
+        if (advancedOptionsPanel.parameterInitializationMethodCombo) {
+            advancedOptionsPanel.parameterInitializationMethodCombo.currentIndex = Math.max(0, ["random", "uniform", "empirical"].indexOf(options.parameter_initialization_method || "random"))
         }
-        if (customParameterScriptTextArea) {
-            customParameterScriptTextArea.text = options.custom_parameter_script || ""
+        if (advancedOptionsPanel.customParameterScriptTextArea) {
+            advancedOptionsPanel.customParameterScriptTextArea.text = options.custom_parameter_script || ""
         }
         Qt.callLater(function() {
             root.suppressRuleComposerReset = false
@@ -2335,11 +2333,11 @@ Rectangle {
         if (personalizedDynamicGenerator) {
             personalizedDynamicGenerator.reset()
         }
-        if (parameterOptimizationRangeCombo) parameterOptimizationRangeCombo.currentIndex = 1
-        if (sensitivityAnalysisCombo) sensitivityAnalysisCombo.currentIndex = 1
-        if (parameterConstraintsCombo) parameterConstraintsCombo.currentIndex = 0
-        if (parameterInitializationMethodCombo) parameterInitializationMethodCombo.currentIndex = 0
-        if (customParameterScriptTextArea) customParameterScriptTextArea.text = ""
+        if (advancedOptionsPanel.parameterOptimizationRangeCombo) advancedOptionsPanel.parameterOptimizationRangeCombo.currentIndex = 1
+        if (advancedOptionsPanel.sensitivityAnalysisCombo) advancedOptionsPanel.sensitivityAnalysisCombo.currentIndex = 1
+        if (advancedOptionsPanel.parameterConstraintsCombo) advancedOptionsPanel.parameterConstraintsCombo.currentIndex = 0
+        if (advancedOptionsPanel.parameterInitializationMethodCombo) advancedOptionsPanel.parameterInitializationMethodCombo.currentIndex = 0
+        if (advancedOptionsPanel.customParameterScriptTextArea) advancedOptionsPanel.customParameterScriptTextArea.text = ""
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
         root.forbidDefaultRuleBuildInEdit = false
