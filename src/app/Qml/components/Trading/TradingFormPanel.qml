@@ -457,1017 +457,6 @@ Rectangle {
         onTriggered: root.deferredOrderListReady = true
     }
 
-    Component {
-        id: futuresTradeFormComponent
-
-        Item {
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: compactMode ? 8 : 12
-
-                Text {
-                    text: "📌 期货合约"
-                    color: Const.tradingLabelSecondary
-                    font.pixelSize: compactSectionLabelFont
-                }
-
-                TextField {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.futuresCode
-                    placeholderText: "如 RB2410"
-                    color: Const.tradingTitleText
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.futuresCode = text
-                    background: Rectangle {
-                        radius: compactInputRadius
-                        color: Const.tradingInputBg
-                        border.color: Const.tradingInputBorder
-                        border.width: 1
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Repeater {
-                        model: root.quickButtonModel
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: compactQuickButtonHeight
-                            radius: compactInputRadius
-                            color: Const.tradingButtonBg
-                            border.color: Const.tradingInputActiveBorder
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: modelData
-                                color: Const.tradingLightBlue
-                                font.pixelSize: compactQuickButtonFont
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.applyQuickValue(modelData)
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 8 : 12
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.futuresLots
-                        placeholderText: "手数"
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.futuresLots = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    ComboBox {
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: compactInputHeight
-                        font.pixelSize: compactInputFont
-                        model: ["市价", "限价"]
-                        currentIndex: root.futuresPriceType === "market" ? 0 : 1
-                        onActivated: root.futuresPriceType = currentIndex === 0 ? "market" : "limit"
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "-"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("futures", -1)
-                        }
-                    }
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.futuresPrice
-                        placeholderText: root.currentReferenceText
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.futuresPrice = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "+"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("futures", 1)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    Component {
-        id: marginBuyTradeFormComponent
-
-        Item {
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: compactMode ? 8 : 12
-
-                Text {
-                    text: "💳 融资买入"
-                    color: Const.tradingLabelSecondary
-                    font.pixelSize: compactSectionLabelFont
-                }
-
-                TextField {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.marginBuyCode
-                    placeholderText: "股票代码"
-                    color: Const.tradingTitleText
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.marginBuyCode = text
-                    background: Rectangle {
-                        radius: compactInputRadius
-                        color: Const.tradingInputBg
-                        border.color: Const.tradingInputBorder
-                        border.width: 1
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: String(root.marginBuyEquityDisplay.identitySummary || "")
-                    color: String(root.marginBuyEquityDisplay.identityColor || Const.tradingLabelTertiary)
-                    font.pixelSize: compactMetaFont
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Repeater {
-                        model: root.quickButtonModel
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: compactQuickButtonHeight
-                            radius: compactInputRadius
-                            color: Const.tradingButtonBg
-                            border.color: Const.tradingInputActiveBorder
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: modelData
-                                color: Const.tradingLightBlue
-                                font.pixelSize: compactQuickButtonFont
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.applyQuickValue(modelData)
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 8 : 12
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.marginBuyShares
-                        placeholderText: "股数"
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.marginBuyShares = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    ComboBox {
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: compactInputHeight
-                        font.pixelSize: compactInputFont
-                        model: ["市价", "限价"]
-                        currentIndex: root.marginBuyPriceType === "market" ? 0 : 1
-                        onActivated: root.marginBuyPriceType = currentIndex === 0 ? "market" : "limit"
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "-"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("margin_buy", -1)
-                        }
-                    }
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.marginBuyPrice
-                        placeholderText: root.currentReferenceText
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.marginBuyPrice = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "+"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("margin_buy", 1)
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Repeater {
-                        model: root.equityQuickPriceButtonModel
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: compactQuickButtonHeight
-                            radius: compactInputRadius
-                            color: Const.tradingButtonBg
-                            border.color: Const.tradingInputActiveBorder
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: tradingFormHelper.equityShortcutButtonText(modelData.code, modelData.label, "margin_buy", marketSnapshot || ({}), depthSnapshot || ({}))
-                                color: Const.tradingLightBlue
-                                font.pixelSize: compactQuickButtonFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.applyEquityPriceShortcut("margin_buy", modelData.code)
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: String(root.marginBuyEquityDisplay.priceSummary || "")
-                    color: Const.tradingLabelTertiary
-                    font.pixelSize: compactMetaFont
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: String(root.marginBuyEquityDisplay.amountSummary || "")
-                    color: Const.tradingLabelTertiary
-                    font.pixelSize: compactMetaFont
-                    horizontalAlignment: Text.AlignHCenter
-                }
-            }
-        }
-    }
-
-    Component {
-        id: marginSellTradeFormComponent
-
-        Item {
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: compactMode ? 8 : 12
-
-                Text {
-                    text: "📉 融券卖出"
-                    color: Const.tradingLabelSecondary
-                    font.pixelSize: compactSectionLabelFont
-                }
-
-                TextField {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.marginSellCode
-                    placeholderText: "股票代码"
-                    color: Const.tradingTitleText
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.marginSellCode = text
-                    background: Rectangle {
-                        radius: compactInputRadius
-                        color: Const.tradingInputBg
-                        border.color: Const.tradingInputBorder
-                        border.width: 1
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: String(root.marginSellEquityDisplay.identitySummary || "")
-                    color: String(root.marginSellEquityDisplay.identityColor || Const.tradingLabelTertiary)
-                    font.pixelSize: compactMetaFont
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Repeater {
-                        model: root.quickButtonModel
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: compactQuickButtonHeight
-                            radius: compactInputRadius
-                            color: Const.tradingButtonBg
-                            border.color: Const.tradingInputActiveBorder
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: modelData
-                                color: Const.tradingLightBlue
-                                font.pixelSize: compactQuickButtonFont
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.applyQuickValue(modelData)
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 8 : 12
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.marginSellShares
-                        placeholderText: "股数"
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.marginSellShares = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    ComboBox {
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: compactInputHeight
-                        font.pixelSize: compactInputFont
-                        model: ["市价", "限价"]
-                        currentIndex: root.marginSellPriceType === "market" ? 0 : 1
-                        onActivated: root.marginSellPriceType = currentIndex === 0 ? "market" : "limit"
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "-"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("margin_sell", -1)
-                        }
-                    }
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.marginSellPrice
-                        placeholderText: root.currentReferenceText
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.marginSellPrice = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "+"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("margin_sell", 1)
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Repeater {
-                        model: root.equityQuickPriceButtonModel
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: compactQuickButtonHeight
-                            radius: compactInputRadius
-                            color: Const.tradingButtonBg
-                            border.color: Const.tradingInputActiveBorder
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: tradingFormHelper.equityShortcutButtonText(modelData.code, modelData.label, "margin_sell", marketSnapshot || ({}), depthSnapshot || ({}))
-                                color: Const.tradingLightBlue
-                                font.pixelSize: compactQuickButtonFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.applyEquityPriceShortcut("margin_sell", modelData.code)
-                            }
-                        }
-                    }
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: String(root.marginSellEquityDisplay.priceSummary || "")
-                    color: Const.tradingLabelTertiary
-                    font.pixelSize: compactMetaFont
-                    horizontalAlignment: Text.AlignHCenter
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    text: String(root.marginSellEquityDisplay.amountSummary || "")
-                    color: Const.tradingLabelTertiary
-                    font.pixelSize: compactMetaFont
-                    horizontalAlignment: Text.AlignHCenter
-                }
-            }
-        }
-    }
-
-    Component {
-        id: optionsTradeFormComponent
-
-        Item {
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: compactMode ? 8 : 12
-
-                Text {
-                    text: "🎯 期权合约"
-                    color: Const.tradingLabelSecondary
-                    font.pixelSize: compactSectionLabelFont
-                }
-
-                TextField {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.optionCode
-                    placeholderText: "如 10004411"
-                    color: Const.tradingTitleText
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.optionCode = text
-                    background: Rectangle {
-                        radius: compactInputRadius
-                        color: Const.tradingInputBg
-                        border.color: Const.tradingInputBorder
-                        border.width: 1
-                    }
-                }
-
-                TextField {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.optionUnderlying
-                    placeholderText: "标的代码"
-                    color: Const.tradingTitleText
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.optionUnderlying = text
-                    background: Rectangle {
-                        radius: compactInputRadius
-                        color: Const.tradingInputBg
-                        border.color: Const.tradingInputBorder
-                        border.width: 1
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Repeater {
-                        model: root.quickButtonModel
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: compactQuickButtonHeight
-                            radius: compactInputRadius
-                            color: Const.tradingButtonBg
-                            border.color: Const.tradingInputActiveBorder
-                            border.width: 1
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: modelData
-                                color: Const.tradingLightBlue
-                                font.pixelSize: compactQuickButtonFont
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.applyQuickValue(modelData)
-                            }
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 8 : 12
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.optionLots
-                        placeholderText: "手数(1/1, 1/2...)"
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.optionLots = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    ComboBox {
-                        Layout.preferredWidth: 120
-                        Layout.preferredHeight: compactInputHeight
-                        font.pixelSize: compactInputFont
-                        model: ["市价", "限价"]
-                        currentIndex: root.optionPriceType === "market" ? 0 : 1
-                        onActivated: root.optionPriceType = currentIndex === 0 ? "market" : "limit"
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 6 : 8
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "-"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("options", -1)
-                        }
-                    }
-
-                    TextField {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        text: root.optionPrice
-                        placeholderText: root.currentReferenceText
-                        color: Const.tradingTitleText
-                        font.pixelSize: compactInputFont
-                        horizontalAlignment: TextInput.AlignHCenter
-                        verticalAlignment: TextInput.AlignVCenter
-                        topPadding: compactInputVerticalPadding
-                        bottomPadding: compactInputVerticalPadding
-                        leftPadding: compactInputHorizontalPadding
-                        rightPadding: compactInputHorizontalPadding
-                        onTextChanged: root.optionPrice = text
-                        background: Rectangle {
-                            radius: compactInputRadius
-                            color: Const.tradingInputBg
-                            border.color: Const.tradingInputBorder
-                            border.width: 1
-                        }
-                    }
-
-                    Rectangle {
-                        Layout.preferredWidth: compactInputHeight
-                        Layout.preferredHeight: compactInputHeight
-                        radius: compactInputRadius
-                        color: Const.tradingButtonBg
-                        border.color: Const.tradingInputActiveBorder
-                        border.width: 1
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "+"
-                            color: Const.tradingLightBlue
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.adjustModePrice("options", 1)
-                        }
-                    }
-                }
-
-                RowLayout {
-                    Layout.fillWidth: true
-                    spacing: compactMode ? 8 : 12
-
-                    ComboBox {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        font.pixelSize: compactInputFont
-                        model: ["认购期权", "认沽期权"]
-                        currentIndex: root.optionType === "call" ? 0 : 1
-                        onActivated: root.optionType = currentIndex === 0 ? "call" : "put"
-                    }
-
-                    ComboBox {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: compactInputHeight
-                        font.pixelSize: compactInputFont
-                        model: ["当月", "下月", "季月"]
-                        currentIndex: root.optionExpiry === "当月" ? 0 : root.optionExpiry === "下月" ? 1 : 2
-                        onActivated: root.optionExpiry = currentIndex === 0 ? "当月" : currentIndex === 1 ? "下月" : "季月"
-                    }
-                }
-            }
-        }
-    }
-
-    Component {
-        id: pendingOrdersContentComponent
-
-        Item {
-            ListView {
-                anchors.fill: parent
-                anchors.margins: compactMode ? 6 : 8
-                clip: true
-                spacing: compactMode ? 4 : 6
-                model: root.pendingOrders
-
-                delegate: Rectangle {
-                    property var orderData: modelData
-                    readonly property var orderUi: tradingFormHelper.buildOrderPresentation(orderData || ({}))
-                    width: ListView.view.width
-                    height: compactOrderRowHeight
-                    radius: compactMode ? 12 : 14
-                    color: Const.tradingOrderItemBg
-                    border.color: orderUi.normalizedStatus === "CANCELLED" ? Const.tradingOrderItemCancelledBorder : Const.tradingOrderItemBorder
-                    border.width: 1
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: compactMode ? 8 : 12
-                        spacing: compactMode ? 6 : 10
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-
-                            Text {
-                                text: orderData.symbol + "  " + orderData.action + "  " + String(orderUi.headlineAmount || "")
-                                color: Const.tradingAccentCyan
-                                font.pixelSize: compactMetaFont
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                text: String(orderUi.priceSummary || "")
-                                    + "  ·  " + orderData.time
-                                    + "  ·  " + orderData.status
-                                    + (String(orderUi.filledSummary || "").length > 0 ? "  ·  " + String(orderUi.filledSummary || "") : "")
-                                color: Const.tradingOrderText
-                                font.pixelSize: compactMode ? 10 : 11
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                visible: String(orderUi.auxiliarySummary || "").length > 0
-                                text: String(orderUi.auxiliarySummary || "")
-                                color: Const.tradingOrderDetailText
-                                font.pixelSize: compactMode ? 9 : 10
-                                elide: Text.ElideMiddle
-                            }
-                        }
-
-                        Rectangle {
-                            visible: orderUi.canCancel === true
-                            radius: compactMode ? 12 : 14
-                            color: Const.tradingCancelBg
-                            border.color: Const.tradingCancelText
-                            border.width: 1
-                            implicitWidth: compactMode ? 56 : 72
-                            implicitHeight: compactMode ? 24 : 30
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "撤单"
-                                color: Const.tradingCancelText
-                                font.pixelSize: compactMode ? 10 : 11
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.cancelOrderRequested(orderData.cancelOrderId || orderData.id)
-                            }
-                        }
-
-                        Rectangle {
-                            visible: orderUi.canApproveManualCheckpoint === true
-                            radius: compactMode ? 12 : 14
-                            color: Const.tradingCheckpointBg
-                            border.color: Const.tradingCheckpointText
-                            border.width: 1
-                            implicitWidth: compactMode ? 88 : 110
-                            implicitHeight: compactMode ? 24 : 30
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: String(orderUi.checkpointActionLabel || "人工确认")
-                                color: Const.tradingCheckpointText
-                                font.pixelSize: compactMode ? 10 : 11
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.approveCheckpointRequested(orderData, orderUi.canRetryManualCheckpoint === true)
-                            }
-                        }
-
-                        Rectangle {
-                            visible: orderUi.canResumeExecutionPause === true
-                            radius: compactMode ? 12 : 14
-                            color: Const.tradingResumeBg
-                            border.color: Const.tradingResumeText
-                            border.width: 1
-                            implicitWidth: compactMode ? 88 : 110
-                            implicitHeight: compactMode ? 24 : 30
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: String(orderUi.executionPauseActionLabel || "恢复执行")
-                                color: Const.tradingResumeText
-                                font.pixelSize: compactMode ? 10 : 11
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.resumeExecutionPauseRequested(orderData, orderUi.canRetryExecutionPause === true)
-                            }
-                        }
-                    }
-                }
-            }
-
-            Text {
-                anchors.centerIn: parent
-                visible: root.pendingOrders.length === 0
-                text: "暂无委托订单"
-                color: Const.tradingEmptyText
-                font.pixelSize: compactMetaFont
-            }
-        }
-    }
 
     Rectangle {
         anchors.fill: parent
@@ -1634,298 +623,131 @@ Rectangle {
                     Layout.fillHeight: true
                     currentIndex: root.currentTabIndex
 
-                    Item {
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: compactMode ? 8 : 12
-
-                            Text {
-                                text: "📌 股票代码"
-                                color: Const.tradingLabelSecondary
-                                font.pixelSize: compactSectionLabelFont
-                            }
-
-                            TextField {
-                                id: stockCodeField
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                placeholderText: "输代码/名称搜索"
-                                color: Const.tradingTitleText
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                property bool suppressTextChange: false
-                                // 显示"名称 代码"，用户输入时只回写代码避免双向绑定循环
-                                text: root.stockDisplayName
-                                      ? (root.stockCode ? root.stockDisplayName + " " + root.stockCode
-                                                        : root.stockDisplayName)
-                                      : (root.stockCode || "")
-                                onTextChanged: {
-                                    if (suppressTextChange) return
-                                    var t = text.trim()
-                                    // 用户输入代码(数字)时回写stockCode，搜素名称时只触发search
-                                    var codeMatch = t.match(/\b(\d{6})\b/)
-                                    suppressTextChange = true
-                                    if (codeMatch) {
-                                        root.stockCode = codeMatch[1]
-                                    } else {
-                                        root.stockCode = t
-                                    }
-                                    symbolSearch.search(t)
-                                    Qt.callLater(function() {
-                                        searchPopup.visible = symbolSearch.count > 0
-                                    })
-                                    Qt.callLater(function() { suppressTextChange = false })
-                                }
-                                Connections {
-                                    target: root
-                                    function onStockCodeChanged() {
-                                        if (!suppressTextChange)
-                                            stockCodeField.text = root.stockDisplayName
-                                                ? root.stockDisplayName + " " + root.stockCode
-                                                : root.stockCode
-                                    }
-                                }
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: Const.tradingInputBg
-                                    border.color: Const.tradingInputBorder
-                                    border.width: 1
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: String(root.stockEquityDisplay.identitySummary || "")
-                                color: String(root.stockEquityDisplay.identityColor || Const.tradingLabelTertiary)
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.quickButtonModel
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: Const.tradingButtonBg
-                                        border.color: Const.tradingInputActiveBorder
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            color: Const.tradingLightBlue
-                                            font.pixelSize: compactQuickButtonFont
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyQuickValue(modelData)
-                                        }
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 8 : 12
-
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    text: root.stockShares
-                                    placeholderText: "股数(100倍数)"
-                                    color: Const.tradingTitleText
-                                    font.pixelSize: compactInputFont
-                                    horizontalAlignment: TextInput.AlignHCenter
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    topPadding: compactInputVerticalPadding
-                                    bottomPadding: compactInputVerticalPadding
-                                    leftPadding: compactInputHorizontalPadding
-                                    rightPadding: compactInputHorizontalPadding
-                                    onTextChanged: root.stockShares = text
-                                    background: Rectangle {
-                                        radius: compactInputRadius
-                                        color: Const.tradingInputBg
-                                        border.color: Const.tradingInputBorder
-                                        border.width: 1
-                                    }
-                                }
-
-                                ComboBox {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["市价", "限价"]
-                                    currentIndex: root.stockPriceType === "market" ? 0 : 1
-                                    onActivated: root.stockPriceType = currentIndex === 0 ? "market" : "limit"
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Rectangle {
-                                    Layout.preferredWidth: compactInputHeight
-                                    Layout.preferredHeight: compactInputHeight
-                                    radius: compactInputRadius
-                                    color: Const.tradingButtonBg
-                                    border.color: Const.tradingInputActiveBorder
-                                    border.width: 1
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "-"
-                                        color: Const.tradingLightBlue
-                                        font.pixelSize: compactButtonFont
-                                        font.weight: Font.DemiBold
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.adjustModePrice("stock", -1)
-                                    }
-                                }
-
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    text: root.stockPrice
-                                    placeholderText: root.currentReferenceText
-                                    color: Const.tradingTitleText
-                                    font.pixelSize: compactInputFont
-                                    horizontalAlignment: TextInput.AlignHCenter
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    topPadding: compactInputVerticalPadding
-                                    bottomPadding: compactInputVerticalPadding
-                                    leftPadding: compactInputHorizontalPadding
-                                    rightPadding: compactInputHorizontalPadding
-                                    onTextChanged: root.stockPrice = text
-                                    background: Rectangle {
-                                        radius: compactInputRadius
-                                        color: Const.tradingInputBg
-                                        border.color: Const.tradingInputBorder
-                                        border.width: 1
-                                    }
-                                }
-
-                                Rectangle {
-                                    Layout.preferredWidth: compactInputHeight
-                                    Layout.preferredHeight: compactInputHeight
-                                    radius: compactInputRadius
-                                    color: Const.tradingButtonBg
-                                    border.color: Const.tradingInputActiveBorder
-                                    border.width: 1
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "+"
-                                        color: Const.tradingLightBlue
-                                        font.pixelSize: compactButtonFont
-                                        font.weight: Font.DemiBold
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.adjustModePrice("stock", 1)
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.equityQuickPriceButtonModel
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: Const.tradingButtonBg
-                                        border.color: Const.tradingInputActiveBorder
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: tradingFormHelper.equityShortcutButtonText(modelData.code, modelData.label, "stock", marketSnapshot || ({}), depthSnapshot || ({}))
-                                            color: Const.tradingLightBlue
-                                            font.pixelSize: compactQuickButtonFont
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyEquityPriceShortcut("stock", modelData.code)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: String(root.stockEquityDisplay.priceSummary || "")
-                                color: Const.tradingLabelTertiary
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: String(root.stockEquityDisplay.amountSummary || "")
-                                color: Const.tradingLabelTertiary
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
+                    // Tab 0: 普通股票
+                    StockTradeForm {
+                        id: stockForm
+                        compactMode: root.compactMode
+                        scaleFactor: root.scaleFactor
+                        stockCode: root.stockCode
+                        stockDisplayName: root.stockDisplayName
+                        stockShares: root.stockShares
+                        stockPriceType: root.stockPriceType
+                        stockPrice: root.stockPrice
+                        quickButtonModel: root.quickButtonModel
+                        equityQuickPriceButtonModel: root.equityQuickPriceButtonModel
+                        equityDisplay: root.stockEquityDisplay
+                        marketSnapshot: root.marketSnapshot
+                        depthSnapshot: root.depthSnapshot
+                        tradingFormHelper: root.tradingFormHelper
+                        currentReferenceText: root.currentReferenceText
+                        symbolSearchModel: symbolSearch
+                        onCodeEdited: function(c) { root.stockCode = c }
+                        onSearchRequested: function(query) {
+                            symbolSearch.search(query)
+                            Qt.callLater(function() {
+                                searchPopup.visible = symbolSearch.count > 0
+                            })
                         }
+                        onSharesEdited: function(s) { root.stockShares = s }
+                        onPriceTypeEdited: function(t) { root.stockPriceType = t }
+                        onPriceEdited: function(p) { root.stockPrice = p }
+                        onQuickValueSelected: function(v) { root.applyQuickValue(v) }
+                        onPriceAdjustRequested: function(d) { root.adjustModePrice("stock", d) }
+                        onEquityPriceShortcutRequested: function(sc) { root.applyEquityPriceShortcut("stock", sc) }
                     }
 
-                    Loader {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: root.currentTabIndex === 1
-                        asynchronous: true
-                        sourceComponent: futuresTradeFormComponent
+                    // Tab 1: 期货
+                    FuturesTradeForm {
+                        id: futuresForm
+                        compactMode: root.compactMode
+                        scaleFactor: root.scaleFactor
+                        code: root.futuresCode
+                        lots: root.futuresLots
+                        priceType: root.futuresPriceType
+                        price: root.futuresPrice
+                        quickButtonModel: root.quickButtonModel
+                        currentReferenceText: root.currentReferenceText
+                        onCodeEdited: function(c) { root.futuresCode = c }
+                        onLotsEdited: function(l) { root.futuresLots = l }
+                        onPriceTypeEdited: function(t) { root.futuresPriceType = t }
+                        onPriceEdited: function(p) { root.futuresPrice = p }
+                        onQuickValueSelected: function(v) { root.applyQuickValue(v) }
+                        onPriceAdjustRequested: function(d) { root.adjustModePrice("futures", d) }
                     }
 
-                    Loader {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: root.currentTabIndex === 2
-                        asynchronous: true
-                        sourceComponent: marginBuyTradeFormComponent
+                    // Tab 2: 融资买入
+                    MarginBuyTradeForm {
+                        id: marginBuyForm
+                        compactMode: root.compactMode
+                        scaleFactor: root.scaleFactor
+                        code: root.marginBuyCode
+                        shares: root.marginBuyShares
+                        priceType: root.marginBuyPriceType
+                        price: root.marginBuyPrice
+                        quickButtonModel: root.quickButtonModel
+                        equityQuickPriceButtonModel: root.equityQuickPriceButtonModel
+                        equityDisplay: root.marginBuyEquityDisplay
+                        marketSnapshot: root.marketSnapshot
+                        depthSnapshot: root.depthSnapshot
+                        tradingFormHelper: root.tradingFormHelper
+                        currentReferenceText: root.currentReferenceText
+                        onCodeEdited: function(c) { root.marginBuyCode = c }
+                        onSharesEdited: function(s) { root.marginBuyShares = s }
+                        onPriceTypeEdited: function(t) { root.marginBuyPriceType = t }
+                        onPriceEdited: function(p) { root.marginBuyPrice = p }
+                        onQuickValueSelected: function(v) { root.applyQuickValue(v) }
+                        onPriceAdjustRequested: function(d) { root.adjustModePrice("margin_buy", d) }
+                        onEquityPriceShortcutRequested: function(sc) { root.applyEquityPriceShortcut("margin_buy", sc) }
                     }
 
-                    Loader {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: root.currentTabIndex === 3
-                        asynchronous: true
-                        sourceComponent: marginSellTradeFormComponent
+                    // Tab 3: 融券卖出
+                    MarginSellTradeForm {
+                        id: marginSellForm
+                        compactMode: root.compactMode
+                        scaleFactor: root.scaleFactor
+                        code: root.marginSellCode
+                        shares: root.marginSellShares
+                        priceType: root.marginSellPriceType
+                        price: root.marginSellPrice
+                        quickButtonModel: root.quickButtonModel
+                        equityQuickPriceButtonModel: root.equityQuickPriceButtonModel
+                        equityDisplay: root.marginSellEquityDisplay
+                        marketSnapshot: root.marketSnapshot
+                        depthSnapshot: root.depthSnapshot
+                        tradingFormHelper: root.tradingFormHelper
+                        currentReferenceText: root.currentReferenceText
+                        onCodeEdited: function(c) { root.marginSellCode = c }
+                        onSharesEdited: function(s) { root.marginSellShares = s }
+                        onPriceTypeEdited: function(t) { root.marginSellPriceType = t }
+                        onPriceEdited: function(p) { root.marginSellPrice = p }
+                        onQuickValueSelected: function(v) { root.applyQuickValue(v) }
+                        onPriceAdjustRequested: function(d) { root.adjustModePrice("margin_sell", d) }
+                        onEquityPriceShortcutRequested: function(sc) { root.applyEquityPriceShortcut("margin_sell", sc) }
                     }
 
-                    Loader {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: root.currentTabIndex === 4
-                        asynchronous: true
-                        sourceComponent: optionsTradeFormComponent
+                    // Tab 4: 期权
+                    OptionsTradeForm {
+                        id: optionsForm
+                        compactMode: root.compactMode
+                        scaleFactor: root.scaleFactor
+                        code: root.optionCode
+                        underlying: root.optionUnderlying
+                        lots: root.optionLots
+                        priceType: root.optionPriceType
+                        price: root.optionPrice
+                        optionType: root.optionType
+                        optionExpiry: root.optionExpiry
+                        quickButtonModel: root.quickButtonModel
+                        currentReferenceText: root.currentReferenceText
+                        onCodeEdited: function(c) { root.optionCode = c }
+                        onUnderlyingEdited: function(u) { root.optionUnderlying = u }
+                        onLotsEdited: function(l) { root.optionLots = l }
+                        onPriceTypeEdited: function(t) { root.optionPriceType = t }
+                        onPriceEdited: function(p) { root.optionPrice = p }
+                        onOptionTypeEdited: function(t) { root.optionType = t }
+                        onOptionExpiryEdited: function(e) { root.optionExpiry = e }
+                        onQuickValueSelected: function(v) { root.applyQuickValue(v) }
+                        onPriceAdjustRequested: function(d) { root.adjustModePrice("options", d) }
                     }
                 }
             }
@@ -2344,11 +1166,15 @@ Rectangle {
             border.color: Const.tradingOrderListBorder
             border.width: 1
 
-            Loader {
-                anchors.fill: parent
-                active: root.deferredOrderListReady
-                asynchronous: true
-                sourceComponent: pendingOrdersContentComponent
+            PendingOrderList {
+                id: pendingOrderListView
+                compactMode: root.compactMode
+                scaleFactor: root.scaleFactor
+                orders: root.pendingOrders
+                tradingFormHelper: root.tradingFormHelper
+                onCancelRequested: function(oid) { root.cancelOrderRequested(oid) }
+                onApproveCheckpointRequested: function(data, retry) { root.approveCheckpointRequested(data, retry) }
+                onResumeExecutionRequested: function(data, retry) { root.resumeExecutionPauseRequested(data, retry) }
             }
 
             Column {
@@ -2402,7 +1228,7 @@ Rectangle {
         padding: 2
         opacity: 0.92
         property var _formRef: root
-        property var _fieldRef: stockCodeField
+        property var _fieldRef: stockForm.codeField
         background: Rectangle { radius: 6; color: Const.tradingSearchPopupBg; border.color: Const.tradingSearchPopupBorder; border.width: 1.5 }
 
         onVisibleChanged: {
@@ -2423,7 +1249,7 @@ Rectangle {
             model: symbolSearch
             clip: true; spacing: 1
             property var _formRef: root
-            property var _fieldRef: stockCodeField
+            property var _fieldRef: stockForm.codeField
             property var _popupRef: searchPopup
             delegate: Rectangle {
                 id: row
@@ -2452,12 +1278,14 @@ Rectangle {
                         var frm = lv._formRef
                         var fld = lv._fieldRef
                         var pop = lv._popupRef
+                        if (fld) {
+                            fld.suppressTextChange = true
+                        }
                         if (frm) {
                             frm.stockCode = sym
                             frm.stockDisplayName = nm
                         }
                         if (fld) {
-                            fld.suppressTextChange = true
                             fld.text = nm + " " + sym
                             fld.suppressTextChange = false
                         }

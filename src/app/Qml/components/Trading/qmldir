@@ -7,3 +7,9 @@ CandlestickChart 1.0 CandlestickChart.qml
 TradingChartWorkspace 1.0 TradingChartWorkspace.qml
 OrderActionBar 1.0 OrderActionBar.qml
 RuntimeRuleObserverPanel 1.0 RuntimeRuleObserverPanel.qml
+StockTradeForm 1.0 StockTradeForm.qml
+FuturesTradeForm 1.0 FuturesTradeForm.qml
+MarginBuyTradeForm 1.0 MarginBuyTradeForm.qml
+MarginSellTradeForm 1.0 MarginSellTradeForm.qml
+OptionsTradeForm 1.0 OptionsTradeForm.qml
+PendingOrderList 1.0 PendingOrderList.qml
