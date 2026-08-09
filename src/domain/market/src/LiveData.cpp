@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <foundation/log/logging.hpp>
 
 namespace domain::market {
 
@@ -12,7 +13,11 @@ namespace domain::market {
 
 BarSeries::BarSeries(int maxBars) : maxBars_(maxBars)
 {
-    if (maxBars_ < 2) maxBars_ = 2;
+    if (maxBars_ < 2) {
+        INTERNAL_WARN_STREAM << "[BarSeries] maxBars=" << maxBars
+                             << " < 2, clamped to 2";
+        maxBars_ = 2;
+    }
 }
 
 // ─── push: 新增一根 K 线 → 增量更新所有缓存 ─────────────────────────────
@@ -307,6 +312,8 @@ double BarSeries::maClose(int n) const
 {
     double v = smaCached(n);
     if (std::isnan(v)) {
+        INTERNAL_DEBUG_STREAM << "[BarSeries] SMA period " << n
+                              << " not precomputed, falling back to O(n) loop";
         // 回退: 如果 n 不在预计算列表中, 遍历计算
         n = clampN(n);
         if (n == 0) return 0.0;
@@ -323,6 +330,8 @@ double BarSeries::emaClose(int n) const
 {
     double v = emaCached(n);
     if (std::isnan(v)) {
+        INTERNAL_DEBUG_STREAM << "[BarSeries] EMA period " << n
+                              << " not precomputed, falling back to full recursion";
         // 回退: 从头递推
         int cnt = count();
         if (cnt == 0) return 0.0;
@@ -438,7 +447,11 @@ MacdData BarSeries::macd(int fast, int slow, int signal) const
 {
     MacdData result;
     int cnt = count();
-    if (cnt < slow) return result;  // 数据不足
+    if (cnt < slow) {
+        INTERNAL_DEBUG_STREAM << "[BarSeries] MACD: insufficient data, need "
+                              << slow << " bars, have " << cnt;
+        return result;  // 数据不足
+    }
 
     // 如果参数是默认值 (12/26/9), 优先使用缓存
     if (fast == 12 && slow == 26 && signal == 9) {
@@ -493,7 +506,11 @@ KdjData BarSeries::kdj(int n, int m1, int m2) const
     (void)m2;  // 同花顺标准 KDJ 中 D = SMA(K, m2), 这里用 EMA 近似
     KdjData result;
     int cnt = count();
-    if (cnt < n + m1) return result;
+    if (cnt < n + m1) {
+        INTERNAL_DEBUG_STREAM << "[BarSeries] KDJ: insufficient data, need "
+                              << (n + m1) << " bars, have " << cnt;
+        return result;
+    }
 
     // 取最近 cnt 根计算最近一个 KDJ 值
     // KDJ 是递推指标, 必须从头计算
@@ -536,7 +553,11 @@ KdjData BarSeries::kdj(int n, int m1, int m2) const
 double BarSeries::rsi(int n) const
 {
     int cnt = count();
-    if (cnt < n + 1) return std::numeric_limits<double>::quiet_NaN();
+    if (cnt < n + 1) {
+        INTERNAL_DEBUG_STREAM << "[BarSeries] RSI: insufficient data, need "
+                              << (n + 1) << " bars, have " << cnt;
+        return std::numeric_limits<double>::quiet_NaN();
+    }
 
     // 初始 avgGain / avgLoss (简单平均前 n 根)
     double avgGain = 0.0, avgLoss = 0.0;

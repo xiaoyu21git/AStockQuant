@@ -3,6 +3,7 @@
 
 #include <ctime>
 #include <sstream>
+#include <foundation/log/logging.hpp>
 
 namespace domain::market {
 
@@ -29,6 +30,8 @@ void MarketDataService::fireCallbacksForDay(std::int64_t day)
         callbacks = m_eodCallbacks;
     }
     std::string dayStr = std::to_string(day);
+    INTERNAL_INFO_STREAM << "[MarketDataService] Firing " << callbacks.size()
+                         << " EOD callbacks for day " << dayStr;
     for (auto& cb : callbacks) {
         cb(dayStr);
     }
@@ -36,7 +39,10 @@ void MarketDataService::fireCallbacksForDay(std::int64_t day)
 
 void MarketDataService::onTick(const engine::GmTickData& td)
 {
-    if (td.symbol.empty()) return;
+    if (td.symbol.empty()) {
+        INTERNAL_WARN_STREAM << "[MarketDataService] Tick with empty symbol, dropped";
+        return;
+    }
 
     std::int64_t prevTradingDay = 0;
     bool dayChanged = false;
@@ -49,6 +55,8 @@ void MarketDataService::onTick(const engine::GmTickData& td)
             && td.tradingDay != m_activeTradingDay) {
             prevTradingDay = m_activeTradingDay;
             dayChanged = true;
+            INTERNAL_INFO_STREAM << "[MarketDataService] Trading day changed: "
+                                 << prevTradingDay << " → " << td.tradingDay;
             // 新交易日：清空所有标的旧分时 K 线，随后的代码用当前 tick 绘制首根 Bar
             for (auto& [sym, ld] : data_) {
                 ld.period(1).clear();
@@ -61,6 +69,7 @@ void MarketDataService::onTick(const engine::GmTickData& td)
         auto& d = data_[td.symbol];
         if (!d.valid()) {
             d = LiveData(td.symbol);
+            INTERNAL_DEBUG_STREAM << "[MarketDataService] New symbol tracked: " << td.symbol;
         }
 
         // ── 更新今日日K ──

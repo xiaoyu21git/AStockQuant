@@ -1,6 +1,7 @@
 #include "AdjustableMarketDataView.h"
 
 #include <stdexcept>
+#include <foundation/log/logging.hpp>
 
 namespace domain::market {
 
@@ -11,6 +12,8 @@ AdjustableMarketDataView::AdjustableMarketDataView(
     , factors_(std::move(adjustFactors))
 {
     if (factors_.size() != source_.dates().size()) {
+        INTERNAL_ERROR_STREAM << "[AdjustableMarketDataView] Factor count mismatch: expected "
+                              << source_.dates().size() << " got " << factors_.size();
         throw std::invalid_argument(
             "AdjustableMarketDataView: factor count mismatch, expected "
             + std::to_string(source_.dates().size())

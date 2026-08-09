@@ -3,6 +3,7 @@
 #include <sstream>
 #include <iomanip>
 #include <cmath>
+#include <foundation/log/logging.hpp>
 
 namespace astock::market {
 
@@ -142,6 +143,12 @@ KLineBatch::KLineBatch(size_t capacity)
 void KLineBatch::push_back(const KLine& kline) {
     if (size_ >= data_.size()) {
         const auto new_capacity = data_.empty() ? std::size_t{1} : data_.size() * 2;
+        if (data_.empty()) {
+            INTERNAL_INFO_STREAM << "[KLineBatch] Initial allocation, capacity=" << new_capacity;
+        } else {
+            INTERNAL_DEBUG_STREAM << "[KLineBatch] Expanding capacity from "
+                                 << data_.size() << " to " << new_capacity;
+        }
         data_.resize(new_capacity);
     }
     data_[size_++] = kline;

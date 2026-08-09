@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <foundation/log/logging.hpp>
 
 namespace domain::market {
 
@@ -49,6 +50,9 @@ Symbol SymbolNormalizer::normalize(std::string_view raw) {
         return Symbol(std::move(result));
     }
 
+    // dot exists but neither prefix nor suffix exchange recognised
+    INTERNAL_WARN_STREAM << "[SymbolNormalizer] Unrecognised exchange format, raw="
+                         << std::string{raw} << " normalised=" << upper;
     return Symbol(std::move(upper));
 }
 

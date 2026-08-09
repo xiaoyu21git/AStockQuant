@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <random>
+#include <foundation/log/logging.hpp>
 
 namespace astock::market {
 
@@ -18,6 +19,10 @@ SimProvider::SimProvider(const std::string& config)
         update_interval_ms_ = static_cast<std::uint64_t>(
             std::stoull(config.substr(pos + 18)));
     }
+    if (config.find("base_price=") == std::string::npos &&
+        config.find("update_interval_ms=") == std::string::npos) {
+        INTERNAL_WARN_STREAM << "[SimProvider] No recognised config keys in: " << config;
+    }
 }
 
 ProviderStatus SimProvider::get_status() const {
@@ -28,12 +33,15 @@ ProviderStatus SimProvider::get_status() const {
 bool SimProvider::connect() {
     std::lock_guard<std::mutex> lock(mutex_);
     status_ = ProviderStatus::CONNECTED;
+    INTERNAL_INFO_STREAM << "[SimProvider] Connected, base_price=" << base_price_
+                         << ", interval=" << update_interval_ms_ << "ms";
     return true;
 }
 
 void SimProvider::disconnect() {
     std::lock_guard<std::mutex> lock(mutex_);
     status_ = ProviderStatus::DISCONNECTED;
+    INTERNAL_INFO_STREAM << "[SimProvider] Disconnected";
 }
 
 void SimProvider::register_kline_callback(KLineCallback cb) {
