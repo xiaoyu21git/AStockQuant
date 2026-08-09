@@ -20,6 +20,7 @@ Rectangle {
 
     property int selectedStrategyTypeIndex: 0
     property var factorService: null
+    property var strategyService: Bridge.StrategyBridge
     property string strategyId: ""
     property var strategyParameters: ({})
     property var commonStrategyParameters: ({})

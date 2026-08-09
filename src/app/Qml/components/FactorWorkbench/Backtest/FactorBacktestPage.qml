@@ -1092,6 +1092,17 @@ Item {
         }
     }
 
+    /// @brief 接收 FactorSelectionPanel 的组合草稿字段更新
+    function updateCompositeDraftField(field, value) {
+        switch (field) {
+            case "name": compositeDraftName = String(value); break
+            case "combineMode": compositeCombineMode = Number(value); break
+            case "missingPolicy": compositeMissingPolicy = Number(value); break
+            case "minimumCoverageRatio": compositeMinimumCoverageRatio = Number(value); break
+            case "dirty": compositeDraftDirty = true; break
+        }
+    }
+
     function setSelectedFactors(factorIds) {
         selectedFactorIds = normalizeSelectedFactorIds(factorIds)
     }
@@ -2321,6 +2332,27 @@ Item {
                             entryMode: root.backtestEntryMode
                             selectedFactorIds: root.selectedFactorIds
                             isBacktesting: root.isBacktesting
+                            // 组合因子数据
+                            compositeChildAllocations: root.compositeChildAllocations
+                            compactCardSpacing: root.compactCardSpacing
+                            selectedFactorCardMinWidth: root.selectedFactorCardMinWidth
+                            selectedFactorCardMaxWidth: root.selectedFactorCardMaxWidth
+                            compositeChildCardMinWidth: root.compositeChildCardMinWidth
+                            compositeChildCardMaxWidth: root.compositeChildCardMaxWidth
+                            compositeCombineModeOptions: root.compositeCombineModeOptions
+                            compositeMissingPolicyOptions: root.compositeMissingPolicyOptions
+                            compositeNormalizeModeOptions: root.compositeNormalizeModeOptions
+                            compositeCombineMode: root.compositeCombineMode
+                            compositeMissingPolicy: root.compositeMissingPolicy
+                            compositeMinimumCoverageRatio: root.compositeMinimumCoverageRatio
+                            compositeDraftName: root.compositeDraftName
+                            compositeDraftDirty: root.compositeDraftDirty
+                            // 服务与回调
+                            factorService: root.factorService
+                            factorSupportMap: root.factorSupportMapCache
+                            resolveFactorDisplayNameFn: function(factorId) { return root.resolveFactorDisplayName(factorId) }
+                            factorValidationStateFn: function(factorId) { return root.factorValidationState(factorId) }
+                            // 事件流出
                             onEntryModeSelected: function(mode) { root.backtestEntryMode = mode }
                             onFactorSelectorRequested: root.openFactorSelector()
                             onFactorRemoved: function(factorId) { root.removeSelectedFactor(factorId) }
@@ -2328,6 +2360,9 @@ Item {
                             onCompositeChildWeightUpdated: function(instanceId, weight) { root.updateCompositeChildWeight(instanceId, weight) }
                             onCompositeChildDirectionToggled: function(instanceId, ascending) { root.updateCompositeChildAscending(instanceId, ascending) }
                             onCompositeChildNormalizeModeChanged: function(instanceId, mode) { root.updateCompositeChildNormalizeMode(instanceId, mode) }
+                            onPanelStatusRequested: function(message, type) { root.handlePanelStatusRequested(message, type) }
+                            onRebalanceRequested: root.rebalanceCompositeChildWeights()
+                            onCompositeDraftUpdated: function(field, value) { root.updateCompositeDraftField(field, value) }
                         }
 
                         // 回测配置

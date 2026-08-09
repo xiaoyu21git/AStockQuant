@@ -91,6 +91,17 @@ function clampWidth(minWidth, preferredWidth, maxWidth) {
     return Math.round(Math.max(minWidth, Math.min(maxWidth, preferredWidth)))
 }
 
+/// @brief 计算紧凑双列卡片宽度 (FactorWorkbench 提取)
+function compactCardWidth(containerWidth, minWidth, maxWidth, spacing) {
+    var availableWidth = Number(containerWidth)
+    if (!isFinite(availableWidth) || availableWidth <= 0) {
+        return minWidth
+    }
+    var twoColumnWidth = Math.floor((availableWidth - spacing) / 2)
+    var clampedWidth = Math.max(minWidth, Math.min(maxWidth, twoColumnWidth))
+    return Math.min(availableWidth, clampedWidth)
+}
+
 function cloneValue(value) {
     return JSON.parse(JSON.stringify(value))
 }

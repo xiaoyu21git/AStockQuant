@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../../../utils/PureUtils.js" as PureUtils
 
 Rectangle {
     id: panelRoot
@@ -8,6 +9,28 @@ Rectangle {
     required property int entryMode
     required property var selectedFactorIds
     required property bool isBacktesting
+
+    // 组合因子数据 (从父组件传入)
+    required property var compositeChildAllocations
+    required property int compactCardSpacing
+    required property int selectedFactorCardMinWidth
+    required property int selectedFactorCardMaxWidth
+    required property int compositeChildCardMinWidth
+    required property int compositeChildCardMaxWidth
+    required property var compositeCombineModeOptions
+    required property var compositeMissingPolicyOptions
+    required property var compositeNormalizeModeOptions
+    required property int compositeCombineMode
+    required property int compositeMissingPolicy
+    required property double compositeMinimumCoverageRatio
+    required property string compositeDraftName
+    required property bool compositeDraftDirty
+
+    // 服务与回调函数 (从父组件传入)
+    required property var factorService
+    required property var factorSupportMap
+    required property var resolveFactorDisplayNameFn
+    required property var factorValidationStateFn
 
     // -- Interface: events out --
     signal entryModeSelected(int mode)
@@ -17,6 +40,30 @@ Rectangle {
     signal compositeChildWeightUpdated(string instanceId, real weight)
     signal compositeChildDirectionToggled(string instanceId, bool ascending)
     signal compositeChildNormalizeModeChanged(string instanceId, int mode)
+    signal panelStatusRequested(string message, string type)
+    signal rebalanceRequested()
+    signal compositeDraftUpdated(string field, var value)
+
+    // 本地 buildCompositeDraft (依赖数据均已通过 required property 传入)
+    function buildCompositeDraft() {
+        return {
+            name: compositeDraftName && String(compositeDraftName).trim().length > 0
+                  ? String(compositeDraftName).trim()
+                  : "composite_factor_draft",
+            combineMode: Number(compositeCombineMode),
+            missingPolicy: Number(compositeMissingPolicy),
+            minimumCoverageRatio: Number(compositeMinimumCoverageRatio),
+            children: compositeChildAllocations.map(function(child) {
+                return {
+                    instanceId: String(child.instanceId || ""),
+                    displayName: String(child.displayName || ""),
+                    weight: Number(child.weight),
+                    ascending: !!child.ascending,
+                    normalizeMode: Number(child.normalizeMode)
+                }
+            })
+        }
+    }
 
     color: "transparent"
     implicitHeight: contentColumn.implicitHeight
@@ -154,7 +201,7 @@ Rectangle {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     enabled: compositeChildAllocations && compositeChildAllocations.length > 0
-                    onClicked: rebalanceCompositeChildWeights()
+                    onClicked: rebalanceRequested()
                 }
             }
 
@@ -245,17 +292,18 @@ Rectangle {
                                 model: selectedFactorIds
 
                                 delegate: Rectangle {
-                                    width: compactCardWidth(
+                                    width: PureUtils.compactCardWidth(
                                                selectedFactorsFlow.width,
                                                selectedFactorCardMinWidth,
-                                               selectedFactorCardMaxWidth)
+                                               selectedFactorCardMaxWidth,
+                                               compactCardSpacing)
                                     radius: 8
                                     color: "#111827"
                                     border.width: 1
                                     border.color: validationState.accentColor
                                     implicitHeight: selectedFactorCardColumn.implicitHeight + 20
 
-                                    property var validationState: factorValidationState(modelData)
+                                    property var validationState: factorValidationStateFn(modelData)
 
                                     ColumnLayout {
                                         id: selectedFactorCardColumn
@@ -270,7 +318,7 @@ Rectangle {
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: resolveFactorDisplayName(modelData)
+                                                text: resolveFactorDisplayNameFn(modelData)
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 color: "#F1F5F9"
@@ -376,8 +424,8 @@ Rectangle {
                                     border.color: "#334155"
                                 }
                                 onTextChanged: {
-                                    compositeDraftName = text
-                                    compositeDraftDirty = true
+                                    compositeDraftUpdated("name", text)
+                                    compositeDraftUpdated("dirty", true)
                                 }
                             }
                         }
@@ -398,8 +446,8 @@ Rectangle {
                                 textRole: "label"
                                 currentIndex: compositeCombineMode
                                 onActivated: function(index) {
-                                    compositeCombineMode = index
-                                    compositeDraftDirty = true
+                                    compositeDraftUpdated("combineMode", index)
+                                    compositeDraftUpdated("dirty", true)
                                 }
                             }
                         }
@@ -420,8 +468,8 @@ Rectangle {
                                 textRole: "label"
                                 currentIndex: compositeMissingPolicy
                                 onActivated: function(index) {
-                                    compositeMissingPolicy = index
-                                    compositeDraftDirty = true
+                                    compositeDraftUpdated("missingPolicy", index)
+                                    compositeDraftUpdated("dirty", true)
                                 }
                             }
                         }
@@ -449,9 +497,10 @@ Rectangle {
                                 }
                                 onEditingFinished: {
                                     var parsedCoverage = Number(text)
-                                    compositeMinimumCoverageRatio = isFinite(parsedCoverage) ? parsedCoverage : 0.5
-                                    text = String(compositeMinimumCoverageRatio)
-                                    compositeDraftDirty = true
+                                    var val = isFinite(parsedCoverage) ? parsedCoverage : 0.5
+                                    text = String(val)
+                                    compositeDraftUpdated("minimumCoverageRatio", val)
+                                    compositeDraftUpdated("dirty", true)
                                 }
                             }
                         }
@@ -471,10 +520,11 @@ Rectangle {
                                 model: compositeChildAllocations
 
                                 delegate: Rectangle {
-                                    width: compactCardWidth(
+                                    width: PureUtils.compactCardWidth(
                                                compositeChildFlow.width,
                                                compositeChildCardMinWidth,
-                                               compositeChildCardMaxWidth)
+                                               compositeChildCardMaxWidth,
+                                               compactCardSpacing)
                                     radius: 8
                                     color: "#111827"
                                     border.width: 1
@@ -482,7 +532,7 @@ Rectangle {
                                     implicitHeight: compositeChildColumn.implicitHeight + 18
 
                                     property string childInstanceId: String((modelData || {}).instanceId || "")
-                                    property var childSupport: currentCacheFactorSupportMap()[childInstanceId] || ({})
+                                    property var childSupport: factorSupportMap[childInstanceId] || ({})
 
                                     ColumnLayout {
                                         id: compositeChildColumn
@@ -495,7 +545,7 @@ Rectangle {
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: String((modelData || {}).displayName || resolveFactorDisplayName(childInstanceId))
+                                                text: String((modelData || {}).displayName || resolveFactorDisplayNameFn(childInstanceId))
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 color: "#F8FAFC"
@@ -671,10 +721,10 @@ Rectangle {
                         var result = factorService.addFactor(draft)
                         if (result && String(result).length > 0) {
                             console.log("组合因子实例已保存:", result)
-                            handlePanelStatusRequested("✓ 组合因子实例已保存: " + String(result), "success")
+                            panelStatusRequested("✓ 组合因子实例已保存: " + String(result), "success")
                         } else {
                             console.log("组合因子实例保存失败")
-                            handlePanelStatusRequested("❌ 保存失败", "error")
+                            panelStatusRequested("❌ 保存失败", "error")
                         }
                     }
                 }

@@ -1,9 +1,12 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import AStock.Bridge 1.0 as Bridge
 
 Rectangle {
     id: panelRoot
+
+    property var strategyService: Bridge.StrategyBridge
 
     // 数据流入
     required property bool enableAdvancedOptions
