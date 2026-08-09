@@ -120,6 +120,11 @@ SurvivorshipValidationReport SurvivorshipValidator::validate(
         INTERNAL_WARN_STREAM << "[SurvivorshipValidator] Validation failed: "
                              << failedCount << "/" << report.checks.size()
                              << " checks failed";
+    } else {
+        INTERNAL_INFO_STREAM << "[SurvivorshipValidator] Validation passed: "
+                            << report.checks.size() << " checks OK, "
+                            << report.totalStocks << " stocks across "
+                            << report.totalDates << " days";
     }
 
     return report;

@@ -26,6 +26,10 @@ BacktestWindowBuilder::BacktestWindowBuilder(const ITradingCalendar& calendar,
 
 WindowBuildResult BacktestWindowBuilder::build(WindowBuildSpec spec) const
 {
+    INTERNAL_INFO_STREAM << "[BacktestWindowBuilder] Building window: start="
+                        << spec.requested.start.value << " end=" << spec.requested.end.value
+                        << " mode=" << static_cast<int>(spec.mode);
+
     if (!spec.requested.isValid()) {
         INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] Invalid date range in build spec";
         return WindowBuildResult{WindowBuildError::InvalidInput, std::nullopt};

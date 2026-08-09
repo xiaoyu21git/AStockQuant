@@ -46,6 +46,9 @@ GroupingAllocationResult QuantileGroupingAllocator::build(
         return GroupingAllocationResult{allocationError, std::nullopt};
     }
 
+    INTERNAL_INFO_STREAM << "[GroupingAllocator] Allocation complete: "
+                       << grouped.buckets.size() << " groups, "
+                       << weights.byInstrument.size() << " positions";
     GroupingAllocationOutput output{std::move(grouped), std::move(weights)};
     return GroupingAllocationResult{GroupingAllocationError::None, std::move(output)};
 }

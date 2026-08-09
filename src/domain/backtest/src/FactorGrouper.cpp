@@ -13,9 +13,11 @@ std::vector<FactorGroup> FactorGrouper::groupByFactorValue(
     int numGroups) {
     
     if (factorValues.empty() || numGroups <= 0) {
+        INTERNAL_WARN_STREAM << "[FactorGrouper] groupByFactorValue: empty input, values="
+                            << factorValues.size() << " groups=" << numGroups;
         return {};
     }
-    
+
     // 获取最小值和最大值
     double minValue = (std::numeric_limits<double>::max)();
     double maxValue = std::numeric_limits<double>::lowest();
@@ -76,9 +78,11 @@ std::vector<FactorGroup> FactorGrouper::groupByQuantile(
     int numGroups) {
     
     if (factorValues.empty() || numGroups <= 0) {
+        INTERNAL_WARN_STREAM << "[FactorGrouper] groupByQuantile: empty input, values="
+                            << factorValues.size() << " groups=" << numGroups;
         return {};
     }
-    
+
     // 获取排序后的因子值
     auto sortedValues = sortFactorValues(factorValues);
     
