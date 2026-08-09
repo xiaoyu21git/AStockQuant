@@ -8,6 +8,7 @@
 #include "Event/Event.h"
 #include <atomic>      // 主要头文件
 #include <optional>
+#include <foundation/log/logging.hpp>
 
 
 namespace engine {
@@ -166,6 +167,7 @@ void EventBusImpl::stop(bool wait_completion, int timeout_ms) {
         }
     }
     workers_.clear();
+    INTERNAL_INFO_STREAM << "[EventBus] Stopped, all workers joined";
 }
 
 bool EventBusImpl::start() {
@@ -191,8 +193,9 @@ bool EventBusImpl::start() {
         for (size_t i = 0; i < thread_count; ++i) {
             workers_.emplace_back(&EventBusImpl::worker_thread_func, this);
         }
+        INTERNAL_INFO_STREAM << "[EventBus] Started " << thread_count << " worker threads";
     }
-    
+
     return true;
 }
 
@@ -245,7 +248,11 @@ PublishResult EventBusImpl::publish(const engine::EventFormat& event, int priori
             if (drop_oldest_on_full_) {
                 event_queue_.pop();
                 should_drop = true;
+                INTERNAL_WARN_STREAM << "[EventBus] Queue full (max=" << config_.max_queue_size
+                                     << "), dropping oldest event";
             } else {
+                INTERNAL_WARN_STREAM << "[EventBus] Queue full (max=" << config_.max_queue_size
+                                     << "), rejecting publish";
                 return PublishResult{PublishError::QUEUE_FULL, "Event queue is full"};
             }
         }

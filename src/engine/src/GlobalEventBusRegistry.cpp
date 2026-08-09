@@ -1,6 +1,7 @@
 #include "GlobalEventBusRegistry.h"
 
 #include <mutex>
+#include <foundation/log/logging.hpp>
 
 namespace engine {
 
@@ -12,6 +13,7 @@ std::mutex g_engine_event_bus_mutex;
 void register_engine_event_bus(std::shared_ptr<EventBus> bus) {
     std::lock_guard<std::mutex> lock(g_engine_event_bus_mutex);
     g_engine_event_bus = std::move(bus);
+    INTERNAL_INFO_STREAM << "[GlobalEventBusRegistry] Engine EventBus registered";
 }
 
 std::shared_ptr<EventBus> get_engine_event_bus() {

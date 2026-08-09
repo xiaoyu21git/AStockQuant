@@ -5,6 +5,7 @@
 #include "GlobalEventBusRegistry.h"
 #include "foundation/market/AStockSymbol.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
+#include <foundation/log/logging.hpp>
 
 namespace engine {
 
@@ -51,11 +52,13 @@ AccountEngine::AccountEngine() {
                     it->second.lastPrice = *price;
             });
     }
+    INTERNAL_INFO_STREAM << "[AccountEngine] Initialised, subscribed to event bus";
 }
 
 bool AccountEngine::initialize(::Strategy* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
+    INTERNAL_INFO_STREAM << "[AccountEngine] Initialised with strategy";
     return true;
 }
 
@@ -70,6 +73,7 @@ void AccountEngine::shutdown() {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_cacheValid = false;
     m_cachedPositions.clear();
+    INTERNAL_INFO_STREAM << "[AccountEngine] Shutdown complete";
 }
 
 bool AccountEngine::initialized() const { return m_strategy != nullptr; }
@@ -116,6 +120,9 @@ void AccountEngine::onCash(const AccountInfo& a) {
         m_cachedAccount = a;
         m_cacheValid = true;
     }
+    INTERNAL_DEBUG_STREAM << "[AccountEngine] Cash updated: available=" << a.availableCash
+                          << " totalAsset=" << a.totalAsset
+                          << " marketValue=" << a.marketValue;
     if (m_onDataChanged) m_onDataChanged();
 }
 
@@ -125,6 +132,8 @@ void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
         for (const auto& p : positions)
             m_cachedPositions[p.symbol] = p;
     }
+    INTERNAL_DEBUG_STREAM << "[AccountEngine] Position update: " << positions.size()
+                          << " positions, cache size=" << m_cachedPositions.size();
     if (m_onDataChanged) m_onDataChanged();
 }
 
