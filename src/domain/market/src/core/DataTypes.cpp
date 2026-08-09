@@ -156,6 +156,8 @@ void KLineBatch::push_back(const KLine& kline) {
 
 const KLine& KLineBatch::operator[](size_t index) const {
     if (index >= size_) {
+        INTERNAL_WARN_STREAM << "[KLineBatch] const operator[] out of range: index="
+                            << index << " size=" << size_;
         throw std::out_of_range("KLineBatch index out of range");
     }
     return data_[index];
@@ -163,6 +165,8 @@ const KLine& KLineBatch::operator[](size_t index) const {
 
 KLine& KLineBatch::operator[](size_t index) {
     if (index >= size_) {
+        INTERNAL_WARN_STREAM << "[KLineBatch] operator[] out of range: index="
+                            << index << " size=" << size_;
         throw std::out_of_range("KLineBatch index out of range");
     }
     return data_[index];

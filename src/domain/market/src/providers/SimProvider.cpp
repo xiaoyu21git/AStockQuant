@@ -54,20 +54,25 @@ void SimProvider::register_tick_callback(TickCallback cb) {
     tick_cb_ = std::move(cb);
 }
 
-bool SimProvider::subscribe_kline(std::uint32_t /*symbol_id*/, std::uint32_t /*period*/) {
-    // 目前订阅不驱动实时推送，仅用于接口兼容
+bool SimProvider::subscribe_kline(std::uint32_t symbol_id, std::uint32_t period) {
+    INTERNAL_DEBUG_STREAM << "[SimProvider] subscribe_kline symbol_id=" << symbol_id
+                          << " period=" << period;
     return true;
 }
 
-bool SimProvider::unsubscribe_kline(std::uint32_t /*symbol_id*/, std::uint32_t /*period*/) {
+bool SimProvider::unsubscribe_kline(std::uint32_t symbol_id, std::uint32_t period) {
+    INTERNAL_DEBUG_STREAM << "[SimProvider] unsubscribe_kline symbol_id=" << symbol_id
+                          << " period=" << period;
     return true;
 }
 
-bool SimProvider::subscribe_tick(std::uint32_t /*symbol_id*/) {
+bool SimProvider::subscribe_tick(std::uint32_t symbol_id) {
+    INTERNAL_DEBUG_STREAM << "[SimProvider] subscribe_tick symbol_id=" << symbol_id;
     return true;
 }
 
-bool SimProvider::unsubscribe_tick(std::uint32_t /*symbol_id*/) {
+bool SimProvider::unsubscribe_tick(std::uint32_t symbol_id) {
+    INTERNAL_DEBUG_STREAM << "[SimProvider] unsubscribe_tick symbol_id=" << symbol_id;
     return true;
 }
 
