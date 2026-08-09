@@ -5,6 +5,7 @@ import QtQuick.Controls 2.15
 import AStock.Bridge 1.0
 import "../../components/FactorWorkbench/Navigation" as NavigationComponents
 import "../../components/Strategy" as StrategyComponents
+import "../../components/Strategy/Creation" as StrategyCreationComponents
 import "../../components/Base" as BaseComponents
 import "../../components" as Components
 
@@ -34,6 +35,7 @@ Rectangle {
     property var localStatusOverrides: ({})     // {strategyId: "启动中"|"停止中"} QML 本地即时状态
     property bool showBacktestWorkbench: false
     property bool showPerformance: false
+    property bool showTuning: false
     property string backtestWorkbenchStatusText: ""
     property bool backtestWorkbenchLoadedOnce: false
     property var backtestResult: ({})
@@ -938,7 +940,36 @@ Rectangle {
     function closeBacktestWorkbench() {
         showBacktestWorkbench = false
     }
-    
+
+    function openTuning() {
+        if (!selectedStrategyId) return
+        var summary = getSelectedStrategySummary() || ({})
+        var strategyName = summary.strategyName || summary.name || ""
+        var typeIndex = summary.strategyTypeIndex || summary.typeIndex || 0
+        tuningConfigPanel.strategyId = selectedStrategyId
+        tuningConfigPanel.strategyTypeIndex = typeIndex
+        tuningConfigPanel.strategyName = strategyName
+        tuningConfigPanel.open()
+    }
+
+    function closeTuning() {
+        showTuning = false
+    }
+
+    // ── 参数调优配置弹窗 ──
+    StrategyCreationComponents.ParameterTuningConfigPanel {
+        id: tuningConfigPanel
+        strategyId: strategyLibraryPage.selectedStrategyId
+
+        onTuningStarted: function(config) {
+            // 启动 C++ 桥接层调优
+            Bridge.ParameterTuningBridge.startTuning(
+                config.strategyId, config.strategyTypeIndex, config)
+            // 切换到结果面板
+            strategyLibraryPage.showTuning = true
+        }
+    }
+
     // 数据模型（完全使用数据库数据，移除模拟数据）
     ListModel {
         id: strategyModel
@@ -984,47 +1015,63 @@ Rectangle {
 
         NavigationComponents.ModeTitleBar {
             Layout.fillWidth: true
-            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
+            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
                 ? "library"
                 : (strategyLibraryPage.backtestWorkbenchMode === "analysis" ? "backtest_analysis"
-                    : strategyLibraryPage.showPerformance ? "performance" : "backtest")
+                    : strategyLibraryPage.showPerformance ? "performance"
+                    : strategyLibraryPage.showTuning ? "tuning" : "backtest")
             showBackButton: false
             modeOptions: [
                 { value: "library", label: "策略库" },
                 { value: "backtest", label: "策略回测" },
                 { value: "backtest_analysis", label: "回测分析" },
+                { value: "tuning", label: "参数调优" },
                 { value: "performance", label: "策略绩效" }
             ]
             modeTitleMap: {
                 "library": "策略库",
                 "backtest": "策略回测",
                 "backtest_analysis": "回测分析",
+                "tuning": "参数调优",
                 "performance": "策略绩效"
             }
             modeSubtitleMap: {
                 "library": "浏览并管理策略，新建入口保留在策略库页。",
                 "backtest": "在策略库内直接配置并运行当前策略回测。",
                 "backtest_analysis": "独立展示最近回测与历史对比结果，不承载回测配置。",
+                "tuning": "自动搜索最优参数组合，提升策略绩效。",
                 "performance": "查看策略历史回测记录与绩效对比。"
             }
             onModeSelected: function(mode) {
                 if (mode === "library") {
                     strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.showBacktestWorkbench = false
+                    strategyLibraryPage.showTuning = false
                     return
                 }
                 if (mode === "performance") {
                     strategyLibraryPage.showPerformance = true
                     strategyLibraryPage.showBacktestWorkbench = false
+                    strategyLibraryPage.showTuning = false
+                    return
+                }
+                if (mode === "tuning") {
+                    strategyLibraryPage.showPerformance = false
+                    strategyLibraryPage.showBacktestWorkbench = false
+                    strategyLibraryPage.openTuning()
                     return
                 }
                 if (mode === "backtest") {
                     strategyLibraryPage.showPerformance = false
+                    strategyLibraryPage.showBacktestWorkbench = false
+                    strategyLibraryPage.showTuning = false
                     strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "workbench")
                     return
                 }
                 if (mode === "backtest_analysis") {
                     strategyLibraryPage.showPerformance = false
+                    strategyLibraryPage.showBacktestWorkbench = false
+                    strategyLibraryPage.showTuning = false
                     strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "analysis")
                     return
                 }
@@ -1033,9 +1080,9 @@ Rectangle {
 
         ScrollView {
             id: scrollView
-            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
+            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
             Layout.fillWidth: true
-            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
+            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
@@ -1065,7 +1112,7 @@ Rectangle {
                 }
 
                 Item {
-                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
                     Layout.fillWidth: true
                     Layout.preferredHeight: spacingXLarge
                 }
@@ -1090,6 +1137,22 @@ Rectangle {
                     item.selectedStrategyName = strategyLibraryPage.getSelectedStrategySummary()
                         ? (strategyLibraryPage.getSelectedStrategySummary().strategyName || strategyLibraryPage.getSelectedStrategySummary().name || "") : ""
                 }
+            }
+        }
+
+        // ── 参数调优结果面板 ──
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: strategyLibraryPage.showTuning
+            visible: strategyLibraryPage.showTuning
+
+            Loader {
+                id: tuningResultLoader
+                anchors.fill: parent
+                asynchronous: true
+                active: strategyLibraryPage.showTuning
+                visible: status === Loader.Ready && strategyLibraryPage.showTuning
+                source: "qrc:/page/strategies/ParameterTuningResultPanel.qml"
             }
         }
 

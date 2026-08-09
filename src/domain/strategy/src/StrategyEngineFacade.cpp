@@ -80,6 +80,55 @@ uint64_t generateBasketId() {
     return std::hash<std::string>{}(id);
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 参数覆写辅助函数 (Phase 16: 参数自动调优 — 内存覆写，零 DB 读取)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// @brief 将 StrategyParamOverlay 应用到 StrategyCreationParams — 仅覆写有值的字段
+static void applyParamOverlay(StrategyCreationParams& params,
+                              const domain::backtest::StrategyParamOverlay& overlay)
+{
+    if (overlay.topN)                   params.topN = *overlay.topN;
+    if (overlay.maxPositions)           params.maxPositions = *overlay.maxPositions;
+    if (overlay.maxWeightPerStock)      params.maxWeightPerStock = *overlay.maxWeightPerStock;
+    if (overlay.minWeightPerStock)      params.minWeightPerStock = *overlay.minWeightPerStock;
+    if (overlay.weightSchemeIndex)
+        params.weightScheme = static_cast<domain::strategies::WeightScheme>(*overlay.weightSchemeIndex);
+    if (overlay.rebalanceFrequencyIndex)
+        params.rebalanceFrequency = static_cast<domain::strategies::RebalanceFrequency>(*overlay.rebalanceFrequencyIndex);
+    if (overlay.allowShort)             params.allowShort = *overlay.allowShort;
+    if (overlay.industryNeutral)        params.industryNeutral = *overlay.industryNeutral;
+    if (overlay.stopLossPercent)        params.stopLossPercent = *overlay.stopLossPercent;
+    if (overlay.takeProfitPercent)      params.takeProfitPercent = *overlay.takeProfitPercent;
+    if (overlay.minHoldDays)            params.minHoldDays = *overlay.minHoldDays;
+    // minCompositeScore / sellThreshold / sellRankMultiplier — 引擎层/策略层应用
+    if (overlay.fastPeriod)             params.fastPeriod = *overlay.fastPeriod;
+    if (overlay.slowPeriod)             params.slowPeriod = *overlay.slowPeriod;
+    if (overlay.signalPeriod)           params.signalPeriod = *overlay.signalPeriod;
+    if (overlay.macdFast)               params.macdFast = *overlay.macdFast;
+    if (overlay.macdSlow)               params.macdSlow = *overlay.macdSlow;
+    if (overlay.macdSignal)             params.macdSignal = *overlay.macdSignal;
+    if (overlay.bbPeriod)               params.bbPeriod = *overlay.bbPeriod;
+    if (overlay.bbStdDev)               params.bbStdDev = *overlay.bbStdDev;
+    // priceFieldIndex — 策略层应用
+}
+
+/// @brief 将 StrategyParamOverlay 直接应用到引擎层成员（风控/持仓天数/调仓频率）
+static void applyParamOverlayToEngine(
+    RiskConfig& riskCfg,
+    int& minHoldDays,
+    int& rebalanceInterval,
+    const domain::backtest::StrategyParamOverlay& overlay)
+{
+    if (overlay.stopLossPercent)        riskCfg.stopLossPercent = *overlay.stopLossPercent;
+    if (overlay.takeProfitPercent)      riskCfg.takeProfitPercent = *overlay.takeProfitPercent;
+    if (overlay.minHoldDays)            minHoldDays = *overlay.minHoldDays;
+    if (overlay.rebalanceFrequencyIndex) {
+        auto rf = static_cast<domain::strategies::RebalanceFrequency>(*overlay.rebalanceFrequencyIndex);
+        rebalanceInterval = domain::strategies::rebalanceFrequencyStepInterval(rf);
+    }
+}
+
 /// @brief 为订单列表打上篮子ID标签，返回生成的篮子ID
 uint64_t tagBasketOrders(std::vector<strategy::OrderRequest>& orders) {
     uint64_t basketId = generateBasketId();
@@ -331,6 +380,9 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                          << " factorIds=" << params.factorIds.size()
                          << " engine=" << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
+
+    // ── 保存原始创建参数 (供回测覆写使用，避免重复 DB 读取) ──
+    engine->m_originalCreationParams = params;
 
     // ── 策略创建 ──
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
@@ -1839,7 +1891,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
 StrategyBacktestResult StrategyEngine::backtest(
     const domain::backtest::BacktestRequest& req,
     factor::compute::BacktestDataService* dataSvc,
-    const std::function<void(double)>& onProgress)
+    const std::function<void(double)>& onProgress,
+    const std::atomic<bool>* cancelFlag)
 {
     StrategyBacktestResult result;
 
@@ -1877,6 +1930,37 @@ StrategyBacktestResult StrategyEngine::backtest(
     // 确保引擎服务处于运行状态（复用引擎时可能未启动）
     if (strategyService_) {
         strategyService_->start();
+    }
+
+    // ── 参数覆写: 调优时为每次试运行注入参数而不重读 DB ──
+    const auto& overlay = req.strategyParamOverlay;
+    if (!overlay.isEmpty()) {
+        // 0. 重置引擎层成员到原始 DB 值 (上一轮覆写可能残留)
+        m_minHoldDays = m_originalCreationParams.minHoldDays;
+        m_rebalanceInterval = domain::strategies::rebalanceFrequencyStepInterval(
+            m_originalCreationParams.rebalanceFrequency);
+        m_riskConfig.stopLossPercent = m_originalCreationParams.stopLossPercent;
+        m_riskConfig.takeProfitPercent = m_originalCreationParams.takeProfitPercent;
+        m_riskConfig.maxDrawdownLimitPercent = m_originalCreationParams.maxDrawdownLimit;
+
+        // 1. 覆写引擎层成员 (风控/持仓天数/调仓频率)
+        applyParamOverlayToEngine(m_riskConfig, m_minHoldDays, m_rebalanceInterval, overlay);
+
+        // 2. 从原始参数 + 覆写重建策略 (内存覆写，零 DB 读取)
+        if (strategyService_) {
+            strategyService_->clearStrategies();
+        }
+        auto modifiedParams = m_originalCreationParams;
+        applyParamOverlay(modifiedParams, overlay);
+        constexpr StrategyInstanceId kDefaultInstanceId = 1;
+        RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
+                                    modifiedParams.maxOrderQuantity,
+                                    modifiedParams.maxWeightPerStock, true);
+        auto newStrategy = StrategyBase::create(kDefaultInstanceId, modifiedParams);
+        if (!newStrategy || !registerStrategy(newStrategy, ctx).isOk()) {
+            result.errorMessage = "Strategy re-creation with overlay failed";
+            return result;
+        }
     }
 
     const int totalDays = static_cast<int>(view->dates().size());
@@ -2006,7 +2090,7 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     // ── 主循环 (Phase 30b: 提取到 runBacktestLoop) ──
     runBacktestLoop(ctx, result, dataSvc, req, fillSim,
-                    symbolToCol, bmColIdx, onProgress, attributionCollector);
+                    symbolToCol, bmColIdx, onProgress, attributionCollector, cancelFlag);
 
     INTERNAL_INFO_STREAM << "[backtest] loop done: days=" << totalDays << " finalEquity=" << btAccount().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
 
@@ -2079,7 +2163,8 @@ void StrategyEngine::runBacktestLoop(
     const std::unordered_map<std::string, int>& symbolToCol,
     int bmColIdx,
     const std::function<void(double)>& onProgress,
-    rules::AttributionCollector& attributionCollector)
+    rules::AttributionCollector& attributionCollector,
+    const std::atomic<bool>* cancelFlag)
 {
     // ── 引用别名: ctx 成员映射为原局部变量名, 循环体零改动 ──
     double& latestEquity = ctx.latestEquity;
@@ -2159,6 +2244,12 @@ void StrategyEngine::runBacktestLoop(
     const double kLoopEnd    = 90.0;
 
     for (int r = 0; r < totalDays; ++r) {
+        // ── 取消检测: 每个交易日开始时检查，支持中途取消调优 ──
+        if (cancelFlag && cancelFlag->load(std::memory_order_relaxed)) {
+            result.errorMessage = "Cancelled by user";
+            return;
+        }
+
         batch = dataSvc->loadBatch(0);
         view = batch.marketView;
         if (!view) { result.errorMessage = "View lost during backtest"; return; }

@@ -28,6 +28,7 @@ set(BRIDGE_HEADERS
     include/FactorBacktestBridge.h
     include/StrategyBridge.h
     include/StrategyBacktestBridge.h
+    include/ParameterTuningBridge.h
     include/StrategyListModel.h
     # ── 新增桥接类型 (TradingConnectionConfig 等) ──
     include/TradingConnectionConfigService.h

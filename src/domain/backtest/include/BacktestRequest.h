@@ -4,9 +4,55 @@
 #include "foundation/Utils/Timestamp.h"
 
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace domain::backtest {
+
+/// 策略参数覆写 — 调优时仅覆写可变字段，不动 rule_profile / factor_overlay 等
+/// 字段为 nullopt 表示不覆写（保持策略 DB 中的原始值）
+struct StrategyParamOverlay final {
+    std::optional<int> topN;
+    std::optional<int> maxPositions;
+    std::optional<double> maxWeightPerStock;
+    std::optional<double> minWeightPerStock;
+    std::optional<int> weightSchemeIndex;        // cast to WeightScheme
+    std::optional<int> rebalanceFrequencyIndex;  // cast to RebalanceFrequency
+    std::optional<bool> allowShort;
+    std::optional<bool> industryNeutral;
+    std::optional<double> stopLossPercent;
+    std::optional<double> takeProfitPercent;
+    std::optional<int> minHoldDays;
+
+    // MultiFactor 专用
+    std::optional<double> minCompositeScore;
+    std::optional<double> sellThreshold;
+    std::optional<double> sellRankMultiplier;
+
+    // 技术指标策略专用
+    std::optional<int> fastPeriod;
+    std::optional<int> slowPeriod;
+    std::optional<int> signalPeriod;
+    std::optional<int> macdFast;
+    std::optional<int> macdSlow;
+    std::optional<int> macdSignal;
+    std::optional<int> bbPeriod;
+    std::optional<double> bbStdDev;
+
+    // 枚举选项
+    std::optional<int> priceFieldIndex;
+
+    [[nodiscard]] bool isEmpty() const noexcept
+    {
+        return !topN && !maxPositions && !maxWeightPerStock && !minWeightPerStock
+            && !weightSchemeIndex && !rebalanceFrequencyIndex && !allowShort
+            && !industryNeutral && !stopLossPercent && !takeProfitPercent
+            && !minHoldDays && !minCompositeScore && !sellThreshold
+            && !sellRankMultiplier && !fastPeriod && !slowPeriod
+            && !signalPeriod && !macdFast && !macdSlow && !macdSignal
+            && !bbPeriod && !bbStdDev && !priceFieldIndex;
+    }
+};
 
 struct DateWindow final {
     foundation::utils::Timestamp startDate;
@@ -106,6 +152,7 @@ struct BacktestRequest final {
     RuntimeOptionSpec runtimeOptions;
     DateWindow window;
     std::string benchmarkIndex{"000300.SH"};  // 基准指数代码
+    StrategyParamOverlay strategyParamOverlay; // 参数调优覆写 (空=不覆写)
 
     [[nodiscard]] bool isValid() const
     {

@@ -588,7 +588,8 @@ public:
     /// @param dataSvc 已加载数据的数据服务（由调用方构建，避免重复解析 JSON）
     [[nodiscard]] StrategyBacktestResult backtest(const domain::backtest::BacktestRequest& req,
                                                    factor::compute::BacktestDataService* dataSvc,
-                                                   const std::function<void(double)>& onProgress = {});
+                                                   const std::function<void(double)>& onProgress = {},
+                                                   const std::atomic<bool>* cancelFlag = nullptr);
 
     // ─── 实盘异步专有接口 ───
 
@@ -793,7 +794,8 @@ private:
         const std::unordered_map<std::string, int>& symbolToCol,
         int bmColIdx,
         const std::function<void(double)>& onProgress,
-        rules::AttributionCollector& attributionCollector);
+        rules::AttributionCollector& attributionCollector,
+        const std::atomic<bool>* cancelFlag = nullptr);
 
     /// @brief 回测后处理: 指标计算 (Phase 30c 拆分)
     /// 从 backtest() L1989-2099 提取, 纯计算, 无日志输出
@@ -861,6 +863,9 @@ private:
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
     int m_minHoldDays{0};                  ///< 最少持有天数, 0=不启用
     std::unordered_map<std::string, std::int64_t> m_positionEntryDates;  ///< symbol→首次建仓日期 YYYYMMDD
+
+    /// @brief 原始创建参数 (fromDb 时保存，供回测覆写，避免重复 DB 读取)
+    StrategyCreationParams m_originalCreationParams;
 };
 
 class StrategyEngine::Builder final {

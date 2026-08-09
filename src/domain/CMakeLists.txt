@@ -11,6 +11,7 @@ add_subdirectory(strategy)
 add_subdirectory(scheduler)
 add_subdirectory(trading)
 add_subdirectory(cleaning)
+add_subdirectory(optimization)
 
     # indicators/signals removed — astock_ta_lib link removed
 
@@ -37,6 +38,7 @@ target_link_libraries(domain
         factor
         domain_trading
         domain_cleaning
+        domain_optimization
 )
 
 target_include_directories(domain

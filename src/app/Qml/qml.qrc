@@ -149,6 +149,7 @@
         <file>components/Strategy/Creation/RuleTemplateStructureView.qml</file>
         <file>components/Strategy/Creation/RuleTemplateSuggestionPanel.qml</file>
         <file>components/Strategy/Creation/StrategyTypeSelector.qml</file>
+        <file>components/Strategy/Creation/ParameterTuningConfigPanel.qml</file>
         <file>components/Strategy/StrategyChart.qml</file>
         <file>components/Strategy/StrategyFilter.qml</file>
         <file>components/Strategy/StrategyFilterButton.qml</file>
@@ -204,6 +205,7 @@
         <file>page/strategies/StrategyLibrarySearchBar.qml</file>
         <file>page/strategies/StrategyGridPanel.qml</file>
         <file>page/strategies/StrategyDetailPanel.qml</file>
+        <file>page/strategies/ParameterTuningResultPanel.qml</file>
         <file>page/strategies/StrategyRuntimeDiagnostics.qml</file>
         <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>

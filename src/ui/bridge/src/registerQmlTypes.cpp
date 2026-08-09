@@ -31,6 +31,7 @@
 #include "RuleTemplateSuggestionService.h"
 #include "DataCleaningServiceRefactored.h"
 #include "StrategyRuleStatsBridge.h"
+#include "ParameterTuningBridge.h"
 
 namespace wang{
 
@@ -229,6 +230,13 @@ namespace wang{
           url, 1, 0, "StrategyRuleStatsBridge",
           [](QQmlEngine*, QJSEngine*) -> QObject* {
              return new StrategyRuleStatsBridge();
+          });
+
+       // ParameterTuningBridge — 参数自动调优桥接 (单例)
+       qmlRegisterSingletonType<ParameterTuningBridge>(
+          url, 1, 0, "ParameterTuningBridge",
+          [](QQmlEngine*, QJSEngine*) -> QObject* {
+             return new ParameterTuningBridge();
           });
 
    }
