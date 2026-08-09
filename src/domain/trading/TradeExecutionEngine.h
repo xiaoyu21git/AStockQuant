@@ -13,6 +13,7 @@
 #include "../strategy/include/IOrderListener.h"
 
 #include <cstdint>
+#include <optional>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -314,6 +315,8 @@ public:
 
     // ── Queries ──
     [[nodiscard]] std::vector<TradeOrder> recentOrders() const noexcept;
+    /// @brief 按 brokerOrderId 查找订单（用于成交回报→策略回链）
+    [[nodiscard]] std::optional<TradeOrder> findOrderByBrokerId(const std::string& brokerOrderId) const noexcept;
 
     // ── Scheduling controls ──
     bool approveExecutionCheckpoint(const std::string& executionScopeId,

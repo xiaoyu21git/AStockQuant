@@ -418,6 +418,16 @@ std::vector<TradeOrder> TradeExecutionEngine::recentOrders() const noexcept {
     return m_impl->m_recentOrders;
 }
 
+std::optional<TradeOrder> TradeExecutionEngine::findOrderByBrokerId(
+    const std::string& brokerOrderId) const noexcept {
+    std::lock_guard<std::mutex> lock(m_impl->m_mutex);
+    for (const auto& o : m_impl->m_recentOrders) {
+        if (o.brokerOrderId() == brokerOrderId)
+            return o;
+    }
+    return std::nullopt;
+}
+
 // ============================================================================
 // 回调注册 — 直接连 TradeEngine，不经过 BrokerGateway
 // ============================================================================

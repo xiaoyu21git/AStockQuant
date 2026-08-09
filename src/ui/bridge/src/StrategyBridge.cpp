@@ -367,6 +367,23 @@ void StrategyBridge::init()
             auto& engine = domain::trading::TradeExecutionEngine::instance();
             mgr.setOrderListener(&engine);
             mgr.setDefaultOrderListener(&engine);
+
+            // ── 实盘成交回报 → TradeJournal ──
+            engine.setOnTradeFill([](const domain::trading::TradeFill& fill) {
+                const std::string brokerId = fill.brokerOrderId().text();
+                if (brokerId.empty()) return;
+                auto order = domain::trading::TradeExecutionEngine::instance()
+                    .findOrderByBrokerId(brokerId);
+                if (!order.has_value()) return;
+                auto* eng = domain::strategy::StrategyManager::instance()
+                    .get(order->strategyId());
+                if (!eng) return;
+                std::string side = order->side() == domain::strategy::OrderDirection::Buy
+                    ? "买入" : "卖出";
+                eng->logExecutionFill(order->symbol(), side,
+                    fill.price(), fill.quantity(), fill.commission(),
+                    fill.tradeTime().to_string(), brokerId);
+            });
         }
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";

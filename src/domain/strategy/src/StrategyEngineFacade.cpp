@@ -553,7 +553,27 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
         }
 
         // ── Phase 2: 策略在候选池内评估 → 生成买卖信号 ──
-        auto orders = collectOrders(strategyService_->onMarketDataPoint(marketDataPoint));
+        auto rawSignals = strategyService_->onMarketDataPoint(marketDataPoint);
+        auto orders = collectOrders(rawSignals);
+
+        // 实盘信号日志 — 仅在有决策事件时写入, 不记录每次 tick 静默
+        if (m_tradeJournal && orders.has_value() && !orders->empty()) {
+            const std::int64_t today = domain::market::MarketDataService::instance()
+                .activeTradingDay();
+            if (today > 0) {
+                std::string datePrefix = std::to_string(today);
+                for (const auto& o : *orders) {
+                    if (!o.isValid()) continue;
+                    std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
+                    double score = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+                    std::ostringstream js;
+                    js << datePrefix << " 信号生成 " << side << " " << o.symbol()
+                       << " " << o.quantity() << "股";
+                    if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
+                    m_tradeJournal->log(js.str());
+                }
+            }
+        }
 
         // ── Phase 3: 规则闸门审核 ──
         if (m_rulePipeline.enabled() && orders.has_value() && liveMarketView()) {
@@ -561,6 +581,7 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
             const std::int64_t today = domain::market::MarketDataService::instance()
                 .activeTradingDay();
             if (today > 0) {
+                const size_t beforeGate = orders->size();
                 rules::BacktestRuleVariableProvider gateProvider;
                 gateProvider.setDay(view, static_cast<std::int32_t>(today), nullptr);
                 auto filtered = m_rulePipeline.filterBuySignals(*orders,
@@ -572,6 +593,21 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                             if (symStrs[cc] == symbol) { ctx.colIndex = static_cast<int>(cc); break; }
                         gateProvider.setCandidate(ctx);
                     }, gateProvider);
+                // 实盘规则拒绝日志
+                if (m_tradeJournal && filtered.size() < beforeGate) {
+                    std::string datePrefix = std::to_string(today);
+                    // 收集被过滤掉的标的
+                    for (const auto& o : *orders) {
+                        bool survived = false;
+                        for (const auto& f : filtered)
+                            if (f.symbol() == o.symbol()) { survived = true; break; }
+                        if (survived) continue;
+                        std::ostringstream js;
+                        js << datePrefix << " 规则拒绝 " << o.symbol()
+                           << " 模板:" << m_rulePipeline.boundTemplateCount();
+                        m_tradeJournal->log(js.str());
+                    }
+                }
                 orders = filtered.empty() ? std::nullopt : std::optional(std::move(filtered));
             }
         }
@@ -839,6 +875,22 @@ void StrategyEngine::drainQueue()
                 auto finalOrders = m_orderGenerator.generate(*orders, posProvider, m_maxOrderQuantity, m_strategyId, m_accountId);
                 if (!finalOrders.empty()) {
                     auto basketId = tagBasketOrders(finalOrders);
+
+                    // 实盘提交日志
+                    if (m_tradeJournal) {
+                        const std::int64_t today = domain::market::MarketDataService::instance()
+                            .activeTradingDay();
+                        std::string datePrefix = today > 0 ? std::to_string(today) : "";
+                        for (const auto& o : finalOrders) {
+                            std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
+                            double score = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+                            std::ostringstream js;
+                            js << datePrefix << " 提交 " << side << " " << o.symbol()
+                               << " " << o.quantity() << "股";
+                            if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
+                            m_tradeJournal->log(js.str());
+                        }
+                    }
 
                     try {
                         m_orderListener->onOrders(finalOrders);
@@ -3111,6 +3163,20 @@ void StrategyEngine::buildBacktestDiagnostics(
             result.rankIC = (varS>0&&varP>0) ? cov/std::sqrt(varS*varP) : 0;
         }
     }
+}
+
+void StrategyEngine::logExecutionFill(const std::string& symbol, const std::string& side,
+                                      double price, std::int64_t quantity, double commission,
+                                      const std::string& fillTime, const std::string& brokerOrderId)
+{
+    if (!m_tradeJournal) return;
+    std::ostringstream js;
+    js << fillTime << " 成交确认 " << side << " " << symbol << " "
+       << quantity << "股 " << std::fixed << std::setprecision(2) << price
+       << " 佣金:" << commission;
+    if (!brokerOrderId.empty())
+        js << " BrokerOrderId:" << brokerOrderId;
+    m_tradeJournal->log(js.str());
 }
 
 } // namespace domain::strategy

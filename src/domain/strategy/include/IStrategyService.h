@@ -640,6 +640,10 @@ public:
     void setStrategyName(std::string name) { m_strategyName = std::move(name); }
     /// @brief 获取交易日志（回测/实盘路径记录交易事件）
     TradeJournal* tradeJournal() { return m_tradeJournal.get(); }
+    /// @brief 实盘成交确认 — 由桥接层在收到 GM 成交回报时调用
+    void logExecutionFill(const std::string& symbol, const std::string& side,
+                          double price, std::int64_t quantity, double commission,
+                          const std::string& fillTime, const std::string& brokerOrderId);
 
     /// @brief 设置实盘数据目录（lastEvalDay JSON 持久化路径前缀）
     void setLiveDataPath(std::string path) { m_liveDataPath = std::move(path); }
