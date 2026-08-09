@@ -1,4 +1,5 @@
 module BacktestComponents
+AttributionPanel 1.0 AttributionPanel.qml
 BacktestLabeledComboBox 1.0 BacktestLabeledComboBox.qml
 BacktestLabeledDatePicker 1.0 BacktestLabeledDatePicker.qml
 BacktestMetricCard 1.0 BacktestMetricCard.qml

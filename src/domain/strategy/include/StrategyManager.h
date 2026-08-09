@@ -39,6 +39,12 @@ public:
     /// @brief 为所有引擎注册订单回调监听器（实盘模式下使用）
     void setOrderListener(IOrderListener* listener);
 
+    /// @brief 为所有引擎注册信号监听器（信号模式下使用, v0.16.0）
+    void setSignalListener(domain::sigout::ISignalListener* listener);
+
+    /// @brief 为所有引擎设置执行模式（v0.16.0）
+    void setExecutionMode(EngineExecutionMode mode);
+
     [[nodiscard]] std::size_t count() const;
     [[nodiscard]] bool empty() const;
 

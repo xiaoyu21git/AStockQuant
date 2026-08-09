@@ -348,6 +348,12 @@ Rectangle {
             }
         }
 
+        AttributionPanel {
+            id: attributionPanel
+            Layout.fillWidth: true
+            attrData: root.backtestResult.attribution || ({})
+        }
+
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 228

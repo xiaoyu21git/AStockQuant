@@ -471,6 +471,7 @@ target_link_libraries(test_eod_order_flow
     PRIVATE
         domain_strategy_runtime
         domain_strategies
+        domain_attribution
         engine
         astock_market
         infrastructure

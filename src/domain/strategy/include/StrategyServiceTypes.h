@@ -38,8 +38,9 @@ enum class StrategyServiceState : std::uint8_t {
 };
 
 enum class EngineExecutionMode : std::uint8_t {
-    Live = 0,
-    Backtest = 1,
+    Live       = 0,
+    Backtest   = 1,
+    SignalOnly = 2,  // v0.16.0: 仅生成信号不执行交易
 };
 
 enum class DiagnosticsEventCode : std::uint8_t {

@@ -964,6 +964,7 @@ const std::unordered_map<ConfigFile, std::string>& s_configFilePaths() {
         {ConfigFile::TradingConnection, "trading_connection.json"},
         {ConfigFile::RiskConfig,        "risk_config.json"},
         {ConfigFile::Jujin,             "jujin.json"},
+        {ConfigFile::SignalMode,        "signal_mode.json"},
     };
     return map;
 }

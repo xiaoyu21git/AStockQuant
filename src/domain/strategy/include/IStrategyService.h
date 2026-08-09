@@ -10,6 +10,8 @@
 #include "SignalBlendCompositor.h"
 #include "RuleGate.h"
 #include "RuleAttribution.h"
+#include "../../attribution/include/AttributionTypes.h"
+#include "../../signal/include/ISignalListener.h"
 #include "RulePipeline.h"
 #include "RiskEvaluator.h"
 #include "OrderGenerator.h"
@@ -621,6 +623,24 @@ public:
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
 
+    /// @brief 设置信号监听器 (v0.16.0: 信号模式)
+    /// 当 m_executionMode == SignalOnly 时，引擎调用 onSignals() 替代 onOrders()
+    void setSignalListener(domain::sigout::ISignalListener* listener);
+
+    /// @brief 根据执行模式分发订单/信号 (v0.16.0)
+    /// SignalOnly→ISignalListener, Live/Backtest→IOrderListener
+    void dispatchOrders(const std::vector<domain::trading::OrderRequest>& orders);
+
+    /// @brief 设置引擎执行模式 (Live/Backtest/SignalOnly)
+    void setExecutionMode(EngineExecutionMode mode) noexcept {
+        m_executionMode = mode;
+    }
+
+    /// @brief 获取当前引擎执行模式
+    [[nodiscard]] EngineExecutionMode executionMode() const noexcept {
+        return m_executionMode;
+    }
+
     /// @brief 为所有已注册策略注入历史数据视图 (非因子策略需要)
     void setContextHistoricalView(const void* view);
 
@@ -682,6 +702,12 @@ public:
     /// @brief 获取最近一次回测的规则归因 (P&L 影响)
     [[nodiscard]] const std::map<std::string, rules::RuleAttribution>& ruleAttribution() const noexcept {
         return m_ruleAttribution;
+    }
+
+    /// @brief 获取最近一次回测的绩效归因报告 (板块/因子/择时三维拆解)
+    [[nodiscard]] const std::optional<domain::attribution::AttributionReport>&
+    lastAttribution() const noexcept {
+        return m_lastAttribution;
     }
     /// @brief 最近一次回测的日期区间
     [[nodiscard]] std::string backtestDateRange() const noexcept { return m_backtestDateRange; }
@@ -837,6 +863,8 @@ private:
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
+    domain::sigout::ISignalListener* m_signalListener{nullptr};  ///< v0.16.0: 信号模式监听器
+    EngineExecutionMode m_executionMode{EngineExecutionMode::Live};
     std::string m_accountId;
     std::string m_strategyId;
     std::string m_strategyName;
@@ -854,6 +882,7 @@ private:
     RulePipeline m_rulePipeline{m_ruleGate};  ///< 规则编排器(封装上下文构建+迭代样板代码)
     bool m_enableCandlePatterns{false};       ///< 是否启用 TA-Lib 蜡烛形态计算
     std::map<std::string, rules::RuleAttribution> m_ruleAttribution;  ///< 最近一次回测的规则归因
+    std::optional<domain::attribution::AttributionReport> m_lastAttribution;  ///< 最近一次回测的绩效归因
     std::string m_backtestDateRange;  ///< 最近一次回测的日期区间 (如 "20200102-20260717")
     RiskConfig m_riskConfig = RiskConfig::defaults();
     MarketTimingGate m_timingGate;             ///< 大盘择时闸门

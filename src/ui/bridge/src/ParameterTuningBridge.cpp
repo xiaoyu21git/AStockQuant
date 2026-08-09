@@ -24,6 +24,7 @@
 #include "../../domain/optimization/include/TrialResult.h"
 #include "../../domain/optimization/include/IOptimizer.h"
 #include "../../domain/optimization/include/GridSearchOptimizer.h"
+#include "../../domain/optimization/include/BayesianOptimizer.h"
 #include "../../foundation/include/foundation/market/AStockSymbol.h"
 
 #include <QDebug>
@@ -408,8 +409,12 @@ void ParameterTuningBridge::executeTuning(const std::string& strategyId,
             return;
         }
 
-        // ── 3. 检查组合爆炸 ──
-        if (totalCombos > 100000) {
+        // ── 3. 读取优化器类型 ──
+        int optimizerKind = params.value("optimizerKind", 0).toInt();
+        bool useBayesian = (optimizerKind == 1);
+
+        // ── 4. 检查组合爆炸 (仅网格搜索限制) ──
+        if (!useBayesian && totalCombos > 100000) {
             QMetaObject::invokeMethod(this, [this, n = static_cast<int>(totalCombos)]() {
                 m_isRunning.store(false); emit isRunningChanged();
                 emit tuningFailed(
@@ -420,8 +425,12 @@ void ParameterTuningBridge::executeTuning(const std::string& strategyId,
         }
 
         int maxTrials = params.value("maxTrials", 0).toInt();
-        if (maxTrials <= 0 || maxTrials > static_cast<int>(totalCombos))
+        if (maxTrials <= 0) {
+            // 贝叶斯默认 100 次, 网格搜索默认遍历全部
+            maxTrials = useBayesian ? 100 : static_cast<int>(totalCombos);
+        } else if (!useBayesian && maxTrials > static_cast<int>(totalCombos)) {
             maxTrials = static_cast<int>(totalCombos);
+        }
 
         m_totalTrials = maxTrials;
         QMetaObject::invokeMethod(this, [this]() { emit totalTrialsChanged(); }, Qt::QueuedConnection);
@@ -538,10 +547,19 @@ void ParameterTuningBridge::executeTuning(const std::string& strategyId,
         };
 
         // ── 10. 运行优化器 ──
-        domain::optimization::GridSearchOptimizer optimizer;
         auto startTime = std::chrono::steady_clock::now();
-        OptimizationResult optResult = optimizer.optimize(
-            space, objective, evaluator, maxTrials, onProgress);
+        OptimizationResult optResult;
+        if (useBayesian) {
+            domain::optimization::BayesianOptimizer::Config bayesianConfig;
+            bayesianConfig.convergenceThreshold = params.value("bayesianConvergenceThreshold", 1e-6).toDouble();
+            bayesianConfig.kernelLengthScale = params.value("bayesianLengthScale", 1.0).toDouble();
+            bayesianConfig.explorationXi = params.value("bayesianExplorationXi", 0.01).toDouble();
+            domain::optimization::BayesianOptimizer optimizer(bayesianConfig);
+            optResult = optimizer.optimize(space, objective, evaluator, maxTrials, onProgress);
+        } else {
+            domain::optimization::GridSearchOptimizer optimizer;
+            optResult = optimizer.optimize(space, objective, evaluator, maxTrials, onProgress);
+        }
         auto endTime = std::chrono::steady_clock::now();
         optResult.elapsedSeconds =
             std::chrono::duration<double>(endTime - startTime).count();

@@ -5,7 +5,6 @@ import QtQuick.Controls 2.15
 import AStock.Bridge 1.0
 import "../../components/FactorWorkbench/Navigation" as NavigationComponents
 import "../../components/Strategy" as StrategyComponents
-import "../../components/Strategy/Creation" as StrategyCreationComponents
 import "../../components/Base" as BaseComponents
 import "../../components" as Components
 
@@ -36,6 +35,7 @@ Rectangle {
     property bool showBacktestWorkbench: false
     property bool showPerformance: false
     property bool showTuning: false
+    property bool showSignalOutput: false
     property string backtestWorkbenchStatusText: ""
     property bool backtestWorkbenchLoadedOnce: false
     property var backtestResult: ({})
@@ -942,31 +942,30 @@ Rectangle {
     }
 
     function openTuning() {
-        if (!selectedStrategyId) return
+        if (!selectedStrategyId || !tuningConfigLoader.item) return
         var summary = getSelectedStrategySummary() || ({})
-        var strategyName = summary.strategyName || summary.name || ""
-        var typeIndex = summary.strategyTypeIndex || summary.typeIndex || 0
-        tuningConfigPanel.strategyId = selectedStrategyId
-        tuningConfigPanel.strategyTypeIndex = typeIndex
-        tuningConfigPanel.strategyName = strategyName
-        tuningConfigPanel.open()
+        tuningConfigLoader.item.strategyId = selectedStrategyId
+        tuningConfigLoader.item.strategyTypeIndex = summary.strategyTypeIndex || summary.typeIndex || 0
+        tuningConfigLoader.item.strategyName = summary.strategyName || summary.name || ""
+        tuningConfigLoader.item.open()
     }
 
     function closeTuning() {
         showTuning = false
     }
 
-    // ── 参数调优配置弹窗 ──
-    StrategyCreationComponents.ParameterTuningConfigPanel {
-        id: tuningConfigPanel
-        strategyId: strategyLibraryPage.selectedStrategyId
-
-        onTuningStarted: function(config) {
-            // 启动 C++ 桥接层调优
-            Bridge.ParameterTuningBridge.startTuning(
-                config.strategyId, config.strategyTypeIndex, config)
-            // 切换到结果面板
-            strategyLibraryPage.showTuning = true
+    // ── 参数调优配置弹窗 (始终加载, Popup 默认关闭, 不阻塞页面) ──
+    Loader {
+        id: tuningConfigLoader
+        active: true
+        source: "../../components/Strategy/Creation/ParameterTuningConfigPanel.qml"
+        onLoaded: {
+            if (!item) return
+            item.tuningStarted.connect(function(config) {
+                Bridge.ParameterTuningBridge.startTuning(
+                    config.strategyId, config.strategyTypeIndex, config)
+                strategyLibraryPage.showTuning = true
+            })
         }
     }
 
@@ -1015,38 +1014,44 @@ Rectangle {
 
         NavigationComponents.ModeTitleBar {
             Layout.fillWidth: true
-            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
+            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
                 ? "library"
                 : (strategyLibraryPage.backtestWorkbenchMode === "analysis" ? "backtest_analysis"
                     : strategyLibraryPage.showPerformance ? "performance"
-                    : strategyLibraryPage.showTuning ? "tuning" : "backtest")
+                    : strategyLibraryPage.showTuning ? "tuning"
+                    : strategyLibraryPage.showSignalOutput ? "signal_output"
+                    : "backtest")
             showBackButton: false
             modeOptions: [
                 { value: "library", label: "策略库" },
                 { value: "backtest", label: "策略回测" },
                 { value: "backtest_analysis", label: "回测分析" },
                 { value: "tuning", label: "参数调优" },
-                { value: "performance", label: "策略绩效" }
+                { value: "performance", label: "策略绩效" },
+                { value: "signal_output", label: "信号输出" }
             ]
             modeTitleMap: {
                 "library": "策略库",
                 "backtest": "策略回测",
                 "backtest_analysis": "回测分析",
                 "tuning": "参数调优",
-                "performance": "策略绩效"
+                "performance": "策略绩效",
+                "signal_output": "信号输出"
             }
             modeSubtitleMap: {
                 "library": "浏览并管理策略，新建入口保留在策略库页。",
                 "backtest": "在策略库内直接配置并运行当前策略回测。",
                 "backtest_analysis": "独立展示最近回测与历史对比结果，不承载回测配置。",
                 "tuning": "自动搜索最优参数组合，提升策略绩效。",
-                "performance": "查看策略历史回测记录与绩效对比。"
+                "performance": "查看策略历史回测记录与绩效对比。",
+                "signal_output": "配置信号输出格式与推送目标，查看信号历史记录。"
             }
             onModeSelected: function(mode) {
                 if (mode === "library") {
                     strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.showBacktestWorkbench = false
                     strategyLibraryPage.showTuning = false
+                    strategyLibraryPage.showSignalOutput = false
                     return
                 }
                 if (mode === "performance") {
@@ -1068,6 +1073,13 @@ Rectangle {
                     strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "workbench")
                     return
                 }
+                if (mode === "signal_output") {
+                    strategyLibraryPage.showPerformance = false
+                    strategyLibraryPage.showBacktestWorkbench = false
+                    strategyLibraryPage.showTuning = false
+                    strategyLibraryPage.showSignalOutput = true
+                    return
+                }
                 if (mode === "backtest_analysis") {
                     strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.showBacktestWorkbench = false
@@ -1080,9 +1092,9 @@ Rectangle {
 
         ScrollView {
             id: scrollView
-            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
+            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
             Layout.fillWidth: true
-            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
+            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
@@ -1112,7 +1124,7 @@ Rectangle {
                 }
 
                 Item {
-                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
                     Layout.fillWidth: true
                     Layout.preferredHeight: spacingXLarge
                 }
@@ -1153,6 +1165,26 @@ Rectangle {
                 active: strategyLibraryPage.showTuning
                 visible: status === Loader.Ready && strategyLibraryPage.showTuning
                 source: "qrc:/page/strategies/ParameterTuningResultPanel.qml"
+            }
+        }
+
+        // ── 信号输出面板 (v0.16.0) ──
+        Item {
+            Layout.fillWidth: true
+            Layout.fillHeight: strategyLibraryPage.showSignalOutput
+            visible: strategyLibraryPage.showSignalOutput
+
+            Loader {
+                id: signalOutputLoader
+                anchors.fill: parent
+                asynchronous: true
+                active: strategyLibraryPage.showSignalOutput
+                visible: status === Loader.Ready && strategyLibraryPage.showSignalOutput
+                source: "../../components/Strategy/SignalOutputPanel.qml"
+                onLoaded: {
+                    if (!item) return
+                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
+                }
             }
         }
 

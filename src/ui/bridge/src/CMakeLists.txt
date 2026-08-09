@@ -36,10 +36,12 @@
     StrategyRuleStatsBridge.cpp
     CrosshairManager.cpp
     BacktestAnalyticsService.cpp
+    SignalPersistencePort.cpp
     ../include/BacktestAnalyticsService.h
+    ../include/SignalPersistencePort.h
 )
 list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 target_include_directories(bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/domain ${CMAKE_SOURCE_DIR}/src/domain/optimization/include ${CMAKE_SOURCE_DIR}/src/domain/factor/include ${CMAKE_SOURCE_DIR}/src/domain/factor_check/include ${CMAKE_SOURCE_DIR}/src/domain/trading ${CMAKE_SOURCE_DIR}/src/domain/trading/include ${CMAKE_SOURCE_DIR}/src/cache/include ${CMAKE_SOURCE_DIR}/thirdparty/gmsdk ${EIGEN_INCLUDE_DIR})
 set_target_properties(bridge PROPERTIES AUTOMOC ON AUTORCC ON AUTOUIC ON)
-target_link_libraries(bridge PRIVATE Qt6::Core Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::Sql Qt6::Gui infrastructure engine foundation cache_module factor domain ${GMSDK_LIBRARY})
+target_link_libraries(bridge PRIVATE Qt6::Core Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::Sql Qt6::Gui infrastructure engine foundation cache_module factor domain domain_signal ${GMSDK_LIBRARY})

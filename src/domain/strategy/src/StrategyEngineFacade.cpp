@@ -22,6 +22,8 @@
 #include "RuleVariableProvider.h"
 #include "RuleConditionEvaluator.h"
 #include "RuleAttribution.h"
+#include "../../attribution/include/AttributionTypes.h"
+#include "../../attribution/include/AttributionAnalyzer.h"
 #include "RuleLibrary.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
@@ -42,6 +44,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <iomanip>
 #include <numeric>
 #include <string>
@@ -870,7 +873,7 @@ int StrategyEngine::liquidateAll()
     for (auto& o : validatedOrders)
         o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
 
-    m_orderListener->onOrders(validatedOrders);
+    dispatchOrders(validatedOrders);
     INTERNAL_WARN_STREAM << "[StrategyEngine] 一键清仓: basketId=" << basketId
                          << " orders=" << validatedOrders.size()
                          << " 笔订单, 持仓已提交";
@@ -880,6 +883,62 @@ int StrategyEngine::liquidateAll()
 void StrategyEngine::setOrderListener(IOrderListener* listener)
 {
     m_orderListener = listener;
+}
+
+void StrategyEngine::setSignalListener(domain::sigout::ISignalListener* listener)
+{
+    m_signalListener = listener;
+}
+
+void StrategyEngine::dispatchOrders(const std::vector<OrderRequest>& orders)
+{
+    if (orders.empty()) return;
+
+    if (m_executionMode == EngineExecutionMode::SignalOnly && m_signalListener) {
+        // 信号模式: OrderRequest → SignalOutput → ISignalListener
+        std::vector<domain::sigout::SignalOutput> signals;
+        signals.reserve(orders.size());
+
+        for (const auto& o : orders) {
+            domain::sigout::SignalOutput so;
+            so.symbol = o.symbol();
+            // stockName 留空, 由 Bridge 层缓存填充
+            so.signalIntent = (o.side() == domain::trading::OrderSide::Buy)
+                ? static_cast<int>(SignalIntent::OPEN)
+                : static_cast<int>(SignalIntent::CLOSE);
+            so.score = 0.0;  // OrderRequest 不含因子得分, 后续可从 StrategySignal 管道补入
+            so.strategyName = m_strategyName;
+            so.traceId = o.traceId();
+            // timestamp: 取当前时间 ISO8601
+            {
+                auto now = std::chrono::system_clock::now();
+                auto tt = std::chrono::system_clock::to_time_t(now);
+                std::tm tmBuf{};
+#ifdef _WIN32
+                localtime_s(&tmBuf, &tt);
+#else
+                localtime_r(&tt, &tmBuf);
+#endif
+                std::ostringstream ts;
+                ts << std::setfill('0')
+                   << std::setw(4) << (tmBuf.tm_year + 1900) << "-"
+                   << std::setw(2) << (tmBuf.tm_mon + 1) << "-"
+                   << std::setw(2) << tmBuf.tm_mday << "T"
+                   << std::setw(2) << tmBuf.tm_hour << ":"
+                   << std::setw(2) << tmBuf.tm_min << ":"
+                   << std::setw(2) << tmBuf.tm_sec;
+                so.timestamp = ts.str();
+            }
+            signals.push_back(std::move(so));
+        }
+
+        m_signalListener->onSignals(signals);
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 信号模式: dispatched " << signals.size()
+                             << " signals trace:" << signals.front().traceId;
+    } else if (m_orderListener) {
+        // 交易模式: 走订单通道 (原有行为)
+        dispatchOrders(orders);
+    }
 }
 
 void StrategyEngine::drainQueue()
@@ -963,7 +1022,7 @@ void StrategyEngine::drainQueue()
                     }
 
                     try {
-                        m_orderListener->onOrders(finalOrders);
+                        dispatchOrders(finalOrders);
                         INTERNAL_INFO_STREAM << "[StrategyEngine] 篮子提交: basketId=" << basketId
                                              << " orders=" << finalOrders.size();
                     } catch (const std::exception& e) {
@@ -1513,7 +1572,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
     if (!finalOrders.empty() && m_orderListener) {
         auto basketId = tagBasketOrders(finalOrders);
         try {
-            m_orderListener->onOrders(finalOrders);
+            dispatchOrders(finalOrders);
             totalSubmitted = static_cast<int>(finalOrders.size());
             // 记录买入标的的建仓日期 (用于最少持有期校验)
             if (m_minHoldDays > 0) {
@@ -2145,6 +2204,28 @@ StrategyBacktestResult StrategyEngine::backtest(
 
     // ── 诊断输出 (Phase 30c: 提取到 buildBacktestDiagnostics) ──
     buildBacktestDiagnostics(result, ctx, req, view, totalDays, onProgress, attributionCollector);
+
+    // ── 绩效归因 (v0.16.0: 板块/因子/择时三维拆解) ──
+    {
+        domain::attribution::AttributionAnalyzer::Config attrConfig;
+        // sectorLookup: 引擎层无 DB 查询能力, 暂不注入 (Bridge 层可二次增强)
+        attrConfig.sectorLookup = nullptr;
+        // factorWeightLookup: 从当前回测请求的 FactorOverlaySpec 获取
+        attrConfig.factorWeightLookup = [&](const std::string& fid) -> double {
+            if (req.factorOverlaySpec.enabled) {
+                for (const auto& alloc : req.factorOverlaySpec.allocations) {
+                    if (alloc.factorId.text() == fid)
+                        return alloc.weightPercent / 100.0;
+                }
+            }
+            return 0.0;
+        };
+        // benchmarkLookup: Phase 2 (待基准行业数据就绪)
+        attrConfig.benchmarkLookup = nullptr;
+
+        domain::attribution::AttributionAnalyzer analyzer(std::move(attrConfig));
+        m_lastAttribution = analyzer.analyze(result);
+    }
 
     result.success = true;
     return result;

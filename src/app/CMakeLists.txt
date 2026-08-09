@@ -236,6 +236,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategySorter.qml
         Qml/components/Strategy/StrategySummaryHeaderCard.qml
         Qml/components/Strategy/PerformanceHistoryList.qml
+        Qml/components/Strategy/SignalOutputPanel.qml
         Qml/page/strategies/BacktestResultAnalysisView.qml
         Qml/page/strategies/StrategyLibraryDialogs.qml
         Qml/page/strategies/StrategyLibrarySearchBar.qml
@@ -261,6 +262,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/BlacklistPanel.qml
         Qml/components/Strategy/Creation/RuleComposerPanel.qml
         Qml/components/Strategy/Creation/AdvancedOptionsPanel.qml
+        Qml/components/Strategy/Creation/ParameterTuningConfigPanel.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml

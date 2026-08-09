@@ -1,5 +1,15 @@
 .pragma library
 
+// ── 内联自 PureUtils (pragma library 无法跨文件 import) ──
+function hasMetricValue(value) {
+    return value !== undefined && value !== null
+}
+
+function hasNumericMetricValue(value) {
+    if (!hasMetricValue(value)) return false
+    return isFinite(Number(value))
+}
+
 function runtimePercentToText(rate) {
     var numeric = Number(rate)
     if (!isFinite(numeric)) {

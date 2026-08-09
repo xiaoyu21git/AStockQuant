@@ -5,6 +5,7 @@ target_sources(domain_optimization PRIVATE
     ParameterSpaceFactory.cpp
     ObjectiveSpec.cpp
     GridSearchOptimizer.cpp
+    BayesianOptimizer.cpp
 )
 
 # 设置C++标准

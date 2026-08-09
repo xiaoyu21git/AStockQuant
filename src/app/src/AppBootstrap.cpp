@@ -266,7 +266,7 @@ bool AppBootstrap::initConfiguration()
         {
             auto& cfg = foundation::config::ConfigManager::instance();
             using CF = foundation::config::ConfigFile;
-            for (auto f : {CF::TradingConnection, CF::RiskConfig, CF::Jujin}) {
+            for (auto f : {CF::TradingConnection, CF::RiskConfig, CF::Jujin, CF::SignalMode}) {
                 auto node = cfg.loadConfigFile(f);
                 if (!node || node->isEmpty()) {
                     INTERNAL_WARN_STREAM << "[AppBootstrap] 配置文件未就绪: "

@@ -363,8 +363,8 @@ Rectangle {
                     strategyId: root.strategyId
                     blacklistSymbols: root.blacklistSymbols
                     blacklistInput: root.blacklistInput
-                    onBlacklistSymbolsChanged: function(v) { root.blacklistSymbols = v }
-                    onBlacklistInputChanged: function(v) { root.blacklistInput = v }
+                    onBlacklistUpdated: function(v) { root.blacklistSymbols = v }
+                    onInputCleared: function(v) { root.blacklistInput = v }
                 }
 
 

@@ -24,6 +24,7 @@
 #include "../../domain/strategy/include/StrategyManager.h"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 #include "../../domain/factor/include/factor_compute/FactorEngine.h"
+#include "../../domain/attribution/include/AttributionTypes.h"
 #include "../../foundation/include/foundation/market/AStockSymbol.h"
 
 #include <QDebug>
@@ -136,6 +137,56 @@ BacktestRequest buildBacktestRequest(const QString& strategyId, const QVariantMa
     req.strategySpec.strategyScopeContext.universe = req.universeSpec;
 
     return req;
+}
+
+/// @brief 归因报告 → QVariantMap 序列化 (仅转换, 零逻辑)
+/// FactorEstimationMethod::Approximate=0 显式序列化, 避免 QML 侧误判
+QVariantMap attributionReportToMap(const domain::attribution::AttributionReport& report) {
+    QVariantMap map;
+    map["isValid"] = report.isValid;
+    if (!report.isValid) return map;
+
+    // 板块归因: 已按 contributions 降序
+    QVariantList sectors;
+    for (const auto& s : report.sectorBreakdown) {
+        QVariantMap sm;
+        sm["sectorName"]   = QString::fromStdString(s.sectorName);
+        sm["totalRealizedPnl"]  = s.totalRealizedPnl;
+        sm["portfolioReturn"]   = s.portfolioReturn;
+        sm["tradeCount"]    = s.tradeCount;
+        sm["stockCount"]    = s.stockCount;
+        sm["averageWeight"] = s.averageWeight;
+        sm["returnContribution"] = s.returnContribution;
+        sectors.append(sm);
+    }
+    map["sectorBreakdown"] = sectors;
+
+    // 因子归因: 已按 estimatedContribution 降序
+    QVariantList factors;
+    for (const auto& f : report.factorBreakdown) {
+        QVariantMap fm;
+        fm["factorId"]    = QString::fromStdString(f.factorId);
+        fm["factorWeight"] = f.factorWeight;
+        fm["factorIC"]    = f.factorIC;
+        fm["estimatedContribution"] = f.estimatedContribution;
+        fm["coveredDays"] = f.coveredDays;
+        fm["estimationMethod"] = static_cast<int>(f.estimationMethod); // 0=Approximate 显式序列化
+        factors.append(fm);
+    }
+    map["factorBreakdown"] = factors;
+
+    // Brinson 择时归因
+    QVariantMap timing;
+    timing["allocationEffect"]  = report.timingBreakdown.allocationEffect;
+    timing["selectionEffect"]   = report.timingBreakdown.selectionEffect;
+    timing["interactionEffect"] = report.timingBreakdown.interactionEffect;
+    timing["excessReturn"]      = report.timingBreakdown.excessReturn;
+    timing["portfolioReturn"]   = report.timingBreakdown.portfolioReturn;
+    timing["benchmarkReturn"]   = report.timingBreakdown.benchmarkReturn;
+    timing["isSimplified"]      = report.timingBreakdown.isSimplified;
+    map["timingBreakdown"] = timing;
+
+    return map;
 }
 
 } // anonymous namespace
@@ -432,6 +483,14 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             }
             riskMap["rejectionDetails"] = rejectionMap;
             qResult["risk"] = riskMap;
+
+            // ── 绩效归因 (v0.16.0: 板块/因子/Brinson择时三维拆解) ──
+            {
+                auto attrOpt = engine->lastAttribution();
+                if (attrOpt.has_value() && attrOpt->isValid) {
+                    qResult["attribution"] = attributionReportToMap(attrOpt.value());
+                }
+            }
 
             // ── 策略卡片指标 & 凯利仓位先落库（快），然后 refreshSingleStrategy 才能读到新数据 ──
             {

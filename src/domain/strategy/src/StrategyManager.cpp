@@ -108,6 +108,26 @@ void StrategyManager::setOrderListener(IOrderListener* listener)
     }
 }
 
+void StrategyManager::setSignalListener(domain::sigout::ISignalListener* listener)
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [id, engine] : m_engines) {
+        if (engine) {
+            engine->setSignalListener(listener);
+        }
+    }
+}
+
+void StrategyManager::setExecutionMode(EngineExecutionMode mode)
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [id, engine] : m_engines) {
+        if (engine) {
+            engine->setExecutionMode(mode);
+        }
+    }
+}
+
 std::size_t StrategyManager::count() const {
     const std::lock_guard<std::mutex> lock(m_mutex);
     return m_engines.size();

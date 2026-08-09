@@ -35,6 +35,13 @@ StrategyBridge* StrategyBridge::s_instance = nullptr;
 #include "foundation/log/logging.hpp"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
+// 信号模式 (v0.16.0)
+#include "../../domain/signal/include/ISignalFormatter.h"
+#include "../../domain/signal/include/ISignalListener.h"
+#include "../../domain/signal/include/ISignalPusher.h"
+#include "../include/SignalPersistencePort.h"
+#include "foundation/config/ConfigManager.hpp"
+
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -384,6 +391,32 @@ void StrategyBridge::init()
                     fill.price(), fill.quantity(), fill.commission(),
                     fill.tradeTime().to_string(), brokerId, order->traceId());
             });
+        }
+
+        // ── 加载信号模式配置 (v0.16.0) ──
+        {
+            auto signalNode = foundation::config::ConfigManager::instance()
+                .loadConfigFile(foundation::config::ConfigFile::SignalMode);
+            if (signalNode && !signalNode->isEmpty()) {
+                QVariantMap cfg;
+                cfg["enabled"] = QString::fromStdString(
+                    signalNode->getPath("enabled", '.').asString("false"));
+                cfg["signalFormat"] = QString::fromStdString(
+                    signalNode->getPath("signalFormat", '.').asString("ths"));
+                cfg["pushTarget"] = QString::fromStdString(
+                    signalNode->getPath("pushTarget", '.').asString("file"));
+                cfg["signalOutputPath"] = QString::fromStdString(
+                    signalNode->getPath("signalOutputPath", '.').asString("./signals/"));
+                setSignalConfig(cfg);
+            } else {
+                // 默认: 信号模式关闭
+                QVariantMap defaultCfg;
+                defaultCfg["enabled"] = "false";
+                defaultCfg["signalFormat"] = "ths";
+                defaultCfg["pushTarget"] = "file";
+                defaultCfg["signalOutputPath"] = "./signals/";
+                m_signalConfig = defaultCfg;
+            }
         }
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";
@@ -1448,4 +1481,200 @@ QString StrategyBridge::tr(const QString& key, const QString&) const {
     // fallback
     int dot = key.lastIndexOf('.');
     return dot >= 0 ? key.mid(dot + 1) : key;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 信号模式 (v0.16.0)
+// ═══════════════════════════════════════════════════════════════════════════
+
+void StrategyBridge::setSignalConfig(const QVariantMap& config)
+{
+    bool enabled = config.value("enabled").toString() == "true";
+    QString format = config.value("signalFormat", "ths").toString();
+    QString target = config.value("pushTarget", "file").toString();
+    QString outputPath = config.value("signalOutputPath", "./signals/").toString();
+
+    m_signalConfig = config;
+
+    if (!enabled) {
+        // 关闭信号模式: 恢复交易模式
+        auto& mgr = domain::strategy::StrategyManager::instance();
+        mgr.setSignalListener(nullptr);
+        mgr.setExecutionMode(domain::strategy::EngineExecutionMode::Live);
+        m_signalListener.reset();
+        m_signalPersistence.reset();
+        INTERNAL_INFO_STREAM << "[Bridge] Signal mode DISABLED";
+        return;
+    }
+
+    // 启用信号模式: 装配 SignalListener
+    m_signalListener = assembleSignalListener();
+
+    // 注入引擎
+    auto& mgr = domain::strategy::StrategyManager::instance();
+    mgr.setSignalListener(m_signalListener.get());
+    mgr.setExecutionMode(domain::strategy::EngineExecutionMode::SignalOnly);
+
+    INTERNAL_INFO_STREAM << "[Bridge] Signal mode ENABLED format=" << format.toStdString()
+                         << " target=" << target.toStdString()
+                         << " outputPath=" << outputPath.toStdString();
+}
+
+QVariantMap StrategyBridge::signalConfig() const
+{
+    return m_signalConfig;
+}
+
+std::unique_ptr<domain::sigout::ISignalListener> StrategyBridge::assembleSignalListener()
+{
+    QString format = m_signalConfig.value("signalFormat", "ths").toString();
+    QString target = m_signalConfig.value("pushTarget", "file").toString();
+    QString outputPath = m_signalConfig.value("signalOutputPath", "./signals/").toString();
+
+    // 1. 创建格式化器
+    std::unique_ptr<domain::sigout::ISignalFormatter> formatter;
+    if (format == "tdx") {
+        formatter = domain::sigout::createTdxFormatter();
+    } else {
+        formatter = domain::sigout::createThsFormatter(); // 默认同花顺
+    }
+
+    // 2. 创建推送器 (Phase 1: 仅文件推送)
+    std::unique_ptr<domain::sigout::ISignalPusher> pusher;
+    pusher = domain::sigout::createFilePusher(outputPath.toStdString(),
+                                               format.toStdString());
+
+    // 3. 创建持久化端口
+    if (!m_signalPersistence) {
+        m_signalPersistence = std::make_shared<SignalPersistencePort>();
+    }
+
+    // 4. 组装 SignalListener
+    return std::make_unique<domain::sigout::SignalListener>(
+        std::move(formatter), std::move(pusher), m_signalPersistence);
+}
+
+QVariantList StrategyBridge::getSignalHistory(const QString& strategyId,
+                                               const QString& date) const
+{
+    QVariantList result;
+    auto& pool = astock::database::NativePgConnectionPool::instance();
+    if (!pool.isInitialized()) return result;
+
+    auto db = pool.getConnection();
+    if (!db || !db->isOpen()) return result;
+
+    std::string sql = "SELECT signal_id, symbol, intent, target_weight, score, "
+                       "signal_format, push_target, signal_time, trace_id, pushed, push_error "
+                       "FROM live.signal_history "
+                       "WHERE trading_day=? "
+                       "ORDER BY signal_time DESC";
+
+    // 如果有 strategyId, 增加过滤
+    if (!strategyId.isEmpty()) {
+        sql = "SELECT signal_id, symbol, intent, target_weight, score, "
+              "signal_format, push_target, signal_time, trace_id, pushed, push_error "
+              "FROM live.signal_history "
+              "WHERE strategy_id=? AND trading_day=? "
+              "ORDER BY signal_time DESC";
+        auto rs = db->executeQuery(sql, {
+            astock::database::SqlParam{strategyId.toStdString()},
+            astock::database::SqlParam{date.toStdString()}
+        });
+        for (std::size_t i = 0; i < rs.rowCount(); ++i) {
+            const auto& row = rs.getRow(i);
+            QVariantMap item;
+            item["signalId"] = QString::fromStdString(row.getString("signal_id"));
+            item["symbol"] = QString::fromStdString(row.getString("symbol"));
+            item["stockName"] = StockNameResolver::name(
+                QString::fromStdString(row.getString("symbol")));
+            item["intent"] = row.getInt("intent");
+            item["targetWeight"] = row.getDouble("target_weight");
+            item["score"] = row.getDouble("score");
+            item["signalFormat"] = QString::fromStdString(row.getString("signal_format"));
+            item["pushTarget"] = QString::fromStdString(row.getString("push_target"));
+            item["signalTime"] = QString::fromStdString(row.getString("signal_time"));
+            item["traceId"] = QString::fromStdString(row.getString("trace_id"));
+            item["pushed"] = row.getInt("pushed") != 0;
+            item["pushError"] = QString::fromStdString(row.getString("push_error"));
+            result.append(item);
+        }
+    } else {
+        auto rs = db->executeQuery(sql, {
+            astock::database::SqlParam{date.toStdString()}
+        });
+        for (std::size_t i = 0; i < rs.rowCount(); ++i) {
+            const auto& row = rs.getRow(i);
+            QVariantMap item;
+            item["signalId"] = QString::fromStdString(row.getString("signal_id"));
+            item["symbol"] = QString::fromStdString(row.getString("symbol"));
+            item["stockName"] = StockNameResolver::name(
+                QString::fromStdString(row.getString("symbol")));
+            item["intent"] = row.getInt("intent");
+            item["targetWeight"] = row.getDouble("target_weight");
+            item["score"] = row.getDouble("score");
+            item["signalFormat"] = QString::fromStdString(row.getString("signal_format"));
+            item["pushTarget"] = QString::fromStdString(row.getString("push_target"));
+            item["signalTime"] = QString::fromStdString(row.getString("signal_time"));
+            item["traceId"] = QString::fromStdString(row.getString("trace_id"));
+            item["pushed"] = row.getInt("pushed") != 0;
+            item["pushError"] = QString::fromStdString(row.getString("push_error"));
+            result.append(item);
+        }
+    }
+    return result;
+}
+
+QVariantMap StrategyBridge::getSignalStats(const QString& strategyId,
+                                            const QString& startDate,
+                                            const QString& endDate) const
+{
+    QVariantMap stats;
+    auto& pool = astock::database::NativePgConnectionPool::instance();
+    if (!pool.isInitialized()) {
+        stats["totalSignals"] = 0;
+        return stats;
+    }
+
+    auto db = pool.getConnection();
+    if (!db || !db->isOpen()) {
+        stats["totalSignals"] = 0;
+        return stats;
+    }
+
+    // 统计查询
+    std::string sql = "SELECT COUNT(*) AS total, "
+                       "SUM(CASE WHEN pushed THEN 1 ELSE 0 END) AS pushed_cnt, "
+                       "SUM(CASE WHEN NOT pushed THEN 1 ELSE 0 END) AS failed_cnt, "
+                       "AVG(score) AS avg_score "
+                       "FROM live.signal_history "
+                       "WHERE trading_day BETWEEN ? AND ?";
+
+    if (!strategyId.isEmpty()) {
+        sql += " AND strategy_id=?";
+    }
+
+    std::vector<astock::database::SqlParam> params = {
+        astock::database::SqlParam{startDate.toStdString()},
+        astock::database::SqlParam{endDate.toStdString()}
+    };
+    if (!strategyId.isEmpty()) {
+        params.emplace_back(strategyId.toStdString());
+    }
+
+    auto rs = db->executeQuery(sql, params);
+    if (!rs.isEmpty()) {
+        const auto& row = rs.getRow(0);
+        stats["totalSignals"] = row.getInt("total");
+        stats["pushedCount"] = row.getInt("pushed_cnt");
+        stats["failedCount"] = row.getInt("failed_cnt");
+        stats["avgScore"] = row.getDouble("avg_score");
+    } else {
+        stats["totalSignals"] = 0;
+        stats["pushedCount"] = 0;
+        stats["failedCount"] = 0;
+        stats["avgScore"] = 0.0;
+    }
+
+    return stats;
 }

@@ -10,8 +10,8 @@ Rectangle {
     required property string strategyId
     required property var blacklistSymbols
     required property string blacklistInput
-    signal blacklistSymbolsChanged(var newValue)
-    signal blacklistInputChanged(string newValue)
+    signal blacklistUpdated(var newValue)
+    signal inputCleared(string newValue)
 
     function addToBlacklist() {
         var sid = String(strategyId || "")
@@ -31,9 +31,9 @@ Rectangle {
         }
         if (changed) {
             Bridge.StrategyBridge.updateSymbolBlacklist(sid, current)
-            blacklistSymbolsChanged(current)
+            blacklistUpdated(current)
         }
-        blacklistInputChanged("")
+        inputCleared("")
     }
 
     function removeFromBlacklist(index) {
@@ -42,7 +42,7 @@ Rectangle {
         var current = blacklistSymbols.slice()
         current.splice(index, 1)
         Bridge.StrategyBridge.updateSymbolBlacklist(sid, current)
-        blacklistSymbolsChanged(current)
+        blacklistUpdated(current)
     }
 
     // 暴露输入字段供外部访问

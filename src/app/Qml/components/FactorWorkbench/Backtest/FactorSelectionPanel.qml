@@ -1,7 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import "../../../../utils/PureUtils.js" as PureUtils
+import "../../../utils/PureUtils.js" as PureUtils
 
 Rectangle {
     id: panelRoot

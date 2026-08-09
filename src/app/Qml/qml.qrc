@@ -69,6 +69,7 @@
         <file>components/Backtest/BacktestLabeledDatePicker.qml</file>
         <file>components/Backtest/BacktestLabeledComboBox.qml</file>
         <file>components/Backtest/BacktestMetricCard.qml</file>
+        <file>components/Backtest/AttributionPanel.qml</file>
         <file>components/Backtest/BacktestResultPanel.qml</file>
         <file>components/Backtest/BacktestStatItem.qml</file>
         <file>components/DataAnalysis/CoreModule.qml</file>
@@ -158,6 +159,7 @@
         <file>components/Strategy/StrategySorter.qml</file>
         <file>components/Strategy/StrategySummaryHeaderCard.qml</file>
         <file>components/Strategy/ViewModeToggle.qml</file>
+        <file>components/Strategy/SignalOutputPanel.qml</file>
         <file>components/Strategy/StrategyBacktestParams.qml</file>
         <file>components/Strategy/PerformanceHistoryList.qml</file>
         <file>components/StrategyCard.qml</file>

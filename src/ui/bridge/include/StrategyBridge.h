@@ -23,7 +23,12 @@ namespace domain::strategy {
 class StrategyEngine;
 }
 
+namespace domain::sigout {
+class ISignalListener;
+}
+
 class StrategyListModel;
+class SignalPersistencePort;
 
 #include "database/StrategyRepository.h"
 
@@ -73,6 +78,25 @@ public:
 
     /// @brief symbol → "股票中文名 代码" (如 "平安银行 000001.SZ")
     Q_INVOKABLE QString stockDisplayName(const QString& symbol) const;
+
+    // ── 信号模式 (v0.16.0) ──
+
+    /// @brief 设置信号模式配置, 启用/禁用信号输出
+    /// config: { enabled, signalFormat("ths"/"tdx"/"internal"), pushTarget("file"/"socket"),
+    ///           signalOutputPath }
+    Q_INVOKABLE void setSignalConfig(const QVariantMap& config);
+
+    /// @brief 获取当前信号模式配置
+    Q_INVOKABLE QVariantMap signalConfig() const;
+
+    /// @brief 按策略+日期查询信号历史
+    /// @return [ { signalId, symbol, stockName, intent, score, signalTime, pushed, pushError, ... }, ... ]
+    Q_INVOKABLE QVariantList getSignalHistory(const QString& strategyId, const QString& date) const;
+
+    /// @brief 按策略+日期范围查询信号统计
+    /// @return { totalSignals, pushedCount, failedCount, avgScore, byIntent: {...} }
+    Q_INVOKABLE QVariantMap getSignalStats(const QString& strategyId, const QString& startDate,
+                                            const QString& endDate) const;
 
     // ── 策略类型枚举 (替代 JS StrategyCreationUtils 的数字映射) ──
     /// @brief 策略类型索引 → 中文名
@@ -270,6 +294,14 @@ private:
 
     // 策略运行时状态（内存单向控制，不查 DB/引擎）
     QHash<QString, QString> m_runtimeStatus;
+
+    // 信号模式 (v0.16.0)
+    QVariantMap m_signalConfig;
+    std::unique_ptr<domain::sigout::ISignalListener> m_signalListener;
+    std::shared_ptr<SignalPersistencePort> m_signalPersistence;
+
+    /// @brief 装配 SignalListener (Formatter + Pusher + Persistence)
+    std::unique_ptr<domain::sigout::ISignalListener> assembleSignalListener();
 
     static StrategyBridge* s_instance;
 };
