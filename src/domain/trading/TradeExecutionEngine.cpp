@@ -352,7 +352,8 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
             order.price(), static_cast<int>(order.quantity()),
             order.signalStrength(), pe,
             td > 0 ? td : 0,
-            std::to_string(order.basketId()));
+            std::to_string(order.basketId()),
+            order.traceId());
         if (result.accepted) {
             Rec::instance().updateOrderStatus(order.clOrdId(),
                 astock::infrastructure::database::RecOrdStatus::Pending, result.brokerOrderId, "");
@@ -731,6 +732,7 @@ TradeOrder TradeExecutionEngine::buildTradeOrder(const strategy::OrderRequest& r
     order.setAccountId(req.accountId());
     order.setCurrency(req.currency());
     order.setExchange(req.exchange());
+    order.setTraceId(req.traceId());
     order.setPositionEffect(
         static_cast<strategy::PositionEffect>(req.positionEffect()));
     return order;

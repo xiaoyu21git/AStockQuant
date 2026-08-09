@@ -5,7 +5,12 @@ import QtQuick.Layouts 1.15
 Rectangle {
     id: panelRoot
 
-    // 暴露内部 Switch 供 root.onEnableAdvancedOptionsChanged 访问
+    // 数据流入
+    required property bool enableAdvancedOptions
+    required property bool useWideParamGrid
+    signal advancedOptionsToggled(bool enabled)
+
+    // 暴露内部控件供外部访问
     property alias advancedParamsSwitch: advancedParamsSwitch
     property alias parameterOptimizationRangeCombo: parameterOptimizationRangeCombo
     property alias sensitivityAnalysisCombo: sensitivityAnalysisCombo
@@ -15,7 +20,7 @@ Rectangle {
 
     Layout.fillWidth: true
     Layout.alignment: Qt.AlignTop
-    Layout.minimumHeight: root.enableAdvancedOptions ? 184 : 56
+    Layout.minimumHeight: enableAdvancedOptions ? 184 : 56
     radius: 10
     color: "#1e293b"
     border.width: 1
@@ -42,10 +47,13 @@ Rectangle {
 
             Switch {
                 id: advancedParamsSwitch
-                checked: root.enableAdvancedOptions
+                checked: enableAdvancedOptions
+                property bool _guard: false
                 onCheckedChanged: {
-                    root.enableAdvancedOptions = checked
-                    root.advancedOptionsChanged(checked)
+                    if (_guard) return
+                    _guard = true
+                    advancedOptionsToggled(checked)
+                    _guard = false
                 }
 
                 indicator: Rectangle {
@@ -75,11 +83,11 @@ Rectangle {
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 10
-            visible: root.enableAdvancedOptions
+            visible: enableAdvancedOptions
 
             GridLayout {
                 Layout.fillWidth: true
-                columns: root.useWideParamGrid ? 2 : 1
+                columns: useWideParamGrid ? 2 : 1
                 columnSpacing: 12
                 rowSpacing: 10
 

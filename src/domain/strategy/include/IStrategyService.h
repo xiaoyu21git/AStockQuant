@@ -643,7 +643,8 @@ public:
     /// @brief 实盘成交确认 — 由桥接层在收到 GM 成交回报时调用
     void logExecutionFill(const std::string& symbol, const std::string& side,
                           double price, std::int64_t quantity, double commission,
-                          const std::string& fillTime, const std::string& brokerOrderId);
+                          const std::string& fillTime, const std::string& brokerOrderId,
+                          const std::string& traceId = "");
 
     /// @brief 设置实盘数据目录（lastEvalDay JSON 持久化路径前缀）
     void setLiveDataPath(std::string path) { m_liveDataPath = std::move(path); }

@@ -95,6 +95,9 @@ public:
     [[nodiscard]] const std::string& clOrdId()   const noexcept { return m_clOrdId; }
     void setClOrdId(std::string v)                    { m_clOrdId = std::move(v); }
 
+    [[nodiscard]] const std::string& traceId() const noexcept { return m_traceId; }
+    void setTraceId(std::string v) { m_traceId = std::move(v); }
+
     [[nodiscard]] const std::string& accountId() const noexcept { return m_accountId; }
     void setAccountId(std::string v)                   { m_accountId = std::move(v); }
 
@@ -182,6 +185,7 @@ private:
     bool m_isBoardLotMode{true};
     std::string m_clientOrderId;
     std::string m_clOrdId;
+    std::string m_traceId;
     std::string m_accountId;
     std::string m_currency;
     std::string m_exchange;

@@ -55,7 +55,8 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
                                 RecSide side, RecOrdType orderType,
                                 double price, int quantity, double signalScore,
                                 RecPosEff positionEffect, int tradingDay,
-                                const std::string& basketId) {
+                                const std::string& basketId,
+                                const std::string& traceId) {
     astock::database::ConnectionGuard conn;
     if (!conn.isValid()) {
         INTERNAL_WARN_STREAM << "[OrderRecorder] DB 不可用, 订单记录丢失: " << clOrdId;
@@ -65,15 +66,16 @@ int OrderRecorder::insertOrder(const std::string& clOrdId, const std::string& st
     std::string sql =
         "INSERT INTO data.live_order "
         "(cl_ord_id, strategy_id, symbol, side, order_type, price, quantity, "
-        "signal_score, position_effect, trading_day, basket_id, status) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')";
+        "signal_score, position_effect, trading_day, basket_id, trace_id, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')";
     std::vector<SqlParam> params = {
         SqlParam{clOrdId}, SqlParam{strategyId}, SqlParam{symbol},
         SqlParam{std::string(toStr(side))}, SqlParam{std::string(toStr(orderType))},
         SqlParam{price}, SqlParam{static_cast<std::int32_t>(quantity)},
         SqlParam{signalScore}, SqlParam{std::string(toStr(positionEffect))},
         SqlParam{static_cast<std::int32_t>(tradingDay)},
-        SqlParam{basketId}
+        SqlParam{basketId},
+        SqlParam{traceId}
     };
     int ret = conn->executeUpdate(sql, params);
     if (ret <= 0) {

@@ -382,7 +382,7 @@ void StrategyBridge::init()
                     ? "买入" : "卖出";
                 eng->logExecutionFill(order->symbol(), side,
                     fill.price(), fill.quantity(), fill.commission(),
-                    fill.tradeTime().to_string(), brokerId);
+                    fill.tradeTime().to_string(), brokerId, order->traceId());
             });
         }
 

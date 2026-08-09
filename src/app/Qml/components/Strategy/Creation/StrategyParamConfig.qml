@@ -327,24 +327,96 @@ Rectangle {
                 FactorOverlayPanel {
                     id: factorOverlayPanel
                     factorOverlayState: root.factorOverlay
+                    factorOverlayErrors: root.factorOverlayErrors()
                     cardMinWidth: root.factorOverlayCardMinWidth
                     cardMaxWidth: root.factorOverlayCardMaxWidth
+
+                    onFactorOverlayEnabledChanged: function(enabled) {
+                        root.factorOverlay.enabled = enabled
+                        root.factorOverlay = root.normalizeFactorOverlay(root.factorOverlay)
+                        root.syncDecoratedParameters()
+                    }
+                    onFactorOverlayCombineModeChanged: function(mode) {
+                        root.factorOverlay.combineMode = mode
+                        root.syncDecoratedParameters()
+                    }
+                    onFactorOverlayMinimumScoreChanged: function(score) {
+                        root.factorOverlay.minimumCompositeScore = score
+                        root.syncDecoratedParameters()
+                    }
+                    onFactorOverlayTargetPositionCountChanged: function(count) {
+                        root.factorOverlay.targetPositionCount = count
+                        root.syncDecoratedParameters()
+                    }
+                    onOpenFactorSelectorRequested: root.openFactorSelector()
+                    onRebalanceWeightsRequested: root.rebalanceFactorOverlayWeights()
+                    onClearAllocationsRequested: root.clearFactorOverlayAllocations()
+                    onRemoveAllocationRequested: function(index) { root.removeFactorOverlayAllocation(index) }
+                    onUpdateWeightRequested: function(index, rawWeight) { root.updateFactorOverlayWeight(index, rawWeight) }
                 }
 
 
                 // -- Blacklist --
                 BlacklistPanel {
                     id: blacklistPanel
+                    strategyId: root.strategyId
+                    blacklistSymbols: root.blacklistSymbols
+                    blacklistInput: root.blacklistInput
+                    onBlacklistSymbolsChanged: function(v) { root.blacklistSymbols = v }
+                    onBlacklistInputChanged: function(v) { root.blacklistInput = v }
                 }
 
 
                 RuleComposerPanel {
                     id: ruleComposerPanel
+
+                    ruleComposerSpacing: root.ruleComposerSpacing
+                    ruleComposerMinHeight: root.ruleComposerMinHeight
+                    ruleComposerStages: root.ruleComposerStages
+                    selectedRuleComposerStageId: root.selectedRuleComposerStageId
+                    selectedRuleComposerGroupId: root.selectedRuleComposerGroupId
+                    ruleComposerValidation: root.ruleComposerValidation
+                    useRuleComposerColumns: root.useRuleComposerColumns
+                    ruleComposerSuggestionWidth: root.ruleComposerSuggestionWidth
+                    ruleComposerSuggestionMinWidth: root.ruleComposerSuggestionMinWidth
+                    ruleComposerSuggestionMaxWidth: root.ruleComposerSuggestionMaxWidth
+                    selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
+                    strategyProfile: root.strategyProfile
+                    availableRuleStages: root.availableRuleStages
+                    suggestionPhaseLock: root.currentSuggestionPhaseLock()
+                    selectedStageTitle: (root.currentSelectedRuleComposerStage() && root.currentSelectedRuleComposerStage().title) || ""
+                    selectedGroupTitle: (root.currentSelectedRuleComposerGroup() && root.currentSelectedRuleComposerGroup().title) || ""
+                    selectedGroupRole: (root.currentSelectedRuleComposerGroup() && root.currentSelectedRuleComposerGroup().role) || ""
+
+                    onStageSelectRequested: function(stageId) { root.selectRuleComposerStage(stageId) }
+                    onStageAddRequested: function(stageId) { root.addRuleComposerStage(stageId) }
+                    onStageRemoveRequested: function(stageId) { root.removeRuleComposerStage(stageId) }
+                    onStageAndGroupSelectRequested: function(stageId, groupId) {
+                        root.selectedRuleComposerStageId = stageId
+                        root.selectedRuleComposerGroupId = groupId
+                    }
+                    onGroupEditRequested: function(stageId, groupId, patch) { root.updateRuleComposerGroup(stageId, groupId, patch) }
+                    onRuleInstanceRemoveRequested: function(stageId, groupId, instanceId) { root.removeRuleComposerInstance(stageId, groupId, instanceId) }
+                    onRuleInstanceMoveRequested: function(stageId, groupId, instanceId, direction) { root.moveRuleComposerInstance(stageId, groupId, instanceId, direction) }
+                    onSuggestionApplyRequested: function(suggestion, applyMode) {
+                        root.bindRuleTemplateSuggestion(suggestion, applyMode)
+                        root.applyRuleTemplateSuggestionRequested({ suggestion: suggestion, applyMode: applyMode })
+                    }
+                    onSuggestionUpsertRequested: function(suggestion) {
+                        root.upsertRuleComposerSuggestion(suggestion)
+                        root.syncDecoratedParameters()
+                    }
                 }
 
 
                 AdvancedOptionsPanel {
                     id: advancedOptionsPanel
+                    enableAdvancedOptions: root.enableAdvancedOptions
+                    useWideParamGrid: root.useWideParamGrid
+                    onAdvancedOptionsToggled: function(enabled) {
+                        root.enableAdvancedOptions = enabled
+                        root.advancedOptionsChanged(enabled)
+                    }
                 }
 
         }

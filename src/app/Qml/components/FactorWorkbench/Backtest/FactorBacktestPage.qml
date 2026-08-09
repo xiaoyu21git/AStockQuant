@@ -1858,7 +1858,15 @@ Item {
         var clampedWidth = Math.max(minWidth, Math.min(maxWidth, twoColumnWidth))
         return Math.min(availableWidth, clampedWidth)
     }
-    
+
+    function handlePanelStatusRequested(message, type) {
+        var normalizedMessage = ""
+        if (message !== undefined && message !== null) {
+            normalizedMessage = String(message)
+        }
+        console.log("[FactorBacktestPage] " + (type || "info") + ": " + normalizedMessage)
+    }
+
     // 因子选择对话框
     property var factorSelectorDialog: null
 

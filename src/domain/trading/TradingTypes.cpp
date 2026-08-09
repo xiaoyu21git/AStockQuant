@@ -54,6 +54,9 @@ void OrderRequest::setTimeInForce(TimeInForce v) noexcept { m_timeInForce = v; }
 const std::string& OrderRequest::expireTime() const noexcept { return m_expireTime; }
 void OrderRequest::setExpireTime(std::string v) { m_expireTime = std::move(v); }
 
+const std::string& OrderRequest::traceId() const noexcept { return m_traceId; }
+void OrderRequest::setTraceId(std::string v) { m_traceId = std::move(v); }
+
 const std::string& OrderRequest::currency() const noexcept { return m_currency; }
 void OrderRequest::setCurrency(std::string v)   { m_currency = std::move(v); }
 

@@ -507,8 +507,8 @@ Item {
                 dynamicParamConfigs = orderDynamicParamConfigs(dynamicParamConfigs)
                 dynamicParamGroups = buildDynamicParamGroups(dynamicParamConfigs)
 
-                if (dynamicParamGenerator) {
-                    dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
+                if (riskConfigCardComponent.dynamicParamGenerator) {
+                    riskConfigCardComponent.dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
                 }
 
                 initDynamicValues()
@@ -537,8 +537,8 @@ Item {
         dynamicParamConfigs = orderDynamicParamConfigs(dynamicParamConfigs)
         dynamicParamGroups = buildDynamicParamGroups(dynamicParamConfigs)
 
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
+        if (riskConfigCardComponent.dynamicParamGenerator) {
+            riskConfigCardComponent.dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
         }
 
         initDynamicValues()
@@ -555,8 +555,8 @@ Item {
         })
         dynamicParamValues = values
 
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.setValues(values)
+        if (riskConfigCardComponent.dynamicParamGenerator) {
+            riskConfigCardComponent.dynamicParamGenerator.setValues(values)
         }
 
         updateRiskSummary(values)
@@ -665,8 +665,8 @@ Item {
         })
 
         dynamicParamValues = restoredValues
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.setValues(restoredValues)
+        if (riskConfigCardComponent.dynamicParamGenerator) {
+            riskConfigCardComponent.dynamicParamGenerator.setValues(restoredValues)
         }
         applyPersistedAuxiliaryConfiguration(pendingPersistedValues)
         updateRiskSummary(restoredValues)

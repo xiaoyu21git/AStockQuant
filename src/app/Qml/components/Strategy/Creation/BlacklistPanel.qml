@@ -6,13 +6,20 @@ import AStock.Bridge 1.0 as Bridge
 Rectangle {
     id: panelRoot
 
+    // ── 父级桥接属性 ──
+    required property string strategyId
+    required property var blacklistSymbols
+    required property string blacklistInput
+    signal blacklistSymbolsChanged(var newValue)
+    signal blacklistInputChanged(string newValue)
+
     function addToBlacklist() {
-        var sid = String(root.strategyId || "")
+        var sid = String(strategyId || "")
         if (!sid) return
-        var raw = root.blacklistInput.trim().toUpperCase()
+        var raw = blacklistInput.trim().toUpperCase()
         if (!raw) return
         var ids = raw.split(/[\s,;，；]+/)
-        var current = root.blacklistSymbols.slice()
+        var current = blacklistSymbols.slice()
         var changed = false
         for (var i = 0; i < ids.length; i++) {
             var id = ids[i].trim()
@@ -24,18 +31,18 @@ Rectangle {
         }
         if (changed) {
             Bridge.StrategyBridge.updateSymbolBlacklist(sid, current)
-            root.blacklistSymbols = current
+            blacklistSymbolsChanged(current)
         }
-        root.blacklistInput = ""
+        blacklistInputChanged("")
     }
 
     function removeFromBlacklist(index) {
-        var sid = String(root.strategyId || "")
+        var sid = String(strategyId || "")
         if (!sid) return
-        var current = root.blacklistSymbols.slice()
+        var current = blacklistSymbols.slice()
         current.splice(index, 1)
         Bridge.StrategyBridge.updateSymbolBlacklist(sid, current)
-        root.blacklistSymbols = current
+        blacklistSymbolsChanged(current)
     }
 
     // 暴露输入字段供外部访问
@@ -65,9 +72,9 @@ Rectangle {
             }
             Item { Layout.fillWidth: true }
             Text {
-                text: root.blacklistSymbols.length + " 只"
+                text: blacklistSymbols.length + " 只"
                 font.pixelSize: 11
-                color: root.blacklistSymbols.length > 0 ? "#f59e0b" : "#64748b"
+                color: blacklistSymbols.length > 0 ? "#f59e0b" : "#64748b"
             }
         }
 
@@ -85,10 +92,10 @@ Rectangle {
                     id: blacklistInputField
                     anchors.fill: parent
                     anchors.margins: 8
-                    text: root.blacklistInput
+                    text: blacklistInput
                     font.pixelSize: 12
                     color: "#e2e8f0"
-                    onTextChanged: root.blacklistInput = text
+                    onTextChanged: blacklistInput = text
                     Text {
                         anchors.fill: parent
                         verticalAlignment: Text.AlignVCenter
@@ -107,11 +114,11 @@ Rectangle {
 
         ColumnLayout {
             Layout.fillWidth: true
-            visible: root.blacklistSymbols.length > 0
+            visible: blacklistSymbols.length > 0
             spacing: 4
 
             Repeater {
-                model: root.blacklistSymbols
+                model: blacklistSymbols
                 delegate: Rectangle {
                     Layout.fillWidth: true
                     height: 28

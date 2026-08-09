@@ -129,8 +129,8 @@ Rectangle {
 
             Text {
                 text: panelRoot.page.strategyLibrarySearchText.trim().length > 0
-                    ? ("显示 " + strategyVisibleModel.count + " / " + (panelRoot.page.strategyViewModel ? panelRoot.page.strategyViewModel.count : 0) + " 个策略")
-                    : ("共 " + strategyVisibleModel.count + " 个策略")
+                    ? ("显示 " + panelRoot.page.strategyVisibleModel.count + " / " + (panelRoot.page.strategyViewModel ? panelRoot.page.strategyViewModel.count : 0) + " 个策略")
+                    : ("共 " + panelRoot.page.strategyVisibleModel.count + " 个策略")
                 font.pixelSize: panelRoot.page.fontSizeNormal
                 color: panelRoot.page.textSecondary
             }

@@ -53,7 +53,7 @@ Rectangle {
             {
                 label: "交易绑定",
                 value: panelRoot.page.describeStrategyBinding(selectedStrategySummary, tradingConfiguration),
-                accent: isBoundStrategy ? accentBlue : panelRoot.page.textSecondary
+                accent: isBoundStrategy ? panelRoot.page.accentBlue : panelRoot.page.textSecondary
             },
             {
                 label: "订阅同步",
@@ -63,7 +63,7 @@ Rectangle {
             {
                 label: "日历来源",
                 value: panelRoot.page.normalizeRuntimeDisplayValue(marketCalendarSnapshot.sourceLabel, "本地时间窗"),
-                accent: marketCalendarSnapshot.holidayAware ? successGreen : panelRoot.page.warningAmber
+                accent: marketCalendarSnapshot.holidayAware ? panelRoot.page.successGreen : panelRoot.page.warningAmber
             },
             {
                 label: "日历阶段",
@@ -93,7 +93,7 @@ Rectangle {
                     "已连接",
                     "未连接",
                     "--"),
-                accent: hasRuntimeSnapshot && runtimeSnapshot.connected ? successGreen : panelRoot.page.textSecondary
+                accent: hasRuntimeSnapshot && runtimeSnapshot.connected ? panelRoot.page.successGreen : panelRoot.page.textSecondary
             },
             {
                 label: "初始化",
@@ -102,7 +102,7 @@ Rectangle {
                     "已初始化",
                     "未初始化",
                     "--"),
-                accent: hasRuntimeSnapshot && runtimeSnapshot.initialized ? successGreen : panelRoot.page.textSecondary
+                accent: hasRuntimeSnapshot && runtimeSnapshot.initialized ? panelRoot.page.successGreen : panelRoot.page.textSecondary
             }
         ]
 

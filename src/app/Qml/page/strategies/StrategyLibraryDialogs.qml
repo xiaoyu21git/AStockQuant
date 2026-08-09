@@ -7,6 +7,8 @@ Item {
     id: panelRoot
     // -- Interface --
     required property QtObject page
+    property alias actionFeedbackDialog: actionFeedbackDialog
+    property alias deleteConfirmDialog: deleteConfirmDialog
 
     // 新建策略对话框
     StrategyComponents.CreateStrategyDialog {

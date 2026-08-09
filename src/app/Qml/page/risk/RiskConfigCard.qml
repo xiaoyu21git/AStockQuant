@@ -39,6 +39,7 @@ Rectangle {
     readonly property int cardInnerPadding: 24
     readonly property int sectionHeaderHeight: 28
     readonly property int sectionIntroHeight: 36
+    property alias dynamicParamGenerator: dynamicParamGenerator
 
     // 事件流出
     signal saveRequested()

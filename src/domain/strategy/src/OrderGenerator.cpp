@@ -150,6 +150,7 @@ std::vector<OrderRequest> OrderGenerator::generate(
         order.setExtension(domain::trading::ExtKey::kSignalIntent,
                            static_cast<std::uint64_t>(delta.intent));
         order.setExtension(domain::trading::ExtKey::kTargetWeight, targetWeight);
+        order.setTraceId(raw.traceId());
         result.push_back(std::move(order));
     }
 

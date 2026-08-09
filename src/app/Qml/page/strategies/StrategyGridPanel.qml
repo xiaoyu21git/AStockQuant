@@ -48,7 +48,7 @@ Rectangle {
             Layout.fillHeight: true
             clip: true
             boundsBehavior: Flickable.StopAtBounds
-            model: strategyVisibleModel
+            model: panelRoot.page.strategyVisibleModel
             cellWidth: (width - 30) / 2
             cellHeight: 280
 

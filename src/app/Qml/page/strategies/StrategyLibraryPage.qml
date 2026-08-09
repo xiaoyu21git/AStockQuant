@@ -38,6 +38,7 @@ Rectangle {
     property bool backtestWorkbenchLoadedOnce: false
     property var backtestResult: ({})
     property string backtestWorkbenchMode: "workbench"
+    property alias strategyVisibleModel: strategyVisibleModel
     readonly property bool hasSelectedStrategy: selectedStrategyIndex >= 0
         && strategyViewModel
         && strategyViewModel.count > selectedStrategyIndex
@@ -347,7 +348,7 @@ Rectangle {
 
         actionFeedbackMessage = normalizedMessage
         actionFeedbackError = !!isError
-        actionFeedbackDialog.open()
+        strategyDialogs.actionFeedbackDialog.open()
     }
 
     function resolveStrategyIdentifier(strategyCandidate) {
@@ -729,9 +730,9 @@ Rectangle {
             return
         }
 
-        deleteConfirmDialog.strategyId = strategyId
-        deleteConfirmDialog.strategyName = strategyName || "未命名策略"
-        deleteConfirmDialog.open()
+        strategyDialogs.deleteConfirmDialog.strategyId = strategyId
+        strategyDialogs.deleteConfirmDialog.strategyName = strategyName || "未命名策略"
+        strategyDialogs.deleteConfirmDialog.open()
     }
 
     function getSelectedStrategySummary() {

@@ -174,6 +174,9 @@ public:
     [[nodiscard]] const std::string& expireTime() const noexcept;
     void setExpireTime(std::string v);
 
+    [[nodiscard]] const std::string& traceId() const noexcept;
+    void setTraceId(std::string v);
+
     [[nodiscard]] const std::string& currency() const noexcept;
     void setCurrency(std::string v);
 
@@ -228,6 +231,7 @@ private:
     std::string m_exchange;          // SSO
     std::string m_currency;          // SSO (典型 "CNY"/"USD" 远小于 SSO)
     std::string m_expireTime;        // SSO (ISO8601 格式)
+    std::string m_traceId;           // SSO (UUID 36字符, 跨日志关联)
     double      m_price{0};
     double      m_quantity{0};
     double      m_displayQty{0};

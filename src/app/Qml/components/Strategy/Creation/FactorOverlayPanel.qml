@@ -7,8 +7,20 @@ Rectangle {
 
     // 数据流入（从 root 派生的只读快照）
     required property var factorOverlayState
+    required property var factorOverlayErrors
     required property int cardMinWidth
     required property int cardMaxWidth
+
+    // 写入/操作信号（发往父级 StrategyParamConfig）
+    signal factorOverlayEnabledChanged(bool enabled)
+    signal factorOverlayCombineModeChanged(string mode)
+    signal factorOverlayMinimumScoreChanged(real score)
+    signal factorOverlayTargetPositionCountChanged(int count)
+    signal openFactorSelectorRequested()
+    signal rebalanceWeightsRequested()
+    signal clearAllocationsRequested()
+    signal removeAllocationRequested(int index)
+    signal updateWeightRequested(int index, string rawWeight)
 
     // 因子卡片宽度计算
     function factorOverlayCardWidth(containerWidth) {
@@ -23,7 +35,7 @@ Rectangle {
     radius: 10
     color: "#0b1220"
     border.width: 1
-    border.color: root.factorOverlay.enabled ? "#0ea5e9" : "#334155"
+    border.color: factorOverlayState.enabled ? "#0ea5e9" : "#334155"
     implicitHeight: factorOverlayColumn.implicitHeight + 20
 
     ColumnLayout {
@@ -64,14 +76,12 @@ Rectangle {
 
             Switch {
                 id: factorOverlaySwitch
-                checked: !!root.factorOverlay.enabled
+                checked: !!factorOverlayState.enabled
                 property bool _guard: false
                 onCheckedChanged: {
                     if (_guard) return
                     _guard = true
-                    root.factorOverlay.enabled = checked
-                    root.factorOverlay = root.normalizeFactorOverlay(root.factorOverlay)
-                    root.syncDecoratedParameters()
+                    factorOverlayEnabledChanged(checked)
                     _guard = false
                 }
             }
@@ -79,18 +89,18 @@ Rectangle {
 
         Text {
             Layout.fillWidth: true
-            text: root.factorOverlay.enabled
+            text: factorOverlayState.enabled
                   ? "规则模板只负责放行/否决，因子层只在同一交易日的合格候选之间做排序和持仓数量裁剪。"
                   : "未启用因子排序层时，当前策略仅按规则模板和基础参数运行。"
             font.pixelSize: 11
-            color: root.factorOverlay.enabled ? "#bae6fd" : "#94a3b8"
+            color: factorOverlayState.enabled ? "#bae6fd" : "#94a3b8"
             wrapMode: Text.WordWrap
         }
 
         ColumnLayout {
             Layout.fillWidth: true
             spacing: 10
-            visible: root.factorOverlay.enabled
+            visible: factorOverlayState.enabled
 
             RowLayout {
                 Layout.fillWidth: true
@@ -98,25 +108,25 @@ Rectangle {
 
                 Button {
                     text: "选择因子"
-                    onClicked: root.openFactorSelector()
+                    onClicked: openFactorSelectorRequested()
                 }
 
                 Button {
                     text: "等权重"
-                    enabled: (root.factorOverlay.allocations || []).length > 0
-                    onClicked: root.rebalanceFactorOverlayWeights()
+                    enabled: (factorOverlayState.allocations || []).length > 0
+                    onClicked: rebalanceWeightsRequested()
                 }
 
                 Button {
                     text: "清空"
-                    enabled: (root.factorOverlay.allocations || []).length > 0
-                    onClicked: root.clearFactorOverlayAllocations()
+                    enabled: (factorOverlayState.allocations || []).length > 0
+                    onClicked: clearAllocationsRequested()
                 }
 
                 Item { Layout.fillWidth: true }
 
                 Text {
-                    text: "已选 " + ((root.factorOverlay.allocations || []).length) + " 个因子"
+                    text: "已选 " + ((factorOverlayState.allocations || []).length) + " 个因子"
                     font.pixelSize: 11
                     color: "#cbd5e1"
                 }
@@ -150,7 +160,7 @@ Rectangle {
                             { label: "配额 (Quota)", value: "quota" }
                         ]
                         currentIndex: {
-                            var mode = String(root.factorOverlay.combineMode || "rank_only")
+                            var mode = String(factorOverlayState.combineMode || "rank_only")
                             if (mode === "intersection") return 1
                             if (mode === "union") return 2
                             if (mode === "quota") return 3
@@ -159,8 +169,7 @@ Rectangle {
                         onCurrentIndexChanged: {
                             var item = model[currentIndex]
                             if (item) {
-                                root.factorOverlay.combineMode = item.value
-                                root.syncDecoratedParameters()
+                                factorOverlayCombineModeChanged(item.value)
                             }
                         }
                     }
@@ -192,13 +201,11 @@ Rectangle {
                     TextField {
                         id: factorMinimumScoreField
                         Layout.fillWidth: true
-                        text: String(root.factorOverlay.minimumCompositeScore || 0)
+                        text: String(factorOverlayState.minimumCompositeScore || 0)
                         placeholderText: "0"
                         onEditingFinished: {
                             var parsed = Number(text)
-                            root.factorOverlay.minimumCompositeScore = isNaN(parsed) ? 0 : parsed
-                            text = String(root.factorOverlay.minimumCompositeScore)
-                            root.syncDecoratedParameters()
+                            factorOverlayMinimumScoreChanged(isNaN(parsed) ? 0 : parsed)
                         }
                     }
                 }
@@ -216,13 +223,11 @@ Rectangle {
                     TextField {
                         id: targetPositionField
                         Layout.fillWidth: true
-                        text: String(root.factorOverlay.targetPositionCount || 50)
+                        text: String(factorOverlayState.targetPositionCount || 50)
                         placeholderText: "50"
                         onEditingFinished: {
                             var parsed = parseInt(text, 10)
-                            root.factorOverlay.targetPositionCount = (isNaN(parsed) || parsed < 1) ? 50 : parsed
-                            text = String(root.factorOverlay.targetPositionCount)
-                            root.syncDecoratedParameters()
+                            factorOverlayTargetPositionCountChanged((isNaN(parsed) || parsed < 1) ? 50 : parsed)
                         }
                     }
 
@@ -237,7 +242,7 @@ Rectangle {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 6
-                visible: (root.factorOverlay.allocations || []).length > 0
+                visible: (factorOverlayState.allocations || []).length > 0
 
                 Text {
                     Layout.fillWidth: true
@@ -257,7 +262,7 @@ Rectangle {
                         spacing: 10
 
                         Repeater {
-                            model: root.factorOverlay.allocations || []
+                            model: factorOverlayState.allocations || []
 
                             delegate: Rectangle {
                                 required property int index
@@ -300,7 +305,7 @@ Rectangle {
 
                                         Button {
                                             text: "移除"
-                                            onClicked: root.removeFactorOverlayAllocation(index)
+                                            onClicked: removeAllocationRequested(index)
                                         }
                                     }
 
@@ -344,7 +349,7 @@ Rectangle {
                                                 color: "#e2e8f0"
                                                 font.pixelSize: 10
                                                 background: null
-                                                onEditingFinished: root.updateFactorOverlayWeight(index, text)
+                                                onEditingFinished: updateWeightRequested(index, text)
                                             }
                                         }
 
@@ -387,8 +392,8 @@ Rectangle {
 
             Text {
                 Layout.fillWidth: true
-                visible: root.factorOverlayErrors().length > 0
-                text: root.factorOverlayErrors().join("；")
+                visible: factorOverlayErrors.length > 0
+                text: factorOverlayErrors.join("；")
                 font.pixelSize: 11
                 color: "#fca5a5"
                 wrapMode: Text.WordWrap

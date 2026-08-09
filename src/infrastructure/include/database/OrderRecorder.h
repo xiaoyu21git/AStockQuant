@@ -23,7 +23,8 @@ public:
                     RecSide side, RecOrdType orderType,
                     double price, int quantity, double signalScore,
                     RecPosEff positionEffect, int tradingDay,
-                    const std::string& basketId = "");
+                    const std::string& basketId = "",
+                    const std::string& traceId = "");
 
     int updateOrderStatus(const std::string& clOrdId, RecOrdStatus status,
                           const std::string& brokerOrderId = "",

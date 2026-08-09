@@ -34,6 +34,7 @@
 #include "foundation/json/json_facade.h"
 #include "foundation/market/AStockSymbol.h"
 #include "foundation/Utils/DateUtils.h"
+#include "foundation/Utils/Uuid.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -536,6 +537,12 @@ StrategyServiceFlowResult StrategyEngine::stop()
 std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPoint& marketDataPoint)
 {
     try {
+        // ── traceId: 跨日志关联追踪, 确保 Phase 2/3 均能访问 ──
+        const std::string traceId = foundation::utils::Uuid::generate_v4().to_string();
+        if (traceId.empty()) {
+            INTERNAL_WARN_STREAM << "[StrategyEngine] traceId 生成失败, UUID 为空";
+        }
+
         // ── Phase 1: 因子定池 → 策略只在池内判买点 ──
         if (m_factorSignalProcessor.enabled() && m_poolSelector) {
             auto pool = m_poolSelector->selectPool(m_factorSignalProcessor);
@@ -556,12 +563,18 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
         auto rawSignals = strategyService_->onMarketDataPoint(marketDataPoint);
         auto orders = collectOrders(rawSignals);
 
+        // ── traceId 注入: 同一次 step() 所有订单共享 ──
+        if (orders.has_value()) {
+            for (auto& o : *orders) o.setTraceId(traceId);
+        }
+
         // 实盘信号日志 — 仅在有决策事件时写入, 不记录每次 tick 静默
         if (m_tradeJournal && orders.has_value() && !orders->empty()) {
             const std::int64_t today = domain::market::MarketDataService::instance()
                 .activeTradingDay();
             if (today > 0) {
                 std::string datePrefix = std::to_string(today);
+                const std::string tid = traceId.empty() ? "N/A" : traceId;
                 for (const auto& o : *orders) {
                     if (!o.isValid()) continue;
                     std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
@@ -570,6 +583,7 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                     js << datePrefix << " 信号生成 " << side << " " << o.symbol()
                        << " " << o.quantity() << "股";
                     if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
+                    js << " trace:" << tid;
                     m_tradeJournal->log(js.str());
                 }
             }
@@ -596,6 +610,7 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                 // 实盘规则拒绝日志
                 if (m_tradeJournal && filtered.size() < beforeGate) {
                     std::string datePrefix = std::to_string(today);
+                    const std::string tid = traceId.empty() ? "N/A" : traceId;
                     // 收集被过滤掉的标的
                     for (const auto& o : *orders) {
                         bool survived = false;
@@ -604,7 +619,8 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
                         if (survived) continue;
                         std::ostringstream js;
                         js << datePrefix << " 规则拒绝 " << o.symbol()
-                           << " 模板:" << m_rulePipeline.boundTemplateCount();
+                           << " 模板:" << m_rulePipeline.boundTemplateCount()
+                           << " trace:" << tid;
                         m_tradeJournal->log(js.str());
                     }
                 }
@@ -884,10 +900,12 @@ void StrategyEngine::drainQueue()
                         for (const auto& o : finalOrders) {
                             std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
                             double score = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+                            std::string tid = o.traceId();
                             std::ostringstream js;
                             js << datePrefix << " 提交 " << side << " " << o.symbol()
                                << " " << o.quantity() << "股";
                             if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
+                            if (!tid.empty()) js << " trace:" << tid;
                             m_tradeJournal->log(js.str());
                         }
                     }
@@ -3167,7 +3185,8 @@ void StrategyEngine::buildBacktestDiagnostics(
 
 void StrategyEngine::logExecutionFill(const std::string& symbol, const std::string& side,
                                       double price, std::int64_t quantity, double commission,
-                                      const std::string& fillTime, const std::string& brokerOrderId)
+                                      const std::string& fillTime, const std::string& brokerOrderId,
+                                      const std::string& traceId)
 {
     if (!m_tradeJournal) return;
     std::ostringstream js;
@@ -3176,6 +3195,8 @@ void StrategyEngine::logExecutionFill(const std::string& symbol, const std::stri
        << " 佣金:" << commission;
     if (!brokerOrderId.empty())
         js << " BrokerOrderId:" << brokerOrderId;
+    if (!traceId.empty())
+        js << " trace:" << traceId;
     m_tradeJournal->log(js.str());
 }
 

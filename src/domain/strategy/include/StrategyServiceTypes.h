@@ -360,6 +360,7 @@ private:
     double currentWeight_{0.0};
     SignalIntent intent_{SignalIntent::KEEP};
     std::string fullSymbol_{};
+    std::string traceId_{};
 
 public:
     StrategySignal() = default;
@@ -414,6 +415,9 @@ public:
 
     [[nodiscard]] SignalIntent intent() const noexcept { return intent_; }
     void setIntent(SignalIntent v) noexcept { intent_ = v; }
+
+    [[nodiscard]] const std::string& traceId() const noexcept { return traceId_; }
+    void setTraceId(std::string v) { traceId_ = std::move(v); }
 
     [[nodiscard]] bool isValid() const noexcept
     {
