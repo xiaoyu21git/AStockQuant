@@ -7,6 +7,8 @@
 #include <QVariantMap>
 #include <QHash>
 #include <QSet>
+#include <deque>
+#include <unordered_map>
 
 #include "CandleDataModel.h"
 #include "foundation/Utils/Uuid.h"
@@ -145,6 +147,11 @@ private:
     int    m_lastSnapDepthHash = 0;
 
     QVariantList m_sectorHeatData;
+
+    // 板块资金流向多日趋势缓存
+    static constexpr int kSectorHeatHistoryDays = 5;
+    std::deque<std::string> m_sectorHeatDates;
+    std::unordered_map<std::string, std::deque<double>> m_sectorNetInHistory;
 };
 
 } // namespace bridge
