@@ -978,7 +978,11 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "market.repair_reflow_confirmed")      return market.conceptAvgReturn;
     if (varPath == "market.high_consensus_collapse_rate") return market.boardBreakRate;
     // 个股级(代理到市场宽度, 真实排名需 per-symbol concept lookup — MVP 阶段代理)
-    if (varPath == "theme.emotion_cycle")                 return market.conceptAvgReturn;
+    if (varPath == "theme.emotion_cycle") {
+        static thread_local bool once = false;
+        if (!once) { INTERNAL_WARN_STREAM << "[RuleVarProvider] theme.emotion_cycle proxied to conceptAvgReturn (MVP placeholder)"; once = true; }
+        return market.conceptAvgReturn;
+    }
     // 龙头排名: 从 concept_leader_rank 缓存实查 (6位码, 未上榜=0)
     if (varPath == "candidate.leader_rank_in_theme")
     { auto it=impl.leaderRankCache.find(impl.candidate.code); return it!=impl.leaderRankCache.end()?std::optional<double>(static_cast<double>(it->second)):std::optional<double>(0.0); }
@@ -989,15 +993,20 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "candidate.theme_leader_locked")
     { auto c2m=impl.closeToMaRatio(20); return c2m&&*c2m>1.02?std::optional<double>(1.0):std::optional<double>(0.0); }
     if (varPath == "candidate.theme_heat_rank")           return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.consensus_acceleration_confirmed") return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.consensus_reflow_confirmed")  return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.consensus_repair_confirmed")  return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.leader_follower_divergence_score") return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.leader_only_repair_gap_score")   return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.relative_core_strength_score")   return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.repair_follow_strength_score")   return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.follow_strength_vs_leader_ratio")return market.breadthAboveMa60Ratio;
-    if (varPath == "candidate.early_repair_strength_score")    return market.breadthAboveMa60Ratio;
+    // ── Tier3 共识/龙头代理: 以下变量均代理到 breadthAboveMa60Ratio (MVP 占位) ──
+    if (varPath == "candidate.consensus_acceleration_confirmed" ||
+        varPath == "candidate.consensus_reflow_confirmed" ||
+        varPath == "candidate.consensus_repair_confirmed" ||
+        varPath == "candidate.leader_follower_divergence_score" ||
+        varPath == "candidate.leader_only_repair_gap_score" ||
+        varPath == "candidate.relative_core_strength_score" ||
+        varPath == "candidate.repair_follow_strength_score" ||
+        varPath == "candidate.follow_strength_vs_leader_ratio" ||
+        varPath == "candidate.early_repair_strength_score") {
+        static thread_local bool proxyWarned = false;
+        if (!proxyWarned) { INTERNAL_WARN_STREAM << "[RuleVarProvider] Tier3 theme/consensus variables proxied to breadthAboveMa60Ratio (MVP placeholder, silenced after first hit)"; proxyWarned = true; }
+        return market.breadthAboveMa60Ratio;
+    }
 
     // ── Tier3 涨停/打板: 纯日线可检测 ──
     // 市场级聚合
@@ -1164,6 +1173,14 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     }
 
     // 其余变量(形态确认/评分/题材类): 数据未就绪 — 显式 nullopt, 由统计上报
+    {
+        static thread_local int nulloptCount = 0;
+        if (++nulloptCount <= 10) {
+            INTERNAL_WARN_STREAM << "[RuleVarProvider] Unresolved variable '"
+                                 << varPath << "' returns nullopt (hit "
+                                 << nulloptCount << ", silenced after 10)";
+        }
+    }
     return std::nullopt;
 }
 
