@@ -295,7 +295,7 @@ Rectangle {
                                 ComboBox {
                                     id: assetTypeCombo
                                     Layout.fillWidth: true
-                                    model: Bridge.StrategyBridge.tr('strategyCreation.assetTypes')
+                                    model: Bridge.StrategyBridge.tr('strategyCreation.assetTypes').split(',')
                                     currentIndex: 0
 
                                     background: Rectangle {
@@ -329,7 +329,7 @@ Rectangle {
                                 ComboBox {
                                     id: timeFrameCombo
                                     Layout.fillWidth: true
-                                    model: Bridge.StrategyBridge.tr('strategyCreation.timeFrames')
+                                    model: Bridge.StrategyBridge.tr('strategyCreation.timeFrames').split(',')
                                     currentIndex: 4
 
                                     background: Rectangle {
@@ -364,10 +364,10 @@ Rectangle {
                                     id: riskLevelCombo
                                     Layout.fillWidth: true
                                     model: [
-                                        Bridge.StrategyBridge.riskLevelName("low"),
-                                        Bridge.StrategyBridge.riskLevelName("medium"),
-                                        Bridge.StrategyBridge.riskLevelName("high"),
-                                        Bridge.StrategyBridge.riskLevelName("aggressive")
+                                        Bridge.StrategyBridge.riskLevelName(1),
+                                        Bridge.StrategyBridge.riskLevelName(2),
+                                        Bridge.StrategyBridge.riskLevelName(3),
+                                        Bridge.StrategyBridge.riskLevelName(4)
                                     ]
                                     currentIndex: 1
 
@@ -402,7 +402,7 @@ Rectangle {
                                 ComboBox {
                                     id: optimizationCombo
                                     Layout.fillWidth: true
-                                    model: Bridge.StrategyBridge.tr('strategyCreation.optimizationMethods')
+                                    model: Bridge.StrategyBridge.tr('strategyCreation.optimizationMethods').split(',')
                                     currentIndex: 0
 
                                     background: Rectangle {
@@ -735,7 +735,7 @@ Rectangle {
     
     // 获取优化方法值
     function getOptimizationMethodValue() {
-        var values = Bridge.StrategyBridge.tr('strategyCreation.optimizationMethodValues')
+        var values = Bridge.StrategyBridge.tr('strategyCreation.optimizationMethodValues').split(',')
         return values[optimizationCombo.currentIndex] || "genetic"
     }
     
@@ -758,7 +758,7 @@ Rectangle {
 
         riskLevelCombo.currentIndex = Math.max(0, riskLevelIndexOptions.indexOf(Number(strategyData.riskLevelIndex)))
 
-        var values = Bridge.StrategyBridge.tr('strategyCreation.optimizationMethodValues')
+        var values = Bridge.StrategyBridge.tr('strategyCreation.optimizationMethodValues').split(',')
         optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || "genetic"))
 
         var tags = strategyData.tags || []

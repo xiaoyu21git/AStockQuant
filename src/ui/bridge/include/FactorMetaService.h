@@ -79,7 +79,6 @@ signals:
 private:
     // 加载元数据文件
     bool loadMetaData();
-    bool loadCommonMetaData();
     bool loadParameterMetaData();
     
     // 解析和合并参数
@@ -99,7 +98,6 @@ private:
     
 private:
     // 元数据缓存
-    QVariantMap m_commonMetaData;          // factor_common.json 数据
     QVariantMap m_parameterMetaData;       // factor_common_params.json 数据
     QMap<factor::FactorType, QVariantMap> m_factorCategories;  // 因子分类信息
     QMap<factor::FactorType, QVariantMap> m_mergedParameters;  // 合并后的参数定义

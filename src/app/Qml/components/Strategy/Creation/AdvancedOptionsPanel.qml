@@ -97,7 +97,7 @@ Rectangle {
                     ComboBox {
                         id: parameterOptimizationRangeCombo
                         Layout.fillWidth: true
-                        model: strategyService.tr('strategyCreation.parameterOptimizationRangeOptions')
+                        model: strategyService.tr('strategyCreation.parameterOptimizationRangeOptions').split(',')
                         currentIndex: 1
 
                         background: Rectangle {
@@ -132,7 +132,7 @@ Rectangle {
                     ComboBox {
                         id: sensitivityAnalysisCombo
                         Layout.fillWidth: true
-                        model: strategyService.tr('strategyCreation.sensitivityAnalysisOptions')
+                        model: strategyService.tr('strategyCreation.sensitivityAnalysisOptions').split(',')
                         currentIndex: 1
 
                         background: Rectangle {
@@ -167,7 +167,7 @@ Rectangle {
                     ComboBox {
                         id: parameterConstraintsCombo
                         Layout.fillWidth: true
-                        model: strategyService.tr('strategyCreation.parameterConstraintOptions')
+                        model: strategyService.tr('strategyCreation.parameterConstraintOptions').split(',')
                         currentIndex: 0
 
                         background: Rectangle {
@@ -202,7 +202,7 @@ Rectangle {
                     ComboBox {
                         id: parameterInitializationMethodCombo
                         Layout.fillWidth: true
-                        model: strategyService.tr('strategyCreation.parameterInitializationMethods')
+                        model: strategyService.tr('strategyCreation.parameterInitializationMethods').split(',')
                         currentIndex: 0
 
                         background: Rectangle {

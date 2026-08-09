@@ -19,10 +19,10 @@ BaseQuantCard {
         id: baseConstants
     }
     
-    // 与因子卡片完全对齐的视觉属性
-    radius: 10  // 与因子卡片保持一致
-    color: selected ? Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.15) : "#1E293B"
-    border.color: selected ? categoryColor : "#334155"  // 与因子卡片的边框颜色对齐
+    radius: 10
+    color: "#1E293B"
+    border.color: "#334155"
+    layer.enabled: false
     
     // 增强文字颜色对比度（与因子卡片一致）
     property color textColorEnhanced: "#F1F5F9"  // 因子卡片使用 #F1F5F9
@@ -45,7 +45,6 @@ BaseQuantCard {
     // 策略特有属性
     property string strategyId: ""              // 策略ID
     property string strategyName: ""            // 策略名称
-    property string strategyType: "趋势策略"     // 策略类型
     
     // 性能指标
     property real returns: 0.0                  // 累计收益率
@@ -78,13 +77,9 @@ BaseQuantCard {
     
     // ============ 初始化属性 ============
     
-    // 将策略属性映射到基类属性
     entityId: strategyId
     displayName: strategyName
-    category: strategyType
-    
-    // 设置类别颜色
-    categoryColor: getStrategyTypeColor(strategyType)
+    categoryColor: "#3B82F6"
     
     // 性能指标配置（覆盖父类）
     performanceMetrics: [
@@ -420,28 +415,7 @@ BaseQuantCard {
     // 已移除顶部的参数面板触发器，功能按钮区域已集成参数面板切换按钮
     
     // ============ 工具函数 ============
-    
-    // 根据策略类型获取颜色
-    function getStrategyTypeColor(strategyType) {
-        switch (strategyType) {
-            case "趋势策略":
-            case "动量策略": return baseConstants.accentBlue;
-            case "价值策略":
-            case "均值回归": return baseConstants.warningAmber;
-            case "质量策略":
-            case "基本面策略": return baseConstants.profitGreen;
-            case "成长策略":
-            case "高增长策略": return Qt.color("#8B5CF6");
-            case "情绪策略":
-            case "市场情绪策略": return Qt.color("#EC4899");  // 粉色
-            case "波动策略":
-            case "套利策略": return baseConstants.lossRed;
-            case "组合策略":
-            case "多因子策略": return Qt.color("#06B6D4");  // 青色
-            default: return baseConstants.accentBlue;
-        }
-    }
-    
+
     // 根据参数颜色字符串获取颜色
     function getParamColor(colorStr) {
         switch (colorStr) {

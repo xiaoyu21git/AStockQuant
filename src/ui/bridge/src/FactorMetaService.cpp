@@ -1397,7 +1397,6 @@ void FactorMetaService::reloadMetaData()
 {
     QMutexLocker locker(&m_mutex);
     
-    m_commonMetaData.clear();
     m_parameterMetaData.clear();
     m_factorCategories.clear();
     m_mergedParameters.clear();
@@ -1427,20 +1426,7 @@ QVariantMap FactorMetaService::getFactorCategory(factor::FactorType factorType)
     if (m_factorCategories.contains(factorType)) {
         return m_factorCategories[factorType];
     }
-    
-    // 如果缓存中没有，尝试从commonMetaData中查找
-    QString factorTypeId = factorTypeToString(factorType);
-    if (m_commonMetaData.contains("categories")) {
-        QVariantList categories = m_commonMetaData["categories"].toList();
-        for (const QVariant& category : categories) {
-            QVariantMap categoryMap = category.toMap();
-            if (categoryMap["id"].toString() == factorTypeId) {
-                m_factorCategories[factorType] = categoryMap;
-                return categoryMap;
-            }
-        }
-    }
-    
+
     return QVariantMap();
 }
 
@@ -1733,64 +1719,17 @@ QVariantMap FactorMetaService::parameterTypes() const
 // 私有方法实现
 bool FactorMetaService::loadMetaData()
 {
-    const bool commonOk = loadCommonMetaData();
-    if (!commonOk) {
-        INTERNAL_WARN_STREAM << "Failed to load common metadata JSON, using static catalog fallback";
-    }
-
     const bool paramsOk = loadParameterMetaData();
     if (!paramsOk) {
         INTERNAL_WARN_STREAM << "Failed to load parameter metadata JSON, using static catalog fallback";
     }
 
-    // 初始化因子分类缓存 — JSON 优先
-    if (m_commonMetaData.contains("categories")) {
-        QVariantList categories = m_commonMetaData["categories"].toList();
-        for (const QVariant& category : categories) {
-            QVariantMap categoryMap = category.toMap();
-            QString categoryId = categoryMap["id"].toString();
-            factor::FactorType factorType = stringToFactorType(categoryId);
-            m_factorCategories[factorType] = categoryMap;
-        }
+    // 从 C++ 静态目录填充因子分类信息（不再从 JSON 加载 UI 配置）
+    const auto& uiCatalog = factorUiMetaCatalog();
+    for (auto it = uiCatalog.constBegin(); it != uiCatalog.constEnd(); ++it) {
+        m_factorCategories.insert(it.key(), it.value());
     }
 
-    // 静态目录兜底：JSON 缺失时从 C++ 静态数据填充分类信息
-    if (m_factorCategories.isEmpty()) {
-        const auto& uiCatalog = factorUiMetaCatalog();
-        for (auto it = uiCatalog.constBegin(); it != uiCatalog.constEnd(); ++it) {
-            m_factorCategories.insert(it.key(), it.value());
-        }
-    }
-
-    return true; // 因子数据在数据库，JSON 仅用于 UI 装饰，缺失不阻塞初始化
-}
-
-bool FactorMetaService::loadCommonMetaData()
-{
-    QString filePath = getConfigFilePath("config/views/factor_common.json");
-    QFile file(filePath);
-    
-    if (!file.exists()) {
-        INTERNAL_WARN_STREAM << "Common metadata file not found: " << toStdString(filePath);
-        return false;
-    }
-    
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        INTERNAL_WARN_STREAM << "Failed to open common metadata file: " << toStdString(filePath);
-        return false;
-    }
-    
-    QByteArray jsonData = file.readAll();
-    file.close();
-    
-    QJsonDocument doc = QJsonDocument::fromJson(jsonData);
-    if (doc.isNull()) {
-        INTERNAL_WARN_STREAM << "Failed to parse common metadata JSON";
-        return false;
-    }
-    
-    m_commonMetaData = doc.object().toVariantMap();
-    INTERNAL_DEBUG_STREAM << "Loaded common metadata from: " << toStdString(filePath);
     return true;
 }
 

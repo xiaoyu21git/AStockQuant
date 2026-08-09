@@ -60,7 +60,6 @@ Rectangle {
             strategyId: selectedStrategy ? (selectedStrategy.strategyId || "") : ""
             strategyName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
             displayName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
-            strategyType: selectedStrategy ? (selectedStrategy.strategyType || "趋势策略") : "趋势策略"
             description: selectedStrategy ? panelRoot.page.buildStrategyCardDescription(selectedStrategy) : "暂无描述"
             status: {
                 panelRoot.page.statusRefreshCounter

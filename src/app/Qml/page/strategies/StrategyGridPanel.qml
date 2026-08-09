@@ -65,7 +65,6 @@ Rectangle {
                 strategyId: sourceStrategy ? (sourceStrategy.strategyId || "") : ""
                 strategyName: sourceStrategy ? (sourceStrategy.strategyName || sourceStrategy.name || "未命名策略") : "未命名策略"
                 displayName: sourceStrategy ? (sourceStrategy.strategyName || sourceStrategy.name || "未命名策略") : "未命名策略"
-                strategyType: sourceStrategy ? (sourceStrategy.strategyType || "趋势策略") : "趋势策略"
                 description: sourceStrategy ? panelRoot.page.buildStrategyCardDescription(sourceStrategy) : "暂无描述"
                 status: {
                     var s = panelRoot.page.getStrategyData(sourceIndex)

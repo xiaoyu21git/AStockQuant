@@ -25,6 +25,11 @@ BaseQuantCard {
 
     property var groupReturns: []
 
+    // 硬编码颜色覆盖基类动态绑定，避免 FBO 离屏渲染导致灰色
+    color: "#1E293B"
+    border.color: "#334155"
+    layer.enabled: false
+
     signal previewRequested()
     signal analyzeRequested()
     signal addToPortfolio()

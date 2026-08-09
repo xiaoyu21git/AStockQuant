@@ -337,13 +337,13 @@ Page {
                                         }
 
                                         Text {
-                                            text: "资产类型: " + strategyService.strategyTypeName(strategyBasicInfo.getAssetTypeIndex())
+                                            text: "资产类型: " + (strategyService.tr('strategyCreation.assetTypes').split(',')[strategyBasicInfo.getAssetTypeIndex()] || "股票")
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
 
                                         Text {
-                                            text: "时间周期: " + strategyService.strategyTypeName(strategyBasicInfo.getTimeFrameIndex())
+                                            text: "时间周期: " + (strategyService.tr('strategyCreation.timeFrames').split(',')[strategyBasicInfo.getTimeFrameIndex()] || "日线")
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }

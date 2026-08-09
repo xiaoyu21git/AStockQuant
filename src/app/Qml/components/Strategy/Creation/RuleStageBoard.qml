@@ -56,12 +56,13 @@ Rectangle {
         ScrollView {
             id: boardScrollView
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: Math.min(boardContent.implicitHeight + 16, 420)
             clip: true
             contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
             ColumnLayout {
+                id: boardContent
                 width: boardScrollView.availableWidth
                 spacing: 10
 

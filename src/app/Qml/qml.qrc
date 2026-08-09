@@ -221,7 +221,6 @@
         <file>components/Trading/OptionsTradeForm.qml</file>
         <file>components/Trading/PendingOrderList.qml</file>
         <file>config/views/risk_backtest_params.json</file>
-        <file>config/views/factor_common.json</file>
         <file>config/views/factor_common_params.json</file>
         <file>utils/I18n.js</file>
         <file>utils/OrderUtils.js</file>

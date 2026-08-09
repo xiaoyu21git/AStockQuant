@@ -78,10 +78,10 @@ Rectangle {
     
     // ============ 私有属性 ============
     
-    readonly property color statusColor: resolveColor(getStatusColor(status), baseConstants.textTertiary)
+    readonly property color statusColor: getStatusColor(status)
     readonly property string statusText: getStatusText(status)
     readonly property string categoryIcon: getCategoryIcon(category)
-    readonly property color resolvedCategoryColor: resolveColor(categoryColor, baseConstants.accentBlue)
+    readonly property color resolvedCategoryColor: categoryColor
     
     // ============ 视觉属性 ============
     
@@ -581,33 +581,11 @@ Rectangle {
     
     // ============ 工具函数 ============
     
-    // 根据状态获取颜色
     function getStatusColor(status) {
-        var normalizedStatus = status ? status.toString().toUpperCase() : "UNKNOWN"
-        switch (normalizedStatus) {
-            case "ACTIVE":
-            case "RUNNING": return baseConstants.profitGreen;
-            case "WAIT_OPEN":
-            case "PENDING": return baseConstants.accentBlue;
-            case "STARTING": return baseConstants.accentBlue;
-            case "PAUSED":
-            case "STOPPING":
-            case "EXPERIMENTAL":
-            case "TESTING": return baseConstants.warningAmber;
-            case "STOPPED":
-            case "INACTIVE":
-            case "ERROR":
-            case "DEPRECATED": return baseConstants.lossRed;
-            case "ARCHIVED": return baseConstants.textTertiary;
-            default: return baseConstants.textTertiary;
-        }
-    }
-
-    function resolveColor(candidate, fallback) {
-        if (candidate === undefined || candidate === null) {
-            return fallback
-        }
-        return candidate
+        var s = status ? status.toString() : ""
+        if (s === "运行中") return baseConstants.profitGreen
+        if (s === "启动中" || s === "等待开盘") return baseConstants.accentBlue
+        return baseConstants.textSecondary
     }
 
     function formatMetricValue(value, format, unit) {
@@ -640,63 +618,13 @@ Rectangle {
         return String(numericValue) + suffix
     }
     
-    // 根据状态获取文本
     function getStatusText(status) {
-        var normalizedStatus = status ? status.toString().toUpperCase() : "UNKNOWN"
-        switch (normalizedStatus) {
-            case "ACTIVE": return "活跃";
-            case "RUNNING": return "运行中";
-            case "STARTING": return "启动中";
-            case "WAIT_OPEN": return "待开盘";
-            case "STOPPED": return "已停止";
-            case "STOPPING": return "停止中";
-            case "INACTIVE": return "已停用";
-            case "ERROR": return "异常";
-            case "DEPRECATED": return "已废弃";
-            case "PAUSED": return "已暂停";
-            case "EXPERIMENTAL": return "实验";
-            case "PENDING": return "待处理";
-            case "TESTING": return "测试中";
-            case "ARCHIVED": return "已归档";
-            default: return "未知";
-        }
+        return status ? status.toString() : ""
     }
-    
-    // 根据类别获取图标
+
     function getCategoryIcon(category) {
-        switch (category) {
-            case "动量类":
-            case "动量因子":
-            case "趋势策略": return "📊";
-            case "价值类":
-            case "价值因子":
-            case "价值策略": return "💰";
-            case "质量类":
-            case "质量因子":
-            case "质量策略": return "📈";
-            case "成长类":
-            case "成长因子":
-            case "成长策略": return "🚀";
-            case "情绪类":
-            case "情绪因子":
-            case "情绪策略": return "🧠";
-            case "波动类":
-            case "低波因子":
-            case "低波动因子":
-            case "波动策略": return "📉";
-            case "流动性类":
-            case "流动性因子": return "💧";
-            case "预期类":
-            case "宏观": return "🌦️";
-            case "行业": return "🏭";
-            case "规模因子": return "📐";
-            case "红利因子": return "🎁";
-            case "技术因子": return "🧮";
-            case "自定义因子":
-            case "自定义": return "🧩";
-            case "恐慌类": return "🛡️";
-            default: return "📊";
-        }
+        if (entityType === "factor") return "📈"
+        return "📊"
     }
     
     // ============ 动画效果 ============

@@ -1401,6 +1401,17 @@ static const std::vector<std::pair<QString, QString>> kTranslations = {
     {"strategyCreation.tags", QStringLiteral("标签")},
     {"strategyCreation.tagsPlaceholder", QStringLiteral("输入标签，按回车添加（可选）")},
     {"strategyCreation.optimizationMethodValues", QStringLiteral("genetic,grid_search,bayesian,random")},
+    // 通用导航
+    {"common.previous", QStringLiteral("上一步")},
+    {"common.next", QStringLiteral("下一步")},
+    {"common.create", QStringLiteral("创建")},
+    {"common.saveChanges", QStringLiteral("保存修改")},
+    // 策略创建补充
+    {"strategyCreation.create", QStringLiteral("创建")},
+    {"strategyCreation.validationPassed", QStringLiteral("验证通过")},
+    {"strategyCreation.validationRequired", QStringLiteral("需完成验证")},
+    {"strategyCreation.strategyCreatedSuccess", QStringLiteral("策略创建成功")},
+    {"strategyCreation.strategyUpdatedSuccess", QStringLiteral("策略修改已保存")},
 };
 
 QString StrategyBridge::tr(const QString& key, const QString&) const {
