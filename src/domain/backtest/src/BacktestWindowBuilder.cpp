@@ -1,4 +1,5 @@
 ﻿#include "BacktestWindowBuilder.h"
+#include <foundation/log/logging.hpp>
 
 namespace astock::domain::backtest::windowing {
 
@@ -26,10 +27,13 @@ BacktestWindowBuilder::BacktestWindowBuilder(const ITradingCalendar& calendar,
 WindowBuildResult BacktestWindowBuilder::build(WindowBuildSpec spec) const
 {
     if (!spec.requested.isValid()) {
+        INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] Invalid date range in build spec";
         return WindowBuildResult{WindowBuildError::InvalidInput, std::nullopt};
     }
 
     if (!calendar_.isTradingDay(spec.requested.start) || !calendar_.isTradingDay(spec.requested.end)) {
+        INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] Non-trading boundary: "
+                              << spec.requested.start.value << "~" << spec.requested.end.value;
         return WindowBuildResult{WindowBuildError::NonTradingBoundary, std::nullopt};
     }
 

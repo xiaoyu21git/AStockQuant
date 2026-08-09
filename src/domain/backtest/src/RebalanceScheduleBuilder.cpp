@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <utility>
+#include <foundation/log/logging.hpp>
 
 namespace astock::domain::backtest::rebalancing {
 
@@ -13,6 +14,7 @@ RebalanceScheduleBuilder::RebalanceScheduleBuilder(const ITradingCalendar& calen
 RebalancePlanResult RebalanceScheduleBuilder::build(RebalancePlanSpec spec) const
 {
     if (!spec.window.isValid() || !spec.interval.isValid()) {
+        INTERNAL_ERROR_STREAM << "[RebalanceScheduleBuilder] Invalid spec: window or interval";
         return RebalancePlanResult{RebalancePlanError::InvalidInput, std::nullopt};
     }
 

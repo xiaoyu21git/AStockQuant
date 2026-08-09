@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <sstream>
+#include <foundation/log/logging.hpp>
 
 namespace domain::backtest {
 
@@ -87,6 +88,9 @@ SurvivorshipValidationReport SurvivorshipValidator::validate(
     const std::vector<int>& dates,
     const std::unordered_map<int, std::vector<std::string>>* universeByDate) const {
 
+    INTERNAL_INFO_STREAM << "[SurvivorshipValidator] Validating " << universe.size()
+                         << " stocks across " << dates.size() << " trading days";
+
     SurvivorshipValidationReport report;
     report.backtestStart = dateToStr(m_backtestStart);
     report.backtestEnd = dateToStr(m_backtestEnd);
@@ -108,6 +112,14 @@ SurvivorshipValidationReport SurvivorshipValidator::validate(
     // 检查4: 退市股逐日检查 (仅当提供了 universeByDate)
     if (universeByDate && !universeByDate->empty()) {
         report.checks.push_back(checkDelistedExcluded(*universeByDate));
+    }
+
+    if (!report.allPassed()) {
+        int failedCount = 0;
+        for (const auto& c : report.checks) { if (!c.passed) ++failedCount; }
+        INTERNAL_WARN_STREAM << "[SurvivorshipValidator] Validation failed: "
+                             << failedCount << "/" << report.checks.size()
+                             << " checks failed";
     }
 
     return report;

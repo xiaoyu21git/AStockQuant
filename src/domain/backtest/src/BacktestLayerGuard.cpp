@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <foundation/log/logging.hpp>
 
 namespace domain::backtest {
 
@@ -10,6 +11,7 @@ BacktestLayerGuardResult StrictBacktestLayerGuard::validate(const BacktestReques
     BacktestLayerGuardResult result;
     if (!request.isValid()) {
         result.violations.push_back(BacktestLayerViolationCode::InvalidRequest);
+        INTERNAL_ERROR_STREAM << "[BacktestLayerGuard] Invalid backtest request";
         return result;
     }
 
@@ -105,6 +107,10 @@ BacktestLayerGuardResult StrictBacktestLayerGuard::validate(const BacktestReques
         }
     }
 
+    if (!result.violations.empty()) {
+        INTERNAL_WARN_STREAM << "[BacktestLayerGuard] Validation found "
+                             << result.violations.size() << " violation(s)";
+    }
     return result;
 }
 

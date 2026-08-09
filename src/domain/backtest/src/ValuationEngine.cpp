@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <unordered_map>
 #include <utility>
+#include <foundation/log/logging.hpp>
 
 namespace astock::domain::backtest::portfolio_valuation {
 
@@ -78,16 +79,19 @@ PortfolioValuationResult MarkToMarketValuationEngine::evaluate(ValuationSpec spe
 
         int64_t priceMicros = 0;
         if (!MarkToMarketValuationEngine::checkedMultiplyInt64(static_cast<int64_t>(it->second), spec.microsPerTick, &priceMicros)) {
+            INTERNAL_ERROR_STREAM << "[ValuationEngine] Overflow: price * microsPerTick";
             return PortfolioValuationResult{PortfolioValuationError::InvalidInput, std::nullopt};
         }
 
         int64_t longMicros = 0;
         if (!MarkToMarketValuationEngine::checkedMultiplyInt64(priceMicros, static_cast<int64_t>(holding.longLots.value), &longMicros)) {
+            INTERNAL_ERROR_STREAM << "[ValuationEngine] Overflow: priceMicros * longLots";
             return PortfolioValuationResult{PortfolioValuationError::InvalidInput, std::nullopt};
         }
 
         int64_t shortMicros = 0;
         if (!MarkToMarketValuationEngine::checkedMultiplyInt64(priceMicros, static_cast<int64_t>(holding.shortLots.value), &shortMicros)) {
+            INTERNAL_ERROR_STREAM << "[ValuationEngine] Overflow: priceMicros * shortLots";
             return PortfolioValuationResult{PortfolioValuationError::InvalidInput, std::nullopt};
         }
 
@@ -100,6 +104,9 @@ PortfolioValuationResult MarkToMarketValuationEngine::evaluate(ValuationSpec spe
     }
 
     summary.netMicros = summary.grossLongMicros - summary.grossShortMicros;
+    INTERNAL_DEBUG_STREAM << "[ValuationEngine] Evaluation complete: "
+                          << holdings.size() << " holdings, "
+                          << "netMicros=" << summary.netMicros;
     return PortfolioValuationResult{PortfolioValuationError::None, std::move(summary)};
 }
 

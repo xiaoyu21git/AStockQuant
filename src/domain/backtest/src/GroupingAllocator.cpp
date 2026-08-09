@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <utility>
+#include <foundation/log/logging.hpp>
 
 namespace astock::domain::backtest::grouping_allocation {
 
@@ -11,9 +12,11 @@ GroupingAllocationResult QuantileGroupingAllocator::build(
     std::vector<RankedInstrument> ranked) const
 {
     if (!spec.isValid()) {
+        INTERNAL_ERROR_STREAM << "[GroupingAllocator] Invalid allocation spec";
         return GroupingAllocationResult{GroupingAllocationError::InvalidInput, std::nullopt};
     }
     if (ranked.empty()) {
+        INTERNAL_WARN_STREAM << "[GroupingAllocator] Empty universe";
         return GroupingAllocationResult{GroupingAllocationError::EmptyUniverse, std::nullopt};
     }
 

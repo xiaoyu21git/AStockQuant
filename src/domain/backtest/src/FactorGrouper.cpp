@@ -4,6 +4,7 @@
 #include <stdexcept>
 #include <sstream>
 #include <iomanip>
+#include <foundation/log/logging.hpp>
 
 namespace domain::backtest {
 
@@ -204,7 +205,11 @@ std::vector<FactorGroup> FactorGrouper::group(
     GroupingMethod method,
     int numGroups,
     const std::vector<double>& customThresholds) {
-    
+
+    INTERNAL_INFO_STREAM << "[FactorGrouper] Grouping " << factorValues.size()
+                         << " stocks into " << numGroups << " groups, method="
+                         << static_cast<int>(method);
+
     switch (method) {
         case GroupingMethod::QUANTILE:
             return groupByQuantile(factorValues, numGroups);
@@ -213,6 +218,8 @@ std::vector<FactorGroup> FactorGrouper::group(
         case GroupingMethod::CUSTOM:
             return groupByCustomRules(factorValues, customThresholds);
         default:
+            INTERNAL_ERROR_STREAM << "[FactorGrouper] Unknown grouping method: "
+                                  << static_cast<int>(method);
             throw std::invalid_argument("Unknown grouping method");
     }
 }
