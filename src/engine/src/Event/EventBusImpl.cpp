@@ -57,6 +57,7 @@ EventBusImpl::~EventBusImpl() {
 
 PublishResult EventBusImpl::publish(std::unique_ptr<Event> evt) {
     if (!evt) {
+        INTERNAL_ERROR_STREAM << "[EventBus] publish failed: null event";
         return PublishResult{PublishError::DISPATCHER_NOT_RUNNING, "Null event"};
     }
     
@@ -619,8 +620,10 @@ void EventBusImpl::process_engine_event(Event* event) {
             if (callback) {
                 try {
                     callback(event->clone());
+                } catch (const std::exception& e) {
+                    INTERNAL_ERROR_STREAM << "[EventBus] Engine subscriber callback threw: " << e.what();
                 } catch (...) {
-                    // 记录错误但继续处理
+                    INTERNAL_ERROR_STREAM << "[EventBus] Engine subscriber callback threw unknown exception";
                 }
             }
         }
@@ -651,8 +654,10 @@ void EventBusImpl::process_format_event(const engine::EventFormat& event) {
             if (subscription.handler) {
                 try {
                     subscription.handler(event);
+                } catch (const std::exception& e) {
+                    INTERNAL_ERROR_STREAM << "[EventBus] Format subscriber callback threw: " << e.what();
                 } catch (...) {
-                    // 记录错误但继续处理
+                    INTERNAL_ERROR_STREAM << "[EventBus] Format subscriber callback threw unknown exception";
                 }
             }
         }
