@@ -473,8 +473,13 @@ QString StrategyBridge::add(const QVariantMap& payload)
         emit operationFailed(kInvalidArgumentCode, m_err);
         return {};
     }
-    if (!isRequiredStrategyParametersShapeValid(parameters)) {
-        setErr(QStringLiteral("add parameters must include rule_profile and rule_composer_state objects"));
+    if (!isVariantMapObject(parameters, QString::fromLatin1(kRuleProfileKey))) {
+        setErr(QStringLiteral("add: parameters 缺少 rule_profile 对象 (规则配置)"));
+        emit operationFailed(kInvalidArgumentCode, m_err);
+        return {};
+    }
+    if (!isVariantMapObject(parameters, QString::fromLatin1(kRuleComposerStateKey))) {
+        setErr(QStringLiteral("add: parameters 缺少 rule_composer_state 对象 (规则编辑器状态)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return {};
     }
@@ -488,12 +493,12 @@ QString StrategyBridge::add(const QVariantMap& payload)
     }
     const BridgeUpsertRequest request = parseReq(payload);
     if (!request.factorIds().valid) {
-        setErr(QStringLiteral("add factorIds contains invalid value"));
+        setErr(QStringLiteral("add: factorIds 含无效值 (空字符串或非字符串元素)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return {};
     }
     if (!request.ruleIds().valid) {
-        setErr(QStringLiteral("add ruleIds contains invalid value"));
+        setErr(QStringLiteral("add: ruleIds 含无效值 (零值或非数字元素)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return {};
     }
@@ -568,19 +573,24 @@ bool StrategyBridge::update(const QVariantMap& payload)
         emit operationFailed(kInvalidArgumentCode, m_err);
         return false;
     }
-    if (!isRequiredStrategyParametersShapeValid(parameters)) {
-        setErr(QStringLiteral("update parameters must include rule_profile and rule_composer_state objects"));
+    if (!isVariantMapObject(parameters, QString::fromLatin1(kRuleProfileKey))) {
+        setErr(QStringLiteral("update: parameters 缺少 rule_profile 对象 (规则配置)"));
+        emit operationFailed(kInvalidArgumentCode, m_err);
+        return false;
+    }
+    if (!isVariantMapObject(parameters, QString::fromLatin1(kRuleComposerStateKey))) {
+        setErr(QStringLiteral("update: parameters 缺少 rule_composer_state 对象 (规则编辑器状态)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return false;
     }
     const BridgeUpsertRequest request = parseReq(payload);
     if (!request.factorIds().valid) {
-        setErr(QStringLiteral("update factorIds contains invalid value"));
+        setErr(QStringLiteral("update: factorIds 含无效值 (空字符串或非字符串元素)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return false;
     }
     if (!request.ruleIds().valid) {
-        setErr(QStringLiteral("update ruleIds contains invalid value"));
+        setErr(QStringLiteral("update: ruleIds 含无效值 (零值或非数字元素)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return false;
     }

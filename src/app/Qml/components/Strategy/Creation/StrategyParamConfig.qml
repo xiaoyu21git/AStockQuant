@@ -1536,61 +1536,77 @@ Rectangle {
     }
 
     function decorateParameters(sourceParameters) {
-        var merged = ({})
-        var source = sourceParameters || ({})
-        for (var key in source) {
-            merged[key] = source[key]
+        try {
+            var merged = ({})
+            var source = sourceParameters || ({})
+            for (var key in source) {
+                merged[key] = source[key]
+            }
+            mergeImportedFactorContext(merged, root.strategyParameters)
+            mergeImportedFactorContext(merged, source)
+
+            // 核心结构 — 必须为有效对象, 否则 C++ add/update 校验失败
+            var composerState = buildRuleComposerStatePayload()
+            var ruleProfile = buildRuleProfilePayload(source)
+            merged.rule_composer_state = (composerState && typeof composerState === "object") ? composerState : { version: 1, stages: [] }
+            merged.rule_profile = (ruleProfile && typeof ruleProfile === "object") ? ruleProfile : { version: 1, strategyProfile: {}, ruleComposerState: merged.rule_composer_state }
+
+            merged.execution_policy = buildExecutionPolicyPayload(source)
+            merged.backtest_assumptions = buildBacktestAssumptionsPayload(source)
+
+            var normalizedFactorOverlay = normalizeFactorOverlay(root.factorOverlay, merged)
+            if (normalizedFactorOverlay.enabled && normalizedFactorOverlay.allocations.length > 0) {
+                merged.factor_overlay = normalizedFactorOverlay
+                merged.factorIds = normalizedFactorOverlay.allocations.map(function(a) { return String(a.factor_id || "").trim() })
+            } else {
+                delete merged.factor_overlay
+                delete merged.factorIds
+            }
+
+            // 清除旧字段 — 清理顶层冗余键, 实际值已封装在 rule_profile 中
+            delete merged.stopLossPercent
+            delete merged.takeProfitPercent
+            delete merged.positionSize
+            delete merged.rebalanceDays
+            delete merged.maxDrawdownLimit
+            delete merged.longTrendPeriod
+            delete merged.breakoutLookbackPeriod
+            delete merged.breakoutThreshold
+            delete merged.adxPeriod
+            delete merged.adxThreshold
+            delete merged.exitMaPeriod
+            delete merged.atrMultiplier
+            delete merged.bollPeriod
+            delete merged.bollStd
+            delete merged.reversionThreshold
+            delete merged.momentumPeriod
+            delete merged.spreadThreshold
+            delete merged.featureWindow
+            delete merged.predictionDays
+            delete merged.trainingDays
+            delete merged.confidenceThreshold
+            delete merged.factorTypes
+            delete merged.eventTypes
+            delete merged.timeframe
+            delete merged.turnoverLimit
+            delete merged.slippageLimit
+            delete merged.level1Breaker
+            delete merged.level2Breaker
+            delete merged.level3Breaker
+            delete merged.factor_allocations
+            delete merged.allocations
+            delete merged.portfolio_allocations_json
+            delete merged.portfolio_factor_ids
+            delete merged.portfolio_factor_count
+            return merged
+        } catch (e) {
+            console.error("decorateParameters 异常:", e)
+            // 返回最小有效结构, 确保 C++ 校验至少能通过形状检查
+            return {
+                rule_composer_state: { version: 1, stages: [] },
+                rule_profile: { version: 1, strategyProfile: {}, ruleComposerState: { version: 1, stages: [] } }
+            }
         }
-        mergeImportedFactorContext(merged, root.strategyParameters)
-        mergeImportedFactorContext(merged, source)
-        merged.rule_composer_state = buildRuleComposerStatePayload()
-        merged.rule_profile = buildRuleProfilePayload(source)
-        merged.execution_policy = buildExecutionPolicyPayload(source)
-        merged.backtest_assumptions = buildBacktestAssumptionsPayload(source)
-        var normalizedFactorOverlay = normalizeFactorOverlay(root.factorOverlay, merged)
-        if (normalizedFactorOverlay.enabled && normalizedFactorOverlay.allocations.length > 0) {
-            merged.factor_overlay = normalizedFactorOverlay
-            // 同时提取顶层 factorIds — C++ readFactorIds 读的是顶层 key
-            merged.factorIds = normalizedFactorOverlay.allocations.map(function(a) { return String(a.factor_id || "").trim() })
-        } else {
-            delete merged.factor_overlay
-            delete merged.factorIds
-        }
-        delete merged.stopLoss
-        delete merged.takeProfit
-        delete merged.positionSize
-        delete merged.rebalanceDays
-        delete merged.maxDrawdownLimit
-        delete merged.longTrendPeriod
-        delete merged.breakoutLookbackPeriod
-        delete merged.breakoutThreshold
-        delete merged.adxPeriod
-        delete merged.adxThreshold
-        delete merged.exitMaPeriod
-        delete merged.atrMultiplier
-        delete merged.bollPeriod
-        delete merged.bollStd
-        delete merged.reversionThreshold
-        delete merged.momentumPeriod
-        delete merged.spreadThreshold
-        delete merged.featureWindow
-        delete merged.predictionDays
-        delete merged.trainingDays
-        delete merged.confidenceThreshold
-        delete merged.factorTypes
-        delete merged.eventTypes
-        delete merged.timeframe
-        delete merged.turnoverLimit
-        delete merged.slippageLimit
-        delete merged.level1Breaker
-        delete merged.level2Breaker
-        delete merged.level3Breaker
-        delete merged.factor_allocations
-        delete merged.allocations
-        delete merged.portfolio_allocations_json
-        delete merged.portfolio_factor_ids
-        delete merged.portfolio_factor_count
-        return merged
     }
 
     function normalizedRuleTemplatePhase(phase) {
@@ -1867,7 +1883,12 @@ Rectangle {
     }
 
     function cloneRuleComposerStages() {
-        return JSON.parse(JSON.stringify(root.ruleComposerStages || []))
+        try {
+            return JSON.parse(JSON.stringify(root.ruleComposerStages || []))
+        } catch (e) {
+            console.error("cloneRuleComposerStages JSON 序列化失败:", e, "ruleComposerStages 长度:", (root.ruleComposerStages || []).length)
+            return []
+        }
     }
 
     function resolveSuggestionTargetLocation(suggestion, stages) {
@@ -2236,6 +2257,9 @@ Rectangle {
         assignIfPresent("minWeightPerStock", ["minWeightPerStock"], Number)
         assignIfPresent("weightScheme", ["weightScheme"], Number)
         assignIfPresent("rebalanceFrequency", ["rebalanceFrequency"], Number)
+        assignIfPresent("stopLossPercent", ["stopLossPercent"], Number)
+        assignIfPresent("takeProfitPercent", ["takeProfitPercent"], Number)
+        assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
 
         if (normalizedStrategyTypeIndex === 0) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
@@ -2378,7 +2402,8 @@ Rectangle {
         Qt.callLater(function() {
             root.suppressRuleComposerReset = false
             // 重新加载当前策略类型的参数（切换类型时被 suppress 跳过了）
-            loadParamConfigs({})
+            // v0.16.0 修复: 传入 mappedValues 保留已编辑的参数值, 避免 maxDrawdownLimit 等被默认值覆盖
+            loadParamConfigs(mappedValues)
         })
         root.advancedOptionsChanged(root.enableAdvancedOptions)
         emitValidationState(currentParameterValidationErrors())

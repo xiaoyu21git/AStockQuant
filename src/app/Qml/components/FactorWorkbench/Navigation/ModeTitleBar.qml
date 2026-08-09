@@ -78,38 +78,48 @@ Rectangle {
             }
         }
         
-        Item { Layout.fillWidth: true }
+        // 模式切换按钮 — 可横向滚动，防止溢出
+        Flickable {
+            id: modeButtonsFlickable
+            Layout.fillWidth: true
+            Layout.preferredHeight: 40
+            contentWidth: modeButtonsRow.implicitWidth
+            clip: true
+            flickableDirection: Flickable.HorizontalFlick
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentWidth > width
 
-        // 模式切换按钮
-        Row {
-            spacing: 8
-            
-            Repeater {
-                model: root.modeOptions
-                
-                delegate: Rectangle {
-                    readonly property string modeValue: root.resolveModeValue(modelData)
-                    readonly property string modeLabel: root.resolveModeLabel(modelData)
+            Row {
+                id: modeButtonsRow
+                spacing: 8
 
-                    width: Math.max(root.modeButtonMinWidth, modeLabelText.implicitWidth + 24)
-                    height: 36
-                    radius: 8
-                    color: currentMode === modeValue ? "#3B82F6" : "transparent"
-                    border.width: currentMode === modeValue ? 0 : 1
-                    border.color: "#334155"
-                    
-                    Text {
-                        id: modeLabelText
-                        anchors.centerIn: parent
-                        text: modeLabel
-                        font.pixelSize: 14
-                        color: currentMode === modeValue ? "white" : "#F1F5F9"
-                    }
-                    
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.modeSelected(modeValue)
+                Repeater {
+                    model: root.modeOptions
+
+                    delegate: Rectangle {
+                        readonly property string modeValue: root.resolveModeValue(modelData)
+                        readonly property string modeLabel: root.resolveModeLabel(modelData)
+
+                        width: Math.max(root.modeButtonMinWidth, modeLabelText.implicitWidth + 24)
+                        height: 36
+                        radius: 8
+                        color: currentMode === modeValue ? "#3B82F6" : "transparent"
+                        border.width: currentMode === modeValue ? 0 : 1
+                        border.color: "#334155"
+
+                        Text {
+                            id: modeLabelText
+                            anchors.centerIn: parent
+                            text: modeLabel
+                            font.pixelSize: 14
+                            color: currentMode === modeValue ? "white" : "#F1F5F9"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.modeSelected(modeValue)
+                        }
                     }
                 }
             }

@@ -1038,6 +1038,28 @@ Page {
 
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
 
+        // ── 诊断: 参数保存前转储关键字段 (v0.16.0) ──
+        var diagParams = strategyData.parameters || ({})
+        var diagRP = diagParams.rule_profile || ({})
+        console.log("[参数保存诊断]",
+            "rule_profile存在:", typeof diagParams.rule_profile === "object",
+            "rule_profile.maxDrawdownLimit:", diagRP.maxDrawdownLimit,
+            "rule_profile.stopLossPercent:", diagRP.stopLossPercent,
+            "rule_profile.takeProfitPercent:", diagRP.takeProfitPercent,
+            "rule_composer_state存在:", typeof diagParams.rule_composer_state === "object",
+            "rule_composer_state.stages数量:", (diagParams.rule_composer_state && diagParams.rule_composer_state.stages) ? diagParams.rule_composer_state.stages.length : -1,
+            "顶层maxDrawdownLimit:", diagParams.maxDrawdownLimit,
+            "顶层stopLossPercent:", diagParams.stopLossPercent)
+
+        // ── 保存前校验 (v0.16.0 加固) ──
+        var paramsCheck = validateParametersForSave(strategyData)
+        if (!paramsCheck.valid) {
+            console.error("参数保存前校验失败:", paramsCheck.reason)
+            showErrorDialog(paramsCheck.reason)
+            isCreating = false
+            return
+        }
+
         isCreating = true
         creationStatus = strategyService.tr("strategyCreation.strategyCreatedSuccess")
 
@@ -1101,6 +1123,33 @@ Page {
         successDialog.open()
     }
     
+    // ── 保存前参数校验 (v0.16.0) ──
+    function validateParametersForSave(strategyData) {
+        if (!strategyData || typeof strategyData !== "object") {
+            return { valid: false, reason: "策略数据为空，无法保存" }
+        }
+        if (!strategyData.strategyTypeIndex || Number(strategyData.strategyTypeIndex) < 0) {
+            return { valid: false, reason: "策略类型未选择或无效" }
+        }
+        if (!strategyData.strategyBehaviorKind === undefined || strategyData.strategyBehaviorKind === null || Number(strategyData.strategyBehaviorKind) < 0) {
+            return { valid: false, reason: "策略行为类型无效" }
+        }
+        var params = strategyData.parameters
+        if (!params || typeof params !== "object" || Array.isArray(params)) {
+            return { valid: false, reason: "策略参数为空，请完成参数配置后再保存" }
+        }
+        if (!params.rule_profile || typeof params.rule_profile !== "object") {
+            return { valid: false, reason: "策略规则配置(rule_profile)缺失 — 请重新进入编辑页或刷新后重试" }
+        }
+        if (!params.rule_composer_state || typeof params.rule_composer_state !== "object") {
+            return { valid: false, reason: "策略规则编辑器状态(rule_composer_state)缺失 — 请重新进入编辑页或刷新后重试" }
+        }
+        if (!params.rule_composer_state.stages || !Array.isArray(params.rule_composer_state.stages)) {
+            return { valid: false, reason: "规则编辑器阶段数据缺失 — 请至少配置一条规则后再保存" }
+        }
+        return { valid: true, reason: "" }
+    }
+
     // 显示错误对话框
     function showErrorDialog(message) {
         errorDialog.errorMessage = message
