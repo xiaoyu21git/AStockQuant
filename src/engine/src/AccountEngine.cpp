@@ -120,9 +120,13 @@ void AccountEngine::onCash(const AccountInfo& a) {
         m_cachedAccount = a;
         m_cacheValid = true;
     }
-    INTERNAL_DEBUG_STREAM << "[AccountEngine] Cash updated: available=" << a.availableCash
-                          << " totalAsset=" << a.totalAsset
-                          << " marketValue=" << a.marketValue;
+    m_positionLogThrottle++;
+    if (m_positionLogThrottle % 50 == 1) {
+        INTERNAL_DEBUG_STREAM << "[AccountEngine] Cash updated: available=" << a.availableCash
+                              << " totalAsset=" << a.totalAsset
+                              << " marketValue=" << a.marketValue
+                              << " (throttle #" << m_positionLogThrottle << ")";
+    }
     if (m_onDataChanged) m_onDataChanged();
 }
 
@@ -132,8 +136,13 @@ void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
         for (const auto& p : positions)
             m_cachedPositions[p.symbol] = p;
     }
-    INTERNAL_DEBUG_STREAM << "[AccountEngine] Position update: " << positions.size()
-                          << " positions, cache size=" << m_cachedPositions.size();
+    // 节流: 每 50 次才打印一次日志
+    m_positionLogThrottle++;
+    if (m_positionLogThrottle % 50 == 1) {
+        INTERNAL_DEBUG_STREAM << "[AccountEngine] Position update: " << positions.size()
+                              << " positions, cache size=" << m_cachedPositions.size()
+                              << " (throttle #" << m_positionLogThrottle << ")";
+    }
     if (m_onDataChanged) m_onDataChanged();
 }
 

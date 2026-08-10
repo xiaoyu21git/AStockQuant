@@ -70,15 +70,28 @@ Item {
         return "↑" + up + "↓" + (cnt - up)
     }
 
+    // ── 初始加载: 同步拉取 → 立即重读, 不依赖异步信号 ──
     Component.onCompleted: {
         if (loadSectors()) return
-        if (Bridge.MarketDataBridge && typeof Bridge.MarketDataBridge.fetchSectorHeat === "function")
+        if (Bridge.MarketDataBridge && typeof Bridge.MarketDataBridge.fetchSectorHeat === "function") {
             Bridge.MarketDataBridge.fetchSectorHeat()
+            loadSectors()
+        }
     }
+    // ── 后台线程推送: 收到信号后重读数据 ──
     Connections {
         target: Bridge.MarketDataBridge
         enabled: Bridge.MarketDataBridge !== null
         function onSectorHeatDataChanged() { loadSectors() }
+    }
+    // ── 页面切回: 同步刷新 ──
+    onVisibleChanged: {
+        if (visible) {
+            if (Bridge.MarketDataBridge && typeof Bridge.MarketDataBridge.fetchSectorHeat === "function") {
+                Bridge.MarketDataBridge.fetchSectorHeat()
+                loadSectors()
+            }
+        }
     }
 
     Rectangle {
@@ -108,7 +121,18 @@ Item {
                         }
                     }
                 }
-                Text { anchors.right: parent.right; text:"🔄"; font.pixelSize:12; color:"#3b82f6" }
+                Text {
+                    anchors.right: parent.right
+                    text: "🔄"; font.pixelSize: 12; color: "#3b82f6"
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (Bridge.MarketDataBridge && typeof Bridge.MarketDataBridge.fetchSectorHeat === "function")
+                                Bridge.MarketDataBridge.fetchSectorHeat()
+                        }
+                    }
+                }
             }
 
             // ── 主体: 左列表 + 右明细 ──

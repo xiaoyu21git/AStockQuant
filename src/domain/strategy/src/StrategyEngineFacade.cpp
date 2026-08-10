@@ -786,6 +786,48 @@ void StrategyEngine::startLiveLoop()
                 m_dailyScheduler->setEodTriggerTime(triggerTime);
                 INTERNAL_INFO_STREAM << "[启动] DailyEod 触发时间 " << triggerTime;
             }
+            // 注入交易日查询: 从 DB trade_calendar 表查，DB不可用直接报错不兜底
+            m_dailyScheduler->setTradingDayProvider([]() -> std::int64_t {
+                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                if (!db || !db->isOpen()) {
+                    INTERNAL_ERROR_STREAM << "[DailyEod] DB连接不可用，无法查询当前交易日";
+                    return 0;
+                }
+                auto now = std::chrono::system_clock::now();
+                auto tt  = std::chrono::system_clock::to_time_t(now);
+                struct tm local;
+#if defined(_WIN32) || defined(_WIN64)
+                localtime_s(&local, &tt);
+#else
+                localtime_r(&tt, &local);
+#endif
+                std::int64_t today = (local.tm_year + 1900) * 10000LL
+                                   + (local.tm_mon + 1) * 100LL
+                                   + local.tm_mday;
+                astock::infrastructure::database::MarketDataRepository repo(db);
+                if (repo.isTradingDay(std::to_string(today)))
+                    return today;
+                auto prev = repo.queryPrevTradingDay(std::to_string(today));
+                if (!prev.empty())
+                    return std::stoll(prev);
+                INTERNAL_ERROR_STREAM << "[DailyEod] trade_calendar 查不到" << today << "的交易日";
+                return 0;
+            });
+            m_dailyScheduler->setPrevTradingDayProvider([](const std::string& date) -> std::string {
+                auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+                if (!db || !db->isOpen()) {
+                    INTERNAL_ERROR_STREAM << "[DailyEod] DB连接不可用，无法查询上一交易日";
+                    return {};
+                }
+                astock::infrastructure::database::MarketDataRepository repo(db);
+                return repo.queryPrevTradingDay(date);
+            });
+            // K线缺口检测: 读 dataSyncDay
+            m_dailyScheduler->setDataSyncDayProvider([persistPath]() -> int {
+                auto json = foundation::json::JsonFacade::parseFile(persistPath);
+                if (json.isNull() || !json.isObject() || !json.has("dataSyncDay")) return 0;
+                try { return json.get("dataSyncDay").asInt(); } catch (...) { return 0; }
+            });
             m_dailyScheduler->setEvalCallback(
                 [this](const std::string& tradingDay, bool isCompensation) -> EodEvaluationStatus {
                     return evaluateEndOfDay(tradingDay, isCompensation);

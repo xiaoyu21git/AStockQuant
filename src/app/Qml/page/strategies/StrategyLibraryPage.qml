@@ -35,7 +35,6 @@ Rectangle {
     property bool showBacktestWorkbench: false
     property bool showPerformance: false
     property bool showTuning: false
-    property bool showSignalOutput: false
     property string backtestWorkbenchStatusText: ""
     property bool backtestWorkbenchLoadedOnce: false
     property var backtestResult: ({})
@@ -1014,12 +1013,11 @@ Rectangle {
 
         NavigationComponents.ModeTitleBar {
             Layout.fillWidth: true
-            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
+            currentMode: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
                 ? "library"
                 : (strategyLibraryPage.backtestWorkbenchMode === "analysis" ? "backtest_analysis"
                     : strategyLibraryPage.showPerformance ? "performance"
                     : strategyLibraryPage.showTuning ? "tuning"
-                    : strategyLibraryPage.showSignalOutput ? "signal_output"
                     : "backtest")
             showBackButton: false
             modeOptions: [
@@ -1027,31 +1025,27 @@ Rectangle {
                 { value: "backtest", label: "策略回测" },
                 { value: "backtest_analysis", label: "回测分析" },
                 { value: "tuning", label: "参数调优" },
-                { value: "performance", label: "策略绩效" },
-                { value: "signal_output", label: "信号输出" }
+                { value: "performance", label: "策略绩效" }
             ]
             modeTitleMap: {
                 "library": "策略库",
                 "backtest": "策略回测",
                 "backtest_analysis": "回测分析",
                 "tuning": "参数调优",
-                "performance": "策略绩效",
-                "signal_output": "信号输出"
+                "performance": "策略绩效"
             }
             modeSubtitleMap: {
                 "library": "浏览并管理策略，新建入口保留在策略库页。",
                 "backtest": "在策略库内直接配置并运行当前策略回测。",
                 "backtest_analysis": "独立展示最近回测与历史对比结果，不承载回测配置。",
                 "tuning": "自动搜索最优参数组合，提升策略绩效。",
-                "performance": "查看策略历史回测记录与绩效对比。",
-                "signal_output": "配置信号输出格式与推送目标，查看信号历史记录。"
+                "performance": "查看策略历史回测记录与绩效对比。"
             }
             onModeSelected: function(mode) {
                 if (mode === "library") {
                     strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.showBacktestWorkbench = false
                     strategyLibraryPage.showTuning = false
-                    strategyLibraryPage.showSignalOutput = false
                     return
                 }
                 if (mode === "performance") {
@@ -1073,13 +1067,6 @@ Rectangle {
                     strategyLibraryPage.openBacktestWorkbench(strategyLibraryPage.selectedStrategyId, "workbench")
                     return
                 }
-                if (mode === "signal_output") {
-                    strategyLibraryPage.showPerformance = false
-                    strategyLibraryPage.showBacktestWorkbench = false
-                    strategyLibraryPage.showTuning = false
-                    strategyLibraryPage.showSignalOutput = true
-                    return
-                }
                 if (mode === "backtest_analysis") {
                     strategyLibraryPage.showPerformance = false
                     strategyLibraryPage.showBacktestWorkbench = false
@@ -1092,9 +1079,9 @@ Rectangle {
 
         ScrollView {
             id: scrollView
-            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
+            visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
             Layout.fillWidth: true
-            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
+            Layout.fillHeight: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
@@ -1124,7 +1111,7 @@ Rectangle {
                 }
 
                 Item {
-                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning && !strategyLibraryPage.showSignalOutput
+                    visible: !strategyLibraryPage.showBacktestWorkbench && !strategyLibraryPage.showPerformance && !strategyLibraryPage.showTuning
                     Layout.fillWidth: true
                     Layout.preferredHeight: spacingXLarge
                 }
@@ -1165,26 +1152,6 @@ Rectangle {
                 active: strategyLibraryPage.showTuning
                 visible: status === Loader.Ready && strategyLibraryPage.showTuning
                 source: "qrc:/page/strategies/ParameterTuningResultPanel.qml"
-            }
-        }
-
-        // ── 信号输出面板 (v0.16.0) ──
-        Item {
-            Layout.fillWidth: true
-            Layout.fillHeight: strategyLibraryPage.showSignalOutput
-            visible: strategyLibraryPage.showSignalOutput
-
-            Loader {
-                id: signalOutputLoader
-                anchors.fill: parent
-                asynchronous: true
-                active: strategyLibraryPage.showSignalOutput
-                visible: status === Loader.Ready && strategyLibraryPage.showSignalOutput
-                source: "../../components/Strategy/SignalOutputPanel.qml"
-                onLoaded: {
-                    if (!item) return
-                    item.selectedStrategyId = strategyLibraryPage.selectedStrategyId
-                }
             }
         }
 

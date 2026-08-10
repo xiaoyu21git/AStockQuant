@@ -79,15 +79,33 @@ Rectangle {
         }
         
         // 模式切换按钮 — 可横向滚动，防止溢出
+        // 显式计算 contentWidth: Row.implicitWidth 在 Repeater 动态子项场景下不可靠
         Flickable {
             id: modeButtonsFlickable
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
-            contentWidth: modeButtonsRow.implicitWidth
+            Layout.preferredHeight: 48
+            // 显式计算避免 Row.implicitWidth 在 Repeater 场景下为 0
+            contentWidth: {
+                var w = 0, kids = modeButtonsRow.children
+                for (var i = 0; i < kids.length; i++) w += kids[i].width
+                return w + Math.max(0, kids.length - 1) * modeButtonsRow.spacing
+            }
             clip: true
             flickableDirection: Flickable.HorizontalFlick
             boundsBehavior: Flickable.StopAtBounds
             interactive: contentWidth > width
+
+            ScrollBar.horizontal: ScrollBar {
+                id: modeScrollBar
+                policy: modeButtonsFlickable.contentWidth > modeButtonsFlickable.width
+                    ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                height: 6
+                contentItem: Rectangle {
+                    implicitHeight: 6
+                    radius: 3
+                    color: "#64748B"
+                }
+            }
 
             Row {
                 id: modeButtonsRow
@@ -100,7 +118,8 @@ Rectangle {
                         readonly property string modeValue: root.resolveModeValue(modelData)
                         readonly property string modeLabel: root.resolveModeLabel(modelData)
 
-                        width: Math.max(root.modeButtonMinWidth, modeLabelText.implicitWidth + 24)
+                        implicitWidth: Math.max(root.modeButtonMinWidth, modeLabelText.implicitWidth + 24)
+                        width: implicitWidth
                         height: 36
                         radius: 8
                         color: currentMode === modeValue ? "#3B82F6" : "transparent"

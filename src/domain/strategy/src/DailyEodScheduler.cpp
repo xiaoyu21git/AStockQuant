@@ -26,24 +26,34 @@ DailyEodScheduler::~DailyEodScheduler() {
 void DailyEodScheduler::start() {
     loadLastEvalDay();
 
-    // ── 补单: 启动时始终补偿上一交易日 ──
     auto today = getCurrentTradingDay();
-    std::string todayStr = std::to_string(today);
-    std::string prevDay = getPreviousTradingDay(todayStr);
-    if (!prevDay.empty()) {
-        auto prev = std::stoll(prevDay);
-        INTERNAL_INFO_STREAM << "[DailyEod] 启动补单: " << prev << " lastEval=" << m_lastEvalDay.load();
-        doEvaluate(prevDay);
+    if (today == 0) {
+        INTERNAL_ERROR_STREAM << "[DailyEod] 无法获取当前交易日, 调度器不启动";
+        return;
     }
+    std::string todayStr = std::to_string(today);
+    int mins = getCurrentLocalMinutes();
 
-    // ── 启动时: 如果已过EOD触发时间且今天未评估，立即评估 ──
-    {
-        int mins = getCurrentLocalMinutes();
-        if (mins >= m_eodTriggerMinute && today > m_lastEvalDay.load()) {
-            INTERNAL_INFO_STREAM << "[DailyEod] 启动时已过触发时间 " << m_eodTriggerMinute << "min, 立即补评估: " << todayStr;
-            doEvaluate(todayStr);
+    // ── 分支1: 补单窗口 (0:00–9:30) → 补偿未评估的交易日 ──
+    if (mins < kCompensationEnd) {
+        std::string prevDay = getPreviousTradingDay(todayStr);
+        if (!prevDay.empty()) {
+            auto prev = std::stoll(prevDay);
+            if (prev > m_lastEvalDay.load()) {
+                INTERNAL_INFO_STREAM << "[DailyEod] 补单窗口(" << mins << "min): "
+                    << "补偿 " << prev << " > lastEval=" << m_lastEvalDay.load();
+                doEvaluate(prevDay);
+            }
         }
     }
+    // ── 分支2: EOD 窗口 (triggerMin ~ triggerMin+10min, 如14:50–15:00), 严格限制 ──
+    else if (mins >= m_eodTriggerMinute && mins < m_eodTriggerMinute + 10
+             && today > m_lastEvalDay.load()) {
+        INTERNAL_INFO_STREAM << "[DailyEod] EOD窗口(" << mins << "min >= "
+            << m_eodTriggerMinute << "min): 立即评估 " << todayStr;
+        doEvaluate(todayStr);
+    }
+    // ── 分支3: 其他时间 → 只启动轮询, 不做任何评估 ──
 
     // 启动轮询检查: 不依赖 gmsdk, 到 m_eodTriggerMinute 即触发
     if (!m_polling.load()) {
@@ -66,6 +76,12 @@ void DailyEodScheduler::start() {
 void DailyEodScheduler::stop() {
     m_eodRegistered.store(false, std::memory_order_release);
     m_polling.store(false);
+    // 停轮询线程池: 唤醒 worker 并等待退出 (最多 5s, sleep 分片已改为每秒检查标志位)
+    if (m_pollExecutor) {
+        m_pollExecutor->shutdown(false);
+        m_pollExecutor->awaitTermination(std::chrono::milliseconds(5000));
+        m_pollExecutor.reset();
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -76,22 +92,39 @@ void DailyEodScheduler::schedulePollCheck() {
     if (!m_polling.load()) return;
     int mins = getCurrentLocalMinutes();
     auto today = getCurrentTradingDay();
-    if (mins >= m_eodTriggerMinute && today > m_lastEvalDay.load()) {
+
+    // 可中断等待: 分片 sleep, 每秒检查 m_polling, 收到停止信号立即退出
+    auto interruptibleSleep = [this](int totalSec, int sliceSec, auto then) {
+        if (!m_polling.load()) return;
+        int elapsed = 0;
+        while (elapsed < totalSec && m_polling.load()) {
+            int step = (std::min)(sliceSec, totalSec - elapsed);
+            std::this_thread::sleep_for(std::chrono::seconds(step));
+            elapsed += step;
+        }
+        if (!m_polling.load()) return;
+        m_pollExecutor->post([this, then]() { then(); });
+    };
+
+    // 今天已评估 → 低频等待 (30分钟), 不需要密集轮询
+    if (today <= m_lastEvalDay.load()) {
+        interruptibleSleep(30 * 60, 5, [this]() { schedulePollCheck(); });
+        return;
+    }
+
+    if (mins >= m_eodTriggerMinute && mins < m_eodTriggerMinute + 10) {
         std::string todayStr = std::to_string(today);
         INTERNAL_INFO_STREAM << "[DailyEod] 轮询触发 " << todayStr
                              << " (" << mins << "min >= " << m_eodTriggerMinute << "min)";
         m_post([this, todayStr]() { doEvaluate(todayStr); });
-        // 当天已触发, 60分钟后恢复检查
-        m_pollExecutor->post([this]() {
-            std::this_thread::sleep_for(std::chrono::minutes(60));
-            schedulePollCheck();
-        });
+        // 触发后 60 分钟恢复检查 (此时 lastEvalDay 已更新, 走低频分支)
+        interruptibleSleep(60 * 60, 5, [this]() { schedulePollCheck(); });
+    } else if (mins >= m_eodTriggerMinute + 10) {
+        // 已过 EOD 窗口 (>15:00), 今天没评也不再评估, 低频等待
+        interruptibleSleep(30 * 60, 5, [this]() { schedulePollCheck(); });
     } else {
-        // 未到时间, 30秒后重试
-        m_pollExecutor->post([this]() {
-            std::this_thread::sleep_for(std::chrono::seconds(30));
-            schedulePollCheck();
-        });
+        // 未到触发时间, 30秒后重试
+        interruptibleSleep(30, 1, [this]() { schedulePollCheck(); });
     }
 }
 
@@ -103,10 +136,12 @@ void DailyEodScheduler::onEodTrigger(const std::string& tradingDay) {
     // 已停止, 不投递 (stop() 先设标志, 再停 executor)
     if (!m_eodRegistered.load(std::memory_order_acquire)) return;
 
-    // 检查是否已达到触发时间（EOD 回调可能在触发时间之后到，此时立即执行）
-    if (getCurrentLocalMinutes() < m_eodTriggerMinute) {
-        INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调到来但未到触发时间"
-            << " (当前=" << getCurrentLocalMinutes() << "min 触发=" << m_eodTriggerMinute << "min), 忽略";
+    // 严格时间窗口: 只在 [triggerMin, triggerMin+10) 内允许触发
+    int mins = getCurrentLocalMinutes();
+    if (mins < m_eodTriggerMinute || mins >= m_eodTriggerMinute + 10) {
+        INTERNAL_INFO_STREAM << "[DailyEod] EOD 回调但不在窗口内"
+            << " (当前=" << mins << "min 窗口=["
+            << m_eodTriggerMinute << "," << m_eodTriggerMinute+10 << ")), 忽略";
         return;
     }
 
@@ -139,6 +174,17 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
     INTERNAL_INFO_STREAM << "[DailyEod] 开始评估 tradingDay=" << tradingDay
                          << " isCompensation=" << isCompensation;
 
+    // ── K线数据缺口检测: dataSyncDay 落后 evalDay 超过2天 → 警告但不阻止 ──
+    if (m_getDataSyncDay) {
+        int syncDay = m_getDataSyncDay();
+        int gap = static_cast<int>(evalDay) - syncDay;
+        if (gap > 2) {
+            INTERNAL_WARN_STREAM << "[DailyEod] ⚠️ K线数据缺口 " << gap
+                << " 天! dataSyncDay=" << syncDay << " evalDay=" << evalDay
+                << " — 请先手动同步K线后再评估, 当前仍按现有数据执行";
+        }
+    }
+
     EodEvaluationStatus status = EodEvaluationStatus::Error;
     try {
         status = m_evalFn(tradingDay, isCompensation);
@@ -150,8 +196,18 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
         status = EodEvaluationStatus::Error;
     }
 
-    // 只在篮子已提交或无信号时持久化，其他状态允许补单重试
-    if (status == EodEvaluationStatus::Submitted) {
+    // 持久化策略:
+    //   正常EOD(非补单): Submitted/NoSignal/Skipped 都标记已评估, 防止轮询重复触发
+    //   补单: 仅 Submitted 持久化, 其余状态允许下次重试
+    bool shouldPersist = false;
+    if (!isCompensation) {
+        shouldPersist = (status == EodEvaluationStatus::Submitted
+                      || status == EodEvaluationStatus::NoSignal
+                      || status == EodEvaluationStatus::Skipped);
+    } else {
+        shouldPersist = (status == EodEvaluationStatus::Submitted);
+    }
+    if (shouldPersist) {
         m_lastEvalDay.store(evalDay);
         persistLastEvalDay();
     } else {
@@ -167,16 +223,11 @@ void DailyEodScheduler::doEvaluate(const std::string& tradingDay) {
 // ═══════════════════════════════════════════════════════════════════
 
 std::string DailyEodScheduler::getPreviousTradingDay(const std::string& date) {
-    // 本地计算: 减1天, 跳过周末
-    int y = std::stoi(date.substr(0,4)), m = std::stoi(date.substr(4,2)), d = std::stoi(date.substr(6,2));
-    struct tm t = {}; t.tm_year=y-1900; t.tm_mon=m-1; t.tm_mday=d;
-    time_t epoch = mktime(&t);
-    do { epoch -= 86400; struct tm prev; localtime_s(&prev, &epoch);
-         if (prev.tm_wday != 0 && prev.tm_wday != 6) {
-             char buf[16]; snprintf(buf,sizeof(buf),"%04d%02d%02d",prev.tm_year+1900,prev.tm_mon+1,prev.tm_mday);
-             return std::string(buf);
-         }
-    } while (true);
+    if (!m_getPrevTradingDay) {
+        INTERNAL_ERROR_STREAM << "[DailyEod] getPreviousTradingDay: PrevTradingDayFn 未注入!";
+        return {};
+    }
+    return m_getPrevTradingDay(date);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -196,17 +247,11 @@ int DailyEodScheduler::getCurrentLocalMinutes() {
 }
 
 std::int64_t DailyEodScheduler::getCurrentTradingDay() {
-    auto now = std::chrono::system_clock::now();
-    auto tt  = std::chrono::system_clock::to_time_t(now);
-    struct tm local;
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&local, &tt);
-#else
-    localtime_r(&tt, &local);
-#endif
-    return (local.tm_year + 1900) * 10000LL
-         + (local.tm_mon + 1) * 100LL
-         + local.tm_mday;
+    if (!m_getTradingDay) {
+        INTERNAL_ERROR_STREAM << "[DailyEod] getCurrentTradingDay: TradingDayFn 未注入!";
+        return 0;
+    }
+    return m_getTradingDay();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -216,33 +261,35 @@ std::int64_t DailyEodScheduler::getCurrentTradingDay() {
 void DailyEodScheduler::loadLastEvalDay() {
     if (m_persistPath.empty() || m_strategyId.empty()) return;
 
-    // 从统一 JSON 读取 strategyLastEval.<strategyId>
+    // 从统一 JSON 读取 eodExecuted.<strategyId>
     auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
     if (json.isNull() || !json.isObject()) return;
-    if (!json.has("strategyLastEval")) return;
-    auto evalMap = json.get("strategyLastEval");
-    if (!evalMap.isObject() || !evalMap.has(m_strategyId)) return;
 
-    try {
-        m_lastEvalDay.store(static_cast<std::int64_t>(evalMap.get(m_strategyId).asInt()));
-        INTERNAL_INFO_STREAM << "[DailyEod] 加载 lastEvalDay=" << m_lastEvalDay.load()
-                             << " strategyId=" << m_strategyId;
-    } catch (...) {
-        m_lastEvalDay.store(0);
+    if (json.has("eodExecuted")) {
+        auto evalMap = json.get("eodExecuted");
+        if (evalMap.isObject() && evalMap.has(m_strategyId)) {
+            try {
+                m_lastEvalDay.store(static_cast<std::int64_t>(evalMap.get(m_strategyId).asInt()));
+                INTERNAL_INFO_STREAM << "[DailyEod] 加载 eodExecuted." << m_strategyId
+                                     << "=" << m_lastEvalDay.load();
+            } catch (...) {
+                m_lastEvalDay.store(0);
+            }
+        }
     }
 }
 
 void DailyEodScheduler::persistLastEvalDay() {
     if (m_persistPath.empty() || m_strategyId.empty()) return;
 
-    // 读取现有 JSON，保留非 strategyLastEval 的顶层键
+    // 读取现有 JSON，保留非 EOD 的顶层键，合并旧键 strategyLastEval → 新键 eodExecuted
     auto root = foundation::json::JsonFacade::createObject();
     auto evalMap = foundation::json::JsonFacade::createObject();
     {
         auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
         if (!existing.isNull() && existing.isObject()) {
             for (const auto& key : existing.keys()) {
-                if (key == "strategyLastEval") {
+                if (key == "eodExecuted") {
                     // 保留其他策略的条目
                     auto oldMap = existing.get(key);
                     if (oldMap.isObject()) {
@@ -258,7 +305,7 @@ void DailyEodScheduler::persistLastEvalDay() {
     // 更新当前策略
     evalMap.set(m_strategyId, foundation::json::JsonFacade::createInt(
         static_cast<int>(m_lastEvalDay.load())));
-    root.set("strategyLastEval", evalMap);
+    root.set("eodExecuted", evalMap);
 
     // 原子写入: 先写临时文件, 再重命名
     std::string tmpPath = m_persistPath + ".tmp";

@@ -7,7 +7,9 @@
 #include <QVariantMap>
 #include <QHash>
 #include <QSet>
+#include <atomic>
 #include <deque>
+#include <thread>
 #include <unordered_map>
 
 #include "CandleDataModel.h"
@@ -147,6 +149,15 @@ private:
     int    m_lastSnapDepthHash = 0;
 
     QVariantList m_sectorHeatData;
+
+    // ── 板块热度推送: 专用工作线程拉取 gm 数据 → marshal 回主线程 emit 信号 ──
+    static constexpr int kSectorHeatIntervalSec = 30;
+    void startSectorHeatThread();
+    void stopSectorHeatThread();
+    void fetchSectorHeatInternal(QVariantList& result);
+    std::atomic<bool> m_sectorThreadRunning{false};
+    std::atomic<bool> m_sectorFetchRequested{false};
+    std::thread m_sectorThread;
 
     // 板块资金流向多日趋势缓存
     static constexpr int kSectorHeatHistoryDays = 5;

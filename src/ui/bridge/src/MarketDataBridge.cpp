@@ -25,6 +25,7 @@ namespace bridge {
 MarketDataBridge::MarketDataBridge(QObject* parent) : QObject(parent) {}
 
 MarketDataBridge::~MarketDataBridge() {
+    stopSectorHeatThread();
     if (m_tickSub.is_valid()) {
         auto bus = engine::get_engine_event_bus();
         if (bus) bus->unsubscribe(m_tickSub);
@@ -48,6 +49,9 @@ void MarketDataBridge::initialize() {
 
     emit initializedChanged();
     emit connectedChanged();
+
+    // 启动板块热度后台拉取线程
+    startSectorHeatThread();
 }
 
 void MarketDataBridge::initializeAsync() {
@@ -85,6 +89,44 @@ void MarketDataBridge::processTick(const QString& symbol) {
         (m_period == TimeShare || (m_period >= Min1 && m_period <= Min120))) {
         syncLiveData();
     }
+}
+
+// ── 板块热度后台线程 ──
+void MarketDataBridge::startSectorHeatThread() {
+    m_sectorThreadRunning = true;
+    m_sectorThread = std::thread([this]() {
+        // 首次拉取: 在工作线程直接调 gm SDK, 不阻塞主线程
+        {
+            QVariantList result;
+            fetchSectorHeatInternal(result);
+            QMetaObject::invokeMethod(this, [this, result]() {
+                m_sectorHeatData = result;
+                emit sectorHeatDataChanged();
+            }, Qt::QueuedConnection);
+        }
+        while (m_sectorThreadRunning) {
+            // 等待间隔, 但 m_sectorFetchRequested 可打断 (QML 手动刷新)
+            for (int i = 0; i < kSectorHeatIntervalSec && m_sectorThreadRunning; ++i) {
+                if (m_sectorFetchRequested.load()) break;
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+            if (!m_sectorThreadRunning) break;
+            m_sectorFetchRequested = false;
+
+            QVariantList result;
+            fetchSectorHeatInternal(result);  // 工作线程跑 gm SDK
+            QMetaObject::invokeMethod(this, [this, result]() {
+                m_sectorHeatData = result;
+                emit sectorHeatDataChanged();
+            }, Qt::QueuedConnection);
+        }
+    });
+}
+
+void MarketDataBridge::stopSectorHeatThread() {
+    m_sectorThreadRunning = false;
+    if (m_sectorThread.joinable())
+        m_sectorThread.join();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -753,96 +795,209 @@ void MarketDataBridge::syncLiveData() {
 // 热门板块数据
 // ═══════════════════════════════════════════════════════════════════
 
-void MarketDataBridge::fetchSectorHeat() {
-    QVariantList result;
+// ── gm SDK 拉取 (在调用线程执行) ──
+// 方案B: 直接查交易所行业指数 K 线获取板块涨跌，成分股只用于领涨名单
+void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
+    result.clear();
 
-    // 1. 获取申万一级行业 → 成分股
-    auto* cats = ::stk_get_industry_category("sw2021", 1);
-    if (!cats || cats->status() || cats->count() <= 0) {
-        INTERNAL_WARN_STREAM << "[MktBridge] stk_get_industry_category failed";
-        if (cats) cats->release();
-        m_sectorHeatData = result; emit sectorHeatDataChanged(); return;
-    }
+    // ── 交易所行业指数列表 (SHSE + SZSE) ──
+    struct SectorDef { const char* sym; const char* name; };
+    static const SectorDef kSectors[] = {
+        // 上证行业指数 (10个)
+        {"SHSE.000032", "能源"},
+        {"SHSE.000033", "材料"},
+        {"SHSE.000034", "工业"},
+        {"SHSE.000035", "可选消费"},
+        {"SHSE.000036", "主要消费"},
+        {"SHSE.000037", "医药卫生"},
+        {"SHSE.000038", "金融地产"},
+        {"SHSE.000039", "信息技术"},
+        {"SHSE.000040", "电信服务"},
+        {"SHSE.000041", "公用事业"},
+        // 深证行业指数 (16个)
+        {"SZSE.399231", "深证农林"},
+        {"SZSE.399232", "深证采矿"},
+        {"SZSE.399233", "深证制造"},
+        {"SZSE.399234", "深证水电"},
+        {"SZSE.399235", "深证建筑"},
+        {"SZSE.399236", "深证批零"},
+        {"SZSE.399237", "深证运输"},
+        {"SZSE.399238", "深证餐饮"},
+        {"SZSE.399239", "深证IT"},
+        {"SZSE.399240", "深证金融"},
+        {"SZSE.399241", "深证地产"},
+        {"SZSE.399242", "深证商务"},
+        {"SZSE.399243", "深证科研"},
+        {"SZSE.399244", "深证公共"},
+        {"SZSE.399248", "深证文化"},
+        {"SZSE.399249", "深证综企"},
+    };
+    constexpr int kSectorCount = sizeof(kSectors) / sizeof(kSectors[0]);
 
     struct StockInfo { std::string sym; std::string name; double chg; };
     struct SecData {
-        std::string name;
-        double chg = 0.0, netIn = 0.0, netInRate = 0.0;
+        double chg = 0, netIn = 0, netInRate = 0;
+        double indexAmount = 0;   // 实时成交额 (盘中用, 盘后被 money_flow 覆盖)
+        bool hasMoneyFlow = false; // true=netIn 来自 money_flow
         std::vector<StockInfo> leads;
         int stockCnt = 0;
     };
-    std::map<std::string, SecData> secMap;
-    std::vector<std::string> allSyms;
-    std::vector<std::string> symIndustry;
-    std::vector<std::string> allNames;
+    std::unordered_map<std::string, SecData> secMap;  // sectorName → data
+    std::vector<std::string> allSyms, symSector, allNames;  // 成分股聚合用
 
-    int catCount = std::min(cats->count(), 25);
-    for (size_t ci = 0; ci < static_cast<size_t>(catCount); ++ci) {
-        auto& cat = cats->at(ci);
-        std::string indCode(cat.industry_code), indName(cat.industry_name);
-        secMap[indName] = SecData{indName};
+    // ── ① 指数 K 线: 板块涨跌 + 实时成交额 ──
+    int idxOk = 0, idxRealtime = 0;
+    for (int i = 0; i < kSectorCount; ++i) {
+        double yesterdayClose = 0, todayPrice = 0, todayAmount = 0;
 
-        auto* stocks = ::stk_get_industry_constituents(indCode.c_str(), nullptr);
+        auto* dailyBars = ::history_bars_n(kSectors[i].sym, "1d", 1, nullptr, 0, nullptr, true, nullptr);
+        if (dailyBars && !dailyBars->status() && dailyBars->count() > 0)
+            yesterdayClose = dailyBars->at(0).close;
+        if (dailyBars) dailyBars->release();
+
+        auto* bar60s = ::history_bars_n(kSectors[i].sym, "60s", 1, nullptr, 0, nullptr, true, nullptr);
+        if (bar60s && !bar60s->status() && bar60s->count() > 0 && bar60s->at(0).close > 0) {
+            todayPrice = bar60s->at(0).close;
+            todayAmount = bar60s->at(0).amount;  // 实时成交额
+            idxRealtime++;
+        }
+        if (bar60s) bar60s->release();
+
+        double price = todayPrice > 0 ? todayPrice : yesterdayClose;
+        if (price > 0 && yesterdayClose > 0) {
+            double chg = (price - yesterdayClose) / yesterdayClose * 100.0;
+            secMap[kSectors[i].name].chg = chg;
+            secMap[kSectors[i].name].indexAmount = todayAmount;
+            secMap[kSectors[i].name].stockCnt = 1;
+            idxOk++;
+        } else {
+            secMap[kSectors[i].name] = SecData{};
+        }
+    }
+    INTERNAL_INFO_STREAM << "[MktBridge] ① index K-line done: " << idxOk << "/" << kSectorCount
+                         << " realtime60s=" << idxRealtime;
+
+    // ── ② 成分股: 领涨股榜单 ──
+    for (int i = 0; i < kSectorCount; ++i) {
+        auto* stocks = ::stk_get_index_constituents(kSectors[i].sym, nullptr);
         if (!stocks || stocks->status() || stocks->count() <= 0) {
-            if (stocks) stocks->release(); continue;
+            if (stocks) stocks->release();
+            continue;
         }
         int pick = std::min(stocks->count(), 5);
         for (int si = 0; si < pick; ++si) {
-            std::string sym(stocks->at(si).symbol);
-            std::string sname(stocks->at(si).sec_name);
-            allSyms.push_back(sym); symIndustry.push_back(indName); allNames.push_back(sname);
+            allSyms.push_back(std::string(stocks->at(si).symbol));
+            symSector.push_back(kSectors[i].name);
         }
         stocks->release();
     }
-    cats->release();
-    if (allSyms.empty()) { m_sectorHeatData = result; emit sectorHeatDataChanged(); return; }
+    INTERNAL_INFO_STREAM << "[MktBridge] ② constituents collected: " << allSyms.size() << " stocks";
 
-    // 构建 symbol→行业名 映射, bar/money flow 结果按 symbol 字段匹配
-    std::unordered_map<std::string, std::string> symToIndustry;
-    for (size_t i = 0; i < allSyms.size(); ++i) {
-        symToIndustry[allSyms[i]] = symIndustry[i];
+    // 成分股名称批量查询 (StkIndexConstituent 无 sec_name, 用 stk_get_symbol_industry 查)
+    std::unordered_map<std::string, std::string> symToName;
+    if (!allSyms.empty()) {
+        std::string symList;
+        for (size_t i = 0; i < allSyms.size(); ++i) {
+            if (i > 0) symList += ",";
+            symList += allSyms[i];
+        }
+        auto* si = ::stk_get_symbol_industry(symList.c_str(), "sw2021", 1, nullptr);
+        if (si && !si->status() && si->count() > 0) {
+            for (size_t i = 0; i < si->count(); ++i)
+                symToName[si->at(i).symbol] = si->at(i).sec_name;
+            si->release();
+        } else if (si) {
+            si->release();
+        }
+        if (symToName.empty()) {
+            // fallback: 用 symbol 本身作为 name
+            for (const auto& s : allSyms) symToName[s] = s;
+        }
     }
 
-    // 逐个标的查询日线 bar — GmSessionEngine 验证单标的模式在非交易日也正常返回
-    for (size_t i = 0; i < allSyms.size(); ++i) {
-        const auto& sym = allSyms[i];
-        auto* bars = ::history_bars_n(sym.c_str(), "1d", 1, nullptr, 0, nullptr, true, nullptr);
-        if (bars && !bars->status() && bars->count() > 0) {
-            auto& b = bars->at(0);
-            if (b.close > 0 && b.pre_close > 0) {
-                double chg = (b.close - b.pre_close) / b.pre_close * 100.0;
-                auto& sd = secMap[symIndustry[i]];
-                sd.chg += chg; sd.stockCnt++;
-                sd.leads.emplace_back(StockInfo{sym, allNames[i], chg});
+    bool hasConstituents = !allSyms.empty();
+    std::string tradeDate;
+    if (hasConstituents) {
+        // symbol→sector 映射 (资金流向反查用)
+        std::unordered_map<std::string, std::string> symToSector;
+        for (size_t i = 0; i < allSyms.size(); ++i)
+            symToSector[allSyms[i]] = symSector[i];
+
+        // ── ③ 成分股 60s+日线: 领涨股涨跌幅 ──
+        int barOk = 0, realtimeCount = 0;
+        for (size_t i = 0; i < allSyms.size(); ++i) {
+            const auto& sym = allSyms[i];
+            double yesterdayClose = 0, todayPrice = 0;
+
+            auto* dailyBars = ::history_bars_n(sym.c_str(), "1d", 1, nullptr, 0, nullptr, true, nullptr);
+            if (dailyBars && !dailyBars->status() && dailyBars->count() > 0)
+                yesterdayClose = dailyBars->at(0).close;
+            if (dailyBars) dailyBars->release();
+
+            auto* bar60s = ::history_bars_n(sym.c_str(), "60s", 1, nullptr, 0, nullptr, true, nullptr);
+            if (bar60s && !bar60s->status() && bar60s->count() > 0 && bar60s->at(0).close > 0) {
+                todayPrice = bar60s->at(0).close;
+                realtimeCount++;
+            }
+            if (bar60s) bar60s->release();
+
+            double price = todayPrice > 0 ? todayPrice : yesterdayClose;
+            if (price > 0 && yesterdayClose > 0) {
+                double chg = (price - yesterdayClose) / yesterdayClose * 100.0;
+                auto& sd = secMap[symSector[i]];
+                sd.leads.emplace_back(StockInfo{sym, symToName[sym], chg});
+                barOk++;
+            }
+            // 若指数K线没拿到涨跌，用成分股均值兜底
+            auto it = secMap.find(symSector[i]);
+            if (it != secMap.end() && it->second.stockCnt == 0 && price > 0 && yesterdayClose > 0) {
+                double chg = (price - yesterdayClose) / yesterdayClose * 100.0;
+                it->second.chg += chg;
+                it->second.stockCnt++;
             }
         }
-        if (bars) bars->release();
+        INTERNAL_INFO_STREAM << "[MktBridge] ③ stock bars: " << barOk << "/" << allSyms.size()
+                             << " realtime60s=" << realtimeCount;
+
+        // ── ④ 资金流向 (仅盘后可用, 盘中用指数成交额替代) ──
+        std::string symList2;
+        for (size_t i = 0; i < allSyms.size(); ++i) { if (i > 0) symList2 += ","; symList2 += allSyms[i]; }
+        auto* mf = ::stk_get_money_flow(symList2.c_str(), nullptr);
+        if (mf && !mf->status() && mf->count() > 0) {
+            for (size_t i = 0; i < mf->count(); ++i) {
+                auto& r = mf->at(i);
+                if (tradeDate.empty() && r.trade_date[0]) tradeDate = r.trade_date;
+                auto it = symToSector.find(std::string(r.symbol));
+                if (it == symToSector.end()) continue;
+                auto& sd = secMap[it->second];
+                sd.netIn += r.main_net_in;
+                sd.netInRate += r.main_net_in_rate;
+                sd.hasMoneyFlow = true;
+            }
+            INTERNAL_INFO_STREAM << "[MktBridge] ④ money_flow OK records=" << mf->count() << " tradeDate=" << tradeDate;
+            mf->release();
+        } else {
+            INTERNAL_INFO_STREAM << "[MktBridge] ④ money_flow N/A (盘中, 用指数成交额替代)"
+                                 << (mf ? " status=" + std::to_string(mf->status()) : "");
+            if (mf) mf->release();
+        }
     }
 
-    std::string symList;
-    for (size_t i = 0; i < allSyms.size(); ++i) { if (i>0) symList+=","; symList+=allSyms[i]; }
-    std::string tradeDate;
-    auto* mf = ::stk_get_money_flow(symList.c_str(), nullptr);
-    if (mf && !mf->status() && mf->count() > 0) {
-        for (size_t i = 0; i < mf->count(); ++i) {
-            auto& r = mf->at(i);
-            if (tradeDate.empty() && r.trade_date[0]) tradeDate = r.trade_date;
-            auto it = symToIndustry.find(std::string(r.symbol));
-            if (it == symToIndustry.end()) continue;
-            auto& sd = secMap[it->second];
-            sd.netIn += r.main_net_in;
-            sd.netInRate += r.main_net_in_rate;
+    // ── 盘中兜底: 无 money_flow 数据的板块用指数实时成交额 ──
+    for (auto& [name, sd] : secMap) {
+        if (!sd.hasMoneyFlow && sd.indexAmount > 0) {
+            sd.netIn = sd.indexAmount;
+            sd.netInRate = 0;
         }
-        mf->release();
-    } else { if (mf) mf->release(); }
+    }
 
-    // 计算资金流向连续趋势 — 与历史缓存做环比，统计同向连续天数
+    // ── ⑤ 资金趋势 + 排序 + 组装结果 ──
     auto computeTrend = [&](const std::string& name, double todayNetIn) -> int {
         auto it = m_sectorNetInHistory.find(name);
         if (it == m_sectorNetInHistory.end() || it->second.empty())
             return (todayNetIn > 0 ? 1 : -1);
         bool todayPositive = todayNetIn > 0;
-        int consecutive = 1; // 当日
+        int consecutive = 1;
         const auto& hist = it->second;
         for (auto rit = hist.rbegin(); rit != hist.rend(); ++rit) {
             if ((*rit > 0) == todayPositive) consecutive++;
@@ -850,7 +1005,6 @@ void MarketDataBridge::fetchSectorHeat() {
         }
         return todayPositive ? consecutive : -consecutive;
     };
-
     auto getPrevNetIn = [&](const std::string& name) -> double {
         auto it = m_sectorNetInHistory.find(name);
         if (it != m_sectorNetInHistory.end() && !it->second.empty())
@@ -861,27 +1015,45 @@ void MarketDataBridge::fetchSectorHeat() {
     struct ResultItem { std::string name; double chg, netIn, netInRate; int signal, trend; double prevNetIn; QVariantList leads; };
     std::vector<ResultItem> items;
     for (auto& [name, sd] : secMap) {
-        if (sd.stockCnt <= 0) continue;
-        double avgChg = sd.chg / sd.stockCnt;
-        int signal; if (avgChg>0&&sd.netIn>0) signal=0; else if (avgChg>0&&sd.netIn<0) signal=1; else if (avgChg<0&&sd.netIn>0) signal=2; else signal=3;
+        double sectorChg = (sd.stockCnt > 0) ? sd.chg / sd.stockCnt : 0;
+        int signal;
+        if (sectorChg > 0 && sd.netIn > 0) signal = 0;
+        else if (sectorChg > 0 && sd.netIn < 0) signal = 1;
+        else if (sectorChg < 0 && sd.netIn > 0) signal = 2;
+        else signal = 3;
         int trend = computeTrend(name, sd.netIn);
         double prevNetIn = getPrevNetIn(name);
-        std::sort(sd.leads.begin(), sd.leads.end(), [](auto& a, auto& b){ return std::abs(a.chg) > std::abs(b.chg); });
+
+        std::sort(sd.leads.begin(), sd.leads.end(),
+                  [](auto& a, auto& b) { return std::abs(a.chg) > std::abs(b.chg); });
         QVariantList leadsList;
-        for (auto& l : sd.leads) { QVariantMap lm; lm["sym"]=QString::fromStdString(l.sym); lm["name"]=QString::fromStdString(l.name); lm["c"]=l.chg; leadsList.append(lm); }
-        items.push_back({name, avgChg, sd.netIn, sd.stockCnt>0?sd.netInRate/sd.stockCnt:0, signal, trend, prevNetIn, leadsList});
+        for (auto& l : sd.leads) {
+            QVariantMap lm;
+            lm["sym"] = QString::fromStdString(l.sym);
+            lm["name"] = QString::fromStdString(l.name);
+            lm["c"] = l.chg;
+            leadsList.append(lm);
+        }
+        items.push_back({name, sectorChg, sd.netIn, sd.stockCnt > 0 ? sd.netInRate / sd.stockCnt : 0,
+                         signal, trend, prevNetIn, leadsList});
     }
-    std::sort(items.begin(), items.end(), [](auto& a, auto& b){ if(a.signal!=b.signal) return a.signal<b.signal; return std::abs(a.chg)>std::abs(b.chg); });
+    std::sort(items.begin(), items.end(),
+              [](auto& a, auto& b) { if (a.signal != b.signal) return a.signal < b.signal; return std::abs(a.chg) > std::abs(b.chg); });
 
     for (auto& it : items) {
         QVariantMap m;
-        m["name"]=QString::fromStdString(it.name); m["chg"]=it.chg; m["netIn"]=it.netIn; m["netInRate"]=it.netInRate;
-        m["signal"]=it.signal; m["leads"]=it.leads;
-        m["netInTrend"]=it.trend; m["netInPrev"]=it.prevNetIn;
+        m["name"] = QString::fromStdString(it.name);
+        m["chg"] = it.chg;
+        m["netIn"] = it.netIn;
+        m["netInRate"] = it.netInRate;
+        m["signal"] = it.signal;
+        m["leads"] = it.leads;
+        m["netInTrend"] = it.trend;
+        m["netInPrev"] = it.prevNetIn;
         result.append(m);
     }
 
-    // 更新历史缓存 — 仅在新交易日写入，防止同一天重复拉取堆积
+    // 更新历史缓存
     if (!tradeDate.empty()) {
         if (m_sectorHeatDates.empty() || m_sectorHeatDates.back() != tradeDate) {
             while (static_cast<int>(m_sectorHeatDates.size()) >= kSectorHeatHistoryDays) {
@@ -891,11 +1063,9 @@ void MarketDataBridge::fetchSectorHeat() {
                 }
             }
             m_sectorHeatDates.push_back(tradeDate);
-            for (auto& [name, sd] : secMap) {
+            for (auto& [name, sd] : secMap)
                 m_sectorNetInHistory[name].push_back(sd.netIn);
-            }
         } else {
-            // 同日刷新，覆盖最新一条
             for (auto& [name, sd] : secMap) {
                 auto& hist = m_sectorNetInHistory[name];
                 if (!hist.empty()) hist.back() = sd.netIn;
@@ -903,10 +1073,14 @@ void MarketDataBridge::fetchSectorHeat() {
         }
     }
 
-    m_sectorHeatData = result;
-    emit sectorHeatDataChanged();
-    INTERNAL_INFO_STREAM << "[MktBridge] fetchSectorHeat done sectors=" << result.size()
+    INTERNAL_INFO_STREAM << "[MktBridge] ⑤ done sectors=" << result.size()
                          << " stocks=" << allSyms.size();
+}
+
+// ── Q_INVOKABLE: QML 调用, 立即返回不阻塞 ──
+// 设置请求标志 → 工作线程被打断 → 拉取 gm SDK → invokeMethod 回主线程 emit
+void MarketDataBridge::fetchSectorHeat() {
+    m_sectorFetchRequested = true;
 }
 
 QString MarketDataBridge::forceSyncToday() {

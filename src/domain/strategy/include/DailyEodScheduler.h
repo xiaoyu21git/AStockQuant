@@ -32,6 +32,15 @@ public:
     /// @brief 投递任务到策略线程
     using PostFn = std::function<void(std::function<void()>)>;
 
+    /// @brief 查询当前交易日 (YYYYMMDD int)，用于替代 localtime() 手算
+    using TradingDayFn = std::function<std::int64_t()>;
+
+    /// @brief 查询上一交易日 date(YYYYMMDD) → prev(YYYYMMDD string)
+    using PrevTradingDayFn = std::function<std::string(const std::string&)>;
+
+    /// @brief 查询数据同步日 (app_state.json dataSyncDay)，用于 K 线缺口检测
+    using DataSyncDayFn = std::function<int()>;
+
     /// @param postToStrategyThread 投递闭包到策略线程
     /// @param persistPath m_lastEvalDay 持久化文件路径
     DailyEodScheduler(PostFn postToStrategyThread, const std::string& persistPath);
@@ -52,18 +61,32 @@ public:
     /// @brief 设置当前策略 ID，用于在统一 JSON 文件中按策略 ID 键读写 lastEvalDay
     void setStrategyId(std::string id) { m_strategyId = std::move(id); }
 
+    /// @brief 注入交易日查询 (从 DB trade_calendar 查，替代 localtime 手算)
+    void setTradingDayProvider(TradingDayFn fn) { m_getTradingDay = std::move(fn); }
+    void setPrevTradingDayProvider(PrevTradingDayFn fn) { m_getPrevTradingDay = std::move(fn); }
+    void setDataSyncDayProvider(DataSyncDayFn fn) { m_getDataSyncDay = std::move(fn); }
+
 private:
     void onEodTrigger(const std::string& tradingDay);
     void doEvaluate(const std::string& tradingDay);
-    static std::string getPreviousTradingDay(const std::string& date);
+
+    /// @brief 查询上一交易日 (通过注入的 DB 回调，不再手算)
+    std::string getPreviousTradingDay(const std::string& date);
+
     static int  getCurrentLocalMinutes();
-    static std::int64_t getCurrentTradingDay();
-    static bool isCompensationWindow() { return getCurrentLocalMinutes() < kCompensationEnd; }
+
+    /// @brief 查询当前交易日 (通过注入的 DB 回调，不再用 localtime)
+    std::int64_t getCurrentTradingDay();
+
+    bool isCompensationWindow() const { return getCurrentLocalMinutes() < kCompensationEnd; }
     void loadLastEvalDay();
     void persistLastEvalDay();
 
     PostFn m_post;
     EvalFn m_evalFn;
+    TradingDayFn m_getTradingDay;       // DB查询: 当前交易日
+    PrevTradingDayFn m_getPrevTradingDay; // DB查询: 上一交易日
+    DataSyncDayFn m_getDataSyncDay;      // 查询 dataSyncDay (K线缺口检测)
     std::atomic<std::int64_t> m_lastEvalDay{0};
     std::string  m_persistPath;   // 统一 JSON 文件的全路径 (strategy_last_eval.json)
     std::string  m_strategyId;    // 当前策略 ID，JSON 中的键

@@ -69,7 +69,8 @@ QtObject {
             items: [
                 {title: "全局设置", icon: "🔧", badge: "", code: "global_settings"},
                 {title: "个人设置", icon: "👤", badge: "", code: "personal_settings"},
-                {title: "系统配置", icon: "⚙️", badge: "", code: "system_configuration"}
+                {title: "系统配置", icon: "⚙️", badge: "", code: "system_configuration"},
+                {title: "信号输出", icon: "📡", badge: "", code: "signal_output"}
             ]
         }
     }

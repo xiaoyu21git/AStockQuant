@@ -95,10 +95,15 @@ Rectangle {
     }
 
     // ── 主布局 ──
-    ColumnLayout {
+    ScrollView {
         anchors.fill: parent
         anchors.margins: 16
-        spacing: 12
+        clip: true
+        ScrollBar.vertical.policy: ScrollBar.AsNeeded
+
+        ColumnLayout {
+            width: root.width - 32
+            spacing: 12
 
         // ═══════════════════════════════════════════════
         // 标题栏 + 启用开关
@@ -331,7 +336,7 @@ Rectangle {
         // ═══════════════════════════════════════════════
         Rectangle {
             Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.preferredHeight: 280
             radius: 10
             color: secondaryBg
             border.color: Qt.rgba(71/255, 85/255, 105/255, 0.22)
@@ -500,5 +505,6 @@ Rectangle {
                 }
             }
         }
+    }
     }
 }

@@ -64,7 +64,7 @@ void PostMarketSyncService::start() {
     m_running.store(true);
     m_scheduler = std::make_unique<std::thread>(&PostMarketSyncService::schedulerLoop, this);
     INTERNAL_INFO_STREAM << "[PostMktSync] 调度线程已启动 today=" << getCurrentTradingDay()
-                         << " lastSync=" << m_lastSyncDay.load();
+                         << " dataSync=" << m_dataSyncDay.load();
 }
 
 bool PostMarketSyncService::forceSyncToday() {
@@ -95,7 +95,7 @@ bool PostMarketSyncService::forceSyncToday() {
 
         auto db = astock::database::NativePgConnectionPool::instance().getConnection();
         if (!db || !db->isOpen()) { INTERNAL_ERROR_STREAM << "[PostMktSync] DB不可用"; return; }
-        if (m_lastSyncDay.load() == today) {
+        if (m_dataSyncDay.load() == today) {
             INTERNAL_INFO_STREAM << "[PostMktSync] 今日已同步, 跳过";
             return;
         }
@@ -111,7 +111,7 @@ bool PostMarketSyncService::forceSyncToday() {
             int rc = std::system(cmd.c_str());
             if (rc != 0) INTERNAL_WARN_STREAM << "[PostMktSync] 事件检测退出码=" << rc;
         }
-        m_lastSyncDay.store(today); saveLastSyncDay(today);
+        m_dataSyncDay.store(today); saveLastSyncDay(today);
         INTERNAL_INFO_STREAM << "[PostMktSync] ====== 同步完成 ======";
         fillAdjFactors();
     });
@@ -128,6 +128,9 @@ auto [s2i, syms] = loadActiveSymbols(db);
 
         if(syncDaily(db,s2i,syms,tradingDay))syncMinute(db,s2i,syms,tradingDay);
         syncWeekly(db,tradingDay);syncMonthly(db,tradingDay);
+        // 手动同步成功后更新 dataSyncDay，防止自动调度重复同步
+        if (tradingDay > m_dataSyncDay.load())
+            saveLastSyncDay(tradingDay);
     });
 }
 
@@ -202,6 +205,12 @@ auto [s2i, syms] = loadActiveSymbols(db);
         for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();
             if(syncDaily(db,s2i,syms,td))syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] 补齐 "<<md.size()<<" 天";
+        // 补齐成功后更新 dataSyncDay 到最后一个补齐日
+        if (!md.empty()) {
+            int lastFilled = foundation::utils::Timestamp(md.back(),"%Y-%m-%d").to_yyyymmdd();
+            if (lastFilled > m_dataSyncDay.load())
+                saveLastSyncDay(lastFilled);
+        }
     });
 }
 
@@ -341,8 +350,16 @@ void PostMarketSyncService::schedulerLoop() {
         const SyncWindow window = resolveSyncWindow();
         int mins = getCurrentLocalMinutes();
         if (mins >= window.triggerMin) {
-            if (m_lastSyncDay.load() == today) {
+            if (m_dataSyncDay.load() == today) {
                 INTERNAL_INFO_STREAM << "[PostMktSync] today=" << today << " 已同步过，跳过";
+                std::this_thread::sleep_for(std::chrono::hours(1));
+                continue;
+            }
+            // 三条件之三: DB 已有今天日线数据 → 只更新配置文件, 不重复同步
+            if (todayDataExists(today)) {
+                INTERNAL_INFO_STREAM << "[PostMktSync] DB 已有 " << today << " 日线, 仅更新 dataSyncDay";
+                m_dataSyncDay.store(today);
+                saveLastSyncDay(today);
                 std::this_thread::sleep_for(std::chrono::hours(1));
                 continue;
             }
@@ -358,7 +375,7 @@ void PostMarketSyncService::schedulerLoop() {
             struct SchedulerGuard { std::atomic<bool>& flag; ~SchedulerGuard() { flag.store(false); } };
             SchedulerGuard sg{m_syncRunning};
             syncAll(today);
-            m_lastSyncDay.store(today);
+            m_dataSyncDay.store(today);
             saveLastSyncDay(today);
             // 同步完成后睡到下一个交易日
             std::this_thread::sleep_for(std::chrono::hours(8));
@@ -377,7 +394,7 @@ void PostMarketSyncService::schedulerLoop() {
                 std::this_thread::sleep_for(std::chrono::minutes(waitMin));
             } else {
                 syncAll(today);
-                m_lastSyncDay.store(today);
+                m_dataSyncDay.store(today);
                 saveLastSyncDay(today);
                 std::this_thread::sleep_for(std::chrono::hours(8));
             }
@@ -825,6 +842,17 @@ bool PostMarketSyncService::isTradingDay(int date) {
     return t.tm_wday != 0 && t.tm_wday != 6;
 }
 
+bool PostMarketSyncService::todayDataExists(int tradingDay) {
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) return false;
+    char dateBuf[16];
+    foundation::utils::formatTradingDayTo(tradingDay, dateBuf, sizeof(dateBuf));
+    auto r = db->executeQuery(
+        "SELECT COUNT(*) AS cnt FROM mkt.daily_bar WHERE trade_date=$1::date",
+        {astock::database::SqlParam{std::string(dateBuf)}});
+    return r.rowCount() > 0 && r.getRow(0).getInt("cnt") > 0;
+}
+
 std::string PostMarketSyncService::toGmSymbol(const std::string& sym) const {
     auto s = foundation::market::AStockSymbol::fromString(sym);
     if (!s.isValid()) return "";
@@ -848,25 +876,26 @@ void PostMarketSyncService::loadLastSyncDay() {
     if (m_persistPath.empty()) return;
     auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
     if (json.isNull() || !json.isObject()) return;
-    if (json.has("lastSyncDay")) {
-        try { m_lastSyncDay.store(json.get("lastSyncDay").asInt()); } catch (...) {}
+    if (json.has("dataSyncDay")) {
+        try { m_dataSyncDay.store(json.get("dataSyncDay").asInt()); } catch (...) {}
     }
-    INTERNAL_INFO_STREAM << "[PostMktSync] 加载 lastSyncDay=" << m_lastSyncDay.load();
+    INTERNAL_INFO_STREAM << "[PostMktSync] 加载 dataSyncDay=" << m_dataSyncDay.load();
 }
 
 void PostMarketSyncService::saveLastSyncDay(int tradingDay) {
     if (m_persistPath.empty()) return;
-    // 读取现有 JSON，保留 adjFactorDate 等字段
+    // 读取现有 JSON，保留其他字段，只写新键 dataSyncDay
     auto root = foundation::json::JsonFacade::createObject();
     {
         auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
         if (!existing.isNull() && existing.isObject()) {
             for (const auto& key : existing.keys()) {
-                if (key != "lastSyncDay") root.set(key, existing.get(key));
+                if (key != "lastSyncDay" && key != "dataSyncDay")
+                    root.set(key, existing.get(key));
             }
         }
     }
-    root.set("lastSyncDay", foundation::json::JsonFacade::createInt(tradingDay));
+    root.set("dataSyncDay", foundation::json::JsonFacade::createInt(tradingDay));
     // 原子写入
     std::string tmpPath = m_persistPath + ".tmp";
     {

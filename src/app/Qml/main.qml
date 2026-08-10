@@ -496,6 +496,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 sourceComponent: {
                     if (parent.settingsSubPage === "global_settings") return globalSettingsComponent
+                    if (parent.settingsSubPage === "signal_output") return signalOutputSettingsComponent
                     return systemSettingsComponent
                 }
             }
@@ -504,6 +505,7 @@ ApplicationWindow {
 
     Component { id: systemSettingsComponent; SystemSettingsPage { configService: Bridge.TradingConnectionConfigService } }
     Component { id: globalSettingsComponent;  SettingsPage {} }
+    Component { id: signalOutputSettingsComponent; SignalOutputPanel {} }
 
     Component {
         id: monitoringPageComponent
@@ -724,7 +726,8 @@ ApplicationWindow {
             "log_viewer": 9,                  // 日志查看 -> 监控面板
             "personal_settings": 10,          // 个人设置 -> 系统设置
             "system_configuration": 10,       // 系统配置 -> 系统设置
-            "global_settings": 10              // 全局设置 -> 系统设置
+            "global_settings": 10,             // 全局设置 -> 系统设置
+            "signal_output": 10               // 信号输出 -> 系统设置
         };
         
         // 首先检查一级菜单

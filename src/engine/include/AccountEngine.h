@@ -60,6 +60,7 @@ private:
     foundation::utils::Uuid m_positionSub;
     foundation::utils::Uuid m_tickSub;
     mutable std::shared_mutex m_mutex;  // 保护 m_cachedAccount + m_cachedPositions
+    int m_positionLogThrottle = 0;
 };
 
 } // namespace engine

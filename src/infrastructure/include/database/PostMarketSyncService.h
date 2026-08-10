@@ -31,7 +31,7 @@ public:
     bool forceSyncToday();
 
     /// @brief 人工触发指定交易日同步（日线+分钟线+周月线聚合）
-    /// 用于补历史缺口，不检查 m_lastSyncDay
+    /// 用于补历史缺口，不检查 dataSyncDay
     void forceSyncDate(int tradingDay);
 
     /// @brief 一次性回补历史数据：日线 + 分钟线，从 2015-01-01 至今
@@ -163,7 +163,7 @@ private:
     std::shared_ptr<foundation::thread::ThreadPoolExecutor> m_executor;
     std::atomic<bool> m_running{false};
     std::atomic<bool> m_syncRunning{false};  // 手动同步正在执行，防止并发
-    std::atomic<int> m_lastSyncDay{0};
+    std::atomic<int> m_dataSyncDay{0};
     std::mutex m_mutex;
     bool m_started = false;
 
