@@ -628,8 +628,8 @@ public:
     /// SemiAuto 模式下，订单生成后先通知拦截器展示确认窗口，用户确认后才执行
     void setBasketInterceptor(IBasketInterceptor* interceptor) noexcept;
 
-    /// @brief 用户确认篮子 → 修改后的订单直接提交 TradeExecutionEngine
-    void confirmBasket(std::uint64_t basketId, const std::vector<domain::trading::OrderRequest>& editedOrders);
+    /// @brief 用户确认篮子 → 引擎自行应用编辑到 m_pendingBasket.orders 并提交
+    void confirmBasket(std::uint64_t basketId, const std::vector<BasketEdit>& edits);
 
     /// @brief 用户拒绝篮子 → 丢弃全部订单，记录日志
     void rejectBasket(std::uint64_t basketId);

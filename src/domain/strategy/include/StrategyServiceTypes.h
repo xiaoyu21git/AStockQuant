@@ -462,6 +462,13 @@ using OrderRequest = domain::trading::OrderRequest;
 using OrderSide    = domain::trading::OrderSide;
 using OrderType    = domain::trading::OrderType;
 
+/// @brief QML → 引擎的篮子编辑项 (零 Qt, 纯 C++)
+/// 用户在半自动确认窗口中可删除标的、修改数量，每项仅传递在原订单数组中的位置和新数量
+struct BasketEdit final {
+    int orderIndex{0};
+    double quantity{0.0};
+};
+
 struct StrategyExecutionStats final {
 private:
     StrategyCount strategyCount_{0};

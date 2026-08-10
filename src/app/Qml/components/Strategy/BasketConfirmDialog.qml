@@ -637,20 +637,11 @@ Rectangle {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            // 显式构造编辑后的订单列表 (避免 for...in 遍历原型链)
                             var edited = []
                             for (var i = 0; i < dialog.orderCount; i++) {
                                 edited.push({
-                                    traceId: dialog.orders[i].traceId,
-                                    symbol: dialog.orders[i].symbol,
-                                    side: dialog.orders[i].side,
-                                    sideRaw: dialog.orders[i].sideRaw,
-                                    quantity: dialog.editedQtys[i] !== undefined ? dialog.editedQtys[i] : dialog.orders[i].quantity,
-                                    price: dialog.orders[i].price !== undefined ? dialog.orders[i].price : 0,
-                                    orderType: dialog.orders[i].orderType !== undefined ? dialog.orders[i].orderType : 1,
-                                    targetWeight: dialog.orders[i].targetWeight,
-                                    signalScore: dialog.orders[i].signalScore,
-                                    signalIntent: dialog.orders[i].signalIntent
+                                    orderIndex: dialog.orders[i].orderIndex,
+                                    quantity: dialog.editedQtys[i] !== undefined ? dialog.editedQtys[i] : dialog.orders[i].quantity
                                 })
                             }
                             Bridge.StrategyBridge.confirmBasket(edited)

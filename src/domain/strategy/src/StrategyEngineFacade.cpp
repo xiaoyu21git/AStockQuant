@@ -958,7 +958,7 @@ void StrategyEngine::setBasketInterceptor(IBasketInterceptor* interceptor) noexc
 }
 
 void StrategyEngine::confirmBasket(std::uint64_t basketId,
-                                   const std::vector<OrderRequest>& editedOrders)
+                                   const std::vector<BasketEdit>& edits)
 {
     std::lock_guard<std::mutex> lock(m_basketMutex);
     if (!m_pendingBasket.pending || m_pendingBasket.basketId != basketId) {
@@ -969,15 +969,45 @@ void StrategyEngine::confirmBasket(std::uint64_t basketId,
     }
     m_pendingBasket.pending = false;
 
-    if (!editedOrders.empty() && m_orderListener) {
-        m_orderListener->onOrders(editedOrders);
+    if (edits.empty() || !m_orderListener) {
+        m_pendingBasket.orders.clear();
+        return;
+    }
+
+    // Step 1: 读 QML 编辑列表 → kept 索引集合 + qty 覆盖
+    std::unordered_set<int> kept;
+    std::unordered_map<int, double> qtyOverrides;
+    for (const auto& e : edits) {
+        if (e.orderIndex < 0 || static_cast<size_t>(e.orderIndex) >= m_pendingBasket.orders.size()) continue;
+        kept.insert(e.orderIndex);
+        if (e.quantity > 0) {
+            qtyOverrides[e.orderIndex] = e.quantity;
+        }
+    }
+
+    // Step 2: 原地删除 QML 未保留的 + 应用数量修改
+    auto& orders = m_pendingBasket.orders;
+    size_t w = 0;
+    for (size_t i = 0; i < orders.size(); ++i) {
+        if (kept.find(static_cast<int>(i)) == kept.end()) continue;  // QML 删掉的
+        auto it = qtyOverrides.find(static_cast<int>(i));
+        if (it != qtyOverrides.end()) {
+            orders[i].setQuantity(it->second);
+        }
+        if (w != i) orders[w] = std::move(orders[i]);
+        ++w;
+    }
+    orders.resize(w);
+
+    if (!orders.empty()) {
+        m_orderListener->onOrders(orders);
 
         // 半自动确认日志 (持久化到策略交易日志)
         if (m_tradeJournal) {
             const std::int64_t today = domain::market::MarketDataService::instance()
                 .activeTradingDay();
             std::string datePrefix = today > 0 ? std::to_string(today) : "";
-            for (const auto& o : editedOrders) {
+            for (const auto& o : orders) {
                 if (!o.isValid()) continue;
                 std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
                 double score = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
@@ -992,7 +1022,7 @@ void StrategyEngine::confirmBasket(std::uint64_t basketId,
         }
 
         INTERNAL_INFO_STREAM << "[SemiAuto] 篮子确认: basketId=" << basketId
-                             << " orders=" << editedOrders.size();
+                             << " orders=" << orders.size();
     }
 }
 

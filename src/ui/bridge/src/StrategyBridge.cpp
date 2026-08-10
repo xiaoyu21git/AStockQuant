@@ -1482,7 +1482,8 @@ QVariantList StrategyBridge::ordersToVariantList(const std::vector<OrderRequest>
 {
     QVariantList list;
     list.reserve(static_cast<int>(orders.size()));
-    for (const auto& o : orders) {
+    for (size_t i = 0; i < orders.size(); ++i) {
+        const auto& o = orders[i];
         QVariantMap item;
         item["symbol"]       = QString::fromStdString(o.symbol());
         item["stockName"]    = StockNameResolver::name(QString::fromStdString(o.symbol()));
@@ -1496,6 +1497,7 @@ QVariantList StrategyBridge::ordersToVariantList(const std::vector<OrderRequest>
         item["signalIntent"] = static_cast<int>(
             o.extensionAs<std::uint64_t>(domain::trading::ExtKey::kSignalIntent, 0));
         item["traceId"]      = QString::fromStdString(o.traceId());
+        item["orderIndex"]   = static_cast<int>(i);
 
         // 最新价 (市价单估算资金占用用)
         auto& gse = engine::GmSessionEngine::instance();
@@ -1507,58 +1509,6 @@ QVariantList StrategyBridge::ordersToVariantList(const std::vector<OrderRequest>
     return list;
 }
 
-// ── QVariantList → OrderRequest[] (QML 回传, 按 traceId 匹配) ──
-std::vector<OrderRequest> StrategyBridge::variantListToOrders(
-    const QVariantList& editedList,
-    const std::vector<OrderRequest>& originalOrders)
-{
-    // 建立 traceId → 原始订单指针的索引, 支持 QML 端删除/排序
-    std::unordered_map<std::string, const OrderRequest*> byTraceId;
-    for (const auto& o : originalOrders) {
-        byTraceId[o.traceId()] = &o;
-    }
-
-    std::vector<OrderRequest> result;
-    result.reserve(editedList.size());
-
-    for (const auto& v : editedList) {
-        QVariantMap item = v.toMap();
-        std::string tid = item.value("traceId").toString().toStdString();
-        auto it = byTraceId.find(tid);
-        if (it == byTraceId.end()) continue;  // 已删除或数据异常, 跳过
-
-        OrderRequest order = *it->second;  // 从原始拷贝, 保留所有不可编辑字段
-
-        // ── quantity 回写 ──
-        qlonglong editedQty = item.value("quantity").toLongLong();
-        if (editedQty > 0) {
-            order.setQuantity(static_cast<double>(editedQty));
-        }
-
-        // ── price / orderType 回写 (价格与类型互转) ──
-        double editedPrice = item.value("price").toDouble();
-        int editedOtype = item.value("orderType", static_cast<int>(OrderType::Market)).toInt();
-
-        if (editedPrice > 0.0 && editedOtype == static_cast<int>(OrderType::Market)) {
-            // 用户在 QML 将 "市价" 改为具体价格 → 转为限价单
-            order.setPrice(editedPrice);
-            order.setOrderType(OrderType::Limit);
-        } else if (editedPrice <= 0.0
-                   && editedOtype == static_cast<int>(OrderType::Limit)) {
-            // 用户将限价清空或归零 → 恢复市价单
-            order.setPrice(0.0);
-            order.setOrderType(OrderType::Market);
-        } else if (editedPrice > 0.0) {
-            // 限价单仅改价
-            order.setPrice(editedPrice);
-        }
-        // else: 市价单不改价 (editedPrice ≤ 0 && Market), 保持原样
-
-        result.push_back(std::move(order));
-    }
-    return result;
-}
-
 // ── IBasketInterceptor 实现: 引擎线程 → Qt 主线程 ──
 bool StrategyBridge::onBasketReady(std::uint64_t basketId,
                                    const std::vector<OrderRequest>& orders,
@@ -1566,6 +1516,7 @@ bool StrategyBridge::onBasketReady(std::uint64_t basketId,
                                    const std::string& strategyName,
                                    const std::string& contextDescription)
 {
+    std::lock_guard<std::mutex> lock(m_basketMutex);
     if (m_pendingBasketId != 0) {
         INTERNAL_WARN_STREAM << "[Bridge] 篮子 " << m_pendingBasketId
                              << " 仍在等待确认, 拒绝新篮子 " << basketId;
@@ -1576,7 +1527,7 @@ bool StrategyBridge::onBasketReady(std::uint64_t basketId,
     m_pendingStrategyId = QString::fromStdString(strategyId);
     m_pendingStrategyName = QString::fromStdString(strategyName);
     m_pendingContextDesc = QString::fromStdString(contextDescription);
-    m_pendingOriginalOrders = orders;  // 保存原始订单副本, 用于 confirmBasket 时重建
+    // 订单数据存引擎底层 (m_pendingBasket.orders), 桥接层只存储显示用 QVariantList
 
     // 转换为 QVariantList 并跨线程通知 QML
     QVariantList qmlOrders = ordersToVariantList(orders);
@@ -1586,12 +1537,17 @@ bool StrategyBridge::onBasketReady(std::uint64_t basketId,
         emit pendingBasketChanged();
     }, Qt::QueuedConnection);
 
+    INTERNAL_INFO_STREAM << "[Bridge] 篮子已接收: basketId=" << basketId
+                         << " strategy=" << strategyName
+                         << " orders=" << orders.size();
+
     return true;
 }
 
 // ── QML 调用: 用户确认篮子 ──
 void StrategyBridge::confirmBasket(const QVariantList& editedOrders)
 {
+    std::lock_guard<std::mutex> lock(m_basketMutex);
     if (m_pendingBasketId == 0) return;
 
     auto* engine = domain::strategy::StrategyManager::instance().get(
@@ -1601,22 +1557,30 @@ void StrategyBridge::confirmBasket(const QVariantList& editedOrders)
                              << m_pendingStrategyId.toStdString();
         m_pendingBasketId = 0;
         m_pendingStrategyId.clear();
-        m_pendingOriginalOrders.clear();
         m_pendingBasketOrders.clear();
         return;
     }
 
-    // 从原始订单重建, 仅替换 QML 中编辑过的 quantity
-    auto finalOrders = variantListToOrders(editedOrders, m_pendingOriginalOrders);
+    // QVariantList → BasketEdit[] → 引擎自己应用到 m_pendingBasket.orders
+    std::vector<domain::strategy::BasketEdit> edits;
+    edits.reserve(editedOrders.size());
+    for (const auto& v : editedOrders) {
+        QVariantMap item = v.toMap();
+        domain::strategy::BasketEdit edit;
+        edit.orderIndex = item.value("orderIndex").toInt();
+        edit.quantity = static_cast<double>(item.value("quantity").toLongLong());
+        if (edit.orderIndex >= 0 && edit.quantity > 0) {
+            edits.push_back(edit);
+        }
+    }
 
-    engine->confirmBasket(m_pendingBasketId, finalOrders);
+    engine->confirmBasket(m_pendingBasketId, edits);
 
     INTERNAL_INFO_STREAM << "[Bridge] 篮子确认: basketId=" << m_pendingBasketId
-                         << " orders=" << finalOrders.size();
+                         << " edits=" << edits.size();
 
     m_pendingBasketId = 0;
     m_pendingStrategyId.clear();
-    m_pendingOriginalOrders.clear();
     m_pendingBasketOrders.clear();
     emit pendingBasketChanged();
 }
@@ -1624,6 +1588,7 @@ void StrategyBridge::confirmBasket(const QVariantList& editedOrders)
 // ── QML 调用: 用户拒绝篮子 ──
 void StrategyBridge::rejectBasket()
 {
+    std::lock_guard<std::mutex> lock(m_basketMutex);
     if (m_pendingBasketId == 0) return;
 
     auto* engine = domain::strategy::StrategyManager::instance().get(
@@ -1636,7 +1601,6 @@ void StrategyBridge::rejectBasket()
 
     m_pendingBasketId = 0;
     m_pendingStrategyId.clear();
-    m_pendingOriginalOrders.clear();
     m_pendingBasketOrders.clear();
     emit pendingBasketChanged();
 }

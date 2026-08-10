@@ -5,6 +5,7 @@
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
+#include <mutex>
 
 #include "StrategyLifecycleStatus.h"
 #include "../../domain/types/ResolvedStrategyBehavior.h"
@@ -307,19 +308,14 @@ private:
                       const std::string& contextDescription) override;
 
     std::uint64_t m_pendingBasketId{0};
+    std::mutex m_basketMutex;  ///< 保护 m_pendingBasketId / m_pendingStrategyId
     QString m_pendingStrategyId;     ///< UUID, 用于 confirmBasket/rejectBasket 查引擎
     QString m_pendingStrategyName;   ///< 显示名, 用于 QML 弹窗标题
     QString m_pendingContextDesc;
-    QVariantList m_pendingBasketOrders;  ///< QML 显示用订单列表
-    std::vector<domain::strategy::OrderRequest> m_pendingOriginalOrders;  ///< 原始订单副本, 供 confirmBasket 重建
+    QVariantList m_pendingBasketOrders;  ///< QML 显示用订单列表 (从 onBasketReady 的 orders 转换)
 
     /// @brief OrderRequest → QVariantList (跨线程传递到 QML)
     static QVariantList ordersToVariantList(const std::vector<domain::strategy::OrderRequest>& orders);
-
-    /// @brief QVariantList → OrderRequest[] (QML 回传, 仅 quantity 可被编辑)
-    static std::vector<domain::strategy::OrderRequest> variantListToOrders(
-        const QVariantList& editedList,
-        const std::vector<domain::strategy::OrderRequest>& originalOrders);
 
     static StrategyBridge* s_instance;
 };
