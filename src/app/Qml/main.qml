@@ -851,53 +851,5 @@ ApplicationWindow {
             BasketConfirmDialog {}
         }
 
-        // 🧪 测试按钮 — 发射合成篮子, 触发 SemiAuto 确认流程
-        Rectangle {
-            anchors.right: parent.right
-            anchors.rightMargin: 20
-            anchors.bottom: parent.bottom
-            anchors.bottomMargin: 20
-            width: testLabel.implicitWidth + 24
-            height: 40
-            radius: 10
-            color: testBasketMa.containsMouse ? "#F59E0B" : "#3B82F6"
-            visible: !Bridge.StrategyBridge.hasPendingBasket
-            border.color: "#60A5FA"
-            border.width: 1
-
-            Behavior on color { ColorAnimation { duration: 150 } }
-
-            Text {
-                id: testLabel
-                anchors.centerIn: parent
-                text: "🧪 测试篮子"
-                font.pixelSize: 13
-                font.weight: Font.Medium
-                color: "#FFFFFF"
-            }
-
-            MouseArea {
-                id: testBasketMa
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    var sid = Bridge.StrategyBridge.selId
-                    if (!sid && Bridge.StrategyBridge.listModel && Bridge.StrategyBridge.listModel.rowCount() > 0) {
-                        // selId 未绑定 → 取列表第一个策略
-                        var first = Bridge.StrategyBridge.listModel.getRow(0)
-                        if (first && first.strategyId) {
-                            sid = first.strategyId
-                        }
-                    }
-                    if (!sid) {
-                        console.warn("[Test] 未选择策略, 无法发射测试篮子")
-                        return
-                    }
-                    console.log("[Test] 发射测试篮子, strategyId=" + sid)
-                    Bridge.StrategyBridge.testEmitBasket(sid)
-                }
-            }
-        }
     }
 }

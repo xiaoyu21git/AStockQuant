@@ -634,10 +634,6 @@ public:
     /// @brief 用户拒绝篮子 → 丢弃全部订单，记录日志
     void rejectBasket(std::uint64_t basketId);
 
-    /// @brief [测试] 发射合成篮子 — 生成 3 条样本订单并直接走 dispatchOrders 管线
-    /// 绕过持仓检查，用于验证 SemiAuto 确认窗口的完整链路
-    void testEmitBasket();
-
     /// @brief 根据执行模式分发订单
     /// Live/Backtest → IOrderListener;  SemiAuto → IBasketInterceptor
     void dispatchOrders(const std::vector<domain::trading::OrderRequest>& orders);

@@ -1641,16 +1641,6 @@ void StrategyBridge::rejectBasket()
     emit pendingBasketChanged();
 }
 
-void StrategyBridge::testEmitBasket(const QString& strategyId)
-{
-    auto* engine = domain::strategy::StrategyManager::instance().get(strategyId.toStdString());
-    if (!engine) {
-        setErr(QStringLiteral("testEmitBasket: 策略未找到"));
-        return;
-    }
-    engine->testEmitBasket();
-}
-
 // ── QML 属性访问器 ──
 
 QVariantList StrategyBridge::pendingBasketOrders() const

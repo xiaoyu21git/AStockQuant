@@ -971,6 +971,26 @@ void StrategyEngine::confirmBasket(std::uint64_t basketId,
 
     if (!editedOrders.empty() && m_orderListener) {
         m_orderListener->onOrders(editedOrders);
+
+        // 半自动确认日志 (持久化到策略交易日志)
+        if (m_tradeJournal) {
+            const std::int64_t today = domain::market::MarketDataService::instance()
+                .activeTradingDay();
+            std::string datePrefix = today > 0 ? std::to_string(today) : "";
+            for (const auto& o : editedOrders) {
+                if (!o.isValid()) continue;
+                std::string side = o.side() == OrderSide::Buy ? "买入" : "卖出";
+                double score = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+                std::string tid = o.traceId();
+                std::ostringstream js;
+                js << datePrefix << " 确认提交 " << side << " " << o.symbol()
+                   << " " << o.quantity() << "股";
+                if (score > 0.0) js << " 评分:" << std::fixed << std::setprecision(2) << score;
+                if (!tid.empty()) js << " trace:" << tid;
+                m_tradeJournal->log(js.str());
+            }
+        }
+
         INTERNAL_INFO_STREAM << "[SemiAuto] 篮子确认: basketId=" << basketId
                              << " orders=" << editedOrders.size();
     }
@@ -983,39 +1003,20 @@ void StrategyEngine::rejectBasket(std::uint64_t basketId)
         return;
     }
     m_pendingBasket.pending = false;
+
+    // 半自动拒绝日志 (持久化到策略交易日志)
+    if (m_tradeJournal) {
+        const std::int64_t today = domain::market::MarketDataService::instance()
+            .activeTradingDay();
+        std::string datePrefix = today > 0 ? std::to_string(today) : "";
+        std::ostringstream js;
+        js << datePrefix << " 用户拒绝篮子 " << basketId
+           << " 订单数:" << m_pendingBasket.orders.size();
+        m_tradeJournal->log(js.str());
+    }
+
     INTERNAL_INFO_STREAM << "[SemiAuto] 篮子拒绝: basketId=" << basketId
                          << " discarded=" << m_pendingBasket.orders.size() << " orders";
-}
-
-void StrategyEngine::testEmitBasket()
-{
-    auto snap = engine::AccountEngine::instance().snapshot();
-    const auto& accountId = snap.account.accountId;
-    if (accountId.empty()) {
-        INTERNAL_WARN_STREAM << "[Test] testEmitBasket: AccountEngine 无 accountId, 无法构建订单";
-        return;
-    }
-
-    // 3 条覆盖 Buy/Sell/不同权重的合成订单
-    struct Fixture { const char* sym; OrderSide side; std::int64_t qty; double score; double weight; } fixtures[] = {
-        {"000001.SZ", OrderSide::Buy,   100, 0.85, 0.05},
-        {"600000.SH", OrderSide::Buy,   200, 0.72, 0.08},
-        {"000002.SZ", OrderSide::Sell,  100, 0.60, 0.03},
-    };
-
-    std::vector<OrderRequest> orders;
-    for (auto& f : fixtures) {
-        auto order = m_orderBuilder.buildSignalOrder(
-            f.sym, f.side, 0.0, f.qty, f.score, m_strategyId, accountId);
-        order.setExtension(domain::trading::ExtKey::kTargetWeight, f.weight);
-        order.setExtension(domain::trading::ExtKey::kSignalScore, f.score);
-        // traceId 必须唯一, 否则 variantListToOrders 按 traceId 匹配时会全部映射到最后一笔
-        order.setTraceId("test-" + std::to_string(orders.size()));
-        orders.push_back(std::move(order));
-    }
-
-    INTERNAL_INFO_STREAM << "[Test] testEmitBasket: 发射 " << orders.size() << " 条合成订单";
-    dispatchOrders(orders);
 }
 
 void StrategyEngine::dispatchOrders(const std::vector<OrderRequest>& orders)

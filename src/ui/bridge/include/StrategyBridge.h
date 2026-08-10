@@ -88,9 +88,6 @@ public:
     /// @brief 用户拒绝篮子 → 丢弃全部订单
     Q_INVOKABLE void rejectBasket();
 
-    /// @brief [测试] 发射合成测试篮子 (3条样本订单), 用于验证 SemiAuto 确认窗口链路
-    Q_INVOKABLE void testEmitBasket(const QString& strategyId);
-
     /// @brief 当前待确认订单列表 (QML 显示用)
     [[nodiscard]] QVariantList pendingBasketOrders() const;
     /// @brief 当前待确认篮子的策略名称

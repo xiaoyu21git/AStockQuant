@@ -39,6 +39,7 @@ void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const
 #include "../../engine/include/AccountEngine.h"
 #include "../../engine/include/OrderManager.h"
 #include "../../ui/bridge/include/MarketDataBridge.h"
+#include "../../ui/bridge/include/StrategyBridge.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
 #include "../../../domain/strategy/include/EventRiskSubscriber.h"
@@ -507,6 +508,12 @@ void AppBootstrap::initializeDeferredDomainServices()
             .setLiveDataPath(livePath.toStdString());
     }
     astock::infrastructure::database::PostMarketSyncService::instance().start();
+
+    // ── 策略桥接 + 篮子拦截器初始化 (SemiAuto 确认窗口) ──
+    if (auto* sb = bridge::StrategyBridge::instance()) {
+        sb->init();
+        INTERNAL_INFO_STREAM << "[AppBootstrap] StrategyBridge 拦截器已就绪";
+    }
 
     initializeDeferredTradingServices();
 
