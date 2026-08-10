@@ -634,11 +634,18 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
         if (!req.isValid()) continue;
         auto order = buildTradeOrder(req);
         order.setBasketId(req.extensionAs<uint64_t>(domain::trading::ExtKey::kBasketId, 0));
-        if (order.side() == strategy::OrderDirection::Sell)
+        bool isSell = (order.side() == strategy::OrderDirection::Sell);
+        INTERNAL_INFO_STREAM << "[TradeExec] 篮子分拣: " << order.symbol()
+                             << " side=" << (isSell ? "Sell" : "Buy")
+                             << " qty=" << order.quantity()
+                             << " price=" << order.price();
+        if (isSell)
             sells.push_back(std::move(order));
         else
             buys.push_back(std::move(order));
     }
+    INTERNAL_INFO_STREAM << "[TradeExec] 篮子拆分: sells=" << sells.size()
+                         << " buys=" << buys.size();
 
     // 获取当前可用现金
     auto& accEng = engine::AccountEngine::instance();
@@ -651,6 +658,9 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
     for (auto& order : sells) {
         if (m_onOrderGenerated) m_onOrderGenerated(order);
         auto risk = buildRiskInput(order);
+        INTERNAL_INFO_STREAM << "[TradeExec] 提交卖单: " << order.symbol()
+                             << " isBuy=" << risk.isBuyOrder()
+                             << " closeable=" << risk.closeableQuantity();
         auto result = submitOrder(order, risk);
         if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
         if (result.succeeded()) {
@@ -683,6 +693,10 @@ void TradeExecutionEngine::onOrders(const std::vector<strategy::OrderRequest>& o
 
         if (m_onOrderGenerated) m_onOrderGenerated(order);
         auto risk = buildRiskInput(order);
+        INTERNAL_INFO_STREAM << "[TradeExec] 提交买单: " << order.symbol()
+                             << " isBuy=" << risk.isBuyOrder()
+                             << " price=" << order.price()
+                             << " qty=" << order.quantity();
         auto result = submitOrder(order, risk);
         if (m_onOrderSubmitResult) m_onOrderSubmitResult(order, result);
         if (result.succeeded()) {

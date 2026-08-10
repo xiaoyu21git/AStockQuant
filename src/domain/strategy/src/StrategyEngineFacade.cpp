@@ -999,6 +999,8 @@ void StrategyEngine::testEmitBasket()
             f.sym, f.side, 0.0, f.qty, f.score, m_strategyId, accountId);
         order.setExtension(domain::trading::ExtKey::kTargetWeight, f.weight);
         order.setExtension(domain::trading::ExtKey::kSignalScore, f.score);
+        // traceId 必须唯一, 否则 variantListToOrders 按 traceId 匹配时会全部映射到最后一笔
+        order.setTraceId("test-" + std::to_string(orders.size()));
         orders.push_back(std::move(order));
     }
 

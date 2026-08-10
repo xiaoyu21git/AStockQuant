@@ -1474,7 +1474,8 @@ QString StrategyBridge::tr(const QString& key, const QString&) const {
 // ═══════════════════════════════════════════════════════════════════════════
 
 using OrderRequest = domain::strategy::OrderRequest;
-using OrderSide = domain::strategy::OrderSide;
+using OrderSide    = domain::strategy::OrderSide;
+using OrderType    = domain::strategy::OrderType;
 
 // ── OrderRequest → QVariantList (引擎线程 → Qt 主线程) ──
 QVariantList StrategyBridge::ordersToVariantList(const std::vector<OrderRequest>& orders)
@@ -1484,36 +1485,75 @@ QVariantList StrategyBridge::ordersToVariantList(const std::vector<OrderRequest>
     for (const auto& o : orders) {
         QVariantMap item;
         item["symbol"]       = QString::fromStdString(o.symbol());
+        item["stockName"]    = StockNameResolver::name(QString::fromStdString(o.symbol()));
         item["side"]         = o.side() == OrderSide::Buy ? QStringLiteral("买入") : QStringLiteral("卖出");
         item["sideRaw"]      = static_cast<int>(o.side());
         item["quantity"]     = static_cast<qlonglong>(o.quantity());
+        item["price"]        = o.price();
+        item["orderType"]    = static_cast<int>(o.orderType());
         item["targetWeight"] = o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
         item["signalScore"]  = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
         item["signalIntent"] = static_cast<int>(
             o.extensionAs<std::uint64_t>(domain::trading::ExtKey::kSignalIntent, 0));
         item["traceId"]      = QString::fromStdString(o.traceId());
+
+        // 最新价 (市价单估算资金占用用)
+        auto& gse = engine::GmSessionEngine::instance();
+        auto quote = gse.fetchQuote(o.symbol());
+        item["latestPrice"] = (quote.has_value() && quote->valid) ? quote->price : 0.0;
+
         list.append(item);
     }
     return list;
 }
 
-// ── QVariantList → OrderRequest[] (QML 回传, 仅 quantity 可被编辑) ──
+// ── QVariantList → OrderRequest[] (QML 回传, 按 traceId 匹配) ──
 std::vector<OrderRequest> StrategyBridge::variantListToOrders(
     const QVariantList& editedList,
     const std::vector<OrderRequest>& originalOrders)
 {
+    // 建立 traceId → 原始订单指针的索引, 支持 QML 端删除/排序
+    std::unordered_map<std::string, const OrderRequest*> byTraceId;
+    for (const auto& o : originalOrders) {
+        byTraceId[o.traceId()] = &o;
+    }
+
     std::vector<OrderRequest> result;
-    result.reserve(originalOrders.size());
+    result.reserve(editedList.size());
 
-    for (int i = 0; i < editedList.size() && i < static_cast<int>(originalOrders.size()); ++i) {
-        QVariantMap item = editedList[i].toMap();
-        OrderRequest order = originalOrders[i];  // 拷贝原始订单
+    for (const auto& v : editedList) {
+        QVariantMap item = v.toMap();
+        std::string tid = item.value("traceId").toString().toStdString();
+        auto it = byTraceId.find(tid);
+        if (it == byTraceId.end()) continue;  // 已删除或数据异常, 跳过
 
-        // 仅替换 quantity (QML 中唯一可编辑字段)
+        OrderRequest order = *it->second;  // 从原始拷贝, 保留所有不可编辑字段
+
+        // ── quantity 回写 ──
         qlonglong editedQty = item.value("quantity").toLongLong();
         if (editedQty > 0) {
-            order.setQuantity(editedQty);
+            order.setQuantity(static_cast<double>(editedQty));
         }
+
+        // ── price / orderType 回写 (价格与类型互转) ──
+        double editedPrice = item.value("price").toDouble();
+        int editedOtype = item.value("orderType", static_cast<int>(OrderType::Market)).toInt();
+
+        if (editedPrice > 0.0 && editedOtype == static_cast<int>(OrderType::Market)) {
+            // 用户在 QML 将 "市价" 改为具体价格 → 转为限价单
+            order.setPrice(editedPrice);
+            order.setOrderType(OrderType::Limit);
+        } else if (editedPrice <= 0.0
+                   && editedOtype == static_cast<int>(OrderType::Limit)) {
+            // 用户将限价清空或归零 → 恢复市价单
+            order.setPrice(0.0);
+            order.setOrderType(OrderType::Market);
+        } else if (editedPrice > 0.0) {
+            // 限价单仅改价
+            order.setPrice(editedPrice);
+        }
+        // else: 市价单不改价 (editedPrice ≤ 0 && Market), 保持原样
+
         result.push_back(std::move(order));
     }
     return result;
