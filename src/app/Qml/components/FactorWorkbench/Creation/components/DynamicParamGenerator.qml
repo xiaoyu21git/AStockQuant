@@ -947,7 +947,9 @@ Item {
     
     // 重新加载参数配置
     function reloadConfigs(newConfigs, newGroups, initialValues) {
-        root.paramInstances = {}
+        // 不清空 paramInstances：Repeater 在 configsList 不变时会复用 item 不触发
+        // onLoaded，清空后 syncValues / setValues 找不到实例 → 滑块视觉永远不更新。
+        // 保留已有实例引用，下面用新值直接驱动它们；切策略类型时 onLoaded 会覆盖。
         root.validationErrors = {}
         root.configs = newConfigs || []
         root.groups = newGroups || []
@@ -966,6 +968,16 @@ Item {
             }
         }
         root.values = newValues
+
+        // 直接驱动已有滑块实例（覆盖 Repeater 复用导致 onLoaded 不触发的缺口）
+        root.suppressParamValuePropagation = true
+        for (var paramId in root.paramInstances) {
+            var instance = root.paramInstances[paramId]
+            if (instance && newValues[paramId] !== undefined && typeof instance.setValue === "function") {
+                instance.setValue(newValues[paramId])
+            }
+        }
+        root.suppressParamValuePropagation = false
 
         Qt.callLater(function() {
             root.syncValues(root.values)

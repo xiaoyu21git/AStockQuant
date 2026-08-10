@@ -1340,6 +1340,7 @@ Rectangle {
         for (var personalizedKey in personalizedValues) {
             preservedValues[personalizedKey] = personalizedValues[personalizedKey]
         }
+
         return preservedValues
     }
 
@@ -1564,11 +1565,9 @@ Rectangle {
             }
 
             // 清除旧字段 — 清理顶层冗余键, 实际值已封装在 rule_profile 中
-            delete merged.stopLossPercent
-            delete merged.takeProfitPercent
+            // 注意: stopLossPercent / takeProfitPercent / maxDrawdownLimit 是引擎+滑块的活跃字段，必须保留在根层级
             delete merged.positionSize
             delete merged.rebalanceDays
-            delete merged.maxDrawdownLimit
             delete merged.longTrendPeriod
             delete merged.breakoutLookbackPeriod
             delete merged.breakoutThreshold
@@ -2233,9 +2232,6 @@ Rectangle {
                 var key = sourceKeys[index]
                 var resolvedValue = sourceParams[key]
                 if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
-                    resolvedValue = persistedRuleProfile[key]
-                }
-                if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
                     continue
                 }
                 mappedValues[targetKey] = transform ? transform(resolvedValue) : resolvedValue
@@ -2401,9 +2397,6 @@ Rectangle {
         }
         Qt.callLater(function() {
             root.suppressRuleComposerReset = false
-            // 重新加载当前策略类型的参数（切换类型时被 suppress 跳过了）
-            // v0.16.0 修复: 传入 mappedValues 保留已编辑的参数值, 避免 maxDrawdownLimit 等被默认值覆盖
-            loadParamConfigs(mappedValues)
         })
         root.advancedOptionsChanged(root.enableAdvancedOptions)
         emitValidationState(currentParameterValidationErrors())
