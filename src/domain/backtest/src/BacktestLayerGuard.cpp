@@ -11,7 +11,7 @@ BacktestLayerGuardResult StrictBacktestLayerGuard::validate(const BacktestReques
     BacktestLayerGuardResult result;
     if (!request.isValid()) {
         result.violations.push_back(BacktestLayerViolationCode::InvalidRequest);
-        INTERNAL_ERROR_STREAM << "[BacktestLayerGuard] Invalid backtest request";
+        INTERNAL_ERROR_STREAM << "[BacktestLayerGuard] 无效的回测请求";
         return result;
     }
 
@@ -108,7 +108,7 @@ BacktestLayerGuardResult StrictBacktestLayerGuard::validate(const BacktestReques
     }
 
     if (!result.violations.empty()) {
-        INTERNAL_WARN_STREAM << "[BacktestLayerGuard] Validation found "
+        INTERNAL_WARN_STREAM << "[BacktestLayerGuard] 验证发现 "
                              << result.violations.size() << " violation(s)";
     }
     return result;

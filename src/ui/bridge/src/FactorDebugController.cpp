@@ -36,7 +36,7 @@ FactorDebugController::FactorDebugController(QObject* parent)
     , m_statusMessage("就绪")
     , m_realtimeUpdateTimer(new QTimer(this))
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController constructor";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 构造函数";
     
     // 初始化调试参数
     m_debugParameters = getDefaultDebugParameters();
@@ -57,7 +57,7 @@ FactorDebugController::FactorDebugController(QObject* parent)
 // 析构函数
 FactorDebugController::~FactorDebugController()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController destructor";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 析构函数";
     
     if (m_realtimeUpdateTimer) {
         m_realtimeUpdateTimer->stop();
@@ -70,7 +70,7 @@ void FactorDebugController::initialize()
     INTERNAL_DEBUG_STREAM << "FactorDebugController::initialize";
     
     if (m_debugState != DebugState::Idle) {
-        INTERNAL_WARN_STREAM << "FactorDebugController::initialize: 已经在初始化状态";
+        INTERNAL_WARN_STREAM << "FactorDebugController 已在初始化状态";
         return;
     }
     
@@ -83,13 +83,13 @@ void FactorDebugController::initialize()
     setDebugState(DebugState::Ready);
     updateStatusMessage("初始化完成");
     
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::initialize: 完成";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 初始化完成";
 }
 
 // 加载因子
 bool FactorDebugController::loadFactor(const QString& factorId)
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::loadFactor: 加载因子 " << toStdString(factorId);
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 加载因子: " << toStdString(factorId);
     
     if (factorId.isEmpty()) {
         updateStatusMessage("因子ID不能为空");
@@ -139,14 +139,14 @@ bool FactorDebugController::loadFactor(const QString& factorId)
     emit currentFactorChanged();
     emit factorLoaded(factorId, factorData);
     
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::loadFactor: 成功加载因子 " << toStdString(factorId);
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 成功加载因子: " << toStdString(factorId);
     return true;
 }
 
 // 卸载因子
 void FactorDebugController::unloadFactor()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::unloadFactor";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 卸载因子";
     
     {
         QWriteLocker locker(&m_rwLock);
@@ -167,7 +167,7 @@ void FactorDebugController::unloadFactor()
 // 刷新因子列表
 void FactorDebugController::refreshFactorList()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::refreshFactorList";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 刷新因子列表";
     
     {
         QWriteLocker locker(&m_rwLock);
@@ -176,13 +176,13 @@ void FactorDebugController::refreshFactorList()
 
     emit availableFactorsChanged();
 
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::refreshFactorList: 因子服务已删除，列表清空";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 因子服务已删除, 列表清空";
 }
 
 // 设置调试参数
 void FactorDebugController::setDebugParameter(const QString& paramName, const QVariant& value)
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::setDebugParameter: " << toStdString(paramName) << "=" << toStdString(value);
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 设置调试参数: " << toStdString(paramName) << "=" << toStdString(value);
     
     if (paramName.isEmpty()) {
         INTERNAL_WARN_STREAM << "参数名不能为空";
@@ -217,7 +217,7 @@ QVariant FactorDebugController::getDebugParameter(const QString& paramName) cons
 // 重置调试参数
 void FactorDebugController::resetDebugParameters()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::resetDebugParameters";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 重置调试参数";
     
     {
         QWriteLocker locker(&m_rwLock);
@@ -235,7 +235,7 @@ void FactorDebugController::resetDebugParameters()
 // 开始调试
 void FactorDebugController::startDebug()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::startDebug";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 启动调试";
     
     if (m_currentFactorId.isEmpty()) {
         updateStatusMessage("请先加载一个因子");
@@ -264,7 +264,7 @@ void FactorDebugController::startDebug()
 // 停止调试
 void FactorDebugController::stopDebug()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::stopDebug";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 停止调试";
     
     if (m_debugState != DebugState::Debugging) {
         INTERNAL_WARN_STREAM << "不在调试状态";
@@ -283,7 +283,7 @@ void FactorDebugController::stopDebug()
 // 暂停调试
 void FactorDebugController::pauseDebug()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::pauseDebug";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 暂停调试";
     
     if (m_debugState != DebugState::Debugging) {
         INTERNAL_WARN_STREAM << "不在调试状态";
@@ -302,7 +302,7 @@ void FactorDebugController::pauseDebug()
 // 恢复调试
 void FactorDebugController::resumeDebug()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::resumeDebug";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 恢复调试";
     
     if (m_debugState != DebugState::Calculating) {
         INTERNAL_WARN_STREAM << "不在暂停状态";
@@ -323,7 +323,7 @@ void FactorDebugController::resumeDebug()
 // 计算因子值
 void FactorDebugController::calculateFactorValues()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::calculateFactorValues";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 计算因子值";
     
     if (m_currentFactorId.isEmpty()) {
         INTERNAL_WARN_STREAM << "没有加载因子";
@@ -346,7 +346,7 @@ void FactorDebugController::calculateFactorValues()
 // 更新预览
 void FactorDebugController::updatePreview()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::updatePreview";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 更新预览";
     
     if (m_currentFactorId.isEmpty()) {
         return;
@@ -364,7 +364,7 @@ void FactorDebugController::updatePreview()
 // 生成因子值序列
 QVariantList FactorDebugController::generateFactorValueSeries(int count)
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::generateFactorValueSeries: 生成 " << count << " 个值";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 生成因子值序列: " << count << "个值";
     
     QVariantList values;
     
@@ -455,7 +455,7 @@ double FactorDebugController::calculateKurtosis()
 // 计算所有指标
 QVariantMap FactorDebugController::calculateAllMetrics()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::calculateAllMetrics";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 计算所有指标";
     
     QVariantMap metrics;
     
@@ -480,7 +480,7 @@ QVariantMap FactorDebugController::calculateAllMetrics()
 // 保存调试配置
 bool FactorDebugController::saveDebugConfiguration()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::saveDebugConfiguration";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 保存调试配置";
     
     if (m_currentFactorId.isEmpty()) {
         updateStatusMessage("请先加载一个因子");
@@ -508,7 +508,7 @@ bool FactorDebugController::saveDebugConfiguration()
 // 加载调试配置
 bool FactorDebugController::loadDebugConfiguration(const QString& configId)
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::loadDebugConfiguration: " << toStdString(configId);
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 加载调试配置: " << toStdString(configId);
     
     // 这里应该从数据库或文件加载配置
     // 暂时只记录日志
@@ -521,7 +521,7 @@ bool FactorDebugController::loadDebugConfiguration(const QString& configId)
 // 获取已保存的配置
 QVariantList FactorDebugController::getSavedConfigurations()
 {
-    INTERNAL_DEBUG_STREAM << "FactorDebugController::getSavedConfigurations";
+    INTERNAL_DEBUG_STREAM << "FactorDebugController 获取已保存配置";
     
     // 这里应该从数据库或文件获取配置列表
     // 暂时返回空列表

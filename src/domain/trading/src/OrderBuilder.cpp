@@ -49,7 +49,7 @@ OrderRequest OrderBuilder::build(const OrderSpec& spec,
     fillCommon(b, spec.symbol, strategyId, accountId);
     auto [req, err] = b.build();
     if (!err.empty())
-        INTERNAL_ERROR_STREAM << "[OrderBuilder] build(OrderSpec) failed: " << err;
+        INTERNAL_ERROR_STREAM << "[OrderBuilder] 构建订单失败: " << err;
     return req;
 }
 
@@ -67,7 +67,7 @@ OrderRequest OrderBuilder::buildStopOrder(const std::string& symbol, double pric
     fillCommon(b, symbol, strategyId, accountId);
     auto [req, err] = b.build();
     if (!err.empty())
-        INTERNAL_ERROR_STREAM << "[OrderBuilder] buildStopOrder failed: " << err;
+        INTERNAL_ERROR_STREAM << "[OrderBuilder] 构建止损单失败: " << err;
     return req;
 }
 
@@ -85,7 +85,7 @@ OrderRequest OrderBuilder::buildSignalOrder(const std::string& symbol, OrderSide
     fillCommon(b, symbol, strategyId, accountId);
     auto [req, err] = b.build();
     if (!err.empty())
-        INTERNAL_ERROR_STREAM << "[OrderBuilder] buildSignalOrder failed: " << err;
+        INTERNAL_ERROR_STREAM << "[OrderBuilder] 构建信号单失败: " << err;
     return req;
 }
 
@@ -101,7 +101,7 @@ OrderRequest OrderBuilder::buildManualOrder(const std::string& symbol, OrderSide
     fillCommon(b, symbol, strategyId, accountId);
     auto [req, err] = b.build();
     if (!err.empty())
-        INTERNAL_ERROR_STREAM << "[OrderBuilder] buildManualOrder failed: " << err;
+        INTERNAL_ERROR_STREAM << "[OrderBuilder] 构建手动单失败: " << err;
     return req;
 }
 

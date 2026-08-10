@@ -36,7 +36,7 @@ FileWatcher& FileWatcher::operator=(FileWatcher&& other) noexcept {
 // 公共方法实现
 bool FileWatcher::watch(const std::string& path, FileChangeCallback callback) {
     if (path.empty()) {
-        INTERNAL_ERROR_STREAM << "Cannot watch empty path";
+        INTERNAL_ERROR_STREAM << "无法监听空路径";
         return false;
     }
     
@@ -44,7 +44,7 @@ bool FileWatcher::watch(const std::string& path, FileChangeCallback callback) {
     
     // 检查是否已经在监控
     if (watch_items_.find(path) != watch_items_.end()) {
-        INTERNAL_WARN_STREAM << "Path already being watched: " << path;
+        INTERNAL_WARN_STREAM << "路径已在监听中: " << path;
         return false;
     }
     
@@ -56,13 +56,13 @@ bool FileWatcher::watch(const std::string& path, FileChangeCallback callback) {
     
     watch_items_[path] = item;
     
-    INTERNAL_INFO_STREAM << "Added watch for path: " << path;
+    INTERNAL_INFO_STREAM << "已添加路径监听: " << path;
     
     // 如果已经在运行，立即开始监控
     if (running_) {
         
         if (!impl_->addWatch(path, config_.recursive)) {
-            INTERNAL_ERROR_STREAM << "Failed to start platform watch for: " << path;
+            INTERNAL_ERROR_STREAM << "平台监听启动失败: " << path;
             watch_items_.erase(path);
             return false;
         }
@@ -80,17 +80,17 @@ void FileWatcher::unwatch(const std::string& path) {
             impl_->removeWatch(path);
         }
         watch_items_.erase(it);
-        INTERNAL_INFO_STREAM << "Removed watch for path: " << path;
+        INTERNAL_INFO_STREAM << "已移除路径监听: " << path;
     }
 }
 
 bool FileWatcher::start() {
     if (running_) {
-        INTERNAL_WARN_STREAM << "FileWatcher is already running";
+        INTERNAL_WARN_STREAM << "FileWatcher 已在运行";
         return true;
     }
     
-    INTERNAL_INFO_STREAM << "Starting FileWatcher";
+    INTERNAL_INFO_STREAM << "正在启动 FileWatcher";
     
     // 添加所有监控路径
     std::lock_guard<std::mutex> lock(items_mutex_);
@@ -98,13 +98,13 @@ bool FileWatcher::start() {
     
     for (const auto& [path, item] : watch_items_) {
         if (!impl_->addWatch(path, config_.recursive)) {
-            INTERNAL_ERROR_STREAM << "Failed to add watch for: " << path;
+            INTERNAL_ERROR_STREAM << "添加监听失败: " << path;
             success = false;
         }
     }
     
     if (!success) {
-        INTERNAL_ERROR_STREAM << "Failed to start all watches";
+        INTERNAL_ERROR_STREAM << "所有监听启动失败";
         return false;
     }
     
@@ -112,14 +112,14 @@ bool FileWatcher::start() {
     impl_->run();
     running_ = true;
     
-    INTERNAL_INFO_STREAM << "FileWatcher started successfully";
+    INTERNAL_INFO_STREAM << "FileWatcher 启动成功";
     return true;
 }
 
 void FileWatcher::stop() {
     if (!running_) return;
     
-    INTERNAL_INFO_STREAM << "Stopping FileWatcher";
+    INTERNAL_INFO_STREAM << "正在停止 FileWatcher";
     
     impl_->stop();
     running_ = false;
@@ -131,7 +131,7 @@ void FileWatcher::stop() {
         item->pending_events.clear();
     }
     
-    INTERNAL_INFO_STREAM << "FileWatcher stopped";
+    INTERNAL_INFO_STREAM << "FileWatcher 已停止";
 }
 
 std::vector<std::string> FileWatcher::getWatchedPaths() const {
@@ -163,7 +163,7 @@ void FileWatcher::resetStats() {
 
 void FileWatcher::setConfig(const FileWatcherConfig& config) {
     if (running_) {
-        INTERNAL_WARN_STREAM << "Cannot change config while FileWatcher is running";
+        INTERNAL_WARN_STREAM << "FileWatcher 运行时无法修改配置";
         return;
     }
     config_ = config;
@@ -210,14 +210,14 @@ void FileWatcher::processEvent(const std::string& path,
         }
         
         if (!item) {
-            INTERNAL_WARN_STREAM << "No watch item found for path: " << path;
+            INTERNAL_WARN_STREAM << "未找到路径监听项: " << path;
             return;
         }
     }
     
     // 检查速率限制
     if (item->isRateLimited()) {
-        INTERNAL_WARN_STREAM << "Rate limit exceeded for path: " << path;
+        INTERNAL_WARN_STREAM << "路径触发频率限制: " << path;
         return;
     }
     
@@ -314,7 +314,7 @@ void FileWatcher::debounceEvents() {
                     item->callback(event);
                 }
             } catch (const std::exception& e) {
-                INTERNAL_ERROR_STREAM << "Error in file change callback for "
+                INTERNAL_ERROR_STREAM << "文件变更回调异常: "
                          << event_path << ": " << e.what();
             }
         }

@@ -241,12 +241,12 @@ FactorInstanceManager::FactorInstanceManager(
     std::shared_ptr<DataAvailabilityChecker> dataChecker)
     : db_(db), dataChecker_(dataChecker) {
 
-    INTERNAL_INFO_STREAM << "[FIM] ctor START";
+    INTERNAL_INFO_STREAM << "[FIM] ctor 开始";
     threadPool_ = std::make_shared<foundation::thread::ThreadPoolExecutor>(4);
-    INTERNAL_INFO_STREAM << "[FIM] threadpool OK";
+    INTERNAL_INFO_STREAM << "[FIM] threadpool 就绪";
 
     // refreshCache() 移除 — 策略需要的因子由 createInstance() 按需加载+缓存
-    INTERNAL_INFO_STREAM << "[FIM] ctor DONE (lazy load)";
+    INTERNAL_INFO_STREAM << "[FIM] ctor 完成 (延迟加载)";
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
@@ -262,10 +262,10 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
     try {
         return creator(info, dataChecker_, *this);
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[FIM] createFactorFromInfo failed: " << instanceId << " type=" << static_cast<int>(factorType) << " error=" << e.what();
+        INTERNAL_ERROR_STREAM << "[FIM] createFactorFromInfo 失败: " << instanceId << " type=" << static_cast<int>(factorType) << " error=" << e.what();
         return nullptr;
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[FIM] createFactorFromInfo failed: " << instanceId << " type=" << static_cast<int>(factorType) << " error=unknown";
+        INTERNAL_ERROR_STREAM << "[FIM] createFactorFromInfo 失败: " << instanceId << " type=" << static_cast<int>(factorType) << " error=未知";
         return nullptr;
     }
 }
@@ -429,33 +429,33 @@ bool FactorInstanceManager::updateInstanceConfig(
         }
 
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[FIM] updateInstanceConfig EXCEPTION: id=" << instanceId << " error=" << e.what();
+        INTERNAL_ERROR_STREAM << "[FIM] updateInstanceConfig 异常: id=" << instanceId << " error=" << e.what();
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[FIM] updateInstanceConfig UNKNOWN EXCEPTION: id=" << instanceId;
+        INTERNAL_ERROR_STREAM << "[FIM] updateInstanceConfig 未知异常: id=" << instanceId;
     }
 
     return false;
 }
 
 void FactorInstanceManager::refreshCache() {
-    INTERNAL_INFO_STREAM << "[FIM] refreshCache START";
+    INTERNAL_INFO_STREAM << "[FIM] refreshCache 开始";
     try {
         std::lock_guard<std::mutex> lock(cacheMutex_);
 
         instanceCache_.clear();
         infoCache_.clear();
 
-        INTERNAL_INFO_STREAM << "[FIM] refreshCache calling loadAllInstancesFromDB";
+        INTERNAL_INFO_STREAM << "[FIM] refreshCache 调用 loadAllInstancesFromDB";
         auto allInstances = loadAllInstancesFromDB();
-        INTERNAL_INFO_STREAM << "[FIM] refreshCache loaded " << allInstances.size() << " instances";
+        INTERNAL_INFO_STREAM << "[FIM] refreshCache 已加载 " << allInstances.size() << " instances";
         for (auto& info : allInstances) {
             infoCache_[info.instanceId] = info;
         }
-        INTERNAL_INFO_STREAM << "[FIM] refreshCache DONE";
+        INTERNAL_INFO_STREAM << "[FIM] refreshCache 完成";
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[FIM] refreshCache EXCEPTION: " << e.what();
+        INTERNAL_ERROR_STREAM << "[FIM] refreshCache 异常: " << e.what();
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[FIM] refreshCache UNKNOWN EXCEPTION (likely Foundation logger crash)";
+        INTERNAL_ERROR_STREAM << "[FIM] refreshCache 未知异常 (likely Foundation logger crash)";
         // 崩溃源：updateInstanceAvailability → DataAvailabilityChecker → Foundation logger
         // 缓存刷新失败不影响主流程，继续运行
     }
@@ -513,9 +513,9 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
         updateInstanceAvailability(info);
 
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[FIM] loadInstanceFromDB EXCEPTION: id=" << instanceId << " error=" << e.what();
+        INTERNAL_ERROR_STREAM << "[FIM] loadInstanceFromDB 异常: id=" << instanceId << " error=" << e.what();
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[FIM] loadInstanceFromDB UNKNOWN EXCEPTION: id=" << instanceId;
+        INTERNAL_ERROR_STREAM << "[FIM] loadInstanceFromDB 未知异常: id=" << instanceId;
     }
 
     return info;
@@ -547,9 +547,9 @@ void FactorInstanceManager::updateInstanceAvailability(
                 checkDate = latestResult.getRow(0).getString("latest_date");
             }
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[FIM] updateInstanceAvailability daily_bar query EXCEPTION: " << e.what();
+            INTERNAL_ERROR_STREAM << "[FIM] updateInstanceAvailability daily_bar 查询异常: " << e.what();
         } catch (...) {
-            INTERNAL_ERROR_STREAM << "[FIM] updateInstanceAvailability daily_bar query UNKNOWN EXCEPTION";
+            INTERNAL_ERROR_STREAM << "[FIM] updateInstanceAvailability daily_bar 查询未知异常";
         }
     }
 
@@ -603,9 +603,9 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
         }
 
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[FIM] loadAllInstancesFromDB EXCEPTION: " << e.what();
+        INTERNAL_ERROR_STREAM << "[FIM] loadAllInstancesFromDB 异常: " << e.what();
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[FIM] loadAllInstancesFromDB UNKNOWN EXCEPTION";
+        INTERNAL_ERROR_STREAM << "[FIM] loadAllInstancesFromDB 未知异常";
     }
 
     return instances;

@@ -43,7 +43,7 @@ std::shared_ptr<ISqlDatabase> NativePgConnectionPool::getConnection()
                 if (env && *env) {
                     cfg.password = env;
                 } else {
-                    INTERNAL_ERROR_STREAM << "[Pool] pg.password not configured"
+                    INTERNAL_ERROR_STREAM << "[Pool] pg.password 未配置"
                                           << " and ASTOCK_PG_PASSWORD not set — refusing connection";
                     return nullptr;
                 }
@@ -62,10 +62,10 @@ std::shared_ptr<ISqlDatabase> NativePgConnectionPool::getConnection()
         connections_.push_back({db, tid});
         return db;
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[Pool] getConnection exception: " << e.what();
+        INTERNAL_ERROR_STREAM << "[Pool] getConnection 异常: " << e.what();
         return nullptr;
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[Pool] getConnection unknown exception";
+        INTERNAL_ERROR_STREAM << "[Pool] getConnection 未知异常";
         return nullptr;
     }
 }

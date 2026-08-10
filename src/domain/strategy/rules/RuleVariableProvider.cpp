@@ -980,7 +980,7 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     // 个股级(代理到市场宽度, 真实排名需 per-symbol concept lookup — MVP 阶段代理)
     if (varPath == "theme.emotion_cycle") {
         static thread_local bool once = false;
-        if (!once) { INTERNAL_WARN_STREAM << "[RuleVarProvider] theme.emotion_cycle proxied to conceptAvgReturn (MVP placeholder)"; once = true; }
+        if (!once) { INTERNAL_WARN_STREAM << "[RuleVarProvider] theme.emotion_cycle 代理到 conceptAvgReturn (MVP占位符)"; once = true; }
         return market.conceptAvgReturn;
     }
     // 龙头排名: 从 concept_leader_rank 缓存实查 (6位码, 未上榜=0)
@@ -1004,7 +1004,7 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
         varPath == "candidate.follow_strength_vs_leader_ratio" ||
         varPath == "candidate.early_repair_strength_score") {
         static thread_local bool proxyWarned = false;
-        if (!proxyWarned) { INTERNAL_WARN_STREAM << "[RuleVarProvider] Tier3 theme/consensus variables proxied to breadthAboveMa60Ratio (MVP placeholder, silenced after first hit)"; proxyWarned = true; }
+        if (!proxyWarned) { INTERNAL_WARN_STREAM << "[RuleVarProvider] Tier3 theme/consensus variables 代理到 breadthAboveMa60Ratio (MVP占位符, 首次后静默)"; proxyWarned = true; }
         return market.breadthAboveMa60Ratio;
     }
 
@@ -1176,9 +1176,9 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     {
         static thread_local int nulloptCount = 0;
         if (++nulloptCount <= 10) {
-            INTERNAL_WARN_STREAM << "[RuleVarProvider] Unresolved variable '"
-                                 << varPath << "' returns nullopt (hit "
-                                 << nulloptCount << ", silenced after 10)";
+            INTERNAL_WARN_STREAM << "[RuleVarProvider] 未解析变量 '"
+                                 << varPath << "' 返回 nullopt (已 "
+                                 << nulloptCount << ", 超过10次后静默)";
         }
     }
     return std::nullopt;

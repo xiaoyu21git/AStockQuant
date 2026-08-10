@@ -234,7 +234,7 @@ bool JujinMarketConnector::isEnabledByEnvironment() const
 bool JujinMarketConnector::start()
 {
     if (m_started) {
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] start skipped: already started";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] 启动跳过: 已启动";
         return true;
     }
 
@@ -321,7 +321,7 @@ void JujinMarketConnector::stop()
         m_patrolExecutor->shutdown();
 
     if (m_initialOrderSyncThread.joinable()) {
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] waiting for initial order sync thread";
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] 等待初始订单同步线程";
         m_initialOrderSyncThread.join();
     }
 
@@ -367,14 +367,14 @@ void JujinMarketConnector::publishExistingOrders(std::shared_ptr<engine::EventBu
         auto& engine = engine::GmSessionEngine::instance();
         auto* s = engine.strategy();
         if (!s) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] gmsdk strategy not initialized";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] gmsdk strategy 未初始化";
             return;
         }
 
         auto* arr = s->get_unfinished_orders(nullptr);
         if (!arr || arr->status() != 0) {
             if (arr) arr->release();
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] get_unfinished_orders failed";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] 获取未完成订单失败";
             return;
         }
 
@@ -423,12 +423,12 @@ void JujinMarketConnector::publishExistingOrders(std::shared_ptr<engine::EventBu
             ++publishedCount;
         }
         arr->release();
-        INTERNAL_INFO_STREAM << "[JujinMarketConnector] sync done published=" << publishedCount
+        INTERNAL_INFO_STREAM << "[JujinMarketConnector] 同步完成, 已发布=" << publishedCount
                              << " filtered=" << filteredCount;
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] sync exception: " << e.what();
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] 同步异常: " << e.what();
         } catch (...) {
-            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] sync unknown exception";
+            INTERNAL_ERROR_STREAM << "[JujinMarketConnector] 同步未知异常";
         }
     });
 }

@@ -28,7 +28,7 @@ EventRiskSubscriber::~EventRiskSubscriber() {
 void EventRiskSubscriber::start() {
     m_bus = engine::get_engine_event_bus();
     if (!m_bus) {
-        INTERNAL_WARN_STREAM << "[EventRisk] EventBus not available";
+        INTERNAL_WARN_STREAM << "[EventRisk] EventBus 不可用";
         return;
     }
 

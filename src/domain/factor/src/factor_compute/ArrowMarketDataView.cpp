@@ -176,20 +176,20 @@ public:
         // ── 打开文件，建立 mmap + reader ──
         auto inResult = arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ);
         if (!inResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[ArrowView] mmap failed: " << inResult.status().ToString();
+            INTERNAL_ERROR_STREAM << "[ArrowView] mmap 失败: " << inResult.status().ToString();
             return;
         }
         input_ = inResult.ValueOrDie();
 
         auto readerResult = arrow::ipc::RecordBatchFileReader::Open(input_);
         if (!readerResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[ArrowView] reader open failed: " << readerResult.status().ToString();
+            INTERNAL_ERROR_STREAM << "[ArrowView] reader 打开失败: " << readerResult.status().ToString();
             return;
         }
         reader_ = readerResult.ValueOrDie();
         const int nBatches = reader_->num_record_batches();
         if (nBatches == 0) {
-            INTERNAL_ERROR_STREAM << "[ArrowView] file has 0 batches";
+            INTERNAL_ERROR_STREAM << "[ArrowView] 文件有 0 个批次";
             return;
         }
 
@@ -402,7 +402,7 @@ public:
         coreColumns_.clear();
         extraFields_.clear();
 
-        INTERNAL_INFO_STREAM << "[MEM] ArrowView::clearColumnCaches: freed "
+        INTERNAL_INFO_STREAM << "[MEM] ArrowView::clearColumnCaches: 已释放 "
             << (freedBytes / (1024.0 * 1024.0)) << " MB"
             << " (coreCols=" << coreCols << " extraCols=" << extraCols
             << " coreLoaded=" << coreLoadedCount << ")";

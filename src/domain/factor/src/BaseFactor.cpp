@@ -581,7 +581,7 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
         neutralizationMode = NeutralizationStatus::HistoricalViewFailed;
         // 中性化失败不丢弃原始因子值
-        INTERNAL_WARN_STREAM << "[neutralization] failed: " << errorMessage << " — keeping raw values";
+        INTERNAL_WARN_STREAM << "[neutralization] 失败: " << errorMessage << " — 保留原始值";
         return true;
     }
 

@@ -79,19 +79,19 @@ PortfolioValuationResult MarkToMarketValuationEngine::evaluate(ValuationSpec spe
 
         int64_t priceMicros = 0;
         if (!MarkToMarketValuationEngine::checkedMultiplyInt64(static_cast<int64_t>(it->second), spec.microsPerTick, &priceMicros)) {
-            INTERNAL_ERROR_STREAM << "[ValuationEngine] Overflow: price * microsPerTick";
+            INTERNAL_ERROR_STREAM << "[ValuationEngine] 溢出: price * microsPerTick";
             return PortfolioValuationResult{PortfolioValuationError::InvalidInput, std::nullopt};
         }
 
         int64_t longMicros = 0;
         if (!MarkToMarketValuationEngine::checkedMultiplyInt64(priceMicros, static_cast<int64_t>(holding.longLots.value), &longMicros)) {
-            INTERNAL_ERROR_STREAM << "[ValuationEngine] Overflow: priceMicros * longLots";
+            INTERNAL_ERROR_STREAM << "[ValuationEngine] 溢出: priceMicros * longLots";
             return PortfolioValuationResult{PortfolioValuationError::InvalidInput, std::nullopt};
         }
 
         int64_t shortMicros = 0;
         if (!MarkToMarketValuationEngine::checkedMultiplyInt64(priceMicros, static_cast<int64_t>(holding.shortLots.value), &shortMicros)) {
-            INTERNAL_ERROR_STREAM << "[ValuationEngine] Overflow: priceMicros * shortLots";
+            INTERNAL_ERROR_STREAM << "[ValuationEngine] 溢出: priceMicros * shortLots";
             return PortfolioValuationResult{PortfolioValuationError::InvalidInput, std::nullopt};
         }
 
@@ -104,7 +104,7 @@ PortfolioValuationResult MarkToMarketValuationEngine::evaluate(ValuationSpec spe
     }
 
     summary.netMicros = summary.grossLongMicros - summary.grossShortMicros;
-    INTERNAL_DEBUG_STREAM << "[ValuationEngine] Evaluation complete: "
+    INTERNAL_DEBUG_STREAM << "[ValuationEngine] 评估完成: "
                           << holdings.size() << " holdings, "
                           << "netMicros=" << summary.netMicros;
     return PortfolioValuationResult{PortfolioValuationError::None, std::move(summary)};

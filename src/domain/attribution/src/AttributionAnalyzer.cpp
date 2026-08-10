@@ -28,7 +28,7 @@ AttributionReport AttributionAnalyzer::analyze(
     const domain::strategy::StrategyBacktestResult& result) const
 {
     if (!result.success || result.tradeLog.empty()) {
-        INTERNAL_INFO_STREAM << "[AttributionAnalyzer] No data available: success="
+        INTERNAL_INFO_STREAM << "[AttributionAnalyzer] 无可用数据: success="
                             << result.success << " tradeLog.size=" << result.tradeLog.size();
         return AttributionReport{};
     }
@@ -62,7 +62,7 @@ AttributionReport AttributionAnalyzer::analyze(
 
     report.isValid = true;
 
-    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] Report generated: "
+    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] 报告已生成: "
                          << report.sectorBreakdown.size() << " sectors, "
                          << report.factorBreakdown.size() << " factors, "
                          << "timing simplified=" << report.timingBreakdown.isSimplified;
@@ -156,7 +156,7 @@ std::vector<SectorAttribution> AttributionAnalyzer::computeSectorAttribution(
                   return a.returnContribution > b.returnContribution;
               });
 
-    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] Sector attribution: "
+    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] 行业归因: "
                          << result.size() << " sectors from "
                          << tradeLog.size() << " trades";
 
@@ -207,7 +207,7 @@ std::vector<FactorAttribution> AttributionAnalyzer::computeFactorAttribution(
                   return a.estimatedContribution > b.estimatedContribution;
               });
 
-    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] Factor attribution: "
+    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] 因子归因: "
                          << result.size() << " factors, rankIC=" << rankIC
                          << " method=approximate";
 
@@ -235,7 +235,7 @@ TimingAttribution AttributionAnalyzer::computeTimingAttribution(
         ta.selectionEffect = 0.0;
         ta.interactionEffect = 0.0;
 
-        INTERNAL_INFO_STREAM << "[AttributionAnalyzer] Timing attribution (simplified): "
+        INTERNAL_INFO_STREAM << "[AttributionAnalyzer] 择时归因 (简化): "
                              << "excessReturn=" << ta.excessReturn
                              << " (no benchmark sector data)";
         return ta;
@@ -249,7 +249,7 @@ TimingAttribution AttributionAnalyzer::computeTimingAttribution(
     ta.selectionEffect = 0.0;
     ta.interactionEffect = 0.0;
 
-    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] Timing attribution: benchmark sector data "
+    INTERNAL_INFO_STREAM << "[AttributionAnalyzer] 择时归因: 基准行业数据 "
                          << "available but Brinson fully integrated is Phase 2, "
                          << "using simplified mode";
 

@@ -77,9 +77,9 @@ FeatureTensorBuilder::FeatureTensorBuilder(
                 if (detected) {
                     INTERNAL_INFO_STREAM << "[FeatureTensorBuilder] 特征配置: "
                         << nRaw << " raw";
-                    if (m_rawFieldCount > 0) INTERNAL_INFO_STREAM << " + " << nDerived << " derived";
-                    if (m_marketFeatureCount > 0) INTERNAL_INFO_STREAM << " + " << nMarket << " market";
-                    INTERNAL_INFO_STREAM << " = " << nScaler << " total";
+                    if (m_rawFieldCount > 0) INTERNAL_INFO_STREAM << " + " << nDerived << " 衍生";
+                    if (m_marketFeatureCount > 0) INTERNAL_INFO_STREAM << " + " << nMarket << " 市场";
+                    INTERNAL_INFO_STREAM << " = " << nScaler << " 总计";
                 } else {
                     INTERNAL_ERROR_STREAM << "[FeatureTensorBuilder] scaler维度("
                         << nScaler << ") 无法匹配已知特征组合, 拒绝使用";

@@ -221,43 +221,55 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     // Stage 1: validation
     auto vr = validateOrder(order);
     if (!vr.valid()) {
-        INTERNAL_WARN_STREAM << "[TradeExec] validateOrder FAILED: " << vr.message()
+        INTERNAL_WARN_STREAM << "[TradeExec] 订单校验失败: " << vr.message()
                              << " code=" << static_cast<int>(vr.code());
         return SubmitResult::rejected(vr.message(), vr.code());
+    }
+
+    // accountId 强制校验 — 空值直接拒绝 (v0.16.0)
+    if (order.accountId().empty()) {
+        INTERNAL_ERROR_STREAM << "[TradeExec] 订单被拒绝: accountId 为空"
+                             << " symbol=" << order.symbol()
+                             << " side=" << (order.side() == strategy::OrderDirection::Buy ? "Buy" : "Sell")
+                             << " qty=" << order.quantity()
+                             << " strategyId=" << order.strategyId()
+                             << " — 请在策略配置中设置 account_id";
+        return SubmitResult::rejected("accountId 为空 — 请在策略配置中设置 account_id",
+                                       OrderValidationCode::MissingRequiredFields);
     }
 
     // Stage 2: scheduling conflict checks
     auto conflict = m_impl->checkExecutionPause(order);
     if (conflict && conflict->hasConflict()) {
-        INTERNAL_WARN_STREAM << "[TradeExec] checkExecutionPause blocked: " << conflict->message();
+        INTERNAL_WARN_STREAM << "[TradeExec] 执行暂停检查阻止: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkManualCheckpoint(order);
     if (conflict && conflict->hasConflict()) {
-        INTERNAL_WARN_STREAM << "[TradeExec] manualCheckpoint blocked: " << conflict->message();
+        INTERNAL_WARN_STREAM << "[TradeExec] 人工检查点阻止: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkPartialFillAdvance(order);
     if (conflict && conflict->hasConflict()) {
-        INTERNAL_WARN_STREAM << "[TradeExec] partialFillAdvance blocked: " << conflict->message();
+        INTERNAL_WARN_STREAM << "[TradeExec] 部分成交推进阻止: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
     conflict = m_impl->checkPendingOrderConflict(order);
     if (conflict && conflict->hasConflict()) {
-        INTERNAL_WARN_STREAM << "[TradeExec] pendingOrderConflict blocked: " << conflict->message();
+        INTERNAL_WARN_STREAM << "[TradeExec] 挂单冲突阻止: " << conflict->message();
         return SubmitResult::scheduleBlocked(conflict->code(), conflict->message());
     }
 
     // Stage 3: risk evaluation
     auto riskResult = strategy::RiskEvaluator::evaluateOrder(riskContext);
     if (!riskResult.approved()) {
-        INTERNAL_WARN_STREAM << "[TradeExec] risk rejected: " << riskResult.description();
+        INTERNAL_WARN_STREAM << "[TradeExec] 风控拒绝: " << riskResult.description();
         return SubmitResult::riskRejected(riskResult.code(), riskResult.description());
     }
 
     // Stage 4: submit via TradeEngine
     if (!engine::TradeEngine::instance().initialized()) {
-        INTERNAL_ERROR_STREAM << "[TradeExec] TradeEngine NOT initialized";
+        INTERNAL_ERROR_STREAM << "[TradeExec] TradeEngine 未初始化";
         return SubmitResult::rejected("TradeEngine not initialized",
                                        OrderValidationCode::MissingRequiredFields);
     }
@@ -288,7 +300,7 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
     engineReq.setCurrency(order.currency());
     engineReq.setExchange(order.exchange());
 
-    INTERNAL_INFO_STREAM << "[TradeExecEng] submitOrder symbol=" << order.symbol()
+    INTERNAL_INFO_STREAM << "[TradeExecEng] 提交订单: symbol=" << order.symbol()
                          << " side=" << (order.side() == strategy::OrderDirection::Buy ? "Buy" : "Sell")
                          << " price=" << order.price() << " qty=" << order.quantity()
                          << " orderType=" << (riskContext.isAutoStrategySignal() ? "Market" : "Limit")
@@ -509,7 +521,7 @@ TradeExecutionEngine::TradeExecutionEngine()
                 auto filledPrice = e.get<double>("filled_price");
                 auto filledQty  = e.get<std::int64_t>("filled_quantity");
                 if (!id) {
-                    INTERNAL_ERROR_STREAM << "[TradeExecEng] order.updated event missing broker_order_id";
+                    INTERNAL_ERROR_STREAM << "[TradeExecEng] order.updated 事件缺少 broker_order_id";
                     return;
                 }
                 std::lock_guard<std::mutex> lock(m_impl->m_mutex);
@@ -537,7 +549,7 @@ TradeExecutionEngine::TradeExecutionEngine()
                                 astock::infrastructure::database::OrderRecorder::instance()
                                     .updateOrderStatus(o.clOrdId(), recSt, o.brokerOrderId(), "");
                             }
-                            INTERNAL_INFO_STREAM << "[TradeExecEng] order.updated id=" << *id
+                            INTERNAL_INFO_STREAM << "[TradeExecEng] 订单更新: id=" << *id
                                                  << " evtStatus=" << *status
                                                  << " newSt=" << static_cast<int>(st)
                                                  << " filledQty=" << o.filledQuantity()
@@ -551,7 +563,7 @@ TradeExecutionEngine::TradeExecutionEngine()
                 if (!found) {
                     // 订单已从内存缓存挤出 (如批量提交后旧批次被新批次替换, 或外部撤单),
                     // broker_order_id 即 clOrdId, 直接落 DB
-                    INTERNAL_INFO_STREAM << "[TradeExecEng] order.updated id=" << *id
+                    INTERNAL_INFO_STREAM << "[TradeExecEng] 订单更新: id=" << *id
                                          << " not in recentOrders (count="
                                          << m_impl->m_recentOrders.size() << "), sync DB directly";
                     if (status) {

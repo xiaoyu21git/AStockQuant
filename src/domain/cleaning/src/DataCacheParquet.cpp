@@ -200,25 +200,25 @@ void DataCache::saveDataSetFile(int dataId, const std::vector<J>& rows,
     std::string path = dataFilePath(dataId);
     auto outResult = arrow::io::FileOutputStream::Open(path);
     if (!outResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: cannot open " << path << ": " << outResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: 无法打开 " << path << ": " << outResult.status().ToString();
         return;
     }
 
     auto writerResult = arrow::ipc::MakeFileWriter(outResult.ValueOrDie(), table->schema());
     if (!writerResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: writer error " << writerResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: 写入器错误 " << writerResult.status().ToString();
         return;
     }
 
     auto writer = writerResult.ValueOrDie();
     auto writeStatus = writer->WriteTable(*table);
     if (!writeStatus.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: write error " << writeStatus.ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] saveArrow: 写入错误 " << writeStatus.ToString();
         return;
     }
     writer->Close();
 
-    INTERNAL_INFO_STREAM << "[DataCache] saved Arrow IPC " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
+    INTERNAL_INFO_STREAM << "[DataCache] 已保存 Arrow IPC " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
 }
 
 std::vector<J> DataCache::loadDataSetFile(int dataId)
@@ -227,13 +227,13 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
 
     auto inResult = arrow::io::ReadableFile::Open(path);
     if (!inResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: cannot open " << path << ": " << inResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: 无法打开 " << path << ": " << inResult.status().ToString();
         return {};
     }
 
     auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
     if (!readerResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: open error " << readerResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: 打开错误 " << readerResult.status().ToString();
         return {};
     }
 
@@ -249,12 +249,12 @@ std::vector<J> DataCache::loadDataSetFile(int dataId)
 
     auto tableResult = arrow::Table::FromRecordBatches(batches);
     if (!tableResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: table error " << tableResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] loadArrow: 表格错误 " << tableResult.status().ToString();
         return {};
     }
 
     auto table = tableResult.ValueOrDie();
-    INTERNAL_INFO_STREAM << "[DataCache] loaded Arrow IPC " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
+    INTERNAL_INFO_STREAM << "[DataCache] 已加载 Arrow IPC " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
 
     return tableToRows(table);
 }
@@ -265,7 +265,7 @@ std::shared_ptr<arrow::Table> DataCache::loadDataSetTable(int dataId)
 
     auto inResult = arrow::io::ReadableFile::Open(path);
     if (!inResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadTable: cannot open " << path;
+        INTERNAL_ERROR_STREAM << "[DataCache] loadTable: 无法打开 " << path;
         return nullptr;
     }
 
@@ -285,7 +285,7 @@ std::shared_ptr<arrow::Table> DataCache::loadDataSetTable(int dataId)
     if (!tableResult.ok()) return nullptr;
 
     auto table = tableResult.ValueOrDie();
-    INTERNAL_INFO_STREAM << "[DataCache] loaded Arrow Table " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
+    INTERNAL_INFO_STREAM << "[DataCache] 已加载 Arrow Table " << path << ": " << table->num_rows() << " rows x " << table->num_columns() << " cols";
     return table;
 }
 
@@ -319,7 +319,7 @@ std::string DataCache::getMaxTradeDate(int dataId)
 
     auto inResult = arrow::io::ReadableFile::Open(path);
     if (!inResult.ok()) {
-        INTERNAL_WARN_STREAM << "[DataCache] getMaxTradeDate: cannot open " << path;
+        INTERNAL_WARN_STREAM << "[DataCache] getMaxTradeDate: 无法打开 " << path;
         return {};
     }
     auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
@@ -330,7 +330,7 @@ std::string DataCache::getMaxTradeDate(int dataId)
 
     int tdIdx = schema->GetFieldIndex(std::string(CF::TRADE_DATE.c_str()));
     if (tdIdx < 0) {
-        INTERNAL_WARN_STREAM << "[DataCache] getMaxTradeDate: no trade_date column in " << path;
+        INTERNAL_WARN_STREAM << "[DataCache] getMaxTradeDate: 无 trade_date 列 " << path;
         return {};
     }
 
@@ -410,13 +410,13 @@ std::vector<J> DataCache::loadDataSetRange(int dataId, const std::string& sinceD
 
     auto inResult = arrow::io::ReadableFile::Open(path);
     if (!inResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: cannot open " << path << ": " << inResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: 无法打开 " << path << ": " << inResult.status().ToString();
         return {};
     }
 
     auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
     if (!readerResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: open error " << readerResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: 打开错误 " << readerResult.status().ToString();
         return {};
     }
 
@@ -431,7 +431,7 @@ std::vector<J> DataCache::loadDataSetRange(int dataId, const std::string& sinceD
 
     auto tableResult = arrow::Table::FromRecordBatches(batches);
     if (!tableResult.ok()) {
-        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: table error " << tableResult.status().ToString();
+        INTERNAL_ERROR_STREAM << "[DataCache] loadRange: 表格错误 " << tableResult.status().ToString();
         return {};
     }
 
@@ -458,7 +458,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
     const std::unordered_set<std::string>& numericFields)
 {
     if (newRows.empty()) {
-        INTERNAL_WARN_STREAM << "[DataCache] append: no new rows for dataset " << dataId;
+        INTERNAL_WARN_STREAM << "[DataCache] append: 数据集无新行, id=" << dataId;
         return -1;
     }
 
@@ -478,13 +478,13 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
     {
         auto inResult = arrow::io::ReadableFile::Open(path);
         if (!inResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open old file " << path << ": " << inResult.status().ToString();
+            INTERNAL_ERROR_STREAM << "[DataCache] append: 无法打开旧文件 " << path << ": " << inResult.status().ToString();
             return -1;
         }
         auto inFile = inResult.ValueOrDie();
         auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inFile);
         if (!readerResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[DataCache] append: read old error " << readerResult.status().ToString();
+            INTERNAL_ERROR_STREAM << "[DataCache] append: 读取旧文件错误 " << readerResult.status().ToString();
             (void)inFile->Close();
             return -1;
         }
@@ -494,7 +494,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
         // 构建新数据 Table，校验 schema 与旧文件一致
         auto newTable = buildArrowTable(newRows, fieldNames, numericFields);
         if (!newTable->schema()->Equals(*oldSchema)) {
-            INTERNAL_ERROR_STREAM << "[DataCache] append: schema mismatch for dataset " << dataId << ", abort (old file kept)";
+            INTERNAL_ERROR_STREAM << "[DataCache] append: 数据集 schema 不匹配, id=" << dataId << ", abort (old file kept)";
             (void)inFile->Close();
             return -1;
         }
@@ -503,14 +503,14 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
         // 写临时文件：旧 batch 全量 + 新 Table。任一步失败即清理 tmp、保留旧文件
         auto outResult = arrow::io::FileOutputStream::Open(tmpPath);
         if (!outResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[DataCache] append: cannot open tmp " << tmpPath << ": " << outResult.status().ToString();
+            INTERNAL_ERROR_STREAM << "[DataCache] append: 无法打开临时文件 " << tmpPath << ": " << outResult.status().ToString();
             (void)inFile->Close();
             return -1;
         }
         auto stream = outResult.ValueOrDie();
         auto writerResult = arrow::ipc::MakeFileWriter(stream, oldSchema);
         if (!writerResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[DataCache] append: writer error " << writerResult.status().ToString();
+            INTERNAL_ERROR_STREAM << "[DataCache] append: 写入器错误 " << writerResult.status().ToString();
             stream.reset(); (void)inFile->Close();
             std::filesystem::remove(tmpPath, rmEc);
             return -1;
@@ -553,7 +553,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
         std::this_thread::sleep_for(std::chrono::milliseconds(kRetryDelayMs));
     }
     if (!renamed) {
-        INTERNAL_ERROR_STREAM << "[DataCache] append: atomic replace failed after retries: " << ec.message() << " (old file kept)";
+        INTERNAL_ERROR_STREAM << "[DataCache] append: 原子替换重试后失败: " << ec.message() << " (old file kept)";
         std::filesystem::remove(tmpPath, rmEc);
         return -1;
     }
@@ -581,7 +581,7 @@ int DataCache::appendDataSetFile(int dataId, const std::vector<J>& newRows,
         }
     }
 
-    INTERNAL_INFO_STREAM << "[DataCache] appended dataset " << dataId << ": +" << newRowCount
+    INTERNAL_INFO_STREAM << "[DataCache] 已追加数据集 " << dataId << ": +" << newRowCount
                          << " rows (old=" << oldRows << ", total=" << totalRows << "), endDate<=" << maxTradeDate;
     return static_cast<int>(totalRows);
 }
@@ -667,7 +667,7 @@ void DataCache::finishArrowWrite(ArrowWriteToken token)
     auto* s = static_cast<ArrowWriteSession*>(token.get());
     if (s->writer) s->writer->Close();
     s->stream.reset();
-    INTERNAL_INFO_STREAM << "[DataCache] saved Arrow IPC " << dataFilePath(s->dataId) << ": " << s->totalRows << " rows x " << s->fieldNames.size() << " cols";
+    INTERNAL_INFO_STREAM << "[DataCache] 已保存 Arrow IPC " << dataFilePath(s->dataId) << ": " << s->totalRows << " rows x " << s->fieldNames.size() << " cols";
     // token 析构时 WriteSessionDeleter 自动 delete s
 }
 

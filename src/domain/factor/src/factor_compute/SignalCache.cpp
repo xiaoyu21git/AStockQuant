@@ -257,7 +257,7 @@ void SignalCache::clear() noexcept
     storage_.clear();
     lruList_.clear();
     currentMemoryBytes_ = 0U;
-    INTERNAL_INFO_STREAM << "[MEM] SignalCache::clear: freed "
+    INTERNAL_INFO_STREAM << "[MEM] SignalCache::clear: 已释放 "
         << (freedBytes / (1024.0 * 1024.0)) << " MB, entries=" << entryCount;
 }
 

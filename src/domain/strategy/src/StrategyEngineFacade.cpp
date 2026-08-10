@@ -248,6 +248,9 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         if (root.has("rebalanceFrequency"))
             params.rebalanceFrequency = static_cast<::domain::strategies::RebalanceFrequency>(root.get("rebalanceFrequency").asInt());
 
+        // ── account_id: 交易账户ID (v0.16.0 强制, 空值将被 TradeExecutionEngine 拒绝) ──
+        params.accountId = root.has("account_id") ? root.get("account_id").asString() : "";
+
         // ── 因子覆盖层: factor_overlay.enabled 是因子存在性的唯一权威来源 ──
         if (root.has("factor_overlay")) {
             auto overlay = root.get("factor_overlay");
@@ -325,7 +328,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     // ── factorOverlayEnabled 是因子存在性的唯一权威来源 ──
     // 所有策略类型均支持因子; MultiFactor/MachineLearning 仅决定策略子类, 不参与因子存在性判断
     if (factorOverlayEnabled && !factorSvc) {
-        INTERNAL_WARN_STREAM << "[fromDb] ABORT: factorOverlay enabled but factorSvc is null";
+        INTERNAL_WARN_STREAM << "[fromDb] 中止: factorOverlay 已启用但 factorSvc 为空";
         return nullptr;
     }
 
@@ -389,9 +392,19 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     engine->m_originalCreationParams = params;
 
     // ── 策略创建 ──
+    if (params.maxOrderQuantity == 0) {
+        INTERNAL_ERROR_STREAM << "[fromDb] maxOrderQuantity=0 非法, 策略创建被拒绝: " << strategyId;
+        return nullptr;
+    }
     constexpr StrategyInstanceId kDefaultInstanceId = 1;
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
+    if (!ctx.isValid()) {
+        INTERNAL_ERROR_STREAM << "[fromDb] RuntimeStrategyContext 校验失败: " << strategyId
+                              << " maxOrderQuantity=" << params.maxOrderQuantity
+                              << " maxWeightPerStock=" << params.maxWeightPerStock;
+        return nullptr;
+    }
     auto runtimeStrategy = StrategyBase::create(kDefaultInstanceId, params);
     if (!runtimeStrategy) {
         INTERNAL_ERROR_STREAM << "[fromDb] StrategyBase::create 返回 nullptr kind="
@@ -408,6 +421,13 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     engine->m_minHoldDays = params.minHoldDays;
     engine->m_strategyName = params.strategyName;
+    engine->setAccountId(params.accountId);
+    // accountId 空值警告 — DataMigrator 应在 Phase 2 自动填充
+    if (params.accountId.empty()) {
+        INTERNAL_WARN_STREAM << "[fromDb] account_id 未配置, strategyId=" << strategyId
+                             << " — 此策略的订单将被 TradeExecutionEngine 拒绝,"
+                             << " 请在策略配置中设置 account_id";
+    }
     // 初始化交易日志: logs/策略名/trade_YYYY-MM-DD.jsonl
     if (!params.strategyName.empty()) {
         engine->m_tradeJournal = std::make_unique<TradeJournal>("logs", params.strategyName);
@@ -415,10 +435,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     return engine;
 
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[fromDb] exception: " << e.what();
+        INTERNAL_ERROR_STREAM << "[fromDb] 异常: " << e.what();
         return nullptr;
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[fromDb] unknown exception";
+        INTERNAL_ERROR_STREAM << "[fromDb] 未知异常";
         return nullptr;
     }
 }
@@ -484,7 +504,7 @@ bool StrategyEngine::prepareMarketData()
     auto& pool = astock::database::NativePgConnectionPool::instance();
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) {
-        INTERNAL_ERROR_STREAM << "[Engine] prepareMarketData: PG connection failed";
+        INTERNAL_ERROR_STREAM << "[Engine] prepareMarketData: PG 连接失败";
         return false;
     }
 
@@ -499,8 +519,8 @@ bool StrategyEngine::prepareMarketData()
             << " ORDER BY si.symbol, d.trade_date ASC";
         auto result = db->executeQuery(sql.str());
         auto rawRows = result.getRows();
-        INTERNAL_INFO_STREAM << "[Engine] query OHLCV: " << rawRows.size()
-                             << " rows, start=" << startDate << " end=" << endDate;
+        INTERNAL_INFO_STREAM << "[Engine] 查询 OHLCV: " << rawRows.size()
+                             << " 行, start=" << startDate << " end=" << endDate;
         if (!rawRows.empty()) {
             m_liveMarketView = factor::compute::CachedMarketDataView::fromSqlRows(rawRows, {});
         }
@@ -695,7 +715,7 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::step(const MarketDataPo
         }
         return orders;
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[StrategyEngine] step() exception: " << e.what()
+        INTERNAL_ERROR_STREAM << "[StrategyEngine] step() 异常: " << e.what()
                              << " instId=" << marketDataPoint.instrumentId().value
                              << " price=" << marketDataPoint.lastPrice();
         throw;
@@ -1012,41 +1032,54 @@ void StrategyEngine::dispatchOrders(const std::vector<OrderRequest>& orders)
 {
     if (orders.empty()) return;
 
-    if (m_executionMode == EngineExecutionMode::SemiAuto && m_basketInterceptor) {
-        // ── 半自动模式: 暂存篮子 → 通知 Bridge 展示确认窗口 ──
-        std::uint64_t basketId = 0;
-        {
-            std::lock_guard<std::mutex> lock(m_basketMutex);
-            if (m_pendingBasket.pending) {
-                INTERNAL_WARN_STREAM << "[SemiAuto] 篮子 " << m_pendingBasket.basketId
-                    << " 未确认 — 新篮子被丢弃 (" << orders.size() << " orders)";
-                return;
+    try {
+        if (m_executionMode == EngineExecutionMode::SemiAuto && m_basketInterceptor) {
+            // ── 半自动模式: 暂存篮子 → 通知 Bridge 展示确认窗口 ──
+            std::uint64_t basketId = 0;
+            {
+                std::lock_guard<std::mutex> lock(m_basketMutex);
+                if (m_pendingBasket.pending) {
+                    INTERNAL_WARN_STREAM << "[SemiAuto] 篮子 " << m_pendingBasket.basketId
+                        << " 未确认 — 新篮子被丢弃 (" << orders.size() << " orders)";
+                    return;
+                }
+                basketId = generateBasketId();
+                // 复制订单列表 (不修改 const 入参)
+                m_pendingBasket.orders = orders;
+                m_pendingBasket.basketId = basketId;
+                m_pendingBasket.pending = true;
             }
-            basketId = generateBasketId();
-            // 复制订单列表 (不修改 const 入参)
-            m_pendingBasket.orders = orders;
-            m_pendingBasket.basketId = basketId;
-            m_pendingBasket.pending = true;
+
+            // 打篮子ID (在副本上操作)
+            auto basketOrders = orders;  // 拷贝
+            for (auto& o : basketOrders)
+                o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
+
+            bool accepted = m_basketInterceptor->onBasketReady(
+                basketId, basketOrders, m_strategyId, m_strategyName, "盘中信号");
+            if (!accepted) {
+                std::lock_guard<std::mutex> lock(m_basketMutex);
+                m_pendingBasket.pending = false;
+                INTERNAL_WARN_STREAM << "[SemiAuto] Bridge 拒收篮子 " << basketId;
+            }
+            return;
         }
 
-        // 打篮子ID (在副本上操作)
-        auto basketOrders = orders;  // 拷贝
-        for (auto& o : basketOrders)
-            o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
-
-        bool accepted = m_basketInterceptor->onBasketReady(
-            basketId, basketOrders, m_strategyId, m_strategyName, "盘中信号");
-        if (!accepted) {
-            std::lock_guard<std::mutex> lock(m_basketMutex);
-            m_pendingBasket.pending = false;
-            INTERNAL_WARN_STREAM << "[SemiAuto] Bridge 拒收篮子 " << basketId;
+        // Live / Backtest 模式: 直接执行
+        if (m_orderListener) {
+            m_orderListener->onOrders(orders);
         }
-        return;
-    }
-
-    // Live / Backtest 模式: 直接执行
-    if (m_orderListener) {
-        m_orderListener->onOrders(orders);
+    } catch (const std::domain_error& e) {
+        INTERNAL_ERROR_STREAM << "[SemiAuto] dispatchOrders 配置异常: " << e.what()
+                              << " strategyId=" << m_strategyId
+                              << " orders=" << orders.size()
+                              << " — 该篮子已被拒绝, 引擎继续运行";
+        // domain_error 表示配置缺陷 (如 baseQty=0), 拒绝该篮子但不崩溃引擎
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "[SemiAuto] dispatchOrders 运行时异常: " << e.what()
+                              << " strategyId=" << m_strategyId
+                              << " orders=" << orders.size()
+                              << " — 该篮子已被拒绝, 引擎继续运行";
     }
 }
 
@@ -1141,8 +1174,8 @@ void StrategyEngine::drainQueue()
                 }
             }
         } catch (const std::exception& e) {
-            INTERNAL_WARN_STREAM << "[StrategyEngine] tick processing failed: "
-                                 << e.what() << " — skipping";
+            INTERNAL_WARN_STREAM << "[StrategyEngine] tick 处理失败: "
+                                 << e.what() << " — 跳过";
         }
         } // for each MDP in batch
 
@@ -1154,7 +1187,7 @@ void StrategyEngine::drainQueue()
     // 循环退出时报告丢 tick 统计
     auto dropped = m_droppedTicks.exchange(0, std::memory_order_relaxed);
     if (dropped > 0) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] drainQueue stopped: " << static_cast<unsigned long long>(dropped) << " ticks dropped during session";
+        INTERNAL_WARN_STREAM << "[StrategyEngine] drainQueue 已停止: " << static_cast<unsigned long long>(dropped) << " 个tick在会话期间被丢弃";
     }
 }
 
@@ -1782,7 +1815,7 @@ EodEvaluationStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingD
     auto& account = snap.account;
     auto& positions = snap.positions;
     if (account.totalAsset <= 0) {
-        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, skip";
+        INTERNAL_WARN_STREAM << "[StrategyEngine] EOD account.totalAsset=0, 跳过";
         return EodEvaluationStatus::Skipped;
     }
     std::unordered_map<std::string, int64_t> posQtyMap;
@@ -1943,7 +1976,7 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
 {
     // ── 校验 ──
     if (auto err = validate(); !err.empty()) {
-        INTERNAL_ERROR_STREAM << "[Builder] validate failed: " << err;
+        INTERNAL_ERROR_STREAM << "[Builder] 校验失败: " << err;
         return nullptr;
     }
 
@@ -2045,10 +2078,12 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     // ── 调仓频率配置 ──
     engine->m_isDailyFrequency = rebalanceCfg_.isDailyFrequency;
     engine->m_rebalanceInterval = rebalanceCfg_.interval;
-    if (maxOrderQuantity_ > 0) {
-        engine->m_maxOrderQuantity = maxOrderQuantity_;
-        engine->m_positionSizer.setBaseQty(maxOrderQuantity_);
+    if (maxOrderQuantity_ == 0) {
+        INTERNAL_ERROR_STREAM << "[Builder] maxOrderQuantity=0 非法, 引擎创建被拒绝";
+        return nullptr;
     }
+    engine->m_maxOrderQuantity = maxOrderQuantity_;
+    engine->m_positionSizer.setBaseQty(maxOrderQuantity_);
 
     INTERNAL_INFO_STREAM << "[Builder] 风控: stopLoss=" << riskCfg_.stopLossPercent
                          << " takeProfit=" << riskCfg_.takeProfitPercent
@@ -2087,7 +2122,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     auto batch = dataSvc->loadBatch(0);
     const auto* view = batch.marketView;
     if (!view) {
-        result.errorMessage = "Failed to load market data view";
+        result.errorMessage = "加载行情数据视图失败";
         return result;
     }
 
@@ -2263,7 +2298,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     runBacktestLoop(ctx, result, dataSvc, req, fillSim,
                     symbolToCol, bmColIdx, onProgress, attributionCollector, cancelFlag);
 
-    INTERNAL_INFO_STREAM << "[backtest] loop done: days=" << totalDays << " finalEquity=" << btAccount().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
+    INTERNAL_INFO_STREAM << "[backtest] 循环完成: days=" << totalDays << " finalEquity=" << btAccount().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
 
     // ── 混合模式因子参与统计: 明确回答"跑了几个因子、各参与多少天" ──
     if (m_factorSignalProcessor.enabled()) {
@@ -2425,7 +2460,7 @@ void StrategyEngine::runBacktestLoop(
 
     auto batch = dataSvc->loadBatch(0);
     const auto* view = batch.marketView;
-    if (!view) { result.errorMessage = "View lost during backtest"; return; }
+    if (!view) { result.errorMessage = "回测期间视图丢失"; return; }
 
     const int totalDays = static_cast<int>(view->dates().size());
     const int colCount = static_cast<int>(view->instruments().size());
@@ -2439,13 +2474,13 @@ void StrategyEngine::runBacktestLoop(
     for (int r = 0; r < totalDays; ++r) {
         // ── 取消检测: 每个交易日开始时检查，支持中途取消调优 ──
         if (cancelFlag && cancelFlag->load(std::memory_order_relaxed)) {
-            result.errorMessage = "Cancelled by user";
+            result.errorMessage = "用户取消";
             return;
         }
 
         batch = dataSvc->loadBatch(0);
         view = batch.marketView;
-        if (!view) { result.errorMessage = "View lost during backtest"; return; }
+        if (!view) { result.errorMessage = "回测期间视图丢失"; return; }
 
         setContextHistoricalView(view);
         if (strategyService_) strategyService_->setContextEvaluationRow(r);
@@ -2478,7 +2513,7 @@ void StrategyEngine::runBacktestLoop(
         auto volumeMat = view->volume();
 
         if (r == 0 || r == totalDays-1 || r % 100 == 0) {
-            INTERNAL_INFO_STREAM << "[backtest] day " << r << "/" << totalDays
+            INTERNAL_INFO_STREAM << "[backtest] 第" << r << "/" << totalDays
                 << " equity=" << btAccount().totalAsset() << " cash=" << cash
                 << " positions=" << backtestPositions.size();
         }
@@ -2563,7 +2598,7 @@ void StrategyEngine::runBacktestLoop(
             }
             timing = m_timingGate.evaluate(ts);
             if (r == 0 || r % 100 == 0) {
-                INTERNAL_INFO_STREAM << "[backtest] day " << r
+                INTERNAL_INFO_STREAM << "[backtest] 第" << r
                     << " 择时: exposure=" << timing.targetExposure
                     << " allowNew=" << timing.allowNewEntries
                     << " liquidate=" << timing.forceLiquidate
@@ -2656,7 +2691,7 @@ void StrategyEngine::runBacktestLoop(
                 strategyService_->updateFactorScores(std::move(factorScoreMap));
             }
             if (r == 0 || r % 100 == 0)
-                INTERNAL_INFO_STREAM << "[backtest] day " << r << " 因子候选池: " << pool.size()
+                INTERNAL_INFO_STREAM << "[backtest] 第" << r << " 因子候选池: " << pool.size()
                                      << " 标的 (targetPosition=" << m_factorSignalProcessor.targetPositionCount() << ")";
         } else {
             strategyService_->updateCandidatePool({});
@@ -2742,7 +2777,7 @@ void StrategyEngine::runBacktestLoop(
         if (ordersOpt.has_value()) {
             auto& orderList = ordersOpt.value();
             if (r == 0 || r % 100 == 0) {
-                INTERNAL_INFO_STREAM << "[backtest] day " << r << " orders=" << orderList.size();
+                INTERNAL_INFO_STREAM << "[backtest] 第" << r << " orders=" << orderList.size();
             }
             int dayBuys = 0, daySells = 0, dayCashShort = 0, dayBudgetSmall = 0;
             double dayBuyAmount = 0.0;
@@ -2913,7 +2948,7 @@ void StrategyEngine::runBacktestLoop(
                     if (sellQty > 0) {
                         auto fr = fillSim.simulateSell(closePrice, sellQty);
                         if (!std::isfinite(fr.income)) {
-                            INTERNAL_WARN_STREAM << "[backtest] NaN income day="
+                            INTERNAL_WARN_STREAM << "[backtest] NaN 收益 day="
                                 << dates[static_cast<std::size_t>(r)].value
                                 << " sym=" << symbol << " price=" << closePrice
                                 << " qty=" << sellQty << " cash=" << cash;
@@ -2970,7 +3005,7 @@ void StrategyEngine::runBacktestLoop(
             if ((r == 0 || r % 100 == 0)
                 && (dayBuys > 0 || daySells > 0 || dayCashShort > 0 || dayBudgetSmall > 0)) {
                 std::ostringstream fillLog;
-                fillLog << "[backtest] day " << r << " fills: buy=" << dayBuys;
+                fillLog << "[backtest] 第" << r << " fills: buy=" << dayBuys;
                 if (dayBuys > 0)
                     fillLog << " (qty " << dayMinQty << "~" << dayMaxQty
                             << ", 金额" << static_cast<std::int64_t>(dayBuyAmount) << ")";
@@ -2990,13 +3025,13 @@ void StrategyEngine::runBacktestLoop(
         }
         equity = cash + marketValue;
         if (!std::isfinite(equity) && r > 0) {
-            INTERNAL_ERROR_STREAM << "[backtest] NaN equity at day="
+            INTERNAL_ERROR_STREAM << "[backtest] NaN 权益 day="
                 << dates[static_cast<std::size_t>(r)].value
                 << " row=" << r << " cash=" << cash
                 << " marketValue=" << marketValue
                 << " positions=" << backtestPositions.size()
-                << " — stopping backtest";
-            result.errorMessage = "NaN equity at day " + std::to_string(dates[static_cast<std::size_t>(r)].value);
+                << " — 停止回测";
+            result.errorMessage = "NaN 净值 at day " + std::to_string(dates[static_cast<std::size_t>(r)].value);
             return;
         }
         domain::trading::AccountSnapshot newAcc;
@@ -3435,10 +3470,10 @@ void StrategyEngine::buildBacktestDiagnostics(
     INTERNAL_INFO_STREAM << "═══════════════════════════════════════════";
 
     if (riskRejectedCount > 0) {
-        INTERNAL_DEBUG_STREAM << "[backtest] risk-rejected orders: " << riskRejectedCount;
+        INTERNAL_DEBUG_STREAM << "[backtest] 风控拒绝订单: " << riskRejectedCount;
     }
     if (onProgress) onProgress(100.0);
-    INTERNAL_INFO_STREAM << "[backtest] success, returning result";
+    INTERNAL_INFO_STREAM << "[backtest] 成功, 返回结果";
     // ── 诊断持久化 ──
     result.stopLossFills   = stopLossFilled;
     result.ruleExitFills   = ruleExitFilled;

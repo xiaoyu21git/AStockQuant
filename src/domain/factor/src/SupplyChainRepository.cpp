@@ -39,7 +39,7 @@ SupplyChainRepository::queryTopProducts(const std::string& calcDate, int topN)
     }
 
     if (result.empty()) {
-        INTERNAL_WARN_STREAM << "[SupplyChainRepo] queryTopProducts empty: date="
+        INTERNAL_WARN_STREAM << "[SupplyChainRepo] queryTopProducts 空: date="
                              << calcDate << " topN=" << topN
                              << " lastError=" << m_db->lastError();
     }
@@ -101,7 +101,7 @@ SupplyChainRepository::queryStockMappings(const std::string& productId,
     }
 
     if (result.empty()) {
-        INTERNAL_WARN_STREAM << "[SupplyChainRepo] queryStockMappings empty: productId="
+        INTERNAL_WARN_STREAM << "[SupplyChainRepo] queryStockMappings 空: productId="
                              << productId << " date=" << queryDate;
     }
 

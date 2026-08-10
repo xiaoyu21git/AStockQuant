@@ -65,18 +65,18 @@ CleanedDataController::CleanedDataController(QObject* parent)
     , m_currentDatasetId(-1)
     , m_cache(nullptr)
 {
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Created";
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 已创建";
 }
 
 CleanedDataController::~CleanedDataController()
 {
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Destroyed";
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 已销毁";
 }
 
 bool CleanedDataController::initialize()
 {
     if (m_initialized) {
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Already initialized";
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 已初始化";
         emit initializationCompleted(true);
         return true;
     }
@@ -84,7 +84,7 @@ bool CleanedDataController::initialize()
     updateLoadingState(true);
     
     try {
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Initializing...";
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 正在初始化...";
         
         // 获取缓存实例，未初始化则自动初始化
         m_cache = &DataCacheAdapter::instance();
@@ -92,7 +92,7 @@ bool CleanedDataController::initialize()
             m_cache->initialize(::bridge::storage::persistentDatasetRootDir());
         }
         if (!m_cache->isInitialized()) {
-            INTERNAL_WARN_STREAM << "CleanedDataController: Cache failed to initialize";
+            INTERNAL_WARN_STREAM << "CleanedDataController: 缓存初始化失败";
             updateLoadingState(false);
             emit errorOccurred("缓存系统初始化失败");
             emit initializationCompleted(false);
@@ -145,20 +145,20 @@ bool CleanedDataController::initialize()
 void CleanedDataController::refreshDatasets()
 {
     if (!m_initialized) {
-        INTERNAL_WARN_STREAM << "CleanedDataController: Not initialized";
+        INTERNAL_WARN_STREAM << "CleanedDataController: 未初始化";
         return;
     }
     
     updateLoadingState(true);
     
     try {
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Refreshing datasets...";
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 正在刷新数据集...";
         
         // 从缓存获取所有数据集信息
         QVector<QVariantMap> allInfos = m_cache->getAllDataSetInfos();
         QVariantList datasets;
 
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Got" << allInfos.size() << "datasets from cache";
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 从缓存获取" << allInfos.size() << "个数据集";
 
         for (const QVariantMap& info : allInfos) {
             // 因子回测页只显示已清洗的缓存
@@ -204,7 +204,7 @@ void CleanedDataController::refreshDatasets()
         
         updateDatasetList(datasets);
         
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Refreshed" << datasets.size() << "datasets";
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 已刷新" << datasets.size() << "datasets";
         
         updateLoadingState(false);
         
@@ -222,14 +222,14 @@ void CleanedDataController::loadCleanedData(const QString& symbol,
                                           const QString& endDate)
 {
     if (!m_initialized) {
-        INTERNAL_WARN_STREAM << "CleanedDataController: Not initialized";
+        INTERNAL_WARN_STREAM << "CleanedDataController: 未初始化";
         emit errorOccurred("控制器未初始化");
         return;
     }
     
     updateLoadingState(true);
     
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Loading cleaned data for"
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 正在加载清洗数据: "
              << symbol.toStdString() << "from" << startDate.toStdString() << "to" << endDate.toStdString();
     
     // 更新当前选择
@@ -277,7 +277,7 @@ void CleanedDataController::loadCleanedData(const QString& symbol,
             if (bestDatasetId > 0) {
                 loadDatasetById(bestDatasetId);
             } else {
-                INTERNAL_WARN_STREAM << "CleanedDataController: No cleaned data found for" << symbol.toStdString();
+                INTERNAL_WARN_STREAM << "CleanedDataController: 未找到清洗数据: " << symbol.toStdString();
                 emit errorOccurred(QString("未找到%1的清洗后数据").arg(symbol));
                 updateLoadingState(false);
             }
@@ -295,7 +295,7 @@ void CleanedDataController::loadCleanedData(const QString& symbol,
 void CleanedDataController::loadDatasetById(int datasetId)
 {
     if (!m_initialized || datasetId <= 0) {
-        INTERNAL_WARN_STREAM << "CleanedDataController: Invalid dataset ID:" << datasetId;
+        INTERNAL_WARN_STREAM << "CleanedDataController: 无效数据集ID: " << datasetId;
         emit errorOccurred("无效的数据集ID");
         return;
     }
@@ -303,7 +303,7 @@ void CleanedDataController::loadDatasetById(int datasetId)
     updateLoadingState(true);
     m_currentDatasetId = datasetId;
 
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Loading dataset by ID:" << datasetId;
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 正在加载数据集, ID: " << datasetId;
 
     try {
         QPointer<CleanedDataController> safeThis(this);
@@ -375,13 +375,13 @@ void CleanedDataController::searchDatasets(const QString& symbol,
                                          double minDataQuality)
 {
     if (!m_initialized) {
-        INTERNAL_WARN_STREAM << "CleanedDataController: Not initialized";
+        INTERNAL_WARN_STREAM << "CleanedDataController: 未初始化";
         return;
     }
 
     updateLoadingState(true);
 
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Searching datasets with criteria:"
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 正在按条件搜索数据集:"
              << "Symbol:" << symbol.toStdString()
              << "Start:" << startDate.toStdString()
              << "End:" << endDate.toStdString()
@@ -427,7 +427,7 @@ void CleanedDataController::searchDatasets(const QString& symbol,
                 filteredDatasets.append(dataset);
             }
             
-            INTERNAL_DEBUG_STREAM << "CleanedDataController: Found" << filteredDatasets.size() << "datasets";
+            INTERNAL_DEBUG_STREAM << "CleanedDataController: 找到" << filteredDatasets.size() << "datasets";
             emit datasetsFound(filteredDatasets);
             updateLoadingState(false);
         });
@@ -443,7 +443,7 @@ void CleanedDataController::searchDatasets(const QString& symbol,
 
 void CleanedDataController::clearSelection()
 {
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Clearing selection";
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 正在清除选择";
     
     m_currentSymbol.clear();
     m_currentStartDate.clear();
@@ -471,7 +471,7 @@ QVariantMap CleanedDataController::getDataDateRange()
     result["endDate"] = endDate.toString("yyyy-MM-dd");
 
     if (!m_initialized) {
-        INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: Not initialized, returning default range:"
+        INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: 未初始化, 返回默认范围:"
                  << result["startDate"].toString().toStdString() << "to" << result["endDate"].toString().toStdString();
         return result;
     }
@@ -505,12 +505,12 @@ QVariantMap CleanedDataController::getDataDateRange()
 
                 if (foundStartDate.isValid() && foundEndDate.isValid()) {
                     if (foundStartDate.daysTo(foundEndDate) < 30) {
-                        INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: Found range too small ("
+                        INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: 发现范围过小 ("
                                  << foundStartDate.daysTo(foundEndDate) << "days), using default range";
                     } else {
                         result["startDate"] = earliestDate;
                         result["endDate"] = latestDate;
-                        INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: Found date range from datasets:"
+                        INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: 从数据集找到日期范围:"
                                  << earliestDate.toStdString() << "to" << latestDate.toStdString();
                         return result;
                     }
@@ -518,10 +518,10 @@ QVariantMap CleanedDataController::getDataDateRange()
             }
         }
     } catch (const std::exception& e) {
-        INTERNAL_WARN_STREAM << "CleanedDataController::getDataDateRange: Error:" << e.what();
+        INTERNAL_WARN_STREAM << "CleanedDataController::getDataDateRange: 错误:" << e.what();
     }
 
-    INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: Using default range:"
+    INTERNAL_DEBUG_STREAM << "CleanedDataController::getDataDateRange: 使用默认范围:"
              << result["startDate"].toString().toStdString() << "to" << result["endDate"].toString().toStdString();
     return result;
 }
@@ -530,7 +530,7 @@ void CleanedDataController::setCurrentSymbol(const QString& symbol)
 {
     if (m_currentSymbol != symbol) {
         m_currentSymbol = symbol;
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Current symbol set to:" << symbol.toStdString();
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 当前股票设为:" << symbol.toStdString();
         emit symbolChanged(symbol);
     }
 }
@@ -539,7 +539,7 @@ void CleanedDataController::setCurrentStartDate(const QString& date)
 {
     if (m_currentStartDate != date) {
         m_currentStartDate = date;
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Current start date set to:" << date.toStdString();
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 当前开始日期设为:" << date.toStdString();
         emit startDateChanged(date);
     }
 }
@@ -548,7 +548,7 @@ void CleanedDataController::setCurrentEndDate(const QString& date)
 {
     if (m_currentEndDate != date) {
         m_currentEndDate = date;
-        INTERNAL_DEBUG_STREAM << "CleanedDataController: Current end date set to:" << date.toStdString();
+        INTERNAL_DEBUG_STREAM << "CleanedDataController: 当前结束日期设为:" << date.toStdString();
         emit endDateChanged(date);
     }
 }
@@ -564,7 +564,7 @@ void CleanedDataController::updateLoadingState(bool loading)
 void CleanedDataController::updateDatasetList(const QVariantList& datasets)
 {
     m_datasetList = datasets;
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Updated dataset list with" << datasets.size() << "items";
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 更新数据集列表, 共" << datasets.size() << "items";
     
     emit datasetListChanged();
     emit datasetsChanged(datasets.size());
@@ -591,7 +591,7 @@ void CleanedDataController::updateSelectedDataset(int datasetId)
                 setCurrentEndDate(m_selectedDatasetInfo["endDate"].toString());
             }
             
-            INTERNAL_DEBUG_STREAM << "CleanedDataController: Selected dataset updated:" << datasetId;
+            INTERNAL_DEBUG_STREAM << "CleanedDataController: 已更新选中数据集:" << datasetId;
             break;
         }
     }
@@ -678,12 +678,12 @@ QVariantMap CleanedDataController::buildFieldDiagnostics(const QVariantList& dat
 void CleanedDataController::emitDataLoaded(const QVariantList& data)
 {
     if (m_selectedDatasetInfo.isEmpty()) {
-        INTERNAL_WARN_STREAM << "CleanedDataController: Refusing to emit dataLoaded without selected dataset info";
+        INTERNAL_WARN_STREAM << "CleanedDataController: 无选中数据集信息, 拒绝发送 dataLoaded";
         emit errorOccurred(QStringLiteral("数据集元信息为空，禁止发送 dataLoaded"));
         return;
     }
 
-    INTERNAL_DEBUG_STREAM << "CleanedDataController: Emitting data loaded with" << data.size() << "records";
+    INTERNAL_DEBUG_STREAM << "CleanedDataController: 发送数据加载信号, 共" << data.size() << "records";
     emit dataLoaded(data, m_selectedDatasetInfo);
 }
 

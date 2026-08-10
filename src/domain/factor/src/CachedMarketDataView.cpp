@@ -527,7 +527,7 @@ bool CachedMarketDataView::saveToBinary(const std::string& filePath) const
 #else
     f = std::fopen(filePath.c_str(), "wb");
 #endif
-    if (!f) { INTERNAL_ERROR_STREAM << "[CMDV] saveToBinary: cannot open " << filePath; return false; }
+    if (!f) { INTERNAL_ERROR_STREAM << "[CMDV] saveToBinary: 无法打开 " << filePath; return false; }
 
     uint32_t magic = 0x42564453; // "BVDS"
     uint32_t version = 2;  // v2: +symbol strings

@@ -33,7 +33,7 @@ Error publish_trigger_event(std::unique_ptr<Event> event) {
 
     std::lock_guard<std::mutex> lock(g_trigger_publisher_mutex);
     if (!g_trigger_publisher) {
-        INTERNAL_WARN_STREAM << "[Trigger] Trigger event publisher not set, dropping event type="
+        INTERNAL_WARN_STREAM << "[Trigger] 事件发布器未设置, 丢弃事件类型="
                  << Event::type_to_string(event->type());
         return Error{Error::Code::DISCONNECTED, "Trigger event publisher not set"};
     }
@@ -399,7 +399,7 @@ public:
             return Error{Error::Code::OK, "Log action executed successfully"};
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[Trigger] Failed to execute log action: " << e.what();
-            return Error{Error::Code::NOT_FOUND, std::string("Failed to execute log action: ") + e.what()};
+            return Error{Error::Code::NOT_FOUND, std::string("[Trigger] 日志动作执行失败: ") + e.what()};
         }
     }
     
@@ -444,7 +444,7 @@ public:
             return Error{Error::Code::OK, "Event emit action completed and published"};
         } catch (const std::exception& e) {
             INTERNAL_ERROR_STREAM << "[Trigger] Failed to execute event emit action: " << e.what();
-            return Error{Error::Code::NOT_FOUND, std::string("Failed to execute event emit action: ") + e.what()};
+            return Error{Error::Code::NOT_FOUND, std::string("[Trigger] 事件发送动作执行失败: ") + e.what()};
         }
     }
     
@@ -560,7 +560,7 @@ public:
     void set_enabled(bool enabled) override {
         std::lock_guard<std::mutex> lock(mutex_);
         enabled_ = enabled;
-        INTERNAL_DEBUG_STREAM << "[Trigger] Trigger '" << name_ << "' " << (enabled_ ? "enabled" : "disabled");
+        INTERNAL_DEBUG_STREAM << "[Trigger] Trigger '" << name_ << "' " << (enabled_ ? "已启用" : "已禁用");
     }
     
     bool is_enabled() const override {

@@ -560,14 +560,14 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                     pmc.cb = sizeof(pmc);
                     if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
                         SIZE_T wsBefore = pmc.WorkingSetSize;
-                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet BEFORE trim: "
+                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet 清理前: "
                             << (wsBefore / (1024.0 * 1024.0)) << " MB";
                         SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1);
                         GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
                         SIZE_T wsAfter = pmc.WorkingSetSize;
-                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet AFTER trim: "
+                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet 清理后: "
                             << (wsAfter / (1024.0 * 1024.0)) << " MB"
-                            << " (released " << ((wsBefore - wsAfter) / (1024.0 * 1024.0)) << " MB)";
+                            << " (释放 " << ((wsBefore - wsAfter) / (1024.0 * 1024.0)) << " MB)";
                     }
                 }
 #endif

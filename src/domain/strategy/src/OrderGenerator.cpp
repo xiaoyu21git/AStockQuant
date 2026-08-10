@@ -40,10 +40,7 @@ std::vector<OrderRequest> OrderGenerator::generate(
         std::int64_t currentQty = posProvider.quantityOf(code);
 
         if (m_sizer->baseQty() == 0) {
-            static std::atomic<int> skipDiag{0};
-            if (skipDiag.fetch_add(1, std::memory_order_relaxed) < 3)
-                INTERNAL_INFO_STREAM << "[OrdGen] SKIP: maxOrderQuantity=0 sym=" << raw.symbol();
-            continue;
+            throw std::domain_error("[OrdGen] baseQty=0, PositionSizer 未正确初始化 — maxOrderQuantity 必须在入口处校验");
         }
 
         OrderDelta delta;

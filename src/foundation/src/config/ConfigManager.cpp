@@ -22,25 +22,25 @@ void ConfigManager::setChangeCallback(const std::function<void(const foundation:
 void ConfigManager::save_snapshot(const std::string& snapshot_id) {
     foundation::config::ConfigNode::Ptr current = this->getConfig(foundation::config::ConfigManager::Domain::APPLICATION);
     if (!current) {
-        INTERNAL_WARN_STREAM << "Cannot save snapshot: current config is null";
+        INTERNAL_WARN_STREAM << "无法保存快照: 当前配置为空";
         return;
     }
     // 假设ConfigNode支持深拷贝构造
     this->snapshots_[snapshot_id] = std::make_shared<ConfigNode>(*current);
-    INTERNAL_INFO_STREAM << "Saved config snapshot: " << snapshot_id;
+    INTERNAL_INFO_STREAM << "已保存配置快照: " << snapshot_id;
 }
 
 void ConfigManager::rollback(const std::string& snapshot_id) {
     auto it = this->snapshots_.find(snapshot_id);
     if (it == snapshots_.end()) {
-        INTERNAL_WARN_STREAM << "No snapshot found for id: " << snapshot_id;
+        INTERNAL_WARN_STREAM << "未找到快照: " << snapshot_id;
         return;
     }
     foundation::config::ConfigNode::Ptr snapshot = it->second;
     std::vector<foundation::config::ConfigManager::ConfigChange> rollback_changes;
     foundation::config::ConfigNode::Ptr current = this->getConfig(foundation::config::ConfigManager::Domain::APPLICATION);
     if (!current || !snapshot) {
-        INTERNAL_WARN_STREAM << "Current or snapshot config is null";
+        INTERNAL_WARN_STREAM << "当前或快照配置为空";
         return;
     }
     // 遍历快照顶层key
@@ -86,7 +86,7 @@ void ConfigManager::rollback(const std::string& snapshot_id) {
 
 void ConfigManager::undo() {
     if (this->change_history_.empty()) {
-        INTERNAL_WARN_STREAM << "No change history to undo.";
+        INTERNAL_WARN_STREAM << "无变更历史可撤销.";
         return;
     }
     auto last_changes = this->change_history_.back();
@@ -199,11 +199,11 @@ ConfigManager::ConfigManager()
     loader_->registerProvider(".yml", 
         std::make_shared<YamlConfigProvider>());
     
-    INTERNAL_DEBUG_STREAM << "ConfigManager constructed";
+    INTERNAL_DEBUG_STREAM << "ConfigManager 已构造";
 }
 
 ConfigManager::~ConfigManager() {
-    INTERNAL_DEBUG_STREAM << "ConfigManager destroyed";
+    INTERNAL_DEBUG_STREAM << "ConfigManager 已销毁";
 }
 
 // ============ 初始化方法 ============
@@ -212,7 +212,7 @@ void ConfigManager::initialize(
     const std::string& profile,
     const std::string& configDir) {
     
-    INTERNAL_INFO_STREAM << "Initializing ConfigManager with profile: " << profile << ", configDir: " << configDir;
+    INTERNAL_INFO_STREAM << "正在初始化 ConfigManager, profile: " << profile << ", configDir: " << configDir;
     
     currentProfile_ = profile;
     configBaseDir_ = configDir;
@@ -236,13 +236,13 @@ void ConfigManager::initialize(
         // 构建应用配置缓存
         buildAppConfig();
         
-        INTERNAL_INFO_STREAM << "ConfigManager initialized successfully";
+        INTERNAL_INFO_STREAM << "ConfigManager 初始化成功";
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to initialize ConfigManager: " << e.what();
+        INTERNAL_ERROR_STREAM << "ConfigManager 初始化失败: " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format(
-                "ConfigManager initialization failed: {}", e.what()
+                "ConfigManager 初始化失败: {}", e.what()
             )
         );
     }
@@ -251,7 +251,7 @@ void ConfigManager::initialize(
 // ============ 配置加载方法 ============
 
 void ConfigManager::loadFoundationConfigs() {
-    INTERNAL_DEBUG_STREAM << "Loading foundation configurations";
+    INTERNAL_DEBUG_STREAM << "正在加载 foundation 配置";
     
     std::vector<ConfigNode::Ptr> foundationConfigs;
     std::string foundationDir = foundation::utils::String::endsWith(configBaseDir_, "/")
@@ -260,12 +260,12 @@ void ConfigManager::loadFoundationConfigs() {
     
     // 检查基础配置目录是否存在
     if (!foundation::fs::File::exists(foundationDir)) {
-        INTERNAL_WARN_STREAM << "Foundation config directory not found: " << foundationDir;
+        INTERNAL_WARN_STREAM << "Foundation 配置目录未找到: " << foundationDir;
         return;
     }
     
     if (!foundation::fs::File::isDirectory(foundationDir)) {
-        INTERNAL_WARN_STREAM << "Foundation config path is not a directory: " << foundationDir;
+        INTERNAL_WARN_STREAM << "Foundation 配置路径不是目录: " << foundationDir;
         return;
     }
     
@@ -286,10 +286,10 @@ void ConfigManager::loadFoundationConfigs() {
                 auto config = loader_->load(filePath, options);
                 foundationConfigs.push_back(config);
                 
-                INTERNAL_DEBUG_STREAM << "Loaded foundation config: " << file;
+                INTERNAL_DEBUG_STREAM << "已加载 foundation 配置: " << file;
                 
             } catch (const std::exception& e) {
-                INTERNAL_WARN_STREAM << "Failed to load foundation config " << file << ": " << e.what();
+                INTERNAL_WARN_STREAM << "加载 foundation 配置失败: " << file << ": " << e.what();
             }
         }
     }
@@ -301,26 +301,26 @@ void ConfigManager::loadFoundationConfigs() {
         std::unique_lock<std::shared_mutex> lock(configMutex_);
         domainConfigs_[Domain::FOUNDATION] = merged;
         
-        INTERNAL_INFO_STREAM << "Loaded " << foundationConfigs.size() << " foundation configurations";
+        INTERNAL_INFO_STREAM << "已加载 " << foundationConfigs.size() << " 个 foundation 配置";
     }
 }
 
 void ConfigManager::loadProfileConfig(const std::string& profile) {
-    INTERNAL_DEBUG_STREAM << "Loading profile configuration: " << profile;
+    INTERNAL_DEBUG_STREAM << "正在加载 profile 配置: " << profile;
     
     std::string profilePath = foundation::utils::String::format(
         "{}/profiles/{}.yaml", configBaseDir_, profile);
     
     // 检查配置文件是否存在
     if (!foundation::fs::File::exists(profilePath)) {
-        INTERNAL_WARN_STREAM << "Profile config not found: " << profilePath;
+        INTERNAL_WARN_STREAM << "Profile 配置未找到: " << profilePath;
         
         // 尝试使用其他扩展名
         profilePath = foundation::utils::String::format(
             "{}/profiles/{}.yml", configBaseDir_, profile);
         
         if (!foundation::fs::File::exists(profilePath)) {
-            INTERNAL_WARN_STREAM << "Profile config not found with .yml extension: " << profilePath;
+            INTERNAL_WARN_STREAM << "Profile 配置未找到 (.yml): " << profilePath;
             return;
         }
     }
@@ -334,27 +334,27 @@ void ConfigManager::loadProfileConfig(const std::string& profile) {
         std::unique_lock<std::shared_mutex> lock(configMutex_);
         domainConfigs_[Domain::PROFILE] = config;
         
-        INTERNAL_INFO_STREAM << "Profile configuration loaded: " << profile;
+        INTERNAL_INFO_STREAM << "Profile 配置已加载: " << profile;
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to load profile config " << profilePath << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "加载 profile 配置失败: " << profilePath << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format(
-                "Failed to load profile config {}: {}", profile, e.what()
+                "加载 profile 配置失败: {}: {}", profile, e.what()
             )
         );
     }
 }
 
 void ConfigManager::loadSystemConfigs() {
-    INTERNAL_DEBUG_STREAM << "Loading system configurations";
+    INTERNAL_DEBUG_STREAM << "正在加载系统配置";
     
     std::vector<ConfigNode::Ptr> systemConfigs;
     std::string systemDir = configBaseDir_ + "/system";
     
     // 检查系统配置目录是否存在
     if (!foundation::fs::File::exists(systemDir)) {
-        INTERNAL_DEBUG_STREAM << "System config directory not found: " << systemDir;
+        INTERNAL_DEBUG_STREAM << "系统配置目录未找到: " << systemDir;
         return;
     }
     
@@ -370,10 +370,10 @@ void ConfigManager::loadSystemConfigs() {
                 auto config = loader_->load(filePath, options);
                 systemConfigs.push_back(config);
                 
-                INTERNAL_DEBUG_STREAM << "Loaded system config: " << file;
+                INTERNAL_DEBUG_STREAM << "已加载系统配置: " << file;
                 
             } catch (const std::exception& e) {
-                INTERNAL_WARN_STREAM << "Failed to load system config " << file << ": " << e.what();
+                INTERNAL_WARN_STREAM << "加载系统配置失败: " << file << ": " << e.what();
             }
         }
     }
@@ -385,12 +385,12 @@ void ConfigManager::loadSystemConfigs() {
         std::unique_lock<std::shared_mutex> lock(configMutex_);
         domainConfigs_[Domain::SYSTEM] = merged;
         
-        INTERNAL_INFO_STREAM << "Loaded " << systemConfigs.size() << " system configurations";
+        INTERNAL_INFO_STREAM << "已加载 " << systemConfigs.size() << " 个系统配置";
     }
 }
 
 void ConfigManager::loadAppConfigs() {
-    INTERNAL_DEBUG_STREAM << "Loading application configurations";
+    INTERNAL_DEBUG_STREAM << "正在加载应用配置";
     
     // 尝试加载应用主配置文件
     // 优先查找 configBaseDir 目录下的配置文件，然后查找 app/ 目录
@@ -412,24 +412,24 @@ void ConfigManager::loadAppConfigs() {
     ConfigNode::Ptr appConfig;
     
     for (const auto& path : appConfigPaths) {
-        INTERNAL_DEBUG_STREAM << "Trying to load app config from: " << path;
+        INTERNAL_DEBUG_STREAM << "正在尝试加载应用配置: " << path;
         if (foundation::fs::File::exists(path)) {
             try {
                 ConfigLoader::LoadOptions options;
                 options.profile = currentProfile_;
                 
                 appConfig = loader_->load(path, options);
-                INTERNAL_INFO_STREAM << "Application configuration loaded: " << path;
+                INTERNAL_INFO_STREAM << "应用配置已加载: " << path;
                 break;
                 
             } catch (const std::exception& e) {
-                INTERNAL_WARN_STREAM << "Failed to load app config " << path << ": " << e.what();
+                INTERNAL_WARN_STREAM << "加载应用配置失败: " << path << ": " << e.what();
             }
         }
     }
     
     if (!appConfig) {
-        INTERNAL_WARN_STREAM << "No application configuration found, using empty config";
+        INTERNAL_WARN_STREAM << "未找到应用配置, 使用空配置";
         appConfig = std::make_shared<ConfigNode>();
     }
     
@@ -438,7 +438,7 @@ void ConfigManager::loadAppConfigs() {
 }
 
 void ConfigManager::loadDynamicConfigs() {
-    INTERNAL_DEBUG_STREAM << "Loading dynamic configurations";
+    INTERNAL_DEBUG_STREAM << "正在加载动态配置";
     
     // 这里可以加载从数据库、API等动态源获取的配置
     // 目前仅初始化一个空的动态配置节点
@@ -446,7 +446,7 @@ void ConfigManager::loadDynamicConfigs() {
     std::unique_lock<std::shared_mutex> lock(configMutex_);
     domainConfigs_[Domain::RUNTIME] = runtimeConfig_;
     
-    INTERNAL_DEBUG_STREAM << "Dynamic configurations initialized";
+    INTERNAL_DEBUG_STREAM << "动态配置已初始化";
 }
 
 // ============ 配置获取方法 ============
@@ -558,11 +558,11 @@ ConfigNode::Ptr ConfigManager::getModuleConfig(
                 options.profile = currentProfile_;
                 
                 moduleSpecificConfig = loader_->load(path, options);
-                INTERNAL_DEBUG_STREAM << "Module config loaded: " << moduleName << " from " << path;
+                INTERNAL_DEBUG_STREAM << "模块配置已加载: " << moduleName << " from " << path;
                 break;
                 
             } catch (const std::exception& e) {
-                INTERNAL_WARN_STREAM << "Failed to load module config " << path << ": " << e.what();
+                INTERNAL_WARN_STREAM << "加载模块配置失败: " << path << ": " << e.what();
             }
         }
     }
@@ -623,12 +623,12 @@ void ConfigManager::setRuntimeConfig(
     // 通知监听器
     notifyListeners(Domain::RUNTIME, path, oldValue, value);
     
-    INTERNAL_INFO_STREAM << "Runtime config updated: " << path << " = " << value.toString();
+    INTERNAL_INFO_STREAM << "运行时配置已更新: " << path << " = " << value.toString();
     
     // 如果要求持久化，保存到文件
     if (persist) {
         // 这里可以添加持久化逻辑
-        INTERNAL_DEBUG_STREAM << "Runtime config persist requested (not implemented)";
+        INTERNAL_DEBUG_STREAM << "运行时配置持久化请求 (未实现)";
     }
 }
 
@@ -640,7 +640,7 @@ ConfigNode::Ptr ConfigManager::getRuntimeConfig() {
 // ============ 配置管理方法 ============
 
 void ConfigManager::reload(Domain domain) {
-    INTERNAL_INFO_STREAM << "Reloading configuration domain: " << static_cast<int>(domain);
+    INTERNAL_INFO_STREAM << "正在重载配置域: " << static_cast<int>(domain);
     
     std::unique_lock<std::shared_mutex> lock(configMutex_);
     
@@ -670,11 +670,11 @@ void ConfigManager::reload(Domain domain) {
     appConfig_.reset();
     moduleConfigs_.clear();
     
-    INTERNAL_INFO_STREAM << "Configuration domain " << static_cast<int>(domain) << " reloaded";
+    INTERNAL_INFO_STREAM << "配置域 " << static_cast<int>(domain) << " 已重载";
 }
 
 void ConfigManager::reloadAll() {
-    INTERNAL_INFO_STREAM << "Reloading all configurations";
+    INTERNAL_INFO_STREAM << "正在重载所有配置";
     
     std::unique_lock<std::shared_mutex> lock(configMutex_);
     
@@ -689,7 +689,7 @@ void ConfigManager::reloadAll() {
     appConfig_.reset();
     moduleConfigs_.clear();
     
-    INTERNAL_INFO_STREAM << "All configurations reloaded";
+    INTERNAL_INFO_STREAM << "所有配置已重载";
 }
 
 // ============ 监听器管理 ============
@@ -697,13 +697,13 @@ void ConfigManager::reloadAll() {
 void ConfigManager::addDomainListener(Domain domain, ConfigChangeListener listener) {
     std::unique_lock<std::mutex> lock(listenersMutex_);
     domainListeners_[domain].push_back(listener);
-    INTERNAL_DEBUG_STREAM << "Added domain listener for domain: " << static_cast<int>(domain);
+    INTERNAL_DEBUG_STREAM << "已添加域监听器: " << static_cast<int>(domain);
 }
 
 void ConfigManager::addPathListener(const std::string& pathPattern, ConfigChangeListener listener) {
     std::unique_lock<std::mutex> lock(listenersMutex_);
     pathListeners_[pathPattern].push_back(listener);
-    INTERNAL_DEBUG_STREAM << "Added path listener for pattern: " << pathPattern;
+    INTERNAL_DEBUG_STREAM << "已添加路径监听器: " << pathPattern;
 }
 
 void ConfigManager::notifyListeners(
@@ -721,7 +721,7 @@ void ConfigManager::notifyListeners(
             try {
                 listener(domain, path, oldValue, newValue);
             } catch (const std::exception& e) {
-                INTERNAL_ERROR_STREAM << "Error in domain listener: " << e.what();
+                INTERNAL_ERROR_STREAM << "域监听器错误: " << e.what();
             }
         }
     }
@@ -754,7 +754,7 @@ void ConfigManager::notifyListeners(
                 try {
                     listener(domain, path, oldValue, newValue);
                 } catch (const std::exception& e) {
-                    INTERNAL_ERROR_STREAM << "Error in path listener: " << e.what();
+                    INTERNAL_ERROR_STREAM << "路径监听器错误: " << e.what();
                 }
             }
         }
@@ -829,12 +829,12 @@ void ConfigManager::exportConfig(
     const std::string& format,
     const std::string& outputPath) const {
     
-    INTERNAL_INFO_STREAM << "Exporting " << static_cast<int>(domain) << " configuration to " << outputPath << " as " << format;
+    INTERNAL_INFO_STREAM << "正在导出 " << static_cast<int>(domain) << " 配置到 " << outputPath << " 格式: " << format;
     
     ConfigNode::Ptr config = getConfig(domain);
     
     if (!config || config->isNull()) {
-        INTERNAL_WARN_STREAM << "No configuration to export for domain: " << static_cast<int>(domain);
+        INTERNAL_WARN_STREAM << "无配置可导出, 域: " << static_cast<int>(domain);
         return;
     }
     
@@ -844,9 +844,9 @@ void ConfigManager::exportConfig(
             bool success = foundation::fs::File::writeText(outputPath, jsonStr);
             
             if (success) {
-                INTERNAL_INFO_STREAM << "Configuration exported to " << outputPath << " as JSON";
+                INTERNAL_INFO_STREAM << "配置已导出到 " << outputPath << " 格式: JSON";
             } else {
-                INTERNAL_ERROR_STREAM << "Failed to write configuration to " << outputPath;
+                INTERNAL_ERROR_STREAM << "写入配置文件失败: " << outputPath;
             }
             
         } else if (format == "yaml" || format == "YAML" || format == "yml") {
@@ -854,17 +854,17 @@ void ConfigManager::exportConfig(
             bool success = foundation::fs::File::writeText(outputPath, yamlStr);
             
             if (success) {
-                INTERNAL_INFO_STREAM << "Configuration exported to " << outputPath << " as YAML";
+                INTERNAL_INFO_STREAM << "配置已导出到 " << outputPath << " 格式: YAML";
             } else {
-                INTERNAL_ERROR_STREAM << "Failed to write configuration to " << outputPath;
+                INTERNAL_ERROR_STREAM << "写入配置文件失败: " << outputPath;
             }
             
         } else {
-            INTERNAL_ERROR_STREAM << "Unsupported export format: " << format;
+            INTERNAL_ERROR_STREAM << "不支持的导出格式: " << format;
         }
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to export configuration: " << e.what();
+        INTERNAL_ERROR_STREAM << "导出配置失败: " << e.what();
     }
 }
 
@@ -894,65 +894,45 @@ ConfigNode::Ptr ConfigManager::mergeConfigs(
 bool ConfigManager::registerDomain(const std::string& name, Domain domain) {
     // 这里可以添加域注册逻辑
     // 目前使用固定的域枚举
-    INTERNAL_DEBUG_STREAM << "Domain registered: " << name << " -> " << static_cast<int>(domain);
+    INTERNAL_DEBUG_STREAM << "域已注册: " << name << " -> " << static_cast<int>(domain);
     return true;
 }
 // ============ 静态快速配置访问方法实现 ============
 
 std::string ConfigManager::get_app_config_string(const std::string& key,
                                              const std::string& default_value) {
-     try {
-        auto& config = getAppConfig();
-        auto node = config->getPath(key, '.');  // 返回 ConfigNode
-        if (node.isNull()) {
-            return default_value;
-        }
-        return node.asString();  // 直接调用转换方法
-    } catch (...) {
+    auto& config = getAppConfig();
+    auto node = config->getPath(key, '.');  // 返回 ConfigNode
+    if (node.isNull()) {
         return default_value;
     }
+    return node.asString();  // 直接调用转换方法
 }
 
 int ConfigManager::get_app_config_int(const std::string& key, int default_value) {
+    auto& config = getAppConfig();
+    // 1. 先获取 ConfigNode 对象
+    auto node = config->getPath(key, '.');
 
-    try {
-        auto& config =getAppConfig();
-        // 1. 先获取 ConfigNode 对象
-        auto node = config->getPath(key, '.');
-        
-        // 2. 检查是否为空
-        if (node.isNull()) {
-            return default_value;
-        }
-        // 3. 转换为 int
-        return node.asInt(default_value);  // 如果 asInt 支持默认值
-        // 或者: return node.asInt();
-        
-    } catch (...) {
+    // 2. 检查是否为空
+    if (node.isNull()) {
         return default_value;
     }
+    // 3. 转换为 int
+    return node.asInt(default_value);  // 如果 asInt 支持默认值
+    // 或者: return node.asInt();
 }
 
-double ConfigManager::get_app_config_double(const std::string& key, 
-                                        double default_value) { 
-    try {
-        auto& config = getAppConfig();
-        return config->get<double>(key, default_value, '.');
-    } catch (...) {
-        return default_value;
-    }
+double ConfigManager::get_app_config_double(const std::string& key,
+                                        double default_value) {
+    auto& config = getAppConfig();
+    return config->get<double>(key, default_value, '.');
 }
 
-bool ConfigManager::get_app_config_bool(const std::string& key, 
+bool ConfigManager::get_app_config_bool(const std::string& key,
                                     bool default_value) {
-
-    
-    try {
-        auto& config = getAppConfig();
-        return config->get<bool>(key, default_value, '.');
-    } catch (...) {
-        return default_value;
-    }
+    auto& config = getAppConfig();
+    return config->get<bool>(key, default_value, '.');
 }
 
 // ============ 命名配置文件操作 (ConfigFile 枚举) ============
@@ -988,18 +968,27 @@ ConfigNode::Ptr ConfigManager::loadConfigFile(ConfigFile file) {
     std::string path = configFilePath(file);
     ConfigNode::Ptr node;
 
+    // Step 1: 文件存在性检查
     if (foundation::fs::File::exists(path)) {
+        // Step 1.5: 文件非空检查
+        auto fsize = foundation::fs::File::size(path);
+        if (fsize == 0) {
+            auto msg = std::string("[ConfigManager] 配置文件为空, 拒绝加载: ") + path
+                       + " (size=" + std::to_string(fsize) + ")";
+            INTERNAL_ERROR_STREAM << msg;
+            throw foundation::ConfigException(msg);
+        }
+
+        // Step 2: 解析 — 失败直接抛异常, 不静默返回空节点
         ConfigLoader::LoadOptions opts;
         opts.profile = currentProfile_;
         opts.enableCache = false;
-        try {
-            node = loader_->load(path, opts);
-        } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[ConfigManager] Failed to parse " << path
-                                 << ": " << e.what();
-            node = std::make_shared<ConfigNode>();
-        }
+        node = loader_->load(path, opts);
+        INTERNAL_DEBUG_STREAM << "[ConfigManager] 配置加载成功: " << path
+                             << " size=" << fsize;
+
     } else if (file == ConfigFile::Jujin) {
+        // Jujin: 允许从 appConfig 的旧字段迁移 (向后兼容)
         auto appCfg = getAppConfig();
         auto legacy = appCfg->getPath("jujin.config", '.');
         if (!legacy.isNull()) {
@@ -1010,6 +999,9 @@ ConfigNode::Ptr ConfigManager::loadConfigFile(ConfigFile file) {
             node = std::make_shared<ConfigNode>();
         }
     } else {
+        // 非 Jujin 配置文件缺失 — 返回空节点
+        // (调用方通常根据配置是否为运行时必需决定是否终止)
+        INTERNAL_ERROR_STREAM << "[ConfigManager] 配置文件不存在: " << path;
         node = std::make_shared<ConfigNode>();
     }
 

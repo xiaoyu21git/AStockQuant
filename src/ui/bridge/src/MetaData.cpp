@@ -867,7 +867,7 @@ MetaView* ViewLoader::createStrategyLibraryView() {
 QJsonObject ViewLoader::loadJsonFile(const QString& filePath) {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        INTERNAL_WARN_STREAM << "Failed to open JSON file:" << filePath.toStdString();
+        INTERNAL_WARN_STREAM << "打开 JSON 文件失败:" << filePath.toStdString();
         return QJsonObject();
     }
     
@@ -876,7 +876,7 @@ QJsonObject ViewLoader::loadJsonFile(const QString& filePath) {
     
     QJsonDocument doc = QJsonDocument::fromJson(data);
     if (doc.isNull()) {
-        INTERNAL_WARN_STREAM << "Failed to parse JSON from file:" << filePath.toStdString();
+        INTERNAL_WARN_STREAM << "解析 JSON 文件失败:" << filePath.toStdString();
         return QJsonObject();
     }
     
@@ -886,7 +886,7 @@ QJsonObject ViewLoader::loadJsonFile(const QString& filePath) {
 void ViewLoader::saveJsonFile(const QString& filePath, const QJsonObject& json) {
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly)) {
-        INTERNAL_WARN_STREAM << "Failed to open JSON file for writing:" << filePath.toStdString();
+        INTERNAL_WARN_STREAM << "打开 JSON 文件写入失败:" << filePath.toStdString();
         return;
     }
     

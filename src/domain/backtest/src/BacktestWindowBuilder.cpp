@@ -26,17 +26,17 @@ BacktestWindowBuilder::BacktestWindowBuilder(const ITradingCalendar& calendar,
 
 WindowBuildResult BacktestWindowBuilder::build(WindowBuildSpec spec) const
 {
-    INTERNAL_INFO_STREAM << "[BacktestWindowBuilder] Building window: start="
+    INTERNAL_INFO_STREAM << "[BacktestWindowBuilder] 正在构建窗口: start="
                         << spec.requested.start.value << " end=" << spec.requested.end.value
                         << " mode=" << static_cast<int>(spec.mode);
 
     if (!spec.requested.isValid()) {
-        INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] Invalid date range in build spec";
+        INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] 构建规格中日期范围无效";
         return WindowBuildResult{WindowBuildError::InvalidInput, std::nullopt};
     }
 
     if (!calendar_.isTradingDay(spec.requested.start) || !calendar_.isTradingDay(spec.requested.end)) {
-        INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] Non-trading boundary: "
+        INTERNAL_ERROR_STREAM << "[BacktestWindowBuilder] 非交易日边界: "
                               << spec.requested.start.value << "~" << spec.requested.end.value;
         return WindowBuildResult{WindowBuildError::NonTradingBoundary, std::nullopt};
     }

@@ -706,13 +706,13 @@ bool File::move(const std::string& src, const std::string& dst) {
     
     // 处理跨设备移动（errno == EXDEV）
     if (errno == EXDEV) {
-        INTERNAL_ERROR_STREAM << "Cross-device move, using copy+delete: "
+        INTERNAL_ERROR_STREAM << "跨设备移动, 使用复制+删除: "
                              << src << " -> " << dst;
         if (copy(src, dst)) {
             return remove(src);
         }
     } else {
-        INTERNAL_ERROR_STREAM << "rename failed (errno " << errno << "): "
+        INTERNAL_ERROR_STREAM << "重命名失败 (errno " << errno << "): "
                              << strerror(errno);
     }
     

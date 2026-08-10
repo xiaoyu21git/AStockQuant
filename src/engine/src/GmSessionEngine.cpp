@@ -106,9 +106,9 @@ public:
         }
         if (posArr) posArr->release();
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[GmSdk] on_init exception: " << e.what();
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_init 异常: " << e.what();
         } catch (...) {
-            INTERNAL_ERROR_STREAM << "[GmSdk] on_init unknown exception";
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_init 未知异常";
         }
     }
 
@@ -163,7 +163,7 @@ public:
         } else {
             static int noBusCnt = 0;
             if (++noBusCnt % 20 == 0) {
-                INTERNAL_WARN_STREAM << "[GmSdk] 🔴 on_tick EventBus not running, tick dropped";
+                INTERNAL_WARN_STREAM << "[GmSdk] 🔴 on_tick EventBus 未运行, tick 被丢弃";
             }
         }
 
@@ -183,9 +183,9 @@ public:
 
         domain::market::MarketDataService::instance().onTick(td);
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[GmSdk] on_tick exception: " << e.what();
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_tick 异常: " << e.what();
         } catch (...) {
-            INTERNAL_ERROR_STREAM << "[GmSdk] on_tick unknown exception";
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_tick 未知异常";
         }
     }
 
@@ -227,7 +227,7 @@ public:
             evt.set("message", u.message);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         } else {
-            INTERNAL_ERROR_STREAM << "[GmSdk] on_order_status EventBus not running, order update dropped";
+            INTERNAL_ERROR_STREAM << "[GmSdk] on_order_status EventBus 未运行, 订单更新被丢弃";
         }
     }
 
@@ -351,9 +351,9 @@ bool GmSessionEngine::initialize(const std::string& token, const std::string& ac
         try {
             static_cast<SessionStrategy*>(m_strategy.get())->run();
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[GmSession] run() exception: " << e.what();
+            INTERNAL_ERROR_STREAM << "[GmSession] run() 异常: " << e.what();
         } catch (...) {
-            INTERNAL_ERROR_STREAM << "[GmSession] run() unknown exception";
+            INTERNAL_ERROR_STREAM << "[GmSession] run() 未知异常";
         }
     });
     m_impl->initialized.store(true);
@@ -484,7 +484,7 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                         if (qt.ask_price > 0) { q.asks.push_back({qt.ask_price, static_cast<double>(qt.ask_volume)}); }
                     }
                 } else {
-                    INTERNAL_INFO_STREAM << "[GmSession] history_ticks_n returned empty/error";
+                    INTERNAL_INFO_STREAM << "[GmSession] history_ticks_n 返回空/错误";
                 }
                 if (lt) lt->release();
                 bars->release();

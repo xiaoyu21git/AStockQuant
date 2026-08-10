@@ -245,26 +245,26 @@ void FactorBacktestOrchestrator::run(
         ~DbFallbackGuard() {
             if (svc) {
                 svc->setDbFallback({});
-                INTERNAL_INFO_STREAM << "[MEM] DbFallbackGuard: dbFallback cleared";
+                INTERNAL_INFO_STREAM << "[MEM] DbFallbackGuard: dbFallback 已清除";
             }
         }
     } dbGuard{m_dataService};
 
 
-    if (!m_scheduler) { emitError("scheduler not set"); return; }
-    if (!m_engine)   { emitError("factor engine not set"); return; }
+    if (!m_scheduler) { emitError("scheduler 未设置"); return; }
+    if (!m_engine)   { emitError("factor engine 未设置"); return; }
     if (!m_engine->hasInstanceManager()) {
-        emitError("FactorService not initialized — factor instances unavailable");
+        emitError("FactorService 未初始化 — factor instances unavailable");
         return;
     }
     if (!m_dataService || !m_dataService->getView()) {
-        emitError("no market data view — cache dataset not loaded");
+        emitError("无行情数据视图 — cache dataset not loaded");
         return;
     }
 
     auto* arrowView = static_cast<factor::compute::ArrowMarketDataView*>(m_dataService->getView());
     if (arrowView->dates().empty() || arrowView->instruments().empty()) {
-        emitError("empty dataset — no dates or instruments");
+        emitError("空数据集 — no dates or instruments");
         return;
     }
 
@@ -302,7 +302,7 @@ void FactorBacktestOrchestrator::run(
             filteredDatesStorage.push_back(d);
         }
         if (filteredDatesStorage.empty()) {
-            emitError("no trading dates within specified date range");
+            emitError("指定日期范围内无交易日");
             return;
         }
         effectiveDatesPtr = &filteredDatesStorage;
@@ -742,7 +742,7 @@ void FactorBacktestOrchestrator::run(
             }
         }
         icByDate.clear();
-        INTERNAL_INFO_STREAM << "[MEM] icByDate cleared";
+        INTERNAL_INFO_STREAM << "[MEM] icByDate 已清除";
 
         INTERNAL_INFO_STREAM << "[回测流程] IC计算完成: icSeries.size=" << icir.icSeries.size()
             << " icMean=" << icir.icMean
@@ -751,7 +751,7 @@ void FactorBacktestOrchestrator::run(
         // ── 模拟成交 ──
         factor::compute::SimulatedTradingResult tradingResult;
         if (reporterInput.factorValuesByDate.empty()) {
-            emitError("factor computation produced no values");
+            emitError("因子计算未产生任何值");
             return;
         }
 
@@ -851,7 +851,7 @@ void FactorBacktestOrchestrator::run(
         // 释放交易模拟输入数据
         reporterInput.factorValuesByDate.clear();
         fvByDate.clear();
-        INTERNAL_INFO_STREAM << "[MEM] factorValuesByDate + fvByDate cleared";
+        INTERNAL_INFO_STREAM << "[MEM] factorValuesByDate + fvByDate 已清除";
 
         // ── 构建 JSON 结果（复用原有逻辑）──
         if (onComplete) {
@@ -941,11 +941,11 @@ void FactorBacktestOrchestrator::run(
             // ── 一致性诊断：spread 方向与 IC 一致但策略仍亏损 ──
             if (btResult.factorMetrics.spreadSignMatchIc && tradingResult.totalReturn < -0.05) {
                 if (btResult.factorMetrics.rankIcMean > 0.0) {
-                    INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true (IC>0) but totalReturn="
+                    INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true (IC>0) 但 totalReturn="
                         << tradingResult.totalReturn
                         << " — factor direction correct, losses may be from costs/slippage/risk controls";
                 } else {
-                    INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true (IC<0) but totalReturn="
+                    INTERNAL_WARN_STREAM << "[Orchestrator] spreadSignMatchIc=true (IC<0) 但 totalReturn="
                         << tradingResult.totalReturn
                         << " — factor is inverted (negative IC), consider reversing long/short baskets";
                 }
@@ -1138,7 +1138,7 @@ void FactorBacktestOrchestrator::run(
         if (onProgress) onProgress(100.0, "completed");
 
     // (dbFallback 由 scope guard DbFallbackGuard 在函数退出时自动清理)
-    INTERNAL_INFO_STREAM << "[MEM] Orchestrator::run() exiting — DbFallbackGuard + dbCache release next";
+    INTERNAL_INFO_STREAM << "[MEM] Orchestrator::run() 退出 — DbFallbackGuard + dbCache 即将释放";
 }
 
 } // namespace Factor::backtest

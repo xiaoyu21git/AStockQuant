@@ -44,8 +44,8 @@ CompositedSignal FactorCompositor::compose(
         return composeCustomWeight(signalSet, spec.customWeights, T, N);
     case CompositeMethod::ICRankWeight:
         // ICRankWeight 需要外部传入 IC 向量，暂回退到等权
-        INTERNAL_WARN_STREAM << "[FactorCompositor] ICRankWeight requires external IC vector, "
-                             << "falling back to EqualWeight — strategy signals will be unweighted";
+        INTERNAL_WARN_STREAM << "[FactorCompositor] ICRankWeight 需要外部 IC 向量, "
+                             << "回退到等权 — 策略信号将不加权";
         return composeEqualWeight(signalSet, T, N, S);
     }
 

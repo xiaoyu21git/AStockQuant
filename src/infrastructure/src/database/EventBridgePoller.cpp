@@ -120,7 +120,7 @@ void EventBridgePoller::pollLoop() {
             ++m_pollCount;
 
             if (published > 0) {
-                INTERNAL_INFO_STREAM << "[BridgePoller] #" << m_pollCount
+                INTERNAL_INFO_STREAM << "[BridgePoller] 轮询 #" << m_pollCount
                                      << " 发布 " << published << " 条 (累计 "
                                      << m_totalPublished << ")";
             }

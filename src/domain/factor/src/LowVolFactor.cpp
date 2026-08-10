@@ -622,7 +622,7 @@ std::optional<double> LowVolFactor::computeBeta(
     }
 
     if (symbolReturns.size() < 2 || benchmarkReturns.size() < 2) {
-        INTERNAL_WARN_STREAM << "[LowVol] Beta fail: symPts=" << symbolSeries.size()
+        INTERNAL_WARN_STREAM << "[LowVol] Beta 失败: symPts=" << symbolSeries.size()
                              << " benchPts=" << benchmarkSeries.size()
                              << " blkup=" << benchmarkLookup.size()
                              << " pairs=" << symbolReturns.size()

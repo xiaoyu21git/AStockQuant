@@ -21,7 +21,7 @@ std::string CacheUtils::statsToJson(const CacheStats& stats) {
         auto json = statsToJsonObject(stats);
         return json.toString();
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to serialize cache stats to JSON: " << std::string(e.what());
+        INTERNAL_ERROR_STREAM << "缓存统计序列化为 JSON 失败: " << std::string(e.what());
         return "{}";
     }
 }
@@ -31,7 +31,7 @@ CacheStats CacheUtils::jsonToStats(const std::string& json_str) {
         auto json = foundation::json::JsonFacade::parse(json_str);
         return jsonObjectToStats(json);
     } catch (const std::exception& e) {
-        INTERNAL_DEBUG_STREAM << "Failed to deserialize cache stats from JSON: " << std::string(e.what());
+        INTERNAL_DEBUG_STREAM << "缓存统计从 JSON 反序列化失败: " << std::string(e.what());
         return CacheStats{};
     }
 }
@@ -89,7 +89,7 @@ CacheStats CacheUtils::jsonObjectToStats(const foundation::json::JsonFacade& jso
         stats.updateHitRate();
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Error parsing cache stats from JSON: " << std::string(e.what());
+        INTERNAL_ERROR_STREAM << "缓存统计 JSON 解析错误: " << std::string(e.what());
     }
     
     return stats;
@@ -505,7 +505,7 @@ bool CacheUtils::deserializeEntry(
         return true;
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to deserialize cache entry: " << std::string(e.what());
+        INTERNAL_ERROR_STREAM << "缓存条目反序列化失败: " << std::string(e.what());
         return false;
     }
 }

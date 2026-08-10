@@ -41,6 +41,7 @@ void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const
 #include "../../ui/bridge/include/MarketDataBridge.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
+#include "database/DataMigrator.h"
 #include "../../../domain/strategy/include/EventRiskSubscriber.h"
 #include "EventDrivenFactor.h"
 #include "../include/PythonEventBridge.h"
@@ -110,7 +111,7 @@ bool ensureDirectoryExists(const QString& path, const char* label)
         return true;
     }
 
-    INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Failed to create " << label
+    INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: Failed to create " << label
                          << " directory: " << path.toStdString();
     return false;
 }
@@ -150,7 +151,7 @@ AppBootstrap::~AppBootstrap() = default;
 
 void AppBootstrap::init()
 {
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Starting initialization...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在初始化...";
     
     // 重置状态
     m_initialized = false;
@@ -158,8 +159,8 @@ void AppBootstrap::init()
     
     // 阶段1: 配置初始化
     if (!initConfiguration()) {
-        m_lastError = "Configuration initialization failed";
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
+        m_lastError = "配置初始化失败";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
         return;
     }
 
@@ -170,44 +171,44 @@ void AppBootstrap::init()
     // 阶段2: 服务初始化
     if (!initServices()) {
         m_lastError = "Services initialization failed";
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
         return;
     }
     
     // 阶段3: 数据库初始化（如果需要）
     if (!initDatabase()) {
         // 数据库初始化失败可能不是致命的，记录警告
-        INTERNAL_INFO_STREAM << "[AppBootstrap] WARNING: Database initialization failed";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] 警告: 数据库初始化失败";
     }
     
     m_initialized = true;
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Initialization completed successfully";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 初始化成功";
 }
 
 void AppBootstrap::start()
 {
     if (!m_initialized) {
-        m_lastError = "Cannot start: application not initialized";
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
+        m_lastError = "无法启动: 应用未初始化";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
         return;
     }
     
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Starting UI...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在启动 UI...";
     
     if (!initQmlEngine()) {
-        m_lastError = "QML engine initialization failed";
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: " << m_lastError;
+        m_lastError = "QML 引擎初始化失败";
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
         return;
     }
     
     m_started = true;
     scheduleDeferredStartupInitialization();
-    INTERNAL_INFO_STREAM << "[AppBootstrap] UI started successfully";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] UI 启动成功";
 }
 
 void AppBootstrap::shutdown()
 {
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Shutting down...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在关闭...";
 
     // 先停所有策略引擎 (线程安全退出)
     domain::strategy::StrategyManager::instance().stopAll();
@@ -230,12 +231,12 @@ void AppBootstrap::shutdown()
     m_initialized = false;
     m_started = false;
 
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Shutdown completed";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 关闭完成";
 }
 
 bool AppBootstrap::initConfiguration()
 {
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing configuration...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在初始化配置...";
     
     try {
         const RuntimeDirectories directories = runtimeDirectories();
@@ -256,22 +257,48 @@ bool AppBootstrap::initConfiguration()
         foundationConfig.log_file = directories.logFilePath.toStdString();
 
         if (!foundation::Foundation::instance().initialize(foundationConfig)) {
-            INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Foundation initialization failed";
+            INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: Foundation 初始化失败";
             return false;
         }
         
         foundation::config::ConfigManager::instance().initialize(profile, configDir);
 
-        // ── 统一预加载所有命名配置文件（一次性加载，避免各模块惰性调用的时序问题）──
+        // ── 统一预加载所有命名配置文件 (三段式: 存在→解析→校验) ──
         {
             auto& cfg = foundation::config::ConfigManager::instance();
             using CF = foundation::config::ConfigFile;
-            for (auto f : {CF::TradingConnection, CF::RiskConfig, CF::Jujin}) {
-                auto node = cfg.loadConfigFile(f);
-                if (!node || node->isEmpty()) {
-                    INTERNAL_WARN_STREAM << "[AppBootstrap] 配置文件未就绪: "
-                                         << static_cast<int>(f);
+
+            // Step 1: 检查文件存在性 + Step 2: 加载并解析 (loadConfigFile 内部)
+            // Step 3: 内容非空校验 — 关键配置文件必须非空, 否则拒绝启动
+            bool fatal = false;
+            for (auto f : {CF::TradingConnection}) {
+                try {
+                    auto node = cfg.loadConfigFile(f);
+                    if (!node || node->isEmpty()) {
+                        INTERNAL_ERROR_STREAM << "[AppBootstrap] 关键配置文件缺失或为空: "
+                                              << static_cast<int>(f)
+                                              << " — 启动被拒绝";
+                        fatal = true;
+                    }
+                } catch (const std::exception& e) {
+                    INTERNAL_ERROR_STREAM << "[AppBootstrap] 关键配置文件加载失败: "
+                                          << static_cast<int>(f) << " — " << e.what()
+                                          << " — 启动被拒绝";
+                    fatal = true;
                 }
+            }
+            // RiskConfig / Jujin 非关键, 缺失不阻塞启动 — 系统有内置默认值
+            for (auto f : {CF::RiskConfig, CF::Jujin}) {
+                try {
+                    cfg.loadConfigFile(f);
+                } catch (const std::exception& e) {
+                    INTERNAL_WARN_STREAM << "[AppBootstrap] 配置加载失败 (非关键): "
+                                         << static_cast<int>(f) << " — " << e.what();
+                }
+            }
+            if (fatal) {
+                INTERNAL_ERROR_STREAM << "[AppBootstrap] 关键配置未就绪, 配置初始化失败";
+                return false;
             }
 
             // ── 同步风控 + 费率配置到 TradingSystem ──
@@ -297,49 +324,65 @@ bool AppBootstrap::initConfiguration()
                 domain::strategy::RiskManager::instance().setRiskConfig(c);
                 INTERNAL_INFO_STREAM << "[AppBootstrap] 风控+费率配置已同步";
             }
+
+            // ── DataMigrator: v0.15→v0.16 schema 迁移 (accountId 自动填充) ──
+            {
+                std::string defaultAccountId;
+                auto tcNode = cfg.loadConfigFile(CF::TradingConnection);
+                if (tcNode && !tcNode->isEmpty() && tcNode->has("accountId")) {
+                    defaultAccountId = tcNode->get("accountId").asString();
+                }
+                astock::infrastructure::database::DataMigrator migrator;
+                auto migResult = migrator.run(defaultAccountId);
+                INTERNAL_INFO_STREAM << "[AppBootstrap] " << migResult.summary();
+                if (migResult.shouldAbort()) {
+                    INTERNAL_ERROR_STREAM << "[AppBootstrap] DataMigrator 失败率过高, 配置初始化中止";
+                    return false;
+                }
+            }
         }
         
         // 简单验证关键配置 - 通过实例方法调用
         auto& configManager = foundation::config::ConfigManager::instance();
         auto appName = configManager.get_app_config_string("app.name", "");
         if (appName.empty()) {
-            INTERNAL_INFO_STREAM << "[AppBootstrap] WARNING: Application name not configured";
+            INTERNAL_INFO_STREAM << "[AppBootstrap] 警告: 应用名称未配置";
         }
         
-        INTERNAL_INFO_STREAM << "[AppBootstrap] Runtime directories ready: "
+        INTERNAL_INFO_STREAM << "[AppBootstrap] 运行时目录就绪: "
                              << directories.configDir.toStdString() << ", "
                              << directories.logsDir.toStdString() << ", "
                              << directories.filesDir.toStdString() << ", "
                              << directories.cacheDir.toStdString() << ", "
                              << directories.tempDir.toStdString();
-        INTERNAL_INFO_STREAM << "[AppBootstrap] Configuration initialized";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] 配置初始化完成";
         return true;
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] Configuration error: " << e.what();
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] 配置错误: " << e.what();
         return false;
     }
 }
 
 bool AppBootstrap::initServices()
 {
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing services...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在初始化服务...";
     
     try {
         if (!engine::get_engine_event_bus()) {
             m_eventBus = engine::EventBus::create();
             if (!m_eventBus) {
-                INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Failed to create application EventBus";
+                INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: 创建应用 EventBus 失败";
                 return false;
             }
 
             if (!m_eventBus->start()) {
-                INTERNAL_ERROR_STREAM << "[AppBootstrap] ERROR: Failed to start application EventBus";
+                INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: 启动应用 EventBus 失败";
                 return false;
             }
 
             engine::register_engine_event_bus(m_eventBus);
-            INTERNAL_INFO_STREAM << "[AppBootstrap] Application EventBus initialized";
+            INTERNAL_INFO_STREAM << "[AppBootstrap] 应用 EventBus 已初始化";
 
             // 启动事件风控订阅器（订阅 news.* 事件，动态调整风控参数）
             domain::strategy::EventRiskSubscriber::instance().start();
@@ -373,28 +416,28 @@ bool AppBootstrap::initServices()
                     engine::TradeEngine::instance().initialize(s);
                     engine::AccountEngine::instance().initialize(s);
                     engine::OrderManager::instance().initialize(s);
-                    INTERNAL_INFO_STREAM << "[AppBootstrap] GmSessionEngine initialized";
+                    INTERNAL_INFO_STREAM << "[AppBootstrap] GmSessionEngine 已初始化";
                 }
             }
         }
 
-        INTERNAL_INFO_STREAM << "[AppBootstrap] Services initialized";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] 服务初始化完成";
         return true;
 
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] Services error: " << e.what();
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] 服务错误: " << e.what();
         return false;
     }
 }
 
 bool AppBootstrap::initDatabase()
 {
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing database...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在初始化数据库...";
 
     // 预热数据库连接池（NativePgConnectionPool 自动惰性初始化）
     auto conn = astock::database::NativePgConnectionPool::instance().getConnection();
     if (conn) {
-        INTERNAL_INFO_STREAM << "[AppBootstrap] Native PG pool warmed up";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] Native PG 连接池已预热";
     }
 
     return true;
@@ -402,7 +445,7 @@ bool AppBootstrap::initDatabase()
 
 bool AppBootstrap::initQmlEngine()
 {
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Initializing QML engine...";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 正在初始化 QML 引擎...";
 
     try {
         qInstallMessageHandler(filteredMessageHandler);
@@ -410,11 +453,11 @@ bool AppBootstrap::initQmlEngine()
         m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
         applyRootWindowIcon(m_engine.get());
 
-        INTERNAL_INFO_STREAM << "[AppBootstrap] QML engine initialized";
+        INTERNAL_INFO_STREAM << "[AppBootstrap] QML 引擎已初始化";
         return true;
 
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[AppBootstrap] QML engine error: " << e.what();
+        INTERNAL_ERROR_STREAM << "[AppBootstrap] QML 引擎错误: " << e.what();
         return false;
     }
 }
@@ -447,7 +490,7 @@ void AppBootstrap::initializeDeferredUiServices()
     scheduleOptionalConnectorReconcile();
 #endif
 
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Deferred startup: MarketDataBridge uses stub interface";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 延迟启动: MarketDataBridge 使用存根接口";
 
     m_deferredUiServicesInitialized = true;
 
@@ -478,7 +521,7 @@ void AppBootstrap::initializeDeferredDomainServices()
 
     initializeDeferredTradingServices();
 
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Deferred startup phase 2/3: domain & trading services initialized";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 延迟启动 2/3: 领域+交易服务已初始化";
 
     m_deferredDomainServicesInitialized = true;
 }
@@ -492,7 +535,7 @@ void AppBootstrap::initializeDeferredTradingServices()
     // ── 交易系统由 TradeExecutionBridge::ensureInitialized 延迟初始化 ──
     // (需 QML 加载配置后，通过 isLiveBridgeReady() 触发掘金网关连接)
 
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Deferred startup phase 3/3: ready";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] 延迟启动 3/3: 就绪";
 
     m_deferredTradingServicesInitialized = true;
 }
@@ -519,7 +562,7 @@ void AppBootstrap::reconcileOptionalConnectors()
         return;
     }
 
-    INTERNAL_INFO_STREAM << "[AppBootstrap] Jujin market connector disabled by environment";
+    INTERNAL_INFO_STREAM << "[AppBootstrap] Jujin 行情连接器因环境配置已禁用";
     m_jujinMarketConnector->stop();
 }
 

@@ -57,7 +57,7 @@ EventBusImpl::~EventBusImpl() {
 
 PublishResult EventBusImpl::publish(std::unique_ptr<Event> evt) {
     if (!evt) {
-        INTERNAL_ERROR_STREAM << "[EventBus] publish failed: null event";
+        INTERNAL_ERROR_STREAM << "[EventBus] 发布失败: 空事件";
         return PublishResult{PublishError::DISPATCHER_NOT_RUNNING, "Null event"};
     }
     
@@ -168,7 +168,7 @@ void EventBusImpl::stop(bool wait_completion, int timeout_ms) {
         }
     }
     workers_.clear();
-    INTERNAL_INFO_STREAM << "[EventBus] Stopped, all workers joined";
+    INTERNAL_INFO_STREAM << "[EventBus] 已停止, 所有工作线程已加入";
 }
 
 bool EventBusImpl::start() {
@@ -194,7 +194,7 @@ bool EventBusImpl::start() {
         for (size_t i = 0; i < thread_count; ++i) {
             workers_.emplace_back(&EventBusImpl::worker_thread_func, this);
         }
-        INTERNAL_INFO_STREAM << "[EventBus] Started " << thread_count << " worker threads";
+        INTERNAL_INFO_STREAM << "[EventBus] 已启动 " << thread_count << " 个工作线程";
     }
 
     return true;
@@ -249,11 +249,11 @@ PublishResult EventBusImpl::publish(const engine::EventFormat& event, int priori
             if (drop_oldest_on_full_) {
                 event_queue_.pop();
                 should_drop = true;
-                INTERNAL_WARN_STREAM << "[EventBus] Queue full (max=" << config_.max_queue_size
-                                     << "), dropping oldest event";
+                INTERNAL_WARN_STREAM << "[EventBus] 队列已满 (max=" << config_.max_queue_size
+                                     << "), 正在丢弃最旧事件";
             } else {
-                INTERNAL_WARN_STREAM << "[EventBus] Queue full (max=" << config_.max_queue_size
-                                     << "), rejecting publish";
+                INTERNAL_WARN_STREAM << "[EventBus] 队列已满 (max=" << config_.max_queue_size
+                                     << "), 拒绝发布";
                 return PublishResult{PublishError::QUEUE_FULL, "Event queue is full"};
             }
         }
@@ -621,9 +621,9 @@ void EventBusImpl::process_engine_event(Event* event) {
                 try {
                     callback(event->clone());
                 } catch (const std::exception& e) {
-                    INTERNAL_ERROR_STREAM << "[EventBus] Engine subscriber callback threw: " << e.what();
+                    INTERNAL_ERROR_STREAM << "[EventBus] 引擎订阅者回调抛出异常: " << e.what();
                 } catch (...) {
-                    INTERNAL_ERROR_STREAM << "[EventBus] Engine subscriber callback threw unknown exception";
+                    INTERNAL_ERROR_STREAM << "[EventBus] 引擎订阅者回调抛出未知异常";
                 }
             }
         }
@@ -655,9 +655,9 @@ void EventBusImpl::process_format_event(const engine::EventFormat& event) {
                 try {
                     subscription.handler(event);
                 } catch (const std::exception& e) {
-                    INTERNAL_ERROR_STREAM << "[EventBus] Format subscriber callback threw: " << e.what();
+                    INTERNAL_ERROR_STREAM << "[EventBus] 格式订阅者回调抛出异常: " << e.what();
                 } catch (...) {
-                    INTERNAL_ERROR_STREAM << "[EventBus] Format subscriber callback threw unknown exception";
+                    INTERNAL_ERROR_STREAM << "[EventBus] 格式订阅者回调抛出未知异常";
                 }
             }
         }
@@ -786,7 +786,7 @@ void EventBusImpl::process_batch_events() {
                         subscription.handler(event);
                     } catch (...) {
                         // 错误处理
-                        INTERNAL_ERROR_STREAM << "Error in batch event handler for type: " << event_type;
+                        INTERNAL_ERROR_STREAM << "批量事件处理器错误, 类型: " << event_type;
                     }
                 }
             }
@@ -816,7 +816,7 @@ void EventBusImpl::process_batch_events() {
                         // 方式3：如果 Event 不可拷贝，只能处理一次
                         // callback(std::move(event));  // 这会清空 vector
                     } catch (...) {
-                        INTERNAL_ERROR_STREAM << "Error in batch engine event handler for type: "
+                        INTERNAL_ERROR_STREAM << "批量引擎事件处理器错误, 类型: "
                                  << static_cast<int>(event_type);
                     }
                 }
@@ -1172,7 +1172,7 @@ void EventBusImpl::optimize_memory_usage() {
 std::string EventBusImpl::get_diagnostic_info() const {
     std::ostringstream oss;
     
-    oss << "EventBus Diagnostic Info:\n";
+    oss << "EventBus 诊断信息:\n";
     oss << "=========================\n";
     oss << "Config:\n";
     oss << "  Worker Threads: " << config_.worker_threads << "\n";

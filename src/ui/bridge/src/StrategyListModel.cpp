@@ -91,7 +91,7 @@ QHash<int, QByteArray> StrategyListModel::roleNames() const
 
 void StrategyListModel::replaceAll(const QVariantList& items)
 {
-    INTERNAL_INFO_STREAM << "[ListModel] replaceAll START rows=" << static_cast<int>(items.size());
+    INTERNAL_INFO_STREAM << "[ListModel] replaceAll 开始 rows=" << static_cast<int>(items.size());
     QVector<StrategyRow> nextRows;
     nextRows.reserve(items.size());
     INTERNAL_INFO_STREAM << "[StrategyListModel] replaceAll input rows=" << items.size();
@@ -99,13 +99,13 @@ void StrategyListModel::replaceAll(const QVariantList& items)
     for (const QVariant& item : items) {
         const QVariantMap map = item.toMap();
         if (map.isEmpty()) {
-            INTERNAL_WARN_STREAM << "[StrategyListModel] skip empty map row";
+            INTERNAL_WARN_STREAM << "[StrategyListModel] 跳过空map行";
             continue;
         }
 
         const StrategyRow row = fromVariantMap(map);
         if (row.strategyId.isEmpty()) {
-            INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] skip row: empty strategyId raw=%1")
+            INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] 跳过行: 空strategyId raw=%1")
                                         .arg(QString::fromUtf8(
                                             QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(
                                                 QJsonDocument::Compact))).toStdString();
@@ -120,12 +120,12 @@ void StrategyListModel::replaceAll(const QVariantList& items)
         nextRows.push_back(row);
     }
 
-    INTERNAL_INFO_STREAM << "[ListModel] replaceAll building model, nextRows=" << static_cast<int>(nextRows.size());
+    INTERNAL_INFO_STREAM << "[ListModel] replaceAll 构建模型, nextRows=" << static_cast<int>(nextRows.size());
     beginResetModel();
     m_rows = std::move(nextRows);
     endResetModel();
     emit countChanged();
-    INTERNAL_INFO_STREAM << "[ListModel] replaceAll DONE";
+    INTERNAL_INFO_STREAM << "[ListModel] replaceAll 完成";
 }
 
 void StrategyListModel::upsertOne(const QVariantMap& item)
@@ -229,7 +229,7 @@ StrategyListModel::StrategyRow StrategyListModel::fromVariantMap(const QVariantM
                          << " runningDays=" << row.runningDays;
 
     if (row.name.isEmpty()) {
-        INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] mapped empty name for strategyId=%1 raw=%2")
+        INTERNAL_WARN_STREAM << QStringLiteral("[StrategyListModel] mapped 空名称 strategyId=%1 raw=%2")
                                     .arg(row.strategyId,
                                          QString::fromUtf8(
                                              QJsonDocument(QJsonObject::fromVariantMap(map)).toJson(

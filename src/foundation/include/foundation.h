@@ -916,7 +916,7 @@ inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
     #define FOUNDATION_ASSERT(expr, msg) \
         do { \
             if (!(expr)) { \
-                INTERNAL_ERROR_STREAM << "Assertion failed: " << msg; \
+                INTERNAL_ERROR_STREAM << "断言失败: " << msg; \
                 std::terminate(); \
             } \
         } while(0)
@@ -929,13 +929,13 @@ inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
 // 异常处理宏
 #define FOUNDATION_TRY try
 #define FOUNDATION_CATCH catch (const foundation::Exception& e) { \
-    INTERNAL_ERROR_STREAM << "Exception: " << e.what(); \
+    INTERNAL_ERROR_STREAM << "异常: " << e.what(); \
     throw; \
 }
 
 #define FOUNDATION_CATCH_RETURN(value) \
     catch (const foundation::Exception& e) { \
-        INTERNAL_ERROR_STREAM << "Exception: " << e.what(); \
+        INTERNAL_ERROR_STREAM << "异常: " << e.what(); \
         return value; \
     }
 

@@ -53,7 +53,7 @@ public:
         }
 
         if (config_.enableCluster || config_.enableTls) {
-            INTERNAL_ERROR_STREAM << "RedisCacheManager: cluster/TLS mode is not supported by the vendored hiredis build";
+            INTERNAL_ERROR_STREAM << "RedisCacheManager: vendored hiredis 不支持集群/TLS 模式";
             return false;
         }
 
@@ -62,7 +62,7 @@ public:
         }
 
         initialized_ = true;
-        INTERNAL_INFO_STREAM << "RedisCacheManager: initialized";
+        INTERNAL_INFO_STREAM << "RedisCacheManager: 已初始化";
         return true;
     }
 
@@ -548,12 +548,12 @@ private:
         struct timeval connectTimeout = toTimeval(config_.connectTimeout);
         context_ = redisConnectWithTimeout(config_.host.c_str(), config_.port, connectTimeout);
         if (context_ == nullptr) {
-            INTERNAL_ERROR_STREAM << "RedisCacheManager: failed to allocate Redis context";
+            INTERNAL_ERROR_STREAM << "RedisCacheManager: 分配 Redis 上下文失败";
             return false;
         }
 
         if (context_->err != 0) {
-            INTERNAL_ERROR_STREAM << "RedisCacheManager: connect failed: " << context_->errstr;
+            INTERNAL_ERROR_STREAM << "RedisCacheManager: 连接失败: " << context_->errstr;
             disconnectLocked();
             return false;
         }
@@ -561,7 +561,7 @@ private:
         if (config_.operationTimeout.count() > 0) {
             struct timeval commandTimeout = toTimeval(config_.operationTimeout);
             if (redisSetTimeout(context_, commandTimeout) != REDIS_OK) {
-                INTERNAL_ERROR_STREAM << "RedisCacheManager: failed to set command timeout";
+                INTERNAL_ERROR_STREAM << "RedisCacheManager: 设置命令超时失败";
                 disconnectLocked();
                 return false;
             }
@@ -570,7 +570,7 @@ private:
         if (!config_.password.empty()) {
             redisReply* authReply = static_cast<redisReply*>(redisCommand(context_, "AUTH %s", config_.password.c_str()));
             if (!replyIsOk(authReply)) {
-                INTERNAL_ERROR_STREAM << "RedisCacheManager: AUTH failed";
+                INTERNAL_ERROR_STREAM << "RedisCacheManager: AUTH 认证失败";
                 if (authReply != nullptr) {
                     freeReplyObject(authReply);
                 }
@@ -583,7 +583,7 @@ private:
         if (config_.database != 0) {
             redisReply* selectReply = static_cast<redisReply*>(redisCommand(context_, "SELECT %d", config_.database));
             if (!replyIsOk(selectReply)) {
-                INTERNAL_ERROR_STREAM << "RedisCacheManager: SELECT failed";
+                INTERNAL_ERROR_STREAM << "RedisCacheManager: SELECT 选择数据库失败";
                 if (selectReply != nullptr) {
                     freeReplyObject(selectReply);
                 }

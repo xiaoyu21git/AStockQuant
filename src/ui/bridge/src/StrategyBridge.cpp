@@ -323,7 +323,7 @@ StrategyBridge::StrategyBridge(QObject* parent)
     , m_repo(std::make_unique<StrategyRepository>())
     , m_listModel(new StrategyListModel(this))
 {
-    INTERNAL_INFO_STREAM << "[Bridge] CTOR";
+    INTERNAL_INFO_STREAM << "[Bridge] 构造";
     s_instance = this;
 }
 
@@ -335,10 +335,10 @@ StrategyBridge::~StrategyBridge()
 void StrategyBridge::init()
 {
     if (m_inited) return;
-    INTERNAL_INFO_STREAM << "[Bridge] init START";
+    INTERNAL_INFO_STREAM << "[Bridge] 初始化开始";
     try {
         if (!m_repo || !m_repo->initialize()) {
-            INTERNAL_ERROR_STREAM << "[Bridge] init FAILED: repo init";
+            INTERNAL_ERROR_STREAM << "[Bridge] 初始化失败: 仓储初始化";
             setErr(QStringLiteral("initialize strategy repository failed"));
             emit operationFailed(kRepositoryErrorCode, m_err);
             return;
@@ -395,20 +395,20 @@ void StrategyBridge::init()
             mgr.setExecutionMode(domain::strategy::EngineExecutionMode::SemiAuto);
         }
 
-        INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";
+        INTERNAL_INFO_STREAM << "[Bridge] 初始化仓储成功, 调用刷新模型";
         m_inited = true;
         emit initedChanged();
         refreshModel();
-        INTERNAL_INFO_STREAM << "[Bridge] init COMPLETE";
+        INTERNAL_INFO_STREAM << "[Bridge] 初始化完成";
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[Bridge] init EXCEPTION: " << e.what();
+        INTERNAL_ERROR_STREAM << "[Bridge] 初始化异常: " << e.what();
         const QString msg = QString::fromUtf8(e.what());
-        INTERNAL_ERROR_STREAM << "[StrategyBridge] init exception: " << msg.toStdString();
+        INTERNAL_ERROR_STREAM << "[StrategyBridge] 初始化异常: " << msg.toStdString();
         setErr(QStringLiteral("strategy init failed: %1").arg(msg));
         emit operationFailed(kRepositoryErrorCode, m_err);
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[Bridge] init UNKNOWN EXCEPTION";
-        INTERNAL_ERROR_STREAM << "[StrategyBridge] init unknown exception";
+        INTERNAL_ERROR_STREAM << "[Bridge] 初始化未知异常";
+        INTERNAL_ERROR_STREAM << "[StrategyBridge] 初始化未知异常";
         setErr(QStringLiteral("strategy init failed: unknown error"));
         emit operationFailed(kRepositoryErrorCode, m_err);
     }
@@ -416,7 +416,7 @@ void StrategyBridge::init()
 
 void StrategyBridge::initAsync()
 {
-    INTERNAL_INFO_STREAM << "[Bridge] initAsync called";
+    INTERNAL_INFO_STREAM << "[Bridge] initAsync 被调用";
     init();
 }
 
@@ -678,11 +678,11 @@ bool StrategyBridge::start(const QString& strategyId)
     }
     init();
     if (!m_inited) {
-        INTERNAL_ERROR_STREAM << "[StrategyBridge] init FAILED";
+        INTERNAL_ERROR_STREAM << "[StrategyBridge] 初始化失败";
         return false;
     }
 
-    INTERNAL_INFO_STREAM << "[Live] start strategy: " << repositoryId.toStdString();
+    INTERNAL_INFO_STREAM << "[Live] 启动策略: " << repositoryId.toStdString();
 
     m_repo->updateStatus(repositoryId, strategy_view::StrategyLifecycleStatus::Active);
 
@@ -702,11 +702,11 @@ bool StrategyBridge::start(const QString& strategyId)
                 emit strategiesChanged();
                 emit started(repositoryId);
                 bridge::TradingRuntimeStatusService::instance()->refresh();
-                INTERNAL_INFO_STREAM << "[Live] engine started: " << repositoryId.toStdString();
+                INTERNAL_INFO_STREAM << "[Live] 引擎已启动: " << repositoryId.toStdString();
             }, Qt::QueuedConnection);
 
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[StrategyBridge] start worker exception: " << e.what();
+            INTERNAL_ERROR_STREAM << "[StrategyBridge] 启动工作线程异常: " << e.what();
             QMetaObject::invokeMethod(this, [this, repositoryId, msg = QString::fromUtf8(e.what())]() {
                 m_runtimeStatus[repositoryId] = QStringLiteral("启动失败");
                 emit strategiesChanged();
@@ -1597,7 +1597,7 @@ void StrategyBridge::confirmBasket(const QVariantList& editedOrders)
     auto* engine = domain::strategy::StrategyManager::instance().get(
         m_pendingStrategyId.toStdString());
     if (!engine) {
-        INTERNAL_WARN_STREAM << "[Bridge] confirmBasket: engine not found for "
+        INTERNAL_WARN_STREAM << "[Bridge] 确认篮子: 未找到引擎 "
                              << m_pendingStrategyId.toStdString();
         m_pendingBasketId = 0;
         m_pendingStrategyId.clear();

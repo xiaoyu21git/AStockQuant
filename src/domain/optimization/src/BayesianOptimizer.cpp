@@ -47,7 +47,7 @@ OptimizationResult BayesianOptimizer::optimize(
     const int dim = space.dimension();
 
     if (dim == 0 || space.totalCombinations() == 0) {
-        INTERNAL_WARN_STREAM << "[BayesianOptimizer] Empty parameter space, returning empty result";
+        INTERNAL_WARN_STREAM << "[BayesianOptimizer] 空参数空间, 返回空结果";
         return OptimizationResult{};
     }
 
@@ -57,7 +57,7 @@ OptimizationResult BayesianOptimizer::optimize(
         : m_config.initialRandomSamples;
     const int effectiveInitial = std::min(initialSamples, maxTrials > 0 ? maxTrials : initialSamples);
 
-    INTERNAL_INFO_STREAM << "[BayesianOptimizer] Starting optimization: dim=" << dim
+    INTERNAL_INFO_STREAM << "[BayesianOptimizer] 开始优化: dim=" << dim
                          << " initialSamples=" << effectiveInitial
                          << " maxTrials=" << maxTrials
                          << " lengthScale=" << m_config.kernelLengthScale;
@@ -94,7 +94,7 @@ OptimizationResult BayesianOptimizer::optimize(
 
     // 若所有初始试验都违规/失败, 无法建立 GP, 直接返回
     if (observedX.empty()) {
-        INTERNAL_WARN_STREAM << "[BayesianOptimizer] All initial samples violated constraints, "
+        INTERNAL_WARN_STREAM << "[BayesianOptimizer] 所有初始样本违反约束, "
                             "cannot fit GP model";
         result.totalTrials = trialIndex;
         result.elapsedSeconds = std::chrono::duration<double>(
@@ -136,7 +136,7 @@ OptimizationResult BayesianOptimizer::optimize(
         }
 
         if (!foundCandidate) {
-            INTERNAL_WARN_STREAM << "[BayesianOptimizer] Failed to find valid acquisition candidate";
+            INTERNAL_WARN_STREAM << "[BayesianOptimizer] 未找到有效采集候选";
             break;
         }
 
@@ -144,7 +144,7 @@ OptimizationResult BayesianOptimizer::optimize(
         if (bestEi < m_config.convergenceThreshold) {
             ++noImprovementCount;
             if (noImprovementCount >= m_config.convergencePatience) {
-                INTERNAL_INFO_STREAM << "[BayesianOptimizer] Converged: max EI=" << bestEi
+                INTERNAL_INFO_STREAM << "[BayesianOptimizer] 已收敛: max EI=" << bestEi
                                     << " < threshold=" << m_config.convergenceThreshold
                                     << " (" << noImprovementCount << " consecutive times)";
                 break;
@@ -169,7 +169,7 @@ OptimizationResult BayesianOptimizer::optimize(
         if (onProgress) onProgress(trialIndex, maxTrials);
     }
 
-    INTERNAL_INFO_STREAM << "[BayesianOptimizer] Optimization finished: "
+    INTERNAL_INFO_STREAM << "[BayesianOptimizer] 优化完成: "
                          << result.trials.size() << " trials, "
                          << observedX.size() << " viable";
 
@@ -334,11 +334,11 @@ BayesianOptimizer::GpFitResult BayesianOptimizer::gpFit(
     Eigen::LLT<Eigen::MatrixXd> llt(K);
     if (llt.info() != Eigen::Success) {
         // 数值问题: 增加噪声重试
-        INTERNAL_WARN_STREAM << "[BayesianOptimizer] Cholesky failed, adding jitter";
+        INTERNAL_WARN_STREAM << "[BayesianOptimizer] Cholesky 失败, 添加抖动";
         Eigen::MatrixXd K2 = K + Eigen::MatrixXd::Identity(K.rows(), K.cols()) * 1e-4;
         Eigen::LLT<Eigen::MatrixXd> llt2(K2);
         if (llt2.info() != Eigen::Success) {
-            INTERNAL_ERROR_STREAM << "[BayesianOptimizer] Cholesky failed after jitter";
+            INTERNAL_ERROR_STREAM << "[BayesianOptimizer] Cholesky 抖动后仍失败";
             return GpFitResult{};
         }
         GpFitResult result;

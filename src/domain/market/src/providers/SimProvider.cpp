@@ -21,7 +21,7 @@ SimProvider::SimProvider(const std::string& config)
     }
     if (config.find("base_price=") == std::string::npos &&
         config.find("update_interval_ms=") == std::string::npos) {
-        INTERNAL_WARN_STREAM << "[SimProvider] No recognised config keys in: " << config;
+        INTERNAL_WARN_STREAM << "[SimProvider] 无识别的配置键: " << config;
     }
 }
 
@@ -33,7 +33,7 @@ ProviderStatus SimProvider::get_status() const {
 bool SimProvider::connect() {
     std::lock_guard<std::mutex> lock(mutex_);
     status_ = ProviderStatus::CONNECTED;
-    INTERNAL_INFO_STREAM << "[SimProvider] Connected, base_price=" << base_price_
+    INTERNAL_INFO_STREAM << "[SimProvider] 已连接, base_price=" << base_price_
                          << ", interval=" << update_interval_ms_ << "ms";
     return true;
 }
@@ -41,7 +41,7 @@ bool SimProvider::connect() {
 void SimProvider::disconnect() {
     std::lock_guard<std::mutex> lock(mutex_);
     status_ = ProviderStatus::DISCONNECTED;
-    INTERNAL_INFO_STREAM << "[SimProvider] Disconnected";
+    INTERNAL_INFO_STREAM << "[SimProvider] 已断开";
 }
 
 void SimProvider::register_kline_callback(KLineCallback cb) {

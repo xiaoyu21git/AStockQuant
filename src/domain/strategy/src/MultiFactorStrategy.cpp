@@ -74,12 +74,12 @@ void MultiFactorStrategy::evaluate(
         static std::atomic<int> diagCount{0};
         if (diagCount.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
             std::string reason;
-            if (!m_config.isValid()) reason = "!config.isValid";
-            else if (!context.isValid()) reason = "!context.isValid";
+            if (!m_config.isValid()) reason = "配置无效";
+            else if (!context.isValid()) reason = "上下文无效";
             else if (context.strategyInstanceId() != m_instanceId)
-                reason = "instanceId mismatch";
-            else if (factorSnapshots.empty()) reason = "factorSnapshots empty";
-            INTERNAL_WARN_STREAM << "[MultiFactor] evaluate skipped: " << reason
+                reason = "实例ID不匹配";
+            else if (factorSnapshots.empty()) reason = "因子快照为空";
+            INTERNAL_WARN_STREAM << "[MultiFactor] 评估跳过: " << reason
                 << " snapshots=" << factorSnapshots.size()
                 << " config.valid=" << m_config.isValid();
         }
@@ -91,7 +91,7 @@ void MultiFactorStrategy::evaluate(
     if (!view) {
         static std::atomic<int> noViewDiag{0};
         if (noViewDiag.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
-            INTERNAL_WARN_STREAM << "[MultiFactor] evaluate skipped: no market view";
+            INTERNAL_WARN_STREAM << "[MultiFactor] 评估跳过: 无行情视图";
         }
         return;
     }
@@ -111,7 +111,7 @@ void MultiFactorStrategy::evaluate(
             if (s.compositeScore > maxScore) maxScore = s.compositeScore;
         }
         INTERNAL_INFO_STREAM << "[MultiFactor] scores=" << allScores.size()
-            << " maxCompositeScore=" << maxScore;
+            << " 最大复合评分=" << maxScore;
     }
 
     // ── 构建 id→fullSymbol 映射 ──
@@ -198,7 +198,7 @@ MultiFactorStrategy::normalizeCrossSectional(
         if (rawDiag.fetch_add(1, std::memory_order_relaxed) < kMaxDiagLogs) {
             for (const auto& fid : m_config.factorIds) {
                 INTERNAL_INFO_STREAM << "[MultiFactor] rawFactor: fid=" << fid
-                    << " count=" << countByFactor[fid]
+                    << " 数量=" << countByFactor[fid]
                     << " nonZero=" << nonZeroByFactor[fid]
                     << " min=" << minByFactor[fid]
                     << " max=" << maxByFactor[fid];
@@ -378,7 +378,7 @@ void MultiFactorStrategy::emitExitSignals(
         int hc = 0;
         for (const auto& [sym, w] : currentWeights) if (w > kZeroValue) ++hc;
         INTERNAL_INFO_STREAM << "[MultiFactor] emitExitSignals #" << enterDiag
-            << " heldInContext=" << hc
+            << " 上下文持仓=" << hc
             << " hasView=" << (view != nullptr);
     }
 
@@ -456,7 +456,7 @@ void MultiFactorStrategy::emitExitSignals(
             if (w > kZeroValue) ++heldCount;
         }
         INTERNAL_INFO_STREAM << "[MultiFactor] exits: held=" << heldCount
-            << " scoreExits=" << scoreExits
+            << " 评分退出=" << scoreExits
             << " rankExits=" << rankExits
             << " (rankThreshold=" << rankExitThreshold
             << " maxPositions=" << m_config.maxPositions

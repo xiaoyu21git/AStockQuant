@@ -144,9 +144,9 @@ void KLineBatch::push_back(const KLine& kline) {
     if (size_ >= data_.size()) {
         const auto new_capacity = data_.empty() ? std::size_t{1} : data_.size() * 2;
         if (data_.empty()) {
-            INTERNAL_INFO_STREAM << "[KLineBatch] Initial allocation, capacity=" << new_capacity;
+            INTERNAL_INFO_STREAM << "[KLineBatch] 初始分配, 容量=" << new_capacity;
         } else {
-            INTERNAL_DEBUG_STREAM << "[KLineBatch] Expanding capacity from "
+            INTERNAL_DEBUG_STREAM << "[KLineBatch] 扩展容量从 "
                                  << data_.size() << " to " << new_capacity;
         }
         data_.resize(new_capacity);
@@ -156,7 +156,7 @@ void KLineBatch::push_back(const KLine& kline) {
 
 const KLine& KLineBatch::operator[](size_t index) const {
     if (index >= size_) {
-        INTERNAL_WARN_STREAM << "[KLineBatch] const operator[] out of range: index="
+        INTERNAL_WARN_STREAM << "[KLineBatch] const operator[] 越界: index="
                             << index << " size=" << size_;
         throw std::out_of_range("KLineBatch index out of range");
     }
@@ -165,7 +165,7 @@ const KLine& KLineBatch::operator[](size_t index) const {
 
 KLine& KLineBatch::operator[](size_t index) {
     if (index >= size_) {
-        INTERNAL_WARN_STREAM << "[KLineBatch] operator[] out of range: index="
+        INTERNAL_WARN_STREAM << "[KLineBatch] operator[] 越界: index="
                             << index << " size=" << size_;
         throw std::out_of_range("KLineBatch index out of range");
     }

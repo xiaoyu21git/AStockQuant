@@ -582,7 +582,7 @@ QVariantMap FactorBacktestBridge::processRunResult(
                 "INSERT INTO alpha.factor_backtest_runs(id,factor_id,config_json,summary_json,groups_json) VALUES($1,$2,$3,$4,$5)",
                 {P{runId}, P{fid}, P{cfgJson}, P{summaryJson}, P{groupsJsonStr}});
             if (runsAffected < 0)
-                INTERNAL_ERROR_STREAM << "[FactorBacktest] save runs failed: affected=" << runsAffected;
+                INTERNAL_ERROR_STREAM << "[FactorBacktest] 保存 runs 失败: affected=" << runsAffected;
 
             // ── 每日收益序列 ──
             QJsonArray dateList = rootObj.value("dateList").toArray();
@@ -612,7 +612,7 @@ QVariantMap FactorBacktestBridge::processRunResult(
                     "risk_adj_long_short=EXCLUDED.risk_adj_long_short",
                     {P{runId}, P{ds}, P{grJson}, P{rls}, P{cls}, P{rks}});
                 if (dailyAffected < 0)
-                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save daily failed: date=" << ds << " affected=" << dailyAffected;
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] 保存 daily 失败: date=" << ds << " affected=" << dailyAffected;
             }
 
             // ── IC 日序列 ──
@@ -625,7 +625,7 @@ QVariantMap FactorBacktestBridge::processRunResult(
                     "VALUES($1,$2,$3) ON CONFLICT(run_id,trade_date) DO UPDATE SET rank_ic=EXCLUDED.rank_ic",
                     {P{runId}, P{ds}, P{icv}});
                 if (icAffected < 0)
-                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save ic_daily failed: date=" << ds << " affected=" << icAffected;
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] 保存 ic_daily 失败: date=" << ds << " affected=" << icAffected;
             }
 
             // ── 交易记录 ──
@@ -644,7 +644,7 @@ QVariantMap FactorBacktestBridge::processRunResult(
                      P{tr.value("price").toDouble()},
                      P{tr.value("costRate").toDouble()}});
                 if (tradeAffected < 0)
-                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save trade failed: symbol=" << tr.value("symbol").toString().toStdString() << " affected=" << tradeAffected;
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] 保存 trade 失败: symbol=" << tr.value("symbol").toString().toStdString() << " affected=" << tradeAffected;
             }
 
             // ── 每期追踪 ──
@@ -672,7 +672,7 @@ QVariantMap FactorBacktestBridge::processRunResult(
                      P{pr.value("shortRawReturn").toDouble()},
                      P{pr.value("strategyNetReturn").toDouble()}});
                 if (periodAffected < 0)
-                    INTERNAL_ERROR_STREAM << "[FactorBacktest] save period failed: date=" << pd << " affected=" << periodAffected;
+                    INTERNAL_ERROR_STREAM << "[FactorBacktest] 保存 period 失败: date=" << pd << " affected=" << periodAffected;
             }
         }
     }
@@ -845,11 +845,11 @@ void FactorBacktestBridge::startBacktestWithFactors(
             FactorBacktestBridge* bridge;
             ~BacktestCleanup() {
                 if (!bridge || !bridge->m_backtestDataSvc) {
-                    INTERNAL_INFO_STREAM << "[MEM] BacktestCleanup SKIP: bridge or dataSvc null";
+                    INTERNAL_INFO_STREAM << "[MEM] BacktestCleanup 跳过: bridge 或 dataSvc 为空";
                     return;
                 }
                 bridge->m_backtestDataSvc->setDbFallback({});
-                INTERNAL_INFO_STREAM << "[MEM] BacktestCleanup: dbFallback cleared";
+                INTERNAL_INFO_STREAM << "[MEM] BacktestCleanup: dbFallback 已清理";
             }
         } cleanup{this};
 
@@ -870,7 +870,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
             m_backtestDataSvc->setMarketView(m_arrowView.get());
             m_loadedDatasetId = capturedDatasetId;
             m_backtestDataSvc->buildViewForFields({});
-            INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] Arrow view created, ID=" << capturedDatasetId;
+            INTERNAL_DEBUG_STREAM << "[FactBacktestBridge] Arrow view 已创建, ID=" << capturedDatasetId;
             if (!m_arrowView || m_arrowView->instruments().empty()) {
                 QMetaObject::invokeMethod(this, [this]() {
                     emit backtestFailed(QStringLiteral("缓存系统返回空数据集"));
@@ -973,28 +973,28 @@ void FactorBacktestBridge::startBacktestWithFactors(
         //   mmap 物理页 + 索引 → reset() 关闭 mmap
         //   Orchestrator/Engine/Scheduler/Reporter 保留 (轻量, 避免重建开销)
         QMetaObject::invokeMethod(this, [this, batchResults]() {
-            INTERNAL_INFO_STREAM << "[MEM] main-thread completion START";
+            INTERNAL_INFO_STREAM << "[MEM] main-thread 完成开始";
             m_progress = 100.0;
             m_statusText = QStringLiteral("回测完成");
             m_isRunning.store(false);
             emit progressChanged(); emit statusChanged();
             emit isRunningChanged();
             publishBatchResults(batchResults);
-            INTERNAL_INFO_STREAM << "[MEM] publishBatchResults done";
+            INTERNAL_INFO_STREAM << "[MEM] publishBatchResults 完成";
             // 清除 SignalCache, 防止跨回测累积
             if (m_factorEngine) {
                 m_factorEngine->clearSignalCache();
-                INTERNAL_INFO_STREAM << "[MEM] SignalCache cleared";
+                INTERNAL_INFO_STREAM << "[MEM] SignalCache 已清除";
             }
             // 释放 ArrowView mmap
             if (m_arrowView) {
                 m_arrowView->clearColumnCaches();
-                INTERNAL_INFO_STREAM << "[MEM] ArrowView columnCaches cleared";
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView columnCaches 已清除";
                 m_arrowView.reset();
                 m_loadedDatasetId = 0;
-                INTERNAL_INFO_STREAM << "[MEM] ArrowView reset (mmap closed)";
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView reset (mmap 已关闭)";
             } else {
-                INTERNAL_INFO_STREAM << "[MEM] ArrowView already null, skip reset";
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView already null, 跳过reset";
             }
 #ifdef _WIN32
             // 强制 trim 进程工作集: 释放 C++ heap 中已 free 但未归还 OS 的物理页
@@ -1003,27 +1003,27 @@ void FactorBacktestBridge::startBacktestWithFactors(
                 pmc.cb = sizeof(pmc);
                 if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
                     SIZE_T wsBefore = pmc.WorkingSetSize;
-                    INTERNAL_INFO_STREAM << "[MEM] WorkingSet BEFORE trim: "
+                    INTERNAL_INFO_STREAM << "[MEM] WorkingSet 清理前: "
                         << (wsBefore / (1024.0 * 1024.0)) << " MB";
                     if (SetProcessWorkingSetSize(GetCurrentProcess(), (SIZE_T)-1, (SIZE_T)-1)) {
                         GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc));
                         SIZE_T wsAfter = pmc.WorkingSetSize;
-                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet AFTER trim: "
+                        INTERNAL_INFO_STREAM << "[MEM] WorkingSet 清理后: "
                             << (wsAfter / (1024.0 * 1024.0)) << " MB"
-                            << " (released " << ((wsBefore - wsAfter) / (1024.0 * 1024.0)) << " MB)";
+                            << " (释放 " << ((wsBefore - wsAfter) / (1024.0 * 1024.0)) << " MB)";
                     } else {
-                        INTERNAL_INFO_STREAM << "[MEM] SetProcessWorkingSetSize failed";
+                        INTERNAL_INFO_STREAM << "[MEM] SetProcessWorkingSetSize 失败";
                     }
                 }
             }
 #endif
             emit backtestProgress(100.0, m_statusText);
-            INTERNAL_INFO_STREAM << "[MEM] main-thread completion END";
+            INTERNAL_INFO_STREAM << "[MEM] main-thread 完成结束";
         }, Qt::QueuedConnection);
 
         // 释放工作线程内剩余的大块内存
         batchResults.clear();
-        INTERNAL_INFO_STREAM << "[MEM] worker-thread batchResults cleared, lambda exiting";
+        INTERNAL_INFO_STREAM << "[MEM] worker-thread batchResults 已清除, lambda 退出";
     });
 }
 
@@ -1163,9 +1163,9 @@ int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& facto
     QString capturedMode = m_dataSourceMode;
     int capturedDatasetId = m_selectedDatasetId;
 
-    INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker started, requestId=" << requestId << ", factors=" << (int)ids.size();
+    INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker 已启动, requestId=" << requestId << ", factors=" << (int)ids.size();
     m_workerPool->post([this, requestId, ids, startDate, endDate, cacheSnapshot, capturedMode, capturedDatasetId]() {
-        INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker running, requestId=" << requestId;
+        INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker 运行中, requestId=" << requestId;
         QVariantMap map;
         try {
             auto* factorSvc = FactorService::instance();
@@ -1200,9 +1200,9 @@ int FactorBacktestBridge::beginFactorSupportMapRefresh(const QVariantList& facto
             }
         }
 
-        INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker done, requestId=" << requestId << ", mapSize=" << (int)map.size();
+        INTERNAL_INFO_STREAM << "[FactorSupportCheck] worker 完成, requestId=" << requestId << ", mapSize=" << (int)map.size();
         QMetaObject::invokeMethod(this, [this, requestId, map]() {
-            INTERNAL_INFO_STREAM << "[FactorSupportCheck] main thread callback, requestId=" << requestId << ", mapSize=" << (int)map.size();
+            INTERNAL_INFO_STREAM << "[FactorSupportCheck] main thread 回调, requestId=" << requestId << ", mapSize=" << (int)map.size();
             m_supportMapRequestInFlight.store(false);
             emit supportMapRequestInFlightChanged();
             emit factorSupportMapReady(requestId, map);

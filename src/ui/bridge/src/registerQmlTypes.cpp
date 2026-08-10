@@ -106,7 +106,7 @@ namespace wang{
        qmlRegisterSingletonType<StrategyBridge>(
           url, 1, 0, "StrategyBridge",
           [](QQmlEngine*, QJSEngine*) -> QObject* {
-             INTERNAL_INFO_STREAM << "[QML] StrategyBridge singleton created";
+             INTERNAL_INFO_STREAM << "[QML] StrategyBridge 单例已创建";
              auto* bridge = new StrategyBridge();
              return bridge;
           });

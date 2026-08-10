@@ -156,7 +156,7 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
         PGresult* res = PQexec(impl_->conn, sql.c_str());
         if (PQresultStatus(res) != PGRES_TUPLES_OK && PQresultStatus(res) != PGRES_COMMAND_OK) {
             impl_->lastError_ = PQresultErrorMessage(res);
-            INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery failed: " << impl_->lastError_
+            INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery 失败: " << impl_->lastError_
                                  << " sql=" << sql.substr(0, 200);
             PQclear(res);
             return {};
@@ -188,7 +188,7 @@ SqlQueryResult NativePgDatabase::executeQuery(const std::string& sql,
                                   nullptr, nullptr, 0);
     if (PQresultStatus(res) != PGRES_TUPLES_OK && PQresultStatus(res) != PGRES_COMMAND_OK) {
         impl_->lastError_ = PQresultErrorMessage(res);
-        INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery(params) failed: " << impl_->lastError_
+        INTERNAL_WARN_STREAM << "[NativePgDB] executeQuery(params) 失败: " << impl_->lastError_
                              << " sql=" << pgSql;
         PQclear(res);
         return {};

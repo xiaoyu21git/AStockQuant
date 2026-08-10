@@ -88,7 +88,7 @@ SurvivorshipValidationReport SurvivorshipValidator::validate(
     const std::vector<int>& dates,
     const std::unordered_map<int, std::vector<std::string>>* universeByDate) const {
 
-    INTERNAL_INFO_STREAM << "[SurvivorshipValidator] Validating " << universe.size()
+    INTERNAL_INFO_STREAM << "[SurvivorshipValidator] 正在验证 " << universe.size()
                          << " stocks across " << dates.size() << " trading days";
 
     SurvivorshipValidationReport report;
@@ -117,12 +117,12 @@ SurvivorshipValidationReport SurvivorshipValidator::validate(
     if (!report.allPassed()) {
         int failedCount = 0;
         for (const auto& c : report.checks) { if (!c.passed) ++failedCount; }
-        INTERNAL_WARN_STREAM << "[SurvivorshipValidator] Validation failed: "
+        INTERNAL_WARN_STREAM << "[SurvivorshipValidator] 验证失败: "
                              << failedCount << "/" << report.checks.size()
                              << " checks failed";
     } else {
-        INTERNAL_INFO_STREAM << "[SurvivorshipValidator] Validation passed: "
-                            << report.checks.size() << " checks OK, "
+        INTERNAL_INFO_STREAM << "[SurvivorshipValidator] 验证通过: "
+                            << report.checks.size() << " 项检查通过, "
                             << report.totalStocks << " stocks across "
                             << report.totalDates << " days";
     }

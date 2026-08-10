@@ -32,7 +32,7 @@ SignalSet SignalSetBuilder::build(
     signalSet.progress = {1, 1};
 
     if (timeCount <= 0 || instCount <= 0) {
-        INTERNAL_WARN_STREAM << "SignalSetBuilder: empty dimensions, timeCount=" << timeCount << " instCount=" << instCount;
+        INTERNAL_WARN_STREAM << "SignalSetBuilder: 空维度, timeCount=" << timeCount << " instCount=" << instCount;
         return signalSet;
     }
 
@@ -61,22 +61,22 @@ SignalSet SignalSetBuilder::build(
 
     switch (mode) {
     case SignalEngineMode::SignalOnly:
-        INTERNAL_INFO_STREAM << "SignalSetBuilder[SignalOnly] totalDates=" << timeCount << " matchedDates=" << matchedDates << " instruments=" << instCount << " matchedValues=" << totalMatchedValues;
+        INTERNAL_INFO_STREAM << "SignalSetBuilder[仅信号] totalDates=" << timeCount << " matchedDates=" << matchedDates << " instruments=" << instCount << " matchedValues=" << totalMatchedValues;
         break;
 
     case SignalEngineMode::FullPipeline:
-        INTERNAL_INFO_STREAM << "SignalSetBuilder[FullPipeline] totalDates=" << timeCount << " matchedDates=" << matchedDates << " instruments=" << instCount << " matchedValues=" << totalMatchedValues;
+        INTERNAL_INFO_STREAM << "SignalSetBuilder[完整管线] totalDates=" << timeCount << " matchedDates=" << matchedDates << " instruments=" << instCount << " matchedValues=" << totalMatchedValues;
         break;
 
     case SignalEngineMode::Incremental:
         if (matchedDates == 0) {
-            INTERNAL_WARN_STREAM << "SignalSetBuilder[Incremental] no valid signal for current date";
+            INTERNAL_WARN_STREAM << "SignalSetBuilder[增量] 当前日期无有效信号";
         }
         break;
     }
 
     if (matchedDates == 0 && factorValues.size() > 0) {
-        INTERNAL_WARN_STREAM << "SignalSetBuilder: date format mismatch! dateStrs[0]=" << dateStrs[0] << " fvKey0=" << factorValues.begin()->first;
+        INTERNAL_WARN_STREAM << "SignalSetBuilder: 日期格式不匹配! dateStrs[0]=" << dateStrs[0] << " fvKey0=" << factorValues.begin()->first;
     }
 
     return signalSet;

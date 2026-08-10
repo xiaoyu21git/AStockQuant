@@ -49,7 +49,7 @@ int DataCacheAdapter::storeDataSet(const QVariantList& data, const QVariantMap& 
         fclose(fi);
     }
 
-    INTERNAL_INFO_STREAM << "[DataCacheAdapter] stored dataset " << dataId << ": " << fullInfo.displayName << " (" << static_cast<int>(data.size()) << " rows)";
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已存储数据集 " << dataId << ": " << fullInfo.displayName << " (" << static_cast<int>(data.size()) << " rows)";
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
@@ -93,7 +93,7 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     m_cache->saveDataSetFile(dataId, rows, fieldNames, numericFields);
     m_cache->updateDataSetRowCount(dataId, static_cast<int>(rows.size()));
 
-    INTERNAL_INFO_STREAM << "[DataCacheAdapter] stored dataset " << dataId << " (from rows): " << info.displayName << " (" << rows.size() << " rows)";
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已存储数据集 " << dataId << " (from rows): " << info.displayName << " (" << rows.size() << " rows)";
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
@@ -129,7 +129,7 @@ void DataCacheAdapter::finishArrowWrite(cleaning::DataCache::ArrowWriteToken tok
         auto updated = m_cache->getDataSetInfo(dataId);
         emit dataSetStored(dataId, cppInfoToMap(updated));
     }
-    INTERNAL_INFO_STREAM << "[DataCacheAdapter] batch write finished: dataSetId=" << dataId << " rows=" << rowCount;
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 批量写入完成: dataSetId=" << dataId << " rows=" << rowCount;
 }
 
 QVariantList DataCacheAdapter::getDataSetById(int dataId) {
@@ -196,7 +196,7 @@ bool DataCacheAdapter::removeDataSet(int dataId) {
 
 int DataCacheAdapter::removeDataSetsBySourceType(const std::string& sourceType) {
     int n = m_cache->removeDataSetsBySourceType(sourceType);
-    INTERNAL_INFO_STREAM << "[DataCacheAdapter] removed " << n << " datasets with sourceType=" << sourceType;
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已移除 " << n << " datasets with sourceType=" << sourceType;
     return n;
 }
 

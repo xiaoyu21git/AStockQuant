@@ -51,43 +51,43 @@ std::string FactorBacktestConfig::getValidationErrors() const {
     std::stringstream errors;
     
     if (factorId.empty()) {
-        errors << "Factor ID cannot be empty. ";
+        errors << "因子ID 不能为空. ";
     }
     
     if (startDate.empty()) {
-        errors << "Start date cannot be empty. ";
+        errors << "开始日期不能为空. ";
     }
     
     if (endDate.empty()) {
-        errors << "End date cannot be empty. ";
+        errors << "结束日期不能为空. ";
     }
     
     if (startDate > endDate) {
-        errors << "Start date cannot be after end date. ";
+        errors << "开始日期不能晚于结束日期. ";
     }
     
     if (numGroups <= 0) {
-        errors << "Number of groups must be positive. ";
+        errors << "分组数必须为正数. ";
     }
     
     if (initialCapital <= 0) {
-        errors << "Initial capital must be positive. ";
+        errors << "初始资金必须为正数. ";
     }
     
     if (transactionCost < 0 || transactionCost > 1.0) {
-        errors << "Transaction cost must be between 0 and 1. ";
+        errors << "交易成本必须在0到1之间. ";
     }
     
     if (slippage < 0 || slippage > 1.0) {
-        errors << "Slippage must be between 0 and 1. ";
+        errors << "滑点必须在0到1之间. ";
     }
     
     if (maxThreads <= 0) {
-        errors << "Max threads must be positive. ";
+        errors << "最大线程数必须为正数. ";
     }
     
     if (cacheTTL < 0) {
-        errors << "Cache TTL cannot be negative. ";
+        errors << "缓存TTL不能为负数. ";
     }
     
     return errors.str();

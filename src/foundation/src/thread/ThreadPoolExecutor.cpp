@@ -51,7 +51,7 @@ void ThreadPoolExecutor::initialize() {
         try {
             if (e) std::rethrow_exception(e);
         } catch (const std::exception& ex) {
-            INTERNAL_ERROR_STREAM << "[ThreadPool] Uncaught exception: " << ex.what();
+            INTERNAL_ERROR_STREAM << "[ThreadPool] 未捕获异常: " << ex.what();
         }
     };
     
@@ -67,16 +67,19 @@ void ThreadPoolExecutor::addWorker() {
         return;
     }
     
-    auto worker = std::make_unique<Worker>();
+    auto worker = std::make_shared<Worker>();
     worker->running.store(true);
     worker->idle.store(true);
     worker->lastWorkTime = std::chrono::steady_clock::now();
-    
-    // 创建线程
-    worker->thread = threadFactory_([this, worker = worker.get()]() {
-        workerFunction(worker);
+
+    // 创建线程 — 使用 weak_ptr 防止 Worker 析构后线程仍持有裸指针 (use-after-free)
+    std::weak_ptr<Worker> weakWorker = worker;
+    worker->thread = threadFactory_([this, weakWorker]() {
+        if (auto locked = weakWorker.lock()) {
+            workerFunction(locked.get());
+        }
     });
-    
+
     workers_.push_back(std::move(worker));
     poolSize_++;
 }

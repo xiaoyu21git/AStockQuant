@@ -12,11 +12,11 @@ GroupingAllocationResult QuantileGroupingAllocator::build(
     std::vector<RankedInstrument> ranked) const
 {
     if (!spec.isValid()) {
-        INTERNAL_ERROR_STREAM << "[GroupingAllocator] Invalid allocation spec";
+        INTERNAL_ERROR_STREAM << "[GroupingAllocator] 无效的分配规格";
         return GroupingAllocationResult{GroupingAllocationError::InvalidInput, std::nullopt};
     }
     if (ranked.empty()) {
-        INTERNAL_WARN_STREAM << "[GroupingAllocator] Empty universe";
+        INTERNAL_WARN_STREAM << "[GroupingAllocator] 空股票池";
         return GroupingAllocationResult{GroupingAllocationError::EmptyUniverse, std::nullopt};
     }
 
@@ -46,7 +46,7 @@ GroupingAllocationResult QuantileGroupingAllocator::build(
         return GroupingAllocationResult{allocationError, std::nullopt};
     }
 
-    INTERNAL_INFO_STREAM << "[GroupingAllocator] Allocation complete: "
+    INTERNAL_INFO_STREAM << "[GroupingAllocator] 分配完成: "
                        << grouped.buckets.size() << " groups, "
                        << weights.byInstrument.size() << " positions";
     GroupingAllocationOutput output{std::move(grouped), std::move(weights)};

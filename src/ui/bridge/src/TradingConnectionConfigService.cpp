@@ -20,7 +20,7 @@ TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
         m_currentConfig = defaultConfiguration();
     }
     m_initialized = true;
-    INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] created, boundStrategyId ="
+    INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] 已创建, boundStrategyId ="
              << m_currentConfig.value("boundStrategyId").toString().toStdString();
 }
 
@@ -45,7 +45,7 @@ QVariantMap TradingConnectionConfigService::loadConfiguration() {
     }
     m_initialized = true;
 
-    INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] loaded config:"
+    INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] 已加载配置:"
              << "\n  boundStrategyId =" << m_currentConfig.value("boundStrategyId").toString().toStdString()
              << "\n  gmStrategyId   =" << m_currentConfig.value("gmStrategyId").toString().toStdString()
              << "\n  strategyId     =" << m_currentConfig.value("strategyId").toString().toStdString()

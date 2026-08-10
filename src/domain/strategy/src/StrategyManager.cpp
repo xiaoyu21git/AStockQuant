@@ -17,9 +17,9 @@ StrategyManager& StrategyManager::instance() {
 
 StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
                                                std::unique_ptr<IRuntimeFactorService> factorSvc) {
-    INTERNAL_INFO_STREAM << "[SM] createEngine: id=" << strategyId << " factorSvc=" << static_cast<void*>(factorSvc.get());
+    INTERNAL_INFO_STREAM << "[SM] 创建引擎: id=" << strategyId << " factorSvc=" << static_cast<void*>(factorSvc.get());
     auto engine = StrategyEngine::fromDb(strategyId, std::move(factorSvc));
-    INTERNAL_INFO_STREAM << "[SM] createEngine: fromDb returned engine=" << static_cast<void*>(engine.get());
+    INTERNAL_INFO_STREAM << "[SM] 创建引擎: fromDb 返回 engine=" << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
 
     const std::lock_guard<std::mutex> lock(m_mutex);
@@ -31,7 +31,7 @@ StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
         m_engines.erase(old);
     }
     m_engines[strategyId] = std::move(engine);
-    INTERNAL_INFO_STREAM << "[SM] createEngine: stored, count=" << m_engines.size();
+    INTERNAL_INFO_STREAM << "[SM] 创建引擎: 已存储, 数量=" << m_engines.size();
     return ptr;
 }
 
@@ -185,10 +185,11 @@ void StrategyManager::startStrategy(const std::string& strategyId)
         throw std::runtime_error("引擎启动失败: " + strategyId);
     }
 
-    // 加载历史行情数据并注入引擎
+    // 加载历史行情数据并注入引擎 — 失败则拒绝启动
     if (!engine->prepareMarketData()) {
-        INTERNAL_WARN_STREAM << "[SM] 历史数据加载失败或为空: " << strategyId;
-        // 不阻塞启动 — 允许无历史数据运行（仅依赖实时 tick）
+        INTERNAL_ERROR_STREAM << "[SM] 历史数据加载失败或为空, 策略启动被拒绝: " << strategyId;
+        engine->stop();
+        throw std::runtime_error("历史数据不可用, 策略启动失败: " + strategyId);
     }
 
     // 注入订单监听器
@@ -210,7 +211,7 @@ void StrategyManager::startStrategy(const std::string& strategyId)
     // 启动实盘循环
     engine->startLiveLoop();
 
-    INTERNAL_INFO_STREAM << "[SM] startStrategy OK: " << strategyId;
+    INTERNAL_INFO_STREAM << "[SM] 启动策略成功: " << strategyId;
 }
 
 void StrategyManager::stopStrategy(const std::string& strategyId)
@@ -223,7 +224,7 @@ void StrategyManager::stopStrategy(const std::string& strategyId)
     it->second->stop();
     m_engines.erase(it);
 
-    INTERNAL_INFO_STREAM << "[SM] stopStrategy OK: " << strategyId << " count=" << m_engines.size();
+    INTERNAL_INFO_STREAM << "[SM] 停止策略成功: " << strategyId << " count=" << m_engines.size();
 }
 
 } // namespace domain::strategy

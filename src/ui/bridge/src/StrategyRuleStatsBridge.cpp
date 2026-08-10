@@ -357,7 +357,7 @@ QVariantMap StrategyRuleStatsBridge::getTemplateStats(const QString& templateId,
             delete pm;
         }
     } catch (const std::exception& ex) {
-        INTERNAL_WARN_STREAM << "[StatsBridge] getTemplateStats: " << ex.what();
+        INTERNAL_WARN_STREAM << "[StatsBridge] 获取模板统计: " << ex.what();
     }
     return s;
 }

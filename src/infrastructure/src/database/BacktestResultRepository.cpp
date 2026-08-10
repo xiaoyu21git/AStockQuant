@@ -18,7 +18,7 @@ bool BacktestResultRepository::ensureTables()
 {
     if (m_tablesEnsured) return true;
     if (!m_db.isOpen()) {
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables: DB not open";
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables: DB 未打开";
         return false;
     }
 
@@ -135,12 +135,12 @@ bool BacktestResultRepository::ensureTables()
         m_db.executeUpdate(kIdxFactorBacktest);
         m_db.executeUpdate(kCreateDailySnapshots);
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables DDL failed: " << e.what();
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables DDL 失败: " << e.what();
         return false;
     }
 
     if (!m_db.isOpen()) {
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables: DB connection lost during DDL";
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] ensureTables: DDL 期间 DB 连接丢失";
         return false;
     }
 
@@ -198,12 +198,12 @@ bool BacktestResultRepository::saveStrategyBacktest(const StoredStrategyBacktest
          P{r.equityCurveJson}});
     if (affected <= 0) {
         auto err = m_db.lastError();
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveStrategyBacktest FAILED id=" << r.id
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] 保存策略回测失败 id=" << r.id
                               << " affected=" << affected << " error=" << err;
         std::cerr << "[BacktestRepo] SAVE FAILED: " << err << std::endl;
         return false;
     }
-    INTERNAL_INFO_STREAM << "[BacktestRepo] saveStrategyBacktest OK id=" << r.id;
+    INTERNAL_INFO_STREAM << "[BacktestRepo] 保存策略回测成功 id=" << r.id;
     return true;
 }
 
@@ -221,7 +221,7 @@ bool BacktestResultRepository::saveStrategyTrades(const std::vector<StoredStrate
              P{std::string(trade.isBuy ? "B" : "S")},
              P{static_cast<std::int64_t>(trade.quantity)}, P{trade.price}, P{trade.realizedPnl}});
         if (affected <= 0) {
-            INTERNAL_ERROR_STREAM << "[BacktestRepo] saveStrategyTrades failed run=" << trade.runId
+            INTERNAL_ERROR_STREAM << "[BacktestRepo] 保存策略交易失败 run=" << trade.runId
                                   << " error=" << m_db.lastError();
             m_db.rollbackTransaction();
             return false;
@@ -235,11 +235,12 @@ std::vector<StoredStrategyBacktest> BacktestResultRepository::loadStrategyBackte
     const std::string& strategyId, int limit)
 {
     ensureTables();
-    std::ostringstream sql;
-    sql << "SELECT * FROM live.strategy_backtest_results WHERE strategy_id="
-        << astock::database::safeStr(strategyId) << " ORDER BY run_at DESC LIMIT " << limit;
+    using P = astock::database::SqlParam;
 
-    auto result = m_db.executeQuery(sql.str());
+    auto result = m_db.executeQuery(
+        "SELECT * FROM live.strategy_backtest_results WHERE strategy_id=? "
+        "ORDER BY run_at DESC LIMIT ?",
+        {P{strategyId}, P{static_cast<std::int32_t>(limit)}});
     std::vector<StoredStrategyBacktest> records;
     for (int i = 0; i < result.rowCount(); ++i) {
         const auto& row = result.getRow(i);
@@ -305,11 +306,11 @@ bool BacktestResultRepository::saveFactorBacktest(const StoredFactorBacktest& r)
            "num_groups=EXCLUDED.num_groups, metrics_json=EXCLUDED.metrics_json";
     const int affected = m_db.executeUpdate(sql.str());
     if (affected <= 0) {
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveFactorBacktest FAILED id=" << r.id
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] 保存因子回测失败 id=" << r.id
                               << " affected=" << affected << " error=" << m_db.lastError();
         return false;
     }
-    INTERNAL_INFO_STREAM << "[BacktestRepo] saveFactorBacktest OK id=" << r.id;
+    INTERNAL_INFO_STREAM << "[BacktestRepo] 保存因子回测成功 id=" << r.id;
     return true;
 }
 
@@ -352,12 +353,12 @@ bool BacktestResultRepository::saveDailySnapshot(const DailyEquitySnapshot& snap
            "total_asset=EXCLUDED.total_asset, daily_return=EXCLUDED.daily_return";
     const int affected = m_db.executeUpdate(sql.str());
     if (affected <= 0) {
-        INTERNAL_ERROR_STREAM << "[BacktestRepo] saveDailySnapshot FAILED id=" << snap.id
+        INTERNAL_ERROR_STREAM << "[BacktestRepo] 保存每日快照失败 id=" << snap.id
                               << " strategy=" << snap.strategyId
                               << " affected=" << affected << " error=" << m_db.lastError();
         return false;
     }
-    INTERNAL_INFO_STREAM << "[BacktestRepo] saveDailySnapshot OK id=" << snap.id;
+    INTERNAL_INFO_STREAM << "[BacktestRepo] 保存每日快照成功 id=" << snap.id;
     return true;
 }
 
@@ -365,12 +366,13 @@ std::vector<DailyEquitySnapshot> BacktestResultRepository::loadDailySnapshots(
     const std::string& strategyId, int limit)
 {
     ensureTables();
-    std::ostringstream sql;
-    sql << "SELECT id, strategy_id, snap_date, total_asset, daily_return "
-           "FROM live.daily_equity_snapshots WHERE strategy_id="
-        << astock::database::safeStr(strategyId) << " ORDER BY snap_date DESC LIMIT " << limit;
+    using P = astock::database::SqlParam;
 
-    auto result = m_db.executeQuery(sql.str());
+    auto result = m_db.executeQuery(
+        "SELECT id, strategy_id, snap_date, total_asset, daily_return "
+        "FROM live.daily_equity_snapshots WHERE strategy_id=? "
+        "ORDER BY snap_date DESC LIMIT ?",
+        {P{strategyId}, P{static_cast<std::int32_t>(limit)}});
     std::vector<DailyEquitySnapshot> records;
     for (int i = 0; i < result.rowCount(); ++i) {
         const auto& row = result.getRow(i);

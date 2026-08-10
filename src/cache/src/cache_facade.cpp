@@ -66,7 +66,7 @@ public:
         config_ = config;
         
         if (!config.enabled) {
-            INTERNAL_INFO_STREAM << "Cache system is disabled";
+            INTERNAL_INFO_STREAM << "缓存系统已禁用";
             return true;
         }
         
@@ -90,11 +90,11 @@ public:
             };
             redisCacheManager_ = std::make_unique<RedisCacheManager>(redisConfig);
             if (!redisCacheManager_->initialize()) {
-                INTERNAL_ERROR_STREAM << "Failed to initialize Redis cache";
+                INTERNAL_ERROR_STREAM << "Redis 缓存初始化失败";
                 redisCacheManager_.reset();
                 return false;
             } else {
-                INTERNAL_INFO_STREAM << "Redis cache initialized successfully";
+                INTERNAL_INFO_STREAM << "Redis 缓存初始化成功";
             }
         }
         
@@ -136,7 +136,7 @@ public:
                     stats_.totalGetTime += std::chrono::duration_cast<std::chrono::microseconds>(end - start);
                     return true;
                 } catch (const std::exception& e) {
-                    INTERNAL_ERROR_STREAM << "Failed to deserialize Redis cached value: " << e.what();
+                    INTERNAL_ERROR_STREAM << "Redis 缓存值反序列化失败: " << e.what();
                     // 删除损坏的缓存
                     redisCacheManager_->remove(key);
                 }
@@ -168,14 +168,14 @@ public:
         try {
             serializedValue = Serializer::serialize(value);
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "Failed to serialize value for caching: " << e.what();
+            INTERNAL_ERROR_STREAM << "缓存值序列化失败: " << e.what();
             return;
         }
 
         // 设置Redis缓存
         if (policy.useRedisCache && redisCacheManager_ && redisCacheManager_->isEnabled()) {
             if (!redisCacheManager_->set(key, serializedValue, ttl)) {
-                INTERNAL_ERROR_STREAM << "Failed to set Redis cache for key: " << key;
+                INTERNAL_ERROR_STREAM << "设置 Redis 缓存失败, 键: " << key;
             }
         }
         

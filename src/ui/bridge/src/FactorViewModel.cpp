@@ -22,12 +22,12 @@ std::string toStdString(const QString& value)
 FactorViewModel::FactorViewModel(QObject* parent)
     : QAbstractListModel(parent)
 {
-    INTERNAL_DEBUG_STREAM << "FactorViewModel constructor";
+    INTERNAL_DEBUG_STREAM << "FactorViewModel 构造函数";
 }
 
 FactorViewModel::~FactorViewModel()
 {
-    INTERNAL_DEBUG_STREAM << "FactorViewModel destructor";
+    INTERNAL_DEBUG_STREAM << "FactorViewModel 析构函数";
 }
 
 int FactorViewModel::rowCount(const QModelIndex& parent) const

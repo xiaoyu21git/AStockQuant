@@ -12,7 +12,7 @@ namespace config {
 ConfigLoader::ConfigLoader() 
     : threadPool_(std::make_unique<foundation::thread::ThreadPoolExecutor>(4)) {
     
-    INTERNAL_INFO_STREAM << "ConfigLoader initialized";
+    INTERNAL_INFO_STREAM << "ConfigLoader 已初始化";
     
     // 初始化统计信息
     Stats initialStats;
@@ -25,7 +25,7 @@ ConfigLoader::ConfigLoader()
 
 ConfigLoader::~ConfigLoader() {
     auto currentStats = getStats();
-    INTERNAL_DEBUG_STREAM << "ConfigLoader destroyed - "
+    INTERNAL_DEBUG_STREAM << "ConfigLoader 已销毁 - "
                          << "Loads: " << currentStats.totalLoads 
                          << ", Cache hits: " << currentStats.cacheHits
                          << ", Errors: " << currentStats.errors
@@ -47,7 +47,7 @@ void ConfigLoader::registerProvider(
     
     providers_[normalizedExt] = provider;
     
-    INTERNAL_INFO_STREAM << "Registered config provider: " << normalizedExt
+    INTERNAL_INFO_STREAM << "已注册配置提供者: " << normalizedExt
                         << " -> " << provider->type();
 }
 
@@ -67,7 +67,7 @@ std::shared_ptr<ConfigNode> ConfigLoader::load(
             if (cached) {
                 // 原子递增缓存命中
                 cacheHits_.fetch_add(1, std::memory_order_relaxed);
-                INTERNAL_DEBUG_STREAM << "Config cache hit: " << cacheKey;
+                INTERNAL_DEBUG_STREAM << "配置缓存命中: " << cacheKey;
                 return cached;
             }
         }
@@ -94,7 +94,7 @@ std::shared_ptr<ConfigNode> ConfigLoader::load(
         
         if (!provider) {
             errors_.fetch_add(1, std::memory_order_relaxed);
-            INTERNAL_ERROR_STREAM << "No config provider found for file: " << resolvedPath;
+            INTERNAL_ERROR_STREAM << "未找到配置提供者: " << resolvedPath;
             throw foundation::ConfigException(
                 "No provider for file: " + resolvedPath);
         }
@@ -102,13 +102,13 @@ std::shared_ptr<ConfigNode> ConfigLoader::load(
         // 检查文件是否存在
         if (!provider->exists(resolvedPath)) {
             errors_.fetch_add(1, std::memory_order_relaxed);
-            INTERNAL_ERROR_STREAM << "Config file not found: " << resolvedPath;
+            INTERNAL_ERROR_STREAM << "配置文件未找到: " << resolvedPath;
             throw foundation::FileException(
-                "Config file not found: " + resolvedPath);
+                "配置文件未找到: " + resolvedPath);
         }
         
         // 加载配置
-        INTERNAL_INFO_STREAM << "Loading config from: " << resolvedPath 
+        INTERNAL_INFO_STREAM << "正在加载配置: " << resolvedPath 
                             << " (profile: " << profile << ")";
         
         // 原子递增总加载次数
@@ -121,9 +121,9 @@ std::shared_ptr<ConfigNode> ConfigLoader::load(
                 try {
                     auto overrideConfig = load(overridePath, options);
                     config->overlay(*overrideConfig);
-                    INTERNAL_DEBUG_STREAM << "Applied override config: " << overridePath;
+                    INTERNAL_DEBUG_STREAM << "已应用覆盖配置: " << overridePath;
                 } catch (const std::exception& e) {
-                    INTERNAL_WARN_STREAM << "Failed to load override config " 
+                    INTERNAL_WARN_STREAM << "加载覆盖配置失败: " 
                                         << overridePath << ": " << e.what();
                 }
             }
@@ -140,14 +140,14 @@ std::shared_ptr<ConfigNode> ConfigLoader::load(
             endTime - startTime);
         totalLoadTime_.fetch_add(loadTime.count(), std::memory_order_relaxed);
         
-        INTERNAL_INFO_STREAM << "Config loaded successfully: " << resolvedPath 
+        INTERNAL_INFO_STREAM << "配置加载成功: " << resolvedPath 
                            << " (took " << loadTime.count() << "ms)";
         
         return config;
         
     } catch (const std::exception& e) {
         errors_.fetch_add(1, std::memory_order_relaxed);
-        INTERNAL_ERROR_STREAM << "Failed to load config " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "加载配置失败: " << path << ": " << e.what();
         throw;
     }
 }
@@ -190,15 +190,15 @@ std::shared_ptr<ConfigNode> ConfigLoader::loadLayered(
         try {
             auto config = load(layer.path, options);
             configs.push_back(config);
-            INTERNAL_DEBUG_STREAM << "Loaded config layer: " << layer.description 
+            INTERNAL_DEBUG_STREAM << "已加载配置层: " << layer.description 
                                 << " (priority: " << layer.priority << ")";
         } catch (const std::exception& e) {
             if (layer.required) {
-                INTERNAL_ERROR_STREAM << "Failed to load required config layer " 
+                INTERNAL_ERROR_STREAM << "加载必需配置层失败: " 
                                      << layer.description << ": " << e.what();
                 throw;
             } else {
-                INTERNAL_WARN_STREAM << "Failed to load optional config layer " 
+                INTERNAL_WARN_STREAM << "加载可选配置层失败: " 
                                     << layer.description << ": " << e.what();
             }
         }
@@ -245,7 +245,7 @@ std::shared_ptr<ConfigNode> ConfigLoader::getFromCache(const std::string& key) {
         } else {
             // 移除过期的缓存项
             cache_.erase(it);
-            INTERNAL_DEBUG_STREAM << "Cache expired: " << key;
+            INTERNAL_DEBUG_STREAM << "缓存过期: " << key;
         }
     }
     
@@ -265,7 +265,7 @@ void ConfigLoader::saveToCache(const std::string& key,
     
     cache_[key] = item;
     
-    INTERNAL_DEBUG_STREAM << "Saved config to cache: " << key 
+    INTERNAL_DEBUG_STREAM << "配置已保存到缓存: " << key 
                          << " (TTL: " << ttl << "s)";
 }
 
@@ -279,13 +279,13 @@ bool ConfigLoader::isCacheExpired(const CacheItem& item) const {
 void ConfigLoader::clearCache() {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     cache_.clear();
-    INTERNAL_INFO_STREAM << "Config cache cleared";
+    INTERNAL_INFO_STREAM << "配置缓存已清除";
 }
 
 void ConfigLoader::removeFromCache(const std::string& key) {
     std::lock_guard<std::mutex> lock(cacheMutex_);
     cache_.erase(key);
-    INTERNAL_DEBUG_STREAM << "Removed from cache: " << key;
+    INTERNAL_DEBUG_STREAM << "已从缓存移除: " << key;
 }
 
 ConfigLoader::Stats ConfigLoader::getStats() const {

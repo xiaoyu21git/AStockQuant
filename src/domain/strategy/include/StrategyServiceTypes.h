@@ -566,6 +566,9 @@ struct StrategyCreationParams final {
     /// 最少持有天数 — 0=不启用(默认), >0 时持有不足该天数的持仓禁止卖出(硬止损除外)
     int minHoldDays{0};
 
+    /// 交易账户ID — 必填, 由策略配置指定, 空值将被 TradeExecutionEngine 拒绝
+    std::string accountId;
+
     // 因子回调（桥接层填充）
     std::function<StrategyServiceFlowResult(const MarketDataPoint&)> onIncremental;
     std::function<StrategyServiceFlowResult(const std::vector<MarketDataPoint>&)> onBatch;

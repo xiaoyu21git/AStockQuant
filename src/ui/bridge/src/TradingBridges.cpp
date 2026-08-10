@@ -85,7 +85,7 @@ void TradeExecutionBridge::ensureInitialized() {
     auto& engine = domain::trading::TradeExecutionEngine::instance();
 
     if (!engine.initialized()) {
-        INTERNAL_ERROR_STREAM << "[Live] TradeExecutionEngine not initialized, waiting for GmSessionEngine startup";
+        INTERNAL_ERROR_STREAM << "[Live] TradeExecutionEngine 未初始化, 等待 GmSessionEngine 启动";
         return;
     }
 

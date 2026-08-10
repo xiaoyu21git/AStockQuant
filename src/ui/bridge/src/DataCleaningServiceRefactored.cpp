@@ -60,7 +60,7 @@ static void registerAllCleaningRules() {
 std::unique_ptr<cleaning::ICleaningRule> createCppRule(const std::string& ruleKey, const std::string& configJson) {
     auto rule = cleaning::RuleFactoryRegistry::instance().create(ruleKey, configJson);
     if (!rule) {
-        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] WARNING: unknown cleaning rule key \""
+        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] 警告: 未知清洗规则键 \""
             << ruleKey << "\", skipped. 请检查规则名是否与 CoreCleaningRules.h 中的 ruleName() 一致";
     }
     return rule;
@@ -113,7 +113,7 @@ bool DataCleaningServiceRefactored::initialize() {
     DataCacheAdapter::instance().initialize(bridge::storage::persistentDatasetRootDir());
     registerAllCleaningRules();
     m_initialized = true;
-    INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] initialized";
+    INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] 已初始化";
     return true;
 }
 
@@ -148,7 +148,7 @@ void DataCleaningServiceRefactored::cancelCleaning(const QString& requestId) {
         // 标记此请求已取消，防止回调中重复发信号
         if (!requestId.isEmpty()) m_impl->cancelledRequests.insert(requestId);
     }
-    INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] cancelCleaning: " << requestId.toStdString();
+    INTERNAL_INFO_STREAM << "[CleaningSvcRefactored] 取消清洗: " << requestId.toStdString();
 }
 
 // ── 从 DataSet 清洗（纯 C++ 类型，零 QVariant） ──
@@ -257,7 +257,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             const int poolSize = 5000;
             std::vector<cleaning::LightRow> pool(poolSize);
             bool engineFirst = true;
-            INTERNAL_INFO_STREAM << "[CleaningSvc] rules=" << ruleCount << " batches=" << numBatches;
+            INTERNAL_INFO_STREAM << "[CleaningSvc] 规则数=" << ruleCount << " batches=" << numBatches;
 
             for (int bi = 0; bi < numBatches; ++bi) {
                 auto batchR = reader->ReadRecordBatch(bi);
@@ -349,7 +349,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
             }
             DataCacheAdapter::instance().finishArrowWrite(std::move(token), outputRows);
             message = QString("清洗完成: %1 → %2 条").arg(inputRows).arg(outputRows);
-            INTERNAL_INFO_STREAM << "[CleaningSvc] done: " << inputRows << " -> " << outputRows << " rows removed=" << (inputRows - outputRows);
+            INTERNAL_INFO_STREAM << "[CleaningSvc] 完成: " << inputRows << " -> " << outputRows << " rows removed=" << (inputRows - outputRows);
 
         } catch (const std::exception& e) {
             message = QString("清洗异常: %1").arg(e.what());
@@ -611,7 +611,7 @@ bool DataCleaningServiceRefactored::saveUserRuleConfig(const QVariantMap& enable
         QString filePath = cfgDir.filePath("cleaning/cleaning_rules_user.json");
         QFile f(filePath);
         if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] saveUserRuleConfig: cannot write "
+            INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] saveUserRuleConfig: 无法写入 "
                                  << filePath.toStdString();
             return false;
         }
@@ -627,7 +627,7 @@ bool DataCleaningServiceRefactored::saveUserRuleConfig(const QVariantMap& enable
         f.close();
         return true;
     } catch (const std::exception& e) {
-        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] saveUserRuleConfig: "
+        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] 保存用户规则: "
                              << e.what();
         return false;
     }
@@ -654,7 +654,7 @@ QVariantMap DataCleaningServiceRefactored::loadUserRuleConfig() const {
             result[it.key()] = it.value().toBool();
         }
     } catch (const std::exception& e) {
-        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] loadUserRuleConfig: "
+        INTERNAL_WARN_STREAM << "[CleaningSvcRefactored] 加载用户规则: "
                              << e.what();
     }
     return result;

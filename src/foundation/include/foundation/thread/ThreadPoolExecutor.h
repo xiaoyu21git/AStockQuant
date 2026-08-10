@@ -215,7 +215,7 @@ private:
     bool allowCoreThreadTimeOut_;
     RejectionPolicy rejectionPolicy_;
     
-    std::vector<std::unique_ptr<Worker>> workers_;
+    std::vector<std::shared_ptr<Worker>> workers_;
     std::function<std::thread(std::function<void()>)> threadFactory_;
     
     std::queue<std::function<void()>> taskQueue_;

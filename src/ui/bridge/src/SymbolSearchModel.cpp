@@ -30,22 +30,22 @@ QHash<int, QByteArray> SymbolSearchModel::roleNames() const {
 void SymbolSearchModel::init() {
     auto& pool = astock::database::NativePgConnectionPool::instance();
     if (!pool.isInitialized()) {
-        INTERNAL_WARN_STREAM << "[SymbolSearch] DB pool not initialized";
+        INTERNAL_WARN_STREAM << "[SymbolSearch] DB连接池未初始化";
         return;
     }
 
     auto db = pool.getConnection();
     if (!db || !db->isOpen()) {
-        INTERNAL_WARN_STREAM << "[SymbolSearch] DB connection failed";
+        INTERNAL_WARN_STREAM << "[SymbolSearch] DB连接失败";
         return;
     }
 
     auto result = db->executeQuery(
         "SELECT symbol, name, exchange FROM ref.symbol_info WHERE asset_class='STOCK' ORDER BY symbol");
     int rows = static_cast<int>(result.rowCount());
-    INTERNAL_DEBUG_STREAM << "[SymbolSearch] query returned" << rows << "rows";
+    INTERNAL_DEBUG_STREAM << "[SymbolSearch] 查询结果: " << rows << "rows";
     if (rows == 0) {
-        INTERNAL_WARN_STREAM << "[SymbolSearch] symbol_info table empty or missing";
+        INTERNAL_WARN_STREAM << "[SymbolSearch] symbol_info表为空或不存在";
         return;
     }
 
@@ -63,7 +63,7 @@ void SymbolSearchModel::init() {
     m_filtered.clear();
     for (int i = 0; i < m_all.size(); ++i) m_filtered.push_back(i);
     endResetModel();
-    INTERNAL_DEBUG_STREAM << "[SymbolSearch] loaded" << m_all.size() << "symbols, first="
+    INTERNAL_DEBUG_STREAM << "[SymbolSearch] 已加载" << m_all.size() << "symbols, first="
              << (m_all.isEmpty() ? "none" : (m_all[0].symbol + " " + m_all[0].secName).toStdString());
     emit countChanged();
 }

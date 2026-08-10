@@ -223,7 +223,7 @@ std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest
     gmResults->release();
 
     INTERNAL_INFO_STREAM << "[TradeEngine] order_batch: " << results.size()
-                         << " submitted, " << reqs.size() << " requested";
+                         << " 已提交, " << reqs.size() << " 请求";
     return results;
 }
 
@@ -244,7 +244,7 @@ std::vector<OrderResult> TradeEngine::submitSplit(const OrderRequest& req, Split
     }
 
     INTERNAL_INFO_STREAM << "[TradeEngine] split: " << results.size()
-                         << " chunks, total qty=" << req.quantity();
+                         << " 个分块, 总量=" << req.quantity();
     return results;
 }
 

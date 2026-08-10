@@ -52,13 +52,13 @@ AccountEngine::AccountEngine() {
                     it->second.lastPrice = *price;
             });
     }
-    INTERNAL_INFO_STREAM << "[AccountEngine] Initialised, subscribed to event bus";
+    INTERNAL_INFO_STREAM << "[AccountEngine] 已初始化, 已订阅事件总线";
 }
 
 bool AccountEngine::initialize(::Strategy* strategy) {
     if (!strategy) return false;
     m_strategy = strategy;
-    INTERNAL_INFO_STREAM << "[AccountEngine] Initialised with strategy";
+    INTERNAL_INFO_STREAM << "[AccountEngine] 已使用策略初始化";
     return true;
 }
 
@@ -73,7 +73,7 @@ void AccountEngine::shutdown() {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_cacheValid = false;
     m_cachedPositions.clear();
-    INTERNAL_INFO_STREAM << "[AccountEngine] Shutdown complete";
+    INTERNAL_INFO_STREAM << "[AccountEngine] 关闭完成";
 }
 
 bool AccountEngine::initialized() const { return m_strategy != nullptr; }
@@ -122,10 +122,10 @@ void AccountEngine::onCash(const AccountInfo& a) {
     }
     m_positionLogThrottle++;
     if (m_positionLogThrottle % 50 == 1) {
-        INTERNAL_DEBUG_STREAM << "[AccountEngine] Cash updated: available=" << a.availableCash
-                              << " totalAsset=" << a.totalAsset
-                              << " marketValue=" << a.marketValue
-                              << " (throttle #" << m_positionLogThrottle << ")";
+        INTERNAL_DEBUG_STREAM << "[AccountEngine] 资金更新: available=" << a.availableCash
+                              << " 总资产=" << a.totalAsset
+                              << " 市值=" << a.marketValue
+                              << " (节流 #" << m_positionLogThrottle << ")";
     }
     if (m_onDataChanged) m_onDataChanged();
 }
@@ -139,9 +139,9 @@ void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
     // 节流: 每 50 次才打印一次日志
     m_positionLogThrottle++;
     if (m_positionLogThrottle % 50 == 1) {
-        INTERNAL_DEBUG_STREAM << "[AccountEngine] Position update: " << positions.size()
-                              << " positions, cache size=" << m_cachedPositions.size()
-                              << " (throttle #" << m_positionLogThrottle << ")";
+        INTERNAL_DEBUG_STREAM << "[AccountEngine] 持仓更新: " << positions.size()
+                              << " 个持仓, 缓存大小=" << m_cachedPositions.size()
+                              << " (节流 #" << m_positionLogThrottle << ")";
     }
     if (m_onDataChanged) m_onDataChanged();
 }

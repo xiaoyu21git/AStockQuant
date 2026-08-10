@@ -12,10 +12,10 @@ static std::shared_ptr<ISqlDatabase> sdb() {
     try {
         return NativePgConnectionPool::instance().getConnection();
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() exception: " << e.what();
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() 异常: " << e.what();
         return nullptr;
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() unknown exception";
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] sdb() 未知异常";
         return nullptr;
     }
 }
@@ -133,9 +133,9 @@ std::optional<PersistedStrategyData> StrategyRepository::findByCode(const QStrin
 
 std::vector<PersistedStrategyData> StrategyRepository::findAll() {
     try {
-        INTERNAL_INFO_STREAM << "[Repo] findAll START";
+        INTERNAL_INFO_STREAM << "[Repo] findAll 开始";
         auto db = sdb();
-        if (!db) { INTERNAL_ERROR_STREAM << "[Repo] findAll FAILED: no db"; return {}; }
+        if (!db) { INTERNAL_ERROR_STREAM << "[Repo] findAll 失败: DB 不可用"; return {}; }
         auto r = db->executeQuery(
             "SELECT s.*, b.total_return, b.annualized_return, b.sharpe_ratio, b.max_drawdown, "
             "b.win_rate "
@@ -145,7 +145,7 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
             "  WHERE strategy_id = s.strategy_id ORDER BY run_at DESC LIMIT 1"
             ") b ON true "
             "ORDER BY s.created_at DESC");
-        INTERNAL_INFO_STREAM << "[Repo] findAll query returned " << static_cast<int>(r.rowCount()) << " rows";
+        INTERNAL_INFO_STREAM << "[Repo] findAll 查询返回 " << static_cast<int>(r.rowCount()) << " 行";
         std::vector<PersistedStrategyData> v;
         for (auto& row : r.getRows()) {
             PersistedStrategyData d;
@@ -178,10 +178,10 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
         }
         return v;
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[StrategyRepo] findAll exception: " << e.what();
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] findAll 异常: " << e.what();
         return {};
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[StrategyRepo] findAll unknown exception";
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] findAll 未知异常";
         return {};
     }
 }
@@ -220,7 +220,7 @@ QString StrategyRepository::save(const PersistedStrategyData& d) {
          SqlParam{std::to_string(static_cast<int>(d.language))},SqlParam{std::to_string(0)},
          SqlParam{toJson(d.parameters)},SqlParam{toJson(d.performanceMetrics)},SqlParam{"{}"}});
     if (affected <= 0) {
-        INTERNAL_ERROR_STREAM << "[Repo] save INSERT failed affected=" << affected << " id=" << id;
+        INTERNAL_ERROR_STREAM << "[Repo] save INSERT 失败 affected=" << affected << " id=" << id;
         return {};
     }
     return sid;
@@ -252,7 +252,7 @@ bool StrategyRepository::update(const QString& id, const PersistedStrategyData& 
          SqlParam{std::to_string(0)},SqlParam{toJson(d.parameters)},SqlParam{toJson(d.performanceMetrics)},
          SqlParam{"{}"},SqlParam{toS(id)}});
     if (affected <= 0) {
-        INTERNAL_ERROR_STREAM << "[StrategyRepo] update failed id=" << toS(id)
+        INTERNAL_ERROR_STREAM << "[StrategyRepo] update 失败 id=" << toS(id)
                               << " error=" << db->lastError();
         return false;
     }

@@ -13,12 +13,12 @@ RebalanceScheduleBuilder::RebalanceScheduleBuilder(const ITradingCalendar& calen
 
 RebalancePlanResult RebalanceScheduleBuilder::build(RebalancePlanSpec spec) const
 {
-    INTERNAL_INFO_STREAM << "[RebalanceScheduleBuilder] Building schedule: window="
+    INTERNAL_INFO_STREAM << "[RebalanceScheduleBuilder] 正在构建调度计划: window="
                         << spec.window.start.value << "~" << spec.window.end.value
                         << " interval=" << spec.interval.value;
 
     if (!spec.window.isValid() || !spec.interval.isValid()) {
-        INTERNAL_ERROR_STREAM << "[RebalanceScheduleBuilder] Invalid spec: window or interval";
+        INTERNAL_ERROR_STREAM << "[RebalanceScheduleBuilder] 无效规格: window 或 interval";
         return RebalancePlanResult{RebalancePlanError::InvalidInput, std::nullopt};
     }
 

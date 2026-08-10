@@ -78,20 +78,20 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
 
     s_computeOneDayCounter = 0;  // 每个因子重置计数器
 
-    INTERNAL_INFO_STREAM << "[FE] compute ENTER: factorName=" << cacheKey.factorName
+    INTERNAL_INFO_STREAM << "[FE] compute 进入: factorName=" << cacheKey.factorName
         << " m_instanceManager=" << static_cast<void*>(m_instanceManager)
         << " m_dataSvc=" << static_cast<void*>(m_dataSvc)
         << " marketView=" << static_cast<const void*>(marketData.marketView);
 
     if (!m_instanceManager) {
-        INTERNAL_ERROR_STREAM << "[FE] compute ABORT: m_instanceManager is null";
+        INTERNAL_ERROR_STREAM << "[FE] compute 中止: m_instanceManager 为空";
         return result;
     }
 
     auto factor = m_instanceManager->createInstance(cacheKey.factorName);
     INTERNAL_INFO_STREAM << "[FE] compute: createInstance(" << cacheKey.factorName << ") = " << static_cast<void*>(factor.get());
     if (!factor) {
-        INTERNAL_ERROR_STREAM << "[FE] compute ABORT: createInstance returned null";
+        INTERNAL_ERROR_STREAM << "[FE] compute 中止: createInstance 返回 null";
         return result;
     }
 
@@ -111,11 +111,11 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
         for (const auto& f : fieldReqs.optionalFields) {
             neededFields.push_back(f);
         }
-        INTERNAL_INFO_STREAM << "[FE] compute: calling buildViewForFields (may take a while for large datasets)...";
+        INTERNAL_INFO_STREAM << "[FE] compute: calling buildViewForFields (大数据集可能需要一段时间)...";
         m_dataSvc->buildViewForFields(neededFields);
         INTERNAL_INFO_STREAM << "[FE] compute: buildViewForFields DONE";
     } else {
-        INTERNAL_INFO_STREAM << "[FE] compute: no m_dataSvc, skipping buildViewForFields";
+        INTERNAL_INFO_STREAM << "[FE] compute: 无 m_dataSvc, 跳过 buildViewForFields";
     }
 
     // 从 DataSvc 获取数据视图
@@ -129,7 +129,7 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
         << " instruments=" << (view ? view->instruments().size() : 0);
 
     if (!view) {
-        INTERNAL_ERROR_STREAM << "[FE] compute ABORT: view is null";
+        INTERNAL_ERROR_STREAM << "[FE] compute 中止: view 为空";
         return result;
     }
 
@@ -161,7 +161,7 @@ FactorMatrix FactorEngine::compute(const MarketMatrixBatch& marketData,
             ++dateCount;
         }
     }
-    INTERNAL_INFO_STREAM << "[FE] compute DONE: " << cacheKey.factorName
+    INTERNAL_INFO_STREAM << "[FE] compute 完成: " << cacheKey.factorName
         << " dates=" << view->dates().size()
         << " symbols=" << symbols.size() << " validDates=" << dateCount << " values=" << valueCount;
 
@@ -217,16 +217,16 @@ std::unordered_map<std::string, double> FactorEngine::computeSingleDate(
     const IMarketDataView* view)
 {
     if (!m_instanceManager) {
-        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: m_instanceManager is null";
+        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: m_instanceManager 为空";
         return {};
     }
     if (!view) {
-        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: view is null";
+        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: view 为空";
         return {};
     }
     auto factor = m_instanceManager->createInstance(factorName);
     if (!factor) {
-        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: factor not found: " << factorName;
+        INTERNAL_ERROR_STREAM << "[FE] computeSingleDate: factor 未找到: " << factorName;
         return {};
     }
     return computeOneDay(*factor, date, symbols, *view);

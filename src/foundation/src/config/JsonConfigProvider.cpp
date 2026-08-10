@@ -17,14 +17,14 @@ JsonConfigProvider::JsonConfigProvider(
     envPrefixes_.push_back("CONFIG_");
     
     // 初始化日志
-    INTERNAL_DEBUG_STREAM << "JsonConfigProvider initialized with envSubstitution=" << enableEnvSubstitution_ << ", includes=" << enableIncludes_;
+    INTERNAL_DEBUG_STREAM << "JsonConfigProvider 已初始化, envSubstitution=" << enableEnvSubstitution_ << ", includes=" << enableIncludes_;
 }
 
 std::shared_ptr<ConfigNode> JsonConfigProvider::load(
     const std::string& path,
     const std::string& profile) const{
     
-    INTERNAL_INFO_STREAM << "Loading JSON config from: " << path;
+    INTERNAL_INFO_STREAM << "正在加载 JSON 配置: " << path;
     
     try {
         // 加载JSON文件
@@ -38,7 +38,7 @@ std::shared_ptr<ConfigNode> JsonConfigProvider::load(
         
         // 提取环境特定配置
         if (!profile.empty() && json.has(profile)) {
-            INTERNAL_DEBUG_STREAM << "Using profile-specific config: " << profile;
+            INTERNAL_DEBUG_STREAM << "使用 profile 特定配置: " << profile;
             json = extractProfileConfig(json, profile);
         }
         
@@ -63,12 +63,12 @@ std::shared_ptr<ConfigNode> JsonConfigProvider::load(
         return configNode;
         
     } catch (const foundation::FileException& e) {
-        INTERNAL_ERROR_STREAM << "File error loading config " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "文件错误, 加载配置失败: " << path << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format("Failed to load config {}: {}", 
                                              path, e.what()));
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Error loading config " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "加载配置错误: " << path << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format("Failed to load config {}: {}", 
                                              path, e.what()));
@@ -79,7 +79,7 @@ void JsonConfigProvider::watch(
     const std::string& path,
     std::function<void(const std::shared_ptr<ConfigNode>&)> callback) {
     
-    INTERNAL_DEBUG_STREAM << "Setting up watch for JSON config: " << path;
+    INTERNAL_DEBUG_STREAM << "设置 JSON 配置监听: " << path;
     
     // 简化实现：使用文件修改时间检查
     // 实际应使用文件系统监控
@@ -90,7 +90,7 @@ void JsonConfigProvider::watch(
     
     // 检查文件是否被修改（简化版）
     // 实际实现应使用foundation::fs的文件监控功能
-    INTERNAL_WARN_STREAM << "File watching not fully implemented for: " << path;
+    INTERNAL_WARN_STREAM << "文件监听尚未完整实现: " << path;
 }
 
 bool JsonConfigProvider::save(
@@ -98,10 +98,10 @@ bool JsonConfigProvider::save(
     const std::string& path) {
     
     try {
-        INTERNAL_INFO_STREAM << "Saving config to: " << path;
+        INTERNAL_INFO_STREAM << "正在保存配置: " << path;
         return config->saveToFile(path);
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to save config to " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "保存配置失败: " << path << ": " << e.what();
         return false;
     }
 }
@@ -131,7 +131,7 @@ void JsonConfigProvider::substituteEnvironmentVariables(
     // 递归遍历JSON并进行环境变量替换
     // 这里需要根据JsonFacade的实际接口实现
     // 简化实现：假设JsonFacade有遍历方法
-    INTERNAL_DEBUG_STREAM << "Substituting environment variables in JSON";
+    INTERNAL_DEBUG_STREAM << "正在替换 JSON 中的环境变量";
     
     // 实现细节取决于JsonFacade的接口
     // 这里提供一个框架
@@ -142,7 +142,7 @@ foundation::json::JsonFacade JsonConfigProvider::processIncludes(
     const std::string& baseDir,
     const std::string& profile) const {
     
-    INTERNAL_DEBUG_STREAM << "Processing includes from base directory: " << baseDir;
+    INTERNAL_DEBUG_STREAM << "正在处理 includes, 基础目录: " << baseDir;
     
     // 克隆输入JSON
     auto result = json; // 假设JsonFacade支持拷贝
@@ -161,7 +161,7 @@ foundation::json::JsonFacade JsonConfigProvider::processIncludes(
                 ? baseDir + includeFile 
                 : baseDir + "/" + includeFile;
             
-            INTERNAL_DEBUG_STREAM << "Including config file: " << includePath;
+            INTERNAL_DEBUG_STREAM << "正在包含配置文件: " << includePath;
             
             // 递归加载include文件
             auto includedConfig = load(includePath, profile);
@@ -172,7 +172,7 @@ foundation::json::JsonFacade JsonConfigProvider::processIncludes(
             // 这里需要根据JsonFacade的合并接口实现
             
         } catch (const std::exception& e) {
-            INTERNAL_WARN_STREAM << "Failed to include config file: " << e.what();
+            INTERNAL_WARN_STREAM << "包含配置文件失败: " << e.what();
         }
     }
     
@@ -187,7 +187,7 @@ foundation::json::JsonFacade JsonConfigProvider::extractProfileConfig(
     const std::string& profile) const {
     
     if (!json.has(profile)) {
-        INTERNAL_WARN_STREAM << "Profile '" << profile << "' not found in config, using default";
+        INTERNAL_WARN_STREAM << "Profile '" << profile << "' 未在配置中找到, 使用默认值";
         return json;
     }
     

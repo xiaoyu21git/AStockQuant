@@ -73,7 +73,7 @@ DynamicUniverseBuildResult DynamicUniverseBuilder::build(IndexId index, DayRange
     UniverseByDay result;
     result.data.reserve(days.size());
 
-    INTERNAL_INFO_STREAM << "[DynamicUniverseBuilder] Building universe for index=" << index.value
+    INTERNAL_INFO_STREAM << "[DynamicUniverseBuilder] 正在构建股票池 index=" << index.value
                          << " range=" << range.start.value << "~" << range.end.value
                          << " days=" << days.size() << " intervals=" << intervals.size();
 
@@ -89,7 +89,7 @@ DynamicUniverseBuildResult DynamicUniverseBuilder::build(IndexId index, DayRange
         }
 
         if (active.empty()) {
-            INTERNAL_WARN_STREAM << "[DynamicUniverseBuilder] Empty universe on day " << day.value;
+            INTERNAL_WARN_STREAM << "[DynamicUniverseBuilder] 空股票池 day=" << day.value;
             const MissingCoverageAction action = coveragePolicy_.onMissing(MissingCoverage{day});
             if (action == MissingCoverageAction::Fail) {
                 return DynamicUniverseBuildResult{DynamicUniverseBuildError::MissingCoverage, std::nullopt};
@@ -107,7 +107,7 @@ DynamicUniverseBuildResult DynamicUniverseBuilder::build(IndexId index, DayRange
         result.data.emplace(day.value, std::move(active));
     }
 
-    INTERNAL_INFO_STREAM << "[DynamicUniverseBuilder] Build complete: "
+    INTERNAL_INFO_STREAM << "[DynamicUniverseBuilder] 构建完成: "
                          << result.data.size() << " trading days with constituents";
     return DynamicUniverseBuildResult{DynamicUniverseBuildError::None, std::move(result)};
 }

@@ -12,10 +12,10 @@ void UiLifecycleCoordinator::activateTradingPage() {
 }
 
 void UiLifecycleCoordinator::activateStrategyLibraryPage() {
-    INTERNAL_INFO_STREAM << "[Lifecycle] activateStrategyLibraryPage";
+    INTERNAL_INFO_STREAM << "[Lifecycle] 激活策略库页面";
     m_strategyLibraryPageActivated = true;
     emit strategyLibraryPageActivated();
-    INTERNAL_INFO_STREAM << "[Lifecycle] activateStrategyLibraryPage DONE";
+    INTERNAL_INFO_STREAM << "[Lifecycle] 激活策略库页面 完成";
 }
 
 } // namespace bridge

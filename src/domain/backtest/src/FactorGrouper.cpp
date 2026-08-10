@@ -13,7 +13,7 @@ std::vector<FactorGroup> FactorGrouper::groupByFactorValue(
     int numGroups) {
     
     if (factorValues.empty() || numGroups <= 0) {
-        INTERNAL_WARN_STREAM << "[FactorGrouper] groupByFactorValue: empty input, values="
+        INTERNAL_WARN_STREAM << "[FactorGrouper] groupByFactorValue: 空输入, values="
                             << factorValues.size() << " groups=" << numGroups;
         return {};
     }
@@ -78,7 +78,7 @@ std::vector<FactorGroup> FactorGrouper::groupByQuantile(
     int numGroups) {
     
     if (factorValues.empty() || numGroups <= 0) {
-        INTERNAL_WARN_STREAM << "[FactorGrouper] groupByQuantile: empty input, values="
+        INTERNAL_WARN_STREAM << "[FactorGrouper] groupByQuantile: 空输入, values="
                             << factorValues.size() << " groups=" << numGroups;
         return {};
     }
@@ -210,7 +210,7 @@ std::vector<FactorGroup> FactorGrouper::group(
     int numGroups,
     const std::vector<double>& customThresholds) {
 
-    INTERNAL_INFO_STREAM << "[FactorGrouper] Grouping " << factorValues.size()
+    INTERNAL_INFO_STREAM << "[FactorGrouper] 正在分组 " << factorValues.size()
                          << " stocks into " << numGroups << " groups, method="
                          << static_cast<int>(method);
 
@@ -222,7 +222,7 @@ std::vector<FactorGroup> FactorGrouper::group(
         case GroupingMethod::CUSTOM:
             return groupByCustomRules(factorValues, customThresholds);
         default:
-            INTERNAL_ERROR_STREAM << "[FactorGrouper] Unknown grouping method: "
+            INTERNAL_ERROR_STREAM << "[FactorGrouper] 未知分组方法: "
                                   << static_cast<int>(method);
             throw std::invalid_argument("Unknown grouping method");
     }

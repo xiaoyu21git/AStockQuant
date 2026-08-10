@@ -206,7 +206,7 @@ FactorService::~FactorService()
 bool FactorService::resolveBackend()
 {
     try {
-        INTERNAL_INFO_STREAM << "[FS] resolveBackend START";
+        INTERNAL_INFO_STREAM << "[FS] resolveBackend 开始";
         std::lock_guard<std::mutex> lock(m_mutex);
 
         // 统一使用 NativePgConnectionPool（基础设施层唯一 DB 连接入口）
@@ -216,31 +216,31 @@ bool FactorService::resolveBackend()
             emit errorOccurred(QStringLiteral("FactorService: 数据库连接池初始化失败"));
             return false;
         }
-        INTERNAL_INFO_STREAM << "[FS] nativeDb OK";
+        INTERNAL_INFO_STREAM << "[FS] nativeDb 成功";
 
         m_dataChecker = std::make_shared<factor::DataAvailabilityChecker>(nativeDb);
-        INTERNAL_INFO_STREAM << "[FS] DataAvailabilityChecker OK";
+        INTERNAL_INFO_STREAM << "[FS] DataAvailabilityChecker 成功";
 
-        INTERNAL_INFO_STREAM << "[FS] creating FIM...";
+        INTERNAL_INFO_STREAM << "[FS] 正在创建 FIM...";
         m_instanceManager.reset(new factor::FactorInstanceManager(nativeDb, m_dataChecker));
-        INTERNAL_INFO_STREAM << "[FS] FactorInstanceManager created";
+        INTERNAL_INFO_STREAM << "[FS] FactorInstanceManager 已创建";
 
         m_detectionService = std::make_unique<FactorDetectionService>();
-        INTERNAL_INFO_STREAM << "[FS] DetectionService OK";
+        INTERNAL_INFO_STREAM << "[FS] DetectionService 成功";
 
         if (!m_viewModel) {
             m_viewModel = new FactorViewModel(this);
         }
-        INTERNAL_INFO_STREAM << "[FS] ViewModel OK";
+        INTERNAL_INFO_STREAM << "[FS] ViewModel 成功";
 
-        INTERNAL_INFO_STREAM << "[FS] resolveBackend COMPLETE";
+        INTERNAL_INFO_STREAM << "[FS] resolveBackend 完成";
         return true;
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "[FS] EXCEPTION: " << e.what();
+        INTERNAL_ERROR_STREAM << "[FS] 异常: " << e.what();
         emit errorOccurred(QStringLiteral("FactorService 异常: %1").arg(QString::fromStdString(e.what())));
         return false;
     } catch (...) {
-        INTERNAL_ERROR_STREAM << "[FS] UNKNOWN EXCEPTION crash";
+        INTERNAL_ERROR_STREAM << "[FS] 未知异常 crash";
         emit errorOccurred(QStringLiteral("FactorService 未知异常"));
         return false;
     }

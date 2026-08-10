@@ -51,7 +51,7 @@ Symbol SymbolNormalizer::normalize(std::string_view raw) {
     }
 
     // dot exists but neither prefix nor suffix exchange recognised
-    INTERNAL_WARN_STREAM << "[SymbolNormalizer] Unrecognised exchange format, raw="
+    INTERNAL_WARN_STREAM << "[SymbolNormalizer] 无法识别的交易所格式, raw="
                          << std::string{raw} << " normalised=" << upper;
     return Symbol(std::move(upper));
 }

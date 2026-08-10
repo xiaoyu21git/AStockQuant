@@ -12,13 +12,13 @@ YamlConfigProvider::YamlConfigProvider(
 ) : enableAnchors_(enableAnchors),
     multiDocument_(multiDocument) {
     
-    INTERNAL_DEBUG_STREAM << "YamlConfigProvider initialized with anchors=" << enableAnchors_ << ", multiDocument=" << multiDocument_;
+    INTERNAL_DEBUG_STREAM << "[YamlConfigProvider] 已初始化 anchors=" << enableAnchors_ << " multiDocument=" << multiDocument_;
 }
 
 std::shared_ptr<ConfigNode> YamlConfigProvider::load(const std::string& path,
                          const std::string& profile) const
 {
-    INTERNAL_INFO_STREAM << "Loading YAML config from: " << path << " (profile: " << profile << ")";
+    INTERNAL_INFO_STREAM << "正在加载 YAML 配置: " << path << " (profile: " << profile << ")";
 
     try {
         // 1. 加载 YAML（Facade 仅作为局部使用）
@@ -50,16 +50,16 @@ std::shared_ptr<ConfigNode> YamlConfigProvider::load(const std::string& path,
         sourceInfo.size = foundation::fs::File::size(path);
         configNode->setSourceInfo(sourceInfo);
 
-        INTERNAL_INFO_STREAM << "YAML config loaded successfully: " << path << " (profile: " << profile << ")";
+        INTERNAL_INFO_STREAM << "YAML 配置加载成功: " << path << " (profile: " << profile << ")";
         return configNode;
 
     } catch (const foundation::FileException& e) {
-        INTERNAL_ERROR_STREAM << "File error loading config " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "文件错误, 加载配置失败: " << path << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format(
                 "Failed to load config {}: {}", path, e.what()));
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Error loading config " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "加载配置错误: " << path << ": " << e.what();
         throw foundation::ConfigException(
             foundation::utils::String::format(
                 "Failed to load config {}: {}", path, e.what()));
@@ -70,10 +70,10 @@ void YamlConfigProvider::watch(
     const std::string& path,
     std::function<void(const std::shared_ptr<ConfigNode>&)> callback) {
     
-    INTERNAL_DEBUG_STREAM << "Setting up watch for YAML config: " << path;
+    INTERNAL_DEBUG_STREAM << "设置 YAML 配置监听: " << path;
     
     // 简化实现，同JsonConfigProvider
-    INTERNAL_WARN_STREAM << "File watching not fully implemented for: " << path;
+    INTERNAL_WARN_STREAM << "文件监听尚未完整实现: " << path;
 }
 
 bool YamlConfigProvider::save(
@@ -81,7 +81,7 @@ bool YamlConfigProvider::save(
     const std::string& path) {
     
     try {
-        INTERNAL_INFO_STREAM << "Saving YAML config to: " << path;
+        INTERNAL_INFO_STREAM << "正在保存 YAML 配置: " << path;
         
         // 获取YAML字符串
         std::string yamlStr = config->toYamlString();
@@ -93,7 +93,7 @@ bool YamlConfigProvider::save(
             // 尝试解析为多文档
             if (!yaml.loadMultiDocumentFromString(yamlStr)) {
                 // 如果解析失败，作为单文档处理
-                INTERNAL_DEBUG_STREAM << "Not a multi-document, saving as single document";
+                INTERNAL_DEBUG_STREAM << "非多文档, 保存为单文档";
                 return foundation::fs::File::writeText(path, yamlStr);
             }
             
@@ -105,7 +105,7 @@ bool YamlConfigProvider::save(
         }
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Failed to save YAML config to " << path << ": " << e.what();
+        INTERNAL_ERROR_STREAM << "保存 YAML 配置失败: " << path << ": " << e.what();
         return false;
     }
 }
@@ -135,18 +135,18 @@ foundation::yaml::YamlFacade YamlConfigProvider::processMultiDocument(
     const foundation::yaml::YamlFacade& yaml,
     const std::string& profile) const {
     
-    INTERNAL_DEBUG_STREAM << "Processing multi-document YAML with profile: " << profile;
+    INTERNAL_DEBUG_STREAM << "正在处理多文档 YAML, profile: " << profile;
     
     // 如果不启用多文档模式或者文档数量小于2，创建新对象并合并
     if (!multiDocument_ || yaml.getDocumentCount() < 2) {
-        INTERNAL_DEBUG_STREAM << "Not processing as multi-document (mode=" << multiDocument_ << ", count=" << yaml.getDocumentCount() << ")";
+        INTERNAL_DEBUG_STREAM << "不按多文档处理 (mode=" << multiDocument_ << ", count=" << yaml.getDocumentCount() << ")";
         // 创建新对象并合并原始内容
         foundation::yaml::YamlFacade result = foundation::yaml::YamlFacade::createEmpty();
         result.merge(yaml);  // 使用 merge 而不是拷贝
         return result;  // 支持移动构造
     }
     
-    INTERNAL_INFO_STREAM << "Processing multi-document YAML with " << yaml.getDocumentCount() << " documents, profile: " << profile;
+    INTERNAL_INFO_STREAM << "正在处理多文档 YAML, 文档数=" << yaml.getDocumentCount() << ", profile: " << profile;
     
     try {
         // 1. 创建新对象而不是尝试拷贝
@@ -157,7 +157,7 @@ foundation::yaml::YamlFacade YamlConfigProvider::processMultiDocument(
         bool profileFound = result.selectDocumentByProfile(profile);
         
         if (profileFound) {
-            INTERNAL_INFO_STREAM << "Found profile-specific document for: " << profile;
+            INTERNAL_INFO_STREAM << "找到 profile 特定文档: " << profile;
             
             // 3. 检查是否需要合并默认文档
             auto merged = mergeWithDefaultDocument(result, profile);
@@ -171,18 +171,18 @@ foundation::yaml::YamlFacade YamlConfigProvider::processMultiDocument(
             bool defaultFound = result.findDocument(defaultSelector);
             
             if (defaultFound) {
-                INTERNAL_INFO_STREAM << "No profile-specific document found, using default document";
+                INTERNAL_INFO_STREAM << "未找到 profile 特定文档, 使用默认文档";
                 return result;  // 支持移动
             } else {
                 // 5. 既没有profile文档也没有默认文档，使用第一个文档
-                INTERNAL_WARN_STREAM << "No profile-specific or default document found, using first document";
+                INTERNAL_WARN_STREAM << "未找到 profile 或默认文档, 使用第一个文档";
                 result.setCurrentDocument(0);
                 return result;  // 支持移动
             }
         }
         
     } catch (const std::exception& e) {
-        INTERNAL_ERROR_STREAM << "Error processing multi-document YAML: " << e.what();
+        INTERNAL_ERROR_STREAM << "处理多文档 YAML 错误: " << e.what();
         
         // 出错时创建新对象
         foundation::yaml::YamlFacade fallback = foundation::yaml::YamlFacade::createEmpty();
@@ -205,7 +205,7 @@ foundation::yaml::YamlFacade YamlConfigProvider::mergeWithDefaultDocument(
     foundation::yaml::YamlFacade& multiDoc,
     const std::string& profile) const {
     
-    INTERNAL_DEBUG_STREAM << "Merging documents for profile: " << profile;
+    INTERNAL_DEBUG_STREAM << "正在合并文档, profile: " << profile;
     
     // 保存当前profile文档的索引
     size_t profileIndex = multiDoc.getCurrentDocumentIndex();
