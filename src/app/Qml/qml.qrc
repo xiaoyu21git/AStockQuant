@@ -159,7 +159,7 @@
         <file>components/Strategy/StrategySorter.qml</file>
         <file>components/Strategy/StrategySummaryHeaderCard.qml</file>
         <file>components/Strategy/ViewModeToggle.qml</file>
-        <file>components/Strategy/SignalOutputPanel.qml</file>
+        <file>components/Strategy/BasketConfirmDialog.qml</file>
         <file>components/Strategy/StrategyBacktestParams.qml</file>
         <file>components/Strategy/PerformanceHistoryList.qml</file>
         <file>components/StrategyCard.qml</file>

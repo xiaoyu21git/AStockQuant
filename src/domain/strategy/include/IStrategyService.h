@@ -11,10 +11,11 @@
 #include "RuleGate.h"
 #include "RuleAttribution.h"
 #include "../../attribution/include/AttributionTypes.h"
-#include "../../signal/include/ISignalListener.h"
+#include "IBasketInterceptor.h"
 #include "RulePipeline.h"
 #include "RiskEvaluator.h"
 #include "OrderGenerator.h"
+#include "PositionSizer.h"
 #include "MarketTimingGate.h"
 #include "TimedCircuitBreaker.h"
 #include "../../trading/include/OrderBuilder.h"
@@ -623,15 +624,25 @@ public:
     /// @brief 设置订单回调监听器，所有订单通过此回调通知。
     void setOrderListener(IOrderListener* listener);
 
-    /// @brief 设置信号监听器 (v0.16.0: 信号模式)
-    /// 当 m_executionMode == SignalOnly 时，引擎调用 onSignals() 替代 onOrders()
-    void setSignalListener(domain::sigout::ISignalListener* listener);
+    /// @brief 设置篮子拦截器 (v0.16.0: 半自动模式)
+    /// SemiAuto 模式下，订单生成后先通知拦截器展示确认窗口，用户确认后才执行
+    void setBasketInterceptor(IBasketInterceptor* interceptor) noexcept;
 
-    /// @brief 根据执行模式分发订单/信号 (v0.16.0)
-    /// SignalOnly→ISignalListener, Live/Backtest→IOrderListener
+    /// @brief 用户确认篮子 → 修改后的订单直接提交 TradeExecutionEngine
+    void confirmBasket(std::uint64_t basketId, const std::vector<domain::trading::OrderRequest>& editedOrders);
+
+    /// @brief 用户拒绝篮子 → 丢弃全部订单，记录日志
+    void rejectBasket(std::uint64_t basketId);
+
+    /// @brief [测试] 发射合成篮子 — 生成 3 条样本订单并直接走 dispatchOrders 管线
+    /// 绕过持仓检查，用于验证 SemiAuto 确认窗口的完整链路
+    void testEmitBasket();
+
+    /// @brief 根据执行模式分发订单
+    /// Live/Backtest → IOrderListener;  SemiAuto → IBasketInterceptor
     void dispatchOrders(const std::vector<domain::trading::OrderRequest>& orders);
 
-    /// @brief 设置引擎执行模式 (Live/Backtest/SignalOnly)
+    /// @brief 设置引擎执行模式 (Live/Backtest/SemiAuto)
     void setExecutionMode(EngineExecutionMode mode) noexcept {
         m_executionMode = mode;
     }
@@ -863,7 +874,18 @@ private:
     std::atomic<std::int64_t> m_droppedTicks{0};
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
-    domain::sigout::ISignalListener* m_signalListener{nullptr};  ///< v0.16.0: 信号模式监听器
+
+    // ── 半自动模式 (v0.16.0) ──
+    IBasketInterceptor* m_basketInterceptor{nullptr};
+
+    struct PendingBasket {
+        std::uint64_t basketId{0};
+        std::vector<domain::trading::OrderRequest> orders;
+        bool pending{false};
+    };
+    PendingBasket m_pendingBasket;
+    std::mutex m_basketMutex;  ///< 保护 m_pendingBasket (引擎线程 ↔ confirmBasket/rejectBasket)
+
     EngineExecutionMode m_executionMode{EngineExecutionMode::Live};
     std::string m_accountId;
     std::string m_strategyId;
@@ -871,7 +893,8 @@ private:
     std::unique_ptr<TradeJournal> m_tradeJournal;  // 交易日志 (按策略名/日期分文件)
     std::string m_liveDataPath;     // 实盘数据目录, 用于统一 JSON 持久化
     domain::trading::OrderBuilder m_orderBuilder;
-    OrderGenerator m_orderGenerator{m_orderBuilder};  ///< 持仓感知建单器
+    PositionSizer m_positionSizer;                              ///< 仓位计算器(默认0, Builder/fromDb 注入 baseQty)
+    OrderGenerator m_orderGenerator{m_orderBuilder, m_positionSizer};  ///< 持仓感知建单器
     std::uint32_t m_maxOrderQuantity{10000};  ///< 权重建仓基数（targetWeight × base = 目标股数），由策略配置注入
     std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定

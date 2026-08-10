@@ -25,7 +25,6 @@ enum class ConfigFile {
     TradingConnection,   // config/trading_connection.json
     RiskConfig,          // config/risk_config.json
     Jujin,               // config/jujin.json
-    SignalMode,          // config/signal_mode.json (v0.16.0)
 };
 
 class ConfigManager {

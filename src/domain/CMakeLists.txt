@@ -13,9 +13,7 @@ add_subdirectory(trading)
 add_subdirectory(cleaning)
 add_subdirectory(optimization)
 add_subdirectory(attribution)
-add_subdirectory(signal)
-
-    # indicators/signals removed — astock_ta_lib link removed
+# signal removed — SemiAuto replaces SignalOnly output pipeline (v0.16.0)
 
 set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
 
@@ -42,14 +40,12 @@ target_link_libraries(domain
         domain_cleaning
         domain_optimization
         domain_attribution
-        domain_signal
 )
 
 target_include_directories(domain
     INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/types/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/indicators/include>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/signals/include>
+        # indicators/include, signals/include — removed (dead dirs)
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategies/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/data/include>
          $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backtest/include>

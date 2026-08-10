@@ -236,7 +236,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategySorter.qml
         Qml/components/Strategy/StrategySummaryHeaderCard.qml
         Qml/components/Strategy/PerformanceHistoryList.qml
-        Qml/components/Strategy/SignalOutputPanel.qml
+        Qml/components/Strategy/BasketConfirmDialog.qml
         Qml/page/strategies/BacktestResultAnalysisView.qml
         Qml/page/strategies/StrategyLibraryDialogs.qml
         Qml/page/strategies/StrategyLibrarySearchBar.qml

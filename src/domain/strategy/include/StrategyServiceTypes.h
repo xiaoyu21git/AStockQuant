@@ -40,7 +40,7 @@ enum class StrategyServiceState : std::uint8_t {
 enum class EngineExecutionMode : std::uint8_t {
     Live       = 0,
     Backtest   = 1,
-    SignalOnly = 2,  // v0.16.0: 仅生成信号不执行交易
+    SemiAuto   = 2,  // v0.16.0: 半自动模式 — 篮子需用户确认后执行
 };
 
 enum class DiagnosticsEventCode : std::uint8_t {
@@ -542,7 +542,7 @@ struct StrategyCreationParams final {
     int maxPositions{100};
     double maxWeightPerStock{0.1};
     double minWeightPerStock{0.0};
-    std::uint32_t maxOrderQuantity{100};
+    std::uint32_t maxOrderQuantity{10000};   ///< 单笔最大委托数量(股), 默认10000
     double stopLossPercent{10.0};
     double takeProfitPercent{20.0};
     double maxDrawdownLimit{99.0};

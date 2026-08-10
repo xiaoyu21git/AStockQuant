@@ -1,19 +1,19 @@
 #pragma once
 // OrderGenerator — 持仓感知建单器
-// 将策略原始订单（含 targetWeight）与当前持仓对比，计算实际买卖数量及意图，
-// 生成最终可提交的 OrderRequest 列表。
+// 将策略原始订单（含 targetWeight）与当前持仓对比，生成最终可提交的 OrderRequest。
 //
-// 职责: 纯计算 + 去重 + 最小手数校验，不涉及 I/O、不持有可变状态。
-// 依赖: 注入 OrderBuilder（用于标准化订单字段），IPositionProvider（查询持仓）。
+// 职责: 去重 + 调用 PositionSizer 计算买卖量 + 调用 OrderBuilder 标准化字段。
+// 手数/权重计算已收敛到 PositionSizer，此处不再重复实现。
 
 #include "../../trading/TradingTypes.h"
 #include "../../trading/include/OrderBuilder.h"
+#include "PositionSizer.h"
 #include "StrategyServiceTypes.h"
 
 #include <cstdint>
-#include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace domain::strategy {
@@ -22,7 +22,6 @@ namespace domain::strategy {
 class IPositionProvider {
 public:
     virtual ~IPositionProvider() = default;
-    /// @brief 查询标的当前持仓量；无后缀6位码 → 持仓股数
     [[nodiscard]] virtual std::int64_t quantityOf(const std::string& code) const = 0;
 };
 
@@ -41,48 +40,27 @@ private:
 
 class OrderGenerator {
 public:
-    /// @param orderBuilder 订单标准化器（设置 accountId/strategyId 等公共字段）
-    explicit OrderGenerator(domain::trading::OrderBuilder& orderBuilder)
-        : m_orderBuilder(&orderBuilder) {}
+    /// @param orderBuilder 订单标准化器
+    /// @param sizer 仓位计算器（持有 maxOrderQuantity 等配置）
+    OrderGenerator(domain::trading::OrderBuilder& orderBuilder,
+                   const PositionSizer& sizer)
+        : m_orderBuilder(&orderBuilder), m_sizer(&sizer) {}
 
     /// @brief 从策略原始信号生成持仓感知订单
-    /// @param rawOrders 策略原始信号订单（含 symbol / side / targetWeight / signalScore）
+    /// @param rawOrders 策略原始信号（含 symbol/side/targetWeight/signalScore）
     /// @param posProvider 当前持仓查询接口
-    /// @param maxOrderQuantity 权重建仓基数（targetWeight × base = 目标股数）
-    /// @param strategyId 策略ID（透传给 OrderBuilder）
-    /// @param accountId 账户ID（透传给 OrderBuilder）
+    /// @param strategyId 策略ID
+    /// @param accountId 账户ID
     /// @return 最终可提交的订单列表（已去重、已校验最小手数）
     [[nodiscard]] std::vector<domain::trading::OrderRequest> generate(
         const std::vector<domain::trading::OrderRequest>& rawOrders,
         const IPositionProvider& posProvider,
-        std::uint32_t maxOrderQuantity,
         const std::string& strategyId,
         const std::string& accountId) const;
 
 private:
-    struct OrderDelta {
-        SignalIntent intent = SignalIntent::KEEP;
-        std::int64_t deltaQty = 0;
-    };
-
-    /// @brief 计算买入增量: 新开仓 → OPEN, 加仓 → ADD, 矛盾 → 返回 0
-    /// 目标股数 = targetWeight × maxOrderQuantity（取整到整手）
-    [[nodiscard]] OrderDelta computeBuyDelta(
-        std::int64_t currentQty, double targetWeight,
-        std::uint32_t maxOrderQuantity) const;
-
-    /// @brief 计算卖出减量: strategy signal(targetWeight>0) → REDUCE/CLOSE,
-    ///        rule exit(requestedQty>0) → 尊重显式数量, 否则 CLOSE
-    /// 目标股数 = targetWeight × maxOrderQuantity（取整到整手）
-    [[nodiscard]] OrderDelta computeSellDelta(
-        std::int64_t currentQty, double targetWeight,
-        std::uint32_t maxOrderQuantity,
-        std::int64_t requestedQty) const;
-
-    /// @brief 买单总敞口压缩: 超出 100% 时按等比缩放所有买单
-    void compressBuyTotalWeight(std::vector<domain::trading::OrderRequest>& orders) const;
-
     domain::trading::OrderBuilder* m_orderBuilder;
+    const PositionSizer* m_sizer;
 };
 
 } // namespace domain::strategy

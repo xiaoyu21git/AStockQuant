@@ -496,7 +496,6 @@ ApplicationWindow {
                 anchors.fill: parent
                 sourceComponent: {
                     if (parent.settingsSubPage === "global_settings") return globalSettingsComponent
-                    if (parent.settingsSubPage === "signal_output") return signalOutputSettingsComponent
                     return systemSettingsComponent
                 }
             }
@@ -505,7 +504,6 @@ ApplicationWindow {
 
     Component { id: systemSettingsComponent; SystemSettingsPage { configService: Bridge.TradingConnectionConfigService } }
     Component { id: globalSettingsComponent;  SettingsPage {} }
-    Component { id: signalOutputSettingsComponent; SignalOutputPanel {} }
 
     Component {
         id: monitoringPageComponent
@@ -726,8 +724,7 @@ ApplicationWindow {
             "log_viewer": 9,                  // 日志查看 -> 监控面板
             "personal_settings": 10,          // 个人设置 -> 系统设置
             "system_configuration": 10,       // 系统配置 -> 系统设置
-            "global_settings": 10,             // 全局设置 -> 系统设置
-            "signal_output": 10               // 信号输出 -> 系统设置
+            "global_settings": 10             // 全局设置 -> 系统设置
         };
         
         // 首先检查一级菜单
@@ -817,6 +814,90 @@ ApplicationWindow {
         if (step && processFlow.currentStep !== step) {
             processFlow.goToStep(step)
             console.log("流程流水线同步到步骤:", step)
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // 半自动篮子确认弹窗 (v0.16.0) — 始终在最上层
+    // ════════════════════════════════════════════════════════════
+    Item {
+        anchors.fill: parent
+        z: 9999  // 确保在所有组件之上
+
+        // 半透明遮罩
+        Rectangle {
+            anchors.fill: parent
+            color: "#000000"
+            opacity: basketConfirmDialogLoader.visible ? 0.45 : 0.0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 200 } }
+
+            MouseArea {
+                anchors.fill: parent
+                // 点击遮罩不关闭 — 用户必须明确选择确认/拒绝
+            }
+        }
+
+        // 确认对话框
+        Loader {
+            id: basketConfirmDialogLoader
+            anchors.centerIn: parent
+            sourceComponent: basketConfirmDialogComponent
+            visible: Bridge.StrategyBridge.hasPendingBasket
+        }
+
+        Component {
+            id: basketConfirmDialogComponent
+            BasketConfirmDialog {}
+        }
+
+        // 🧪 测试按钮 — 发射合成篮子, 触发 SemiAuto 确认流程
+        Rectangle {
+            anchors.right: parent.right
+            anchors.rightMargin: 20
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 20
+            width: testLabel.implicitWidth + 24
+            height: 40
+            radius: 10
+            color: testBasketMa.containsMouse ? "#F59E0B" : "#3B82F6"
+            visible: !Bridge.StrategyBridge.hasPendingBasket
+            border.color: "#60A5FA"
+            border.width: 1
+
+            Behavior on color { ColorAnimation { duration: 150 } }
+
+            Text {
+                id: testLabel
+                anchors.centerIn: parent
+                text: "🧪 测试篮子"
+                font.pixelSize: 13
+                font.weight: Font.Medium
+                color: "#FFFFFF"
+            }
+
+            MouseArea {
+                id: testBasketMa
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    var sid = Bridge.StrategyBridge.selId
+                    if (!sid && Bridge.StrategyBridge.listModel && Bridge.StrategyBridge.listModel.rowCount() > 0) {
+                        // selId 未绑定 → 取列表第一个策略
+                        var first = Bridge.StrategyBridge.listModel.getRow(0)
+                        if (first && first.strategyId) {
+                            sid = first.strategyId
+                        }
+                    }
+                    if (!sid) {
+                        console.warn("[Test] 未选择策略, 无法发射测试篮子")
+                        return
+                    }
+                    console.log("[Test] 发射测试篮子, strategyId=" + sid)
+                    Bridge.StrategyBridge.testEmitBasket(sid)
+                }
+            }
         }
     }
 }

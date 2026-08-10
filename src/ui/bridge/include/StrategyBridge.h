@@ -23,16 +23,12 @@ namespace domain::strategy {
 class StrategyEngine;
 }
 
-namespace domain::sigout {
-class ISignalListener;
-}
-
 class StrategyListModel;
-class SignalPersistencePort;
 
 #include "database/StrategyRepository.h"
+#include "../../domain/strategy/include/IBasketInterceptor.h"
 
-class StrategyBridge : public QObject {
+class StrategyBridge : public QObject, public domain::strategy::IBasketInterceptor {
     Q_OBJECT
 
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
@@ -41,6 +37,10 @@ class StrategyBridge : public QObject {
     Q_PROPERTY(bool cacheOk READ cacheOk NOTIFY cacheOkChanged)
     Q_PROPERTY(QString selId READ selId WRITE setSelId NOTIFY selIdChanged)
     Q_PROPERTY(QAbstractListModel* listModel READ listModel CONSTANT)
+    Q_PROPERTY(QVariantList pendingBasketOrders READ pendingBasketOrders NOTIFY pendingBasketChanged)
+    Q_PROPERTY(QString pendingBasketStrategyName READ pendingBasketStrategyName NOTIFY pendingBasketChanged)
+    Q_PROPERTY(QString pendingBasketContextDesc READ pendingBasketContextDesc NOTIFY pendingBasketChanged)
+    Q_PROPERTY(bool hasPendingBasket READ hasPendingBasket NOTIFY pendingBasketChanged)
 
 public:
     explicit StrategyBridge(QObject* parent = nullptr);
@@ -79,24 +79,26 @@ public:
     /// @brief symbol → "股票中文名 代码" (如 "平安银行 000001.SZ")
     Q_INVOKABLE QString stockDisplayName(const QString& symbol) const;
 
-    // ── 信号模式 (v0.16.0) ──
+    // ── 半自动确认窗口 (v0.16.0) ──
 
-    /// @brief 设置信号模式配置, 启用/禁用信号输出
-    /// config: { enabled, signalFormat("ths"/"tdx"/"internal"), pushTarget("file"/"socket"),
-    ///           signalOutputPath }
-    Q_INVOKABLE void setSignalConfig(const QVariantMap& config);
+    /// @brief 用户确认篮子订单 → 提交至 TradeExecutionEngine
+    /// QML BasketConfirmDialog 调用, editedOrders 中的 quantity 可能被用户修改
+    Q_INVOKABLE void confirmBasket(const QVariantList& editedOrders);
 
-    /// @brief 获取当前信号模式配置
-    Q_INVOKABLE QVariantMap signalConfig() const;
+    /// @brief 用户拒绝篮子 → 丢弃全部订单
+    Q_INVOKABLE void rejectBasket();
 
-    /// @brief 按策略+日期查询信号历史
-    /// @return [ { signalId, symbol, stockName, intent, score, signalTime, pushed, pushError, ... }, ... ]
-    Q_INVOKABLE QVariantList getSignalHistory(const QString& strategyId, const QString& date) const;
+    /// @brief [测试] 发射合成测试篮子 (3条样本订单), 用于验证 SemiAuto 确认窗口链路
+    Q_INVOKABLE void testEmitBasket(const QString& strategyId);
 
-    /// @brief 按策略+日期范围查询信号统计
-    /// @return { totalSignals, pushedCount, failedCount, avgScore, byIntent: {...} }
-    Q_INVOKABLE QVariantMap getSignalStats(const QString& strategyId, const QString& startDate,
-                                            const QString& endDate) const;
+    /// @brief 当前待确认订单列表 (QML 显示用)
+    [[nodiscard]] QVariantList pendingBasketOrders() const;
+    /// @brief 当前待确认篮子的策略名称
+    [[nodiscard]] QString pendingBasketStrategyName() const;
+    /// @brief 当前待确认篮子的上下文描述
+    [[nodiscard]] QString pendingBasketContextDesc() const;
+    /// @brief 是否有待确认的篮子
+    [[nodiscard]] bool hasPendingBasket() const;
 
     // ── 策略类型枚举 (替代 JS StrategyCreationUtils 的数字映射) ──
     /// @brief 策略类型索引 → 中文名
@@ -161,6 +163,9 @@ signals:
     void initedChanged();
     void cacheOkChanged();
     void selIdChanged();
+
+    // ── 半自动篮子确认 (v0.16.0) ──
+    void pendingBasketChanged();
 
     void strategiesChanged();
     void created(const QString& strategyId, const QVariantMap& strategyData);
@@ -295,13 +300,29 @@ private:
     // 策略运行时状态（内存单向控制，不查 DB/引擎）
     QHash<QString, QString> m_runtimeStatus;
 
-    // 信号模式 (v0.16.0)
-    QVariantMap m_signalConfig;
-    std::unique_ptr<domain::sigout::ISignalListener> m_signalListener;
-    std::shared_ptr<SignalPersistencePort> m_signalPersistence;
+    // ── 半自动篮子确认 (v0.16.0) ──
 
-    /// @brief 装配 SignalListener (Formatter + Pusher + Persistence)
-    std::unique_ptr<domain::sigout::ISignalListener> assembleSignalListener();
+    /// @brief IBasketInterceptor 实现: 引擎线程 → Qt 主线程
+    bool onBasketReady(std::uint64_t basketId,
+                      const std::vector<domain::strategy::OrderRequest>& orders,
+                      const std::string& strategyId,
+                      const std::string& strategyName,
+                      const std::string& contextDescription) override;
+
+    std::uint64_t m_pendingBasketId{0};
+    QString m_pendingStrategyId;     ///< UUID, 用于 confirmBasket/rejectBasket 查引擎
+    QString m_pendingStrategyName;   ///< 显示名, 用于 QML 弹窗标题
+    QString m_pendingContextDesc;
+    QVariantList m_pendingBasketOrders;  ///< QML 显示用订单列表
+    std::vector<domain::strategy::OrderRequest> m_pendingOriginalOrders;  ///< 原始订单副本, 供 confirmBasket 重建
+
+    /// @brief OrderRequest → QVariantList (跨线程传递到 QML)
+    static QVariantList ordersToVariantList(const std::vector<domain::strategy::OrderRequest>& orders);
+
+    /// @brief QVariantList → OrderRequest[] (QML 回传, 仅 quantity 可被编辑)
+    static std::vector<domain::strategy::OrderRequest> variantListToOrders(
+        const QVariantList& editedList,
+        const std::vector<domain::strategy::OrderRequest>& originalOrders);
 
     static StrategyBridge* s_instance;
 };

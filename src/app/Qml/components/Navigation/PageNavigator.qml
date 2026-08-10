@@ -41,8 +41,7 @@ QtObject {
         // 系统设置相关页面
         "global_settings":       { stackIndex: 11, pageName: "全局设置", moduleId: "settings" },
         "personal_settings": { stackIndex: 11, pageName: "个人设置", moduleId: "settings" },
-        "system_configuration": { stackIndex: 11, pageName: "系统配置", moduleId: "settings" },
-        "signal_output":       { stackIndex: 11, pageName: "信号输出", moduleId: "settings" }
+        "system_configuration": { stackIndex: 11, pageName: "系统配置", moduleId: "settings" }
     }
     
     // === 模块到页面的映射 ===
@@ -64,7 +63,7 @@ QtObject {
             "real_time_monitoring", "alert_center", "system_status", "log_viewer"
         ],
         "settings": [
-            "global_settings", "personal_settings", "system_configuration", "signal_output"
+            "global_settings", "personal_settings", "system_configuration"
         ]
     }
     

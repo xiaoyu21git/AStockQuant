@@ -39,8 +39,8 @@ public:
     /// @brief 为所有引擎注册订单回调监听器（实盘模式下使用）
     void setOrderListener(IOrderListener* listener);
 
-    /// @brief 为所有引擎注册信号监听器（信号模式下使用, v0.16.0）
-    void setSignalListener(domain::sigout::ISignalListener* listener);
+    /// @brief 为所有引擎注册篮子拦截器（半自动模式下使用, v0.16.0）
+    void setBasketInterceptor(IBasketInterceptor* interceptor);
 
     /// @brief 为所有引擎设置执行模式（v0.16.0）
     void setExecutionMode(EngineExecutionMode mode);
@@ -58,6 +58,11 @@ public:
     /// @brief 设置默认订单监听器（由桥接层在初始化时注入一次，所有引擎共享）
     void setDefaultOrderListener(IOrderListener* listener) {
         m_defaultOrderListener = listener;
+    }
+
+    /// @brief 设置默认篮子拦截器（由桥接层在初始化时注入一次，v0.16.0 SemiAuto）
+    void setDefaultBasketInterceptor(IBasketInterceptor* interceptor) {
+        m_defaultBasketInterceptor = interceptor;
     }
 
     /// @brief 设置实盘数据持久化目录（由桥接层在初始化时注入一次）
@@ -87,6 +92,7 @@ private:
     std::unordered_map<std::string, std::unique_ptr<StrategyEngine>> m_engines;
     factor::FactorInstanceManager* m_factorInstanceManager{nullptr};
     IOrderListener* m_defaultOrderListener{nullptr};
+    IBasketInterceptor* m_defaultBasketInterceptor{nullptr};  // v0.16.0 SemiAuto
     std::string m_liveDataPath;  // 实盘数据持久化目录
 };
 

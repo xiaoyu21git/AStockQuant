@@ -35,11 +35,6 @@ StrategyBridge* StrategyBridge::s_instance = nullptr;
 #include "foundation/log/logging.hpp"
 #include "../../domain/strategy/include/RuntimeFactorSvc.h"
 
-// 信号模式 (v0.16.0)
-#include "../../domain/signal/include/ISignalFormatter.h"
-#include "../../domain/signal/include/ISignalListener.h"
-#include "../../domain/signal/include/ISignalPusher.h"
-#include "../include/SignalPersistencePort.h"
 #include "foundation/config/ConfigManager.hpp"
 
 #include <QJsonArray>
@@ -393,30 +388,11 @@ void StrategyBridge::init()
             });
         }
 
-        // ── 加载信号模式配置 (v0.16.0) ──
+        // ── 半自动模式: 注册篮子拦截器 + 切换所有引擎为 SemiAuto ──
         {
-            auto signalNode = foundation::config::ConfigManager::instance()
-                .loadConfigFile(foundation::config::ConfigFile::SignalMode);
-            if (signalNode && !signalNode->isEmpty()) {
-                QVariantMap cfg;
-                cfg["enabled"] = QString::fromStdString(
-                    signalNode->getPath("enabled", '.').asString("false"));
-                cfg["signalFormat"] = QString::fromStdString(
-                    signalNode->getPath("signalFormat", '.').asString("ths"));
-                cfg["pushTarget"] = QString::fromStdString(
-                    signalNode->getPath("pushTarget", '.').asString("file"));
-                cfg["signalOutputPath"] = QString::fromStdString(
-                    signalNode->getPath("signalOutputPath", '.').asString("./signals/"));
-                setSignalConfig(cfg);
-            } else {
-                // 默认: 信号模式关闭
-                QVariantMap defaultCfg;
-                defaultCfg["enabled"] = "false";
-                defaultCfg["signalFormat"] = "ths";
-                defaultCfg["pushTarget"] = "file";
-                defaultCfg["signalOutputPath"] = "./signals/";
-                m_signalConfig = defaultCfg;
-            }
+            mgr.setDefaultBasketInterceptor(this);
+            mgr.setBasketInterceptor(this);
+            mgr.setExecutionMode(domain::strategy::EngineExecutionMode::SemiAuto);
         }
 
         INTERNAL_INFO_STREAM << "[Bridge] init repo OK, calling refreshModel";
@@ -1494,197 +1470,165 @@ QString StrategyBridge::tr(const QString& key, const QString&) const {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 信号模式 (v0.16.0)
+// 半自动篮子确认 (v0.16.0)
 // ═══════════════════════════════════════════════════════════════════════════
 
-void StrategyBridge::setSignalConfig(const QVariantMap& config)
+using OrderRequest = domain::strategy::OrderRequest;
+using OrderSide = domain::strategy::OrderSide;
+
+// ── OrderRequest → QVariantList (引擎线程 → Qt 主线程) ──
+QVariantList StrategyBridge::ordersToVariantList(const std::vector<OrderRequest>& orders)
 {
-    bool enabled = config.value("enabled").toString() == "true";
-    QString format = config.value("signalFormat", "ths").toString();
-    QString target = config.value("pushTarget", "file").toString();
-    QString outputPath = config.value("signalOutputPath", "./signals/").toString();
-
-    m_signalConfig = config;
-
-    if (!enabled) {
-        // 关闭信号模式: 恢复交易模式
-        auto& mgr = domain::strategy::StrategyManager::instance();
-        mgr.setSignalListener(nullptr);
-        mgr.setExecutionMode(domain::strategy::EngineExecutionMode::Live);
-        m_signalListener.reset();
-        m_signalPersistence.reset();
-        INTERNAL_INFO_STREAM << "[Bridge] Signal mode DISABLED";
-        return;
+    QVariantList list;
+    list.reserve(static_cast<int>(orders.size()));
+    for (const auto& o : orders) {
+        QVariantMap item;
+        item["symbol"]       = QString::fromStdString(o.symbol());
+        item["side"]         = o.side() == OrderSide::Buy ? QStringLiteral("买入") : QStringLiteral("卖出");
+        item["sideRaw"]      = static_cast<int>(o.side());
+        item["quantity"]     = static_cast<qlonglong>(o.quantity());
+        item["targetWeight"] = o.extensionAs<double>(domain::trading::ExtKey::kTargetWeight, 0.0);
+        item["signalScore"]  = o.extensionAs<double>(domain::trading::ExtKey::kSignalScore, 0.0);
+        item["signalIntent"] = static_cast<int>(
+            o.extensionAs<std::uint64_t>(domain::trading::ExtKey::kSignalIntent, 0));
+        item["traceId"]      = QString::fromStdString(o.traceId());
+        list.append(item);
     }
-
-    // 启用信号模式: 装配 SignalListener
-    m_signalListener = assembleSignalListener();
-
-    // 注入引擎
-    auto& mgr = domain::strategy::StrategyManager::instance();
-    mgr.setSignalListener(m_signalListener.get());
-    mgr.setExecutionMode(domain::strategy::EngineExecutionMode::SignalOnly);
-
-    INTERNAL_INFO_STREAM << "[Bridge] Signal mode ENABLED format=" << format.toStdString()
-                         << " target=" << target.toStdString()
-                         << " outputPath=" << outputPath.toStdString();
+    return list;
 }
 
-QVariantMap StrategyBridge::signalConfig() const
+// ── QVariantList → OrderRequest[] (QML 回传, 仅 quantity 可被编辑) ──
+std::vector<OrderRequest> StrategyBridge::variantListToOrders(
+    const QVariantList& editedList,
+    const std::vector<OrderRequest>& originalOrders)
 {
-    return m_signalConfig;
-}
+    std::vector<OrderRequest> result;
+    result.reserve(originalOrders.size());
 
-std::unique_ptr<domain::sigout::ISignalListener> StrategyBridge::assembleSignalListener()
-{
-    QString format = m_signalConfig.value("signalFormat", "ths").toString();
-    QString target = m_signalConfig.value("pushTarget", "file").toString();
-    QString outputPath = m_signalConfig.value("signalOutputPath", "./signals/").toString();
+    for (int i = 0; i < editedList.size() && i < static_cast<int>(originalOrders.size()); ++i) {
+        QVariantMap item = editedList[i].toMap();
+        OrderRequest order = originalOrders[i];  // 拷贝原始订单
 
-    // 1. 创建格式化器
-    std::unique_ptr<domain::sigout::ISignalFormatter> formatter;
-    if (format == "tdx") {
-        formatter = domain::sigout::createTdxFormatter();
-    } else {
-        formatter = domain::sigout::createThsFormatter(); // 默认同花顺
-    }
-
-    // 2. 创建推送器 (Phase 1: 仅文件推送)
-    std::unique_ptr<domain::sigout::ISignalPusher> pusher;
-    pusher = domain::sigout::createFilePusher(outputPath.toStdString(),
-                                               format.toStdString());
-
-    // 3. 创建持久化端口
-    if (!m_signalPersistence) {
-        m_signalPersistence = std::make_shared<SignalPersistencePort>();
-    }
-
-    // 4. 组装 SignalListener
-    return std::make_unique<domain::sigout::SignalListener>(
-        std::move(formatter), std::move(pusher), m_signalPersistence);
-}
-
-QVariantList StrategyBridge::getSignalHistory(const QString& strategyId,
-                                               const QString& date) const
-{
-    QVariantList result;
-    auto& pool = astock::database::NativePgConnectionPool::instance();
-    if (!pool.isInitialized()) return result;
-
-    auto db = pool.getConnection();
-    if (!db || !db->isOpen()) return result;
-
-    std::string sql = "SELECT signal_id, symbol, intent, target_weight, score, "
-                       "signal_format, push_target, signal_time, trace_id, pushed, push_error "
-                       "FROM live.signal_history "
-                       "WHERE trading_day=? "
-                       "ORDER BY signal_time DESC";
-
-    // 如果有 strategyId, 增加过滤
-    if (!strategyId.isEmpty()) {
-        sql = "SELECT signal_id, symbol, intent, target_weight, score, "
-              "signal_format, push_target, signal_time, trace_id, pushed, push_error "
-              "FROM live.signal_history "
-              "WHERE strategy_id=? AND trading_day=? "
-              "ORDER BY signal_time DESC";
-        auto rs = db->executeQuery(sql, {
-            astock::database::SqlParam{strategyId.toStdString()},
-            astock::database::SqlParam{date.toStdString()}
-        });
-        for (std::size_t i = 0; i < rs.rowCount(); ++i) {
-            const auto& row = rs.getRow(i);
-            QVariantMap item;
-            item["signalId"] = QString::fromStdString(row.getString("signal_id"));
-            item["symbol"] = QString::fromStdString(row.getString("symbol"));
-            item["stockName"] = StockNameResolver::name(
-                QString::fromStdString(row.getString("symbol")));
-            item["intent"] = row.getInt("intent");
-            item["targetWeight"] = row.getDouble("target_weight");
-            item["score"] = row.getDouble("score");
-            item["signalFormat"] = QString::fromStdString(row.getString("signal_format"));
-            item["pushTarget"] = QString::fromStdString(row.getString("push_target"));
-            item["signalTime"] = QString::fromStdString(row.getString("signal_time"));
-            item["traceId"] = QString::fromStdString(row.getString("trace_id"));
-            item["pushed"] = row.getInt("pushed") != 0;
-            item["pushError"] = QString::fromStdString(row.getString("push_error"));
-            result.append(item);
+        // 仅替换 quantity (QML 中唯一可编辑字段)
+        qlonglong editedQty = item.value("quantity").toLongLong();
+        if (editedQty > 0) {
+            order.setQuantity(editedQty);
         }
-    } else {
-        auto rs = db->executeQuery(sql, {
-            astock::database::SqlParam{date.toStdString()}
-        });
-        for (std::size_t i = 0; i < rs.rowCount(); ++i) {
-            const auto& row = rs.getRow(i);
-            QVariantMap item;
-            item["signalId"] = QString::fromStdString(row.getString("signal_id"));
-            item["symbol"] = QString::fromStdString(row.getString("symbol"));
-            item["stockName"] = StockNameResolver::name(
-                QString::fromStdString(row.getString("symbol")));
-            item["intent"] = row.getInt("intent");
-            item["targetWeight"] = row.getDouble("target_weight");
-            item["score"] = row.getDouble("score");
-            item["signalFormat"] = QString::fromStdString(row.getString("signal_format"));
-            item["pushTarget"] = QString::fromStdString(row.getString("push_target"));
-            item["signalTime"] = QString::fromStdString(row.getString("signal_time"));
-            item["traceId"] = QString::fromStdString(row.getString("trace_id"));
-            item["pushed"] = row.getInt("pushed") != 0;
-            item["pushError"] = QString::fromStdString(row.getString("push_error"));
-            result.append(item);
-        }
+        result.push_back(std::move(order));
     }
     return result;
 }
 
-QVariantMap StrategyBridge::getSignalStats(const QString& strategyId,
-                                            const QString& startDate,
-                                            const QString& endDate) const
+// ── IBasketInterceptor 实现: 引擎线程 → Qt 主线程 ──
+bool StrategyBridge::onBasketReady(std::uint64_t basketId,
+                                   const std::vector<OrderRequest>& orders,
+                                   const std::string& strategyId,
+                                   const std::string& strategyName,
+                                   const std::string& contextDescription)
 {
-    QVariantMap stats;
-    auto& pool = astock::database::NativePgConnectionPool::instance();
-    if (!pool.isInitialized()) {
-        stats["totalSignals"] = 0;
-        return stats;
+    if (m_pendingBasketId != 0) {
+        INTERNAL_WARN_STREAM << "[Bridge] 篮子 " << m_pendingBasketId
+                             << " 仍在等待确认, 拒绝新篮子 " << basketId;
+        return false;  // 上一个篮子未确认, 拒绝
     }
 
-    auto db = pool.getConnection();
-    if (!db || !db->isOpen()) {
-        stats["totalSignals"] = 0;
-        return stats;
+    m_pendingBasketId = basketId;
+    m_pendingStrategyId = QString::fromStdString(strategyId);
+    m_pendingStrategyName = QString::fromStdString(strategyName);
+    m_pendingContextDesc = QString::fromStdString(contextDescription);
+    m_pendingOriginalOrders = orders;  // 保存原始订单副本, 用于 confirmBasket 时重建
+
+    // 转换为 QVariantList 并跨线程通知 QML
+    QVariantList qmlOrders = ordersToVariantList(orders);
+
+    QMetaObject::invokeMethod(this, [this, qmlOrders]() {
+        m_pendingBasketOrders = qmlOrders;
+        emit pendingBasketChanged();
+    }, Qt::QueuedConnection);
+
+    return true;
+}
+
+// ── QML 调用: 用户确认篮子 ──
+void StrategyBridge::confirmBasket(const QVariantList& editedOrders)
+{
+    if (m_pendingBasketId == 0) return;
+
+    auto* engine = domain::strategy::StrategyManager::instance().get(
+        m_pendingStrategyId.toStdString());
+    if (!engine) {
+        INTERNAL_WARN_STREAM << "[Bridge] confirmBasket: engine not found for "
+                             << m_pendingStrategyId.toStdString();
+        m_pendingBasketId = 0;
+        m_pendingStrategyId.clear();
+        m_pendingOriginalOrders.clear();
+        m_pendingBasketOrders.clear();
+        return;
     }
 
-    // 统计查询
-    std::string sql = "SELECT COUNT(*) AS total, "
-                       "SUM(CASE WHEN pushed THEN 1 ELSE 0 END) AS pushed_cnt, "
-                       "SUM(CASE WHEN NOT pushed THEN 1 ELSE 0 END) AS failed_cnt, "
-                       "AVG(score) AS avg_score "
-                       "FROM live.signal_history "
-                       "WHERE trading_day BETWEEN ? AND ?";
+    // 从原始订单重建, 仅替换 QML 中编辑过的 quantity
+    auto finalOrders = variantListToOrders(editedOrders, m_pendingOriginalOrders);
 
-    if (!strategyId.isEmpty()) {
-        sql += " AND strategy_id=?";
+    engine->confirmBasket(m_pendingBasketId, finalOrders);
+
+    INTERNAL_INFO_STREAM << "[Bridge] 篮子确认: basketId=" << m_pendingBasketId
+                         << " orders=" << finalOrders.size();
+
+    m_pendingBasketId = 0;
+    m_pendingStrategyId.clear();
+    m_pendingOriginalOrders.clear();
+    m_pendingBasketOrders.clear();
+    emit pendingBasketChanged();
+}
+
+// ── QML 调用: 用户拒绝篮子 ──
+void StrategyBridge::rejectBasket()
+{
+    if (m_pendingBasketId == 0) return;
+
+    auto* engine = domain::strategy::StrategyManager::instance().get(
+        m_pendingStrategyId.toStdString());
+    if (engine) {
+        engine->rejectBasket(m_pendingBasketId);
     }
 
-    std::vector<astock::database::SqlParam> params = {
-        astock::database::SqlParam{startDate.toStdString()},
-        astock::database::SqlParam{endDate.toStdString()}
-    };
-    if (!strategyId.isEmpty()) {
-        params.emplace_back(strategyId.toStdString());
-    }
+    INTERNAL_INFO_STREAM << "[Bridge] 篮子拒绝: basketId=" << m_pendingBasketId;
 
-    auto rs = db->executeQuery(sql, params);
-    if (!rs.isEmpty()) {
-        const auto& row = rs.getRow(0);
-        stats["totalSignals"] = row.getInt("total");
-        stats["pushedCount"] = row.getInt("pushed_cnt");
-        stats["failedCount"] = row.getInt("failed_cnt");
-        stats["avgScore"] = row.getDouble("avg_score");
-    } else {
-        stats["totalSignals"] = 0;
-        stats["pushedCount"] = 0;
-        stats["failedCount"] = 0;
-        stats["avgScore"] = 0.0;
-    }
+    m_pendingBasketId = 0;
+    m_pendingStrategyId.clear();
+    m_pendingOriginalOrders.clear();
+    m_pendingBasketOrders.clear();
+    emit pendingBasketChanged();
+}
 
-    return stats;
+void StrategyBridge::testEmitBasket(const QString& strategyId)
+{
+    auto* engine = domain::strategy::StrategyManager::instance().get(strategyId.toStdString());
+    if (!engine) {
+        setErr(QStringLiteral("testEmitBasket: 策略未找到"));
+        return;
+    }
+    engine->testEmitBasket();
+}
+
+// ── QML 属性访问器 ──
+
+QVariantList StrategyBridge::pendingBasketOrders() const
+{
+    return m_pendingBasketOrders;
+}
+
+QString StrategyBridge::pendingBasketStrategyName() const
+{
+    return m_pendingStrategyName;
+}
+
+QString StrategyBridge::pendingBasketContextDesc() const
+{
+    return m_pendingContextDesc;
+}
+
+bool StrategyBridge::hasPendingBasket() const
+{
+    return m_pendingBasketId != 0;
 }

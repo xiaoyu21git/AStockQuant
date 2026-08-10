@@ -21,6 +21,8 @@ target_sources(domain_strategy_runtime PRIVATE
     src/SignalBlendCompositor.cpp
     src/NonFactorStrategy.cpp
     src/OrderGenerator.cpp
+    src/PositionSizer.cpp
+
     src/RiskManager.cpp
     src/RiskControl.cpp
     src/RulePipeline.cpp

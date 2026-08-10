@@ -230,7 +230,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         params.maxWeightPerStock = root.has("maxWeightPerStock") ? root.get("maxWeightPerStock").asDouble() : 0.1;
         params.minWeightPerStock = root.has("minWeightPerStock") ? root.get("minWeightPerStock").asDouble() : 0.0;
         params.minHoldDays = root.has("minHoldDays") ? root.get("minHoldDays").asInt() : 0;
-        params.maxOrderQuantity = root.has("maxOrderQuantity") ? static_cast<std::uint32_t>(root.get("maxOrderQuantity").asInt()) : 100U;
+        if (root.has("maxOrderQuantity"))
+            params.maxOrderQuantity = static_cast<std::uint32_t>(root.get("maxOrderQuantity").asInt());
         params.stopLossPercent   = root.has("stopLossPercent")   ? root.get("stopLossPercent").asDouble()   : 10.0;
         params.takeProfitPercent = root.has("takeProfitPercent") ? root.get("takeProfitPercent").asDouble() : 20.0;
         params.maxDrawdownLimit  = root.has("maxDrawdownLimit")  ? root.get("maxDrawdownLimit").asDouble()   : 99.0;
@@ -392,8 +393,18 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     RuntimeStrategyContext ctx(kDefaultInstanceId, 1,
                                 params.maxOrderQuantity, params.maxWeightPerStock, true);
     auto runtimeStrategy = StrategyBase::create(kDefaultInstanceId, params);
-    if (!runtimeStrategy || !engine->registerStrategy(runtimeStrategy, ctx).isOk())
+    if (!runtimeStrategy) {
+        INTERNAL_ERROR_STREAM << "[fromDb] StrategyBase::create 返回 nullptr kind="
+                             << static_cast<int>(params.behaviorKind)
+                             << " factorWeights=" << params.factorWeights.size();
         return nullptr;
+    }
+    auto regResult = engine->registerStrategy(runtimeStrategy, ctx);
+    if (!regResult.isOk()) {
+        INTERNAL_ERROR_STREAM << "[fromDb] registerStrategy 失败: code="
+                             << static_cast<int>(regResult.code());
+        return nullptr;
+    }
 
     engine->m_minHoldDays = params.minHoldDays;
     engine->m_strategyName = params.strategyName;
@@ -903,7 +914,7 @@ int StrategyEngine::liquidateAll()
     for (const auto& p : positions)
         liqPosMap[p.symbol] = p.quantity;
     MapPositionProvider liqPosProvider(liqPosMap);
-    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, m_maxOrderQuantity, m_strategyId, snap.account.accountId);
+    auto validatedOrders = m_orderGenerator.generate(orders, liqPosProvider, m_strategyId, snap.account.accountId);
 
     if (validatedOrders.empty()) {
         INTERNAL_INFO_STREAM << "[StrategyEngine] liquidateAll: OrderGenerator 过滤后无有效订单";
@@ -927,59 +938,113 @@ void StrategyEngine::setOrderListener(IOrderListener* listener)
     m_orderListener = listener;
 }
 
-void StrategyEngine::setSignalListener(domain::sigout::ISignalListener* listener)
+// ═══════════════════════════════════════════════════════════════
+// 半自动篮子确认 (v0.16.0)
+// ═══════════════════════════════════════════════════════════════
+
+void StrategyEngine::setBasketInterceptor(IBasketInterceptor* interceptor) noexcept
 {
-    m_signalListener = listener;
+    m_basketInterceptor = interceptor;
+}
+
+void StrategyEngine::confirmBasket(std::uint64_t basketId,
+                                   const std::vector<OrderRequest>& editedOrders)
+{
+    std::lock_guard<std::mutex> lock(m_basketMutex);
+    if (!m_pendingBasket.pending || m_pendingBasket.basketId != basketId) {
+        INTERNAL_WARN_STREAM << "[SemiAuto] confirmBasket: basketId 不匹配"
+                             << " expected=" << m_pendingBasket.basketId
+                             << " got=" << basketId;
+        return;
+    }
+    m_pendingBasket.pending = false;
+
+    if (!editedOrders.empty() && m_orderListener) {
+        m_orderListener->onOrders(editedOrders);
+        INTERNAL_INFO_STREAM << "[SemiAuto] 篮子确认: basketId=" << basketId
+                             << " orders=" << editedOrders.size();
+    }
+}
+
+void StrategyEngine::rejectBasket(std::uint64_t basketId)
+{
+    std::lock_guard<std::mutex> lock(m_basketMutex);
+    if (!m_pendingBasket.pending || m_pendingBasket.basketId != basketId) {
+        return;
+    }
+    m_pendingBasket.pending = false;
+    INTERNAL_INFO_STREAM << "[SemiAuto] 篮子拒绝: basketId=" << basketId
+                         << " discarded=" << m_pendingBasket.orders.size() << " orders";
+}
+
+void StrategyEngine::testEmitBasket()
+{
+    auto snap = engine::AccountEngine::instance().snapshot();
+    const auto& accountId = snap.account.accountId;
+    if (accountId.empty()) {
+        INTERNAL_WARN_STREAM << "[Test] testEmitBasket: AccountEngine 无 accountId, 无法构建订单";
+        return;
+    }
+
+    // 3 条覆盖 Buy/Sell/不同权重的合成订单
+    struct Fixture { const char* sym; OrderSide side; std::int64_t qty; double score; double weight; } fixtures[] = {
+        {"000001.SZ", OrderSide::Buy,   100, 0.85, 0.05},
+        {"600000.SH", OrderSide::Buy,   200, 0.72, 0.08},
+        {"000002.SZ", OrderSide::Sell,  100, 0.60, 0.03},
+    };
+
+    std::vector<OrderRequest> orders;
+    for (auto& f : fixtures) {
+        auto order = m_orderBuilder.buildSignalOrder(
+            f.sym, f.side, 0.0, f.qty, f.score, m_strategyId, accountId);
+        order.setExtension(domain::trading::ExtKey::kTargetWeight, f.weight);
+        order.setExtension(domain::trading::ExtKey::kSignalScore, f.score);
+        orders.push_back(std::move(order));
+    }
+
+    INTERNAL_INFO_STREAM << "[Test] testEmitBasket: 发射 " << orders.size() << " 条合成订单";
+    dispatchOrders(orders);
 }
 
 void StrategyEngine::dispatchOrders(const std::vector<OrderRequest>& orders)
 {
     if (orders.empty()) return;
 
-    if (m_executionMode == EngineExecutionMode::SignalOnly && m_signalListener) {
-        // 信号模式: OrderRequest → SignalOutput → ISignalListener
-        std::vector<domain::sigout::SignalOutput> signals;
-        signals.reserve(orders.size());
-
-        for (const auto& o : orders) {
-            domain::sigout::SignalOutput so;
-            so.symbol = o.symbol();
-            // stockName 留空, 由 Bridge 层缓存填充
-            so.signalIntent = (o.side() == domain::trading::OrderSide::Buy)
-                ? static_cast<int>(SignalIntent::OPEN)
-                : static_cast<int>(SignalIntent::CLOSE);
-            so.score = 0.0;  // OrderRequest 不含因子得分, 后续可从 StrategySignal 管道补入
-            so.strategyName = m_strategyName;
-            so.traceId = o.traceId();
-            // timestamp: 取当前时间 ISO8601
-            {
-                auto now = std::chrono::system_clock::now();
-                auto tt = std::chrono::system_clock::to_time_t(now);
-                std::tm tmBuf{};
-#ifdef _WIN32
-                localtime_s(&tmBuf, &tt);
-#else
-                localtime_r(&tt, &tmBuf);
-#endif
-                std::ostringstream ts;
-                ts << std::setfill('0')
-                   << std::setw(4) << (tmBuf.tm_year + 1900) << "-"
-                   << std::setw(2) << (tmBuf.tm_mon + 1) << "-"
-                   << std::setw(2) << tmBuf.tm_mday << "T"
-                   << std::setw(2) << tmBuf.tm_hour << ":"
-                   << std::setw(2) << tmBuf.tm_min << ":"
-                   << std::setw(2) << tmBuf.tm_sec;
-                so.timestamp = ts.str();
+    if (m_executionMode == EngineExecutionMode::SemiAuto && m_basketInterceptor) {
+        // ── 半自动模式: 暂存篮子 → 通知 Bridge 展示确认窗口 ──
+        std::uint64_t basketId = 0;
+        {
+            std::lock_guard<std::mutex> lock(m_basketMutex);
+            if (m_pendingBasket.pending) {
+                INTERNAL_WARN_STREAM << "[SemiAuto] 篮子 " << m_pendingBasket.basketId
+                    << " 未确认 — 新篮子被丢弃 (" << orders.size() << " orders)";
+                return;
             }
-            signals.push_back(std::move(so));
+            basketId = generateBasketId();
+            // 复制订单列表 (不修改 const 入参)
+            m_pendingBasket.orders = orders;
+            m_pendingBasket.basketId = basketId;
+            m_pendingBasket.pending = true;
         }
 
-        m_signalListener->onSignals(signals);
-        INTERNAL_INFO_STREAM << "[StrategyEngine] 信号模式: dispatched " << signals.size()
-                             << " signals trace:" << signals.front().traceId;
-    } else if (m_orderListener) {
-        // 交易模式: 走订单通道 (原有行为)
-        dispatchOrders(orders);
+        // 打篮子ID (在副本上操作)
+        auto basketOrders = orders;  // 拷贝
+        for (auto& o : basketOrders)
+            o.setExtension(domain::trading::ExtKey::kBasketId, basketId);
+
+        bool accepted = m_basketInterceptor->onBasketReady(
+            basketId, basketOrders, m_strategyId, m_strategyName, "盘中信号");
+        if (!accepted) {
+            std::lock_guard<std::mutex> lock(m_basketMutex);
+            m_pendingBasket.pending = false;
+            INTERNAL_WARN_STREAM << "[SemiAuto] Bridge 拒收篮子 " << basketId;
+        }
+        return;
+    }
+
+    // Live / Backtest 模式: 直接执行
+    if (m_orderListener) {
+        m_orderListener->onOrders(orders);
     }
 }
 
@@ -1041,7 +1106,7 @@ void StrategyEngine::drainQueue()
                 }
 
                 MapPositionProvider posProvider(posQtyMap);
-                auto finalOrders = m_orderGenerator.generate(*orders, posProvider, m_maxOrderQuantity, m_strategyId, m_accountId);
+                auto finalOrders = m_orderGenerator.generate(*orders, posProvider, m_strategyId, m_accountId);
                 if (!finalOrders.empty()) {
                     auto basketId = tagBasketOrders(finalOrders);
 
@@ -1574,7 +1639,7 @@ EodEvaluationStatus StrategyEngine::finalizeAndSubmit(
         }
     }
 
-    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, m_maxOrderQuantity, m_strategyId, m_accountId);
+    auto finalOrders = m_orderGenerator.generate(rawOrders, posProvider, m_strategyId, m_accountId);
     INTERNAL_INFO_STREAM << "[EOD QtyDiag] finalOrders=" << finalOrders.size();
 
     // ── 最终订单: Top-3 买入/卖出 按权重排名 ──
@@ -1978,7 +2043,10 @@ std::unique_ptr<StrategyEngine> StrategyEngine::Builder::build()
     // ── 调仓频率配置 ──
     engine->m_isDailyFrequency = rebalanceCfg_.isDailyFrequency;
     engine->m_rebalanceInterval = rebalanceCfg_.interval;
-    engine->m_maxOrderQuantity = maxOrderQuantity_;
+    if (maxOrderQuantity_ > 0) {
+        engine->m_maxOrderQuantity = maxOrderQuantity_;
+        engine->m_positionSizer.setBaseQty(maxOrderQuantity_);
+    }
 
     INTERNAL_INFO_STREAM << "[Builder] 风控: stopLoss=" << riskCfg_.stopLossPercent
                          << " takeProfit=" << riskCfg_.takeProfitPercent

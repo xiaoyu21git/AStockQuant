@@ -108,12 +108,12 @@ void StrategyManager::setOrderListener(IOrderListener* listener)
     }
 }
 
-void StrategyManager::setSignalListener(domain::sigout::ISignalListener* listener)
+void StrategyManager::setBasketInterceptor(IBasketInterceptor* interceptor)
 {
     const std::lock_guard<std::mutex> lock(m_mutex);
     for (auto& [id, engine] : m_engines) {
         if (engine) {
-            engine->setSignalListener(listener);
+            engine->setBasketInterceptor(interceptor);
         }
     }
 }
@@ -194,6 +194,12 @@ void StrategyManager::startStrategy(const std::string& strategyId)
     // 注入订单监听器
     if (m_defaultOrderListener) {
         engine->setOrderListener(m_defaultOrderListener);
+    }
+
+    // 注入篮子拦截器 + 切换到半自动模式 (v0.16.0)
+    if (m_defaultBasketInterceptor) {
+        engine->setBasketInterceptor(m_defaultBasketInterceptor);
+        engine->setExecutionMode(EngineExecutionMode::SemiAuto);
     }
 
     // 注入实盘数据持久化路径（lastEvalDay JSON 等）
