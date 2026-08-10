@@ -44,10 +44,10 @@ private:
     QString configFilePath() const;
     QVariantMap defaultConfiguration() const;
     QVariantMap normalizeConfiguration(const QVariantMap& raw) const;
-    bool writeConfigFile(const QVariantMap& config) const;
-    QVariantMap readConfigFile() const;
+    bool writeConfigFile() const;
 
     QVariantMap m_appliedConfig;
+    QVariantMap m_currentConfig;
     bool m_initialized{false};
 };
 

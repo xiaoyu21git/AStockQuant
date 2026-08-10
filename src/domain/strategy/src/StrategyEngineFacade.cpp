@@ -248,9 +248,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         if (root.has("rebalanceFrequency"))
             params.rebalanceFrequency = static_cast<::domain::strategies::RebalanceFrequency>(root.get("rebalanceFrequency").asInt());
 
-        // ── account_id: 交易账户ID (v0.16.0 强制, 空值将被 TradeExecutionEngine 拒绝) ──
-        params.accountId = root.has("account_id") ? root.get("account_id").asString() : "";
-
         // ── 因子覆盖层: factor_overlay.enabled 是因子存在性的唯一权威来源 ──
         if (root.has("factor_overlay")) {
             auto overlay = root.get("factor_overlay");
@@ -421,13 +418,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     engine->m_minHoldDays = params.minHoldDays;
     engine->m_strategyName = params.strategyName;
-    engine->setAccountId(params.accountId);
-    // accountId 空值警告 — DataMigrator 应在 Phase 2 自动填充
-    if (params.accountId.empty()) {
-        INTERNAL_WARN_STREAM << "[fromDb] account_id 未配置, strategyId=" << strategyId
-                             << " — 此策略的订单将被 TradeExecutionEngine 拒绝,"
-                             << " 请在策略配置中设置 account_id";
-    }
     // 初始化交易日志: logs/策略名/trade_YYYY-MM-DD.jsonl
     if (!params.strategyName.empty()) {
         engine->m_tradeJournal = std::make_unique<TradeJournal>("logs", params.strategyName);

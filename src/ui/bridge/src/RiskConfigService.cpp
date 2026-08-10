@@ -18,29 +18,48 @@ QVariantMap RiskConfigService::appliedConfiguration() const {
 
 void RiskConfigService::initialize() {
     if (m_initialized) return;
-    m_appliedConfig = loadAppliedConfiguration();
+    loadAppliedConfiguration();
+    loadCurrentConfiguration();
     m_initialized = true;
 }
 
 QVariantMap RiskConfigService::loadCurrentConfiguration() {
-    return readConfigFile();
+    auto cfg = foundation::config::ConfigManager::instance()
+        .loadConfigFile(foundation::config::ConfigFile::RiskConfig);
+    if (!cfg || cfg->isNull()) {
+        m_currentConfig = defaultConfiguration();
+        return m_currentConfig;
+    }
+    auto current = cfg->getPath("currentConfiguration", '.');
+    if (current.isNull()) {
+        m_currentConfig = defaultConfiguration();
+        return m_currentConfig;
+    }
+    m_currentConfig = toVariantMap(current);
+    return m_currentConfig;
 }
 
 QVariantMap RiskConfigService::loadAppliedConfiguration() {
     if (!m_appliedConfig.isEmpty()) return m_appliedConfig;
-    QVariantMap config = readConfigFile();
-    if (!config.isEmpty()) {
-        m_appliedConfig = config;
+    auto cfg = foundation::config::ConfigManager::instance()
+        .loadConfigFile(foundation::config::ConfigFile::RiskConfig);
+    if (!cfg || cfg->isNull()) {
+        m_appliedConfig = defaultConfiguration();
         return m_appliedConfig;
     }
-    m_appliedConfig = defaultConfiguration();
+    auto applied = cfg->getPath("appliedConfiguration", '.');
+    if (applied.isNull()) {
+        m_appliedConfig = defaultConfiguration();
+        return m_appliedConfig;
+    }
+    m_appliedConfig = toVariantMap(applied);
     return m_appliedConfig;
 }
 
 bool RiskConfigService::saveConfiguration(const QVariantMap& config) {
     QVariantMap normalized = normalizeConfiguration(config);
-    if (writeConfigFile(normalized)) {
-        m_appliedConfig = normalized;
+    m_currentConfig = normalized;
+    if (writeConfigFile()) {
         emit configurationSaved();
         return true;
     }
@@ -50,8 +69,9 @@ bool RiskConfigService::saveConfiguration(const QVariantMap& config) {
 
 bool RiskConfigService::applyConfiguration(const QVariantMap& config) {
     QVariantMap normalized = normalizeConfiguration(config);
+    m_currentConfig = normalized;
     m_appliedConfig = normalized;
-    writeConfigFile(normalized);
+    writeConfigFile();
     emit appliedConfigurationChanged();
     emit configurationApplied();
     return true;
@@ -121,17 +141,13 @@ QVariantMap RiskConfigService::normalizeConfiguration(const QVariantMap& raw) co
     return normalized;
 }
 
-bool RiskConfigService::writeConfigFile(const QVariantMap& config) const {
-    auto node = toConfigNode(config);
+bool RiskConfigService::writeConfigFile() const {
+    QVariantMap wrapper;
+    wrapper["appliedConfiguration"] = m_appliedConfig;
+    wrapper["currentConfiguration"] = m_currentConfig;
+    auto node = toConfigNode(wrapper);
     return foundation::config::ConfigManager::instance()
         .saveConfigFile(foundation::config::ConfigFile::RiskConfig, node);
-}
-
-QVariantMap RiskConfigService::readConfigFile() const {
-    auto cfg = foundation::config::ConfigManager::instance()
-        .loadConfigFile(foundation::config::ConfigFile::RiskConfig);
-    if (!cfg || cfg->isNull()) return defaultConfiguration();
-    return toVariantMap(*cfg);
 }
 
 } // namespace bridge

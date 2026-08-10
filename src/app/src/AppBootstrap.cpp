@@ -41,7 +41,6 @@ void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const
 #include "../../ui/bridge/include/MarketDataBridge.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
-#include "database/DataMigrator.h"
 #include "../../../domain/strategy/include/EventRiskSubscriber.h"
 #include "EventDrivenFactor.h"
 #include "../include/PythonEventBridge.h"
@@ -304,44 +303,34 @@ bool AppBootstrap::initConfiguration()
             // ── 同步风控 + 费率配置到 TradingSystem ──
             auto riskNode = cfg.loadConfigFile(CF::RiskConfig);
             if (riskNode && !riskNode->isEmpty()) {
-                using namespace domain::strategy;
-                RiskConfig c = RiskConfig::defaults();
-                c.stopLossPercent        = riskNode->getPath("stopLossPercent",'.').asDouble(c.stopLossPercent);
-                c.takeProfitPercent      = riskNode->getPath("takeProfitPercent",'.').asDouble(c.takeProfitPercent);
-                c.maxDrawdownLimitPercent = riskNode->getPath("maxDrawdownLimitPercent",'.').asDouble(c.maxDrawdownLimitPercent);
-                c.maxDailyLossPercent    = riskNode->getPath("maxDailyLossPercent",'.').asDouble(c.maxDailyLossPercent);
-                c.breakerLevel1Percent   = riskNode->getPath("breakerLevel1Percent",'.').asDouble(c.breakerLevel1Percent);
-                c.breakerLevel2Percent   = riskNode->getPath("breakerLevel2Percent",'.').asDouble(c.breakerLevel2Percent);
-                c.breakerLevel3Percent   = riskNode->getPath("breakerLevel3Percent",'.').asDouble(c.breakerLevel3Percent);
-                c.maxPositionPercent     = riskNode->getPath("maxPositionPercent",'.').asDouble(c.maxPositionPercent);
-                c.maxTotalExposurePercent = riskNode->getPath("maxTotalExposurePercent",'.').asDouble(c.maxTotalExposurePercent);
-                c.orderSizeLimitWan      = riskNode->getPath("orderSizeLimitWan",'.').asDouble(c.orderSizeLimitWan);
-                c.slippageLimitPercent   = riskNode->getPath("slippageLimitPercent",'.').asDouble(c.slippageLimitPercent);
-                c.turnoverLimitWan       = riskNode->getPath("turnoverLimitWan",'.').asDouble(c.turnoverLimitWan);
-                c.commissionRate         = riskNode->getPath("commissionRate",'.').asDouble(c.commissionRate);
-                c.minCommission          = riskNode->getPath("minCommission",'.').asDouble(c.minCommission);
-                c.stampTaxRate           = riskNode->getPath("stampTaxRate",'.').asDouble(c.stampTaxRate);
-                domain::strategy::RiskManager::instance().setRiskConfig(c);
-                INTERNAL_INFO_STREAM << "[AppBootstrap] 风控+费率配置已同步";
+                auto applied = riskNode->getPath("appliedConfiguration", '.');
+                if (!applied.isNull()) {
+                    using namespace domain::strategy;
+                    RiskConfig c = RiskConfig::defaults();
+                    c.stopLossPercent        = applied.getPath("stopLossPercent",'.').asDouble(c.stopLossPercent);
+                    c.takeProfitPercent      = applied.getPath("takeProfitPercent",'.').asDouble(c.takeProfitPercent);
+                    c.maxDrawdownLimitPercent = applied.getPath("maxDrawdownLimitPercent",'.').asDouble(c.maxDrawdownLimitPercent);
+                    c.maxDailyLossPercent    = applied.getPath("maxDailyLossPercent",'.').asDouble(c.maxDailyLossPercent);
+                    c.breakerLevel1Percent   = applied.getPath("breakerLevel1Percent",'.').asDouble(c.breakerLevel1Percent);
+                    c.breakerLevel2Percent   = applied.getPath("breakerLevel2Percent",'.').asDouble(c.breakerLevel2Percent);
+                    c.breakerLevel3Percent   = applied.getPath("breakerLevel3Percent",'.').asDouble(c.breakerLevel3Percent);
+                    c.maxPositionPercent     = applied.getPath("maxPositionPercent",'.').asDouble(c.maxPositionPercent);
+                    c.maxTotalExposurePercent = applied.getPath("maxTotalExposurePercent",'.').asDouble(c.maxTotalExposurePercent);
+                    c.orderSizeLimitWan      = applied.getPath("orderSizeLimitWan",'.').asDouble(c.orderSizeLimitWan);
+                    c.slippageLimitPercent   = applied.getPath("slippageLimitPercent",'.').asDouble(c.slippageLimitPercent);
+                    c.turnoverLimitWan       = applied.getPath("turnoverLimitWan",'.').asDouble(c.turnoverLimitWan);
+                    c.commissionRate         = applied.getPath("commissionRate",'.').asDouble(c.commissionRate);
+                    c.minCommission          = applied.getPath("minCommission",'.').asDouble(c.minCommission);
+                    c.stampTaxRate           = applied.getPath("stampTaxRate",'.').asDouble(c.stampTaxRate);
+                    domain::strategy::RiskManager::instance().setRiskConfig(c);
+                    INTERNAL_INFO_STREAM << "[AppBootstrap] 风控+费率配置已同步";
+                } else {
+                    INTERNAL_INFO_STREAM << "[AppBootstrap] 风控配置缺失 appliedConfiguration 节点, 使用默认值";
+                }
             }
 
-            // ── DataMigrator: v0.15→v0.16 schema 迁移 (accountId 自动填充) ──
-            {
-                std::string defaultAccountId;
-                auto tcNode = cfg.loadConfigFile(CF::TradingConnection);
-                if (tcNode && !tcNode->isEmpty() && tcNode->has("accountId")) {
-                    defaultAccountId = tcNode->get("accountId").asString();
-                }
-                astock::infrastructure::database::DataMigrator migrator;
-                auto migResult = migrator.run(defaultAccountId);
-                INTERNAL_INFO_STREAM << "[AppBootstrap] " << migResult.summary();
-                if (migResult.shouldAbort()) {
-                    INTERNAL_ERROR_STREAM << "[AppBootstrap] DataMigrator 失败率过高, 配置初始化中止";
-                    return false;
-                }
-            }
         }
-        
+
         // 简单验证关键配置 - 通过实例方法调用
         auto& configManager = foundation::config::ConfigManager::instance();
         auto appName = configManager.get_app_config_string("app.name", "");

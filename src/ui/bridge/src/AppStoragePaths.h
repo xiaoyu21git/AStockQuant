@@ -221,12 +221,4 @@ inline QString persistentDataSetBinFilePath(int datasetId)
     return QDir(dir).filePath(QStringLiteral("data.bin"));
 }
 
-inline QString riskConfigurationFilePath()
-{
-    const QString targetPath = QDir(configDir()).filePath(QStringLiteral("risk/risk_configuration.json"));
-    migrateLegacyFileIfNeeded(targetPath, legacyLocationsForRelativePath(QStringLiteral("risk/risk_configuration.json")));
-    ensureDirectoryExists(QFileInfo(targetPath).dir().absolutePath());
-    return targetPath;
-}
-
 } // namespace bridge::storage

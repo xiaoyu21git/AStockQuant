@@ -226,18 +226,6 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
         return SubmitResult::rejected(vr.message(), vr.code());
     }
 
-    // accountId 强制校验 — 空值直接拒绝 (v0.16.0)
-    if (order.accountId().empty()) {
-        INTERNAL_ERROR_STREAM << "[TradeExec] 订单被拒绝: accountId 为空"
-                             << " symbol=" << order.symbol()
-                             << " side=" << (order.side() == strategy::OrderDirection::Buy ? "Buy" : "Sell")
-                             << " qty=" << order.quantity()
-                             << " strategyId=" << order.strategyId()
-                             << " — 请在策略配置中设置 account_id";
-        return SubmitResult::rejected("accountId 为空 — 请在策略配置中设置 account_id",
-                                       OrderValidationCode::MissingRequiredFields);
-    }
-
     // Stage 2: scheduling conflict checks
     auto conflict = m_impl->checkExecutionPause(order);
     if (conflict && conflict->hasConflict()) {

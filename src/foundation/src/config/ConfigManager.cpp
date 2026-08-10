@@ -309,15 +309,15 @@ void ConfigManager::loadProfileConfig(const std::string& profile) {
     INTERNAL_DEBUG_STREAM << "正在加载 profile 配置: " << profile;
     
     std::string profilePath = foundation::utils::String::format(
-        "{}/profiles/{}.yaml", configBaseDir_, profile);
-    
+        "%s/profiles/%s.yaml", configBaseDir_.c_str(), profile.c_str());
+
     // 检查配置文件是否存在
     if (!foundation::fs::File::exists(profilePath)) {
         INTERNAL_WARN_STREAM << "Profile 配置未找到: " << profilePath;
-        
+
         // 尝试使用其他扩展名
         profilePath = foundation::utils::String::format(
-            "{}/profiles/{}.yml", configBaseDir_, profile);
+            "%s/profiles/%s.yml", configBaseDir_.c_str(), profile.c_str());
         
         if (!foundation::fs::File::exists(profilePath)) {
             INTERNAL_WARN_STREAM << "Profile 配置未找到 (.yml): " << profilePath;
@@ -942,7 +942,7 @@ namespace {
 const std::unordered_map<ConfigFile, std::string>& s_configFilePaths() {
     static const std::unordered_map<ConfigFile, std::string> map = {
         {ConfigFile::TradingConnection, "trading_connection.json"},
-        {ConfigFile::RiskConfig,        "risk_config.json"},
+        {ConfigFile::RiskConfig,        "risk/risk_configuration.json"},
         {ConfigFile::Jujin,             "jujin.json"},
     };
     return map;

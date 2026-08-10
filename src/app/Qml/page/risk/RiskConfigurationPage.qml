@@ -754,4 +754,212 @@ Item {
         return Math.min(score, 10)
     }
 
+    // ═══════════════════════════════════════════════════════════════════
+    // 辅助函数 — Phase 31c 重构时遗漏, 从 cb323dd 恢复
+    // ═══════════════════════════════════════════════════════════════════
+
+    function riskBudgetUsageNote() {
+        if (currentVarBudgetAmount <= 0) {
+            return "等待实时账户与风控预算"
+        }
+        return "预算 ¥" + Math.round(currentVarBudgetAmount).toLocaleString() + " · 估算占用 ¥" + Math.round(currentEstimatedVarAmount).toLocaleString()
+    }
+
+    function exposureUsageNote() {
+        var maxExposure = getConfigValue("maxTotalExposure", 67)
+        if (maxExposure <= 0) {
+            return "未配置总仓位预算"
+        }
+        return "距上限剩余 " + Math.max(0, maxExposure - currentTotalExposurePercent).toFixed(1) + "%"
+    }
+
+    function numberOrDefault(value, fallback) {
+        return PureUtils.numberOrDefault(value, fallback);
+    }
+
+    function parseTimestamp(value) {
+        return PureUtils.parseTimestamp(value);
+    }
+
+    function getStrategyParameters(strategy) {
+        return DataAccess.getStrategyParameters(strategy);
+    }
+
+    function getStrategyPerformance(strategy) {
+        return DataAccess.getStrategyPerformance(strategy);
+    }
+
+    function getLatestBacktest(strategy) {
+        return DataAccess.getLatestBacktest(strategy);
+    }
+
+    function getStrategyAdvancedOptions(strategy) {
+        return DomainConstants.getStrategyAdvancedOptions(strategy);
+    }
+
+    function getBacktestHistory(strategy) {
+        return DataAccess.getBacktestHistory(strategy);
+    }
+
+    function resolveStrategyName(strategy) {
+        return DataAccess.resolveStrategyNameFromBacktest(strategy);
+    }
+
+    function resolveStrategyId(strategy) {
+        return DataAccess.resolveStrategyId(strategy);
+    }
+
+    function normalizePercentFromRuntime(value) {
+        return NormalizeUtils.normalizePercentFromRuntime(value);
+    }
+
+    function firstDefinedValue(source, keys) {
+        return PureUtils.firstDefinedValue(source, keys);
+    }
+
+    function resolveStrategyConfigAliases(key) {
+        return DomainConstants.resolveStrategyConfigAliases(key);
+    }
+
+    function hasBacktestRecord(strategy) {
+        return DataAccess.hasBacktestRecord(strategy);
+    }
+
+    function isPortfolioStrategy(strategy) {
+        var StrategyCreation5 = DomainConstants.StrategyCreation5;
+        var storedTypeIndex = Number(strategy && strategy.strategyTypeIndex)
+        return Number.isFinite(storedTypeIndex)
+            && Math.floor(storedTypeIndex) === StrategyCreation5
+    }
+
+    function resolveExternalPortfolioStrategy() {
+        var strategy = externalRiskContext && externalRiskContext.strategy
+            ? externalRiskContext.strategy
+            : ({})
+        return isPortfolioStrategy(strategy) ? strategy : ({})
+    }
+
+    function resolveActiveBacktest(strategy) {
+        if (externalRiskContext
+                && externalRiskContext.latestBacktest
+                && Object.keys(externalRiskContext.latestBacktest).length > 0
+                && (!focusedStrategyId || String(externalRiskContext.strategyId || "") === String(resolveStrategyId(strategy) || focusedStrategyId))) {
+            return externalRiskContext.latestBacktest
+        }
+        return getLatestBacktest(strategy)
+    }
+
+    function resolveFocusedStrategyConfigValue(key) {
+        var strategy = activeRiskStrategy && Object.keys(activeRiskStrategy).length > 0
+            ? activeRiskStrategy
+            : resolveExternalPortfolioStrategy()
+        if (!strategy || Object.keys(strategy).length === 0) {
+            return undefined
+        }
+
+        var parameters = getStrategyParameters(strategy)
+        var advancedOptions = getStrategyAdvancedOptions(strategy)
+        var optimizationConfig = advancedOptions.optimization_config || ({})
+        var latestBacktest = resolveActiveBacktest(strategy)
+        var runtimeParameters = latestBacktest.runtimeParameters || ({})
+        var runtimeConfig = parameters.backtest_runtime || strategy.backtest_runtime || ({})
+        var aliases = resolveStrategyConfigAliases(key)
+        var sources = [runtimeParameters, optimizationConfig, runtimeConfig, parameters, strategy]
+
+        for (var index = 0; index < sources.length; ++index) {
+            var value = firstDefinedValue(sources[index], aliases)
+            if (value !== undefined) {
+                return value
+            }
+        }
+
+        return undefined
+    }
+
+    function getConfigValue(key, fallback) {
+        var rawValue = resolveFocusedStrategyConfigValue(key)
+        if (rawValue === undefined || rawValue === null || rawValue === "") {
+            rawValue = dynamicParamValues[key]
+        }
+        if (rawValue === undefined || rawValue === null || rawValue === "") {
+            return fallback
+        }
+
+        var numericValue = Number(rawValue)
+        if (isNaN(numericValue)) {
+            return fallback
+        }
+
+        return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue
+    }
+
+    function preferredRiskParamGroups() {
+        return DomainConstants.preferredRiskParamGroups();
+    }
+
+    function buildDynamicParamGroups(configs) {
+        var configIdMap = ({})
+        ;(configs || []).forEach(function(config) {
+            if (config && config.id) {
+                configIdMap[config.id] = true
+            }
+        })
+
+        var groups = []
+        preferredRiskParamGroups().forEach(function(group) {
+            var resolvedParams = (group.params || []).filter(function(paramId) {
+                return !!configIdMap[paramId]
+            })
+
+            if (resolvedParams.length === 0) {
+                return
+            }
+
+            groups.push({
+                id: group.id,
+                name: group.name,
+                description: group.description,
+                minColumnWidth: group.minColumnWidth,
+                maxColumns: group.maxColumns,
+                params: resolvedParams
+            })
+        })
+
+        return groups
+    }
+
+    function orderDynamicParamConfigs(configs) {
+        var configMap = ({})
+        var ordered = []
+        var appended = ({})
+
+        ;(configs || []).forEach(function(config) {
+            if (config && config.id) {
+                configMap[config.id] = config
+            }
+        })
+
+        preferredRiskParamGroups().forEach(function(group) {
+            ;(group.params || []).forEach(function(paramId) {
+                if (!configMap[paramId] || appended[paramId]) {
+                    return
+                }
+
+                appended[paramId] = true
+                ordered.push(configMap[paramId])
+            })
+        })
+
+        ;(configs || []).forEach(function(config) {
+            if (!config || !config.id || appended[config.id]) {
+                return
+            }
+
+            appended[config.id] = true
+            ordered.push(config)
+        })
+
+        return ordered
+    }
+
 }

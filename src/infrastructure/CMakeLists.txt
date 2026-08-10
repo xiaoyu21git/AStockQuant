@@ -30,7 +30,6 @@ add_library(infrastructure STATIC
     src/database/MarketDataService.cpp
 
     src/database/BacktestResultRepository.cpp
-    src/database/DataMigrator.cpp
 )
 
 set_target_properties(infrastructure PROPERTIES
