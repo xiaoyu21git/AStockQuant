@@ -826,10 +826,7 @@ Item {
     }
 
     function isPortfolioStrategy(strategy) {
-        var StrategyCreation5 = DomainConstants.StrategyCreation5;
-        var storedTypeIndex = Number(strategy && strategy.strategyTypeIndex)
-        return Number.isFinite(storedTypeIndex)
-            && Math.floor(storedTypeIndex) === StrategyCreation5
+        return Bridge.StrategyBridge.isPortfolioStrategyType(String(strategy && strategy.strategyType || ""))
     }
 
     function resolveExternalPortfolioStrategy() {

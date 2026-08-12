@@ -8,9 +8,11 @@
 #include <mutex>
 
 #include "StrategyLifecycleStatus.h"
+#include "StrategyTypeContract.h"
 #include "../../domain/types/ResolvedStrategyBehavior.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "../../domain/strategies/include/StrategyDefinitionTypes.h"
+#include "../../domain/strategies/include/StrategyTypeRegistry.h"
 
 #include <initializer_list>
 #include <memory>
@@ -98,37 +100,43 @@ public:
     /// @brief 是否有待确认的篮子
     [[nodiscard]] bool hasPendingBasket() const;
 
-    // ── 策略类型枚举 (替代 JS StrategyCreationUtils 的数字映射) ──
-    /// @brief 策略类型索引 → 中文名
-    Q_INVOKABLE QString strategyTypeName(int typeIndex) const;
-    /// @brief 策略类型索引 → 图标
-    Q_INVOKABLE QString strategyTypeIcon(int typeIndex) const;
-    /// @brief 策略类型索引 → 简短描述
-    Q_INVOKABLE QString strategyTypeBrief(int typeIndex) const;
-    /// @brief 策略类型索引 → behaviorKind
-    Q_INVOKABLE int strategyBehaviorKindFromTypeIndex(int typeIndex) const;
-    /// @brief behaviorKind → 策略类型索引
-    Q_INVOKABLE int strategyTypeIndexFromBehaviorKind(int behaviorKind) const;
-    /// @brief 标准化策略类型索引 (接受 display/behavior 两种编号)
-    Q_INVOKABLE int normalizeStrategyTypeIndex(int raw) const;
+    // ── 策略类型枚举 (C++ 枚举唯一事实源, 替代 JS StrategyCreationUtils 的数字映射) ──
+    /// @brief 全部 11 种策略类型 (选择器模型源: [{type, id, name, icon, brief}])
+    Q_INVOKABLE QVariantList strategyTypeList() const;
+    /// @brief 策略类型 → 枚举名字符串 (落库/载荷格式; 非法枚举返回空串)
+    Q_INVOKABLE QString strategyTypeId(StrategyTypeContract::StrategyType type) const;
+    /// @brief 枚举名字符串 → 策略类型 (非法返回 kInvalidStrategyType = -1, 无回退)
+    Q_INVOKABLE int strategyTypeFromId(const QString& id) const;
+    /// @brief 策略类型 → 中文名
+    Q_INVOKABLE QString strategyTypeName(StrategyTypeContract::StrategyType type) const;
+    /// @brief 策略类型 → 图标
+    Q_INVOKABLE QString strategyTypeIcon(StrategyTypeContract::StrategyType type) const;
+    /// @brief 策略类型 → 简短描述
+    Q_INVOKABLE QString strategyTypeBrief(StrategyTypeContract::StrategyType type) const;
+    /// @brief 策略类型 → behaviorKind 数值 (一律推导, 服务端唯一权威; 非法枚举返回 -1)
+    Q_INVOKABLE int strategyBehaviorKindOfType(StrategyTypeContract::StrategyType type) const;
+    /// @brief behaviorKind 数值 → 中文名 (0-8, 非法返回空串)
+    Q_INVOKABLE QString strategyBehaviorKindName(int behaviorKind) const;
+    /// @brief 是否组合配置类策略 (风险平价)
+    Q_INVOKABLE bool isPortfolioStrategyType(const QString& strategyTypeId) const;
     /// @brief 风险等级索引 → 中文名
     Q_INVOKABLE QString riskLevelName(int index) const;
     /// @brief 风险等级索引 → 颜色
     Q_INVOKABLE QString riskLevelColor(int index) const;
 
     /// @brief 策略参数配置表单 (替代 JS buildParamConfigs)
-    Q_INVOKABLE QVariantList buildParamConfigs(int typeIndex) const;
+    Q_INVOKABLE QVariantList buildParamConfigs(StrategyTypeContract::StrategyType type) const;
     /// @brief 组装完整策略创建数据 (替代 JS buildCompleteStrategyData)
     Q_INVOKABLE QVariantMap buildCompleteStrategyData(const QVariantMap& context) const;
     /// @brief 重置表单数据默认值 (替代 JS resetFormData)
     Q_INVOKABLE QVariantMap resetFormData() const;
     /// @brief 默认策略描述 (替代 JS getDefaultStrategyDescription)
-    Q_INVOKABLE QString defaultStrategyDescription(int typeIndex) const;
+    Q_INVOKABLE QString defaultStrategyDescription(StrategyTypeContract::StrategyType type) const;
     /// @brief 默认策略标签 (替代 JS getDefaultStrategyTags)
-    Q_INVOKABLE QStringList defaultStrategyTags(int typeIndex) const;
+    Q_INVOKABLE QStringList defaultStrategyTags(StrategyTypeContract::StrategyType type) const;
 
     // ── 规则编辑器 (替代 JS rule composer) ──
-    Q_INVOKABLE QVariantMap buildDefaultStrategyProfile(int typeIndex) const;
+    Q_INVOKABLE QVariantMap buildDefaultStrategyProfile(StrategyTypeContract::StrategyType type) const;
     Q_INVOKABLE QVariantList buildDefaultBaseRuleBindings(const QVariantMap& profile) const;
     Q_INVOKABLE QVariantList buildDefaultMarketRuleBindings(const QVariantMap& profile) const;
     Q_INVOKABLE QVariantList buildDefaultRuleComposerSkeleton(const QVariantMap& profile, const QVariantList& bindings) const;
@@ -176,16 +184,13 @@ signals:
 private:
     static constexpr int kInvalidArgumentCode = 1001;
     static constexpr int kRepositoryErrorCode = 2001;
+    static constexpr int kInvalidStrategyType = -1;  // strategyTypeFromId 非法输入的返回值
     static constexpr const char* kStrategyIdKey = "strategyId";
 
     struct StrategyTypeSpec final {
         domain::strategies::StrategyType value{domain::strategies::StrategyType::DOUBLE_MOVING_AVERAGE};
         bool valid{false};
-    };
-
-    struct StrategyBehaviorKindSpec final {
-        domain::strategies::StrategyBehaviorKind value{domain::strategies::StrategyBehaviorKind::Custom};
-        bool valid{false};
+        bool provided{false};  // 载荷是否携带 strategyType 键 (update 用于区分"缺失"与"非法")
     };
 
     struct FactorIdListSpec final {
@@ -238,7 +243,6 @@ private:
         [[nodiscard]] const std::string& strategyName() const noexcept { return strategyName_; }
         [[nodiscard]] const std::string& description() const noexcept { return description_; }
         [[nodiscard]] const StrategyTypeSpec& strategyType() const noexcept { return strategyType_; }
-        [[nodiscard]] const StrategyBehaviorKindSpec& behaviorKind() const noexcept { return behaviorKind_; }
         [[nodiscard]] const FactorIdListSpec& factorIds() const noexcept { return factorIds_; }
         [[nodiscard]] const RuleIdListSpec& ruleIds() const noexcept { return ruleIds_; }
         [[nodiscard]] bool status() const noexcept { return status_; }
@@ -247,7 +251,6 @@ private:
         void setStrategyName(std::string value) { strategyName_ = std::move(value); }
         void setDescription(std::string value) { description_ = std::move(value); }
         void setStrategyType(const StrategyTypeSpec& value) { strategyType_ = value; }
-        void setBehaviorKind(const StrategyBehaviorKindSpec& value) { behaviorKind_ = value; }
         void setFactorIds(const FactorIdListSpec& value) { factorIds_ = value; }
         void setRuleIds(const RuleIdListSpec& value) { ruleIds_ = value; }
         void setStatus(bool value) { status_ = value; }
@@ -258,7 +261,6 @@ private:
         std::string strategyName_;
         std::string description_;
         StrategyTypeSpec strategyType_;
-        StrategyBehaviorKindSpec behaviorKind_;
         FactorIdListSpec factorIds_;
         RuleIdListSpec ruleIds_;
         bool status_{false};
@@ -266,9 +268,7 @@ private:
     };
 
     QString readText(const QVariantMap& payload, std::initializer_list<const char*> keys) const;
-    bool isTypeIdxValid(int index) const;
     StrategyTypeSpec readTypeSpec(const QVariantMap& payload) const;
-    StrategyBehaviorKindSpec readBehaviorKindSpec(const QVariantMap& payload) const;
     FactorIdListSpec readFactorIds(const QVariantMap& payload) const;
     RuleIdListSpec readRuleIds(const QVariantMap& payload) const;
     bool hasForbiddenFields(const QVariantMap& payload) const;

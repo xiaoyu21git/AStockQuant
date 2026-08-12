@@ -944,7 +944,7 @@ Rectangle {
         if (!selectedStrategyId || !tuningConfigLoader.item) return
         var summary = getSelectedStrategySummary() || ({})
         tuningConfigLoader.item.strategyId = selectedStrategyId
-        tuningConfigLoader.item.strategyTypeIndex = summary.strategyTypeIndex || summary.typeIndex || 0
+        tuningConfigLoader.item.strategyType = Bridge.StrategyBridge.strategyTypeFromId(String(summary.strategyType || ""))
         tuningConfigLoader.item.strategyName = summary.strategyName || summary.name || ""
         tuningConfigLoader.item.open()
     }
@@ -962,7 +962,7 @@ Rectangle {
             if (!item) return
             item.tuningStarted.connect(function(config) {
                 Bridge.ParameterTuningBridge.startTuning(
-                    config.strategyId, config.strategyTypeIndex, config)
+                    config.strategyId, config.strategyType, config)
                 strategyLibraryPage.showTuning = true
             })
         }

@@ -14,6 +14,7 @@
 
 #include "BacktestRequest.h"
 #include "StrategyBridge.h"
+#include "../../domain/strategies/include/StrategyTypeRegistry.h"
 #include "DataCacheAdapter.h"
 #include "../../../infrastructure/include/database/BacktestResultRepository.h"
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
@@ -587,6 +588,21 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                         record.dataEndDate   = params.value("endDate").toString().toStdString();
                         // 策略参数
                         auto po = strategyParamsSnapshot;
+                        // 行为类型: 由参数快照的 rule_profile.strategyProfile.strategyType 枚举名推导,
+                        // 回填 strategy_backtest_results.behavior_kind (缺失/非法保持 0 + 警告, 不回退)
+                        {
+                            const auto rp = po.value("rule_profile").toMap();
+                            const auto sp = rp.value("strategyProfile").toMap();
+                            const auto parsed = domain::strategies::StrategyTypeRegistry::fromTypeId(
+                                sp.value("strategyType").toString().toStdString());
+                            if (parsed.has_value()) {
+                                record.behaviorKind = static_cast<int>(
+                                    domain::strategies::StrategyTypeRegistry::backtestBehaviorKindOf(*parsed));
+                            } else {
+                                INTERNAL_WARN_STREAM << "[StrategyBacktest] rule_profile.strategyProfile.strategyType 缺失/非法, "
+                                                     << "behavior_kind 保持 0 strategy=" << record.strategyId;
+                            }
+                        }
                         auto fo = po.value("factor_overlay").toMap();
                         record.combineMode       = fo.value("combineMode").toString().toStdString();
                         record.targetPositionCount = fo.value("targetPositionCount").toInt();

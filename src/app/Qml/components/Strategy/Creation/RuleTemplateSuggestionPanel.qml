@@ -12,7 +12,8 @@ Rectangle {
     property string phaseLockValue: ""
     property string queryPlaceholderText: ""
     property bool showInlinePhaseInputs: false
-    property int selectedStrategyTypeIndex: -1
+    // 策略类型一律使用 QML 契约枚举值 (Bridge.StrategyTypes.StrategyType.*)
+    property int selectedStrategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
     property int selectedStrategyBehaviorKind: -1
     property var strategyProfile: ({})
     property string selectedStageId: ""
@@ -193,11 +194,10 @@ Rectangle {
     }
 
     function resolvedStrategyLabel() {
-        var normalizedStrategyTypeIndex = Bridge.StrategyBridge.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
-        if (normalizedStrategyTypeIndex !== -1) {
-            return Bridge.StrategyBridge.strategyTypeName(normalizedStrategyTypeIndex) || "当前策略"
+        if (selectedStrategyType >= 0) {
+            return Bridge.StrategyBridge.strategyTypeName(selectedStrategyType) || "当前策略"
         }
-        return Bridge.StrategyBridge.strategyTypeName(currentStrategyBehaviorKind)
+        return Bridge.StrategyBridge.strategyBehaviorKindName(currentStrategyBehaviorKind)
     }
 
     function resolveCurrentStrategyBehaviorKind() {
@@ -206,19 +206,17 @@ Rectangle {
             return Math.floor(explicitKind)
         }
 
+        // 画像持久化枚举名字符串 → C++ 严格解析 → 行为类型推导 (数字键与 snake_case 回退已永久删除)
         var profile = strategyProfile || ({})
-        var parameters = profile.parameters || ({})
-        explicitKind = Number(profile.strategyBehaviorKind !== undefined ? profile.strategyBehaviorKind : parameters.strategyBehaviorKind)
-        if (isFinite(explicitKind) && explicitKind >= 0 && explicitKind <= 8) {
-            return Math.floor(explicitKind)
+        var typeId = String(profile.strategyType || "")
+        if (typeId) {
+            var parsedType = Bridge.StrategyBridge.strategyTypeFromId(typeId)
+            if (parsedType >= 0) {
+                return Bridge.StrategyBridge.strategyBehaviorKindOfType(parsedType)
+            }
         }
 
-        explicitKind = Number(profile.strategy_behavior_kind !== undefined ? profile.strategy_behavior_kind : parameters.strategy_behavior_kind)
-        if (isFinite(explicitKind) && explicitKind >= 0 && explicitKind <= 8) {
-            return Math.floor(explicitKind)
-        }
-
-        return Bridge.StrategyBridge.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+        return Bridge.StrategyBridge.strategyBehaviorKindOfType(selectedStrategyType)
     }
 
     function suggestionPhaseForStage(stageId) {
@@ -657,29 +655,28 @@ Rectangle {
         }
 
         var behaviorKind = currentStrategyBehaviorKind
-        var strategyTypeIndex = Bridge.StrategyBridge.normalizeStrategyTypeIndex(selectedStrategyTypeIndex)
-        if (behaviorKind === 0
-                && strategyTypeIndex === 1) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.TrendFollowing
+                && selectedStrategyType === Bridge.StrategyTypes.StrategyType.TurtleBreakout) {
             return "趋势突破策略建议绑定突破确认类入场模板，并搭配趋势衰减退出与市场风控模板。"
         }
-        if (behaviorKind === 0) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.TrendFollowing) {
             return "趋势策略建议至少分别绑定一条入场/观察信号和一条持仓管理/退出模板；市场/风控模板按需补充。"
         }
-        if (behaviorKind === 1) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.MeanReversion) {
             return "均值回归策略更适合绑定回归入场与失败退出模板，市场风控通常只做过滤。"
         }
-        if (behaviorKind === 2) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.Momentum) {
             return "动量策略通常需要入场信号和趋势衰减退出，市场风控用于过滤退潮时段。"
         }
-        if (behaviorKind === 3
-                || behaviorKind === 4
-                || behaviorKind === 5) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.Arbitrage
+                || behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.MultiFactor
+                || behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.MachineLearning) {
             return "组合与模型类策略通常优先补持仓管理和市场风控模板，入场确认更多依赖评分与池内排序。"
         }
-        if (behaviorKind === 6) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.EventDriven) {
             return "事件驱动策略建议优先绑定事件确认入场和事件失效退出模板，再补市场风控。"
         }
-        if (behaviorKind === 7) {
+        if (behaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.HighFrequency) {
             return "高频策略建议优先绑定微结构入场与执行约束模板，市场风控更多负责交易时段和流动性限制。"
         }
         return "可以同时为不同阶段绑定模板；同一阶段再次应用会替换该阶段当前模板。"
@@ -851,7 +848,7 @@ Rectangle {
                 section = {
                     id: sectionKey,
                     title: Bridge.StrategyBridge.phaseDisplayName(item && item.phase),
-                    subtitle: Bridge.StrategyBridge.strategyTypeName(item && item.category),
+                    subtitle: Bridge.StrategyBridge.categoryDisplayName(item && item.category),
                     items: [],
                     readyCount: 0
                 }
@@ -1121,7 +1118,7 @@ Rectangle {
                     Repeater {
                         model: [
                             Bridge.StrategyBridge.phaseDisplayName(modelData.phase),
-                            Bridge.StrategyBridge.strategyTypeName(modelData.category),
+                            Bridge.StrategyBridge.categoryDisplayName(modelData.category),
                             modelData.is_default_template ? "默认模板" : ""
                         ]
 

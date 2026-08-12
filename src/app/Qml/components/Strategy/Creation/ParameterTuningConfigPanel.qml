@@ -10,7 +10,7 @@ Popup {
 
     // ── 外部输入 ──
     property string strategyId: ""
-    property int strategyTypeIndex: 0
+    property int strategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
     property string strategyName: ""
     property var backtestParams: ({})
     property var paramRanges: []
@@ -49,8 +49,8 @@ Popup {
     // ── 打开时刷新参数 ──
     onOpened: {
         if (!Bridge.ParameterTuningBridge) return
-        paramRanges = Bridge.ParameterTuningBridge.getTuningParamRanges(strategyTypeIndex)
-        totalCombinations = Bridge.ParameterTuningBridge.estimateCombinations(strategyTypeIndex)
+        paramRanges = Bridge.ParameterTuningBridge.getTuningParamRanges(strategyType)
+        totalCombinations = Bridge.ParameterTuningBridge.estimateCombinations(strategyType)
         ready = true
     }
 
@@ -155,7 +155,7 @@ Popup {
                             color: root.successGreen
                         }
                         Text {
-                            text: Bridge.StrategyBridge.strategyTypeName(strategyTypeIndex)
+                            text: Bridge.StrategyBridge.strategyTypeName(strategyType)
                             color: root.textSecondary
                             font.pixelSize: 12
                         }
@@ -429,7 +429,7 @@ Popup {
                         onClicked: {
                             root.tuningStarted({
                                 strategyId: root.strategyId,
-                                strategyTypeIndex: root.strategyTypeIndex,
+                                strategyType: root.strategyType,
                                 optimizerKind: optimizerCombo.currentIndex,
                                 objectiveMetric: ["sharpe","annualizedReturn","calmar","sortino","profitFactor"][objectiveCombo.currentIndex],
                                 maxTrials: maxTrialsSpin.value,

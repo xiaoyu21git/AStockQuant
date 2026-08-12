@@ -5,6 +5,7 @@
 #include "../../../ui/bridge/include/StrategyLifecycleStatus.h"
 #include "../../../domain/types/ResolvedStrategyBehavior.h"
 #include "../../../domain/strategies/include/StrategyDefinitionTypes.h"
+#include "../../../domain/strategies/include/StrategyTypeRegistry.h"
 #include <QDateTime>
 #include <QString>
 #include <QVariantMap>
@@ -41,7 +42,8 @@ struct PersistedStrategyData {
     std::string strategyCode;
     domain::strategies::StrategyMetadata metadata;
     domain::backtest::ResolvedStrategyIdentity strategyIdentity;
-    int strategyTypeIndex{0};
+    // 策略类型(唯一事实源); 无值 = 数据无效, 禁止落库
+    std::optional<domain::strategies::StrategyType> strategyType;
     std::string version;
     std::string author;
     StrategyLanguageCode language{StrategyLanguageCode::Python};

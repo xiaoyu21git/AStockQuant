@@ -27,6 +27,7 @@ set(BRIDGE_HEADERS
     include/FactorService.h
     include/FactorBacktestBridge.h
     include/StrategyBridge.h
+    include/StrategyTypeContract.h
     include/StrategyBacktestBridge.h
     include/ParameterTuningBridge.h
     include/StrategyListModel.h

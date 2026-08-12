@@ -24,9 +24,9 @@ Page {
     // 信号
     signal backClicked()
     
-    // 数据容器
-    property int selectedStrategyTypeIndex: 0
-    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+    // 数据容器 (策略类型一律使用 QML 契约枚举值 Bridge.StrategyTypes.StrategyType.*)
+    property int selectedStrategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
+    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindOfType(selectedStrategyType)
     property string strategyName: ""
     property string strategyDescription: ""
     property string optimizationMethod: "genetic"
@@ -80,10 +80,10 @@ Page {
                             Layout.fillHeight: true
                             Layout.preferredWidth: step1Content.selectorPanelWidth
 
-                            onStrategyTypeIndexChanged: function(strategyTypeIndex) {
-                                root.selectedStrategyTypeIndex = strategyTypeIndex
-                                if (strategyService.normalizeStrategyTypeIndex(root.selectedStrategyTypeIndex) !== -1) {
-                                    strategyBasicInfo.applyStrategyTypeDefaults(root.selectedStrategyTypeIndex, false)
+                            onStrategyTypeChanged: function(strategyType) {
+                                root.selectedStrategyType = strategyType
+                                if (strategyType >= 0) {
+                                    strategyBasicInfo.applyStrategyTypeDefaults(strategyType, false)
                                 }
                             }
                         }
@@ -93,7 +93,7 @@ Page {
                             id: strategyBasicInfo
                             Layout.fillHeight: true
                             Layout.fillWidth: true
-                            selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
+                            selectedStrategyType: root.selectedStrategyType
                             useWideCardLayout: false
 
                             onValidationChanged: function(isValid) {
@@ -106,7 +106,7 @@ Page {
                 // 步骤2: 参数配置
                 StrategyComponents.StrategyParamConfig {
                     id: step2Content
-                    selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
+                    selectedStrategyType: root.selectedStrategyType
                     factorService: root.factorService
                     
                     onParametersChanged: function(newParameters) {
@@ -331,7 +331,7 @@ Page {
                                         }
 
                                         Text {
-                                            text: "类型: " + strategyService.strategyTypeName(root.selectedStrategyTypeIndex)
+                                            text: "类型: " + strategyService.strategyTypeName(root.selectedStrategyType)
                                             font.pixelSize: 13
                                             color: "#cbd5e1"
                                         }
@@ -895,16 +895,13 @@ Page {
         return rawValue
     }
 
-    function mapBackendTypeToFrontendIndex(strategy) {
-        var explicitTypeIndex = Number(strategy && strategy.strategyTypeIndex)
-        if (isFinite(explicitTypeIndex) && explicitTypeIndex >= 0) {
-            var normalizedTypeIndex = strategyService.normalizeStrategyTypeIndex(explicitTypeIndex)
-            if (normalizedTypeIndex !== -1) {
-                return normalizedTypeIndex
-            }
+    function mapBackendTypeToFrontendEnum(strategy) {
+        var backendTypeId = String((strategy && strategy.strategyType) || "")
+        if (!backendTypeId) {
+            return -1
         }
-
-        return -1
+        // 严格解析枚举名字符串; 非法返回 -1 (无任何回退)
+        return strategyService.strategyTypeFromId(backendTypeId)
     }
 
     function loadStrategyForEdit(strategy) {
@@ -926,9 +923,9 @@ Page {
             return
         }
 
-        var frontendTypeIndex = mapBackendTypeToFrontendIndex(plainStrategy)
-        if (frontendTypeIndex === -1) {
-            showErrorDialog("策略缺少合法 strategyTypeIndex，无法继续编辑。")
+        var frontendStrategyType = mapBackendTypeToFrontendEnum(plainStrategy)
+        if (frontendStrategyType === -1) {
+            showErrorDialog("策略缺少合法 strategyType，无法继续编辑。")
             return
         }
 
@@ -963,18 +960,18 @@ Page {
         resetForm()
         isEditMode = true
         editingStrategyId = strategySnapshot.strategyId
-        selectedStrategyTypeIndex = frontendTypeIndex
+        selectedStrategyType = frontendStrategyType
         enableAdvancedOptions = !!advancedOptions.enabled
 
-        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyTypeIndex) {
-            strategyTypeSelector.setSelectedStrategyTypeIndex(selectedStrategyTypeIndex, false)
+        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyType) {
+            strategyTypeSelector.setSelectedStrategyType(selectedStrategyType, false)
         }
         if (strategyBasicInfo && strategyBasicInfo.setBasicInfo) {
             strategyBasicInfo.setBasicInfo(strategySnapshot)
         }
         if (step2Content && step2Content.applyPersistedStrategy) {
             try {
-                step2Content.applyPersistedStrategy(selectedStrategyTypeIndex, editableParameters, advancedOptions)
+                step2Content.applyPersistedStrategy(selectedStrategyType, editableParameters, advancedOptions)
             } catch (error) {
                 isEditMode = false
                 editingStrategyId = ""
@@ -1010,8 +1007,7 @@ Page {
         var context = {
             strategyName: strategyBasicInfo.strategyName,
             strategyDescription: strategyBasicInfo.strategyDescription,
-            selectedStrategyTypeIndex: selectedStrategyTypeIndex,
-            selectedStrategyBehaviorKind: selectedStrategyBehaviorKind,
+            selectedStrategyType: selectedStrategyType,
             strategyTags: strategyBasicInfo.getTagsList(),
             assetTypeIndex: strategyBasicInfo.getAssetTypeIndex(),
             timeFrameIndex: strategyBasicInfo.getTimeFrameIndex(),
@@ -1031,8 +1027,8 @@ Page {
             showErrorDialog("策略运行属性必须使用受支持的索引口径，请重新选择时间周期和风险等级。")
             return
         }
-        if (strategyData.strategyBehaviorKind === undefined || strategyData.strategyBehaviorKind === null || Number(strategyData.strategyBehaviorKind) < 0) {
-            showErrorDialog("策略行为类型无效，无法提交。")
+        if (!strategyData.strategyType || String(strategyData.strategyType).length === 0) {
+            showErrorDialog("策略类型无效，无法提交。")
             return
         }
 
@@ -1072,8 +1068,7 @@ Page {
 
         var backendStrategyData = {
             strategyName: strategyData.name,
-            strategyTypeIndex: strategyData.strategyTypeIndex,
-            strategyBehaviorKind: strategyData.strategyBehaviorKind,
+            strategyType: strategyData.strategyType,
             description: strategyData.description,
             assetTypeIndex: strategyData.assetTypeIndex,
             timeFrameIndex: strategyData.timeFrameIndex,
@@ -1128,11 +1123,8 @@ Page {
         if (!strategyData || typeof strategyData !== "object") {
             return { valid: false, reason: "策略数据为空，无法保存" }
         }
-        if (!strategyData.strategyTypeIndex || Number(strategyData.strategyTypeIndex) < 0) {
+        if (!strategyData.strategyType || String(strategyData.strategyType).length === 0) {
             return { valid: false, reason: "策略类型未选择或无效" }
-        }
-        if (!strategyData.strategyBehaviorKind === undefined || strategyData.strategyBehaviorKind === null || Number(strategyData.strategyBehaviorKind) < 0) {
-            return { valid: false, reason: "策略行为类型无效" }
         }
         var params = strategyData.parameters
         if (!params || typeof params !== "object" || Array.isArray(params)) {
@@ -1171,7 +1163,7 @@ Page {
         var resetData = strategyService.resetFormData()
         
         // 应用重置数据
-        selectedStrategyTypeIndex = Number(resetData.selectedStrategyTypeIndex)
+        selectedStrategyType = Number(resetData.selectedStrategyType)
         strategyName = resetData.strategyName
         strategyDescription = resetData.strategyDescription
         strategyTags = resetData.strategyTags
@@ -1179,7 +1171,7 @@ Page {
         enableAdvancedOptions = resetData.enableAdvancedOptions
         strategyParameters = resetData.strategyParameters
         parametersValid = resetData.parametersValid
-        strategyBasicInfo.applyStrategyTypeDefaults(selectedStrategyTypeIndex, true)
+        strategyBasicInfo.applyStrategyTypeDefaults(selectedStrategyType, true)
     }
     
     // 策略创建成功对话框 (集成C++服务后使用)

@@ -11,7 +11,6 @@ Popup {
     property string groupId: ""
     property string groupRole: ""
     property var strategyProfile: ({})
-    property int selectedStrategyTypeIndex: 0
 
     signal ruleAdded(string templateId)
 

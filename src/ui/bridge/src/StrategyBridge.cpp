@@ -96,8 +96,7 @@ const QStringList& frozenStrategyUpsertPayloadKeys()
     static const QStringList keys = {
         QStringLiteral("strategyId"),
         QStringLiteral("strategyName"),
-        QStringLiteral("strategyTypeIndex"),
-        QStringLiteral("strategyBehaviorKind"),
+        QStringLiteral("strategyType"),  // 枚举名字符串 (如 "MACHINE_LEARNING_SELECTION"); 数字键已永久删除
         QStringLiteral("description"),
         QStringLiteral("assetTypeIndex"),
         QStringLiteral("timeFrameIndex"),
@@ -161,27 +160,17 @@ QString StrategyBridge::readText(const QVariantMap& payload,
     return {};
 }
 
-bool StrategyBridge::isTypeIdxValid(const int index) const
-{
-    return domain::strategies::isValidStrategyTypeIndex(index);
-}
-
 StrategyBridge::StrategyTypeSpec StrategyBridge::readTypeSpec(const QVariantMap& payload) const
 {
     StrategyTypeSpec spec;
-    const int typeIndex = readScalarByKeys<int>(payload, {"strategyTypeIndex"}, -1);
-    if (!isTypeIdxValid(typeIndex)) return spec;
-    spec.value = static_cast<domain::strategies::StrategyType>(typeIndex);
-    spec.valid = true;
-    return spec;
-}
-
-StrategyBridge::StrategyBehaviorKindSpec StrategyBridge::readBehaviorKindSpec(const QVariantMap& payload) const
-{
-    StrategyBehaviorKindSpec spec;
-    const int behaviorIndex = readScalarByKeys<int>(payload, {"strategyBehaviorKind"}, -1);
-    if (!domain::strategies::isValidStrategyBehaviorKindIndex(behaviorIndex)) return spec;
-    spec.value = static_cast<domain::strategies::StrategyBehaviorKind>(behaviorIndex);
+    const QVariant rawValue = payload.value(QStringLiteral("strategyType"));
+    if (!rawValue.isValid() || rawValue.isNull()) return spec;
+    spec.provided = true;
+    // 严格精确解析枚举名; 数字/旧键/模糊匹配一律拒绝, 无回退
+    const auto parsed = domain::strategies::StrategyTypeRegistry::fromTypeId(
+        rawValue.toString().trimmed().toStdString());
+    if (!parsed.has_value()) return spec;
+    spec.value = *parsed;
     spec.valid = true;
     return spec;
 }
@@ -266,7 +255,6 @@ StrategyBridge::BridgeUpsertRequest StrategyBridge::parseReq(const QVariantMap& 
     request.setStrategyName(readText(payload, {"strategyName"}).toStdString());
     request.setDescription(readText(payload, {"description"}).toStdString());
     request.setStrategyType(readTypeSpec(payload));
-    request.setBehaviorKind(readBehaviorKindSpec(payload));
     request.setFactorIds(readFactorIds(payload));
     request.setRuleIds(readRuleIds(payload));
     request.setStatus(readScalarByKeys<bool>(payload, {"status"}, request.status()));
@@ -280,7 +268,6 @@ void StrategyBridge::applyReq(const BridgeUpsertRequest& request,
     if (request.hasStrategyId()) target.strategyId = request.strategyId().to_string();
     if (!request.strategyName().empty()) target.metadata.name = request.strategyName();
     if (!request.description().empty()) target.metadata.description = request.description();
-    if (request.behaviorKind().valid) target.metadata.behaviorKind = request.behaviorKind().value;
     target.status = request.status()
         ? strategy_view::StrategyLifecycleStatus::Active
         : strategy_view::StrategyLifecycleStatus::Inactive;
@@ -288,14 +275,16 @@ void StrategyBridge::applyReq(const BridgeUpsertRequest& request,
     if (request.ruleIds().provided) target.metadata.ruleIds = request.ruleIds().values;
     target.parameters = request.parameters();
     if (request.strategyType().valid) {
-        const int typeIndex = static_cast<int>(request.strategyType().value);
-        if (!isTypeIdxValid(typeIndex)) std::abort();
-        target.strategyTypeIndex = typeIndex;
+        target.strategyType = request.strategyType().value;
+        // 行为类型一律由策略类型推导, 不再从载荷读取
+        target.metadata.behaviorKind =
+            domain::strategies::StrategyTypeRegistry::behaviorKindOf(target.strategyType.value());
+        // identity 由注册表显式构建 (逐名对应, 禁止数值强转)
         target.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{
-            static_cast<domain::backtest::StrategyStoredType>(typeIndex),
+            domain::strategies::StrategyTypeRegistry::storedTypeOf(target.strategyType.value()),
             domain::backtest::ResolvedStrategyBehavior{
-                static_cast<domain::backtest::StrategyBehaviorKind>(
-                    static_cast<int>(target.metadata.behaviorKind)), true},
+                domain::strategies::StrategyTypeRegistry::backtestBehaviorKindOf(target.strategyType.value()),
+                true},
             true
         };
     }
@@ -484,12 +473,7 @@ QString StrategyBridge::add(const QVariantMap& payload)
         return {};
     }
     if (!request.strategyType().valid) {
-        setErr(QStringLiteral("add strategyTypeIndex is required"));
-        emit operationFailed(kInvalidArgumentCode, m_err);
-        return {};
-    }
-    if (!request.behaviorKind().valid) {
-        setErr(QStringLiteral("add strategyBehaviorKind is required"));
+        setErr(QStringLiteral("add strategyType is required (枚举名字符串, 如 MACHINE_LEARNING_SELECTION)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return {};
     }
@@ -570,8 +554,8 @@ bool StrategyBridge::update(const QVariantMap& payload)
         emit operationFailed(kInvalidArgumentCode, m_err);
         return false;
     }
-    if (!request.behaviorKind().valid) {
-        setErr(QStringLiteral("update strategyBehaviorKind is required"));
+    if (request.strategyType().provided && !request.strategyType().valid) {
+        setErr(QStringLiteral("update strategyType is invalid (非法枚举名)"));
         emit operationFailed(kInvalidArgumentCode, m_err);
         return false;
     }
@@ -861,22 +845,38 @@ QString StrategyBridge::stockDisplayName(const QString& symbol) const
     return StockNameResolver::displayName(symbol);
 }
 
-// ── 策略类型枚举 (替代 JS StrategyCreationUtils 数字映射) ──
+// ── 策略类型枚举 (C++ 枚举唯一事实源, 替代 JS StrategyCreationUtils 的数字映射) ──
 
-using SBK = ::domain::strategies::StrategyBehaviorKind;
+using ContractType = StrategyTypeContract::StrategyType;
 
-static const std::vector<std::tuple<int, QString, QString, QString>> kStrategyTypeMeta = {
-    {0,  QStringLiteral("双均线趋势"), QStringLiteral("📈"), QStringLiteral("基于双均线金叉死叉的趋势跟踪策略")},
-    {1,  QStringLiteral("海龟突破"),   QStringLiteral("🐢"), QStringLiteral("基于唐奇安通道突破的趋势跟踪策略")},
-    {2,  QStringLiteral("布林带回归"), QStringLiteral("📊"), QStringLiteral("基于布林带的均值回归策略")},
-    {3,  QStringLiteral("RSI回归"),    QStringLiteral("📉"), QStringLiteral("基于RSI超买超卖的均值回归策略")},
-    {4,  QStringLiteral("多因子选股"), QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
-    {5,  QStringLiteral("财报超预期"), QStringLiteral("📰"), QStringLiteral("基于财报超预期事件的交易策略")},
-    {6,  QStringLiteral("统计配对"),   QStringLiteral("⚖️"), QStringLiteral("基于价差偏离的统计套利配对交易")},
-    {7,  QStringLiteral("风险平价"),   QStringLiteral("🛡️"), QStringLiteral("基于风险平价的资产配置策略")},
-    {8,  QStringLiteral("机器学习"),   QStringLiteral("🤖"), QStringLiteral("ML模型驱动的智能选股策略")},
-    {9,  QStringLiteral("订单流"),     QStringLiteral("⚡"), QStringLiteral("基于订单流不平衡的高频交易策略")},
-    {10, QStringLiteral("波动率套利"), QStringLiteral("📐"), QStringLiteral("基于波动率价差的期权套利策略")},
+// QML 契约枚举 → 域枚举 (StrategyTypeContract.h 的 static_assert 已保证逐值一致)
+static domain::strategies::StrategyType toDomain(ContractType type)
+{
+    return static_cast<domain::strategies::StrategyType>(type);
+}
+
+// 契约枚举值合法性 (QML 可能传入任意 int)
+static bool isContractTypeValid(ContractType type)
+{
+    return domain::strategies::isValidStrategyTypeIndex(static_cast<int>(type));
+}
+
+static constexpr int kInvalidBehaviorKind = -1;  // strategyBehaviorKindOfType 非法输入的返回值
+
+using StrategyTypeMetaEntry = std::tuple<ContractType, QString, QString, QString>;
+
+static const std::vector<StrategyTypeMetaEntry> kStrategyTypeMeta = {
+    {ContractType::DoubleMovingAverage,      QStringLiteral("双均线趋势"), QStringLiteral("📈"), QStringLiteral("基于双均线金叉死叉的趋势跟踪策略")},
+    {ContractType::TurtleBreakout,           QStringLiteral("海龟突破"),   QStringLiteral("🐢"), QStringLiteral("基于唐奇安通道突破的趋势跟踪策略")},
+    {ContractType::BollingerBandMeanReversion, QStringLiteral("布林带回归"), QStringLiteral("📊"), QStringLiteral("基于布林带的均值回归策略")},
+    {ContractType::RsiMeanReversion,         QStringLiteral("RSI回归"),    QStringLiteral("📉"), QStringLiteral("基于RSI超买超卖的均值回归策略")},
+    {ContractType::MultiFactorSelection,     QStringLiteral("多因子选股"), QStringLiteral("🧩"), QStringLiteral("多因子加权综合排名选股")},
+    {ContractType::EarningsSurprise,         QStringLiteral("财报超预期"), QStringLiteral("📰"), QStringLiteral("基于财报超预期事件的交易策略")},
+    {ContractType::StatisticalPairTrading,   QStringLiteral("统计配对"),   QStringLiteral("⚖️"), QStringLiteral("基于价差偏离的统计套利配对交易")},
+    {ContractType::RiskParityAllocation,     QStringLiteral("风险平价"),   QStringLiteral("🛡️"), QStringLiteral("基于风险平价的资产配置策略")},
+    {ContractType::MachineLearningSelection, QStringLiteral("机器学习"),   QStringLiteral("🤖"), QStringLiteral("ML模型驱动的智能选股策略")},
+    {ContractType::OrderFlowImbalance,       QStringLiteral("订单流"),     QStringLiteral("⚡"), QStringLiteral("基于订单流不平衡的高频交易策略")},
+    {ContractType::VolatilitySpread,         QStringLiteral("波动率套利"), QStringLiteral("📐"), QStringLiteral("基于波动率价差的期权套利策略")},
 };
 
 static const std::vector<std::tuple<int, QString, QString>> kRiskLevelMeta = {
@@ -886,71 +886,89 @@ static const std::vector<std::tuple<int, QString, QString>> kRiskLevelMeta = {
     {4, QStringLiteral("激进"),   QStringLiteral("#8B5CF6")},
 };
 
-static int toBk(int typeIndex) {
-    switch (typeIndex) {
-    case 0:  return (int)SBK::TrendFollowing;
-    case 1:  return (int)SBK::Momentum;
-    case 2:  return (int)SBK::MeanReversion;
-    case 3:  return (int)SBK::MeanReversion;
-    case 4:  return (int)SBK::MultiFactor;
-    case 5:  return (int)SBK::EventDriven;
-    case 6:  return (int)SBK::Arbitrage;
-    case 7:  return (int)SBK::MultiFactor;
-    case 8:  return (int)SBK::MachineLearning;
-    case 9:  return (int)SBK::HighFrequency;
-    case 10: return (int)SBK::Arbitrage;
-    default: return (int)SBK::Custom;
+// 枚举 → 元数据; 非法枚举返回 nullptr (调用方自行处理, 禁止回退到其它类型)
+static const StrategyTypeMetaEntry* findMeta(ContractType type)
+{
+    for (const auto& m : kStrategyTypeMeta)
+        if (std::get<0>(m) == type) return &m;
+    return nullptr;
+}
+
+QVariantList StrategyBridge::strategyTypeList() const
+{
+    QVariantList list;
+    for (const auto& m : kStrategyTypeMeta) {
+        QVariantMap item;
+        item["type"] = static_cast<int>(std::get<0>(m));
+        item["id"] = strategyTypeId(std::get<0>(m));
+        item["name"] = std::get<1>(m);
+        item["icon"] = std::get<2>(m);
+        item["brief"] = std::get<3>(m);
+        list.append(item);
     }
+    return list;
 }
 
-static int fromBk(int bk) {
-    switch (bk) {
-    case (int)SBK::TrendFollowing:  return 0;
-    case (int)SBK::MeanReversion:   return 2;
-    case (int)SBK::Momentum:        return 1;
-    case (int)SBK::Arbitrage:       return 6;
-    case (int)SBK::MultiFactor:     return 4;
-    case (int)SBK::MachineLearning: return 8;
-    case (int)SBK::EventDriven:     return 5;
-    case (int)SBK::HighFrequency:   return 9;
-    case (int)SBK::Custom:          return 10;
-    default: return 0;
+QString StrategyBridge::strategyTypeId(ContractType type) const
+{
+    if (!isContractTypeValid(type)) return {};
+    return QString::fromStdString(std::string(
+        domain::strategies::StrategyTypeRegistry::typeId(toDomain(type))));
+}
+
+int StrategyBridge::strategyTypeFromId(const QString& id) const
+{
+    const auto parsed = domain::strategies::StrategyTypeRegistry::fromTypeId(id.trimmed().toStdString());
+    return parsed.has_value() ? static_cast<int>(*parsed) : kInvalidStrategyType;
+}
+
+QString StrategyBridge::strategyTypeName(ContractType type) const
+{
+    const auto* m = findMeta(type);
+    return m ? std::get<1>(*m) : QString();
+}
+
+QString StrategyBridge::strategyTypeIcon(ContractType type) const
+{
+    const auto* m = findMeta(type);
+    return m ? std::get<2>(*m) : QString();
+}
+
+QString StrategyBridge::strategyTypeBrief(ContractType type) const
+{
+    const auto* m = findMeta(type);
+    return m ? std::get<3>(*m) : QString();
+}
+
+int StrategyBridge::strategyBehaviorKindOfType(ContractType type) const
+{
+    if (!isContractTypeValid(type)) return kInvalidBehaviorKind;
+    return static_cast<int>(
+        domain::strategies::StrategyTypeRegistry::behaviorKindOf(toDomain(type)));
+}
+
+QString StrategyBridge::strategyBehaviorKindName(int behaviorKind) const
+{
+    switch (static_cast<domain::strategies::StrategyBehaviorKind>(behaviorKind)) {
+    case domain::strategies::StrategyBehaviorKind::TrendFollowing:  return QStringLiteral("趋势跟随");
+    case domain::strategies::StrategyBehaviorKind::MeanReversion:   return QStringLiteral("均值回归");
+    case domain::strategies::StrategyBehaviorKind::Momentum:        return QStringLiteral("动量");
+    case domain::strategies::StrategyBehaviorKind::Arbitrage:       return QStringLiteral("套利");
+    case domain::strategies::StrategyBehaviorKind::MultiFactor:     return QStringLiteral("多因子");
+    case domain::strategies::StrategyBehaviorKind::MachineLearning: return QStringLiteral("机器学习");
+    case domain::strategies::StrategyBehaviorKind::EventDriven:     return QStringLiteral("事件驱动");
+    case domain::strategies::StrategyBehaviorKind::HighFrequency:   return QStringLiteral("高频");
+    case domain::strategies::StrategyBehaviorKind::Custom:          return QStringLiteral("自定义");
     }
+    return {};
 }
 
-static const auto* findMeta(int typeIndex) {
-    for (auto& m : kStrategyTypeMeta)
-        if (std::get<0>(m) == typeIndex) return &m;
-    return &kStrategyTypeMeta[0];  // fallback TrendFollowing
-}
-
-int StrategyBridge::normalizeStrategyTypeIndex(int raw) const {
-    if (raw >= 0 && raw <= 10) return raw;           // display range 0-10
-    if (raw == 100) return 0;                        // Common → TrendFollowing
-    // Try behaviorKind range
-    int ti = fromBk(raw);
-    if (ti >= 0) return ti;
-    return 0;  // fallback
-}
-
-QString StrategyBridge::strategyTypeName(int typeIndex) const {
-    return std::get<1>(*findMeta(normalizeStrategyTypeIndex(typeIndex)));
-}
-
-QString StrategyBridge::strategyTypeIcon(int typeIndex) const {
-    return std::get<2>(*findMeta(normalizeStrategyTypeIndex(typeIndex)));
-}
-
-QString StrategyBridge::strategyTypeBrief(int typeIndex) const {
-    return std::get<3>(*findMeta(normalizeStrategyTypeIndex(typeIndex)));
-}
-
-int StrategyBridge::strategyBehaviorKindFromTypeIndex(int typeIndex) const {
-    return toBk(normalizeStrategyTypeIndex(typeIndex));
-}
-
-int StrategyBridge::strategyTypeIndexFromBehaviorKind(int behaviorKind) const {
-    return fromBk(behaviorKind);
+bool StrategyBridge::isPortfolioStrategyType(const QString& strategyTypeId) const
+{
+    const auto parsed = domain::strategies::StrategyTypeRegistry::fromTypeId(
+        strategyTypeId.trimmed().toStdString());
+    return parsed.has_value()
+        && *parsed == domain::strategies::StrategyType::RISK_PARITY_ALLOCATION;
 }
 
 QString StrategyBridge::riskLevelName(int index) const {
@@ -1010,8 +1028,7 @@ static auto option(int val, const QString& label) {
     return m;
 }
 
-QVariantList StrategyBridge::buildParamConfigs(int typeIndex) const {
-    int ti = normalizeStrategyTypeIndex(typeIndex);
+QVariantList StrategyBridge::buildParamConfigs(ContractType type) const {
     QVariantList configs;
 
     // ── 公共参数 ──
@@ -1035,42 +1052,54 @@ QVariantList StrategyBridge::buildParamConfigs(int typeIndex) const {
 
     // ── 类型专属参数 ──
     auto P = QStringLiteral("个性化参数");
-    if (ti == 0 || ti == 1) {  // TrendFollowing / TrendBreakout
+    if (type == ContractType::DoubleMovingAverage || type == ContractType::TurtleBreakout) {
         configs << slider("fastPeriod", QStringLiteral("快线周期"), 5, 2, 60, 1, QStringLiteral("天"), 0, P);
         configs << slider("slowPeriod", QStringLiteral("慢线周期"), 30, 5, 120, 1, QStringLiteral("天"), 0, P);
     }
-    if (ti == 2 || ti == 3) {  // MeanReversion / RsiMeanReversion
+    if (type == ContractType::BollingerBandMeanReversion || type == ContractType::RsiMeanReversion) {
         configs << slider("period", QStringLiteral("RSI周期"), 14, 5, 50, 1, QStringLiteral("天"), 0, P);
     }
-    if (ti == 2) {  // Momentum
+    if (type == ContractType::BollingerBandMeanReversion) {
         configs << slider("macdFast", QStringLiteral("MACD快线"), 12, 2, 60, 1, QStringLiteral("天"), 0, P);
         configs << slider("macdSlow", QStringLiteral("MACD慢线"), 26, 3, 120, 1, QStringLiteral("天"), 0, P);
         configs << slider("macdSignal", QStringLiteral("MACD信号"), 9, 2, 30, 1, QStringLiteral("天"), 0, P);
     }
-    if (ti == 4 || ti == 5) {  // MultiFactor / MachineLearning
+    // 多因子 / 机器学习 / 业绩惊喜: 三者引擎同走 MultiFactorStrategy 子类,
+    // sellThreshold/sellRankMultiplier/minCompositeScore 是引擎真实消费字段, topN 由 fromDb 直接读取
+    if (type == ContractType::MultiFactorSelection
+        || type == ContractType::MachineLearningSelection
+        || type == ContractType::EarningsSurprise) {
+        configs << slider("topN", QStringLiteral("TopN"), 50, 1, 500, 1, QStringLiteral(""), 0, P);
         configs << slider("sellThreshold", QStringLiteral("卖出阈值"), 0.2, -5.0, 5.0, 0.1, QStringLiteral("σ"), 1, P);
         configs << slider("sellRankMultiplier", QStringLiteral("排名卖出乘数"), 2.0, 1.0, 10.0, 0.5, QStringLiteral("x"), 1, P);
         configs << slider("minCompositeScore", QStringLiteral("最低综合分"), 0.0, -5.0, 5.0, 0.1, QStringLiteral("σ"), 1, P);
     }
-    if (ti == 6) {  // Arbitrage/BollingerBand
+    if (type == ContractType::StatisticalPairTrading) {
         configs << slider("bbPeriod", QStringLiteral("布林带周期"), 20, 5, 60, 1, QStringLiteral("天"), 0, P);
         configs << slider("bbStdDev", QStringLiteral("标准差倍数"), 2.0, 1.0, 4.0, 0.1, QStringLiteral("倍"), 1, P);
     }
+    // 风险平价: id 与调优工厂 ParameterSpaceFactory 一致 (V1 不包含资产列表输入)
+    if (type == ContractType::RiskParityAllocation) {
+        configs << slider("volatilityLookback", QStringLiteral("波动率回看"), 60, 5, 500, 1, QStringLiteral(""), 0, P);
+        configs << slider("targetVolatility", QStringLiteral("目标波动率"), 0.0, 0.0, 1.0, 0.01, QStringLiteral(""), 2, P);
+    }
+    // 订单流失衡 / 波动率套利: 依赖盘口/期权链外部数据, V1 仅通用参数 (与调优工厂裁决一致)
     return configs;
 }
 
 QVariantMap StrategyBridge::buildCompleteStrategyData(const QVariantMap& context) const {
-    int ti = normalizeStrategyTypeIndex(context.value("selectedStrategyTypeIndex", 0).toInt());
-    int bk = toBk(ti);
+    const auto type = static_cast<ContractType>(
+        context.value(QStringLiteral("selectedStrategyType")).toInt());
+    const QString typeId = strategyTypeId(type);
 
     auto params = context.value("strategyParameters", QVariantMap()).toMap();
 
     QVariantMap data;
     data["name"] = context.value("strategyName", QStringLiteral("新策略"));
     data["displayName"] = data["name"];
-    data["strategyBehaviorKind"] = bk;
-    data["strategyTypeIndex"] = ti;
-    data["typeName"] = strategyTypeName(ti);
+    // 类型只发枚举名字符串; 数字键与行为类字段已永久删除 (行为类一律服务端推导)
+    data["strategyType"] = typeId;
+    data["typeName"] = strategyTypeName(type);
     data["description"] = context.value("strategyDescription", "");
 
     data["assetTypeIndex"] = context.value("assetTypeIndex", 1);
@@ -1098,7 +1127,7 @@ QVariantMap StrategyBridge::resetFormData() const {
     QVariantMap data;
     data["strategyName"] = "";
     data["strategyDescription"] = "";
-    data["selectedStrategyTypeIndex"] = 0;
+    data["selectedStrategyType"] = static_cast<int>(ContractType::DoubleMovingAverage);
     data["strategyTags"] = QVariantList();
     data["assetType"] = "stock";
     data["timeFrame"] = "daily";
@@ -1111,19 +1140,18 @@ QVariantMap StrategyBridge::resetFormData() const {
     return data;
 }
 
-QString StrategyBridge::defaultStrategyDescription(int typeIndex) const {
-    return strategyTypeBrief(typeIndex);
+QString StrategyBridge::defaultStrategyDescription(ContractType type) const {
+    return strategyTypeBrief(type);
 }
-QStringList StrategyBridge::defaultStrategyTags(int) const {
+QStringList StrategyBridge::defaultStrategyTags(ContractType) const {
     return {QStringLiteral("量化"), QStringLiteral("A股")};
 }
 
 // ── 规则编辑器 (基本实现) ──
-QVariantMap StrategyBridge::buildDefaultStrategyProfile(int typeIndex) const {
-    int bk = strategyBehaviorKindFromTypeIndex(typeIndex);
+QVariantMap StrategyBridge::buildDefaultStrategyProfile(ContractType type) const {
     QVariantMap p;
-    p["strategyTypeIndex"] = typeIndex;
-    p["strategyBehaviorKind"] = bk;
+    // 类型只落枚举名字符串; 行为类字段已永久删除 (一律由类型推导)
+    p["strategyType"] = strategyTypeId(type);
     p["horizon"] = "swing";
     p["tradingFrequency"] = "low_frequency";
     p["marketScope"] = "a_share";

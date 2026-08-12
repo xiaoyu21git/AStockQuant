@@ -7,6 +7,7 @@
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "../../../infrastructure/include/database/MarketDataService.h"
 #include "../../../infrastructure/include/database/OrderRecorder.h"
+#include "../../strategies/include/StrategyTypeRegistry.h"
 #include "../../backtest/include/BacktestRequest.h"
 #include "../../backtest/include/BacktestFillSimulator.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
@@ -192,16 +193,26 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
                          << " first50=" << metaJson.substr(0, 50);
     auto meta = foundation::json::JsonFacade::parse(metaJson);
     INTERNAL_INFO_STREAM << "[fromDb] meta.has(name)=" << meta.has("name")
-                         << " has(behaviorKind)=" << meta.has("behaviorKind")
+                         << " has(strategyType)=" << meta.has("strategyType")
                          << " name=" << (meta.has("name") ? meta.get("name").asString() : "N/A");
 
     StrategyCreationParams params;
     params.strategyId     = strategyId;
     params.strategyName   = meta.has("name")        ? meta.get("name").asString()        : "";
     params.description    = meta.has("description") ? meta.get("description").asString()  : "";
-    params.behaviorKind   = meta.has("behaviorKind")
-        ? static_cast<::domain::strategies::StrategyBehaviorKind>(meta.get("behaviorKind").asInt())
-        : ::domain::strategies::StrategyBehaviorKind::Custom;
+    // ── 策略类型: 唯一权威来源 = metadata_json.strategyType 枚举名; 行为类型一律推导 ──
+    if (!meta.has("strategyType")) {
+        INTERNAL_ERROR_STREAM << "[fromDb] strategyType 缺失, 拒绝加载: " << strategyId;
+        return nullptr;
+    }
+    const std::string strategyTypeIdStr = meta.get("strategyType").asString();
+    auto parsedType = ::domain::strategies::StrategyTypeRegistry::fromTypeId(strategyTypeIdStr);
+    if (!parsedType.has_value()) {
+        INTERNAL_ERROR_STREAM << "[fromDb] strategyType 非法: " << strategyTypeIdStr
+                              << ", 拒绝加载: " << strategyId;
+        return nullptr;
+    }
+    params.behaviorKind = ::domain::strategies::StrategyTypeRegistry::behaviorKindOf(*parsedType);
     // ── 因子存在性: 唯一权威来源 = factor_overlay.enabled (DB字段) ──
     bool factorOverlayEnabled = false;
     int  factorTargetPositionCount = 10;
@@ -214,13 +225,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
     std::string paramJson = row.getString("parameters");
     if (!paramJson.empty() && paramJson != "null") {
         auto root = foundation::json::JsonFacade::parse(paramJson);
-        // v2.1: fallback — metadata 无 behaviorKind 但有因子配置时强制 MultiFactor
-        if (params.behaviorKind == ::domain::strategies::StrategyBehaviorKind::Custom) {
-            if (root.has("factor_overlay") && root.get("factor_overlay").has("enabled")
-                && root.get("factor_overlay").get("enabled").asBool()) {
-                params.behaviorKind = ::domain::strategies::StrategyBehaviorKind::MultiFactor;
-            }
-        }
         params.topN = root.has("topN") ? root.get("topN").asInt() : 0;
         params.allowShort = root.has("allowShort") && root.get("allowShort").asBool();
         params.maxPositions = root.has("maxPositions") ? root.get("maxPositions").asInt() : 20;
@@ -380,7 +384,8 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         .withFactorService(std::move(factorSvc))
         .build();
 
-    INTERNAL_INFO_STREAM << "[fromDb] " << strategyId << " kind=" << static_cast<int>(params.behaviorKind)
+    INTERNAL_INFO_STREAM << "[fromDb] " << strategyId << " strategyType=" << strategyTypeIdStr
+                         << " kind=" << static_cast<int>(params.behaviorKind)
                          << " factorIds=" << params.factorIds.size()
                          << " engine=" << static_cast<void*>(engine.get());
     if (!engine) return nullptr;

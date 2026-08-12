@@ -22,7 +22,7 @@ ColumnLayout {
     required property int ruleComposerSuggestionWidth
     required property int ruleComposerSuggestionMinWidth
     required property int ruleComposerSuggestionMaxWidth
-    required property int selectedStrategyTypeIndex
+    required property int selectedStrategyType
     required property var strategyProfile
     required property var availableRuleStages
     required property var suggestionPhaseLock
@@ -173,7 +173,7 @@ ColumnLayout {
             hintMessage: "默认规则包和当前组快捷引入是主入口；这里仅用于补充非默认模板。先选阶段和规则组，再把模板加入当前规则组。"
             showInlinePhaseInputs: !useRuleComposerColumns
             phaseLockValue: suggestionPhaseLock
-            selectedStrategyTypeIndex: selectedStrategyTypeIndex
+            selectedStrategyType: selectedStrategyType
             strategyProfile: strategyProfile
             selectedStageId: selectedRuleComposerStageId
             selectedStageTitle: selectedStageTitle
@@ -194,7 +194,7 @@ ColumnLayout {
         hintMessage: "默认规则包和当前组快捷引入是主入口；这里仅用于补充非默认模板。先选阶段和规则组，再把模板加入当前规则组。"
         showInlinePhaseInputs: true
         phaseLockValue: suggestionPhaseLock
-        selectedStrategyTypeIndex: selectedStrategyTypeIndex
+        selectedStrategyType: selectedStrategyType
         strategyProfile: strategyProfile
         selectedStageId: selectedRuleComposerStageId
         selectedStageTitle: selectedStageTitle
@@ -209,7 +209,6 @@ ColumnLayout {
     // 规则模板浏览弹窗（原在父文件底部，现移入组件内部）
     RuleTemplatePickerDialog {
         id: ruleTemplatePicker
-        selectedStrategyTypeIndex: selectedStrategyTypeIndex
         strategyProfile: strategyProfile
 
         onRuleAdded: function(templateId) {

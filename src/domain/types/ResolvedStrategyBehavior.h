@@ -58,36 +58,4 @@ struct ResolvedStrategyIdentity {
     }
 };
 
-inline ResolvedStrategyIdentity resolveStrategyStoredType(const int storedTypeIndex)
-{
-    switch (static_cast<StrategyStoredType>(storedTypeIndex)) {
-    case StrategyStoredType::DOUBLE_MOVING_AVERAGE:
-    case StrategyStoredType::TURTLE_BREAKOUT:
-    case StrategyStoredType::BOLLINGER_BAND_MEAN_REVERSION:
-    case StrategyStoredType::RSI_MEAN_REVERSION:
-    case StrategyStoredType::MULTI_FACTOR_SELECTION:
-    case StrategyStoredType::EARNINGS_SURPRISE:
-    case StrategyStoredType::STATISTICAL_PAIR_TRADING:
-    case StrategyStoredType::RISK_PARITY_ALLOCATION:
-    case StrategyStoredType::MACHINE_LEARNING_SELECTION:
-    case StrategyStoredType::ORDER_FLOW_IMBALANCE:
-    case StrategyStoredType::VOLATILITY_SPREAD:
-    case StrategyStoredType::Portfolio:
-    case StrategyStoredType::Custom:
-        return ResolvedStrategyIdentity{static_cast<StrategyStoredType>(storedTypeIndex), {}, true};
-    case StrategyStoredType::Unknown:
-    default:
-        return {};
-    }
-}
-
-inline ResolvedStrategyBehavior resolveStrategyBehavior(const int behaviorIndex)
-{
-    if (!isValidStrategyBehaviorKind(behaviorIndex)) {
-        return {};
-    }
-
-    return ResolvedStrategyBehavior{static_cast<StrategyBehaviorKind>(behaviorIndex), true};
-}
-
 } // namespace domain::backtest

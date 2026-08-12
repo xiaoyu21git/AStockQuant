@@ -14,6 +14,7 @@
 #include "CrosshairManager.h"
 #include "MarketDataBridge.h"
 #include "StrategyBridge.h"
+#include "StrategyTypeContract.h"
 #include "FactorService.h"
 #include "FactorBacktestBridge.h"
 #include "StrategyBacktestBridge.h"
@@ -110,6 +111,11 @@ namespace wang{
              auto* bridge = new StrategyBridge();
              return bridge;
           });
+
+      // StrategyTypes — 策略类型枚举契约 (不可创建; QML 仅引用其枚举值)
+      qmlRegisterUncreatableType<StrategyTypeContract>(
+         url, 1, 0, "StrategyTypes",
+         QStringLiteral("策略类型枚举契约, 仅供 QML 引用枚举值, 禁止实例化"));
 
       // FactorService - 因子服务桥接层（单例模式）
       // instance() 内部已同步调用 initialize()，无需 QTimer 延迟

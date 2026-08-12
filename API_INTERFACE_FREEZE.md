@@ -254,12 +254,11 @@ public:
 };
 ```
 
-冻结约束（2026-05-31 生效）：
+冻结约束（2026-05-31 生效；2026-08-13 修订）：
 - `add/update` 顶层 `payload` 白名单字段固定为：
   - `strategyId`
   - `strategyName`
-  - `strategyTypeIndex`
-  - `strategyBehaviorKind`
+  - `strategyType`
   - `description`
   - `assetTypeIndex`
   - `timeFrameIndex`
@@ -270,6 +269,9 @@ public:
   - `status`
   - `factorIds`
   - `ruleIds`
+- 2026-08-13 修订（项目负责人批准）：数字合同废弃，`strategyTypeIndex`/`strategyBehaviorKind` 两个数字键永久删除。
+  `strategyType` 为 C++ 枚举名字符串（如 `"MACHINE_LEARNING_SELECTION"`），是策略类型的唯一输入；
+  `strategyBehaviorKind` 一律由服务端从 `strategyType` 推导，payload 携带即拒绝。
 - 白名单外字段一律报错拒绝（fail-fast），不做兼容映射。
 - `update/remove/get` 的 `strategyId` 必须是合法 UUID，不允许空值或旧别名字段回退。
 - `parameters` 必须包含 `rule_profile` 与 `rule_composer_state` 对象，旧字段（如 `commonConfig`、`strategySpec`、`rule_template_bindings`）保持拒绝。

@@ -32,6 +32,8 @@
 #include <QJsonDocument>
 #include <QMetaObject>
 
+#include <optional>
+
 namespace {
 
 using domain::backtest::BacktestRequest;
@@ -55,6 +57,13 @@ using domain::optimization::TrialResult;
 using domain::optimization::ObjectiveSpec;
 using domain::optimization::OptimizationResult;
 using domain::optimization::ObjectiveMetric;
+
+// QML 契约枚举 → 域枚举 (StrategyTypeContract.h 的 static_assert 已保证逐值一致); 非法 → nullopt
+std::optional<domain::strategies::StrategyType> toDomainType(StrategyTypeContract::StrategyType type)
+{
+    if (!domain::strategies::isValidStrategyTypeIndex(static_cast<int>(type))) return std::nullopt;
+    return static_cast<domain::strategies::StrategyType>(type);
+}
 
 /// @brief 将 ParamSet 映射为 StrategyParamOverlay
 StrategyParamOverlay paramSetToOverlay(const ParamSet& ps,
@@ -269,13 +278,15 @@ ParameterTuningBridge::~ParameterTuningBridge()
     cancelTuning();
 }
 
-QVariantList ParameterTuningBridge::getTuningParamRanges(int strategyTypeIndex) const
+QVariantList ParameterTuningBridge::getTuningParamRanges(StrategyTypeContract::StrategyType type) const
 {
     using domain::optimization::ParamRange;
     using domain::optimization::ParameterSpaceFactory;
 
-    auto strategyType = static_cast<domain::strategies::StrategyType>(strategyTypeIndex);
-    auto ranges = ParameterSpaceFactory::defaultRanges(strategyType);
+    // 严格校验: 非法枚举直接返回空列表, 不静默回退
+    auto strategyType = toDomainType(type);
+    if (!strategyType.has_value()) return {};
+    auto ranges = ParameterSpaceFactory::defaultRanges(*strategyType);
 
     QVariantList result;
     for (const auto& r : ranges) {
@@ -318,10 +329,12 @@ QVariantList ParameterTuningBridge::getTuningParamRanges(int strategyTypeIndex) 
     return result;
 }
 
-int ParameterTuningBridge::estimateCombinations(int strategyTypeIndex) const
+int ParameterTuningBridge::estimateCombinations(StrategyTypeContract::StrategyType type) const
 {
-    auto strategyType = static_cast<domain::strategies::StrategyType>(strategyTypeIndex);
-    auto ranges = domain::optimization::ParameterSpaceFactory::defaultRanges(strategyType);
+    // 严格校验: 非法枚举返回 0, 不静默回退
+    auto strategyType = toDomainType(type);
+    if (!strategyType.has_value()) return 0;
+    auto ranges = domain::optimization::ParameterSpaceFactory::defaultRanges(*strategyType);
     return static_cast<int>(domain::optimization::ParameterSpaceFactory::estimateSearchSpace(ranges));
 }
 
@@ -331,10 +344,16 @@ int ParameterTuningBridge::totalTrials() const { return m_totalTrials; }
 double ParameterTuningBridge::progress() const { return m_progress; }
 QString ParameterTuningBridge::status() const { return m_statusText; }
 
-void ParameterTuningBridge::startTuning(const QString& strategyId, int strategyTypeIndex,
+void ParameterTuningBridge::startTuning(const QString& strategyId, StrategyTypeContract::StrategyType type,
                                          const QVariantMap& params)
 {
     if (m_isRunning.load()) return;
+
+    // 严格校验: 非法枚举直接中止, 不静默回退
+    if (!toDomainType(type).has_value()) {
+        emit tuningFailed(QStringLiteral("非法策略类型 (策略类型枚举非法)"));
+        return;
+    }
 
     if (strategyId.isEmpty()) {
         emit tuningFailed(QStringLiteral("Strategy ID is empty"));
@@ -361,8 +380,8 @@ void ParameterTuningBridge::startTuning(const QString& strategyId, int strategyT
             1, 1, std::chrono::milliseconds(120000), "ParameterTuningBridge");
     }
 
-    m_workerPool->post([this, capturedStrategyId, strategyTypeIndex, params]() {
-        executeTuning(capturedStrategyId, strategyTypeIndex, params);
+    m_workerPool->post([this, capturedStrategyId, type, params]() {
+        executeTuning(capturedStrategyId, type, params);
     });
 }
 
@@ -373,7 +392,7 @@ void ParameterTuningBridge::cancelTuning()
 }
 
 void ParameterTuningBridge::executeTuning(const std::string& strategyId,
-                                           int strategyTypeIndex,
+                                           StrategyTypeContract::StrategyType type,
                                            const QVariantMap& params)
 {
     try {
@@ -386,11 +405,18 @@ void ParameterTuningBridge::executeTuning(const std::string& strategyId,
             return;
         }
 
-        // ── 1. 解析策略类型 ──
-        auto strategyType = static_cast<domain::strategies::StrategyType>(strategyTypeIndex);
+        // ── 1. 解析策略类型 (严格校验: 非法枚举直接失败, 不静默回退) ──
+        auto strategyType = toDomainType(type);
+        if (!strategyType.has_value()) {
+            QMetaObject::invokeMethod(this, [this]() {
+                m_isRunning.store(false); emit isRunningChanged();
+                emit tuningFailed(QStringLiteral("非法策略类型 (策略类型枚举非法)"));
+            }, Qt::QueuedConnection);
+            return;
+        }
 
         // ── 2. 构建参数空间 ──
-        auto ranges = domain::optimization::ParameterSpaceFactory::defaultRanges(strategyType);
+        auto ranges = domain::optimization::ParameterSpaceFactory::defaultRanges(*strategyType);
         if (ranges.empty()) {
             QMetaObject::invokeMethod(this, [this]() {
                 m_isRunning.store(false); emit isRunningChanged();

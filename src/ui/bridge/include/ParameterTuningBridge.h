@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "StrategyTypeContract.h"
 
 /// @brief 参数自动调优桥接层 — QML ↔ 领域层
 /// 职责：QML 参数解析 → 线程调度 → 领域 IOptimizer/ParameterSpace 调用 → 结果回传 QML
@@ -27,16 +28,17 @@ public:
 
     /// @brief 获取指定策略类型的可调参数范围列表 (供 QML 配置面板展示)
     /// @return QVariantList of QVariantMap {name, type, min, max, step, options[], candidateCount}
-    Q_INVOKABLE QVariantList getTuningParamRanges(int strategyTypeIndex) const;
+    /// 非法枚举 → 返回空列表 (严格校验, 不静默回退)
+    Q_INVOKABLE QVariantList getTuningParamRanges(StrategyTypeContract::StrategyType type) const;
 
-    /// @brief 估算参数组合总数 (供 QML 显示组合爆炸警告)
-    Q_INVOKABLE int estimateCombinations(int strategyTypeIndex) const;
+    /// @brief 估算参数组合总数 (供 QML 显示组合爆炸警告); 非法枚举 → 0
+    Q_INVOKABLE int estimateCombinations(StrategyTypeContract::StrategyType type) const;
 
     /// @brief 启动参数调优
     /// @param strategyId 策略 ID (用于引擎创建)
-    /// @param strategyTypeIndex StrategyType 枚举索引 (int)
+    /// @param type 策略类型 (QML 契约枚举); 非法枚举 → tuningFailed, 不静默回退
     /// @param params 覆盖参数: optimizerKind(0=GridSearch), maxTrials, objectiveMetric, paramRanges(可选)
-    Q_INVOKABLE void startTuning(const QString& strategyId, int strategyTypeIndex,
+    Q_INVOKABLE void startTuning(const QString& strategyId, StrategyTypeContract::StrategyType type,
                                   const QVariantMap& params);
 
     /// @brief 取消正在运行的调优
@@ -61,7 +63,7 @@ signals:
 
 private:
     /// @brief 从 QVariantMap 构建 TunerConfig (在 worker 线程中执行)
-    void executeTuning(const std::string& strategyId, int strategyTypeIndex,
+    void executeTuning(const std::string& strategyId, StrategyTypeContract::StrategyType type,
                        const QVariantMap& params);
 
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_workerPool;

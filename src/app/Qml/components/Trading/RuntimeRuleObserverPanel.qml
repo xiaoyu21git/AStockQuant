@@ -510,7 +510,8 @@ Rectangle {
         var payload = source || ({})
         return "执行周期: " + String(payload.executionTimeframe || payload.execution_timeframe || "--")
             + "\n策略类型: " + String(payload.selectedStrategyType || "--")
-            + "\n行为类型: " + Bridge.StrategyBridge.strategyTypeName(payload.strategyBehaviorKind !== undefined ? payload.strategyBehaviorKind : payload.strategy_behavior_kind)
+            + "\n行为类型: " + (payload.strategyBehaviorKind !== undefined
+                ? Bridge.StrategyBridge.strategyBehaviorKindName(payload.strategyBehaviorKind) : "--")
     }
 
     function hasConfiguredDefaults() {
@@ -585,7 +586,7 @@ Rectangle {
                 fields: [
                     { key: "executionTimeframe", aliases: ["execution_timeframe"], label: "执行周期", format: "text" },
                     { key: "selectedStrategyType", label: "策略类型", format: "text" },
-                    { key: "strategyBehaviorKind", aliases: ["strategy_behavior_kind"], label: "行为类型", format: "strategyBehaviorKind" },
+                    { key: "strategyBehaviorKind", label: "行为类型", format: "strategyBehaviorKind" },
                     { key: "selectedStrategySubtype", label: "策略子类", format: "text" }
                 ]
             }
@@ -633,7 +634,7 @@ Rectangle {
     function formatFieldValue(fieldSpec, value) {
         switch (fieldSpec.format) {
         case "strategyBehaviorKind":
-            return Bridge.StrategyBridge.strategyTypeName(value)
+            return Bridge.StrategyBridge.strategyBehaviorKindName(value)
         case "percent":
             return formatPercent(value, 2)
         case "percent3":

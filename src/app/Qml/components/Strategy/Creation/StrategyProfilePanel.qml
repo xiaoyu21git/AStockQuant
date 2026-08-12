@@ -7,7 +7,8 @@ import QtQuick.Controls 2.15
 Rectangle {
     id: root
 
-    property int selectedStrategyTypeIndex: 0
+    // 策略类型一律使用 QML 契约枚举值 (Bridge.StrategyTypes.StrategyType.*)
+    property int selectedStrategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
     property var strategyProfile: ({})
 
     signal profileEdited(var profile)
@@ -56,7 +57,8 @@ Rectangle {
         for (var field in source) {
             nextProfile[field] = source[field]
         }
-        nextProfile.strategyTypeIndex = selectedStrategyTypeIndex
+        // 画像持久化枚举名字符串 (数字键已永久删除)
+        nextProfile.strategyType = Bridge.StrategyBridge.strategyTypeId(selectedStrategyType)
         nextProfile[key] = value
         profileEdited(nextProfile)
     }
@@ -111,7 +113,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: Bridge.StrategyBridge.strategyTypeName(root.selectedStrategyTypeIndex)
+                    text: Bridge.StrategyBridge.strategyTypeName(root.selectedStrategyType)
                     font.pixelSize: 13
                     font.weight: Font.Medium
                     color: "#dbeafe"

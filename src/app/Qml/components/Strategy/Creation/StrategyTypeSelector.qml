@@ -12,25 +12,14 @@ Rectangle {
     
     // ============ 属性 ============
     
-    property int selectedStrategyTypeIndex: 0
-    readonly property int selectedStrategyBehaviorKind: Bridge.StrategyBridge.strategyBehaviorKindFromTypeIndex(selectedStrategyTypeIndex)
+    // 策略类型一律使用 QML 契约枚举值 (Bridge.StrategyTypes.StrategyType.*), 禁止硬编码数字
+    property int selectedStrategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
+    readonly property int selectedStrategyBehaviorKind: Bridge.StrategyBridge.strategyBehaviorKindOfType(selectedStrategyType)
     readonly property int compactSelectorColumns: width >= 280 ? 2 : 1
     readonly property int strategyCardHeight: compactSelectorColumns > 1 ? 44 : 50
-    readonly property var strategyTypeIndices: [
-        0,
-        1,
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-        9
-    ]
-    
+
     // 信号
-    signal strategyTypeIndexChanged(int strategyTypeIndex)
+    signal strategyTypeChanged(int strategyType)
     
     // ============ 主布局 ============
     
@@ -77,11 +66,11 @@ Rectangle {
                     // 策略类型卡片组件
                     Component {
                         id: strategyTypeCard
-                        
+
                         Rectangle {
                             id: cardRoot
-                            property int strategyTypeIndex: -1
-                            property bool isSelected: root.selectedStrategyTypeIndex === strategyTypeIndex
+                            property int strategyType: -1
+                            property bool isSelected: root.selectedStrategyType === strategyType
                             
                             Layout.fillWidth: true
                             height: root.strategyCardHeight
@@ -106,7 +95,7 @@ Rectangle {
                                     
                                     Text {
                                         anchors.centerIn: parent
-                                        text: Bridge.StrategyBridge.strategyTypeIcon(cardRoot.strategyTypeIndex)
+                                        text: Bridge.StrategyBridge.strategyTypeIcon(cardRoot.strategyType)
                                         font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 14
                                         color: isSelected ? "white" : "#cbd5e1"
                                     }
@@ -119,7 +108,7 @@ Rectangle {
                                     spacing: root.compactSelectorColumns > 1 ? 0 : 2
                                     
                                     Text {
-                                        text: Bridge.StrategyBridge.strategyTypeName(cardRoot.strategyTypeIndex)
+                                        text: Bridge.StrategyBridge.strategyTypeName(cardRoot.strategyType)
                                         font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 13
                                         font.weight: isSelected ? Font.DemiBold : Font.Medium
                                         color: isSelected ? "white" : "#f1f5f9"
@@ -128,7 +117,7 @@ Rectangle {
                                     }
                                     
                                     Text {
-                                        text: Bridge.StrategyBridge.strategyTypeBrief(cardRoot.strategyTypeIndex)
+                                        text: Bridge.StrategyBridge.strategyTypeBrief(cardRoot.strategyType)
                                         font.pixelSize: 10
                                         color: isSelected ? "#dbeafe" : "#94a3b8"
                                         elide: Text.ElideRight
@@ -152,19 +141,20 @@ Rectangle {
                     }
 
                     Repeater {
-                        model: root.strategyTypeIndices
+                        // 模型由 C++ strategyTypeList() 提供: [{type, id, name, icon, brief}] × 11
+                        model: Bridge.StrategyBridge.strategyTypeList()
 
                         delegate: Loader {
                             required property var modelData
 
-                            readonly property int strategyTypeIndex: Number(modelData)
+                            readonly property int strategyType: Number(modelData.type)
 
                             sourceComponent: strategyTypeCard
                             Layout.fillWidth: true
                             Layout.preferredHeight: root.strategyCardHeight
 
                             onLoaded: {
-                                item.strategyTypeIndex = strategyTypeIndex
+                                item.strategyType = strategyType
                             }
 
                             MouseArea {
@@ -172,7 +162,7 @@ Rectangle {
                                 cursorShape: Qt.PointingHandCursor
 
                                 onClicked: {
-                                    root.toggleStrategyType(parent.strategyTypeIndex)
+                                    root.toggleStrategyType(parent.strategyType)
                                 }
                             }
                         }
@@ -197,7 +187,7 @@ Rectangle {
                     
                     Text {
                         id: strategyTypeDesc
-                        text: Bridge.StrategyBridge.strategyTypeBrief(root.selectedStrategyTypeIndex)
+                        text: Bridge.StrategyBridge.strategyTypeBrief(root.selectedStrategyType)
                         font.pixelSize: 12
                         color: "#94a3b8"
                         wrapMode: Text.WordWrap
@@ -213,23 +203,23 @@ Rectangle {
     
     // 重置选择
     function reset() {
-        root.selectedStrategyTypeIndex = 0
+        root.selectedStrategyType = Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
     }
 
-    function toggleStrategyType(strategyTypeIndex) {
-        root.selectedStrategyTypeIndex = root.selectedStrategyTypeIndex === strategyTypeIndex ? -1 : strategyTypeIndex
-        root.strategyTypeIndexChanged(root.selectedStrategyTypeIndex)
+    function toggleStrategyType(strategyType) {
+        root.selectedStrategyType = root.selectedStrategyType === strategyType ? -1 : strategyType
+        root.strategyTypeChanged(root.selectedStrategyType)
     }
 
-    function setSelectedStrategyTypeIndex(strategyTypeIndex, emitSignal) {
-        root.selectedStrategyTypeIndex = Bridge.StrategyBridge.normalizeStrategyTypeIndex(strategyTypeIndex)
+    function setSelectedStrategyType(strategyType, emitSignal) {
+        root.selectedStrategyType = strategyType
         if (emitSignal === undefined || emitSignal) {
-            root.strategyTypeIndexChanged(root.selectedStrategyTypeIndex)
+            root.strategyTypeChanged(root.selectedStrategyType)
         }
     }
-    
+
     // 验证
     function isValid() {
-        return root.selectedStrategyTypeIndex >= 0
+        return root.selectedStrategyType >= 0
     }
 }

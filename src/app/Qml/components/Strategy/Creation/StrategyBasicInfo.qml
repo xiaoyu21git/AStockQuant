@@ -20,7 +20,8 @@ Rectangle {
     property alias riskLevel: riskLevelCombo.currentIndex
     property alias optimizationMethod: optimizationCombo.currentIndex
     property alias strategyTags: tagsField.text
-    property int selectedStrategyTypeIndex: 0
+    // 策略类型一律使用 QML 契约枚举值 (Bridge.StrategyTypes.StrategyType.*)
+    property int selectedStrategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
     property bool useWideCardLayout: true
     property bool descriptionRecentlyUpdated: false
     property bool tagsRecentlyUpdated: false
@@ -649,7 +650,7 @@ Rectangle {
 
         return mergeTags(
             getTagsList(),
-            [termName, Bridge.StrategyBridge.strategyTypeName(root.selectedStrategyTypeIndex)]
+            [termName, Bridge.StrategyBridge.strategyTypeName(root.selectedStrategyType)]
                 .concat(recommendedActions)
                 .concat(matchedAliases)
         )
@@ -690,9 +691,9 @@ Rectangle {
         validateForm()
     }
 
-    function applyStrategyTypeDefaults(strategyTypeIndex, forceOverwrite) {
-        var defaultDescription = Bridge.StrategyBridge.strategyTypeBrief(strategyTypeIndex)
-        var defaultTags = Bridge.StrategyBridge.defaultStrategyTags(strategyTypeIndex)
+    function applyStrategyTypeDefaults(strategyType, forceOverwrite) {
+        var defaultDescription = Bridge.StrategyBridge.strategyTypeBrief(strategyType)
+        var defaultTags = Bridge.StrategyBridge.defaultStrategyTags(strategyType)
         var defaultTagsText = defaultTags.join(', ')
 
         if (forceOverwrite || strategyDescField.text.trim() === "" || strategyDescField.text === lastAutoDescription) {

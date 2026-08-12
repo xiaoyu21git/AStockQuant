@@ -30,13 +30,11 @@ static QVariantMap fromJson(const std::string& j) {
     return doc.isObject() ? doc.object().toVariantMap() : QVariantMap{};
 }
 
-// 旧数据 metadata_json 可能没有 strategyTypeIndex 键;
-// 缺失时返回 -1 (Invalid), 由 UI 层用 behaviorKind 推导, 不得伪造成合法值 0
-constexpr int kInvalidStrategyTypeIndex = -1;
-static int readStrategyTypeIndex(const QVariantMap& metaJson) {
-    return metaJson.contains("strategyTypeIndex")
-        ? metaJson.value("strategyTypeIndex").toInt()
-        : kInvalidStrategyTypeIndex;
+// metadata_json.strategyType 枚举名 → StrategyType (严格精确解析; 缺失/非法返回 nullopt, 无回退)
+static std::optional<domain::strategies::StrategyType> readStrategyType(const QVariantMap& metaJson) {
+    if (!metaJson.contains("strategyType")) return std::nullopt;
+    return domain::strategies::StrategyTypeRegistry::fromTypeId(
+        metaJson.value("strategyType").toString().toStdString());
 }
 
 // stub helpers for typed structs
@@ -46,8 +44,10 @@ QVariantMap PersistedStrategyData::toVariantMap() const {
     m["strategyId"] = fromS(strategyId);
     m["strategyName"] = fromS(metadata.name);
     m["strategyCode"] = fromS(strategyCode);
-    m["strategyTypeIndex"] = strategyTypeIndex;
-    m["behaviorKind"] = static_cast<int>(metadata.behaviorKind);
+    // 类型只发枚举名字符串; 行为类型由桥接层从 strategyType 推导
+    m["strategyType"] = strategyType.has_value()
+        ? fromS(std::string(domain::strategies::StrategyTypeRegistry::typeId(*strategyType)))
+        : QString();
     m["description"] = fromS(metadata.description);
     m["version"] = fromS(version);
     m["author"] = fromS(author);
@@ -104,10 +104,16 @@ std::optional<PersistedStrategyData> StrategyRepository::findById(const QString&
     auto metaJson = fromJson(row.getString("metadata_json"));
     d.metadata.name = metaJson.value("name").toString().toStdString();
     d.metadata.description = metaJson.value("description").toString().toStdString();
-    d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
-        metaJson.value("behaviorKind").toInt());
     d.metadata.enabled = metaJson.value("enabled").toBool();
-    d.strategyTypeIndex = readStrategyTypeIndex(metaJson);
+    auto parsedType = readStrategyType(metaJson);
+    if (!parsedType.has_value()) {
+        INTERNAL_ERROR_STREAM << "[Repo] findById 拒绝: strategyType 缺失/非法 id="
+                              << row.getString("strategy_id");
+        return std::nullopt;
+    }
+    d.strategyType = parsedType;
+    // 行为类型一律由策略类型推导, 不再从 JSON 读取
+    d.metadata.behaviorKind = domain::strategies::StrategyTypeRegistry::behaviorKindOf(*parsedType);
     d.strategyIdentity = domain::backtest::ResolvedStrategyIdentity{};
     d.parameters = fromJson(row.getString("parameters"));
     QVariantMap perf;
@@ -161,10 +167,16 @@ std::vector<PersistedStrategyData> StrategyRepository::findAll() {
             auto metaJson = fromJson(row.getString("metadata_json"));
             d.metadata.name = metaJson.value("name").toString().toStdString();
             d.metadata.description = metaJson.value("description").toString().toStdString();
-            d.metadata.behaviorKind = static_cast<domain::strategies::StrategyBehaviorKind>(
-                metaJson.value("behaviorKind").toInt());
             d.metadata.enabled = metaJson.value("enabled").toBool();
-            d.strategyTypeIndex = readStrategyTypeIndex(metaJson);
+            auto parsedType = readStrategyType(metaJson);
+            if (!parsedType.has_value()) {
+                INTERNAL_ERROR_STREAM << "[Repo] findAll 跳过行: strategyType 缺失/非法 id="
+                                      << row.getString("strategy_id");
+                continue;
+            }
+            d.strategyType = parsedType;
+            // 行为类型一律由策略类型推导, 不再从 JSON 读取
+            d.metadata.behaviorKind = domain::strategies::StrategyTypeRegistry::behaviorKindOf(*parsedType);
             // 直接从最新回测记录取绩效 (LATERAL JOIN)
             QVariantMap perf;
             perf["totalReturn"]      = row.getDouble("total_return");
@@ -198,12 +210,17 @@ QString StrategyRepository::save(const PersistedStrategyData& d) {
     auto id = d.strategyId.empty() ? foundation::utils::Uuid::generate_v4().to_string() : d.strategyId;
     QString sid = fromS(id);
 
+    if (!d.strategyType.has_value()) {
+        INTERNAL_ERROR_STREAM << "[Repo] save 拒绝: strategyType 未设置 (行为类型不落库, 必须由类型推导)";
+        return {};
+    }
     QVariantMap metaJson;
     metaJson["name"] = fromS(d.metadata.name);
     metaJson["description"] = fromS(d.metadata.description);
-    metaJson["behaviorKind"] = static_cast<int>(d.metadata.behaviorKind);
     metaJson["enabled"] = d.metadata.enabled;
-    metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
+    // 类型只落枚举名字符串; behaviorKind 不再落库, 读取时由类型推导
+    metaJson["strategyType"] = fromS(std::string(
+        domain::strategies::StrategyTypeRegistry::typeId(*d.strategyType)));
 
     // 字符串参数以 text OID 绑定, jsonb 列必须显式 ::jsonb 转换 (否则 PG 42804)
     int affected = db->executeUpdate(
@@ -234,12 +251,17 @@ bool StrategyRepository::update(const QString& id, const PersistedStrategyData& 
     auto db = sdb();
     if (!db) return false;
 
+    if (!d.strategyType.has_value()) {
+        INTERNAL_ERROR_STREAM << "[Repo] update 拒绝: strategyType 未设置 (行为类型不落库, 必须由类型推导)";
+        return false;
+    }
     QVariantMap metaJson;
     metaJson["name"] = fromS(d.metadata.name);
     metaJson["description"] = fromS(d.metadata.description);
-    metaJson["behaviorKind"] = static_cast<int>(d.metadata.behaviorKind);
     metaJson["enabled"] = d.metadata.enabled;
-    metaJson["strategyTypeIndex"] = d.strategyTypeIndex;
+    // 类型只落枚举名字符串; behaviorKind 不再落库, 读取时由类型推导
+    metaJson["strategyType"] = fromS(std::string(
+        domain::strategies::StrategyTypeRegistry::typeId(*d.strategyType)));
 
     // 字符串参数以 text OID 绑定, jsonb 列必须显式 ::jsonb 转换,
     // 否则 PG 报 42804 (text→jsonb 无赋值转换) 导致更新失败

@@ -18,7 +18,8 @@ Rectangle {
     
     // ============ 属性 ============
 
-    property int selectedStrategyTypeIndex: 0
+    // 策略类型一律使用 QML 契约枚举值 (Bridge.StrategyTypes.StrategyType.*)
+    property int selectedStrategyType: Bridge.StrategyTypes.StrategyType.DoubleMovingAverage
     property var factorService: null
     property var strategyService: Bridge.StrategyBridge
     property string strategyId: ""
@@ -45,7 +46,7 @@ Rectangle {
         typeof root.computeCurrentRuleComposerGroupQuickImportEntries === "function"
             ? (root.computeCurrentRuleComposerGroupQuickImportEntries() || [])
             : [])
-    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindFromTypeIndex(root.selectedStrategyTypeIndex)
+    readonly property int selectedStrategyBehaviorKind: strategyService.strategyBehaviorKindOfType(root.selectedStrategyType)
     readonly property bool ruleComposerConfigValid: (root.ruleComposerValidation.errorCount || 0) === 0
     readonly property bool useNarrowRulePanels: width >= 1180
     readonly property bool useWideParamGrid: width >= 1200
@@ -381,7 +382,7 @@ Rectangle {
                     ruleComposerSuggestionWidth: root.ruleComposerSuggestionWidth
                     ruleComposerSuggestionMinWidth: root.ruleComposerSuggestionMinWidth
                     ruleComposerSuggestionMaxWidth: root.ruleComposerSuggestionMaxWidth
-                    selectedStrategyTypeIndex: root.selectedStrategyTypeIndex
+                    selectedStrategyType: root.selectedStrategyType
                     strategyProfile: root.strategyProfile
                     availableRuleStages: root.availableRuleStages
                     suggestionPhaseLock: root.currentSuggestionPhaseLock()
@@ -428,7 +429,7 @@ Rectangle {
     
     // 加载参数配置
     function loadParamConfigs(initialValues) {
-        var paramConfigs = strategyService.buildParamConfigs(root.selectedStrategyTypeIndex)
+        var paramConfigs = strategyService.buildParamConfigs(root.selectedStrategyType)
         var separatedConfigs = splitParameterConfigs(paramConfigs)
         root.commonParameterConfigs = separatedConfigs.common
         root.personalizedParameterConfigs = separatedConfigs.personalized
@@ -881,7 +882,7 @@ Rectangle {
         }
 
         try {
-            var builtProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            var builtProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyType)
             return isPlainObject(builtProfile) ? builtProfile : ({})
         } catch (error) {
             console.warn("buildDefaultStrategyProfile failed:", error)
@@ -2203,7 +2204,7 @@ Rectangle {
         }
     }
 
-    function applyPersistedStrategy(strategyTypeIndex, parameters, advancedOptions) {
+    function applyPersistedStrategy(strategyType, parameters, advancedOptions) {
         var sourceParams = parameters || ({})
         if (!sourceParams || typeof sourceParams !== "object" || Array.isArray(sourceParams)) {
             throw new Error("编辑参数必须为对象，且符合新字段合同")
@@ -2219,8 +2220,10 @@ Rectangle {
         if (sourceParams.rule_composer_state === undefined || sourceParams.rule_composer_state === null || sourceParams.rule_composer_state === "") {
             throw new Error("编辑参数缺少 rule_composer_state，当前仅支持新字段合同")
         }
+        if (strategyType === undefined || strategyType === null || strategyType < 0) {
+            throw new Error("非法策略类型 (契约枚举值非法)，无法进入编辑态")
+        }
         var mappedValues = importedFactorContextPayload(sourceParams)
-        var normalizedStrategyTypeIndex = strategyService.normalizeStrategyTypeIndex(strategyTypeIndex)
         var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
         var persistedComposerState = normalizeStructuredValue(sourceParams.rule_composer_state) || ({})
         if (!Array.isArray(persistedComposerState.stages) || persistedComposerState.stages.length === 0) {
@@ -2257,50 +2260,52 @@ Rectangle {
         assignIfPresent("takeProfitPercent", ["takeProfitPercent"], Number)
         assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
 
-        if (normalizedStrategyTypeIndex === 0) {
+        if (strategyType === Bridge.StrategyTypes.StrategyType.DoubleMovingAverage) {
             assignIfPresent("fastPeriod", ["fastPeriod"], Number)
             assignIfPresent("slowPeriod", ["slowPeriod"], Number)
             assignIfPresent("priceField", ["priceField"])
-        } else if (normalizedStrategyTypeIndex === 1) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.TurtleBreakout) {
             assignIfPresent("channelPeriod", ["channelPeriod"], Number)
             assignIfPresent("breakoutMultiplier", ["breakoutMultiplier"], Number)
             assignIfPresent("atrPeriod", ["atrPeriod"], Number)
-        } else if (normalizedStrategyTypeIndex === 2) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.BollingerBandMeanReversion) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("standardDeviationMultiplier", ["standardDeviationMultiplier"], Number)
             assignIfPresent("entryThreshold", ["entryThreshold"], Number)
             assignIfPresent("exitThreshold", ["exitThreshold"], Number)
-        } else if (normalizedStrategyTypeIndex === 3) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.RsiMeanReversion) {
             assignIfPresent("period", ["period"], Number)
             assignIfPresent("oversoldLevel", ["oversoldLevel"], Number)
             assignIfPresent("overboughtLevel", ["overboughtLevel"], Number)
-        } else if (normalizedStrategyTypeIndex === 4) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.MultiFactorSelection) {
             assignIfPresent("factorWeights", ["factorWeights"])
             assignIfPresent("topN", ["topN"], Number)
             assignIfPresent("industryNeutral", ["industryNeutral"], Boolean)
-        } else if (normalizedStrategyTypeIndex === 5) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.EarningsSurprise) {
             assignIfPresent("surpriseThreshold", ["surpriseThreshold"], Number)
             assignIfPresent("holdDays", ["holdDays"], Number)
             assignIfPresent("eventSources", ["eventSources"])
-        } else if (normalizedStrategyTypeIndex === 6) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.StatisticalPairTrading) {
             assignIfPresent("tradingPair", ["tradingPair"])
             assignIfPresent("hedgeRatio", ["hedgeRatio"], Number)
             assignIfPresent("lookback", ["lookback"], Number)
             assignIfPresent("entryZScore", ["entryZScore"], Number)
             assignIfPresent("exitZScore", ["exitZScore"], Number)
-        } else if (normalizedStrategyTypeIndex === 7) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.RiskParityAllocation) {
             assignIfPresent("assets", ["assets"])
             assignIfPresent("volatilityLookback", ["volatilityLookback"], Number)
             assignIfPresent("targetVolatility", ["targetVolatility"], Number)
-        } else if (normalizedStrategyTypeIndex === 8) {
-            assignIfPresent("modelId", ["modelId"], Number)
-            assignIfPresent("featureIds", ["featureIds"])
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.MachineLearningSelection) {
+            // ML 引擎与多因子同走 MultiFactorStrategy 子类, 持久化键为引擎真实消费字段
             assignIfPresent("topN", ["topN"], Number)
-        } else if (normalizedStrategyTypeIndex === 9) {
+            assignIfPresent("sellThreshold", ["sellThreshold"], Number)
+            assignIfPresent("sellRankMultiplier", ["sellRankMultiplier"], Number)
+            assignIfPresent("minCompositeScore", ["minCompositeScore"], Number)
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.OrderFlowImbalance) {
             assignIfPresent("depthLevels", ["depthLevels"], Number)
             assignIfPresent("imbalanceThreshold", ["imbalanceThreshold"], Number)
             assignIfPresent("maxHoldSeconds", ["maxHoldSeconds"], Number)
-        } else if (normalizedStrategyTypeIndex === 10) {
+        } else if (strategyType === Bridge.StrategyTypes.StrategyType.VolatilitySpread) {
             assignIfPresent("underlying", ["underlying"])
             assignIfPresent("optionChainFilter", ["optionChainFilter"])
             assignIfPresent("historicalVolatilityWindow", ["historicalVolatilityWindow"], Number)
@@ -2310,7 +2315,7 @@ Rectangle {
         }
 
         root.suppressRuleComposerReset = true
-        root.selectedStrategyTypeIndex = normalizedStrategyTypeIndex
+        root.selectedStrategyType = strategyType
         if (commonDynamicGenerator) {
             commonDynamicGenerator.setValues(mappedValues)
         }
@@ -2329,7 +2334,7 @@ Rectangle {
             || ({})
 
         console.log("applyPersistedStrategy:",
-                "strategyTypeIndex=", normalizedStrategyTypeIndex,
+                "strategyType=", strategyType,
                 "bindingCount=", persistedBindingEntries.length,
                 "hasComposerStages=", hasPersistedComposerStages,
                 "composerStageCount=", (persistedComposerState && persistedComposerState.stages && persistedComposerState.stages.length) || 0,
@@ -2432,7 +2437,7 @@ Rectangle {
         boundRuleTemplateBindings = ({})
         boundRuleTemplateBindingEntries = []
         root.forbidDefaultRuleBuildInEdit = false
-        root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+        root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyType)
         root.factorOverlay = defaultFactorOverlay()
         rebuildRuleComposerState(false)
         root.strategyParameters = decorateParameters({})
@@ -2452,10 +2457,10 @@ Rectangle {
     
     // ============ 初始化和信号连接 ============
     
-    // 机器学习/多因子策略自动启用因子覆盖层
+    // 机器学习/多因子策略自动启用因子覆盖层 (行为类型由 C++ 端从策略类型推导, 契约枚举值比较)
     function autoEnableFactorOverlayIfNeeded() {
-        if (root.selectedStrategyBehaviorKind === 4     // MultiFactor
-            || root.selectedStrategyBehaviorKind === 5) { // MachineLearning
+        if (root.selectedStrategyBehaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.MultiFactor
+            || root.selectedStrategyBehaviorKind === Bridge.StrategyTypes.StrategyBehaviorKind.MachineLearning) {
             if (!root.factorOverlay.enabled) {
                 root.factorOverlay.enabled = true
                 root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
@@ -2468,7 +2473,7 @@ Rectangle {
         paramComponents.registerAllComponents()
 
         if (!root.strategyProfile || Object.keys(root.strategyProfile).length === 0) {
-            root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyTypeIndex)
+            root.strategyProfile = strategyService.buildDefaultStrategyProfile(root.selectedStrategyType)
         }
         autoEnableFactorOverlayIfNeeded()
         root.factorOverlay = normalizeFactorOverlay(root.factorOverlay)
@@ -2480,7 +2485,7 @@ Rectangle {
         loadParamConfigs({})
     }
 
-    onSelectedStrategyTypeIndexChanged: {
+    onSelectedStrategyTypeChanged: {
         loadParamConfigs({})
         root.forbidDefaultRuleBuildInEdit = false
         autoEnableFactorOverlayIfNeeded()
