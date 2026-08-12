@@ -49,6 +49,11 @@ public:
     bool removeDataSet(int dataId);
     int removeDataSetsBySourceType(const std::string& sourceType);
 
+    /// @brief 增量追加资金流列：查 PG fund.money_flow_daily，
+    ///        按 (symbol, trade_date) 对齐已有 Arrow 行序，原子写回
+    /// @return 新增列数（20），已有则返回 0，失败返回 -1
+    int augmentMoneyFlow(int dataId);
+
 signals:
     void dataSetStored(int dataId, QVariantMap info);
     void dataSetRemoved(int dataId);

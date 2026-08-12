@@ -3,6 +3,7 @@
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <map>
 #include <set>
 
@@ -378,9 +379,9 @@ StrategyServiceFlowResult StrategyService::evaluateAndCheckRulesLowLatency()
     ruleResultBuffer_.clear();
     pendingOrderBuffer_.clear();
 
-    static int s_evalRound = 0;
-    static int s_totalSignals = 0;
-    static int s_totalOrders = 0;
+    static std::atomic<int> s_evalRound{0};
+    static std::atomic<int> s_totalSignals{0};
+    static std::atomic<int> s_totalOrders{0};
 
     if (!ruleEvaluationService_.isReady()) {
         publishDiagnostics(DiagnosticsEvent(

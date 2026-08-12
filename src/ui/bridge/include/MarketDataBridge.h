@@ -14,6 +14,7 @@
 
 #include "CandleDataModel.h"
 #include "foundation/Utils/Uuid.h"
+#include "foundation/thread/ThreadPoolExecutor.h"
 
 namespace engine { struct EventFormat; }
 
@@ -78,6 +79,7 @@ public:
     // ── 板块数据 ──
     Q_INVOKABLE void fetchSectorHeat();
     QVariantList sectorHeatData() const { return m_sectorHeatData; }
+    QVariantMap dataDateSummary() const { return m_dataDateSummary; }
 
     // ── 盘后数据同步 ──
     Q_INVOKABLE QString forceSyncToday();
@@ -86,6 +88,14 @@ public:
     Q_INVOKABLE QString forceSyncHistory();  // 从2015回补日线+分钟线历史数据
     Q_INVOKABLE QString probeGmCoverage(const QString& symbol, const QVariantList& dates);  // 探测掘金覆盖
     Q_INVOKABLE QString fillAdjFactors();  // 补全复权因子
+    Q_INVOKABLE QString forceSyncFinancial(int tradingDay);  // 手动补财报数据
+    Q_INVOKABLE QString forceSyncMoneyFlow(int tradingDay);       // 手动补指定日资金流
+    Q_INVOKABLE QString forceSyncMoneyFlowHistory();              // 一键补全部资金流历史 (自动跳过已有日期)
+    Q_INVOKABLE QString getSyncTaskStatus(const QString& taskType);  // 查询同步任务状态 (返回 JSON)
+
+    // ── 数据日期概要 (异步, 结果通过 dataDateSummaryReady 信号返回) ──
+    Q_INVOKABLE void requestDataDateSummary();
+    Q_PROPERTY(QVariantMap dataDateSummary READ dataDateSummary NOTIFY dataDateSummaryReady)
 
     // ── Domain 工具方法 ──
     Q_INVOKABLE int priceDigitsForMode(const QString& mode) const;
@@ -108,6 +118,7 @@ signals:
     void dataReady();
     void tickReceived(const QString& symbol, double price, double volume);
     void sectorHeatDataChanged();
+    void dataDateSummaryReady();
 
 private:
     // ── tick 事件处理 ──
@@ -149,6 +160,10 @@ private:
     int    m_lastSnapDepthHash = 0;
 
     QVariantList m_sectorHeatData;
+    QVariantMap m_dataDateSummary;  // 异步填充, UI 通过 dataDateSummary 属性访问
+
+    // ── 异步任务线程池 (替代 std::thread) ──
+    std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_executor;
 
     // ── 板块热度推送: 专用工作线程拉取 gm 数据 → marshal 回主线程 emit 信号 ──
     static constexpr int kSectorHeatIntervalSec = 30;

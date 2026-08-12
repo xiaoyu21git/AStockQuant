@@ -65,7 +65,7 @@ public:
 
 
     void on_init() override {
-        m_impl->sessionReady.store(true);
+        m_impl->setSessionReady(true);
         try {
         auto bus = get_engine_event_bus();
         if (!bus || !bus->is_running()) return;
@@ -141,7 +141,7 @@ public:
 
         // ── 🔍 仅首次打印 (确认 gmsdk 推送) ──
         {
-            static int tickCnt = 0;
+            static std::atomic<int> tickCnt{0};
             if (++tickCnt == 1) {
                 INTERNAL_INFO_STREAM << "[GmSdk] 🟢 on_tick #1"
                     << " sym=" << td.symbol << " price=" << td.price
@@ -161,7 +161,7 @@ public:
             evt.set("tradingDay", td.tradingDay);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         } else {
-            static int noBusCnt = 0;
+            static std::atomic<int> noBusCnt{0};
             if (++noBusCnt % 20 == 0) {
                 INTERNAL_WARN_STREAM << "[GmSdk] 🔴 on_tick EventBus 未运行, tick 被丢弃";
             }
@@ -208,7 +208,7 @@ public:
             default: u.status = OrderUpdate::Submitted;    break;
         }
 
-        INTERNAL_INFO_STREAM << "[GmSdk] on_order_status cl_ord_id=" << u.brokerOrderId
+        INTERNAL_INFO_STREAM << "[GmSdk] 订单状态回调: cl_ord_id=" << u.brokerOrderId
                              << " symbol=" << u.symbol
                              << " gmStatus=" << o->status
                              << " mappedStatus=" << static_cast<int>(u.status)
@@ -227,7 +227,7 @@ public:
             evt.set("message", u.message);
             bus->publish(evt, static_cast<int>(EventPriority::HIGH));
         } else {
-            INTERNAL_ERROR_STREAM << "[GmSdk] on_order_status EventBus 未运行, 订单更新被丢弃";
+            INTERNAL_ERROR_STREAM << "[GmSdk] 订单状态回调: EventBus 未运行, 订单更新被丢弃";
         }
     }
 
@@ -343,11 +343,11 @@ GmSessionEngine& GmSessionEngine::instance() {
 GmSessionEngine::~GmSessionEngine() { shutdown(); }
 
 bool GmSessionEngine::initialize(const std::string& token, const std::string& accountId) {
-    if (m_impl && m_impl->initialized.load()) return true;
+    if (m_impl && m_impl->isInitialized()) return true;
     if (token.empty()) return false;
     m_impl = std::make_unique<Impl>();
     m_strategy.reset(new SessionStrategy(token, accountId, m_impl.get()));
-    m_impl->strategyThread = std::thread([this]() {
+    m_impl->strategyThread() = std::thread([this]() {
         try {
             static_cast<SessionStrategy*>(m_strategy.get())->run();
         } catch (const std::exception& e) {
@@ -356,19 +356,19 @@ bool GmSessionEngine::initialize(const std::string& token, const std::string& ac
             INTERNAL_ERROR_STREAM << "[GmSession] run() 未知异常";
         }
     });
-    m_impl->initialized.store(true);
+    m_impl->setInitialized(true);
     return true;
 }
 
 void GmSessionEngine::shutdown() {
-    if (!m_impl || !m_impl->initialized.load()) return;
-    m_impl->sessionReady.store(false);
-    m_impl->initialized.store(false);
-    if (m_impl->strategyThread.joinable()) m_impl->strategyThread.detach();
+    if (!m_impl || !m_impl->isInitialized()) return;
+    m_impl->setSessionReady(false);
+    m_impl->setInitialized(false);
+    if (m_impl->strategyThread().joinable()) m_impl->strategyThread().detach();
     m_strategy.reset(); m_impl.reset();
 }
 
-bool GmSessionEngine::initialized() const { return m_impl && m_impl->initialized.load(); }
+bool GmSessionEngine::initialized() const { return m_impl && m_impl->isInitialized(); }
 
 // ── 交易时段查询（纯基于系统时钟 + 交易日历，零副作用）──
 
@@ -409,11 +409,11 @@ void GmSessionEngine::subscribeTick(const std::string& symbol) {
     if (++ref == 1) {
         auto* s = static_cast<SessionStrategy*>(m_strategy.get());
         std::string gmSym = toGmSymbol(symbol);
-        INTERNAL_INFO_STREAM << "[GmSession] subscribeTick: " << symbol << " → " << gmSym
+        INTERNAL_INFO_STREAM << "[GmSession] 订阅Tick: " << symbol << " → " << gmSym
                              << " strategy=" << (s ? "ok" : "NULL");
         if (s) s->subscribe(gmSym.c_str(), "tick", false);
     } else {
-        INTERNAL_INFO_STREAM << "[GmSession] subscribeTick: " << symbol << " refCount=" << ref;
+        INTERNAL_INFO_STREAM << "[GmSession] 订阅Tick: " << symbol << " refCount=" << ref;
     }
 }
 
@@ -439,7 +439,7 @@ void GmSessionEngine::unsubscribeTick(const std::string& symbol) {
 // ═══════════════════════════════════════════════════════════════════
 
 std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
-    if (!m_impl || !m_impl->sessionReady.load()) return std::nullopt;
+    if (!m_impl || !m_impl->isSessionReady()) return std::nullopt;
     // 交易时段: 优先取 tick 实时缓存
     {
         std::lock_guard<std::mutex> lock(m_tickMutex);
@@ -456,8 +456,6 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
     if (!gm.empty()) {
         // 取最近1根日线 (含昨日收盘)
         auto* bars = ::history_bars_n(gm.c_str(), "1d", 1, nullptr, 0, nullptr, true, nullptr);
-        INTERNAL_INFO_STREAM << "[GmSession] history_bars_n 1d " << gm
-            << " status=" << (bars?bars->status():-1) << " count=" << (bars?bars->count():0);
         if (bars && !bars->status() && bars->count() > 0) {
             auto& b = bars->at(0);
             if (b.close > 0) {
@@ -475,7 +473,7 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
                     << " status=" << (lt?lt->status():-1) << " count=" << (lt?lt->count():0);
                 if (lt && !lt->status() && lt->count() > 0) {
                     auto& t = lt->at(0);
-                    INTERNAL_INFO_STREAM << "[GmSession] tick quotes:"
+                    INTERNAL_INFO_STREAM << "[GmSession] Tick行情:"
                         << " b0_p=" << t.quotes[0].bid_price << " b0_v=" << t.quotes[0].bid_volume
                         << " a0_p=" << t.quotes[0].ask_price << " a0_v=" << t.quotes[0].ask_volume;
                     for (int i = 0; i < 5; ++i) {
@@ -500,6 +498,21 @@ std::optional<GmQuote> GmSessionEngine::fetchQuote(const std::string& symbol) {
         return q;
     }
     return std::nullopt;
+}
+
+std::unordered_map<std::string, GmQuote> GmSessionEngine::getCachedQuotes() {
+    std::unordered_map<std::string, GmQuote> result;
+    {
+        std::lock_guard<std::mutex> lock(m_tickMutex);
+        for (const auto& [sym, q] : m_quoteCache) {
+            if (q.valid && q.price > 0) {
+                GmQuote copy = q;
+                copy.preClose = fetchPreClose(sym);
+                result[sym] = std::move(copy);
+            }
+        }
+    }
+    return result;
 }
 
 double GmSessionEngine::fetchPreClose(const std::string& symbol) {

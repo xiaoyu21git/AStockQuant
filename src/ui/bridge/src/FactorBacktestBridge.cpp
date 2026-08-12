@@ -994,7 +994,7 @@ void FactorBacktestBridge::startBacktestWithFactors(
                 m_loadedDatasetId = 0;
                 INTERNAL_INFO_STREAM << "[MEM] ArrowView reset (mmap 已关闭)";
             } else {
-                INTERNAL_INFO_STREAM << "[MEM] ArrowView already null, 跳过reset";
+                INTERNAL_INFO_STREAM << "[MEM] ArrowView 已为null, 跳过reset";
             }
 #ifdef _WIN32
             // 强制 trim 进程工作集: 释放 C++ heap 中已 free 但未归还 OS 的物理页

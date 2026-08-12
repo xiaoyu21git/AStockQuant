@@ -12,6 +12,7 @@
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
 #include <cstdlib>
+#include <unordered_set>
 
 #include <algorithm>
 #include <chrono>
@@ -103,6 +104,7 @@ bool PostMarketSyncService::forceSyncToday() {
         syncWeeklyMonthly(today);
         syncConceptMembership();
         if (isMonthlyMaintenanceDay()) syncFinancialData(today);
+        syncMoneyFlowData(today);  // 资金流日频同步 (Phase 1.5)
         computeConceptDailyStats(today);
         // 商品突发事件检测 (Python 子进程, 静默失败不阻塞同步)
         {
@@ -173,9 +175,10 @@ auto [s2i, syms] = loadActiveSymbols(db);
             { int y, m, d; if (sscanf(days[i].c_str(), "%d-%d-%d", &y, &m, &d) == 3) td = y * 10000 + m * 100 + d; }
             if (td == 0) continue;
             syncMinute(db, s2i, syms, td);
+            syncMoneyFlow(db, s2i, syms, td);  // 资金流同步对齐日线
             if (i % 5 == 4) std::this_thread::sleep_for(std::chrono::milliseconds(500));
             if (i % 50 == 0 || i == total - 1) {
-                INTERNAL_ERROR_STREAM << "[PostMktSync] 分钟 " << (i+1) << "/" << total;
+                INTERNAL_ERROR_STREAM << "[PostMktSync] 分钟+资金流 " << (i+1) << "/" << total;
                 if (onProgress) onProgress(i + 1, total, "分钟线 " + std::to_string(i + 1) + "/" + std::to_string(total));
             }
         }
@@ -203,7 +206,7 @@ auto [s2i, syms] = loadActiveSymbols(db);
         for(auto&d:tds){int c=cov.count(d)?cov[d]:0;if(c<mc*90/100)md.push_back(d);}
         if(md.empty())return;
         for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();
-            if(syncDaily(db,s2i,syms,td))syncMinute(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
+            if(syncDaily(db,s2i,syms,td)){syncMinute(db,s2i,syms,td);syncMoneyFlow(db,s2i,syms,td);}syncWeekly(db,td);syncMonthly(db,td);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] 补齐 "<<md.size()<<" 天";
         // 补齐成功后更新 dataSyncDay 到最后一个补齐日
         if (!md.empty()) {
@@ -477,6 +480,9 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     // 阶段2: 分钟线 (独立, 失败继续)
     syncMinute(db, symToId, symbols, tradingDay);
     INTERNAL_INFO_STREAM << "[PostMktSync] ====== 分钟线完成 ======";
+    // 阶段2.5: 资金流 (Phase 1.5 — 日频, 不放独立 try-catch, 失败整体中断)
+    syncMoneyFlowData(tradingDay);
+    INTERNAL_INFO_STREAM << "[PostMktSync] ====== 资金流完成 ======";
     // 阶段3-4: 周月线
     syncWeekly(db, tradingDay);
     syncMonthly(db, tradingDay);
@@ -1335,10 +1341,203 @@ void PostMarketSyncService::syncWeeklyMonthly(int tradingDay) {
 
 void PostMarketSyncService::syncFinancialData(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
-    if(!db||!db->isOpen())return;
-auto [s2i, syms] = loadActiveSymbols(db);
-
+    if(!db||!db->isOpen()){
+        INTERNAL_ERROR_STREAM << "[PostMktSync] 财报同步: DB连接不可用";
+        return;
+    }
+    INTERNAL_INFO_STREAM << "[PostMktSync] 财报同步: DB就绪, 加载活跃标的...";
+    auto [s2i, syms] = loadActiveSymbols(db);
+    INTERNAL_INFO_STREAM << "[PostMktSync] 财报同步: 活跃标的 " << syms.size() << " 只, 调用GM SDK...";
     syncFinancial(db,s2i,syms,tradingDay);
+}
+
+void PostMarketSyncService::forceSyncFinancial(int tradingDay) {
+    INTERNAL_INFO_STREAM << "[PostMktSync] 手动触发财报同步 tradingDay=" << tradingDay;
+    syncFinancialData(tradingDay);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 资金流数据同步 (Phase 1.5 — LSTM 因子数据源)
+// ═══════════════════════════════════════════════════════════════
+
+void PostMarketSyncService::syncMoneyFlowData(int tradingDay) {
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] 资金流同步: DB连接不可用";
+        return;
+    }
+    INTERNAL_INFO_STREAM << "[PostMktSync] 资金流同步: DB就绪, 加载活跃标的...";
+    auto [s2i, syms] = loadActiveSymbols(db);
+    INTERNAL_INFO_STREAM << "[PostMktSync] 资金流同步: 活跃标的 " << syms.size() << " 只, 调用GM SDK...";
+    if (!syncMoneyFlow(db, s2i, syms, tradingDay)) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] 资金流同步失败";
+    }
+}
+
+void PostMarketSyncService::forceSyncMoneyFlow(int tradingDay) {
+    INTERNAL_INFO_STREAM << "[PostMktSync] 手动触发资金流同步 tradingDay=" << tradingDay;
+    syncMoneyFlowData(tradingDay);
+}
+
+void PostMarketSyncService::forceSyncMoneyFlowHistory() {
+    INTERNAL_INFO_STREAM << "[PostMktSync] 一键补全部资金流历史";
+    if (!m_executor) return;
+    m_executor->post([this]() {
+        std::lock_guard<std::recursive_mutex> gmLock(engine::GmSessionEngine::gmSdkMutex());
+
+        auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+        if (!db || !db->isOpen()) return;
+
+        auto [s2i, syms] = loadActiveSymbols(db);
+        INTERNAL_INFO_STREAM << "[PostMktSync] 资金流全历史: 活跃标的 " << syms.size() << " 只";
+
+        // 获取所有交易日
+        auto calRes = db->executeQuery(
+            "SELECT trade_date::text AS dt FROM ref.trade_calendar "
+            "WHERE is_trading_day=true AND trade_date>='2015-01-01' AND trade_date<=CURRENT_DATE "
+            "ORDER BY trade_date DESC");
+        std::vector<std::string> allDays;
+        for (auto& r : calRes.getRows()) allDays.push_back(r.getString("dt"));
+
+        // 获取已有资金流数据的日期
+        auto doneRes = db->executeQuery(
+            "SELECT DISTINCT trade_date::text AS dt FROM fund.money_flow_daily "
+            "WHERE trade_date>='2015-01-01'");
+        std::unordered_set<std::string> doneSet;
+        for (auto& r : doneRes.getRows()) doneSet.insert(r.getString("dt"));
+
+        int total = static_cast<int>(allDays.size());
+        int skipped = 0, synced = 0, failed = 0;
+        for (int i = 0; i < total; ++i) {
+            const auto& ds = allDays[i];
+            if (doneSet.count(ds)) { ++skipped; continue; }
+
+            int y, m, d, td = 0;
+            if (sscanf(ds.c_str(), "%d-%d-%d", &y, &m, &d) == 3) td = y * 10000 + m * 100 + d;
+            if (td == 0) { ++skipped; continue; }
+
+            if (syncMoneyFlow(db, s2i, syms, td)) ++synced; else ++failed;
+
+            if ((i + 1) % 300 == 0 || i == total - 1) {
+                INTERNAL_INFO_STREAM << "[PostMktSync] 资金流全历史进度: "
+                    << (i + 1) << "/" << total
+                    << " 已同步=" << synced << " 跳过=" << skipped << " 失败=" << failed;
+            }
+            if ((i + 1) % 5 == 0)
+                std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        }
+        INTERNAL_INFO_STREAM << "[PostMktSync] 资金流全历史完成: 同步=" << synced
+            << " 跳过=" << skipped << " 失败=" << failed;
+    });
+}
+
+bool PostMarketSyncService::syncMoneyFlow(std::shared_ptr<astock::database::ISqlDatabase> db,
+    const std::unordered_map<std::string,int>& symToId,
+    const std::vector<std::string>& symbols, int tradingDay) {
+    logTaskStart("MONEY_FLOW", tradingDay);
+    int ok = 0;
+    char dateStr[32];
+    foundation::utils::formatTradingDayTo(tradingDay, dateStr, sizeof(dateStr));
+
+    // 构建 gmItems: gmSymbol → sid 映射
+    struct GmItem { std::string gm; int sid; };
+    std::vector<GmItem> gmItems;
+    for (const auto& sym : symbols) {
+        std::string gm = toGmSymbol(sym);
+        if (gm.empty()) continue;
+        auto it = symToId.find(sym);
+        if (it == symToId.end()) continue;
+        gmItems.push_back({gm, it->second});
+    }
+    if (gmItems.empty()) {
+        logTaskEnd("MONEY_FLOW", tradingDay, true, 0, "no valid symbols");
+        return true;
+    }
+
+    static constexpr int kBatchSize = 300;
+    const int totalBatches = (static_cast<int>(gmItems.size()) + kBatchSize - 1) / kBatchSize;
+
+    struct MoneyFlowRow {
+        int sid;
+        double main_in, main_out, main_net_in, main_net_in_rate;
+        double super_in, super_out, super_net_in, super_net_in_rate;
+        double large_in, large_out, large_net_in, large_net_in_rate;
+        double mid_in, mid_out, mid_net_in, mid_net_in_rate;
+        double small_in, small_out, small_net_in, small_net_in_rate;
+    };
+    std::unordered_map<int, MoneyFlowRow> rows;
+
+    for (int bi = 0; bi < totalBatches; ++bi) {
+        int start = bi * kBatchSize;
+        int end = std::min(start + kBatchSize, static_cast<int>(gmItems.size()));
+        std::string batchList;
+        std::unordered_map<std::string, int> g2i;  // gmSymbol → symbolId (本批)
+        for (int i = start; i < end; ++i) {
+            if (!batchList.empty()) batchList += ",";
+            batchList += gmItems[i].gm;
+            g2i[gmItems[i].gm] = gmItems[i].sid;
+        }
+
+        auto* mf = ::stk_get_money_flow(batchList.c_str(), dateStr);
+        bool mfOk = mf && mf->status() == 0;
+        int mfCount = mfOk ? mf->count() : 0;
+
+        INTERNAL_INFO_STREAM << "[PostMktSync] MONEY_FLOW batch " << (bi + 1) << "/" << totalBatches
+            << " symbols=" << (end - start)
+            << " status=" << (mf ? std::to_string(mf->status()) : "null")
+            << " count=" << mfCount;
+
+        if (mfOk && mfCount > 0) {
+            for (int i = 0; i < mfCount; ++i) {
+                auto& r = mf->at(i);
+                std::string gmSym(r.symbol);
+                auto it = g2i.find(gmSym);
+                if (it == g2i.end()) {
+                    // 无兜底: symbol 在 DB 中不存在表示数据不一致
+                    mf->release();
+                    INTERNAL_ERROR_STREAM << "[PostMktSync] MONEY_FLOW GM返回的符号在 ref.symbol_info 中不存在: " << gmSym;
+                    throw std::runtime_error("[syncMoneyFlow] GM返回的符号在 ref.symbol_info 中不存在: " + gmSym);
+                }
+                int sid = it->second;
+                rows[sid] = {sid,
+                    r.main_in, r.main_out, r.main_net_in, r.main_net_in_rate,
+                    r.super_in, r.super_out, r.super_net_in, r.super_net_in_rate,
+                    r.large_in, r.large_out, r.large_net_in, r.large_net_in_rate,
+                    r.mid_in, r.mid_out, r.mid_net_in, r.mid_net_in_rate,
+                    r.small_in, r.small_out, r.small_net_in, r.small_net_in_rate};
+            }
+        }
+        if (mf) mf->release();
+    }
+
+    INTERNAL_INFO_STREAM << "[PostMktSync] MONEY_FLOW fillDone totalRows=" << rows.size()
+        << " totalSymbols=" << symToId.size() << " batches=" << totalBatches;
+
+    if (!db || !db->isOpen()) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] MONEY_FLOW DB连接已失效, 无法写入";
+        logTaskEnd("MONEY_FLOW", tradingDay, false, 0, "DB connection lost after fill");
+        return false;
+    }
+
+    const char* isql = R"(INSERT INTO fund.money_flow_daily(symbol_id,trade_date,main_in,main_out,main_net_in,main_net_in_rate,super_in,super_out,super_net_in,super_net_in_rate,large_in,large_out,large_net_in,large_net_in_rate,mid_in,mid_out,mid_net_in,mid_net_in_rate,small_in,small_out,small_net_in,small_net_in_rate) VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) ON CONFLICT(symbol_id,trade_date) DO NOTHING)";
+    using P = astock::database::SqlParam;
+
+    for (const auto& [sid, r] : rows) {
+        int affected = db->executeUpdate(isql, {
+            P{sid}, P{std::string(dateStr)},
+            P{r.main_in}, P{r.main_out}, P{r.main_net_in}, P{r.main_net_in_rate},
+            P{r.super_in}, P{r.super_out}, P{r.super_net_in}, P{r.super_net_in_rate},
+            P{r.large_in}, P{r.large_out}, P{r.large_net_in}, P{r.large_net_in_rate},
+            P{r.mid_in}, P{r.mid_out}, P{r.mid_net_in}, P{r.mid_net_in_rate},
+            P{r.small_in}, P{r.small_out}, P{r.small_net_in}, P{r.small_net_in_rate}
+        });
+        if (affected >= 0) ++ok;
+    }
+    int skip = static_cast<int>(rows.size()) - ok;
+
+    INTERNAL_INFO_STREAM << "[PostMktSync] MONEY_FLOW insertDone ok=" << ok << " skip=" << skip;
+    logTaskEnd("MONEY_FLOW", tradingDay, true, ok, std::to_string(skip) + " skipped");
+    return true;
 }
 
 bool PostMarketSyncService::isMonthlyMaintenanceDay() {
@@ -1355,23 +1554,88 @@ bool PostMarketSyncService::syncFinancial(std::shared_ptr<astock::database::ISql
     const std::unordered_map<std::string,int>& symToId,const std::vector<std::string>& symbols,int tradingDay) {
     logTaskStart("FINANCIAL",tradingDay);int ok=0,skip=0;char dateStr[32];
     foundation::utils::formatTradingDayTo(tradingDay, dateStr, sizeof(dateStr));
-    std::string gmList;for(const auto& sym:symbols){std::string gm=toGmSymbol(sym);if(gm.empty())continue;if(!gmList.empty())gmList+=",";gmList+=gm;}
-    if(gmList.empty()){logTaskEnd("FINANCIAL",tradingDay,true,0,"no valid symbols");return true;}
-    auto* prime=::stk_get_finance_prime_pt(gmList.c_str(),"eps_basic,bps_pcom_ps,roe,net_prof_pcom,ttl_inc_oper,ttl_ast,ttl_liab,ttl_eqy_pcom,net_cf_oper,ttl_prof",0,0,dateStr);
-    auto* deriv=::stk_get_finance_deriv_pt(gmList.c_str(),"roa,sale_gpm,sale_npm,ast_liab_rate,curr_rate,quick_rate,oper_prof_toi",0,0,dateStr);
+
+    // 构建 gmSymbol → id 映射 + gm 符号列表
+    struct GmItem { std::string gm; int sid; };
+    std::vector<GmItem> gmItems;
+    for(const auto& sym:symbols){
+        std::string gm=toGmSymbol(sym);if(gm.empty())continue;
+        auto it=symToId.find(sym);if(it==symToId.end())continue;
+        gmItems.push_back({gm,it->second});
+    }
+    if(gmItems.empty()){logTaskEnd("FINANCIAL",tradingDay,true,0,"no valid symbols");return true;}
+
+    static constexpr int kBatchSize = 300;
+    const int totalBatches = (static_cast<int>(gmItems.size()) + kBatchSize - 1) / kBatchSize;
+
+    const char* kPrimeFields = "eps_basic,bps_pcom_ps,roe,net_prof_pcom,ttl_inc_oper,ttl_ast,ttl_liab,ttl_eqy_pcom,net_cf_oper,ttl_prof";
+    const char* kDerivFields = "roa,sale_gpm,sale_npm,ast_liab_rate,curr_rate,quick_rate,oper_prof_toi";
+
     std::unordered_map<int,double> eps,bps,roe,np,rev,ast,liab,eq,ocf,prof,roa,gm2,pm,de,cr,qr,om;
-    auto fill=[&](auto* data,const std::vector<std::pair<std::string,std::unordered_map<int,double>*>>& fields){
-        if(!data||data->status()!=0)return;std::unordered_map<std::string,int> g2i;
-        for(const auto& sym:symbols){std::string g=toGmSymbol(sym);if(!g.empty())g2i[g]=symToId.at(sym);}
-        while(!data->is_end()){const char* s=data->get_string("symbol");if(s){auto it=g2i.find(s);if(it!=g2i.end()){int id=it->second;for(auto&[fn,mp]:fields){double v=data->get_real(fn.c_str());if(std::isfinite(v))(*mp)[id]=v;}}}data->next();}
-    };
-    fill(prime,{{"eps_basic",&eps},{"bps_pcom_ps",&bps},{"roe",&roe},{"net_prof_pcom",&np},{"ttl_inc_oper",&rev},{"ttl_ast",&ast},{"ttl_liab",&liab},{"ttl_eqy_pcom",&eq},{"net_cf_oper",&ocf},{"ttl_prof",&prof}});
-    fill(deriv,{{"roa",&roa},{"sale_gpm",&gm2},{"sale_npm",&pm},{"ast_liab_rate",&de},{"curr_rate",&cr},{"quick_rate",&qr},{"oper_prof_toi",&om}});
-    if(prime)prime->release();if(deriv)deriv->release();
-    std::string isql=R"(INSERT INTO fund.financial_indicator_daily(symbol_id,trade_date,eps,bps,roa,roe,profit_margin,gross_margin,operating_margin,debt_to_equity,current_ratio,quick_ratio,operating_cash_flow,total_revenue,net_profit,total_assets,total_liabilities,equity) VALUES($1,$2::date,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) ON CONFLICT(symbol_id,trade_date) DO NOTHING)";
+    std::unordered_map<int,std::string> rptDate,rptType;  // report_date, report_type 从 SDK 提取
+
+    for(int bi=0;bi<totalBatches;++bi){
+        int start=bi*kBatchSize;int end=std::min(start+kBatchSize,static_cast<int>(gmItems.size()));
+        std::string batchList;
+        std::unordered_map<std::string,int> g2i; // gmSymbol → symbolId (仅本批)
+        for(int i=start;i<end;++i){
+            if(!batchList.empty())batchList+=",";batchList+=gmItems[i].gm;
+            g2i[gmItems[i].gm]=gmItems[i].sid;
+        }
+
+        auto* prime=::stk_get_finance_prime_pt(batchList.c_str(),kPrimeFields,0,0,dateStr);
+        auto* deriv=::stk_get_finance_deriv_pt(batchList.c_str(),kDerivFields,0,0,dateStr);
+        bool primeOk = prime && prime->status()==0;
+        bool derivOk = deriv && deriv->status()==0;
+        INTERNAL_INFO_STREAM << "[PostMktSync] FINANCIAL batch " << (bi+1) << "/" << totalBatches
+            << " symbols=" << (end-start)
+            << " prime=" << (primeOk?"OK":(prime?std::to_string(prime->status()):"null"))
+            << " deriv=" << (derivOk?"OK":(deriv?std::to_string(deriv->status()):"null"));
+
+        auto fillNum=[&](auto* data,const std::vector<std::pair<std::string,std::unordered_map<int,double>*>>& fields){
+            if(!data||data->status()!=0)return;
+            while(!data->is_end()){const char* s=data->get_string("symbol");if(s){auto it=g2i.find(s);if(it!=g2i.end()){int id=it->second;for(auto&[fn,mp]:fields){double v=data->get_real(fn.c_str());if(std::isfinite(v))(*mp)[id]=v;}}}data->next();}
+        };
+        // prime: 一次遍历同时提取数值指标和 report_date/type
+        if(primeOk){
+            while(!prime->is_end()){
+                const char* s=prime->get_string("symbol");
+                if(s){auto it=g2i.find(s);if(it!=g2i.end()){int id=it->second;
+                    for(auto&[fn,mp]:std::vector<std::pair<std::string,std::unordered_map<int,double>*>>{{"eps_basic",&eps},{"bps_pcom_ps",&bps},{"roe",&roe},{"net_prof_pcom",&np},{"ttl_inc_oper",&rev},{"ttl_ast",&ast},{"ttl_liab",&liab},{"ttl_eqy_pcom",&eq},{"net_cf_oper",&ocf},{"ttl_prof",&prof}}){double v=prime->get_real(fn.c_str());if(std::isfinite(v))(*mp)[id]=v;}
+                    const char* ed=prime->get_string("end_date");if(ed&&ed[0])rptDate[id]=ed;
+                    const char* rt=prime->get_string("rpt_type");if(rt&&rt[0])rptType[id]=rt;
+                }}
+                prime->next();
+            }
+        }
+        fillNum(deriv,{{"roa",&roa},{"sale_gpm",&gm2},{"sale_npm",&pm},{"ast_liab_rate",&de},{"curr_rate",&cr},{"quick_rate",&qr},{"oper_prof_toi",&om}});
+        if(prime)prime->release();if(deriv)deriv->release();
+    }
+
+    INTERNAL_INFO_STREAM << "[PostMktSync] FINANCIAL fillDone epsCount=" << eps.size()
+        << " rptDateCount=" << rptDate.size() << " rptTypeCount=" << rptType.size()
+        << " totalSymbols=" << symToId.size() << " batches=" << totalBatches;
+
+    if(!db||!db->isOpen()){
+        INTERNAL_ERROR_STREAM << "[PostMktSync] FINANCIAL DB连接已失效, 无法写入";
+        logTaskEnd("FINANCIAL",tradingDay,false,0,"DB connection lost after fill");
+        return false;
+    }
+
+    if(rptDate.empty()){
+        INTERNAL_ERROR_STREAM << "[PostMktSync] FINANCIAL rptDate为空, SDK字段名end_date可能不对";
+        logTaskEnd("FINANCIAL",tradingDay,false,0,"rptDate field name mismatch");
+        return false;
+    }
+
+    std::string isql=R"(INSERT INTO fund.financial_indicator_daily(symbol_id,trade_date,report_date,report_type,eps,bps,roa,roe,profit_margin,gross_margin,operating_margin,debt_to_equity,current_ratio,quick_ratio,operating_cash_flow,total_revenue,net_profit,total_assets,total_liabilities,equity) VALUES($1,$2::date,$3::date,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) ON CONFLICT(symbol_id,trade_date) DO NOTHING)";
     using P=astock::database::SqlParam;
-    for(const auto&[sym,sid]:symToId){if(!eps.count(sid)){++skip;continue;}
-        db->executeUpdate(isql,{P{sid},P{std::string(dateStr)},P{eps[sid]},P{bps[sid]},P{roa[sid]},P{roe[sid]},P{pm[sid]},P{gm2[sid]},P{om[sid]},P{de[sid]},P{cr[sid]},P{qr[sid]},P{ocf[sid]},P{rev[sid]},P{np[sid]},P{ast[sid]},P{liab[sid]},P{eq[sid]}});++ok;}
+    for(const auto&[sym,sid]:symToId){
+        if(!eps.count(sid)){++skip;continue;}
+        if(!rptDate.count(sid)||!rptType.count(sid)){++skip;continue;}
+        int affected=db->executeUpdate(isql,{P{sid},P{std::string(dateStr)},P{rptDate[sid]},P{rptType[sid]},P{eps[sid]},P{bps[sid]},P{roa[sid]},P{roe[sid]},P{pm[sid]},P{gm2[sid]},P{om[sid]},P{de[sid]},P{cr[sid]},P{qr[sid]},P{ocf[sid]},P{rev[sid]},P{np[sid]},P{ast[sid]},P{liab[sid]},P{eq[sid]}});
+        if(affected>=0)++ok;else ++skip;}
+    INTERNAL_INFO_STREAM << "[PostMktSync] FINANCIAL insertDone ok=" << ok << " skip=" << skip;
     logTaskEnd("FINANCIAL",tradingDay,true,ok,std::to_string(skip)+" skipped");
     return true;
 }

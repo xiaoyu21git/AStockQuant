@@ -182,6 +182,43 @@ inline std::string sqlSelect() {
 }
 } // namespace alternative_data_columns
 
+namespace money_flow_columns {
+// 资金流日频列（来自 fund.money_flow_daily，按 (symbol_id, trade_date) LEFT JOIN）
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "money_main_net_in","money_main_net_in_rate","money_main_in","money_main_out",
+        "money_super_net_in","money_super_net_in_rate","money_super_in","money_super_out",
+        "money_large_net_in","money_large_net_in_rate","money_large_in","money_large_out",
+        "money_mid_net_in","money_mid_net_in_rate","money_mid_in","money_mid_out",
+        "money_small_net_in","money_small_net_in_rate","money_small_in","money_small_out"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {
+        "money_main_net_in","money_main_net_in_rate","money_main_in","money_main_out",
+        "money_super_net_in","money_super_net_in_rate","money_super_in","money_super_out",
+        "money_large_net_in","money_large_net_in_rate","money_large_in","money_large_out",
+        "money_mid_net_in","money_mid_net_in_rate","money_mid_in","money_mid_out",
+        "money_small_net_in","money_small_net_in_rate","money_small_in","money_small_out"
+    };
+    return s;
+}
+// SQL 片段：LEFT JOIN fund.money_flow_daily
+inline std::string sqlSelect() {
+    return "mf.main_net_in AS money_main_net_in, mf.main_net_in_rate AS money_main_net_in_rate,"
+           "mf.main_in AS money_main_in, mf.main_out AS money_main_out,"
+           "mf.super_net_in AS money_super_net_in, mf.super_net_in_rate AS money_super_net_in_rate,"
+           "mf.super_in AS money_super_in, mf.super_out AS money_super_out,"
+           "mf.large_net_in AS money_large_net_in, mf.large_net_in_rate AS money_large_net_in_rate,"
+           "mf.large_in AS money_large_in, mf.large_out AS money_large_out,"
+           "mf.mid_net_in AS money_mid_net_in, mf.mid_net_in_rate AS money_mid_net_in_rate,"
+           "mf.mid_in AS money_mid_in, mf.mid_out AS money_mid_out,"
+           "mf.small_net_in AS money_small_net_in, mf.small_net_in_rate AS money_small_net_in_rate,"
+           "mf.small_in AS money_small_in, mf.small_out AS money_small_out";
+}
+} // namespace money_flow_columns
+
 namespace minute_bar_columns {
 // 分钟线列（来自 mkt.minute_bar 表）
 inline const std::vector<std::string>& names() {
@@ -339,13 +376,14 @@ public:
     }
 };
 
-enum class DataSourceType { Kline, Financial, Unknown };
+enum class DataSourceType { Kline, Financial, MoneyFlow, Unknown };
 
 inline DataSourceType sourceTypeFromName(const std::string& name) {
     if (name == "kline_daily" || name == "kline_weekly"
         || name == "kline_monthly" || name == "minute_data")
         return DataSourceType::Kline;
     if (name == "financial") return DataSourceType::Financial;
+    if (name == "money_flow") return DataSourceType::MoneyFlow;
     return DataSourceType::Unknown;
 }
 
@@ -356,6 +394,7 @@ inline IDataSource* sourceByName(const std::string& name) {
     switch (sourceTypeFromName(name)) {
     case DataSourceType::Kline:     return &s_kline;
     case DataSourceType::Financial: return &s_fin;
+    case DataSourceType::MoneyFlow: return nullptr;  // 资金流通过列追加迁移，非独立数据源
     default:                       return nullptr;
     }
 }
@@ -401,9 +440,11 @@ inline FieldSchema fullSchemaForTypes(const std::vector<std::string>& typeNames)
         auto* src = sourceByName(t);
         if (!src) continue;
         FieldSchema s = src->detectSchema(nullptr, {}, {});
-        // K线查询时 JOIN 了 symbol_info，附加元数据列
+        // K线查询时 JOIN 了 symbol_info + money_flow_daily，附加元数据列和资金流列
         if (sourceTypeFromName(t) == DataSourceType::Kline) {
             for (auto& n : symbol_info_columns::names()) s.names.push_back(n);
+            for (auto& n : money_flow_columns::names()) s.names.push_back(n);
+            for (auto& n : money_flow_columns::numeric()) s.numeric.insert(n);
         }
         // 财务查询时也通过 si.symbol JOIN 了 symbol_info
         // 但财务行不 JOIN 元数据列，元数据从 K线行带入

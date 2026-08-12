@@ -42,6 +42,7 @@ void filteredMessageHandler(QtMsgType type, const QMessageLogContext& ctx, const
 #include "../../ui/bridge/include/StrategyBridge.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/PostMarketSyncService.h"
+#include "database/DataMigrator.h"
 #include "../../../domain/strategy/include/EventRiskSubscriber.h"
 #include "EventDrivenFactor.h"
 #include "../include/PythonEventBridge.h"
@@ -157,18 +158,29 @@ void AppBootstrap::init()
     m_initialized = false;
     m_lastError.clear();
     
-    // 阶段1: 配置初始化
+    // 阶段1: 配置初始化 (三段式: 存在→解析→校验)
     if (!initConfiguration()) {
         m_lastError = "配置初始化失败";
         INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
         return;
     }
 
+    // 阶段2: 数据迁移 (废弃字段扫描 + schema_version)
+    {
+        auto migResult = astock::infrastructure::database::DataMigrator::instance()
+            .run(runtimeDirectories().configDir.toStdString());
+        if (!migResult.success) {
+            m_lastError = "数据迁移失败: " + std::to_string(migResult.errors.size()) + " 个错误";
+            INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
+            return;
+        }
+    }
+
     // 启用文件日志: logs/system/system_YYYY-MM-DD.log
     foundation::internal::InternalLogger::instance().enableFileLogging("logs");
     INTERNAL_INFO_STREAM << "[AppBootstrap] 文件日志已启用: logs/system/";
 
-    // 阶段2: 服务初始化
+    // 阶段3: 服务初始化
     if (!initServices()) {
         m_lastError = "Services initialization failed";
         INTERNAL_ERROR_STREAM << "[AppBootstrap] 错误: " << m_lastError;
@@ -279,6 +291,10 @@ bool AppBootstrap::initConfiguration()
                                               << static_cast<int>(f)
                                               << " — 启动被拒绝";
                         fatal = true;
+                    } else {
+                        // Step 3: 字段级校验 — 缺失/非法字段直接拒绝启动
+                        cfg.validateConfigFile(f, *node);
+                        INTERNAL_INFO_STREAM << "[AppBootstrap] 配置校验通过: " << static_cast<int>(f);
                     }
                 } catch (const std::exception& e) {
                     INTERNAL_ERROR_STREAM << "[AppBootstrap] 关键配置文件加载失败: "
@@ -390,13 +406,12 @@ bool AppBootstrap::initServices()
         // ── GmSessionEngine（唯一 gmsdk 连接）在 QML 之前初始化 ──
         {
             std::string token, accountId, strategyId;
+            // 配置已在 initConfiguration 中通过三段式校验, 字段一定存在
             auto cfg = foundation::config::ConfigManager::instance()
                 .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
-            if (cfg && !cfg->isNull()) {
-                token      = cfg->has("token")      ? cfg->get("token").asString()      : "";
-                accountId  = cfg->has("accountId")  ? cfg->get("accountId").asString()  : "";
-                strategyId = cfg->has("gmStrategyId")? cfg->get("gmStrategyId").asString(): "";
-            }
+            token      = cfg->get("token").asString();
+            accountId  = cfg->get("accountId").asString();
+            strategyId = cfg->get("gmStrategyId").asString();
             if (!token.empty()) {
                 // AccountEngine 先订阅 EventBus，再启动 GmSessionEngine（避开 on_init 事件丢失）
                 engine::AccountEngine::instance();
@@ -510,7 +525,7 @@ void AppBootstrap::initializeDeferredDomainServices()
     astock::infrastructure::database::PostMarketSyncService::instance().start();
 
     // ── 策略桥接 + 篮子拦截器初始化 (SemiAuto 确认窗口) ──
-    if (auto* sb = bridge::StrategyBridge::instance()) {
+    if (auto* sb = StrategyBridge::instance()) {
         sb->init();
         INTERNAL_INFO_STREAM << "[AppBootstrap] StrategyBridge 拦截器已就绪";
     }

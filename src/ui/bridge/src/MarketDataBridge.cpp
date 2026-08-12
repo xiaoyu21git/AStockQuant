@@ -1,6 +1,7 @@
 // MarketDataBridge.cpp — 统一行情桥接层
 // tick 事件驱动 (被动推送), 同时处理行情快照 + K线聚合, 零定时器
 #include "MarketDataBridge.h"
+#include <thread>  // sectorHeatThread 专用 (持久轮询循环, 不适合线程池)
 #include "../../../domain/market/include/MarketDataService.h"
 #include "../../../domain/market/include/LiveData.h"
 #include "../../engine/include/GmSessionEngine.h"
@@ -26,6 +27,9 @@ MarketDataBridge::MarketDataBridge(QObject* parent) : QObject(parent) {}
 
 MarketDataBridge::~MarketDataBridge() {
     stopSectorHeatThread();
+    if (m_executor) {
+        m_executor->shutdown(true);
+    }
     if (m_tickSub.is_valid()) {
         auto bus = engine::get_engine_event_bus();
         if (bus) bus->unsubscribe(m_tickSub);
@@ -815,22 +819,22 @@ void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
         {"SHSE.000040", "电信服务"},
         {"SHSE.000041", "公用事业"},
         // 深证行业指数 (16个)
-        {"SZSE.399231", "深证农林"},
-        {"SZSE.399232", "深证采矿"},
-        {"SZSE.399233", "深证制造"},
-        {"SZSE.399234", "深证水电"},
-        {"SZSE.399235", "深证建筑"},
-        {"SZSE.399236", "深证批零"},
-        {"SZSE.399237", "深证运输"},
-        {"SZSE.399238", "深证餐饮"},
-        {"SZSE.399239", "深证IT"},
-        {"SZSE.399240", "深证金融"},
-        {"SZSE.399241", "深证地产"},
-        {"SZSE.399242", "深证商务"},
-        {"SZSE.399243", "深证科研"},
-        {"SZSE.399244", "深证公共"},
-        {"SZSE.399248", "深证文化"},
-        {"SZSE.399249", "深证综企"},
+        {"SZSE.399231", "农林牧渔"},
+        {"SZSE.399232", "采矿"},
+        {"SZSE.399233", "制造"},
+        {"SZSE.399234", "水电"},
+        {"SZSE.399235", "建筑"},
+        {"SZSE.399236", "批零"},
+        {"SZSE.399237", "运输"},
+        {"SZSE.399238", "餐饮"},
+        {"SZSE.399239", "IT"},
+        {"SZSE.399240", "金融"},
+        {"SZSE.399241", "地产"},
+        {"SZSE.399242", "商务"},
+        {"SZSE.399243", "科研"},
+        {"SZSE.399244", "公共"},
+        {"SZSE.399248", "文化"},
+        {"SZSE.399249", "综企"},
     };
     constexpr int kSectorCount = sizeof(kSectors) / sizeof(kSectors[0]);
 
@@ -874,7 +878,7 @@ void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
             secMap[kSectors[i].name] = SecData{};
         }
     }
-    INTERNAL_INFO_STREAM << "[MktBridge] ① index K-line done: " << idxOk << "/" << kSectorCount
+    INTERNAL_INFO_STREAM << "[MktBridge] ① 指数K线完成: " << idxOk << "/" << kSectorCount
                          << " realtime60s=" << idxRealtime;
 
     // ── ② 成分股: 领涨股榜单 ──
@@ -891,7 +895,7 @@ void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
         }
         stocks->release();
     }
-    INTERNAL_INFO_STREAM << "[MktBridge] ② constituents collected: " << allSyms.size() << " stocks";
+    INTERNAL_INFO_STREAM << "[MktBridge] ② 成分股已收集: " << allSyms.size() << " stocks";
 
     // 成分股名称批量查询 (StkIndexConstituent 无 sec_name, 用 stk_get_symbol_industry 查)
     std::unordered_map<std::string, std::string> symToName;
@@ -956,7 +960,7 @@ void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
                 it->second.stockCnt++;
             }
         }
-        INTERNAL_INFO_STREAM << "[MktBridge] ③ stock bars: " << barOk << "/" << allSyms.size()
+        INTERNAL_INFO_STREAM << "[MktBridge] ③ 个股K线: " << barOk << "/" << allSyms.size()
                              << " realtime60s=" << realtimeCount;
 
         // ── ④ 资金流向 (仅盘后可用, 盘中用指数成交额替代) ──
@@ -974,7 +978,7 @@ void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
                 sd.netInRate += r.main_net_in_rate;
                 sd.hasMoneyFlow = true;
             }
-            INTERNAL_INFO_STREAM << "[MktBridge] ④ money_flow OK records=" << mf->count() << " tradeDate=" << tradeDate;
+            INTERNAL_INFO_STREAM << "[MktBridge] ④ 资金流向 OK 记录数=" << mf->count() << " tradeDate=" << tradeDate;
             mf->release();
         } else {
             INTERNAL_INFO_STREAM << "[MktBridge] ④ money_flow N/A (盘中, 用指数成交额替代)"
@@ -1073,7 +1077,7 @@ void MarketDataBridge::fetchSectorHeatInternal(QVariantList& result) {
         }
     }
 
-    INTERNAL_INFO_STREAM << "[MktBridge] ⑤ done sectors=" << result.size()
+    INTERNAL_INFO_STREAM << "[MktBridge] ⑤ 完成 sectors=" << result.size()
                          << " stocks=" << allSyms.size();
 }
 
@@ -1119,6 +1123,101 @@ QString MarketDataBridge::probeGmCoverage(const QString& symbol, const QVariantL
 QString MarketDataBridge::fillAdjFactors() {
     astock::infrastructure::database::PostMarketSyncService::instance().fillAdjFactors();
     return QStringLiteral("复权因子补全已启动, 查看日志");
+}
+
+QString MarketDataBridge::forceSyncFinancial(int tradingDay) {
+    if (!m_executor) {
+        m_executor = std::make_unique<foundation::thread::ThreadPoolExecutor>(
+            1, 2, std::chrono::seconds(60), "MarketDataBridge");
+    }
+    m_executor->post([tradingDay]() {
+        astock::infrastructure::database::PostMarketSyncService::instance().forceSyncFinancial(tradingDay);
+    });
+    return QStringLiteral("财报同步已启动(后台线程), 查看日志 system/");
+}
+
+QString MarketDataBridge::forceSyncMoneyFlow(int tradingDay) {
+    if (!m_executor) {
+        m_executor = std::make_unique<foundation::thread::ThreadPoolExecutor>(
+            1, 2, std::chrono::seconds(60), "MarketDataBridge");
+    }
+    m_executor->post([tradingDay]() {
+        astock::infrastructure::database::PostMarketSyncService::instance().forceSyncMoneyFlow(tradingDay);
+    });
+    return QStringLiteral("资金流单日同步已加入队列, 查看 data.sync_task_log");
+}
+
+QString MarketDataBridge::forceSyncMoneyFlowHistory() {
+    if (!m_executor) {
+        m_executor = std::make_unique<foundation::thread::ThreadPoolExecutor>(
+            1, 2, std::chrono::seconds(60), "MarketDataBridge");
+    }
+    m_executor->post([]() {
+        astock::infrastructure::database::PostMarketSyncService::instance().forceSyncMoneyFlowHistory();
+    });
+    return QStringLiteral("资金流全历史同步已启动, 查看日志 system/");
+}
+
+QString MarketDataBridge::getSyncTaskStatus(const QString& taskType) {
+    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+    if (!db || !db->isOpen()) return QStringLiteral("{}");
+    auto res = db->executeQuery(
+        "SELECT task_type,status,rows_written,error_msg,started_at,ended_at"
+        " FROM data.sync_task_log WHERE task_type=$1 ORDER BY started_at DESC LIMIT 1",
+        {astock::database::SqlParam{taskType.toStdString()}});
+    if (res.rowCount() == 0) return QStringLiteral("{}");
+    auto& row = res.getRow(0);
+    bool success = row.getString("status") == "success";
+    return QString("{\"task_type\":\"%1\",\"success\":%2,\"rows\":%3,\"error\":\"%4\"}")
+        .arg(QString::fromStdString(row.getString("task_type")))
+        .arg(success ? QStringLiteral("true") : QStringLiteral("false"))
+        .arg(row.getInt("rows_written"))
+        .arg(QString::fromStdString(row.getString("error_msg")));
+}
+
+void MarketDataBridge::requestDataDateSummary() {
+    if (!m_executor) {
+        m_executor = std::make_unique<foundation::thread::ThreadPoolExecutor>(
+            1, 2, std::chrono::seconds(60), "MarketDataBridge");
+    }
+    // ThreadPoolExecutor 执行 PG 查询, 结果 marshal 回主线程
+    m_executor->post([this]() {
+        QVariantMap result;
+        result["daily"]   = QStringLiteral("查询中...");
+        result["weekly"]  = QStringLiteral("查询中...");
+        result["monthly"] = QStringLiteral("查询中...");
+        result["minute"]  = QStringLiteral("查询中...");
+        result["financial"] = QStringLiteral("查询中...");
+
+        auto db = astock::database::NativePgConnectionPool::instance().getConnection();
+        if (!db || !db->isOpen()) {
+            result["daily"] = QStringLiteral("DB不可用");
+            QMetaObject::invokeMethod(this, [this, result]() {
+                m_dataDateSummary = result;
+                emit dataDateSummaryReady();
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        auto queryMax = [&](const char* table, const char* col) -> QString {
+            auto r = db->executeQuery(
+                std::string("SELECT MAX(") + col + ")::text AS md FROM " + table);
+            if (r.rowCount() > 0)
+                return QString::fromStdString(r.getRow(0).getString("md"));
+            return QStringLiteral("无数据");
+        };
+
+        result["daily"]   = queryMax("mkt.daily_bar",  "trade_date");
+        result["weekly"]  = queryMax("mkt.weekly_bar",  "trade_date");
+        result["monthly"] = queryMax("mkt.monthly_bar", "trade_date");
+        result["minute"]  = queryMax("mkt.minute_bar",  "trade_ts::date");
+        result["financial"] = queryMax("fund.financial_indicator_daily", "trade_date");
+
+        QMetaObject::invokeMethod(this, [this, result]() {
+            m_dataDateSummary = result;
+            emit dataDateSummaryReady();
+        }, Qt::QueuedConnection);
+    });
 }
 
 } // namespace bridge

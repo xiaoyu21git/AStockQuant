@@ -19,6 +19,26 @@ Item {
     property string boundStrategySymbolsPreview: ""
     property var latestLiveValidationReport: ({ errors: [], warnings: [], checkedAt: "" })
     property var latestStartupGate: ({})
+    property var dateSummary: ({})
+
+    function dateStatusColor(key, dateStr) {
+        if (!dateStr || dateStr.length < 10 || dateStr === "无数据" || dateStr === "DB不可用") return "#F87171"
+        if (key === "financial") {
+            // 财报季度更新, 滞后 5 个月内正常 (季报截止日为季末后1个月, 年报为4月底)
+            var now = new Date()
+            var d = new Date(dateStr)
+            var monthDiff = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth())
+            return monthDiff <= 5 ? "#38BDF8" : "#FBBF24"
+        }
+        if (key === "monthly") {
+            var now = new Date()
+            var d = new Date(dateStr)
+            if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) return "#38BDF8"
+            var monthDiff = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth())
+            return monthDiff <= 1 ? "#38BDF8" : "#FBBF24"
+        }
+        return "#38BDF8"
+    }
 
     function accountProfileValue() {
         return accountProfileBox && accountProfileBox.selectedProfileValue ? accountProfileBox.selectedProfileValue : "live"
@@ -129,6 +149,18 @@ Item {
     Component.onCompleted: {
         Qt.callLater(reloadConfiguration)
         Qt.callLater(loadStrategyOptions)
+        Qt.callLater(function() {
+            if (marketDataService && marketDataService.requestDataDateSummary)
+                marketDataService.requestDataDateSummary()
+        })
+    }
+
+    Connections {
+        target: marketDataService
+        function onDataDateSummaryReady() {
+            if (marketDataService && marketDataService.dataDateSummary)
+                dateSummary = marketDataService.dataDateSummary
+        }
     }
 
     Rectangle { anchors.fill: parent; color: "#0F172A" }
@@ -244,10 +276,73 @@ Item {
                         Button { text: "立即同步"; onClicked: syncResult.text = marketDataService ? marketDataService.forceSyncMissingDays(30) : "Bridge未就绪" }
                         Button { text: "补历史"; onClicked: syncResult.text = marketDataService ? marketDataService.forceSyncHistory() : "Bridge未就绪" }
                         Button { text: "补复权因子"; onClicked: syncResult.text = marketDataService ? marketDataService.fillAdjFactors() : "Bridge未就绪" }
+                        Button { text: "补财报数据"; onClicked: syncResult.text = marketDataService ? marketDataService.forceSyncFinancial(20260810) : "Bridge未就绪" }
+                        RowLayout {
+                            Button { text: "补资金流(全部)"; onClicked: syncResult.text = marketDataService ? marketDataService.forceSyncMoneyFlowHistory() : "Bridge未就绪" }
+                            Button { text: "查询状态"; onClicked: syncResult.text = marketDataService ? marketDataService.getSyncTaskStatus("MONEY_FLOW") : "Bridge未就绪" }
+                        }
                     }
                     Text { id: syncResult; Layout.fillWidth: true; font.pixelSize: 12; color: "#94A3B8" }
+                    // ── 临时：资金流列追加测试 ──
+                    RowLayout { Layout.fillWidth: true; spacing: 12
+                        Text { text: "资金流扩列"; font.pixelSize: 14; color: "#FBBF24" }
+                        Item { Layout.fillWidth: true }
+                        Button { text: "扩列13(已完成)"; onClicked: {
+                            var svc = Bridge.DataCleaningServiceRefactored
+                            var ret = svc ? svc.augmentMoneyFlow(13) : -99
+                            syncResult.text = "augmentMoneyFlow(13) => " + ret
+                        }}
+                        Button { text: "扩列14"; onClicked: {
+                            var svc = Bridge.DataCleaningServiceRefactored
+                            var ret = svc ? svc.augmentMoneyFlow(14) : -99
+                            syncResult.text = "augmentMoneyFlow(14) => " + ret
+                        }}
+                    }
+                    // ── 临时结束 ──
                     Text { Layout.fillWidth: true; wrapMode: Text.WordWrap; font.pixelSize: 13; color: "#94A3B8"
                         text: "实盘绑定区分业务策略 ID 与掘金固定策略 ID。选择系统内业务策略，掘金策略 ID 需手工填写。" }
+
+                    // ── 数据日期概要 ──
+                    Item { Layout.fillWidth: true; height: 1; Rectangle { anchors.fill: parent; color: "#334155" } }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 8
+                        Text { text: "数据日期"; font.pixelSize: 16; font.bold: true; color: "#F8FAFC" }
+                        Item { Layout.fillWidth: true }
+                        Button {
+                            text: "刷新"; font.pixelSize: 12
+                            onClicked: {
+                                if (marketDataService && marketDataService.requestDataDateSummary)
+                                    marketDataService.requestDataDateSummary()
+                            }
+                        }
+                    }
+                    GridLayout {
+                        Layout.fillWidth: true; columns: 2; rowSpacing: 6; columnSpacing: 24
+                        Repeater {
+                            model: [
+                                { label: "日线",     key: "daily" },
+                                { label: "周线",     key: "weekly" },
+                                { label: "月线",     key: "monthly" },
+                                { label: "分钟线",   key: "minute" },
+                                { label: "财报",     key: "financial" }
+                            ]
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: 8
+                                Text { text: modelData.label; font.pixelSize: 14; color: "#94A3B8"; Layout.preferredWidth: 60 }
+                                Rectangle {
+                                    Layout.fillWidth: true; radius: 6; implicitHeight: 30
+                                    color: "#0F172A"; border.color: "#334155"; border.width: 1
+                                    Text {
+                                        anchors.centerIn: parent; font.pixelSize: 13
+                                        color: dateStatusColor(modelData.key, dateSummary ? dateSummary[modelData.key] : "")
+                                        text: dateSummary ? (dateSummary[modelData.key] || "—") : "点击刷新"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Text { Layout.fillWidth: true; font.pixelSize: 11; color: "#64748B"
+                        text: "蓝=正常, 红=无数据, 黄=滞后。财报季度更新可滞后5个月。异步查询不卡界面。" }
                 }
             }
         }

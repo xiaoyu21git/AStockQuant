@@ -94,7 +94,7 @@ void StrategyListModel::replaceAll(const QVariantList& items)
     INTERNAL_INFO_STREAM << "[ListModel] replaceAll 开始 rows=" << static_cast<int>(items.size());
     QVector<StrategyRow> nextRows;
     nextRows.reserve(items.size());
-    INTERNAL_INFO_STREAM << "[StrategyListModel] replaceAll input rows=" << items.size();
+    INTERNAL_INFO_STREAM << "[StrategyListModel] replaceAll 输入行数=" << items.size();
 
     for (const QVariant& item : items) {
         const QVariantMap map = item.toMap();

@@ -1023,6 +1023,80 @@ bool ConfigManager::saveConfigFile(ConfigFile file, const ConfigNode& config) {
     return true;
 }
 
+void ConfigManager::validateConfigFile(ConfigFile file, const ConfigNode& node) const {
+    std::vector<std::string> missingFields;
+    std::vector<std::string> invalidFields;
+
+    if (file == ConfigFile::TradingConnection) {
+        // ── 必需字段列表: 字段路径 → 描述 ──
+        struct RequiredField { std::string path; std::string desc; };
+        const std::vector<RequiredField> requiredFields = {
+            {"token",        "掘金 Token"},
+            {"accountId",    "账户 ID"},
+            {"gmStrategyId", "掘金策略 ID"},
+        };
+
+        for (const auto& f : requiredFields) {
+            if (!node.has(f.path)) {
+                missingFields.push_back(f.desc + " (" + f.path + ")");
+                continue;
+            }
+            auto val = node.get(f.path);
+            if (val.isNull()) {
+                missingFields.push_back(f.desc + " (" + f.path + ": null)");
+                continue;
+            }
+            // 字符串字段必须非空
+            if (val.isString() && val.asString().empty()) {
+                invalidFields.push_back(f.desc + " (" + f.path + ": 空字符串)");
+            }
+        }
+
+        // ── 半必需: 账户环境必须为 "live" 或 "simulation" ──
+        if (node.has("accountProfile")) {
+            auto profile = node.get("accountProfile").asString();
+            if (profile != "live" && profile != "simulation") {
+                invalidFields.push_back(
+                    std::string("账户环境 (accountProfile): 非法值 \"") + profile + "\", 期望 live/simulation");
+            }
+        }
+    } else if (file == ConfigFile::RiskConfig) {
+        // RiskConfig: appliedConfiguration 节点必须包含风控字段
+        if (!node.has("appliedConfiguration")) {
+            missingFields.push_back("风控应用配置 (appliedConfiguration)");
+        } else {
+            auto applied = node.get("appliedConfiguration");
+            const std::vector<std::string> riskFields = {
+                "stopLossPercent", "takeProfitPercent", "maxDrawdownLimitPercent",
+                "maxDailyLossPercent", "maxPositionPercent", "maxTotalExposurePercent",
+                "commissionRate", "minCommission", "stampTaxRate"
+            };
+            for (const auto& f : riskFields) {
+                if (!applied.has(f)) {
+                    missingFields.push_back("appliedConfiguration." + f);
+                }
+            }
+        }
+    }
+
+    if (!missingFields.empty() || !invalidFields.empty()) {
+        std::string msg = std::string("[ConfigManager] 配置校验失败: ")
+                        + configFilePath(file);
+        if (!missingFields.empty()) {
+            msg += "\n  缺失字段 (" + std::to_string(missingFields.size()) + "):";
+            for (const auto& f : missingFields)
+                msg += "\n    - " + f;
+        }
+        if (!invalidFields.empty()) {
+            msg += "\n  非法字段 (" + std::to_string(invalidFields.size()) + "):";
+            for (const auto& f : invalidFields)
+                msg += "\n    - " + f;
+        }
+        INTERNAL_ERROR_STREAM << msg;
+        throw foundation::ConfigException(msg);
+    }
+}
+
 void ConfigManager::invalidateConfigFileCache(ConfigFile file) {
     std::unique_lock<std::shared_mutex> lock(m_fileCacheMutex);
     m_fileConfigCache.erase(file);

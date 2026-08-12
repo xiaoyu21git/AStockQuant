@@ -117,6 +117,11 @@ bool DataCleaningServiceRefactored::initialize() {
     return true;
 }
 
+// ── 资金流列追加 ──
+int DataCleaningServiceRefactored::augmentMoneyFlow(int dataId) {
+    return DataCacheAdapter::instance().augmentMoneyFlow(dataId);
+}
+
 // ── 默认规则 ──
 QVariantMap DataCleaningServiceRefactored::getDefaultRules() const {
     QVariantMap rules;

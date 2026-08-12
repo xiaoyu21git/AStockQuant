@@ -135,17 +135,26 @@ public:
     static int toGmSide(OrderSide s);
     static int toGmOrderType(OrderType t);
 
-    // Impl — SessionStrategy 通过 Impl& 参数访问
+    // Impl — 仅 GmSessionEngine 及其成员函数可访问私有成员
     struct Impl {
-        std::atomic<bool> initialized{false};
-        std::atomic<bool> sessionReady{false};  // on_init() 后置 true
-        std::thread       strategyThread;
+        bool isInitialized() const { return m_initialized.load(std::memory_order_acquire); }
+        void setInitialized(bool v) { m_initialized.store(v, std::memory_order_release); }
+
+        bool isSessionReady() const { return m_sessionReady.load(std::memory_order_acquire); }
+        void setSessionReady(bool v) { m_sessionReady.store(v, std::memory_order_release); }
+
+        std::thread& strategyThread() { return m_strategyThread; }
+
+    private:
+        std::atomic<bool> m_initialized{false};
+        std::atomic<bool> m_sessionReady{false};  // on_init() 后置 true
+        std::thread       m_strategyThread;
     };
     struct StrategyDeleter { void operator()(::Strategy*) noexcept; };
 
     /// @brief 会话是否就绪（on_init 回调已完成）
     [[nodiscard]] bool isSessionReady() const {
-        return m_impl && m_impl->sessionReady.load(std::memory_order_acquire);
+        return m_impl && m_impl->isSessionReady();
     }
 
     /// @brief 内部访问器 — GmSessionEngine.cpp 的 SessionStrategy 使用
@@ -155,6 +164,10 @@ public:
 
     // ── 行情缓存 (供 on_tick 回调写入) ──
     void cacheTickQuote(const std::string& symbol, GmQuote&& quote);
+
+    /// @brief 批量读取 tick 缓存行情 (纯缓存, 无 SDK 回退, 单次加锁)
+    /// @return sym → quote 映射, 仅包含缓存中存在的标的
+    std::unordered_map<std::string, GmQuote> getCachedQuotes();
 
 private:
 

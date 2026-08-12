@@ -77,7 +77,7 @@ std::vector<PatchOperation> RulePatchLoader::loadFromFile(
     file.seekg(0, std::ios::beg);
 
     if (fileSize < static_cast<std::streamsize>(PatchHeader::kHeaderSize + 32)) {
-        INTERNAL_WARN_STREAM << "[PatchLoader] 补丁文件太小: " << fileSize << " bytes";
+        INTERNAL_WARN_STREAM << "[PatchLoader] 补丁文件太小: " << fileSize << " 字节";
         return {};
     }
 
@@ -142,19 +142,19 @@ int RulePatchLoader::apply(const std::vector<PatchOperation>& ops,
     for (const auto& op : ops) {
         switch (op.op) {
         case PatchOperation::Op::Add:
-            INTERNAL_INFO_STREAM << "[PatchLoader] ADD template=" << op.templateId;
+            INTERNAL_INFO_STREAM << "[PatchLoader] 添加 template=" << op.templateId;
             ++applied;
             break;
         case PatchOperation::Op::Modify:
-            INTERNAL_INFO_STREAM << "[PatchLoader] MODIFY rule=" << op.ruleId;
+            INTERNAL_INFO_STREAM << "[PatchLoader] 修改 rule=" << op.ruleId;
             ++applied;
             break;
         case PatchOperation::Op::Disable:
-            INTERNAL_INFO_STREAM << "[PatchLoader] DISABLE rule=" << op.ruleId;
+            INTERNAL_INFO_STREAM << "[PatchLoader] 禁用 rule=" << op.ruleId;
             ++applied;
             break;
         case PatchOperation::Op::Enable:
-            INTERNAL_INFO_STREAM << "[PatchLoader] ENABLE rule=" << op.ruleId;
+            INTERNAL_INFO_STREAM << "[PatchLoader] 启用 rule=" << op.ruleId;
             ++applied;
             break;
         }

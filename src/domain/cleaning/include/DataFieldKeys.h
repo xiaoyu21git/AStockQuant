@@ -4,10 +4,21 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <unordered_set>
 #include <initializer_list>
 
 namespace cleaning {
+
+// ── 资金流行数据（用于列追加迁移，key = "symbol|trade_date"）──
+struct MoneyFlowRow {
+    double main_in = 0, main_out = 0, main_net_in = 0, main_net_in_rate = 0;
+    double super_in = 0, super_out = 0, super_net_in = 0, super_net_in_rate = 0;
+    double large_in = 0, large_out = 0, large_net_in = 0, large_net_in_rate = 0;
+    double mid_in = 0, mid_out = 0, mid_net_in = 0, mid_net_in_rate = 0;
+    double small_in = 0, small_out = 0, small_net_in = 0, small_net_in_rate = 0;
+};
+using MoneyFlowMap = std::unordered_map<std::string, MoneyFlowRow>;
 
 class FieldKey {
 public:
@@ -129,6 +140,36 @@ struct XF {
     static constexpr FieldKey STATUS{"status"};
     static constexpr FieldKey EXCHANGE{"exchange"};
     static constexpr FieldKey NAME{"name"};
+};
+
+// ── 资金流字段 (fund.money_flow_daily, 日频) ──
+struct MONEY_F {  // MoneyFlowFields
+    static constexpr FieldKey MAIN_NET_IN{"money_main_net_in"};
+    static constexpr FieldKey MAIN_NET_IN_RATE{"money_main_net_in_rate"};
+    static constexpr FieldKey MAIN_IN{"money_main_in"};
+    static constexpr FieldKey MAIN_OUT{"money_main_out"};
+    static constexpr FieldKey SUPER_NET_IN{"money_super_net_in"};
+    static constexpr FieldKey SUPER_NET_IN_RATE{"money_super_net_in_rate"};
+    static constexpr FieldKey SUPER_IN{"money_super_in"};
+    static constexpr FieldKey SUPER_OUT{"money_super_out"};
+    static constexpr FieldKey LARGE_NET_IN{"money_large_net_in"};
+    static constexpr FieldKey LARGE_NET_IN_RATE{"money_large_net_in_rate"};
+    static constexpr FieldKey LARGE_IN{"money_large_in"};
+    static constexpr FieldKey LARGE_OUT{"money_large_out"};
+    static constexpr FieldKey MID_NET_IN{"money_mid_net_in"};
+    static constexpr FieldKey MID_NET_IN_RATE{"money_mid_net_in_rate"};
+    static constexpr FieldKey MID_IN{"money_mid_in"};
+    static constexpr FieldKey MID_OUT{"money_mid_out"};
+    static constexpr FieldKey SMALL_NET_IN{"money_small_net_in"};
+    static constexpr FieldKey SMALL_NET_IN_RATE{"money_small_net_in_rate"};
+    static constexpr FieldKey SMALL_IN{"money_small_in"};
+    static constexpr FieldKey SMALL_OUT{"money_small_out"};
+
+    static FieldSet all() { return {MAIN_NET_IN, MAIN_NET_IN_RATE, MAIN_IN, MAIN_OUT,
+        SUPER_NET_IN, SUPER_NET_IN_RATE, SUPER_IN, SUPER_OUT,
+        LARGE_NET_IN, LARGE_NET_IN_RATE, LARGE_IN, LARGE_OUT,
+        MID_NET_IN, MID_NET_IN_RATE, MID_IN, MID_OUT,
+        SMALL_NET_IN, SMALL_NET_IN_RATE, SMALL_IN, SMALL_OUT}; }
 };
 
 // ── 清洗标签字段 ──

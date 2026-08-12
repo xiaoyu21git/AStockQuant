@@ -52,6 +52,17 @@ public:
     /// @brief 补全 GMSDK 数据的复权因子（pre_adjust_factor / post_adjust_factor）
     void fillAdjFactors();
 
+    /// @brief 手动触发财报数据同步 (EPS/ROE/净利润等, 写入 fund.financial_indicator_daily)
+    /// 正常路径每月 1-5 号自动执行, 此接口用于补齐历史缺口
+    void forceSyncFinancial(int tradingDay);
+
+    /// @brief 手动触发资金流数据同步 (主力/超大单/大单/中单/小单, 写入 fund.money_flow_daily)
+    /// 正常路径每天盘后自动执行, 此接口用于补齐历史缺口
+    void forceSyncMoneyFlow(int tradingDay);
+
+    /// @brief 一键补全部资金流历史 (遍历所有交易日, 跳过已有数据的日期)
+    void forceSyncMoneyFlowHistory();
+
     /// @brief 设置实盘数据持久化目录（由 AppBootstrap 注入）
     void setLiveDataPath(const std::string& path) { m_liveDataPath = path; }
 
@@ -76,6 +87,7 @@ private:
     void syncDailyMinute(int tradingDay);
     void syncWeeklyMonthly(int tradingDay);
     void syncFinancialData(int tradingDay);
+    void syncMoneyFlowData(int tradingDay);
 
     /// @brief 从 GM SDK 同步概念/题材板块成分股(首次拉全量, 增量更新)
     void syncConceptMembership();
@@ -103,6 +115,9 @@ private:
     bool syncWeekly(std::shared_ptr<astock::database::ISqlDatabase> db, int tradingDay);
     bool syncMonthly(std::shared_ptr<astock::database::ISqlDatabase> db, int tradingDay);
     bool syncFinancial(std::shared_ptr<astock::database::ISqlDatabase> db,
+                       const std::unordered_map<std::string,int>& symToId,
+                       const std::vector<std::string>& symbols, int tradingDay);
+    bool syncMoneyFlow(std::shared_ptr<astock::database::ISqlDatabase> db,
                        const std::unordered_map<std::string,int>& symToId,
                        const std::vector<std::string>& symbols, int tradingDay);
 

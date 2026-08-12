@@ -9,6 +9,7 @@
 #include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <sstream>
@@ -22,7 +23,7 @@
 namespace factor::compute {
 
 // computeOneDay 调用计数器（每次 compute() 入口重置，用于限制日志输出）
-static int s_computeOneDayCounter = 0;
+static std::atomic<int> s_computeOneDayCounter{0};
 
 BacktestDataService::BacktestDataService() = default;
 BacktestDataService::~BacktestDataService() = default;

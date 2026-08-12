@@ -1,6 +1,7 @@
 #include "../include/StrategyManager.h"
 #include "../include/RuntimeFactorSvc.h"
 #include "../../factor/include/FactorInstanceManager.h"
+#include "foundation/config/ConfigManager.hpp"
 #include "foundation/log/logging.hpp"
 #include "foundation/market/AStockSymbol.h"
 
@@ -178,6 +179,24 @@ void StrategyManager::startStrategy(const std::string& strategyId)
     auto* engine = getOrCreateEngine(strategyId);
     if (!engine) {
         throw std::runtime_error("引擎创建失败: " + strategyId);
+    }
+
+    // ── 注入交易账户 ID (从 TradingConnection 配置读取, Phase 1.4) ──
+    {
+        auto cfg = foundation::config::ConfigManager::instance()
+            .loadConfigFile(foundation::config::ConfigFile::TradingConnection);
+        if (cfg && !cfg->isNull() && cfg->has("accountId")) {
+            std::string accountId = cfg->get("accountId").asString();
+            if (!accountId.empty()) {
+                engine->setAccountId(accountId);
+                INTERNAL_INFO_STREAM << "[SM] 已注入 accountId: " << strategyId
+                                     << " -> " << accountId;
+            } else {
+                INTERNAL_ERROR_STREAM << "[SM] accountId 为空, 策略将无法下单: " << strategyId;
+            }
+        } else {
+            INTERNAL_ERROR_STREAM << "[SM] 配置中未找到 accountId, 策略将无法下单: " << strategyId;
+        }
     }
 
     auto result = engine->start();

@@ -657,7 +657,7 @@ QVariantList StrategyBridge::list()
         map["dailyPnL"] = totalPnl;
         map["position"] = totalMv;
         map["trades"]   = tradeCount;  // 实盘持仓数作为交易活跃度指标
-        INTERNAL_INFO_STREAM << "[StrategyBridge] list: " << sid.toStdString()
+        INTERNAL_INFO_STREAM << "[StrategyBridge] 列表: " << sid.toStdString()
                              << " returns=" << map["returns"].toDouble()
                              << " runningDays=" << map["runningDays"].toInt()
                              << " holdings=" << tradeCount

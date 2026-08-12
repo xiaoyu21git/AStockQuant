@@ -176,6 +176,10 @@ public:
     /// @return true 成功, false 失败 (原文件不受影响)
     bool saveConfigFile(ConfigFile file, const ConfigNode& config);
 
+    /// @brief 校验配置文件必需字段 — 任何字段缺失或值非法则 throw ConfigException
+    /// @throws ConfigException 列出所有缺失/非法字段, 不静默不兜底
+    void validateConfigFile(ConfigFile file, const ConfigNode& node) const;
+
     /// @brief 清除指定文件的缓存 (下次 loadConfigFile 将重新读磁盘)
     void invalidateConfigFileCache(ConfigFile file);
 

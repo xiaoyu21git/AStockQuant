@@ -299,6 +299,12 @@ public:
     /// @brief 批量写入：完成并关闭文件
     void finishArrowWrite(ArrowWriteToken token);
 
+    /// @brief 增量追加资金流列：对已有 Arrow 文件在读出行顺序基础上，
+    ///        按已查询好的 MoneyFlowMap 对齐构建 20 个 money_* 列，原子写回。
+    /// @param mfMap  key="symbol|trade_date", value=20资金流字段值
+    /// @return 追加的总列数（20），schema 已含则跳过返回 0，失败返回 -1
+    int augmentMoneyFlowColumns(int dataId, const MoneyFlowMap& mfMap);
+
 #endif // ASTOCK_HAS_PARQUET
 
     /// @brief 保存数据集数据到 JSON 文件（无 Parquet 时的回退）

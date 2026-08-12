@@ -1,12 +1,10 @@
 #include "database/BacktestResultRepository.h"
 #include "database/ISqlDatabase.h"
-#include "database/SqlEscape.h"
 #include "foundation/log/logging.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>
-#include <sstream>
 #include <iomanip>
 
 namespace domain::backtest {
@@ -295,16 +293,15 @@ std::vector<StoredStrategyBacktest> BacktestResultRepository::loadStrategyBackte
 bool BacktestResultRepository::saveFactorBacktest(const StoredFactorBacktest& r)
 {
     ensureTables();
-    std::ostringstream sql;
-    sql << "INSERT INTO alpha.factor_backtest_results "
-           "(id, factor_id, run_at, num_groups, metrics_json) VALUES ("
-        << astock::database::safeStr(r.id) << "," << astock::database::safeStr(r.factorId)
-        << "," << astock::database::safeStr(r.runAt) << ","
-        << r.numGroups << "," << astock::database::safeStr(r.metricsJson)
-        << ") ON CONFLICT(id) DO UPDATE SET "
-           "factor_id=EXCLUDED.factor_id, run_at=EXCLUDED.run_at, "
-           "num_groups=EXCLUDED.num_groups, metrics_json=EXCLUDED.metrics_json";
-    const int affected = m_db.executeUpdate(sql.str());
+    using P = astock::database::SqlParam;
+    const int affected = m_db.executeUpdate(
+        "INSERT INTO alpha.factor_backtest_results "
+        "(id, factor_id, run_at, num_groups, metrics_json) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(id) DO UPDATE SET "
+        "factor_id=EXCLUDED.factor_id, run_at=EXCLUDED.run_at, "
+        "num_groups=EXCLUDED.num_groups, metrics_json=EXCLUDED.metrics_json",
+        {P{r.id}, P{r.factorId}, P{r.runAt},
+         P{static_cast<std::int32_t>(r.numGroups)}, P{r.metricsJson}});
     if (affected <= 0) {
         INTERNAL_ERROR_STREAM << "[BacktestRepo] 保存因子回测失败 id=" << r.id
                               << " affected=" << affected << " error=" << m_db.lastError();
@@ -318,12 +315,12 @@ std::vector<StoredFactorBacktest> BacktestResultRepository::loadFactorBacktests(
     const std::string& factorId, int limit)
 {
     ensureTables();
-    std::ostringstream sql;
-    sql << "SELECT id, factor_id, run_at, num_groups, metrics_json "
-           "FROM alpha.factor_backtest_results WHERE factor_id="
-        << astock::database::safeStr(factorId) << " ORDER BY run_at DESC LIMIT " << limit;
-
-    auto result = m_db.executeQuery(sql.str());
+    using P = astock::database::SqlParam;
+    auto result = m_db.executeQuery(
+        "SELECT id, factor_id, run_at, num_groups, metrics_json "
+        "FROM alpha.factor_backtest_results WHERE factor_id=? "
+        "ORDER BY run_at DESC LIMIT ?",
+        {P{factorId}, P{static_cast<std::int32_t>(limit)}});
     std::vector<StoredFactorBacktest> records;
     for (int i = 0; i < result.rowCount(); ++i) {
         const auto& row = result.getRow(i);
@@ -343,15 +340,14 @@ std::vector<StoredFactorBacktest> BacktestResultRepository::loadFactorBacktests(
 bool BacktestResultRepository::saveDailySnapshot(const DailyEquitySnapshot& snap)
 {
     ensureTables();
-    std::ostringstream sql;
-    sql << "INSERT INTO live.daily_equity_snapshots "
-           "(id, strategy_id, snap_date, total_asset, daily_return) VALUES ("
-        << astock::database::safeStr(snap.id) << "," << astock::database::safeStr(snap.strategyId)
-        << "," << astock::database::safeStr(snap.date) << ","
-        << snap.totalAsset << "," << snap.dailyReturn
-        << ") ON CONFLICT(strategy_id, snap_date) DO UPDATE SET "
-           "total_asset=EXCLUDED.total_asset, daily_return=EXCLUDED.daily_return";
-    const int affected = m_db.executeUpdate(sql.str());
+    using P = astock::database::SqlParam;
+    const int affected = m_db.executeUpdate(
+        "INSERT INTO live.daily_equity_snapshots "
+        "(id, strategy_id, snap_date, total_asset, daily_return) VALUES (?,?,?,?,?) "
+        "ON CONFLICT(strategy_id, snap_date) DO UPDATE SET "
+        "total_asset=EXCLUDED.total_asset, daily_return=EXCLUDED.daily_return",
+        {P{snap.id}, P{snap.strategyId}, P{snap.date},
+         P{snap.totalAsset}, P{snap.dailyReturn}});
     if (affected <= 0) {
         INTERNAL_ERROR_STREAM << "[BacktestRepo] 保存每日快照失败 id=" << snap.id
                               << " strategy=" << snap.strategyId

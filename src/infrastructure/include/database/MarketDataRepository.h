@@ -230,6 +230,12 @@ public:
         const std::string& startTime,
         const std::string& endTime);
 
+    /// 资金流日频查询（按标的+日期范围，返回 22 列：symbol + trade_date + 20 money_*）
+    std::vector<astock::database::SqlQueryResultRow> queryMoneyFlow(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
+
     /// 分钟线日聚合（按 (symbol_id, trade_ts::date) GROUP BY 派生日频列）
     /// 返回列: symbol, trade_date, open_minute, high_minute, low_minute, close_minute, volume_minute
     std::vector<astock::database::SqlQueryResultRow> queryMinuteDailyAgg(

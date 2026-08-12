@@ -27,12 +27,12 @@ QVariantMap RiskConfigService::loadCurrentConfiguration() {
     auto cfg = foundation::config::ConfigManager::instance()
         .loadConfigFile(foundation::config::ConfigFile::RiskConfig);
     if (!cfg || cfg->isNull()) {
-        m_currentConfig = defaultConfiguration();
+        m_currentConfig.clear();
         return m_currentConfig;
     }
     auto current = cfg->getPath("currentConfiguration", '.');
     if (current.isNull()) {
-        m_currentConfig = defaultConfiguration();
+        m_currentConfig.clear();
         return m_currentConfig;
     }
     m_currentConfig = toVariantMap(current);
@@ -44,12 +44,12 @@ QVariantMap RiskConfigService::loadAppliedConfiguration() {
     auto cfg = foundation::config::ConfigManager::instance()
         .loadConfigFile(foundation::config::ConfigFile::RiskConfig);
     if (!cfg || cfg->isNull()) {
-        m_appliedConfig = defaultConfiguration();
+        m_appliedConfig.clear();
         return m_appliedConfig;
     }
     auto applied = cfg->getPath("appliedConfiguration", '.');
     if (applied.isNull()) {
-        m_appliedConfig = defaultConfiguration();
+        m_appliedConfig.clear();
         return m_appliedConfig;
     }
     m_appliedConfig = toVariantMap(applied);
@@ -123,21 +123,12 @@ QVariantMap RiskConfigService::defaultConfiguration() const {
 
 QVariantMap RiskConfigService::normalizeConfiguration(const QVariantMap& raw) const {
     QVariantMap normalized;
-    QVariantMap defaults = defaultConfiguration();
 
-    // 复制已知键，保留未知键
+    // 仅复制已有键, 不引入默认值
     for (auto it = raw.begin(); it != raw.end(); ++it) {
         normalized[it.key()] = it.value();
     }
 
-    // 确保默认值存在
-    for (auto it = defaults.begin(); it != defaults.end(); ++it) {
-        if (!normalized.contains(it.key())) {
-            normalized[it.key()] = it.value();
-        }
-    }
-
-    normalized["version"] = 1;
     return normalized;
 }
 

@@ -218,6 +218,16 @@ SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order) {
 
 SubmitResult TradeExecutionEngine::submitOrder(const TradeOrder& order,
                                                 const strategy::RiskInput& riskContext) {
+    // Stage 0: accountId 强制校验 — 空账户拒绝下单, 不兜底
+    if (order.accountId().empty()) {
+        INTERNAL_ERROR_STREAM << "[TradeExec] 拒绝下单: accountId 为空 — "
+                              << "symbol=" << order.symbol()
+                              << " strategyId=" << order.strategyId()
+                              << " — 请在策略配置中指定 account_id";
+        return SubmitResult::rejected("accountId 为空, 策略未配置交易账户",
+                                       OrderValidationCode::MissingRequiredFields);
+    }
+
     // Stage 1: validation
     auto vr = validateOrder(order);
     if (!vr.valid()) {
@@ -552,8 +562,8 @@ TradeExecutionEngine::TradeExecutionEngine()
                     // 订单已从内存缓存挤出 (如批量提交后旧批次被新批次替换, 或外部撤单),
                     // broker_order_id 即 clOrdId, 直接落 DB
                     INTERNAL_INFO_STREAM << "[TradeExecEng] 订单更新: id=" << *id
-                                         << " not in recentOrders (count="
-                                         << m_impl->m_recentOrders.size() << "), sync DB directly";
+                                         << " 不在 recentOrders 中 (count="
+                                         << m_impl->m_recentOrders.size() << "), 直接同步 DB";
                     if (status) {
                         OrderStatusValue st = toOrderStatusValue(
                             static_cast<OrderUpdate::Status>(*status));

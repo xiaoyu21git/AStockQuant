@@ -163,7 +163,7 @@ public:
             }
                 
             default:
-                INTERNAL_ERROR_STREAM << "[Trigger] Unknown time condition type: " << static_cast<int>(condition_type_);
+                INTERNAL_ERROR_STREAM << "[Trigger] 未知时间条件类型: " << static_cast<int>(condition_type_);
                 return false;
         }
     }
@@ -184,7 +184,7 @@ public:
                 return std::make_unique<TimeCondition>(interval_);
                 
             default:
-                INTERNAL_ERROR_STREAM << "[Trigger] Cannot clone unknown time condition type";
+                INTERNAL_ERROR_STREAM << "[Trigger] 无法克隆未知时间条件类型";
                 return std::make_unique<TimeCondition>(condition_type_, time1_);
         }
     }
@@ -250,7 +250,7 @@ public:
                 return !left_->check(event, current_time);
                 
             default:
-                INTERNAL_ERROR_STREAM << "[Trigger] Unknown logical operator: " << static_cast<int>(operator_);
+                INTERNAL_ERROR_STREAM << "[Trigger] 未知逻辑运算符: " << static_cast<int>(operator_);
                 return false;
         }
     }
@@ -266,7 +266,7 @@ public:
                 return std::make_unique<LogicalCondition>(left_->clone());
                 
             default:
-                INTERNAL_ERROR_STREAM << "[Trigger] Cannot clone unknown logical operator";
+                INTERNAL_ERROR_STREAM << "[Trigger] 无法克隆未知逻辑运算符";
                 return std::make_unique<LogicalCondition>(left_->clone());
         }
     }
@@ -398,7 +398,7 @@ public:
             
             return Error{Error::Code::OK, "Log action executed successfully"};
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[Trigger] Failed to execute log action: " << e.what();
+            INTERNAL_ERROR_STREAM << "[Trigger] 执行日志动作失败: " << e.what();
             return Error{Error::Code::NOT_FOUND, std::string("[Trigger] 日志动作执行失败: ") + e.what()};
         }
     }
@@ -433,17 +433,17 @@ public:
             auto result = publish_trigger_event(std::move(new_event));
 
             if (result.code() != Error::Code::OK) {
-                INTERNAL_ERROR_STREAM << "[Trigger] EventEmitAction: failed to publish event of type "
+                INTERNAL_ERROR_STREAM << "[Trigger] EventEmitAction: 发布事件失败, 类型: "
                           << Event::type_to_string(event_type_) << ": " << result.message();
                 return result;
             }
 
-            INTERNAL_INFO_STREAM << "[Trigger] EventEmitAction: Published event of type "
+            INTERNAL_INFO_STREAM << "[Trigger] EventEmitAction: 事件已发布, 类型: "
                      << Event::type_to_string(event_type_);
 
             return Error{Error::Code::OK, "Event emit action completed and published"};
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[Trigger] Failed to execute event emit action: " << e.what();
+            INTERNAL_ERROR_STREAM << "[Trigger] 执行事件发送动作失败: " << e.what();
             return Error{Error::Code::NOT_FOUND, std::string("[Trigger] 事件发送动作执行失败: ") + e.what()};
         }
     }
@@ -470,7 +470,7 @@ public:
         try {
             return callback_(triggering_event, current_time);
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[Trigger] Callback action execution failed: " << e.what();
+            INTERNAL_ERROR_STREAM << "[Trigger] 回调动作执行失败: " << e.what();
             return Error{Error::Code::NOT_FOUND, std::string("Callback execution failed: ") + e.what()};
         }
     }
@@ -478,7 +478,7 @@ public:
     std::unique_ptr<TriggerAction> clone() const override {
         // 注意：函数对象不能安全地克隆
         // 在实际使用中可能需要其他机制
-        INTERNAL_WARN_STREAM << "[Trigger] CallbackAction clone not fully implemented";
+        INTERNAL_WARN_STREAM << "[Trigger] CallbackAction 克隆未完全实现";
         return std::make_unique<CallbackAction>(callback_);
     }
 };
@@ -508,11 +508,11 @@ public:
         , condition_(std::move(condition))
         , action_(std::move(action)) 
     {
-        INTERNAL_DEBUG_STREAM << "[Trigger] Created trigger: " << name_;
+        INTERNAL_DEBUG_STREAM << "[Trigger] 触发器已创建: " << name_;
     }
     
     ~TriggerImpl() override {
-        INTERNAL_DEBUG_STREAM << "[Trigger] Destroyed trigger: " << name_;
+        INTERNAL_DEBUG_STREAM << "[Trigger] 触发器已销毁: " << name_;
     }
     
     Error evaluate(const Event& event, foundation::Timestamp current_time) override {
@@ -528,21 +528,21 @@ public:
                 return Error{Error::Code::NOT_FOUND, "Condition not satisfied"};
             }
             
-            INTERNAL_DEBUG_STREAM << "[Trigger] Trigger '" << name_ << "' condition satisfied, executing action";
+            INTERNAL_DEBUG_STREAM << "[Trigger] 触发器 '" << name_ << "' 条件满足, 正在执行动作";
             
             // 执行动作
             Error result = action_->execute(event, current_time);
             
             if (result.code() != 0) {
-                INTERNAL_ERROR_STREAM << "[Trigger] Trigger '" << name_ << "' action failed: " << result.message();
+                INTERNAL_ERROR_STREAM << "[Trigger] 触发器 '" << name_ << "' 动作执行失败: " << result.message();
             } else {
-                INTERNAL_DEBUG_STREAM << "[Trigger] Trigger '" << name_ << "' action executed successfully";
+                INTERNAL_DEBUG_STREAM << "[Trigger] 触发器 '" << name_ << "' 动作执行成功";
             }
             
             return result;
             
         } catch (const std::exception& e) {
-            INTERNAL_ERROR_STREAM << "[Trigger] Trigger '" << name_ << "' evaluation failed: " << e.what();
+            INTERNAL_ERROR_STREAM << "[Trigger] 触发器 '" << name_ << "' 评估失败: " << e.what();
             return Error{Error::Code::OK, std::string("Trigger evaluation failed: ") + e.what()};
         }
     }

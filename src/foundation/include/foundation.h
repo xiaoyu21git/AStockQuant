@@ -453,7 +453,7 @@ inline bool init(const std::string& config_file = "") {
                 // ... 类似JSON的解析
             }
         } catch (const std::exception& e) {
-            Foundation::log_error("Failed to load config file: " + std::string(e.what()));
+            Foundation::log_error("配置文件加载失败: " + std::string(e.what()));
         }
     }
     

@@ -3,9 +3,14 @@
 #include "AppStoragePaths.h"
 #include "DataSourceRegistry.h"
 #include "foundation/json/json_facade.h"
+#include "database/MarketDataRepository.h"
+#include "database/NativePgConnectionPool.h"
+#include "foundation/market/AStockSymbol.h"
 #include <arrow/api.h>
 
 #include <cstdio>
+#include <cstdlib>
+#include <sstream>
 
 DataCacheAdapter& DataCacheAdapter::instance() {
     static DataCacheAdapter s;
@@ -93,7 +98,7 @@ int DataCacheAdapter::storeDataSetFromRows(const std::vector<foundation::json::J
     m_cache->saveDataSetFile(dataId, rows, fieldNames, numericFields);
     m_cache->updateDataSetRowCount(dataId, static_cast<int>(rows.size()));
 
-    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已存储数据集 " << dataId << " (from rows): " << info.displayName << " (" << rows.size() << " rows)";
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已存储数据集 " << dataId << " (来自rows): " << info.displayName << " (" << rows.size() << " rows)";
 
     emit dataSetStored(dataId, cppInfoToMap(info));
     return dataId;
@@ -196,7 +201,7 @@ bool DataCacheAdapter::removeDataSet(int dataId) {
 
 int DataCacheAdapter::removeDataSetsBySourceType(const std::string& sourceType) {
     int n = m_cache->removeDataSetsBySourceType(sourceType);
-    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已移除 " << n << " datasets with sourceType=" << sourceType;
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] 已移除 " << n << " 个数据集 sourceType=" << sourceType;
     return n;
 }
 
@@ -253,4 +258,83 @@ QVariantMap DataCacheAdapter::cppInfoToMap(const cleaning::DataSetInfo& info) {
     m["endDate"] = QString::fromStdString(info.endDate);
     m["isBacktestReady"] = info.isBacktestReady;
     return m;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 资金流列增量追加 — PG 查询 + 委托 DataCache 做 Arrow 操作
+// ═══════════════════════════════════════════════════════════════════
+
+int DataCacheAdapter::augmentMoneyFlow(int dataId) {
+    ensureInitialized();
+    auto dsInfo = m_cache->getDataSetInfo(dataId);
+    if (dsInfo.id <= 0) {
+        INTERNAL_ERROR_STREAM << "[DataCacheAdapter] augmentMF: 数据集 " << dataId << " 不存在";
+        return -1;
+    }
+
+    const auto& symbols = dsInfo.stockCodes;
+    const auto& startDate = dsInfo.startDate;
+    const auto& endDate = dsInfo.endDate;
+    if (symbols.empty() || startDate.empty() || endDate.empty()) {
+        INTERNAL_ERROR_STREAM << "[DataCacheAdapter] augmentMF: 无标的或日期范围";
+        return -1;
+    }
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] augmentMF: id=" << dataId
+        << " symbols=" << symbols.size() << " range=" << startDate << "~" << endDate;
+
+    // 1. 查询 PG：批量拉取所有资金流数据
+    cleaning::MoneyFlowMap mfMap;
+    mfMap.reserve(symbols.size() * 500); // 估计每个 symbol ~500 个交易日
+
+    {
+        using namespace astock::database;
+        auto db = NativePgConnectionPool::instance().getConnection();
+        if (!db || !db->isOpen()) {
+            INTERNAL_ERROR_STREAM << "[DataCacheAdapter] augmentMF: DB连接不可用";
+            return -1;
+        }
+
+        astock::infrastructure::database::MarketDataRepository repo(db);
+        auto mfRows = repo.queryMoneyFlow(symbols, startDate, endDate);
+        for (const auto& row : mfRows) {
+            const auto& vals = row.getValues();
+            auto sit = vals.find("symbol");
+            auto tit = vals.find("trade_date");
+            if (sit == vals.end() || tit == vals.end()) continue;
+            std::string key = foundation::market::AStockSymbol::normalizeToFullSymbol(sit->second) + "|" + tit->second;
+
+            cleaning::MoneyFlowRow mr;
+            auto getVal = [&](const char* col) -> double {
+                auto it = vals.find(col);
+                if (it != vals.end() && !it->second.empty())
+                    return std::strtod(it->second.c_str(), nullptr);
+                return std::numeric_limits<double>::quiet_NaN();
+            };
+            mr.main_net_in = getVal("money_main_net_in");
+            mr.main_net_in_rate = getVal("money_main_net_in_rate");
+            mr.main_in = getVal("money_main_in");
+            mr.main_out = getVal("money_main_out");
+            mr.super_net_in = getVal("money_super_net_in");
+            mr.super_net_in_rate = getVal("money_super_net_in_rate");
+            mr.super_in = getVal("money_super_in");
+            mr.super_out = getVal("money_super_out");
+            mr.large_net_in = getVal("money_large_net_in");
+            mr.large_net_in_rate = getVal("money_large_net_in_rate");
+            mr.large_in = getVal("money_large_in");
+            mr.large_out = getVal("money_large_out");
+            mr.mid_net_in = getVal("money_mid_net_in");
+            mr.mid_net_in_rate = getVal("money_mid_net_in_rate");
+            mr.mid_in = getVal("money_mid_in");
+            mr.mid_out = getVal("money_mid_out");
+            mr.small_net_in = getVal("money_small_net_in");
+            mr.small_net_in_rate = getVal("money_small_net_in_rate");
+            mr.small_in = getVal("money_small_in");
+            mr.small_out = getVal("money_small_out");
+            mfMap[std::move(key)] = mr;
+        }
+    }
+    INTERNAL_INFO_STREAM << "[DataCacheAdapter] augmentMF: PG查询完成, mfMap.size=" << mfMap.size();
+
+    // 2. 委托 DataCache 做 Arrow 列追加
+    return m_cache->augmentMoneyFlowColumns(dataId, mfMap);
 }

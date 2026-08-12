@@ -16,9 +16,6 @@ TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
     : QObject(parent) {
     m_configFilePath = resolveConfigFilePath();
     m_currentConfig = readConfigFile();
-    if (m_currentConfig.isEmpty()) {
-        m_currentConfig = defaultConfiguration();
-    }
     m_initialized = true;
     INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] 已创建, boundStrategyId ="
              << m_currentConfig.value("boundStrategyId").toString().toStdString();
@@ -40,9 +37,6 @@ QString TradingConnectionConfigService::configFilePath() const {
 QVariantMap TradingConnectionConfigService::loadConfiguration() {
     QMutexLocker lock(&m_mutex);
     m_currentConfig = readConfigFile();
-    if (m_currentConfig.isEmpty()) {
-        m_currentConfig = defaultConfiguration();
-    }
     m_initialized = true;
 
     INTERNAL_DEBUG_STREAM << "[TradingConnectionConfig] 已加载配置:"
@@ -116,7 +110,6 @@ QVariantMap TradingConnectionConfigService::bindStrategyConfiguration(
     QMutexLocker lock(&m_mutex);
     if (!m_initialized) {
         m_currentConfig = readConfigFile();
-        if (m_currentConfig.isEmpty()) m_currentConfig = defaultConfiguration();
         m_initialized = true;
     }
 
@@ -256,7 +249,6 @@ QString TradingConnectionConfigService::resolveConfigFilePath() const {
 
 QVariantMap TradingConnectionConfigService::normalizeConfiguration(const QVariantMap& raw) const {
     QVariantMap normalized;
-    QVariantMap defaults = defaultConfiguration();
 
     // 键名规范化：统一使用 camelCase
     auto normalizeKey = [](const QString& key) -> QString {
@@ -281,25 +273,17 @@ QVariantMap TradingConnectionConfigService::normalizeConfiguration(const QVarian
         normalized[normalizeKey(it.key())] = it.value();
     }
 
-    // 确保默认键存在
-    for (auto it = defaults.begin(); it != defaults.end(); ++it) {
-        if (!normalized.contains(it.key())) {
-            normalized[it.key()] = it.value();
-        }
-    }
-
-    // accountId 别名合并
-    if (normalized.value("accountId").toString().isEmpty()) {
+    // accountId 别名合并 (不引入默认值)
+    if (!normalized.contains("accountId") || normalized.value("accountId").toString().isEmpty()) {
         QString simId = normalized.value("simAccountId").toString();
         if (!simId.isEmpty()) {
             normalized["accountId"] = simId;
-        } else {
+        } else if (normalized.contains("liveAccountId")) {
             normalized["accountId"] = normalized.value("liveAccountId").toString();
         }
     }
 
     normalized["updatedAt"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    normalized["version"] = 1;
     return normalized;
 }
 

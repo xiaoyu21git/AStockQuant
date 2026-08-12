@@ -185,6 +185,11 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         // ── 构建统一 Schema（用于建数据集写入 token；装配细节委托 RawMarketDataAssembler）──
         std::vector<std::string> typeNames;
         for (const QString& dt : dataTypes) typeNames.push_back(dt.toStdString());
+
+        // 来源配置哈希
+        int configHash = qHash(dataSource) ^ qHash(dataTypes.join(",")) ^ qHash(startDate) ^ qHash(endDate);
+        if (configHash == 0) configHash = 1;  // 0 表示未设置
+
         auto mergedSchema = bridge::RawMarketDataAssembler::schemaFor(typeNames);
         const auto& allFields = mergedSchema.names;
         const auto& numericFields = mergedSchema.numeric;
@@ -205,18 +210,31 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
         infoMap["stockCodes"] = allSymbols;
         infoMap["startDate"] = startDate;
         infoMap["endDate"] = endDate;
-        // 来源配置 ID: 用 qHash 生成(数据源+类型+日期), 与 cleaning 的 sourceDataSetId 语义一致
-        int configHash = qHash(dataSource) ^ qHash(dataTypes.join(",")) ^ qHash(startDate) ^ qHash(endDate);
-        if (configHash == 0) configHash = 1;  // 0 表示未设置
         infoMap["sourceDataSetId"] = configHash;
 
         // 删除同一配置的旧拉取结果(避免 dataset_X 目录堆积)
         {
             auto& cppCache = cleaning::DataCache::instance();
+            // 先收集要被删除的 raw 数据集 ID，用于级联清理 cleaned 子集
+            std::vector<int> removedRawIds;
             for (const auto& ds : cppCache.listDataSets()) {
                 if (ds.sourceType == dataSource.toStdString()
                     && ds.sourceDataSetId == configHash) {
-                    cppCache.removeDataSet(ds.id);
+                    removedRawIds.push_back(ds.id);
+                }
+            }
+            for (int rid : removedRawIds) {
+                cppCache.removeDataSet(rid);
+            }
+            // 级联删除：清理引用已删除 raw 数据集的 cleaned 子集
+            for (const auto& ds : cppCache.listDataSets()) {
+                if (ds.sourceType == "cleaning") {
+                    for (int rid : removedRawIds) {
+                        if (ds.sourceDataSetId == rid) {
+                            cppCache.removeDataSet(ds.id);
+                            break;
+                        }
+                    }
                 }
             }
         }

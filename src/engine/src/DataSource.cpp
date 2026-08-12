@@ -44,7 +44,7 @@ public:
         // 例如：连接数据库、WebSocket、文件等
         
         // ==================== 修改点3: 使用基类成员 ====================
-        INTERNAL_INFO_STREAM << "[DataSource] Connecting to data source: " << name_ << " at " << uri_;
+        INTERNAL_INFO_STREAM << "[DataSource] 正在连接数据源: " << name_ << " at " << uri_;
         
         // 连接成功
         old_state = state_;
@@ -71,7 +71,7 @@ public:
         // 停止轮询线程
         stop_polling_thread();
         
-        INTERNAL_INFO_STREAM << "[DataSource] Disconnected from data source: " << name_;
+        INTERNAL_INFO_STREAM << "[DataSource] 数据源已断开: " << name_;
         
         return Error{Error::Code::OK, ""};
     }
@@ -85,7 +85,7 @@ public:
         // 例如：从API获取数据、读取文件等
         
         try {
-            INTERNAL_DEBUG_STREAM << "[DataSource] Polling data from: " << name_;
+            INTERNAL_DEBUG_STREAM << "[DataSource] 正在轮询数据: " << name_;
             
             // 创建模拟事件
             std::map<std::string, std::string> attrs{
@@ -105,7 +105,7 @@ public:
             return Error{Error::Code::OK, ""};
         } catch (const std::exception& e) {
             // ==================== 修改点6: 使用基类成员 ====================
-            INTERNAL_ERROR_STREAM << "[DataSource] Failed to poll data from " << name_ << ": " << e.what();
+            INTERNAL_ERROR_STREAM << "[DataSource] 轮询数据失败: " << name_ << ", " << e.what();
             
             // 更新状态为错误
             auto old_state = state_;
@@ -214,7 +214,7 @@ private:
             try {
                 listener->on_data_received(std::unique_ptr<Event>(event->clone().release()));
             } catch (const std::exception& e) {
-                INTERNAL_ERROR_STREAM << "[DataSource] Data listener error: " << e.what();
+                INTERNAL_ERROR_STREAM << "[DataSource] 数据监听器错误: " << e.what();
             }
         }
     }
@@ -225,7 +225,7 @@ private:
             try {
                 listener->on_state_changed(old_state, new_state);
             } catch (const std::exception& e) {
-                INTERNAL_ERROR_STREAM << "[DataSource] Data listener error: " + std::string(e.what());
+                INTERNAL_ERROR_STREAM << "[DataSource] 数据监听器错误: " + std::string(e.what());
             }
         }
     }

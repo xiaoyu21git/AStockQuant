@@ -519,7 +519,7 @@ bool StrategyEngine::prepareMarketData()
         // ── 因子策略：MarketDataRepository → buildLiveView ──
         auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
         auto rawRows = repo->queryAllMarketDailyBarWithFields(startDate, endDate, extraFields);
-        INTERNAL_DEBUG_STREAM << "[Engine] query Factor: " << rawRows.size()<< " rows, fields=" << (5 + extraFields.size());
+        INTERNAL_DEBUG_STREAM << "[Engine] query Factor: " << rawRows.size()<< " 行, fields=" << (5 + extraFields.size());
         if (!rawRows.empty()) {
             factorService_->buildLiveView(rawRows, extraFields);
         }
@@ -1046,7 +1046,7 @@ void StrategyEngine::rejectBasket(std::uint64_t basketId)
     }
 
     INTERNAL_INFO_STREAM << "[SemiAuto] 篮子拒绝: basketId=" << basketId
-                         << " discarded=" << m_pendingBasket.orders.size() << " orders";
+                         << " 已丢弃=" << m_pendingBasket.orders.size() << " 笔订单";
 }
 
 void StrategyEngine::dispatchOrders(const std::vector<OrderRequest>& orders)
@@ -1061,7 +1061,7 @@ void StrategyEngine::dispatchOrders(const std::vector<OrderRequest>& orders)
                 std::lock_guard<std::mutex> lock(m_basketMutex);
                 if (m_pendingBasket.pending) {
                     INTERNAL_WARN_STREAM << "[SemiAuto] 篮子 " << m_pendingBasket.basketId
-                        << " 未确认 — 新篮子被丢弃 (" << orders.size() << " orders)";
+                        << " 未确认 — 新篮子被丢弃 (" << orders.size() << " 笔订单)";
                     return;
                 }
                 basketId = generateBasketId();
@@ -1353,34 +1353,19 @@ bool StrategyEngine::fetchTodayPrices(const EodContext& ctx, EodPriceData& price
         return !prices.bars.empty();
     }
 
-    // 实时: 从 GMSDK 取价
-    std::ostringstream gmList;
+    // 盘中: 直接从 tick 缓存取实时价, 不调日线 (收盘前日线未生成)
+    auto cachedQuotes = engine::GmSessionEngine::instance().getCachedQuotes();
     for (const auto& sym : *ctx.symbols) {
-        std::string gm = foundation::market::AStockSymbol::fromString(sym).gmSymbol();
-        if (!gm.empty()) {
-            if (gmList.tellp() > 0) gmList << ',';
-            gmList << gm;
+        auto it = cachedQuotes.find(sym);
+        if (it != cachedQuotes.end()) {
+            const auto& q = it->second;
+            prices.bars[sym] = {q.price, q.volume, q.preClose};
         }
     }
-    const std::string gmSymbols = gmList.str();
-    INTERNAL_INFO_STREAM << "[StrategyEngine] gmsdk 批量取价: "
-                         << ctx.symbols->size() << " 标的 endDate=" << ctx.endDateStr;
+    INTERNAL_INFO_STREAM << "[StrategyEngine] tick 取价: "
+                         << prices.bars.size() << " 只标的有数据 (tick缓存共 "
+                         << cachedQuotes.size() << " 只)";
 
-    auto* bars = ::history_bars_n(gmSymbols.c_str(), "1d", 1, ctx.endDateStr.c_str(),
-                                   0, nullptr, true, nullptr);
-    if (bars && !bars->status() && bars->count() > 0) {
-        for (int i = 0; i < bars->count(); ++i) {
-            const auto& b = bars->at(i);
-            std::string internal = engine::GmSessionEngine::fromGmSymbol(b.symbol);
-            if (!internal.empty() && b.close > 0)
-                prices.bars[internal] = {static_cast<double>(b.close),
-                                         static_cast<double>(b.volume),
-                                         static_cast<double>(b.pre_close)};
-        }
-    }
-    if (bars) bars->release();
-    INTERNAL_INFO_STREAM << "[StrategyEngine] gmsdk 批量取价完成: "
-                         << prices.bars.size() << " 只标的有数据";
     return !prices.bars.empty();
 }
 
@@ -1537,7 +1522,7 @@ std::vector<StrategyEngine::PendingOrder> StrategyEngine::collectEodSignals(
         try {
             if (EventRiskSubscriber::instance().isStarted() &&
                 EventRiskSubscriber::instance().blockedSymbols().count(foundation::market::AStockSymbol::codeOnly(sym))) {
-                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD skip blocked: " << sym;
+                INTERNAL_INFO_STREAM << "[StrategyEngine] EOD 跳过封堵: " << sym;
                 continue;
             }
 
@@ -1985,11 +1970,11 @@ StrategyEngine::Builder& StrategyEngine::Builder::withCircuitBreaker(const Timed
 std::string StrategyEngine::Builder::validate() const
 {
     if (factorOverlayCfg_.enabled && !factorOverlayCfg_.isValid())
-        return "FactorOverlay enabled but filters empty";
+        return "因子覆盖已启用但过滤器为空";
     if (!rebalanceCfg_.isValid())
-        return "RebalanceConfig invalid: interval=" + std::to_string(rebalanceCfg_.interval);
+        return "调仓配置无效: interval=" + std::to_string(rebalanceCfg_.interval);
     if (factorOverlayCfg_.enabled && !factorService_)
-        return "FactorOverlay enabled but factorService is null";
+        return "因子覆盖已启用但factorService为空";
     return {};  // 空字符串 = 通过
 }
 
@@ -2133,7 +2118,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     };
     BacktestGuard backtestGuard(m_isBacktestMode);
     if (!dataSvc) {
-        result.errorMessage = "Null data service";
+        result.errorMessage = "数据服务为空";
         return result;
     }
 
@@ -2185,7 +2170,7 @@ StrategyBacktestResult StrategyEngine::backtest(
                                     modifiedParams.maxWeightPerStock, true);
         auto newStrategy = StrategyBase::create(kDefaultInstanceId, modifiedParams);
         if (!newStrategy || !registerStrategy(newStrategy, ctx).isOk()) {
-            result.errorMessage = "Strategy re-creation with overlay failed";
+            result.errorMessage = "策略覆写重建失败";
             return result;
         }
     }
@@ -2194,7 +2179,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     const int colCount = static_cast<int>(view->instruments().size());
 
     if (totalDays == 0 || colCount == 0) {
-        result.errorMessage = "Empty market data";
+        result.errorMessage = "行情数据为空";
         return result;
     }
 
@@ -2204,7 +2189,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     {
         const auto& symStrs = view->symbolStrings();
         if (symStrs.size() != view->instruments().size()) {
-            result.errorMessage = "Symbol/instrument column mismatch";
+            result.errorMessage = "标的/合约列数不匹配";
             return result;
         }
         symbolToCol.reserve(symStrs.size());
@@ -2358,9 +2343,9 @@ StrategyBacktestResult StrategyEngine::backtest(
     int showN = (std::min)(5, static_cast<int>(topStocks.size()));
     if (showN > 0) {
         std::ostringstream topOss;
-        topOss << "[backtest] top" << showN << " winners: ";
+        topOss << "[backtest] top" << showN << " 盈利: ";
         for (int i = 0; i < showN; ++i) topOss << topStocks[i].first << "(" << static_cast<int>(topStocks[i].second) << ") ";
-        topOss << "\n[backtest] top" << showN << " losers:  ";
+        topOss << "\n[backtest] top" << showN << " 亏损:  ";
         for (int i = 0; i < showN; ++i) topOss << topStocks[topStocks.size()-1-i].first << "(" << static_cast<int>(topStocks[topStocks.size()-1-i].second) << ") ";
         INTERNAL_INFO_STREAM << topOss.str();
     }
@@ -3052,7 +3037,7 @@ void StrategyEngine::runBacktestLoop(
                 << " marketValue=" << marketValue
                 << " positions=" << backtestPositions.size()
                 << " — 停止回测";
-            result.errorMessage = "NaN 净值 at day " + std::to_string(dates[static_cast<std::size_t>(r)].value);
+            result.errorMessage = "NaN 净值, 日期 " + std::to_string(dates[static_cast<std::size_t>(r)].value);
             return;
         }
         domain::trading::AccountSnapshot newAcc;

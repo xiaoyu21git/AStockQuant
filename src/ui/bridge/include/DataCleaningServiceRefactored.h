@@ -82,6 +82,9 @@ public:
     void removeCustomRule(const QString& ruleName);
     QVariantMap getCustomRules() const;
 
+    /// @brief 增量追加资金流列到已有数据集（原地扩列，不重建）
+    Q_INVOKABLE int augmentMoneyFlow(int dataId);
+
     // ── 用户规则配置持久化 ──
     /// @brief 保存用户启停配置到 configDir/cleaning/cleaning_rules_user.json
     Q_INVOKABLE bool saveUserRuleConfig(const QVariantMap& enabledMap);

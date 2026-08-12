@@ -54,7 +54,7 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
             auto it = idToSym->find(id);
             return it != idToSym->end() ? it->second : std::string();
         };
-        INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: rebuilt symbol resolver (" << symbols.size() << " 只标的)";
+        INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: 已重建符号解析器 (" << symbols.size() << " 只标的)";
     } else {
         INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: view=" << static_cast<const void*>(view) << " (无标的符号串可用)";
     }
@@ -86,7 +86,7 @@ void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc)
                     auto it = idToSym->find(id);
                     return it != idToSym->end() ? it->second : std::string();
                 };
-                INTERNAL_INFO_STREAM << "[RFS] setDataService: rebuilt symbol resolver (" << symbols.size() << " 只标的)";
+                INTERNAL_INFO_STREAM << "[RFS] setDataService: 已重建符号解析器 (" << symbols.size() << " 只标的)";
             }
         }
     }
@@ -108,8 +108,8 @@ const std::map<std::string, double>* RuntimeFactorSvc::backtestValuesBySymbol(
         factor::compute::MarketMatrixBatch batch;
         batch.batchIndex = 0;
         m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
-        INTERNAL_INFO_STREAM << "[RFS] backtestValuesBySymbol cache FILLED: id=" << instanceId
-                             << " dates=" << m_factorCache[instanceId].size();
+        INTERNAL_INFO_STREAM << "[RFS] backtestValuesBySymbol 缓存已填充: id=" << instanceId
+                             << " 日期数=" << m_factorCache[instanceId].size();
     }
     char dateBuf[16];
     foundation::utils::formatTradingDayTo(date, dateBuf, sizeof(dateBuf));
@@ -208,18 +208,18 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
     if (m_dataSvc) {
         INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST: instance=" << instanceId << " 日期=" << dateBuf << " 标的=" << symbolStrList.size();
         if (m_factorCache.find(instanceId) == m_factorCache.end()) {
-            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST cache MISS, calling engine->compute...";
+            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST 缓存未命中, 调用 engine->compute...";
             factor::compute::FactorCacheKey key;
             key.factorName = instanceId;
             factor::compute::MarketMatrixBatch batch;
             batch.batchIndex = 0;
             m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
             auto& cached = m_factorCache[instanceId];
-            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST cache FILLED: dates=" << cached.size();
+            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST 缓存已填充: 日期数=" << cached.size();
             if (!cached.empty()) {
                 auto firstDate = cached.begin()->first;
                 auto lastDate = cached.rbegin()->first;
-                INTERNAL_INFO_STREAM << "[RFS]   cache range: " << firstDate << " ~ " << lastDate;
+                INTERNAL_INFO_STREAM << "[RFS]   缓存范围: " << firstDate << " ~ " << lastDate;
             }
         }
         auto it = m_factorCache[instanceId].find(dateBuf);
@@ -233,12 +233,12 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
                 }
             }
         } else {
-            INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " 在缓存中未找到 (缓存有 " << m_factorCache[instanceId].size() << " dates)";
+            INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " 在缓存中未找到 (缓存有 " << m_factorCache[instanceId].size() << " 条日期)";
             // 打印缓存中随机一个日期的前5个key，确认格式
             if (!m_factorCache[instanceId].empty()) {
                 auto& sampleDate = m_factorCache[instanceId].begin()->second;
                 std::ostringstream sampleOss;
-                sampleOss << "[RFS]   cache sample keys: ";
+                sampleOss << "[RFS]   缓存样本键: ";
                 int n=0; for (auto& [k,v] : sampleDate) { if (++n>5) break; sampleOss << k << " "; }
                 INTERNAL_WARN_STREAM << sampleOss.str();
             }
@@ -356,7 +356,7 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
             }
             static std::atomic<int> diag{0};
             if (diag.fetch_add(1, std::memory_order_relaxed) < 3)
-                INTERNAL_INFO_STREAM << "[RFS] copySnapshots cacheRead: iid=" << iid
+                INTERNAL_INFO_STREAM << "[RFS] copySnapshots 缓存读取: iid=" << iid
                                      << " 日期=" << dateBuf
                                      << " 缓存条目=" << dateIt->second.size()
                                      << " matched=" << matched
@@ -416,7 +416,7 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                 }
                 static std::atomic<int> cacheDiag{0};
                 if (cacheDiag.fetch_add(1, std::memory_order_relaxed) < 3)
-                    INTERNAL_INFO_STREAM << "[RFS] copySnapshots liveCache: iid=" << iid
+                    INTERNAL_INFO_STREAM << "[RFS] copySnapshots 实时缓存: iid=" << iid
                                          << " 日期=" << dateBuf
                                          << " 条目=" << dateIt->second.size();
                 continue;
@@ -452,7 +452,7 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
 
         static std::atomic<int> computeDiag{0};
         if (computeDiag.fetch_add(1, std::memory_order_relaxed) < 3)
-            INTERNAL_INFO_STREAM << "[RFS] copySnapshots liveCompute: iid=" << iid
+            INTERNAL_INFO_STREAM << "[RFS] copySnapshots 实时计算: iid=" << iid
                                  << " 日期=" << dateBuf
                                  << " computed=" << factorValues.size()
                                  << " totalSyms=" << symbolStrs.size();

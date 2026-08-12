@@ -7,10 +7,12 @@
 #include <arrow/ipc/api.h>
 
 #include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -49,10 +51,16 @@ void scanFields(const std::vector<J>& rows,
                      F_F::OPERATING_CASH_FLOW, F_F::INVESTING_CASH_FLOW, F_F::FINANCING_CASH_FLOW,
                      F_F::TOTAL_REVENUE, F_F::NET_PROFIT, F_F::TOTAL_ASSETS, F_F::TOTAL_LIABILITIES, F_F::EQUITY,
                      F_F::DIVIDEND_YIELD, F_F::PAYOUT_RATIO, F_F::DIVIDEND_STABILITY});
+        auto mf = mk({MONEY_F::MAIN_NET_IN, MONEY_F::MAIN_NET_IN_RATE, MONEY_F::MAIN_IN, MONEY_F::MAIN_OUT,
+                      MONEY_F::SUPER_NET_IN, MONEY_F::SUPER_NET_IN_RATE, MONEY_F::SUPER_IN, MONEY_F::SUPER_OUT,
+                      MONEY_F::LARGE_NET_IN, MONEY_F::LARGE_NET_IN_RATE, MONEY_F::LARGE_IN, MONEY_F::LARGE_OUT,
+                      MONEY_F::MID_NET_IN, MONEY_F::MID_NET_IN_RATE, MONEY_F::MID_IN, MONEY_F::MID_OUT,
+                      MONEY_F::SMALL_NET_IN, MONEY_F::SMALL_NET_IN_RATE, MONEY_F::SMALL_IN, MONEY_F::SMALL_OUT});
         auto x = mk({XF::NAME, XF::EXCHANGE, XF::STATUS, XF::LIST_DATE, XF::DELIST_DATE});
         // 兼容别名 — 不在 DataFieldKeys 中但实际数据可能出现
         std::vector<const char*> aliases = {"code", "stock_code", "industry", "asset_class", "trade_status"};
         v.insert(v.end(), f.begin(), f.end());
+        v.insert(v.end(), mf.begin(), mf.end());
         v.insert(v.end(), x.begin(), x.end());
         v.insert(v.end(), aliases.begin(), aliases.end());
         return v;
@@ -669,6 +677,199 @@ void DataCache::finishArrowWrite(ArrowWriteToken token)
     s->stream.reset();
     INTERNAL_INFO_STREAM << "[DataCache] 已保存 Arrow IPC " << dataFilePath(s->dataId) << ": " << s->totalRows << " rows x " << s->fieldNames.size() << " cols";
     // token 析构时 WriteSessionDeleter 自动 delete s
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// 资金流列原地追加 — augmentMoneyFlowColumns
+// 接收预查询好的 MoneyFlowMap，对齐 Arrow 行序构建 20 个新列，原子写回
+// PG 查询由桥接层完成，保证 domain/cleaning 零基础设施依赖
+// ═══════════════════════════════════════════════════════════════════
+
+int DataCache::augmentMoneyFlowColumns(int dataId, const MoneyFlowMap& mfMap)
+{
+    const std::string path = dataFilePath(dataId);
+    const std::string tmpPath = path + ".tmp";
+
+    std::error_code rmEc;
+    std::filesystem::remove(tmpPath, rmEc);
+
+    // 1. 打开旧文件
+    auto inResult = arrow::io::ReadableFile::Open(path);
+    if (!inResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: 无法打开 " << path << ": " << inResult.status().ToString();
+        return -1;
+    }
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(inResult.ValueOrDie());
+    if (!readerResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: 读取错误 " << readerResult.status().ToString();
+        return -1;
+    }
+    auto reader = readerResult.ValueOrDie();
+    auto oldSchema = reader->schema();
+
+    int symIdx = oldSchema->GetFieldIndex("symbol");
+    int tdIdx = oldSchema->GetFieldIndex("trade_date");
+    if (symIdx < 0 || tdIdx < 0) {
+        INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: schema 缺少 symbol 或 trade_date 列";
+        return -1;
+    }
+    if (oldSchema->GetFieldIndex("money_main_net_in") >= 0) {
+        INTERNAL_INFO_STREAM << "[DataCache] augmentMF: id=" << dataId << " 已含资金流列，跳过";
+        return 0;
+    }
+
+    // 2. 逐 batch 处理：不再全量加载 Table，避免 OOM（单 batch ~200MB vs 全量 3.5G）
+    static constexpr int kMFCols = 20;
+    const char* kColNames[kMFCols] = {
+        "money_main_net_in","money_main_net_in_rate","money_main_in","money_main_out",
+        "money_super_net_in","money_super_net_in_rate","money_super_in","money_super_out",
+        "money_large_net_in","money_large_net_in_rate","money_large_in","money_large_out",
+        "money_mid_net_in","money_mid_net_in_rate","money_mid_in","money_mid_out",
+        "money_small_net_in","money_small_net_in_rate","money_small_in","money_small_out"
+    };
+
+    const int nBatches = reader->num_record_batches();
+    if (nBatches <= 0) { INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: 无数据"; return -1; }
+    int64_t totalRows = 0, totalNan = 0, totalHit = 0;
+
+    // 构建新 schema（无需全量 table）
+    std::vector<std::shared_ptr<arrow::Field>> newFields;
+    for (int ci = 0; ci < oldSchema->num_fields(); ++ci)
+        newFields.push_back(oldSchema->field(ci));
+    for (int c = 0; c < kMFCols; ++c)
+        newFields.push_back(arrow::field(kColNames[c], arrow::float64()));
+    auto newSchema = arrow::schema(newFields);
+
+    // 打开输出 writer
+    auto outResult = arrow::io::FileOutputStream::Open(tmpPath);
+    if (!outResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: 无法打开临时文件 " << tmpPath;
+        return -1;
+    }
+    auto writerResult = arrow::ipc::MakeFileWriter(outResult.ValueOrDie(), newSchema);
+    if (!writerResult.ok()) {
+        INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: 写入器错误 " << writerResult.status().ToString();
+        return -1;
+    }
+    auto writer = writerResult.ValueOrDie();
+
+    INTERNAL_INFO_STREAM << "[DataCache] augmentMF: id=" << dataId
+        << " 开始逐batch处理, batches=" << nBatches
+        << " origCols=" << oldSchema->num_fields() << " mfMapSize=" << mfMap.size();
+
+    for (int bi = 0; bi < nBatches; ++bi) {
+        auto bRes = reader->ReadRecordBatch(bi);
+        if (!bRes.ok()) { INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: batch " << bi << " 读取失败"; continue; }
+        auto batch = bRes.ValueOrDie();
+        const int64_t nRows = batch->num_rows();
+        totalRows += nRows;
+
+        // 取当前 batch 的 symbol / trade_date 列
+        auto symArr = std::static_pointer_cast<arrow::StringArray>(batch->column(symIdx));
+        auto tdArr  = std::static_pointer_cast<arrow::StringArray>(batch->column(tdIdx));
+
+        // 构建 20 个 DoubleArray，仅对本 batch 的行
+        arrow::DoubleBuilder builders[kMFCols];
+        for (int c = 0; c < kMFCols; ++c) builders[c].Reserve(nRows);
+
+        std::string keyBuf;
+        keyBuf.reserve(32);
+        int64_t nanCount = 0;
+        for (int64_t r = 0; r < nRows; ++r) {
+            keyBuf.clear();
+            if (!symArr->IsNull(r))
+                keyBuf += foundation::market::AStockSymbol::normalizeToFullSymbol(std::string(symArr->GetString(r)));
+            keyBuf += '|';
+            if (!tdArr->IsNull(r)) keyBuf += tdArr->GetString(r);
+
+            auto it = mfMap.find(keyBuf);
+            if (it != mfMap.end()) {
+                const auto& mf = it->second;
+                builders[0].Append(mf.main_net_in);
+                builders[1].Append(mf.main_net_in_rate);
+                builders[2].Append(mf.main_in);
+                builders[3].Append(mf.main_out);
+                builders[4].Append(mf.super_net_in);
+                builders[5].Append(mf.super_net_in_rate);
+                builders[6].Append(mf.super_in);
+                builders[7].Append(mf.super_out);
+                builders[8].Append(mf.large_net_in);
+                builders[9].Append(mf.large_net_in_rate);
+                builders[10].Append(mf.large_in);
+                builders[11].Append(mf.large_out);
+                builders[12].Append(mf.mid_net_in);
+                builders[13].Append(mf.mid_net_in_rate);
+                builders[14].Append(mf.mid_in);
+                builders[15].Append(mf.mid_out);
+                builders[16].Append(mf.small_net_in);
+                builders[17].Append(mf.small_net_in_rate);
+                builders[18].Append(mf.small_in);
+                builders[19].Append(mf.small_out);
+            } else {
+                for (int c = 0; c < kMFCols; ++c)
+                    builders[c].Append(std::numeric_limits<double>::quiet_NaN());
+                ++nanCount;
+            }
+        }
+        totalNan += nanCount;
+        totalHit += (nRows - nanCount);
+
+        // 组装 augmented batch = 原 batch 列 + 20 新列
+        std::vector<std::shared_ptr<arrow::Array>> augCols;
+        for (int ci = 0; ci < batch->num_columns(); ++ci)
+            augCols.push_back(batch->column(ci));
+        for (int c = 0; c < kMFCols; ++c) {
+            std::shared_ptr<arrow::Array> arr;
+            builders[c].Finish(&arr);
+            augCols.push_back(arr);
+        }
+        auto augBatch = arrow::RecordBatch::Make(newSchema, nRows, augCols);
+
+        auto wst = writer->WriteRecordBatch(*augBatch);
+        if (!wst.ok()) {
+            INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: batch " << bi << " 写入错误 " << wst.ToString();
+            writer->Close();
+            std::filesystem::remove(tmpPath, rmEc);
+            return -1;
+        }
+
+        if ((bi + 1) % 5 == 0 || bi == nBatches - 1) {
+            INTERNAL_INFO_STREAM << "[DataCache] augmentMF: batch " << (bi+1) << "/" << nBatches
+                << " rows=" << totalRows << " hit=" << totalHit << " nan=" << totalNan;
+        }
+    }
+
+    writer->Close();
+    writer.reset();
+    outResult.ValueOrDie()->Close();
+
+    // 释放 reader 持有的原始文件句柄，否则 Windows rename 失败
+    reader.reset();
+    inResult.ValueOrDie()->Close();
+
+    // 3. 原子替换
+    std::error_code ec;
+    std::filesystem::rename(tmpPath, path, ec);
+    if (ec) {
+        INTERNAL_ERROR_STREAM << "[DataCache] augmentMF: 原子替换失败 " << ec.message();
+        std::filesystem::remove(tmpPath, rmEc);
+        return -1;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = m_index.find(dataId);
+        if (it != m_index.end()) {
+            for (int c = 0; c < kMFCols; ++c)
+                it->second.availableFields.push_back(kColNames[c]);
+            saveCatalog();
+        }
+    }
+
+    INTERNAL_INFO_STREAM << "[DataCache] augmentMF: id=" << dataId << " 完成, "
+        << totalRows << " rows x " << newSchema->num_fields() << " cols"
+        << " hit=" << totalHit << " nan=" << totalNan;
+    return kMFCols;
 }
 
 } // namespace cleaning

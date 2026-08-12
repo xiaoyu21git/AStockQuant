@@ -105,7 +105,7 @@ OrderResult TradeEngine::submitOrder(const OrderRequest& req) {
     gmReq.order_business  = static_cast<int>(req.extensionAs<int64_t>(
                                 domain::trading::ExtKey::kOrderBusiness, 0));
 
-    INTERNAL_INFO_STREAM << "[TradeEngine] place_order: gmSym=" << gmSym
+    INTERNAL_INFO_STREAM << "[TradeEngine] 下单: gmSym=" << gmSym
                          << " side=" << gmReq.side
                          << " posEffect=" << gmReq.position_effect
                          << " orderType=" << gmReq.order_type
@@ -159,7 +159,7 @@ bool TradeEngine::cancelOrder(const std::string& orderId) {
         std::lock_guard<std::mutex> lk(m_ordersMutex);
         m_activeOrders.erase(clOrdKey);
     }
-    INTERNAL_INFO_STREAM << "[TradeEngine] cancel: " << orderId;
+    INTERNAL_INFO_STREAM << "[TradeEngine] 撤单: " << orderId;
     return true;
 }
 
@@ -222,7 +222,7 @@ std::vector<OrderResult> TradeEngine::submitBatch(const std::vector<OrderRequest
     }
     gmResults->release();
 
-    INTERNAL_INFO_STREAM << "[TradeEngine] order_batch: " << results.size()
+    INTERNAL_INFO_STREAM << "[TradeEngine] 批量下单: " << results.size()
                          << " 已提交, " << reqs.size() << " 请求";
     return results;
 }
@@ -243,7 +243,7 @@ std::vector<OrderResult> TradeEngine::submitSplit(const OrderRequest& req, Split
             std::this_thread::sleep_for(std::chrono::milliseconds(spec.intervalMs));
     }
 
-    INTERNAL_INFO_STREAM << "[TradeEngine] split: " << results.size()
+    INTERNAL_INFO_STREAM << "[TradeEngine] 拆分订单: " << results.size()
                          << " 个分块, 总量=" << req.quantity();
     return results;
 }

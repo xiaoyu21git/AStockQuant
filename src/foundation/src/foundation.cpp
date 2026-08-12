@@ -54,7 +54,7 @@ bool Foundation::initialize(const Config& config) {
         }
         
         // 测试日志
-        logger_->info("Foundation logger initialized successfully");
+        logger_->info("Foundation日志系统初始化成功");
         // 2. 初始化文件系统
         filesystem_ = std::make_unique<fs::File>();
         
@@ -113,11 +113,11 @@ bool Foundation::initialize(const Config& config) {
         }
         
         initialized_ = true;
-        log_info("Foundation library initialized successfully");
+        log_info("Foundation库初始化成功");
         return true;
         
     } catch (const std::exception& e) {
-        log_error(std::string("Failed to initialize Foundation: ") + e.what());
+        log_error(std::string("Foundation初始化失败: ") + e.what());
         shutdown();
         return false;
     }
@@ -126,7 +126,7 @@ bool Foundation::initialize(const Config& config) {
 void Foundation::shutdown() {
     if (!initialized_) return;
     
-    log_info("Shutting down Foundation library");
+    log_info("正在关闭Foundation库");
     
     // 清理顺序很重要：先停止依赖其他模块的模块
     
@@ -153,7 +153,7 @@ void Foundation::shutdown() {
     yaml_.reset();
     json_.reset();
     filesystem_.reset();
-    log_info("Foundation library shutdown complete");
+    log_info("Foundation库关闭完成");
     logger_.reset();
     
     initialized_ = false;
@@ -161,14 +161,10 @@ void Foundation::shutdown() {
 
 void Foundation::reload_configs() {
     if (!initialized_) return;
-    
-    try {
-        config_manager_->reloadAll();
-        app_config_ = config_manager_->getAppConfig();
-        log_info("All configurations reloaded");
-    } catch (const std::exception& e) {
-        log_error(std::string("Failed to reload configs: ") + e.what());
-    }
+
+    config_manager_->reloadAll();
+    app_config_ = config_manager_->getAppConfig();
+    log_info("所有配置已重新加载");
 }
 
 // ============ 模块访问器实现 ============
@@ -354,7 +350,7 @@ config::ConfigNode::Ptr Foundation::load_config(const std::string& file_path) {
             throw ParseException("Unsupported config file format: " + file_path);
         }
     } catch (const std::exception& e) {
-        log_error(std::string("Failed to load config: ") + e.what());
+        log_error(std::string("配置加载失败: ") + e.what());
         throw;
     }
 }
@@ -372,7 +368,7 @@ config::ConfigNode::Ptr Foundation::load_config_string(const std::string& conten
             throw ParseException("Unsupported config format: " + format);
         }
     } catch (const std::exception& e) {
-        log_error(std::string("Failed to parse config string: ") + e.what());
+        log_error(std::string("配置字符串解析失败: ") + e.what());
         throw;
     }
 }
@@ -391,7 +387,7 @@ bool Foundation::save_config(const config::ConfigNode::Ptr& config,
             throw ParseException("Unsupported config file format: " + file_path);
         }
     } catch (const std::exception& e) {
-        log_error(std::string("Failed to save config: ") + e.what());
+        log_error(std::string("配置保存失败: ") + e.what());
         return false;
     }
 }
