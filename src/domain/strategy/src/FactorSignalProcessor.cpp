@@ -118,6 +118,14 @@ double FactorSignalProcessor::compositeScore(const std::string& symbol) const
         if (iit != m_factorInfluence.end()) infl = iit->second;
         score += normalized * infl;
     }
+
+    // 板块环境系数修正（Phase 1：默认 1.0 = 不调整）
+    // 由外部板块状态计算器在 updateSnapshot 前调用 setSectorEnvCoeff 注入
+    double envCoeff = sectorEnvCoeff(symbol);
+    if (envCoeff != 1.0 && std::isfinite(envCoeff) && envCoeff > 0.0) {
+        score *= envCoeff;
+    }
+
     return score;
 }
 

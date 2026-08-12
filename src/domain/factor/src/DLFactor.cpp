@@ -242,6 +242,19 @@ DataRequirements DLFactor::getDataRequirements() const
     appendRequiredField(req, "market_cap");
     appendRequiredField(req, "roe");
     appendRequiredField(req, "industry_code");
+
+    // 板块日频聚合列（Phase 1 产出，字段顺序与 train.py SECTOR_FIELDS 一致）
+    // 若 Arrow 缓存不含这些列，ffill 后为 NaN → 标的被跳过 → 旧模型不受影响
+    appendRequiredField(req, "sector_vwap_change");
+    appendRequiredField(req, "sector_breadth");
+    appendRequiredField(req, "sector_is_reliable");
+    appendRequiredField(req, "sector_money_flow_net");
+    appendRequiredField(req, "sector_money_flow_ratio");
+    appendRequiredField(req, "sector_amplitude");
+    appendRequiredField(req, "sector_relative_strength");
+    appendRequiredField(req, "sector_concentration");
+    appendRequiredField(req, "sector_turnover_ratio");
+
     appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;
 }

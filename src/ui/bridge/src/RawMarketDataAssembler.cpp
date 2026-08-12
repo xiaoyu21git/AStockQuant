@@ -92,6 +92,98 @@ RawMarketDataAssembler::Result RawMarketDataAssembler::assemble(
     int totalRows = 0;
     static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
 
+    // ── 板块日频聚合：全日期范围一次查询，构建 sectorIdx + 市场均值 ──
+    std::map<std::string, std::unordered_map<std::string, std::string>> sectorIdx;
+    std::map<std::string, double> dailyMarketAvgVwapChg;
+    {
+        auto dbSector = astock::database::NativePgConnectionPool::instance().getConnection();
+        if (dbSector && dbSector->isOpen()) {
+            MarketDataRepository sectorRepo(std::move(dbSector));
+            auto sRows = sectorRepo.querySectorDailyAgg(startDate, endDate);
+            auto mfRows = sectorRepo.querySectorMoneyFlowAgg(startDate, endDate);
+            const auto& secCols = cleaning::sector_daily_columns::names();
+
+            for (const auto& sr : sRows) {
+                const auto& sv = sr.getValues();
+                auto ii = sv.find("industry_code");
+                auto ti = sv.find("trade_date");
+                if (ii == sv.end() || ti == sv.end()) continue;
+                std::string key;
+                key += ii->second;
+                key += '|';
+                std::string date = ti->second.size() >= 10 ? ti->second.substr(0, 10) : ti->second;
+                for (char c : date) if (c != '-') key += c;
+                std::unordered_map<std::string, std::string> colVals;
+                for (const auto& cn : secCols) {
+                    auto it = sv.find(cn);
+                    if (it != sv.end() && !it->second.empty()
+                        && it->second != "NULL" && it->second != "null") {
+                        colVals[cn] = it->second;
+                    }
+                }
+                if (!colVals.empty()) sectorIdx[std::move(key)] = std::move(colVals);
+            }
+
+            for (const auto& mr : mfRows) {
+                const auto& mv = mr.getValues();
+                auto ii = mv.find("industry_code");
+                auto ti = mv.find("trade_date");
+                if (ii == mv.end() || ti == mv.end()) continue;
+                std::string key;
+                key += ii->second;
+                key += '|';
+                std::string date = ti->second.size() >= 10 ? ti->second.substr(0, 10) : ti->second;
+                for (char c : date) if (c != '-') key += c;
+                auto it = sectorIdx.find(key);
+                if (it == sectorIdx.end()) continue;
+                for (const auto& cn : {"sector_money_flow_net","sector_money_flow_ratio"}) {
+                    auto mit = mv.find(cn);
+                    if (mit != mv.end() && !mit->second.empty())
+                        it->second[cn] = mit->second;
+                }
+            }
+
+            auto concRows = sectorRepo.querySectorConcentration(startDate, endDate);
+            for (const auto& cr : concRows) {
+                const auto& cv = cr.getValues();
+                auto ii = cv.find("industry_code");
+                auto ti = cv.find("trade_date");
+                if (ii == cv.end() || ti == cv.end()) continue;
+                std::string key;
+                key += ii->second;
+                key += '|';
+                std::string date = ti->second.size() >= 10 ? ti->second.substr(0, 10) : ti->second;
+                for (char c : date) if (c != '-') key += c;
+                auto it = sectorIdx.find(key);
+                if (it == sectorIdx.end()) continue;
+                auto ci = cv.find("sector_concentration");
+                if (ci != cv.end() && !ci->second.empty()
+                    && ci->second != "NULL" && ci->second != "null")
+                    it->second["sector_concentration"] = ci->second;
+            }
+
+            // 计算 sector_relative_strength：板块 vwap_change - 全市场均值 vwap_change
+            std::map<std::string, int> dailySectorCount;
+            for (const auto& [key, cols] : sectorIdx) {
+                auto pipe = key.find('|');
+                if (pipe == std::string::npos) continue;
+                std::string td = key.substr(pipe + 1);
+                auto vcIt = cols.find("sector_vwap_change");
+                if (vcIt == cols.end() || vcIt->second.empty()) continue;
+                try {
+                    double vc = std::stod(vcIt->second);
+                    dailyMarketAvgVwapChg[td] += vc;
+                    dailySectorCount[td]++;
+                } catch (...) {}
+            }
+            for (auto& [td, sum] : dailyMarketAvgVwapChg) {
+                auto ci = dailySectorCount.find(td);
+                if (ci != dailySectorCount.end() && ci->second > 0)
+                    sum /= static_cast<double>(ci->second);
+            }
+        }
+    }
+
     for (int mi = 0; mi < totalMonths; ++mi) {
         int cm = m1 + mi, cy = y1 + (cm - 1) / 12; cm = (cm - 1) % 12 + 1;
         int cs = (cy == y1 && cm == m1) ? d1 : 1;
@@ -150,6 +242,68 @@ RawMarketDataAssembler::Result RawMarketDataAssembler::assemble(
                     if (it == minIdx.end()) continue;
                     for (const auto& [cn, cv] : it->second)
                         row.setValue(cn, cv);
+                }
+            }
+
+            // ── 资金流注入：独立 queryMoneyFlow 路径，避免 LEFT JOIN 扫描全表 ──
+            bool hasMoneyFlow = std::find(dataTypes.begin(), dataTypes.end(), "money_flow") != dataTypes.end();
+            if (hasMoneyFlow) {
+                auto mfRows = repo.queryMoneyFlow(chunk, ms, me);
+                std::map<std::string, std::unordered_map<std::string, std::string>> mfIdx;
+                const auto& mfCols = cleaning::money_flow_columns::names();
+                for (const auto& mr : mfRows) {
+                    const auto& mv = mr.getValues();
+                    auto si = mv.find("symbol");
+                    auto ti = mv.find("trade_date");
+                    if (si == mv.end() || ti == mv.end()) continue;
+                    std::unordered_map<std::string, std::string> colVals;
+                    for (const auto& cn : mfCols) {
+                        auto it = mv.find(cn);
+                        if (it != mv.end() && !it->second.empty())
+                            colVals[cn] = it->second;
+                    }
+                    mfIdx[normKey(si->second, ti->second)] = std::move(colVals);
+                }
+                for (auto& row : rows) {
+                    const auto& rv = row.getValues();
+                    auto si = rv.find("symbol");
+                    auto ti = rv.find("trade_date");
+                    if (si == rv.end() || ti == rv.end()) continue;
+                    auto it = mfIdx.find(normKey(si->second, ti->second));
+                    if (it == mfIdx.end()) continue;
+                    for (const auto& [cn, cv] : it->second)
+                        row.setValue(cn, cv);
+                }
+            }
+
+            // ── 板块列注入：使用月级预构建的 sectorIdx（O(1) 查表，不再每 chunk 查 SQL）──
+            if (!sectorIdx.empty()) {
+                for (auto& row : rows) {
+                    const auto& rv = row.getValues();
+                    auto ii = rv.find("industry_code");
+                    auto ti = rv.find("trade_date");
+                    if (ii == rv.end() || ti == rv.end()) continue;
+                    std::string key;
+                    key += ii->second;
+                    key += '|';
+                    std::string date = ti->second.size() >= 10 ? ti->second.substr(0, 10) : ti->second;
+                    for (char c : date) if (c != '-') key += c;
+                    auto it = sectorIdx.find(key);
+                    if (it == sectorIdx.end()) continue;
+                    for (const auto& [cn, cv] : it->second)
+                        row.setValue(cn, cv);
+                    // 写入 sector_relative_strength
+                    std::string tdKey = key.substr(key.find('|') + 1);
+                    auto mktIt = dailyMarketAvgVwapChg.find(tdKey);
+                    if (mktIt != dailyMarketAvgVwapChg.end()) {
+                        auto vcIt = it->second.find("sector_vwap_change");
+                        if (vcIt != it->second.end() && !vcIt->second.empty()) {
+                            try {
+                                double rel = std::stod(vcIt->second) - mktIt->second;
+                                row.setValue("sector_relative_strength", std::to_string(rel));
+                            } catch (...) {}
+                        }
+                    }
                 }
             }
 

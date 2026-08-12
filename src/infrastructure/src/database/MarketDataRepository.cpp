@@ -306,11 +306,8 @@ MarketDataRepository::queryDailyBarJoined(
 {
     std::ostringstream sql;
     sql << "SELECT " << cleaning::kline_columns::sqlSelect() << ","
-        << cleaning::symbol_info_columns::sqlSelect() << ","
-        << cleaning::money_flow_columns::sqlSelect()
+        << cleaning::symbol_info_columns::sqlSelect()
         << " FROM mkt.daily_bar d JOIN ref.symbol_info s ON d.symbol_id = s.id"
-        << " LEFT JOIN ref.industry_classification ic ON ic.symbol_id = d.symbol_id AND ic.end_date IS NULL"
-        << " LEFT JOIN fund.money_flow_daily mf ON mf.symbol_id = d.symbol_id AND mf.trade_date = d.trade_date"
         << " WHERE d.trade_date >= " << safeStr(startDate)
         << " AND d.trade_date <= " << safeStr(endDate)
         << " ORDER BY s.symbol, d.trade_date ASC";
@@ -333,11 +330,8 @@ MarketDataRepository::queryDailyBarJoined(
     if (symbols.empty()) return {};
     std::ostringstream sql;
     sql << "SELECT " << cleaning::kline_columns::sqlSelect() << ","
-        << cleaning::symbol_info_columns::sqlSelect() << ","
-        << cleaning::money_flow_columns::sqlSelect()
+        << cleaning::symbol_info_columns::sqlSelect()
         << " FROM mkt.daily_bar d JOIN ref.symbol_info s ON d.symbol_id = s.id"
-        << " LEFT JOIN ref.industry_classification ic ON ic.symbol_id = d.symbol_id AND ic.end_date IS NULL"
-        << " LEFT JOIN fund.money_flow_daily mf ON mf.symbol_id = d.symbol_id AND mf.trade_date = d.trade_date"
         << " WHERE s.symbol IN " << symbolList(symbols)
         << " AND d.trade_date >= " << safeStr(startDate)
         << " AND d.trade_date <= " << safeStr(endDate)
@@ -1003,6 +997,83 @@ std::string MarketDataRepository::queryNextTradingDay(const std::string& anchorD
     auto result = db_->executeQuery(sql.str());
     if (result.isEmpty()) return {};
     return result.getRow(0).getString("td");
+}
+
+// ═══ querySectorDailyAgg — 板块日频聚合 ═══
+
+std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::querySectorDailyAgg(
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    // 使用 DataSourceRegistry 的 SQL 模板，替换日期占位符
+    std::string sql = cleaning::sector_daily_columns::sqlSectorDailyAgg();
+    // 替换占位符 {start_date}/{end_date}
+    auto replace = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    };
+    replace(sql, "{start_date}", startDate);
+    replace(sql, "{end_date}", endDate);
+
+    auto result = db_->executeQuery(sql);
+    std::vector<astock::database::SqlQueryResultRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i)
+        rows.push_back(result.getRow(i));
+    return rows;
+}
+
+// ═══ querySectorMoneyFlowAgg — 板块资金流日聚合 ═══
+
+std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::querySectorMoneyFlowAgg(
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    std::string sql = cleaning::sector_daily_columns::sqlSectorMoneyFlowAgg();
+    auto replace = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    };
+    replace(sql, "{start_date}", startDate);
+    replace(sql, "{end_date}", endDate);
+
+    auto result = db_->executeQuery(sql);
+    std::vector<astock::database::SqlQueryResultRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i)
+        rows.push_back(result.getRow(i));
+    return rows;
+}
+
+// ═══ querySectorConcentration — 板块集中度 ═══
+
+std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::querySectorConcentration(
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    std::string sql = cleaning::sector_daily_columns::sqlSectorConcentration();
+    auto replace = [](std::string& s, const std::string& from, const std::string& to) {
+        size_t pos = 0;
+        while ((pos = s.find(from, pos)) != std::string::npos) {
+            s.replace(pos, from.length(), to);
+            pos += to.length();
+        }
+    };
+    replace(sql, "{start_date}", startDate);
+    replace(sql, "{end_date}", endDate);
+
+    auto result = db_->executeQuery(sql);
+    std::vector<astock::database::SqlQueryResultRow> rows;
+    rows.reserve(result.rowCount());
+    for (std::size_t i = 0; i < result.rowCount(); ++i)
+        rows.push_back(result.getRow(i));
+    return rows;
 }
 
 } // namespace astock::infrastructure::database

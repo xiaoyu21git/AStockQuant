@@ -37,6 +37,17 @@ public:
     void setMinimumCompositeScore(double s) { m_minimumCompositeScore = s; }
     void setCombineMode(FactorCombineMode mode) { m_combineMode = mode; }
     void setFactorInfluence(const std::unordered_map<std::string, double>& inf) { m_factorInfluence = inf; }
+
+    /// 板块环境系数（Phase 1）：按标的设置板块共振乘数
+    /// sector_is_reliable=false 的板块 → coeff 应设为 1.0（默认不调整）
+    void setSectorEnvCoeff(const std::string& symbol, double coeff) { m_sectorEnvCoeff[symbol] = coeff; }
+    void setSectorEnvCoeffs(const std::unordered_map<std::string, double>& coeffs) { m_sectorEnvCoeff = coeffs; }
+    void clearSectorEnvCoeffs() { m_sectorEnvCoeff.clear(); }
+    [[nodiscard]] double sectorEnvCoeff(const std::string& symbol) const {
+        auto it = m_sectorEnvCoeff.find(symbol);
+        return it != m_sectorEnvCoeff.end() ? it->second : 1.0;
+    }
+
     [[nodiscard]] int targetPositionCount() const { return m_targetPositionCount; }
     [[nodiscard]] double minimumCompositeScore() const { return m_minimumCompositeScore; }
     [[nodiscard]] FactorCombineMode combineMode() const { return m_combineMode; }
@@ -91,6 +102,8 @@ private:
     double m_minimumCompositeScore{0.0};
     // factorId → 快照与统计量
     std::unordered_map<std::string, FactorSnapshotStats> m_snapshot;
+    // symbol → 板块环境乘数（默认 1.0 = 不调整）
+    std::unordered_map<std::string, double> m_sectorEnvCoeff;
 };
 
 } // namespace domain::strategy

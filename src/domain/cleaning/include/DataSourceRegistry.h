@@ -219,6 +219,107 @@ inline std::string sqlSelect() {
 }
 } // namespace money_flow_columns
 
+namespace sector_daily_columns {
+// 板块日频聚合列（从 mkt.minute_bar + fund.money_flow_daily 按 industry_code 聚合派生）
+// 与日线并列，通过 RawMarketDataAssembler 注入同一 Arrow 文件
+inline const std::vector<std::string>& names() {
+    static const std::vector<std::string> v = {
+        "sector_vwap_change","sector_breadth","sector_is_reliable",
+        "sector_money_flow_net","sector_money_flow_ratio",
+        "sector_amplitude","sector_relative_strength",
+        "sector_concentration","sector_turnover_ratio"
+    };
+    return v;
+}
+inline const std::unordered_set<std::string>& numeric() {
+    static const std::unordered_set<std::string> s = {
+        "sector_vwap_change","sector_breadth","sector_is_reliable",
+        "sector_money_flow_net","sector_money_flow_ratio",
+        "sector_amplitude","sector_relative_strength",
+        "sector_concentration","sector_turnover_ratio"
+    };
+    return s;
+}
+// SQL 片段：板块日频聚合（子查询 + LAG 计算 vwap_change / turnover_ratio）
+// relative_strength 在 C++ 注入时计算（需要日全市场均值）
+// concentration 由独立 SQL sqlSectorConcentration() 计算，C++ 注入时合并
+// ⚠️ industry_code 来自 si.industry_code (与日线行同源)，确保 C++ 注入时 key 匹配
+inline std::string sqlSectorDailyAgg() {
+    return
+        "SELECT industry_code, trade_date, stock_count, sector_is_reliable,"
+        " sector_vwap, sector_breadth, sector_amplitude, sector_turnover,"
+        " CASE WHEN prev_vwap > 0 AND prev_vwap IS NOT NULL"
+        "  THEN (sector_vwap - prev_vwap) / prev_vwap ELSE NULL END AS sector_vwap_change,"
+        " CASE WHEN avg20_turnover > 0 AND avg20_turnover IS NOT NULL"
+        "  THEN sector_turnover / avg20_turnover ELSE NULL END AS sector_turnover_ratio"
+        " FROM ("
+        "  SELECT industry_code, trade_date, stock_count, sector_is_reliable,"
+        "   sector_vwap, sector_breadth, sector_amplitude, sector_turnover,"
+        "   LAG(sector_vwap) OVER (PARTITION BY industry_code ORDER BY trade_date) AS prev_vwap,"
+        "   AVG(sector_turnover) OVER (PARTITION BY industry_code ORDER BY trade_date"
+        "    ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) AS avg20_turnover"
+        "  FROM ("
+        "   SELECT si.industry_code, mb.trade_ts::date AS trade_date,"
+        "    COUNT(DISTINCT mb.symbol_id) AS stock_count,"
+        "    CASE WHEN COUNT(DISTINCT mb.symbol_id) >= 5 THEN 1.0 ELSE 0.0 END AS sector_is_reliable,"
+        "    SUM(mb.close * mb.volume) / NULLIF(SUM(mb.volume), 0.0) AS sector_vwap,"
+        "    COUNT(*) FILTER (WHERE mb.close > mb.open) * 1.0 / NULLIF(COUNT(*), 0.0) AS sector_breadth,"
+        "    (MAX(mb.high) - MIN(mb.low)) / NULLIF(AVG(mb.open), 0.0) AS sector_amplitude,"
+        "    SUM(mb.amount) AS sector_turnover"
+        "   FROM mkt.minute_bar mb"
+        "   JOIN ref.symbol_info si ON mb.symbol_id = si.id"
+        "   WHERE mb.trade_ts >= '{start_date}'::timestamp"
+        "    AND mb.trade_ts < ('{end_date}'::date + 1)::timestamp"
+        "    AND si.industry_code IS NOT NULL"
+        "   GROUP BY si.industry_code, mb.trade_ts::date"
+        "  ) base"
+        ") lagged"
+        " ORDER BY industry_code, trade_date";
+}
+// 板块资金流聚合 SQL（从 fund.money_flow_daily 按 industry_code 汇总）
+// ⚠️ industry_code 来自 si.industry_code (与日线行同源)，确保 C++ 注入时 key 匹配
+inline std::string sqlSectorMoneyFlowAgg() {
+    return
+        "SELECT si.industry_code, mf.trade_date::text AS trade_date,"
+        " SUM(mf.main_net_in) AS sector_money_flow_net,"
+        " CASE WHEN SUM(mf.main_in + mf.main_out) > 0"
+        "  THEN SUM(mf.main_net_in) * 1.0 / SUM(mf.main_in + mf.main_out)"
+        "  ELSE 0.0 END AS sector_money_flow_ratio"
+        " FROM fund.money_flow_daily mf"
+        " JOIN ref.symbol_info si ON mf.symbol_id = si.id"
+        " WHERE mf.trade_date BETWEEN '{start_date}' AND '{end_date}'"
+        "  AND si.industry_code IS NOT NULL"
+        " GROUP BY si.industry_code, mf.trade_date"
+        " ORDER BY si.industry_code, mf.trade_date";
+}
+// 板块集中度 SQL：Top3 个股成交额 / 全板块成交额
+// 从 minute_bar 先按个股聚合 → ROW_NUMBER 排名 → Top3 求和
+inline std::string sqlSectorConcentration() {
+    return
+        "SELECT industry_code, trade_date,"
+        " CASE WHEN total_turnover > 0"
+        "  THEN top3_turnover / total_turnover ELSE NULL END AS sector_concentration"
+        " FROM ("
+        "  SELECT industry_code, trade_date,"
+        "   SUM(stock_turnover) AS total_turnover,"
+        "   SUM(stock_turnover) FILTER (WHERE rn <= 3) AS top3_turnover"
+        "  FROM ("
+        "   SELECT si.industry_code, mb.trade_ts::date AS trade_date,"
+        "    SUM(mb.amount) AS stock_turnover,"
+        "    ROW_NUMBER() OVER (PARTITION BY si.industry_code, mb.trade_ts::date"
+        "     ORDER BY SUM(mb.amount) DESC) AS rn"
+        "   FROM mkt.minute_bar mb"
+        "   JOIN ref.symbol_info si ON mb.symbol_id = si.id"
+        "   WHERE mb.trade_ts >= '{start_date}'::timestamp"
+        "    AND mb.trade_ts < ('{end_date}'::date + 1)::timestamp"
+        "    AND si.industry_code IS NOT NULL"
+        "   GROUP BY si.industry_code, mb.trade_ts::date, mb.symbol_id"
+        "  ) per_stock"
+        "  GROUP BY industry_code, trade_date"
+        ") ranked";
+}
+} // namespace sector_daily_columns
+
 namespace minute_bar_columns {
 // 分钟线列（来自 mkt.minute_bar 表）
 inline const std::vector<std::string>& names() {
@@ -445,6 +546,8 @@ inline FieldSchema fullSchemaForTypes(const std::vector<std::string>& typeNames)
             for (auto& n : symbol_info_columns::names()) s.names.push_back(n);
             for (auto& n : money_flow_columns::names()) s.names.push_back(n);
             for (auto& n : money_flow_columns::numeric()) s.numeric.insert(n);
+            for (auto& n : sector_daily_columns::names()) s.names.push_back(n);
+            for (auto& n : sector_daily_columns::numeric()) s.numeric.insert(n);
         }
         // 财务查询时也通过 si.symbol JOIN 了 symbol_info
         // 但财务行不 JOIN 元数据列，元数据从 K线行带入
