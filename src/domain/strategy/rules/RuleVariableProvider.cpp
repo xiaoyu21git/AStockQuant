@@ -92,7 +92,8 @@ struct BacktestRuleVariableProvider::Impl {
         int afternoonBars{0}, totalBars{0};
         bool hasData{false};
     };
-    std::unordered_map<std::string, MinuteBarAgg> minuteBarCache;
+    mutable std::unordered_map<std::string, MinuteBarAgg> minuteBarCache;
+    mutable std::int32_t minuteBarCacheDate{0};  // 缓存对应交易日(0=未加载), 惰性按需加载
     RuleCandidateContext candidate;
 
     // ── 蜡烛形态缓存 (惰性批量计算) ──
@@ -111,6 +112,47 @@ struct BacktestRuleVariableProvider::Impl {
         candleCacheColIndex = candidate.colIndex;
         candleCacheLastRow = lastRow;
         computeCandlePatterns();
+    }
+
+    // 当日全市场分钟线预聚合, 仅在规则实际解析分时形态变量时按日惰性加载
+    // (数据与查询口径同 setDay 原预载一致; 失败保持空缓存 → 变量返回 nullopt)
+    void ensureMinuteBarCache() const {
+        if (minuteBarCacheDate == date) return;
+        minuteBarCacheDate = date;
+        minuteBarCache.clear();
+        char ds[16]; foundation::utils::formatTradingDayTo(date, ds, sizeof(ds));
+        try {
+            auto& pool = astock::database::NativePgConnectionPool::instance();
+            auto db = pool.getConnection();
+            if (db && db->isOpen()) {
+                auto r = db->executeQuery(
+                    "SELECT si.symbol, "
+                    "MIN(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN mb.low END) as al, "
+                    "MAX(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN mb.high END) as ah, "
+                    "MIN(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)<12 THEN mb.low END) as ml, "
+                    "MAX(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)<12 THEN mb.high END) as mh, "
+                    "COUNT(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN 1 END) as ab, "
+                    "COUNT(*) as tb, "
+                    "(ARRAY_AGG(mb.close ORDER BY mb.trade_ts DESC))[1] as ac "
+                    "FROM mkt.minute_bar mb "
+                    "JOIN ref.symbol_info si ON mb.symbol_id=si.id "
+                    "WHERE mb.trade_ts>=$1::date AND mb.trade_ts<$1::date+INTERVAL'1day' "
+                    "GROUP BY si.symbol",
+                    {astock::database::SqlParam{std::string(ds)}});
+                for (auto& row : r.getRows()) {
+                    MinuteBarAgg agg;
+                    agg.afternoonLow = row.getDouble("al");
+                    agg.afternoonHigh = row.getDouble("ah");
+                    agg.morningLow = row.getDouble("ml");
+                    agg.morningHigh = row.getDouble("mh");
+                    agg.afternoonBars = row.getInt("ab");
+                    agg.totalBars = row.getInt("tb");
+                    agg.afternoonClose = row.getDouble("ac");
+                    agg.hasData = agg.totalBars > 0;
+                    minuteBarCache[row.getString("symbol")] = agg;
+                }
+            }
+        } catch (...) {}  // 表为空或查询超时不阻塞
     }
 
     void computeCandlePatterns() const;
@@ -513,6 +555,7 @@ struct BacktestRuleVariableProvider::Impl {
     /// 午后回流: 上午下跌→下午V反 → 1.0, 否则 0.0
     [[nodiscard]] std::optional<double> afternoonReflowConfirmed() const
     {
+        ensureMinuteBarCache();
         auto it = minuteBarCache.find(candidate.code);
         if (it == minuteBarCache.end() || !it->second.hasData) return std::nullopt;
         const auto& mb = it->second;
@@ -525,6 +568,7 @@ struct BacktestRuleVariableProvider::Impl {
     /// 尾盘修复: 午后最后阶段强势收回
     [[nodiscard]] std::optional<double> tailRepairConfirmed() const
     {
+        ensureMinuteBarCache();
         auto it = minuteBarCache.find(candidate.code);
         if (it == minuteBarCache.end() || !it->second.hasData) return std::nullopt;
         const auto& mb = it->second;
@@ -538,6 +582,7 @@ struct BacktestRuleVariableProvider::Impl {
     /// 日内冲高回落: 上午高→下午低
     [[nodiscard]] std::optional<double> intradayFlushConfirmed() const
     {
+        ensureMinuteBarCache();
         auto it = minuteBarCache.find(candidate.code);
         if (it == minuteBarCache.end() || !it->second.hasData) return std::nullopt;
         const auto& mb = it->second;
@@ -711,43 +756,9 @@ void BacktestRuleVariableProvider::setDay(
     m_impl->positions = positions;
     m_impl->marketReady = false;
     m_impl->leaderRankCache.clear();
+    // 分钟线聚合按日惰性加载 (ensureMinuteBarCache, 仅规则实际引用分时形态变量时触发)
     m_impl->minuteBarCache.clear();
-    // 预加载分钟线聚合 (分时形态变量需要)
-    {
-        char ds[16]; foundation::utils::formatTradingDayTo(date, ds, sizeof(ds));
-        try {
-            auto& pool = astock::database::NativePgConnectionPool::instance();
-            auto db = pool.getConnection();
-            if (db && db->isOpen()) {
-                auto r = db->executeQuery(
-                    "SELECT si.symbol, "
-                    "MIN(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN mb.low END) as al, "
-                    "MAX(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN mb.high END) as ah, "
-                    "MIN(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)<12 THEN mb.low END) as ml, "
-                    "MAX(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)<12 THEN mb.high END) as mh, "
-                    "COUNT(CASE WHEN EXTRACT(HOUR FROM mb.trade_ts)>=13 THEN 1 END) as ab, "
-                    "COUNT(*) as tb, "
-                    "(ARRAY_AGG(mb.close ORDER BY mb.trade_ts DESC))[1] as ac "
-                    "FROM mkt.minute_bar mb "
-                    "JOIN ref.symbol_info si ON mb.symbol_id=si.id "
-                    "WHERE mb.trade_ts>=$1::date AND mb.trade_ts<$1::date+INTERVAL'1day' "
-                    "GROUP BY si.symbol",
-                    {astock::database::SqlParam{std::string(ds)}});
-                for (auto& row : r.getRows()) {
-                    Impl::MinuteBarAgg agg;
-                    agg.afternoonLow = row.getDouble("al");
-                    agg.afternoonHigh = row.getDouble("ah");
-                    agg.morningLow = row.getDouble("ml");
-                    agg.morningHigh = row.getDouble("mh");
-                    agg.afternoonBars = row.getInt("ab");
-                    agg.totalBars = row.getInt("tb");
-                    agg.afternoonClose = row.getDouble("ac");
-                    agg.hasData = agg.totalBars > 0;
-                    m_impl->minuteBarCache[row.getString("symbol")] = agg;
-                }
-            }
-        } catch (...) {}  // 表为空或查询超时不阻塞
-    }
+    m_impl->minuteBarCacheDate = 0;
     if (view) {
         const auto& dates = view->dates();
         m_impl->lastRow = -1;
@@ -1127,9 +1138,9 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     if (varPath == "candidate.tail_repair_attempt_confirmed")return impl.tailRepairConfirmed();
     if (varPath == "position.intraday_flush_confirmed")     return impl.intradayFlushConfirmed();
     if (varPath == "candidate.afternoon_fade_drawdown_ratio")
-    { auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData&&it->second.afternoonHigh>0?std::optional<double>((it->second.afternoonHigh-it->second.afternoonClose)/it->second.afternoonHigh):std::nullopt; }
+    { impl.ensureMinuteBarCache(); auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData&&it->second.afternoonHigh>0?std::optional<double>((it->second.afternoonHigh-it->second.afternoonClose)/it->second.afternoonHigh):std::nullopt; }
     if (varPath == "candidate.afternoon_chase_confirmed")
-    { auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData&&it->second.afternoonClose>it->second.afternoonHigh*0.98?std::optional<double>(1.0):std::optional<double>(0.0); }
+    { impl.ensureMinuteBarCache(); auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData&&it->second.afternoonClose>it->second.afternoonHigh*0.98?std::optional<double>(1.0):std::optional<double>(0.0); }
     if (varPath == "candidate.low_volume_board_yesterday_confirmed")
     { auto lim=impl.yesterdayAtLimitUp(); auto vr=impl.volumeRatioToAvg(5); return lim&&vr&&*lim>0.5&&*vr<0.8?std::optional<double>(1.0):std::optional<double>(0.0); }
     if (varPath == "market.low_volume_board_follow_through_rate")  return market.oneWordBoardRatio;
@@ -1146,9 +1157,9 @@ std::optional<double> BacktestRuleVariableProvider::resolve(const std::string& v
     // 业绩惊喜: EPS 环比增长>20% (fund.financial_indicator_daily)
     // 分时饱和度/午后追涨(分钟bar)
     if (varPath == "candidate.intraday_chase_saturation_score")
-    { auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData?std::optional<double>(it->second.totalBars/240.0*100.0):std::nullopt; }
+    { impl.ensureMinuteBarCache(); auto it=impl.minuteBarCache.find(impl.candidate.code); return it!=impl.minuteBarCache.end()&&it->second.hasData?std::optional<double>(it->second.totalBars/240.0*100.0):std::nullopt; }
     if (varPath == "candidate.intraday_spike_attack_confirmed")
-    { auto it=impl.minuteBarCache.find(impl.candidate.code); auto flush=impl.intradayFlushConfirmed(); return it!=impl.minuteBarCache.end()&&it->second.hasData&&flush&&*flush>0.5&&it->second.morningHigh>it->second.afternoonLow*1.03?std::optional<double>(1.0):std::optional<double>(0.0); }
+    { impl.ensureMinuteBarCache(); auto it=impl.minuteBarCache.find(impl.candidate.code); auto flush=impl.intradayFlushConfirmed(); return it!=impl.minuteBarCache.end()&&it->second.hasData&&flush&&*flush>0.5&&it->second.morningHigh>it->second.afternoonLow*1.03?std::optional<double>(1.0):std::optional<double>(0.0); }
     // 业绩惊喜
     {
         // 简化: change_pct>5% 代理业绩惊喜 (真实 EPS 需 DB JOIN, 留待精准版)
