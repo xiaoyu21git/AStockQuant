@@ -179,8 +179,8 @@ double SizeFactor::scoreFromRawValue(double rawValue) const {
 
 void SizeFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
-    if (config::hasCalculationConfig(config)) {
-        params_ = sizeParamsFromJson(config::calculationConfig(config));
+    if (config::hasParametersConfig(config)) {
+        params_ = sizeParamsFromJson(config::parametersConfig(config));
     }
     dataRequirements_ = getDataRequirements();
     boundaryRules_ = getBoundaryRules();

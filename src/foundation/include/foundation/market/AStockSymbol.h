@@ -22,6 +22,7 @@ enum class Board : uint8_t {
     Main,       // 主板
     ChiNext,    // 创业板 (300xxx, 301xxx)
     STAR,       // 科创板 (688xxx)
+    BShare,     // B股 (沪B 900xxx, 深B 200xxx/201xxx)
 };
 
 /// @brief A股标的符号 — 封装代码、交易所、板块判断及格式转换
@@ -53,6 +54,9 @@ public:
     /// @brief 板块
     [[nodiscard]] Board board() const noexcept { return m_board; }
 
+    /// @brief 是否B股 (唯一判定源: Board::BShare, 由代码前缀推断)
+    [[nodiscard]] bool isBShare() const noexcept { return m_board == Board::BShare; }
+
     /// @brief 后缀 ".SZ" / ".SH" / ".BJ"
     [[nodiscard]] std::string suffix() const;
 
@@ -75,6 +79,9 @@ public:
     /// id > 999999 返回空字符串（非 A 股代码）
     [[nodiscard]] static std::string fromInstrumentId(uint32_t id);
 
+    /// @brief 静态便捷判定: 输入 "900901" 或 "900901.SH" 均可 (直接前缀判定, 不构造对象)
+    [[nodiscard]] static bool isBShareSymbol(const std::string& symbol);
+
 private:
     std::string m_code;        // 6 位数字字符串
     Exchange m_exchange{Exchange::Unknown};
@@ -83,6 +90,8 @@ private:
     AStockSymbol(std::string code, Exchange exchange, Board board);
     static Exchange inferExchange(const std::string& code);
     static Board inferBoard(const std::string& code);
+    /// @brief B股前缀判定的唯一事实源 (inferBoard 与 isBShareSymbol 共用)
+    static bool hasBSharePrefix(int prefix3);
 };
 
 } // namespace market

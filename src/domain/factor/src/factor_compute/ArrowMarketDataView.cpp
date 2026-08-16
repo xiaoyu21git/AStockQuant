@@ -3,6 +3,7 @@
 
 #include "foundation/Utils/Timestamp.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/perf/Stopwatch.h"
 
 #include <arrow/api.h>
 #include <arrow/io/api.h>
@@ -10,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -44,6 +46,23 @@ struct ColumnData {
     std::vector<signal_value_t> values;
     const signal_value_t* ptr = nullptr;
     int32_t length = 0;
+};
+
+/// @brief 单个 record batch 的日期值域 — makeChunkView 跳读索引
+/// (批内日期未排序、相邻批范围重叠, 故记录 [min,max] 而非首尾日期)
+class BatchDateRange {
+public:
+    BatchDateRange(int32_t minDate, int32_t maxDate)
+        : m_minDate(minDate), m_maxDate(maxDate) {}
+
+    /// @brief 与 [chunkMin, chunkMax] 不相交时整批可跳过
+    [[nodiscard]] bool disjoint(int32_t chunkMin, int32_t chunkMax) const {
+        return m_maxDate < chunkMin || m_minDate > chunkMax;
+    }
+
+private:
+    int32_t m_minDate = 0;
+    int32_t m_maxDate = 0;
 };
 
 /// @brief 从单个 RecordBatch 提取指定双精度列
@@ -168,25 +187,46 @@ private:
 } // anonymous namespace
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ArrowReaderHandle
+// ══════════════════════════════════════════════════════════════════════════════
+
+std::shared_ptr<ArrowReaderHandle> ArrowReaderHandle::open(const std::string& path)
+{
+    // 打开逻辑唯一实现 — ArrowMarketDataView::Impl 构造与 createReaderHandle 共用
+    auto handle = std::make_shared<ArrowReaderHandle>();
+    auto inResult = arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ);
+    if (!inResult.ok()) {
+        handle->m_lastError = "mmap 失败: " + inResult.status().ToString();
+        return handle;
+    }
+    handle->m_input = inResult.ValueOrDie();
+
+    auto readerResult = arrow::ipc::RecordBatchFileReader::Open(handle->m_input);
+    if (!readerResult.ok()) {
+        handle->m_lastError = "reader 打开失败: " + readerResult.status().ToString();
+        handle->m_input.reset();
+        return handle;
+    }
+    handle->m_reader = readerResult.ValueOrDie();
+    return handle;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ArrowMarketDataView::Impl
 // ══════════════════════════════════════════════════════════════════════════════
 class ArrowMarketDataView::Impl {
 public:
-    explicit Impl(const std::string& path) {
-        // ── 打开文件，建立 mmap + reader ──
-        auto inResult = arrow::io::MemoryMappedFile::Open(path, arrow::io::FileMode::READ);
-        if (!inResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[ArrowView] mmap 失败: " << inResult.status().ToString();
+    explicit Impl(const std::string& path)
+        : m_path(path)
+    {
+        // ── 打开文件，建立 mmap + reader (与 ArrowReaderHandle::open 共用同一打开实现) ──
+        auto handle = ArrowReaderHandle::open(path);
+        if (!handle || !handle->valid()) {
+            INTERNAL_ERROR_STREAM << "[ArrowView] " << (handle ? handle->lastError() : "open failed");
             return;
         }
-        input_ = inResult.ValueOrDie();
-
-        auto readerResult = arrow::ipc::RecordBatchFileReader::Open(input_);
-        if (!readerResult.ok()) {
-            INTERNAL_ERROR_STREAM << "[ArrowView] reader 打开失败: " << readerResult.status().ToString();
-            return;
-        }
-        reader_ = readerResult.ValueOrDie();
+        input_ = handle->input();
+        reader_ = handle->reader();
         const int nBatches = reader_->num_record_batches();
         if (nBatches == 0) {
             INTERNAL_ERROR_STREAM << "[ArrowView] 文件有 0 个批次";
@@ -194,29 +234,44 @@ public:
         }
 
         // ── 扫描 date + symbol 列，构建索引（逐 batch 流式，不积累全量）──
+        // 顺带记录每批日期值域 (batchDateRange_), 供 makeChunkView 跳读不相交批
         std::unordered_map<std::string, int> dateToIdx;
         int nextInst = 0;
         int64_t totalRows = 0;
+        batchDateRange_.reserve(nBatches);
 
         for (int bi = 0; bi < nBatches; ++bi) {
+            int32_t batchMin = std::numeric_limits<int32_t>::max();
+            int32_t batchMax = std::numeric_limits<int32_t>::min();
             auto batch = reader_->ReadRecordBatch(bi);
-            if (!batch.ok()) continue;
-            auto b = batch.ValueOrDie();
-            auto symArr = batchStringColumn(b, "symbol");
-            auto dateArr = batchStringColumn(b, "trade_date");
-            if (!symArr || !dateArr) continue;
-
-            for (int64_t j = 0; j < b->num_rows(); ++j) {
-                std::string sym = symArr->IsNull(j) ? "" : symArr->GetString(j);
-                std::string dt = dateArr->IsNull(j) ? "" : dateArr->GetString(j);
-                if (!sym.empty() && localSymbolToInst_.find(sym) == localSymbolToInst_.end())
-                    localSymbolToInst_[sym] = nextInst++;
-                if (!dt.empty() && dateToIdx.find(dt) == dateToIdx.end()) {
-                    dateToIdx[dt] = static_cast<int>(dateToIdx.size());
-                    dateKeys_.push_back(DateKey{parseDateInt(dt)});
+            if (batch.ok()) {
+                auto b = batch.ValueOrDie();
+                auto symArr = batchStringColumn(b, "symbol");
+                auto dateArr = batchStringColumn(b, "trade_date");
+                if (symArr && dateArr) {
+                    for (int64_t j = 0; j < b->num_rows(); ++j) {
+                        std::string sym = symArr->IsNull(j) ? "" : symArr->GetString(j);
+                        std::string dt = dateArr->IsNull(j) ? "" : dateArr->GetString(j);
+                        if (!sym.empty() && localSymbolToInst_.find(sym) == localSymbolToInst_.end())
+                            localSymbolToInst_[sym] = nextInst++;
+                        if (!dt.empty()) {
+                            const int32_t dv = parseDateInt(dt);
+                            if (dv > 0) {
+                                if (dv < batchMin) batchMin = dv;
+                                if (dv > batchMax) batchMax = dv;
+                            }
+                            if (dateToIdx.find(dt) == dateToIdx.end()) {
+                                dateToIdx[dt] = static_cast<int>(dateToIdx.size());
+                                dateKeys_.push_back(DateKey{dv});
+                            }
+                        }
+                    }
                 }
+                totalRows += b->num_rows();
             }
-            totalRows += b->num_rows();
+            batchDateRange_.push_back(BatchDateRange(
+                (batchMin != std::numeric_limits<int32_t>::max()) ? batchMin : 0,
+                (batchMax != std::numeric_limits<int32_t>::min()) ? batchMax : 0));
         }
 
         nDates_ = static_cast<int>(dateKeys_.size());
@@ -238,6 +293,12 @@ public:
         std::sort(dateKeys_.begin(), dateKeys_.end(),
             [](const DateKey& a, const DateKey& b) { return a.value < b.value; });
 
+        // ── 排序后重建 O(1) 日期索引 (值 → 行号) ──
+        // emplace 保留首个出现下标, 与排序向量中 lower_bound 命中元素一致
+        dateIndexMap_.reserve(dateKeys_.size());
+        for (std::size_t i = 0; i < dateKeys_.size(); ++i)
+            dateIndexMap_.emplace(dateKeys_[i].value, static_cast<int>(i));
+
         // ── 记录可用字段名 ──
         {
             auto firstBatch = reader_->ReadRecordBatch(0).ValueOrDie();
@@ -254,17 +315,48 @@ public:
             << ", rows=" << static_cast<long long>(totalRows) << " (lazy load)";
     }
 
-    // ── 懒加载核心列（全量，首次访问触发）──
-    void ensureCoreColumn(const std::string& name) const {
-        if (coreLoaded_.count(name)) return;
-        coreLoaded_.insert(name);
+    // ── 单格取值 (统一取数入口): 空值 → NaN ──
+    static double extractCell(const std::shared_ptr<arrow::DoubleArray>& arr, int64_t row)
+    {
+        if (!arr || arr->IsNull(row)) return std::numeric_limits<double>::quiet_NaN();
+        return arr->Value(row);
+    }
 
-        auto& cd = coreColumns_[name];
-        cd.values.resize(static_cast<size_t>(nDates_) * nInsts_,
-                         std::numeric_limits<signal_value_t>::quiet_NaN());
-        cd.length = nDates_ * nInsts_;
-        cd.ptr = cd.values.data();
+    /// @brief 列名是否为核心 5 列
+    static bool isCoreColumn(const std::string& name)
+    {
+        return name == "open" || name == "high" || name == "low"
+            || name == "close" || name == "volume";
+    }
 
+    // ── 多列单扫加载 (核心列与额外列统一处理): 一次全文件扫描同时填充多列 ──
+    // 单列加载 (ensureCoreColumn/loadLazyField) 也经此入口, 不按列类型写两套扫描代码
+    void loadColumnsOnce(const std::vector<std::string>& names) const
+    {
+        if (names.empty() || nDates_ == 0 || nInsts_ == 0) return;
+
+        // 过滤未加载列 (核心列看 coreLoaded_, 额外列看 availableFields_)
+        std::vector<std::string> pending;
+        pending.reserve(names.size());
+        for (const auto& n : names) {
+            if (isCoreColumn(n)) {
+                if (!coreLoaded_.count(n)) { coreLoaded_.insert(n); pending.push_back(n); }
+            } else if (availableFields_.count(n)) {
+                pending.push_back(n);
+            }
+        }
+        if (pending.empty()) return;
+
+        // 预分配所有目标列 (全 NaN)
+        for (const auto& n : pending) {
+            auto& cd = isCoreColumn(n) ? coreColumns_[n] : extraFields_[n];
+            cd.values.assign(static_cast<size_t>(nDates_) * nInsts_,
+                             std::numeric_limits<signal_value_t>::quiet_NaN());
+            cd.length = nDates_ * nInsts_;
+            cd.ptr = cd.values.data();
+        }
+
+        // 单次 batch 扫描, 所有列同时填充 (symbol/date 每行只解析一次)
         const int nBatches = reader_->num_record_batches();
         for (int bi = 0; bi < nBatches; ++bi) {
             auto batchRes = reader_->ReadRecordBatch(bi);
@@ -273,63 +365,67 @@ public:
 
             auto symArr = batchStringColumn(batch, "symbol");
             auto dateArr = batchStringColumn(batch, "trade_date");
-            auto colArr = batchDoubleColumn(batch, name);
-            if (!symArr || !dateArr || !colArr) continue;
+            if (!symArr || !dateArr) continue;
+
+            std::vector<std::shared_ptr<arrow::DoubleArray>> colArrs(pending.size());
+            for (size_t ci = 0; ci < pending.size(); ++ci)
+                colArrs[ci] = batchDoubleColumn(batch, pending[ci]);
 
             for (int64_t j = 0; j < batch->num_rows(); ++j) {
-                if (colArr->IsNull(j)) continue;
                 std::string sym = symArr->IsNull(j) ? "" : symArr->GetString(j);
                 std::string dt = dateArr->IsNull(j) ? "" : dateArr->GetString(j);
                 auto si = localSymbolToInst_.find(sym);
-                auto di = dateIndex(dt);
-                if (si != localSymbolToInst_.end() && di >= 0)
+                if (si == localSymbolToInst_.end()) continue;
+                const int di = dateIndex(dt);
+                if (di < 0) continue;
+
+                for (size_t ci = 0; ci < pending.size(); ++ci) {
+                    const double v = extractCell(colArrs[ci], j);
+                    if (!std::isfinite(v)) continue;
+                    auto& cd = isCoreColumn(pending[ci])
+                        ? coreColumns_[pending[ci]] : extraFields_[pending[ci]];
                     cd.values[static_cast<size_t>(di) * nInsts_ + si->second] =
-                        static_cast<signal_value_t>(colArr->Value(j));
+                        static_cast<signal_value_t>(v);
+                }
             }
         }
+        for (const auto& n : pending)
+            if (!isCoreColumn(n)) availableFields_.erase(n);
+    }
+
+    // ── 懒加载核心列（全量，首次访问触发）──
+    void ensureCoreColumn(const std::string& name) const {
+        loadColumnsOnce({name});
     }
 
     // ── 懒加载额外字段（全量）──
     ColumnData loadLazyField(const std::string& name) const {
-        ColumnData cd;
-        if (nDates_ == 0 || nInsts_ == 0) return cd;
-        cd.values.resize(static_cast<size_t>(nDates_) * nInsts_,
-                         std::numeric_limits<signal_value_t>::quiet_NaN());
-        cd.length = nDates_ * nInsts_;
-        cd.ptr = cd.values.data();
-
-        const int nBatches = reader_->num_record_batches();
-        for (int bi = 0; bi < nBatches; ++bi) {
-            auto batchRes = reader_->ReadRecordBatch(bi);
-            if (!batchRes.ok()) continue;
-            auto batch = batchRes.ValueOrDie();
-
-            auto symArr = batchStringColumn(batch, "symbol");
-            auto dateArr = batchStringColumn(batch, "trade_date");
-            auto colArr = batchDoubleColumn(batch, name);
-            if (!symArr || !dateArr || !colArr) continue;
-
-            for (int64_t j = 0; j < batch->num_rows(); ++j) {
-                if (colArr->IsNull(j)) continue;
-                std::string sym = symArr->IsNull(j) ? "" : symArr->GetString(j);
-                std::string dt = dateArr->IsNull(j) ? "" : dateArr->GetString(j);
-                auto si = localSymbolToInst_.find(sym);
-                auto di = dateIndex(dt);
-                if (si != localSymbolToInst_.end() && di >= 0)
-                    cd.values[static_cast<size_t>(di) * nInsts_ + si->second] =
-                        static_cast<signal_value_t>(colArr->Value(j));
-            }
-        }
-        return cd;
+        loadColumnsOnce({name});
+        auto it = extraFields_.find(name);
+        return (it != extraFields_.end()) ? it->second : ColumnData{};
     }
 
-    // ── 分块视图：只加载指定日期区间 + 指定列 ──
+    // ── 分块视图：只加载指定日期区间 + 指定列 (串行路径 — 共享 reader_) ──
     std::unique_ptr<IMarketDataView> makeChunkView(
         const std::vector<DateKey>& dateRange,
         const std::vector<std::string>& columns) const
     {
+        return makeChunkViewWithReader(dateRange, columns, reader_);
+    }
+
+    // ── 分块视图填充 (指定 reader — 串行共享 reader_, 并行 worker 用独立句柄) ──
+    // makeChunkView 与 makeChunkViewConcurrent 共用此唯一实现; 索引 (日期/标的/
+    // 跳读) 只读共享, 仅 RecordBatch 读取经各自 reader, 无全局锁。
+    std::unique_ptr<IMarketDataView> makeChunkViewWithReader(
+        const std::vector<DateKey>& dateRange,
+        const std::vector<std::string>& columns,
+        const std::shared_ptr<arrow::ipc::RecordBatchFileReader>& reader) const
+    {
         if (!indexReady_ || dateRange.empty() || columns.empty())
             return nullptr;
+
+        foundation::perf::Stopwatch swScan;   // 块级扫描计时台账
+        swScan.start();
 
         // 构建 dateRange → 行索引 映射（按值查找，因为 dateRange 是 dateKeys_ 的子集）
         std::unordered_map<int32_t, int> dateValToChunkRow;
@@ -363,9 +459,24 @@ public:
         }
 
         // ── 单次 batch 扫描，所有列同时填充（symbol/date 每行只解析一次）──
-        const int nBatches = reader_->num_record_batches();
+        // 跳读: 与块值域不相交的批不可能命中任何块日期 → 整批跳过 (位级一致)
+        int32_t chunkMin = std::numeric_limits<int32_t>::max();
+        int32_t chunkMax = std::numeric_limits<int32_t>::min();
+        for (const auto& d : dateRange) {
+            if (d.value < chunkMin) chunkMin = d.value;
+            if (d.value > chunkMax) chunkMax = d.value;
+        }
+        const int nBatches = reader->num_record_batches();
+        int scannedBatches = 0;
+        int skippedBatches = 0;
         for (int bi = 0; bi < nBatches; ++bi) {
-            auto batchRes = reader_->ReadRecordBatch(bi);
+            if (bi < static_cast<int>(batchDateRange_.size())
+                && batchDateRange_[static_cast<size_t>(bi)].disjoint(chunkMin, chunkMax)) {
+                ++skippedBatches;
+                continue;
+            }
+            ++scannedBatches;
+            auto batchRes = reader->ReadRecordBatch(bi);
             if (!batchRes.ok()) continue;
             auto batch = batchRes.ValueOrDie();
 
@@ -397,6 +508,11 @@ public:
         }
         for (auto& cb : colBufs)
             view->setColumn(std::move(cb.name), std::move(cb.cd));
+        swScan.stop();
+        swScan.report("makeChunkView [dates=" + std::to_string(chunkDates)
+            + " cols=" + std::to_string(columns.size())
+            + " scanned=" + std::to_string(scannedBatches)
+            + " skipped=" + std::to_string(skippedBatches) + "]");
         return view;
     }
 
@@ -425,16 +541,15 @@ public:
             << " coreLoaded=" << coreLoadedCount << ")";
     }
 
-    // ── 日期查找辅助 ──
+    // ── 日期查找辅助 (O(1) 哈希) ──
     int dateIndex(const std::string& dateStr) const {
-        int32_t dateVal = parseDateInt(dateStr);
-        auto it = std::lower_bound(dateKeys_.begin(), dateKeys_.end(), dateVal,
-            [](const DateKey& dk, int32_t v) { return dk.value < v; });
-        if (it == dateKeys_.end() || it->value != dateVal) return -1;
-        return static_cast<int>(it - dateKeys_.begin());
+        const int32_t dateVal = parseDateInt(dateStr);
+        const auto it = dateIndexMap_.find(dateVal);
+        return (it != dateIndexMap_.end()) ? it->second : -1;
     }
 
     // ── 成员 ──
+    std::string m_path;                                  // 数据集文件路径 (worker 创建独立句柄用)
     std::shared_ptr<arrow::io::RandomAccessFile> input_;
     std::shared_ptr<arrow::ipc::RecordBatchFileReader> reader_;
 
@@ -443,9 +558,12 @@ public:
     std::vector<InstrumentId> instruments_;
     std::vector<std::string> symbolStrings_;
     std::unordered_map<std::string, int> localSymbolToInst_;
+    std::vector<BatchDateRange> batchDateRange_;   // 每批日期值域 (跳读索引)
+    std::unordered_map<int32_t, int> dateIndexMap_; // 排序后日期值 → 行号 (O(1) 查找)
     int nDates_ = 0, nInsts_ = 0;
 
-    std::unordered_set<std::string> availableFields_;
+    // 尚未加载的额外字段集合 (加载后移除 — 懒加载状态, 与 coreLoaded_ 同为 mutable)
+    mutable std::unordered_set<std::string> availableFields_;
 
     // 懒加载缓存（全量）
     mutable std::unordered_set<std::string> coreLoaded_;
@@ -510,14 +628,8 @@ ArrowMarketDataView::getField(const std::string& name) const {
 }
 
 void ArrowMarketDataView::ensureColumns(const std::vector<std::string>& names) const {
-    for (const auto& n : names) {
-        if (n == "open" || n == "high" || n == "low" || n == "close" || n == "volume") {
-            impl_->ensureCoreColumn(n);
-        } else if (impl_->availableFields_.count(n)) {
-            impl_->extraFields_[n] = impl_->loadLazyField(n);
-            impl_->availableFields_.erase(n);
-        }
-    }
+    // 多列单扫: 一次全文件扫描同时填充全部目标列 (核心列与额外列统一处理)
+    impl_->loadColumnsOnce(names);
 }
 
 void ArrowMarketDataView::clearColumnCaches() const {
@@ -536,6 +648,23 @@ std::unique_ptr<IMarketDataView>
 ArrowMarketDataView::makeChunkView(const std::vector<DateKey>& dateRange,
                                     const std::vector<std::string>& columns) const {
     return impl_->makeChunkView(dateRange, columns);
+}
+
+std::unique_ptr<IMarketDataView>
+ArrowMarketDataView::makeChunkViewConcurrent(const std::vector<DateKey>& dateRange,
+                                             const std::vector<std::string>& columns,
+                                             const ArrowReaderHandle& handle) const {
+    // 并行 worker 路径: 经独立句柄读 RecordBatch, 索引与串行路径共享 (只读)
+    return impl_->makeChunkViewWithReader(dateRange, columns, handle.reader());
+}
+
+const std::string& ArrowMarketDataView::arrowPath() const {
+    return impl_->m_path;
+}
+
+std::shared_ptr<ArrowReaderHandle>
+ArrowMarketDataView::createReaderHandle(const std::string& path) {
+    return ArrowReaderHandle::open(path);
 }
 
 const std::vector<DateKey>& ArrowMarketDataView::dates() const { return impl_->dateKeys_; }

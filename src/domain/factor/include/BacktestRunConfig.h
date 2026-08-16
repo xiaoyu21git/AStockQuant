@@ -56,6 +56,7 @@ struct BacktestRunConfig {
     double winsorizeQuantile{0.005};       // 因子值双侧缩尾分位数（0.0=不缩尾），传递给 Orchestrator
     int marketEnvironmentProfile = 0;
     bool ascending{true};                   // 因子方向: true=值越大越好, false=值越小越好
+    int workerThreads = 1;                  // 块级并行 worker 数 (<2 或块数<2 走串行路径, 同一套代码)
 };
 
 } // namespace Factor::backtest

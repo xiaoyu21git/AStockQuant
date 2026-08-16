@@ -16,7 +16,7 @@ constexpr const char* kDescriptionKey = "description";
 constexpr const char* kDataStatusKey = "data_status";
 constexpr const char* kAvailabilityKey = "is_available";
 constexpr const char* kConfigKey = "config";
-constexpr const char* kCalculationKey = "calculation";
+constexpr const char* kParametersKey = "parameters";
 constexpr const char* kDataRequirementsKey = "dataRequirements";
 constexpr const char* kBoundaryRulesKey = "boundaryRules";
 
@@ -147,14 +147,14 @@ void setSerializedConfig(foundation::json::JsonFacade& config, const foundation:
     config.set(kConfigKey, nestedConfig);
 }
 
-bool hasCalculationConfig(const foundation::json::JsonFacade& config)
+bool hasParametersConfig(const foundation::json::JsonFacade& config)
 {
-    return config.has(kCalculationKey);
+    return config.has(kParametersKey);
 }
 
-foundation::json::JsonFacade calculationConfig(const foundation::json::JsonFacade& config)
+foundation::json::JsonFacade parametersConfig(const foundation::json::JsonFacade& config)
 {
-    return config.get(kCalculationKey);
+    return config.get(kParametersKey);
 }
 
 void setDataRequirementsConfig(foundation::json::JsonFacade& config, const foundation::json::JsonFacade& dataRequirements)

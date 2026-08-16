@@ -374,8 +374,8 @@ std::shared_ptr<ValueFactor> ValueFactor::create(
 void ValueFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
-    if (config::hasCalculationConfig(config)) {
-        params_ = valueParamsFromJson(config::calculationConfig(config));
+    if (config::hasParametersConfig(config)) {
+        params_ = valueParamsFromJson(config::parametersConfig(config));
     }
     dataRequirements_ = getDataRequirements();
 }

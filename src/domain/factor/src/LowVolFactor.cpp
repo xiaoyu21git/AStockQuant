@@ -4,6 +4,7 @@
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
 #include <ta_libc.h>
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 
 #include <algorithm>
@@ -66,23 +67,22 @@ LowVolFactor::Params lowVolParamsFromJson(const foundation::json::JsonFacade& js
 
 bool parseIsoDate(const std::string& text, std::tm& out)
 {
-    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+    // 字符转换复用 foundation::utils::parseIsoDateToInt (唯一实现), 此处仅保留 std::tm 包装
+    const int packed = foundation::utils::parseIsoDateToInt(text.data(), text.size());
+    if (packed < 0) {
         return false;
     }
-    try {
-        std::tm candidate = {};
-        candidate.tm_year = std::stoi(text.substr(0, 4)) - 1900;
-        candidate.tm_mon = std::stoi(text.substr(5, 2)) - 1;
-        candidate.tm_mday = std::stoi(text.substr(8, 2));
-        candidate.tm_isdst = -1;
-        if (std::mktime(&candidate) == -1) {
-            return false;
-        }
-        out = candidate;
-        return true;
-    } catch (...) {
+
+    std::tm candidate = {};
+    candidate.tm_year = packed / 10000 - 1900;
+    candidate.tm_mon = (packed / 100) % 100 - 1;
+    candidate.tm_mday = packed % 100;
+    candidate.tm_isdst = -1;
+    if (std::mktime(&candidate) == -1) {
         return false;
     }
+    out = candidate;
+    return true;
 }
 
 std::string trimAsciiWhitespace(std::string text)
@@ -657,8 +657,8 @@ std::optional<double> LowVolFactor::computeBeta(
 
 void LowVolFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
-    if (config::hasCalculationConfig(config)) {
-        const auto calculation = config::calculationConfig(config);
+    if (config::hasParametersConfig(config)) {
+        const auto calculation = config::parametersConfig(config);
         params_ = lowVolParamsFromJson(calculation);
     }
     dataRequirements_ = getDataRequirements();

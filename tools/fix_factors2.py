@@ -8,8 +8,11 @@ cur = conn.cursor()
 # GrowthMetric enum: REVENUE_GROWTH=0, NET_PROFIT_GROWTH=1, DELTA_ROE=2, SUE=3
 # QualityMetric: ROE=0, ROA=1, GROSS_MARGIN=2, OPERATING_MARGIN=3, EARNINGS_QUALITY=4
 # ValuationMetric: BP=0, EP=1, DIVIDEND_YIELD=2, CFP=3
-# 频率枚举: 低频=2 (对应 DataFrequency enum)
-# 标准化: Z-Score=0, Rank=1, None=2
+# ⚠️ 本脚本第 11-12 行旧注释 "低频=2, Z-Score=0, Rank=1, None=2" 与 C++ 枚举不符 (写库时错位),
+#    其写入的错位值已于 2026-08-16 由 tools/restore_parameters_key.py 按因子名意图纠正:
+#   C++ 现行枚举: DataFrequency{Minute=0, Daily=1, Weekly=2, ...} → 日频=1
+#                 StandardizationMethod{None=0, ZScore=1, MinMax=2, Rank=3, Percentile=4}
+#   (此脚本已执行完毕, 仅供考古; 勿再运行)
 
 factors = [
     # MOM type=1

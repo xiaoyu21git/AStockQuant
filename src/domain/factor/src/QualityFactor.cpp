@@ -246,8 +246,8 @@ std::shared_ptr<QualityFactor> QualityFactor::create(
 
 void QualityFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
-    if (config::hasCalculationConfig(config)) {
-        const auto calculation = config::calculationConfig(config);
+    if (config::hasParametersConfig(config)) {
+        const auto calculation = config::parametersConfig(config);
         params_ = qualityParamsFromJson(calculation);
     }
     dataRequirements_ = getDataRequirements();

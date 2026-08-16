@@ -3,10 +3,13 @@
 #include "factor_compute/FactorEngine.h"
 #include "factor_compute/IMarketDataView.h"
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -14,12 +17,15 @@
 namespace factor::compute {
 
 class ArrowMarketDataView;
+class ArrowReaderHandle;
 
 /// @brief 回看数据加载器 — PG 按字段懒加载 + 日期/静态/财报语义查询
 ///
 /// 因子值管线与策略日循环视图的 DB 回看唯一入口 (因子回测/策略回测共用一份)。
 /// 每个字段首次查询时一次性拉回 [minReportDate, cacheStartDate] 全区间并缓存,
 /// 后续查询纯内存命中。必须由 shared_ptr 持有 (dbFallbackFn 回调捕获自身所有权)。
+/// 块级并行时由主线程预载全部字段 + 多 worker 共享同一 loader: 缓存读写经
+/// shared_mutex (读共享/写独占, PG 查询被写锁自然串行化)。
 class WarmupDataLoader : public std::enable_shared_from_this<WarmupDataLoader> {
 public:
     using CacheMap = std::unordered_map<std::string,                 // field
@@ -29,18 +35,19 @@ public:
     /// @param maxLookback  最大回看交易日数
     WarmupDataLoader(std::int32_t firstDateVal, int maxLookback);
 
-    /// @brief 惰性 dbFallback 回调 (挂到 BacktestDataService)
+    /// @brief 惰性 dbFallback 回调
     /// 回调持有 loader 的 shared_ptr 所有权, loader 释放后回调仍可安全调用 (缓存常驻)
     [[nodiscard]] BacktestDataService::DbFallbackFn dbFallbackFn();
+
+    /// @brief 字段级懒加载: 首次查询时从 PG 拉回全区间并写入缓存 (幂等, __loaded__ 标记)
+    /// 主线程预载 (块级并行前全字段) + 运行期 dbFallback 兜底调用; 内部 mutex 双检
+    void ensureFieldLoaded(const std::string& field,
+                           const std::vector<std::string>& symbols);
 
 private:
     /// @brief 字段分类 — 决定 PG 查询方式与缓存查询语义
     enum class FieldClass { SymbolInfo, Financial, Kline, Index, Minute, Unknown };
     [[nodiscard]] static FieldClass classifyField(const std::string& field);
-
-    /// @brief 字段级懒加载: 首次查询时从 PG 拉回全区间并写入缓存 (幂等, __loaded__ 标记)
-    void ensureFieldLoaded(const std::string& field,
-                           const std::vector<std::string>& symbols);
 
     /// @brief 从缓存取某日截面 (静态取 "_", 财报取公告日最近, 其余精确日期)
     [[nodiscard]] std::unordered_map<std::string, double> lookupField(
@@ -48,6 +55,7 @@ private:
         const std::vector<std::string>& symbols) const;
 
     std::shared_ptr<CacheMap> m_dbCache;
+    mutable std::shared_mutex m_cacheMutex;  // ensureFieldLoaded 写 / lookupField 读
     std::string m_minReportDate;
     std::string m_cacheStartDate;
 };
@@ -69,6 +77,7 @@ public:
     /// @param warmupDays       数据集前 DB 回看交易日数 (0 = 不查 DB)
     /// @param arrowPrefixDates 数据集内回看交易日 (块 N>0 由调用方从数据集日期切出)
     /// @param prefixRowCountOut 前置行总数 = warmupDates + arrowPrefixDates (compute 跳过用)
+    /// @param readerHandle     null = 串行路径 (共享 reader); 非 null = 并行 worker 独立句柄
     /// @return 扩展视图, 构建失败返回 nullptr
     [[nodiscard]] std::unique_ptr<IMarketDataView> build(
         const std::vector<DateKey>& dates,
@@ -76,7 +85,8 @@ public:
         const std::vector<std::string>& fields,
         int warmupDays,
         const std::vector<DateKey>& arrowPrefixDates,
-        std::size_t& prefixRowCountOut) const;
+        std::size_t& prefixRowCountOut,
+        const ArrowReaderHandle* readerHandle = nullptr) const;
 
 private:
     /// @brief 从目标首日往前, data.trade_calendar 查 warmupDays 个交易日
@@ -119,13 +129,18 @@ public:
     /// @param dates       交易日序列 (调用方已完成窗口/交易日历过滤)
     /// @param factorIds   因子实例 ID 列表
     /// @param forwardDays 块尾部扩展交易日 (0 = 无扩展)
-    /// @param sink        每块回调 (同步, 回调返回后块视图即销毁)
+    /// @param sink        每块回调 (同步, 回调返回后块视图即销毁; 并行模式下主线程按块序串行调用)
+    /// @param onProgress  进度回调 — 按"已完成 sink 的块数"计
+    /// @param workerThreads 块级并行 worker 数 (<2 或块数<2 走串行路径, 同一套代码)
+    /// @param cancelFlag  软取消标志 (每日期循环间检查; 取消后未 sink 块丢弃, 提前返回)
     void run(const ArrowMarketDataView& arrowView,
              const std::vector<DateKey>& dates,
              const std::vector<std::string>& factorIds,
              int forwardDays,
              ChunkSink sink,
-             ProgressFn onProgress = {});
+             ProgressFn onProgress = {},
+             int workerThreads = 1,
+             const std::atomic<bool>* cancelFlag = nullptr);
 
 private:
     /// @brief 收集因子所需额外字段 (去核心 5 列) + 最大回看交易日

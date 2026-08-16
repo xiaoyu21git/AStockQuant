@@ -118,37 +118,27 @@ void loadBoundaryRulesFromJson(BoundaryRules& boundaryRules,
     }
 }
 
-constexpr int kMonthsPerYear = 12;
 constexpr int kFridayIndex = 5;
 constexpr int kIsoWeekLength = 7;
 
 bool parseIsoDate(const std::string& text, std::tm& out)
 {
-    if (text.size() != 10 || text[4] != '-' || text[7] != '-') {
+    // 字符转换复用 foundation::utils::parseIsoDateToInt (唯一实现), 此处仅保留 std::tm 包装
+    const int packed = foundation::utils::parseIsoDateToInt(text.data(), text.size());
+    if (packed < 0) {
         return false;
     }
 
-    try {
-        const int year = std::stoi(text.substr(0, 4));
-        const int month = std::stoi(text.substr(5, 2));
-        const int day = std::stoi(text.substr(8, 2));
-        if (month < 1 || month > kMonthsPerYear || day < 1 || day > 31) {
-            return false;
-        }
-
-        std::tm candidate = {};
-        candidate.tm_year = year - 1900;
-        candidate.tm_mon = month - 1;
-        candidate.tm_mday = day;
-        candidate.tm_isdst = -1;
-        if (std::mktime(&candidate) == -1) {
-            return false;
-        }
-        out = candidate;
-        return true;
-    } catch (...) {
+    std::tm candidate = {};
+    candidate.tm_year = packed / 10000 - 1900;
+    candidate.tm_mon = (packed / 100) % 100 - 1;
+    candidate.tm_mday = packed % 100;
+    candidate.tm_isdst = -1;
+    if (std::mktime(&candidate) == -1) {
         return false;
     }
+    out = candidate;
+    return true;
 }
 
 std::string formatIsoDate(const std::tm& value)
@@ -491,7 +481,7 @@ std::string BaseFactor::resolveCommonEffectiveDateForFields(const CalculationCon
                 missingField = true;
                 continue;
             }
-            const bool hasFieldData = !context.historicalView->getCrossSection(candidate, field, symbols).empty();
+            const bool hasFieldData = context.historicalView->hasCrossSectionData(candidate, field, symbols);
             if (hasFieldData) {
                 matchedField = true;
             } else if (requirementMode == CommonFieldRequirementMode::AllFields) {

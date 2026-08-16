@@ -348,6 +348,7 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         }
 
         auto& cache = activeTier();
+        size_t bShareSkipped = 0;
         for (const auto& iid : instanceIds) {
             auto cacheIt = cache.find(iid);
             if (cacheIt == cache.end()) continue;
@@ -357,6 +358,10 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
             size_t matched = 0;
             double sampleVal = 0.0;
             for (const auto& [sym, val] : dateIt->second) {
+                if (foundation::market::AStockSymbol::isBShareSymbol(sym)) {  // B股不进截面快照
+                    ++bShareSkipped;
+                    continue;
+                }
                 auto idIt = symbolToId.find(sym);
                 if (idIt == symbolToId.end()) continue;
                 if (matched == 0) sampleVal = val;
@@ -371,6 +376,8 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                                      << " matched=" << matched
                                      << " sampleVal=" << sampleVal;
         }
+        if (bShareSkipped > 0)
+            INTERNAL_DEBUG_STREAM << "[RFS] copySnapshots B股剔除: " << bShareSkipped << " 标的";
         return;
     }
 
@@ -413,6 +420,7 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
     };
 
     auto& cache = activeTier();
+    size_t bShareSkipped = 0;
     for (const auto& iid : instanceIds) {
         // ── 缓存读: 首次计算后后续 step() 调用直接读缓存 ──
         auto cacheIt = cache.find(iid);
@@ -420,6 +428,10 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
             auto dateIt = cacheIt->second.find(std::string(dateBuf));
             if (dateIt != cacheIt->second.end()) {
                 for (const auto& [sym, val] : dateIt->second) {
+                    if (foundation::market::AStockSymbol::isBShareSymbol(sym)) {  // B股不进截面快照
+                        ++bShareSkipped;
+                        continue;
+                    }
                     auto idIt = codeOnlyToId.find(sym);
                     if (idIt != codeOnlyToId.end())
                         output.push_back(RuntimeFactorSnapshot{ idIt->second, iid, val, 1 });
@@ -441,6 +453,10 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         for (uint32_t id : syms) {
             std::string resolved = m_symbolResolver ? m_symbolResolver(id) : std::string();
             if (resolved.empty()) continue;
+            if (foundation::market::AStockSymbol::isBShareSymbol(resolved)) {  // B股不进全截面计算 (Z-score 统计零污染)
+                ++bShareSkipped;
+                continue;
+            }
             symbolStrs.push_back(std::move(resolved));  // 保留完整 symbol, 不去后缀
         }
 
@@ -467,6 +483,8 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                                  << " computed=" << factorValues.size()
                                  << " totalSyms=" << symbolStrs.size();
     }
+    if (bShareSkipped > 0)
+        INTERNAL_DEBUG_STREAM << "[RFS] copySnapshots B股剔除: " << bShareSkipped << " 标的";
 }
 
 // ── preflight P2 探测: 评估日因子全截面是否有有限值 (§9, 终审 4.1) ──
@@ -536,7 +554,8 @@ void RuntimeFactorSvc::warmUpCache(const std::string& strategyId, BarPeriod peri
     std::vector<std::string> fullSymbols;
     fullSymbols.reserve(symbols.size());
     for (const auto& sym : symbols)
-        if (!sym.empty()) fullSymbols.push_back(sym);
+        if (!sym.empty() && !foundation::market::AStockSymbol::isBShareSymbol(sym))  // 入口统一过滤: B股不进预热缓存
+            fullSymbols.push_back(sym);
     if (fullSymbols.empty()) return;
 
     auto& cache = tier(period);  // ADR-004: 按 period 物理分区, 跨频零共享

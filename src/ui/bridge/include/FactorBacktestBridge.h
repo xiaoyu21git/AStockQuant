@@ -180,6 +180,9 @@ private:
     QVariantMap m_backtestResult;
     QVariantMap m_resultMetrics;
     std::atomic<bool> m_isRunning{false};
+    // 软取消请求标志 (每次回测启动时复位; cancelBacktest 置位 → 透传编排器/管线
+    // 每日期检查点, 取消后丢弃未完成块且不发布结果)
+    std::atomic<bool> m_cancelRequested{false};
     double m_progress{0.0};
     QString m_statusText;
     QVariantMap m_factorSupportMapCache;

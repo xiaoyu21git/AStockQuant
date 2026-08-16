@@ -47,6 +47,15 @@ public:
         const std::string& field,
         const std::vector<std::string>& symbols = {}) const = 0;
 
+    /// @brief 某日某字段截面是否存在数据 — 与 !getCrossSection().empty() 等价
+    /// 默认实现直接调用 getCrossSection; 实现类可提供短路版本避免构建全市场 map
+    virtual bool hasCrossSectionData(const std::string& date,
+                                     const std::string& field,
+                                     const std::vector<std::string>& symbols = {}) const
+    {
+        return !getCrossSection(date, field, symbols).empty();
+    }
+
     virtual std::unordered_map<std::string, std::unordered_map<std::string, double>> getBatchCrossSections(
         const std::string& date,
         const std::vector<std::string>& symbols,

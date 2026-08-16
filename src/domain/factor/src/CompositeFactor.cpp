@@ -548,10 +548,10 @@ int CompositeFactor::getLookbackDays() const
 void CompositeFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
-    if (!config::hasCalculationConfig(config)) {
+    if (!config::hasParametersConfig(config)) {
         throw std::runtime_error("组合因子 calculation 字段缺失");
     }
-    params_ = compositeParamsFromJson(config::calculationConfig(config));
+    params_ = compositeParamsFromJson(config::parametersConfig(config));
     children_.clear();
 }
 

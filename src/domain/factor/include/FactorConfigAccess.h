@@ -25,8 +25,8 @@ std::string requiredSerializedDescription(const foundation::json::JsonFacade& co
 void setSerializedDataStatus(foundation::json::JsonFacade& config, const foundation::json::JsonFacade& dataStatus);
 void setSerializedAvailability(foundation::json::JsonFacade& config, bool isAvailable);
 void setSerializedConfig(foundation::json::JsonFacade& config, const foundation::json::JsonFacade& nestedConfig);
-bool hasCalculationConfig(const foundation::json::JsonFacade& config);
-foundation::json::JsonFacade calculationConfig(const foundation::json::JsonFacade& config);
+bool hasParametersConfig(const foundation::json::JsonFacade& config);
+foundation::json::JsonFacade parametersConfig(const foundation::json::JsonFacade& config);
 void setDataRequirementsConfig(foundation::json::JsonFacade& config, const foundation::json::JsonFacade& dataRequirements);
 bool hasDataRequirementsConfig(const foundation::json::JsonFacade& config);
 foundation::json::JsonFacade dataRequirementsConfig(const foundation::json::JsonFacade& config);

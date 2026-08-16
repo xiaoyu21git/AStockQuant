@@ -238,14 +238,6 @@
     "neutralizationEnabled": false,
     "standardization": "zscore"
   },
-  "calculation": {
-    "growthMetrics": ["revenue_growth", "net_profit_growth"],
-    "growthWeights": [60, 40],
-    "timeframe": "quarterly",
-    "lookbackPeriod": 252,
-    "neutralizationEnabled": false,
-    "standardization": "zscore"
-  },
   "dataRequirements": {
     "required": ["total_revenue", "net_profit"],
     "sourceTable": "financial_indicator"

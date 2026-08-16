@@ -389,24 +389,24 @@ factor::FactorType FactorDetectionService::resolveRuntimeType(
 
 bool FactorDetectionService::configHasCustomExpression(const factor::FactorInstanceInfo& info) const
 {
-    if (!info.config.has("calculation")) {
+    if (!info.config.has("parameters")) {
         return false;
     }
-    const auto calculation = info.config.get("calculation");
-    if (!calculation.has("expression")) {
+    const auto parameters = info.config.get("parameters");
+    if (!parameters.has("expression")) {
         return false;
     }
-    const auto expression = calculation.get("expression");
+    const auto expression = parameters.get("expression");
     return expression.isString() && !QString::fromStdString(expression.asString()).trimmed().isEmpty();
 }
 
 bool FactorDetectionService::configNeutralizationEnabled(const factor::FactorInstanceInfo& info) const
 {
-    if (!info.config.has("calculation")) {
+    if (!info.config.has("parameters")) {
         return false;
     }
-    const auto calculation = info.config.get("calculation");
-    return calculation.has("neutralizationEnabled") && calculation.get("neutralizationEnabled").asBool();
+    const auto parameters = info.config.get("parameters");
+    return parameters.has("neutralizationEnabled") && parameters.get("neutralizationEnabled").asBool();
 }
 
 QStringList FactorDetectionService::declaredRequiredFieldsFromConfig(const factor::FactorInstanceInfo& info) const

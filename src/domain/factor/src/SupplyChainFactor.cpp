@@ -114,8 +114,8 @@ void SupplyChainFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
 
-    foundation::json::JsonFacade calcCfg = config.has("calculation")
-        ? config.get("calculation")
+    foundation::json::JsonFacade calcCfg = config.has("parameters")
+        ? config.get("parameters")
         : config;
 
     params_.fromJson(calcCfg);

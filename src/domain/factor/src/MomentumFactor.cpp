@@ -4,11 +4,11 @@
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
 #include <ta_libc.h>
+#include "foundation/Utils/DateUtils.h"
 
 #include <algorithm>
 #include <cmath>
 #include <ctime>
-#include <iomanip>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -99,15 +99,6 @@ double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBE
     }
     return output[lastIndex];
 }
-
-bool parseDateYyyyMmDd(const std::string& dateText, std::tm& dateValue)
-{
-    std::istringstream input(dateText);
-    input >> std::get_time(&dateValue, "%Y-%m-%d");
-    return !input.fail();
-}
-
-
 
 }
 
@@ -455,8 +446,8 @@ std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomen
 
 std::vector<double> MomentumFactor::getAdjustedPriceSeries(const std::string& symbol,
                                                            const CalculationContext& context) {
-    std::tm parsedDate{};
-    if (!parseDateYyyyMmDd(context.date, parsedDate)) {
+    // 日期格式校验复用 foundation::utils::parseIsoDateToInt (唯一实现)
+    if (foundation::utils::parseIsoDateToInt(context.date.data(), context.date.size()) < 0) {
         throw std::runtime_error("非法计算日期");
     }
 
@@ -570,8 +561,8 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
     
     // 加载动量因子特定配置
-    if (config::hasCalculationConfig(config)) {
-        auto calcConfig = config::calculationConfig(config);
+    if (config::hasParametersConfig(config)) {
+        auto calcConfig = config::parametersConfig(config);
         params_ = momentumParamsFromJson(calcConfig);
     }
 

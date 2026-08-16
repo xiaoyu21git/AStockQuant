@@ -767,6 +767,7 @@ private:
         int stopLossFilled = 0, ruleExitFilled = 0, normalSellFilled = 0;
         int riskRejectedCount = 0, stopLossSkippedNoHeld = 0, totalStopLossOrders = 0;
         int stopLossExitCount = 0, ruleExitCount = 0;  // 诊断计数器
+        int bShareBlockedOrders = 0;                   // B股禁买拦截笔数 (全局硬过滤)
         double totalProfit = 0.0, totalLoss = 0.0;
         double largestWin = 0.0, largestLoss = 0.0;
 

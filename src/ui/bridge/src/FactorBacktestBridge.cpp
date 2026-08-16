@@ -840,6 +840,9 @@ void FactorBacktestBridge::startBacktestWithFactors(
     // 异步: 全部重操作移到 worker 线程，不阻塞 UI
     int capturedDatasetId = m_selectedDatasetId;
     m_workerPool->post([this, runConfigs, capturedDatasetId]() {
+        // 每次回测启动复位软取消标志 (上次取消残留不得污染本次)
+        m_cancelRequested.store(false, std::memory_order_release);
+
         // ── RAII scope guard: 确保任何退出路径都释放 dbFallback ──
         struct BacktestCleanup {
             FactorBacktestBridge* bridge;
@@ -946,7 +949,25 @@ void FactorBacktestBridge::startBacktestWithFactors(
                 // 结果回调: 编排器同步调用, 仅暂存序列化结果
                 [&serializedResult](const std::string& serialized) {
                     serializedResult = serialized;
-                });
+                },
+                &m_cancelRequested);
+
+            if (m_cancelRequested.load(std::memory_order_acquire)) {
+                // 已取消: 不发布结果, 中止整批, 释放 ArrowView mmap (对齐正常完成路径)
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_isRunning.store(false);
+                    emit isRunningChanged();
+                    if (m_factorEngine) m_factorEngine->clearSignalCache();
+                    if (m_arrowView) {
+                        m_arrowView->clearColumnCaches();
+                        m_arrowView.reset();
+                        m_loadedDatasetId = 0;
+                        INTERNAL_INFO_STREAM << "[MEM] 取消路径 ArrowView reset (mmap 已关闭)";
+                    }
+                }, Qt::QueuedConnection);
+                INTERNAL_INFO_STREAM << "[回测流程] 已取消: 批次中止, 结果不发布";
+                return;
+            }
 
             QString runError;
             QVariantMap runResult = processRunResult(runConfig, serializedResult, runError);
@@ -1046,7 +1067,11 @@ void FactorBacktestBridge::startCompositeBacktest(const QVariantMap& compositeDr
 }
 
 void FactorBacktestBridge::cancelBacktest()
-{ m_isRunning.store(false); emit isRunningChanged(); m_statusText = QStringLiteral("已取消"); emit statusChanged(); emit backtestCancelled(); }
+{
+    // 置软取消标志: 编排器/管线每日期检查点感知, 未完成块丢弃且结果不发布
+    m_cancelRequested.store(true, std::memory_order_release);
+    m_isRunning.store(false); emit isRunningChanged(); m_statusText = QStringLiteral("已取消"); emit statusChanged(); emit backtestCancelled();
+}
 
 void FactorBacktestBridge::clearBacktestResult()
 {

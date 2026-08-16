@@ -1,20 +1,22 @@
 // ══════════════════════════════════════════════════════════════════════════════
-// 因子回测管线基准程序 (Phase 0: 基线台账 + 金样 JSON + 小块对拍门禁)
+// 因子回测管线基准程序 (Phase 0: 基线台账 + 基线 JSON + 小块对拍门禁)
 //
 // 用法:
 //   --list                                   列出 DB 中全部因子实例 (id/名称/类型)
 //   --arrow <path>                           数据集 Arrow 文件路径 (必填, 除 --list)
 //   --factor <id>                            因子实例 id (可重复, 多因子取均值)
 //   --start <YYYY-MM-DD> / --end <YYYY-MM-DD> 日期过滤 (小块对拍: 只留 ~120 交易日)
-//   --out <json>                             回测结果 JSON 输出路径 (金样)
+//   --out <json>                             回测结果 JSON 输出路径 (基线)
 //   --forward <d> / --rebalance <d>          前向/调仓周期 (默认 30/15)
 //   --groups <n> / --ascending <0|1>         分组数/因子方向 (默认 5/1)
 //   --winsorize <q>                          缩尾分位数 (默认 0.005, 0=不缩尾)
+//   --threads <n>                            块级并行 worker 数 (默认 1; <2 走串行路径)
+//   --cancel-after-ms <t>                    软取消单测: t 毫秒后置取消标志; 断言结果不发布
 //
 // 与 UI 完全同接线 (FactorBacktestBridge::initialize + startRun):
 //   BacktestScheduler + BacktestDataService + FactorEngine + BacktestReporter
 //   + FactorInstanceManager(NativePg 连接) + ArrowMarketDataView → Orchestrator
-// 结果 JSON = Orchestrator::onComplete 原文 = UI 展示的同一格式 → 金样可位级对拍。
+// 结果 JSON = Orchestrator::onComplete 原文 = UI 展示的同一格式 → 基线可位级对拍。
 // 耗时台账: [PERF] 阶段级汇总 (视图构建/编排回测/JSON 落盘)。
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -30,6 +32,9 @@
 #include "foundation/perf/Stopwatch.h"
 #include "foundation/log/logging.hpp"
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -37,6 +42,7 @@
 #include <iostream>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -55,6 +61,8 @@ struct BenchArgs {
     int numGroups = 5;
     bool ascending = true;
     double winsorize = 0.005;
+    int workerThreads = 1;      // 块级并行 worker 数
+    int cancelAfterMs = 0;      // 软取消单测: >0 时启用
 };
 
 /// @brief 解析 "YYYY-MM-DD" → YYYYMMDD 整数 (非法返回 0)
@@ -97,7 +105,9 @@ void printUsage(const char* prog)
         "  --rebalance <d>            调仓周期 (默认 15)\n"
         "  --groups <n>               分组数 (默认 5)\n"
         "  --ascending <0|1>          因子方向 (默认 1)\n"
-        "  --winsorize <q>            缩尾分位数 (默认 0.005)\n",
+        "  --winsorize <q>            缩尾分位数 (默认 0.005)\n"
+        "  --threads <n>              块级并行 worker 数 (默认 1)\n"
+        "  --cancel-after-ms <t>      软取消单测: t 毫秒后置取消标志, 断言不发布结果\n",
         prog);
 }
 
@@ -148,6 +158,12 @@ bool parseArgs(int argc, char** argv, BenchArgs& out)
         } else if (arg == "--winsorize") {
             const char* v = next("--winsorize"); if (!v) return false;
             out.winsorize = std::atof(v);
+        } else if (arg == "--threads") {
+            const char* v = next("--threads"); if (!v) return false;
+            out.workerThreads = std::atoi(v);
+        } else if (arg == "--cancel-after-ms") {
+            const char* v = next("--cancel-after-ms"); if (!v) return false;
+            out.cancelAfterMs = std::atoi(v);
         } else {
             std::fprintf(stderr, "未知参数: %s\n", arg.c_str());
             return false;
@@ -178,7 +194,7 @@ int runList(factor::FactorInstanceManager& instanceMgr)
     return 0;
 }
 
-/// @brief 运行回测并落盘金样 JSON (与 UI 同一接线)
+/// @brief 运行回测并落盘基线 JSON (与 UI 同一接线)
 int runBacktest(const BenchArgs& args)
 {
     // ── PG 连接池 (与应用同源: astock/astock123@localhost:5432/astock_quant) ──
@@ -258,16 +274,29 @@ int runBacktest(const BenchArgs& args)
     cfg.numGroups = args.numGroups;
     cfg.ascending = args.ascending;
     cfg.winsorizeQuantile = args.winsorize;
+    cfg.workerThreads = std::max(1, args.workerThreads);
 
     std::printf("[回测] factors=%zu forward=%dd rebalance=%dd groups=%d "
-                "start=%s end=%s\n",
+                "threads=%d start=%s end=%s\n",
                 resolvedFactorIds.size(), cfg.forwardDays, cfg.rebalanceDays,
-                cfg.numGroups, args.startDate.c_str(), args.endDate.c_str());
+                cfg.numGroups, cfg.workerThreads,
+                args.startDate.c_str(), args.endDate.c_str());
 
     // ── 编排回测 (同步执行) ──
     foundation::perf::Stopwatch swRun;
     std::string serializedResult;
     swRun.start();
+
+    // 软取消单测: 独立线程定时置取消标志 (模拟 UI cancelBacktest), 断言不发布结果
+    std::atomic<bool> cancelFlag{false};
+    std::thread cancelThread;
+    if (args.cancelAfterMs > 0) {
+        cancelThread = std::thread([&cancelFlag, ms = args.cancelAfterMs]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+            cancelFlag.store(true, std::memory_order_release);
+        });
+    }
+
     orchestrator.run(
         cfg,
         [](double progress, const std::string& status) {
@@ -275,11 +304,30 @@ int runBacktest(const BenchArgs& args)
         },
         [&serializedResult](const std::string& serialized) {
             serializedResult = serialized;
-        });
+        },
+        args.cancelAfterMs > 0 ? &cancelFlag : nullptr);
     swRun.stop();
     swRun.report("Orchestrator 全链回测");
+    if (cancelThread.joinable()) cancelThread.join();
 
     // ── 结果落盘 ──
+    if (args.cancelAfterMs > 0) {
+        // 取消路径: 结果必须不发布 (serializedResult 为空), 且远早于完整回测返回
+        const double elapsedMs = swRun.elapsedMilliseconds();
+        if (serializedResult.empty()) {
+            std::printf("[取消单测] PASS: %.0f ms 返回, 结果未发布 (取消延迟=单日检查点+排水)\n",
+                        elapsedMs);
+        } else {
+            std::fprintf(stderr, "[取消单测] FAIL: 取消后仍发布了结果 (%zu 字节)\n",
+                         serializedResult.size());
+            return 6;
+        }
+        if (cancelFlag.load(std::memory_order_acquire)) {
+            return 0;
+        }
+        std::fprintf(stderr, "[取消单测] WARN: 结果为空但取消标志未置位 (回测早于取消定时自然结束)\n");
+        return 0;
+    }
     if (serializedResult.empty()) {
         std::fprintf(stderr, "FATAL: 回测未产出结果 JSON\n");
         return 4;
@@ -292,7 +340,7 @@ int runBacktest(const BenchArgs& args)
         }
         ofs << serializedResult;
         ofs.close();
-        std::printf("[输出] 金样 JSON 已写入: %s (%zu 字节)\n",
+        std::printf("[输出] 基线 JSON 已写入: %s (%zu 字节)\n",
                     args.outPath.c_str(), serializedResult.size());
     } else {
         std::printf("[结果] %s\n", serializedResult.c_str());

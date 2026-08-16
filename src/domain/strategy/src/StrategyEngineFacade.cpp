@@ -1806,6 +1806,7 @@ void StrategyEngine::runBacktestLoop(
     double& cash = ctx.cash;
     double& peakEquity = ctx.peakEquity;
     auto& backtestPositions = ctx.backtestPositions;
+    int& bShareBlockedOrders = ctx.bShareBlockedOrders;
 
     int& riskRejectedCount = ctx.riskRejectedCount;
     int& totalFills = ctx.totalFills;
@@ -2186,6 +2187,17 @@ void StrategyEngine::runBacktestLoop(
             std::int64_t dayMinQty = 0, dayMaxQty = 0;
             for (auto& order : orderList) {
                 const std::string& symbol = order.symbol();
+                // B股禁买: 全局硬过滤 (仅拦买入; 卖出路径不动)。置顶于 symbolToCol.at 之前,
+                // 视图外符号(因子缓存 key 与视图不一致的边界情形)不会触发 .at() 异常
+                if (order.side() == OrderSide::Buy &&
+                    foundation::market::AStockSymbol::isBShareSymbol(symbol)) {
+                    ++bShareBlockedOrders;
+                    INTERNAL_DEBUG_STREAM << "[backtest] B股禁买拦截: " << symbol;
+                    if (m_tradeJournal)
+                        m_tradeJournal->log(std::to_string(dates[static_cast<std::size_t>(r)].value)
+                                            + " B股禁买拦截 " + symbol);
+                    continue;
+                }
                 const int col = symbolToCol.at(symbol);
                 const double closePrice = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<std::size_t>(col)]);
@@ -2693,6 +2705,7 @@ void StrategyEngine::buildBacktestDiagnostics(
                          << "  到达sell段: " << totalStopLossOrders << "次"
                          << "  实际卖出: " << stopLossFilled << "笔"
                          << "  跳过(无持仓): " << stopLossSkippedNoHeld << "次";
+    INTERNAL_INFO_STREAM << "[交易明细] B股禁买拦截: " << ctx.bShareBlockedOrders << " 笔";
     // 卖单按盈亏排序，打印 top20
     std::vector<const BacktestTradeRecord*> sells;
     for (const auto& t : result.tradeLog)

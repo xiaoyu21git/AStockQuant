@@ -10,6 +10,13 @@
 namespace foundation {
 namespace market {
 
+namespace {
+// B股代码前缀 (沪B 900xxx, 深B 200xxx~201xxx)
+constexpr int kSHBSharePrefix3 = 900;
+constexpr int kSZBSharesPrefix3Lo = 200;
+constexpr int kSZBSharesPrefix3Hi = 201;
+} // namespace
+
 // ============ 交易所推断规则 ============
 //
 // 上海 (SSE):
@@ -22,6 +29,12 @@ namespace market {
 //
 // 北京 (BSE):
 //   8xxxxx (830xxx~839xxx, 870xxx~879xxx 等)
+//
+// ⚠️ B股代码 900xxx(沪B) / 200xxx~201xxx(深B) 有意不映射任何交易所:
+//   保持 fromCode("900901").fullSymbol() == "900901" (无后缀) 的现状行为。
+//   该行为已被 normalizeToFullSymbol 的 8 处调用点依赖(UI 桥接/缓存 key)。
+//   若将来需要 900→SSE / 200/201→SZSE, 必须先行全局审计 normalizeToFullSymbol
+//   全部调用点, 确认允许增加后缀后方可修改, 并同步更新 inferBoard 注释。
 
 Exchange AStockSymbol::inferExchange(const std::string& code) {
     if (code.size() < 3) return Exchange::Unknown;
@@ -43,11 +56,17 @@ Board AStockSymbol::inferBoard(const std::string& code) {
 
     if (prefix3 == 688)                    return Board::STAR;
     if (prefix3 == 300 || prefix3 == 301)  return Board::ChiNext;
+    if (hasBSharePrefix(prefix3))          return Board::BShare;  // 沪B 900xxx / 深B 200xxx~201xxx
     if (prefix3 >= 0   && prefix3 <= 3)    return Board::Main;
     if (prefix3 >= 600 && prefix3 <= 609)  return Board::Main;
     if (prefix3 >= 800 && prefix3 <= 899)  return Board::Main;  // 北交所暂按主板
 
     return Board::Unknown;
+}
+
+bool AStockSymbol::hasBSharePrefix(int prefix3) {
+    return prefix3 == kSHBSharePrefix3 ||
+           (prefix3 >= kSZBSharesPrefix3Lo && prefix3 <= kSZBSharesPrefix3Hi);
 }
 
 // ============ 构造 ============
@@ -84,6 +103,13 @@ AStockSymbol AStockSymbol::fromCode(const std::string& code) {
     if (code.empty()) return {};
     Exchange ex = inferExchange(code);
     return {code, ex, inferBoard(code)};
+}
+
+bool AStockSymbol::isBShareSymbol(const std::string& symbol) {
+    const std::string code = codeOnly(symbol);
+    if (code.size() < 3) return false;
+    const int prefix3 = (code[0] - '0') * 100 + (code[1] - '0') * 10 + (code[2] - '0');
+    return hasBSharePrefix(prefix3);
 }
 
 // ============ 格式转换 ============

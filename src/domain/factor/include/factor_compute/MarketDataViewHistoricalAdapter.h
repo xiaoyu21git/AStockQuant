@@ -61,6 +61,12 @@ public:
         const std::string& field,
         const std::vector<std::string>& symbols = {}) const override;
 
+    /// @brief 短路版行存在性判定 — 与 !getCrossSection().empty() 完全等价, 但不构建 map
+    [[nodiscard]] bool hasCrossSectionData(
+        const std::string& date,
+        const std::string& field,
+        const std::vector<std::string>& symbols = {}) const override;
+
     [[nodiscard]] std::unordered_map<std::string, std::unordered_map<std::string, double>>
     getBatchCrossSections(
         const std::string& date,

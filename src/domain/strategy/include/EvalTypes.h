@@ -145,6 +145,7 @@ struct EvalResult {
     std::int64_t ruleGateRejected = 0;
     std::int64_t limitFiltered = 0;
     std::int64_t generatorFiltered = 0;
+    std::int64_t bShareFiltered = 0;  // B股买单拦截数 (已持仓加仓)
 };
 
 } // namespace domain::strategy

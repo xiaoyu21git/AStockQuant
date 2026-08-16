@@ -7,6 +7,7 @@
 //   Reporter (Layer 4): AnalysisKernel → IC/IR/分层/多空
 // ══════════════════════════════════════════════════════════════════════════════
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -118,8 +119,23 @@ public:
     /// @brief 清除 SignalCache 中的所有缓存条目
     void clearSignalCache();
 
+    /// @param dbFallback 数据库回退回调 (并行块任务经此参数传入, 空则回退读 m_dataSvc)
+    /// @param cancelFlag 软取消标志 (每日期循环间检查, nullptr = 永不取消; 并行 worker 由管线透传)
     FactorMatrix compute(const MarketMatrixBatch& marketData, const FactorCacheKey& cacheKey,
-                         size_t skipDates = 0);
+                         size_t skipDates = 0,
+                         const CachedMarketDataViewHistoricalAdapter::DbFallbackFn& dbFallback = {},
+                         const std::atomic<bool>* cancelFlag = nullptr);
+
+    /// @brief 用指定因子实例计算 (并行 worker 路径)
+    /// 实例由 FactorWorkerContext 经 createIsolatedInstance 隔离提供 (消除共享实例
+    /// 记忆化缓存竞态); 串行路径 compute() 内部 createInstance 后同样落到本入口 —
+    /// 两条路径共享 computeImpl 唯一实现。
+    FactorMatrix computeWithInstance(factor::BaseFactor& factor,
+                                     const MarketMatrixBatch& marketData,
+                                     const FactorCacheKey& cacheKey,
+                                     size_t skipDates,
+                                     const CachedMarketDataViewHistoricalAdapter::DbFallbackFn& dbFallback,
+                                     const std::atomic<bool>* cancelFlag);
 
     /// @brief 单日因子计算（实盘 / 逐 tick 路径用）
     /// @param factorName  因子实例 ID
@@ -134,13 +150,25 @@ public:
         const IMarketDataView* view);
 
 private:
+    /// @brief 核心计算循环 (compute/computeWithInstance 共用的唯一实现, 静态纯函数)
+    /// engine 以 const 指针传入 — 路径只读 m_dataSvc (回退取 dbFallback);
+    /// 不触碰 SignalCache/实例管理器等可变状态 → 并行多 worker 共享同一引擎不加锁的前提。
+    [[nodiscard]] static FactorMatrix computeImpl(
+        factor::BaseFactor& factor,
+        const MarketMatrixBatch& marketData,
+        const FactorCacheKey& cacheKey,
+        size_t skipDates,
+        const CachedMarketDataViewHistoricalAdapter::DbFallbackFn& dbFallback,
+        const std::atomic<bool>* cancelFlag,
+        const FactorEngine* engine);
+
     /// @brief 公共的 "给定因子 + 行情 → 因子值" 计算（compute 和 computeSingleDate 共享）
+    /// @param historicalView 复用构建的 adapter (compute 全日期循环复用, 避免每日期重建索引)
     [[nodiscard]] static std::unordered_map<std::string, double> computeOneDay(
         class factor::BaseFactor& factor,
         const std::string& dateStr,
         const std::vector<std::string>& symbols,
-        const IMarketDataView& view,
-        const CachedMarketDataViewHistoricalAdapter::DbFallbackFn& dbFallback = {});
+        const std::shared_ptr<CachedMarketDataViewHistoricalAdapter>& historicalView);
 
     std::unique_ptr<SignalCache> m_signalCache;
     factor::FactorInstanceManager* m_instanceManager = nullptr;

@@ -1,5 +1,8 @@
 #include "../include/SignalBlendCompositor.h"
 
+#include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
+
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -20,12 +23,19 @@ std::vector<std::string> selectPoolCore(
     std::vector<Scored> candidates;
     candidates.reserve(allSyms.size());
 
+    int bShareSkipped = 0;  // B股剔除计数 (仅 DEBUG 汇总)
     for (const auto& sym : allSyms) {
+        if (foundation::market::AStockSymbol::isBShareSymbol(sym)) {  // B股禁入候选池
+            ++bShareSkipped;
+            continue;
+        }
         if (!filterFn(sym)) continue;
         double cs = processor.compositeScore(sym);
         if (cs < processor.minimumCompositeScore()) continue;
         candidates.push_back({sym, cs});
     }
+    if (bShareSkipped > 0)
+        INTERNAL_DEBUG_STREAM << "[Pool] B股剔除: " << bShareSkipped << " 标的";
     if (candidates.empty()) return {};
 
     // 按 compositeScore 降序
@@ -76,6 +86,7 @@ std::vector<std::string> QuotaPoolSelector::selectPool(
     const auto& influences = processor.factorInfluences();
     std::unordered_set<std::string> pool;
     std::vector<std::string> overflow;  // 去重被跳过的 → 补位
+    int bShareSkipped = 0;              // B股剔除计数 (仅 DEBUG 汇总)
 
     for (const auto& [factorId, influence] : influences) {
         if (influence <= 0.0) continue;
@@ -85,6 +96,10 @@ std::vector<std::string> QuotaPoolSelector::selectPool(
         int taken = 0;
         for (const auto& sym : ranked) {
             if (taken >= quota) break;
+            if (foundation::market::AStockSymbol::isBShareSymbol(sym)) {  // B股不占名额也不进补位
+                ++bShareSkipped;
+                continue;
+            }
             if (pool.insert(sym).second) {
                 ++taken;
             } else {
@@ -100,6 +115,10 @@ std::vector<std::string> QuotaPoolSelector::selectPool(
             pool.insert(sym);
         }
     }
+
+    if (bShareSkipped > 0)
+        INTERNAL_DEBUG_STREAM << "[Pool] Quota 选择器: 配额=" << poolSize
+                              << " 实际入选=" << pool.size() << " B股剔除=" << bShareSkipped;
 
     return std::vector<std::string>(pool.begin(), pool.end());
 }

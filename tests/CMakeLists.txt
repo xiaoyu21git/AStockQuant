@@ -509,7 +509,7 @@ target_link_libraries(test_phase1_5_smoke
 
 message(STATUS "[TESTS] Configured test_phase1_5_smoke executable")
 
-# ─── 因子回测性能基准程序 (Phase 0: 基线台账 + 金样 JSON, 需 PG + Arrow 数据集) ───
+# ─── 因子回测性能基准程序 (Phase 0: 基线台账 + 基线 JSON, 需 PG + Arrow 数据集) ───
 add_executable(full_market_benchmark_runner
     full_market_benchmark_runner.cpp
 )

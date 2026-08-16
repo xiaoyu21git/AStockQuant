@@ -10,6 +10,7 @@
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
 #include "foundation/Utils/Uuid.h"
 
 #include <cmath>
@@ -99,6 +100,12 @@ public:
 ValidationResult TradeExecutionEngine::validateOrder(const TradeOrder& order) {
     if (order.symbol().empty()) {
         return ValidationResult::reject(OrderValidationCode::InvalidSymbol, "symbol is empty");
+    }
+    // B股禁买: 只拦买入, 卖出/现金类动作放行 (校验层静默, 拒绝原因随返回值上抛)
+    if (order.side() == strategy::OrderDirection::Buy &&
+        foundation::market::AStockSymbol::isBShareSymbol(order.symbol())) {
+        return ValidationResult::reject(OrderValidationCode::BSharesNotTradable,
+                                        "B股禁止买入: " + order.symbol());
     }
     if (order.strategyId().empty()) {
         return ValidationResult::reject(OrderValidationCode::MissingRequiredFields, "strategyId is empty");

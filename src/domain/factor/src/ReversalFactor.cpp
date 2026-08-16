@@ -159,8 +159,8 @@ BoundaryRules ReversalFactor::getBoundaryRules() const
 void ReversalFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
-    if (config::hasCalculationConfig(config))
-        params_.fromJson(config::calculationConfig(config));
+    if (config::hasParametersConfig(config))
+        params_.fromJson(config::parametersConfig(config));
     dataRequirements_ = getDataRequirements();
 }
 

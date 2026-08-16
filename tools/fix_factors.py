@@ -2,6 +2,10 @@ import sys; sys.path.insert(0, 'tools')
 from db_config import pg_connect
 import json
 
+# ⚠️ 本脚本写入字符串枚举("低频"/"Z-Score"/"Rank")与 numeric-only 配置口径不符,
+#    其写入值已于 2026-08-16 由 tools/restore_parameters_key.py 按因子名意图纠正。
+#    (此脚本已执行完毕, 仅供考古; 勿再运行)
+
 conn = pg_connect()
 cur = conn.cursor()
 

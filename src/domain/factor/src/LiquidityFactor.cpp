@@ -155,8 +155,8 @@ void LiquidityFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
     // 与 ValueFactor 一致：从 calculation 子对象解析因子参数
-    if (config::hasCalculationConfig(config)) {
-        const auto& calc = config::calculationConfig(config);
+    if (config::hasParametersConfig(config)) {
+        const auto& calc = config::parametersConfig(config);
         if (calc.has("liquidityMetric")) {
             const auto& val = calc.get("liquidityMetric");
             if (val.isNumber()) {

@@ -91,6 +91,38 @@ static void test_enumIntegrity() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 2026-08-16: isBShare() / isBShareSymbol() — B股判定 (全局禁买前置)
+// 沪B 900xxx, 深B 200xxx/201xxx; 无后缀代码走前缀兜底
+// ═══════════════════════════════════════════════════════════════
+static void test_isBShare() {
+    using foundation::market::AStockSymbol;
+    // 静态判定: B股 → true (带后缀 / 无后缀)
+    assert(AStockSymbol::isBShareSymbol("900901.SH"));
+    assert(AStockSymbol::isBShareSymbol("200011.SZ"));
+    assert(AStockSymbol::isBShareSymbol("201872.SZ"));  // 201 同为深B (历史事故: 漏判 201)
+    assert(AStockSymbol::isBShareSymbol("900901"));
+    assert(AStockSymbol::isBShareSymbol("200011"));
+    // 实例判定: 后缀解析路径与纯代码路径
+    assert(AStockSymbol::fromString("900901.SH").isBShare());
+    assert(AStockSymbol::fromCode("900901").isBShare());
+    assert(AStockSymbol::fromCode("200011").board() == Board::BShare);
+    // 非B股 → false (各板块回归)
+    assert(!AStockSymbol::isBShareSymbol("000001.SZ"));  // 深主板
+    assert(!AStockSymbol::isBShareSymbol("002594.SZ"));  // 中小板 (200 前缀不能误伤 002)
+    assert(!AStockSymbol::isBShareSymbol("600000.SH"));  // 沪主板
+    assert(!AStockSymbol::isBShareSymbol("300750.SZ"));  // 创业板
+    assert(!AStockSymbol::isBShareSymbol("301001.SZ"));  // 创业板 301
+    assert(!AStockSymbol::isBShareSymbol("688981.SH"));  // 科创板
+    assert(!AStockSymbol::isBShareSymbol("830799.BJ"));  // 北交所
+    assert(!AStockSymbol::isBShareSymbol(""));           // 空
+    assert(!AStockSymbol::isBShareSymbol("abc"));        // 非法
+    // 回归断言: inferExchange 未改 — B股代码保持无后缀现状行为
+    assert(AStockSymbol::fromCode("900901").fullSymbol() == "900901");
+    assert(AStockSymbol::fromCode("900901").exchange() == Exchange::Unknown);
+    std::printf("  PASS: isBShare\n");
+}
+
+// ═══════════════════════════════════════════════════════════════
 
 int main() {
     std::printf("=== Phase 1-5 Smoke Tests ===\n");
@@ -98,6 +130,7 @@ int main() {
     test_normalizeToFullSymbol();
     test_isAbnormalTerminal();
     test_enumIntegrity();
+    test_isBShare();
     std::printf("=== All tests passed ===\n");
     return 0;
 }

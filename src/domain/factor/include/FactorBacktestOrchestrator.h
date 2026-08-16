@@ -9,6 +9,7 @@
 #include "BacktestRunConfig.h"
 #include "factor_compute/SimulatedTradingExecutor.h"
 
+#include <atomic>
 #include <cstddef>
 #include <functional>
 #include <map>
@@ -60,9 +61,11 @@ void setFactorEngine(factor::compute::FactorEngine* engine);
     /// @param config        回测运行时参数 (缓存配置+因子配置+回测参数), 由 Bridge 从 QML 转换
     /// @param onProgress    进度回调 → 传给 Bridge → emit progressChanged
     /// @param onComplete    完成回调 → 传给 Bridge → emit backtestCompleted
+    /// @param cancelFlag    软取消标志 (管线每日期检查点; 取消后提前返回且不调用 onComplete)
     void run(const BacktestRunConfig& config,
              FactorOrchestratorProgressCallback onProgress,
-             FactorOrchestratorResultCallback onComplete);
+             FactorOrchestratorResultCallback onComplete,
+             const std::atomic<bool>* cancelFlag = nullptr);
 
 private:
     // 从 reporterInput.factorValuesByDate 构建排序日期列表

@@ -2,6 +2,7 @@
 // 用于消除分散在各模块中的 yyyymmdd ↔ "yyyy-mm-dd" 手工转换
 #pragma once
 
+#include <cstddef>
 #include <cstdio>
 #include <string>
 
@@ -34,6 +35,25 @@ inline int parseTradingDay(const std::string& dateStr) {
     int y = 0, m = 0, d = 0;
     std::sscanf(dateStr.c_str(), "%d-%d-%d", &y, &m, &d);
     return y * 10000 + m * 100 + d;
+}
+
+/// @brief 将 "yyyy-mm-dd" 字符串 (const char* + 长度) 严格解析为 yyyymmdd 整数
+/// 校验: 长度 10、第 4/7 位为 '-'、其余位为数字、月 1-12、日 1-31
+/// @return 解析成功返回 yyyymmdd, 失败返回 -1
+inline int parseIsoDateToInt(const char* str, size_t len) {
+    if (str == nullptr || len != 10 || str[4] != '-' || str[7] != '-') return -1;
+    for (size_t i = 0; i < 10; ++i) {
+        if (i == 4 || i == 7) continue;
+        if (str[i] < '0' || str[i] > '9') return -1;
+    }
+    const int year = (str[0] - '0') * 1000 + (str[1] - '0') * 100
+        + (str[2] - '0') * 10 + (str[3] - '0');
+    const int month = (str[5] - '0') * 10 + (str[6] - '0');
+    const int day = (str[8] - '0') * 10 + (str[9] - '0');
+    constexpr int kMonthsPerYear = 12;
+    constexpr int kMaxDayInMonth = 31;
+    if (month < 1 || month > kMonthsPerYear || day < 1 || day > kMaxDayInMonth) return -1;
+    return year * 10000 + month * 100 + day;
 }
 
 /// @brief 从 yyyymmdd 往前回滚 calendarDays 个日历日 (28天/月近似, 回测回看窗口估算用)

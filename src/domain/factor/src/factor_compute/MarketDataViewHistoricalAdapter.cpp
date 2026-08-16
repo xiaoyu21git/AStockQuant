@@ -1,4 +1,5 @@
 #include "factor_compute/MarketDataViewHistoricalAdapter.h"
+#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 
 namespace factor::compute {
@@ -10,11 +11,18 @@ CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
     const auto& viewDates = view_.dates();
     const auto& viewInstruments = view_.instruments();
 
+    // 双日期键: 紧凑 "YYYYMMDD" + ISO "YYYY-MM-DD" 指向同一索引 —
+    // 查找时无需格式转换与二次哈希 (dates_ 标签保持紧凑格式不变, 因子内部键不受影响)
     dates_.reserve(viewDates.size());
+    dateToIndex_.reserve(viewDates.size() * 2);
     for (size_t i = 0; i < viewDates.size(); ++i) {
         std::string dateStr = std::to_string(viewDates[i].value);
         dates_.push_back(dateStr);
-        dateToIndex_[dateStr] = static_cast<int32_t>(i);
+        const int32_t idx = static_cast<int32_t>(i);
+        dateToIndex_[dateStr] = idx;
+        char isoBuf[16];
+        foundation::utils::formatTradingDayTo(viewDates[i].value, isoBuf, sizeof(isoBuf));
+        dateToIndex_[isoBuf] = idx;
     }
 
     symbols_.reserve(viewInstruments.size());
@@ -31,17 +39,8 @@ CachedMarketDataViewHistoricalAdapter::CachedMarketDataViewHistoricalAdapter(
 
 int32_t CachedMarketDataViewHistoricalAdapter::findDateIndex(const std::string& date) const
 {
-    auto it = dateToIndex_.find(date);
-    if (it != dateToIndex_.end()) return it->second;
-    // 支持 YYYY-MM-DD → YYYYMMDD 格式转换
-    if (date.size() == 10 && date[4] == '-' && date[7] == '-') {
-        std::string compact;
-        compact.reserve(8);
-        for (char c : date) { if (c >= '0' && c <= '9') compact += c; }
-        auto it2 = dateToIndex_.find(compact);
-        if (it2 != dateToIndex_.end()) return it2->second;
-    }
-    return -1;
+    const auto it = dateToIndex_.find(date);
+    return (it != dateToIndex_.end()) ? it->second : -1;
 }
 
 int32_t CachedMarketDataViewHistoricalAdapter::findSymbolIndex(const std::string& symbol) const
@@ -89,6 +88,7 @@ std::vector<factor::HistoricalDataPoint> CachedMarketDataViewHistoricalAdapter::
     if (endIdx < 0 || endIdx >= fv.rowCount) endIdx = fv.rowCount - 1;
     if (startIdx > endIdx) return result;
 
+    result.reserve(static_cast<size_t>(endIdx - startIdx + 1));
     const int32_t stride = fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount;
     for (int32_t d = startIdx; d <= endIdx; ++d) {
         double val = fv.data[static_cast<size_t>(d) * static_cast<size_t>(stride) + static_cast<size_t>(symIdx)];
@@ -161,6 +161,46 @@ CachedMarketDataViewHistoricalAdapter::getBatchCrossSections(
     for (const auto& field : fields)
         result[field] = getCrossSection(date, field, symbols);
     return result;
+}
+
+bool CachedMarketDataViewHistoricalAdapter::hasCrossSectionData(
+    const std::string& date, const std::string& field,
+    const std::vector<std::string>& symbols) const
+{
+    // 与 getCrossSection() 的行存在性判定逐分支等价, 但不构建全市场 map:
+    // 扫到第一个有限值即短路。dbFallback 未挂时按行存在性; 已挂时全 NaN 行由 dbFallback 结果决定
+    bool fromView = false;   // 行存在且请求标的至少一个命中符号表
+    bool hasFinite = false;
+    const int32_t dateIdx = findDateIndex(date);
+    if (dateIdx >= 0) {
+        auto fieldView = view_.getField(field);
+        if (fieldView.has_value()) {
+            const auto& fv = fieldView.value();
+            if (fv.isValid() && dateIdx < fv.rowCount) {
+                const int32_t rowStride = fv.rowStride >= fv.columnCount ? fv.rowStride : fv.columnCount;
+                if (symbols.empty()) {
+                    fromView = fv.columnCount > 0;
+                    for (int32_t i = 0; i < fv.columnCount && !hasFinite; ++i) {
+                        if (std::isfinite(fv.data[static_cast<size_t>(dateIdx) * static_cast<size_t>(rowStride) + static_cast<size_t>(i)]))
+                            hasFinite = true;
+                    }
+                } else {
+                    for (const auto& sym : symbols) {
+                        const int32_t si = findSymbolIndex(sym);
+                        if (si < 0) continue;
+                        fromView = true;
+                        if (!hasFinite &&
+                            std::isfinite(fv.data[static_cast<size_t>(dateIdx) * static_cast<size_t>(rowStride) + static_cast<size_t>(si)]))
+                            hasFinite = true;
+                    }
+                }
+            }
+        }
+    }
+
+    if (dbFallback_)
+        return (fromView && hasFinite) || !dbFallback_(date, field, symbols).empty();
+    return fromView;
 }
 
 } // namespace factor::compute

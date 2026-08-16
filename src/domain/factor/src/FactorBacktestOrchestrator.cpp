@@ -10,6 +10,7 @@
 #include "FactorIcUtils.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
+#include "foundation/perf/Stopwatch.h"
 
 #include <algorithm>
 #include <cmath>
@@ -58,7 +59,8 @@ std::vector<std::string> FactorBacktestOrchestrator::sortedDatesFrom(
 void FactorBacktestOrchestrator::run(
     const BacktestRunConfig& config,
     FactorOrchestratorProgressCallback onProgress,
-    FactorOrchestratorResultCallback onComplete)
+    FactorOrchestratorResultCallback onComplete,
+    const std::atomic<bool>* cancelFlag)
 {
     auto emitError = [&](const char* msg) {
         auto err = foundation::json::JsonFacade::createObject();
@@ -218,6 +220,8 @@ void FactorBacktestOrchestrator::run(
     }
 
     factor::compute::FactorValuePipeline pipeline(*m_engine, *m_dataService);
+    foundation::perf::Stopwatch swFactorIc;   // 因子计算 + IC 累积
+    swFactorIc.start();
     pipeline.run(*arrowView, allDates, pipelineFactorIds, fwdDays,
         [&](const factor::compute::FactorValuePipeline::ChunkOutput& out) {
             const size_t ownSize = out.chunkDates->size();
@@ -390,7 +394,16 @@ void FactorBacktestOrchestrator::run(
         },
         [&](double frac, const std::string& status) {
             if (onProgress) onProgress(5.0 + 55.0 * frac, status);
-        });
+        },
+        config.workerThreads,
+        cancelFlag);
+
+    // ── 软取消: 管线提前返回 (未 sink 块被丢弃) → 不发布结果 ──
+    // (UI 状态由 Bridge::cancelBacktest 即时更新, 此处不回调 onProgress)
+    if (cancelFlag && cancelFlag->load(std::memory_order_acquire)) {
+        INTERNAL_INFO_STREAM << "[回测流程] 已取消: 未 sink 块已丢弃, 结果不发布";
+        return;
+    }
 
         // ── 从累积的 IC 对计算 Rank IC ──
         ::factor::ICIRResult icir;
@@ -424,6 +437,8 @@ void FactorBacktestOrchestrator::run(
             auto pos = std::count_if(icSeries.begin(), icSeries.end(), [](double v){return v>0.0;});
             icir.icPositiveRatio = static_cast<double>(pos) / icSeries.size();
         }
+        swFactorIc.stop();
+        swFactorIc.report("因子计算+IC");
         if (onProgress) onProgress(60.0, "factors computed (per-date IC)");
 
         // ── 提前采样 scatterData 并释放 icByDate ──
@@ -497,6 +512,8 @@ void FactorBacktestOrchestrator::run(
         const int32_t numInsts = static_cast<int32_t>(instrumentIds.size());
 
         // 确保 close 全量加载（交易模拟需要随机访问）
+        foundation::perf::Stopwatch swPriceLoad;
+        swPriceLoad.start();
         if (arrowView) {
             arrowView->ensureColumns({"close", "pre_adjust_factor", "post_adjust_factor"});
         }
@@ -525,11 +542,18 @@ void FactorBacktestOrchestrator::run(
             fvByDate[date] = std::move(innerMap);
         }
 
+        swPriceLoad.stop();
+        swPriceLoad.report("行情全量加载");
+
         INTERNAL_INFO_STREAM << "[回测流程] 模拟交易开始: dates=" << sortedDates.size()
             << " instruments=" << instrumentIds.size();
+        foundation::perf::Stopwatch swTrade;
+        swTrade.start();
         tradingResult = m_executor->execute(fvByDate, sortedDates, priceView,
                                              preAdjustView, postAdjustView,
                                              instrumentIds, instrumentIdToSymbol);
+        swTrade.stop();
+        swTrade.report("模拟成交");
         INTERNAL_INFO_STREAM << "[回测流程] 模拟交易结束: periods=" << tradingResult.validSampleCount
             << " totalReturn=" << tradingResult.totalReturn;
 
@@ -552,6 +576,8 @@ void FactorBacktestOrchestrator::run(
         INTERNAL_INFO_STREAM << "[MEM] factorValuesByDate + fvByDate 已清除";
 
         // ── 构建 JSON 结果（复用原有逻辑）──
+        foundation::perf::Stopwatch swJson;
+        swJson.start();
         if (onComplete) {
             ::factor::BacktestConfig btConfig;
             btConfig.forwardDays    = std::max(1, config.forwardDays);
@@ -833,6 +859,8 @@ void FactorBacktestOrchestrator::run(
                 << " spreadSignMatch=" << (btResult.factorMetrics.spreadSignMatchIc ? "Y" : "N");
             onComplete(root.toString());
         }
+        swJson.stop();
+        swJson.report("JSON 构建");
         if (onProgress) onProgress(100.0, "completed");
 
     // (dbFallback 由 FactorValuePipeline 内部 guard 在 run 返回时自动清理)

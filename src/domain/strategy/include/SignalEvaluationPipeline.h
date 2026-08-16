@@ -140,6 +140,8 @@ struct EvalSession {
     std::int64_t limitFiltered{0};
     std::int64_t generatorFiltered{0};
     std::int64_t positionExits{0};
+    std::int64_t bShareSymbolsSkipped{0};  // B股标的级跳过 (未持仓整标的, 不计入生成数)
+    std::int64_t bShareFiltered{0};        // B股买单拦截 (已持仓加仓, 计入生成数并从审核分母扣除)
 };
 
 /// @brief 评估主链 (频率无关; 不依赖任何具体数据源/日历/引擎单例)

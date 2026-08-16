@@ -32,6 +32,7 @@ enum class OrderValidationCode : int {
     InvalidPrice,
     InvalidQuantity,
     MissingRequiredFields,
+    BSharesNotTradable,  // B股禁止买入 (全局硬过滤)
 };
 
 enum class ActionKind : int {

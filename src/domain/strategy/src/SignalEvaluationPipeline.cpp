@@ -392,6 +392,14 @@ void SignalEvaluationPipeline::collectSignals(const EvalRequest& req,
         auto aSym = foundation::market::AStockSymbol::fromString(sym);
         if (!aSym.isValid()) continue;
 
+        // B股禁新买: 未持仓B股整标的跳过 (省掉规则/因子求值); 已持仓B股放行卖单路径
+        if (aSym.isBShare() &&
+            s.posQtyMap.count(foundation::market::AStockSymbol::codeOnly(sym)) == 0) {
+            ++s.bShareSymbolsSkipped;
+            INTERNAL_DEBUG_STREAM << "[Eval] B股标的跳过: " << sym;
+            continue;
+        }
+
         MarketDataPoint mdp(
             domain::strategy::InstrumentId{aSym.instrumentId()}, price, vol, s.tradingDayInt);
 
@@ -410,6 +418,13 @@ void SignalEvaluationPipeline::collectSignals(const EvalRequest& req,
                 if (!order.isValid()) continue;
                 // §8: 原始信号计数 (涨跌停过滤前 + 规则闸门拒绝前)
                 ++s.totalGenerated;
+                // B股禁买: 已持仓B股的加仓买单同样拒绝; 卖单不受影响。
+                // 置于涨跌停过滤之前: 一字涨停B股买单的拒绝原因归为「B股禁买」而非「涨停」
+                if (order.side() == OrderSide::Buy && aSym.isBShare()) {
+                    ++s.bShareFiltered;
+                    INTERNAL_DEBUG_STREAM << "[Eval] B股买单拒绝: " << order.symbol();
+                    continue;
+                }
                 // 涨跌停过滤: 涨停不买, 跌停不卖
                 if (order.side() == OrderSide::Buy && isAtLimitUp(price, pvIt->second.preClose)) {
                     ++s.limitFiltered;
@@ -561,8 +576,8 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
     }
 
     if (deps.ruleGate && deps.ruleGate->enabled()) {
-        // 分母 = 进入审核的信号数 (原始生成 N − 涨跌停过滤 N2)
-        const std::int64_t audited = s.totalGenerated - s.limitFiltered;
+        // 分母 = 进入审核的信号数 (原始生成 N − 涨跌停过滤 N2 − B股拦截, B股买单不再进入规则闸门)
+        const std::int64_t audited = s.totalGenerated - s.limitFiltered - s.bShareFiltered;
         INTERNAL_INFO_STREAM << "[Eval] 规则闸门:"
             << " 信号审核拒绝=" << s.ruleGateRejected
             << "/" << audited
@@ -596,6 +611,7 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
     result.ruleGateRejected = s.ruleGateRejected;
     result.limitFiltered = s.limitFiltered;
     result.generatorFiltered = s.generatorFiltered;
+    result.bShareFiltered = s.bShareFiltered;
 
     if (sub.skipped) {
         // ADR-006 幂等: 当日已提交 → 跳过 (调度器按 Skipped 正常持久化, 幂等键保持)
@@ -655,13 +671,16 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
                 + std::to_string(s.totalGenerated)
                 + " 规则闸门拒绝=" + std::to_string(s.ruleGateRejected)
                 + " 涨跌停过滤=" + std::to_string(s.limitFiltered)
-                + " 生成器过滤=" + std::to_string(s.generatorFiltered));
+                + " 生成器过滤=" + std::to_string(s.generatorFiltered)
+                + " B股拒绝=" + std::to_string(s.bShareFiltered));
         }
     }
 
     INTERNAL_INFO_STREAM << "[Eval] 完成 status=" << EvalNaming::statusText(result.status)
                          << " 信号=" << s.totalGenerated
-                         << " 提交=" << sub.totalSubmitted;
+                         << " 提交=" << sub.totalSubmitted
+                         << " B股跳过=" << s.bShareSymbolsSkipped
+                         << " B股拒绝=" << s.bShareFiltered;
     return result;
 }
 
