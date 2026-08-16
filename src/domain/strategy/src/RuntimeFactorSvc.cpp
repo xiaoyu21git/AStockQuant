@@ -2,6 +2,8 @@
 #include "../../factor/include/FactorInstanceManager.h"
 #include "../../factor/include/EventDrivenFactor.h"
 #include "../../factor/include/factor_compute/FactorEngine.h"
+#include "../../factor/include/factor_compute/ArrowMarketDataView.h"
+#include "../../factor/include/factor_compute/FactorValuePipeline.h"
 #include "../../factor/include/factor_compute/CachedMarketDataView.h"
 #include "../../infrastructure/include/database/ISqlDatabase.h"
 #include "foundation/Utils/DateUtils.h"
@@ -9,6 +11,7 @@
 #include "foundation/market/AStockSymbol.h"
 
 #include <atomic>
+#include <cmath>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -34,12 +37,14 @@ void RuntimeFactorSvc::setMarketView(const factor::compute::IMarketDataView*) {
     // 实盘路径使用 setLiveMarketView() 替代；此接口保留向后兼容
 }
 
-void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView* view) {
-    m_liveMarketView = view;
+void RuntimeFactorSvc::setLiveMarketView(
+    std::shared_ptr<const factor::compute::IMarketDataView> view)
+{
+    m_liveMarketView = std::move(view);  // P3: 发布即持有 (shared_ptr 直接入库)
     // 重建符号解析：tick 侧 InstrumentId 用股票代码段(000001→1, 600000→600000)
     // 解析后直接映射到 view 中的股票代码字符串，不再走顺序 ID
-    if (view && !view->symbolStrings().empty()) {
-        const auto& symbols = view->symbolStrings();
+    if (m_liveMarketView && !m_liveMarketView->symbolStrings().empty()) {
+        const auto& symbols = m_liveMarketView->symbolStrings();
         auto idToSym = std::make_shared<std::unordered_map<std::uint32_t, std::string>>();
         for (size_t i = 0; i < symbols.size(); ++i) {
             const std::string& sym = symbols[i];
@@ -56,14 +61,19 @@ void RuntimeFactorSvc::setLiveMarketView(const factor::compute::IMarketDataView*
         };
         INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: 已重建符号解析器 (" << symbols.size() << " 只标的)";
     } else {
-        INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: view=" << static_cast<const void*>(view) << " (无标的符号串可用)";
+        INTERNAL_INFO_STREAM << "[RFS] setLiveMarketView: view=" << static_cast<const void*>(m_liveMarketView.get()) << " (无标的符号串可用)";
     }
 }
 
 void RuntimeFactorSvc::setDataService(factor::compute::BacktestDataService* svc) {
     m_dataSvc = svc;
     m_engine->setDataService(svc);
-    INTERNAL_INFO_STREAM << "[RFS] setDataService: svc=" << static_cast<void*>(svc);
+    // 统一因子值管线入口: 缓存 Arrow 视图 (backtestValuesBySymbol 经 FactorValuePipeline 分块计算)
+    m_arrowView = (svc && svc->getView())
+        ? static_cast<const factor::compute::ArrowMarketDataView*>(svc->getView())
+        : nullptr;
+    INTERNAL_INFO_STREAM << "[RFS] setDataService: svc=" << static_cast<void*>(svc)
+                         << " arrowView=" << static_cast<const void*>(m_arrowView);
 
     // 用 MarketView 中的真实股票代码替换硬编码解析器
     if (svc) {
@@ -100,22 +110,30 @@ void RuntimeFactorSvc::setFactorIds(const std::vector<std::string>& factorIds) {
 const std::map<std::string, double>* RuntimeFactorSvc::backtestValuesBySymbol(
     const std::string& instanceId, std::int32_t date) const
 {
-    if (!m_dataSvc || !m_engine) return nullptr;
-    // 与 getValues 回测分支共享同一份缓存: 首次访问全量计算
-    if (m_factorCache.find(instanceId) == m_factorCache.end()) {
-        factor::compute::FactorCacheKey key;
-        key.factorName = instanceId;
-        factor::compute::MarketMatrixBatch batch;
-        batch.batchIndex = 0;
-        m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
+    if (!m_dataSvc || !m_engine || !m_arrowView) return nullptr;
+    auto& cache = activeTier();
+    // 与 getValues 回测分支共享同一份缓存: 首次访问经统一因子值管线全量计算
+    if (cache.find(instanceId) == cache.end()) {
+        // 统一管线 — 与因子回测同一份计算实现 (回看/分块/DB补齐全部内聚在管线内)
+        const std::vector<std::string> factorIds{instanceId};
+        factor::compute::FactorValuePipeline pipeline(*m_engine, *m_dataSvc);
+        pipeline.run(*m_arrowView, m_arrowView->dates(), factorIds, /*forwardDays=*/0,
+            [&](const factor::compute::FactorValuePipeline::ChunkOutput& out) {
+                auto it = out.perFactorValues->find(instanceId);
+                if (it == out.perFactorValues->end()) return;
+                for (const auto& [dateStr, symValues] : it->second) {
+                    auto& dst = cache[instanceId][dateStr];
+                    for (const auto& [sym, val] : symValues)
+                        dst[sym] = val;
+                }
+            });
         INTERNAL_INFO_STREAM << "[RFS] backtestValuesBySymbol 缓存已填充: id=" << instanceId
-                             << " 日期数=" << m_factorCache[instanceId].size();
+                             << " 日期数=" << cache[instanceId].size();
     }
     char dateBuf[16];
     foundation::utils::formatTradingDayTo(date, dateBuf, sizeof(dateBuf));
-    const auto& cache = m_factorCache[instanceId];
-    const auto it = cache.find(dateBuf);
-    return it != cache.end() ? &it->second : nullptr;
+    const auto it = cache[instanceId].find(dateBuf);
+    return it != cache[instanceId].end() ? &it->second : nullptr;
 }
 
 std::vector<std::string> RuntimeFactorSvc::getRequiredFields() const {
@@ -177,9 +195,11 @@ void RuntimeFactorSvc::buildLiveView(
     const std::vector<astock::database::SqlQueryResultRow>& rows,
     const std::vector<std::string>& extraFields)
 {
-    auto view = factor::compute::CachedMarketDataView::fromSqlRows(rows, extraFields);
-    if (view) setLiveMarketView(view.get());
-    m_ownedLiveView = std::move(view);
+    // P3 发布顺序: 先持有后发布 — shared_ptr 构造完成即所有权确定,
+    // setLiveMarketView 发布与持有同一步, 消除旧实现 "先发布裸指针后入库" 的间隙
+    std::shared_ptr<factor::compute::CachedMarketDataView> view =
+        factor::compute::CachedMarketDataView::fromSqlRows(rows, extraFields);
+    setLiveMarketView(std::move(view));
 }
 
 // ── IFactorSvc: 统一的因子值计算入口 ──
@@ -204,27 +224,12 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
     char dateBuf[16];
     foundation::utils::formatTradingDayTo(date, dateBuf, sizeof(dateBuf));
 
-    // ── 回测: FactorEngine 全量算一次, 缓存 ──
+    // ── 回测: 委托 backtestValuesBySymbol (统一因子值管线, 活跃周期分区; 回测恒 Daily) ──
     if (m_dataSvc) {
         INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST: instance=" << instanceId << " 日期=" << dateBuf << " 标的=" << symbolStrList.size();
-        if (m_factorCache.find(instanceId) == m_factorCache.end()) {
-            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST 缓存未命中, 调用 engine->compute...";
-            factor::compute::FactorCacheKey key;
-            key.factorName = instanceId;
-            factor::compute::MarketMatrixBatch batch;
-            batch.batchIndex = 0;
-            m_factorCache[instanceId] = m_engine->compute(batch, key).factorValues;
-            auto& cached = m_factorCache[instanceId];
-            INTERNAL_INFO_STREAM << "[RFS] getValues BACKTEST 缓存已填充: 日期数=" << cached.size();
-            if (!cached.empty()) {
-                auto firstDate = cached.begin()->first;
-                auto lastDate = cached.rbegin()->first;
-                INTERNAL_INFO_STREAM << "[RFS]   缓存范围: " << firstDate << " ~ " << lastDate;
-            }
-        }
-        auto it = m_factorCache[instanceId].find(dateBuf);
-        if (it != m_factorCache[instanceId].end()) {
-            for (const auto& [sym, val] : it->second) {
+        const std::map<std::string, double>* dateValues = backtestValuesBySymbol(instanceId, date);
+        if (dateValues) {
+            for (const auto& [sym, val] : *dateValues) {
                 // 缓存 key 可能带后缀 (如 "000001.SZ"), 统一去掉后缀再匹配
                 std::string codeOnly = foundation::market::AStockSymbol::codeOnly(sym);
                 for (uint32_t id : symbolIds) {
@@ -233,13 +238,16 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
                 }
             }
         } else {
-            INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " 在缓存中未找到 (缓存有 " << m_factorCache[instanceId].size() << " 条日期)";
+            auto& cache = activeTier();
+            const auto cacheIt = cache.find(instanceId);
+            INTERNAL_WARN_STREAM << "[RFS] getValues BACKTEST: date " << dateBuf << " 在缓存中未找到 (缓存有 "
+                << ((cacheIt != cache.end()) ? cacheIt->second.size() : 0) << " 条日期)";
             // 打印缓存中随机一个日期的前5个key，确认格式
-            if (!m_factorCache[instanceId].empty()) {
-                auto& sampleDate = m_factorCache[instanceId].begin()->second;
+            if (cacheIt != cache.end() && !cacheIt->second.empty()) {
+                const auto& sampleDate = cacheIt->second.begin()->second;
                 std::ostringstream sampleOss;
                 sampleOss << "[RFS]   缓存样本键: ";
-                int n=0; for (auto& [k,v] : sampleDate) { if (++n>5) break; sampleOss << k << " "; }
+                int n=0; for (const auto& [k,v] : sampleDate) { if (++n>5) break; sampleOss << k << " "; }
                 INTERNAL_WARN_STREAM << sampleOss.str();
             }
         }
@@ -254,7 +262,7 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
             int lastDate = dates.back().value;
             foundation::utils::formatTradingDayTo(lastDate, dateBuf, sizeof(dateBuf));
         }
-        auto factorValues = m_engine->computeSingleDate(instanceId, dateBuf, symbolStrList, m_liveMarketView);
+        auto factorValues = m_engine->computeSingleDate(instanceId, dateBuf, symbolStrList, m_liveMarketView.get());
         for (const auto& [sym, val] : factorValues) {
             for (uint32_t id : symbolIds)
                 if (m_symbolResolver(id) == sym) { result[id] = val; break; }
@@ -269,7 +277,7 @@ std::unordered_map<std::uint32_t, double> RuntimeFactorSvc::getValues(
 
     INTERNAL_WARN_STREAM << "[RFS] 无数据源: id=" << instanceId
                          << " dataSvc=" << static_cast<void*>(m_dataSvc)
-                         << " liveView=" << static_cast<const void*>(m_liveMarketView);
+                         << " liveView=" << static_cast<const void*>(m_liveMarketView.get());
     return result;
 }
 
@@ -339,9 +347,10 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                 symbolToId[viewSyms[i]] = insts[i].value;
         }
 
+        auto& cache = activeTier();
         for (const auto& iid : instanceIds) {
-            auto cacheIt = m_factorCache.find(iid);
-            if (cacheIt == m_factorCache.end()) continue;
+            auto cacheIt = cache.find(iid);
+            if (cacheIt == cache.end()) continue;
             auto dateIt = cacheIt->second.find(dateBuf);
             if (dateIt == cacheIt->second.end()) continue;
 
@@ -403,10 +412,11 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         return foundation::market::AStockSymbol::codeOnly(s);
     };
 
+    auto& cache = activeTier();
     for (const auto& iid : instanceIds) {
         // ── 缓存读: 首次计算后后续 step() 调用直接读缓存 ──
-        auto cacheIt = m_factorCache.find(iid);
-        if (cacheIt != m_factorCache.end()) {
+        auto cacheIt = cache.find(iid);
+        if (cacheIt != cache.end()) {
             auto dateIt = cacheIt->second.find(std::string(dateBuf));
             if (dateIt != cacheIt->second.end()) {
                 for (const auto& [sym, val] : dateIt->second) {
@@ -435,13 +445,13 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
         }
 
         auto factorValues = self->m_engine->computeSingleDate(
-            iid, std::string(dateBuf), symbolStrs, m_liveMarketView);
+            iid, std::string(dateBuf), symbolStrs, m_liveMarketView.get());
 
         // 写入缓存: key 用无后缀码, 与 codeOnlyToId 一致
         std::map<std::string, double> dateCache;
         for (const auto& [sym, val] : factorValues)
             dateCache[stripSuffix(sym)] = val;
-        m_factorCache[iid][std::string(dateBuf)] = std::move(dateCache);
+        cache[iid][std::string(dateBuf)] = std::move(dateCache);
 
         // 输出快照: 通过 fullSymbol 查找 instrumentId
         for (const auto& [sym, val] : factorValues) {
@@ -457,6 +467,91 @@ void RuntimeFactorSvc::copySnapshots(std::vector<RuntimeFactorSnapshot>& output)
                                  << " computed=" << factorValues.size()
                                  << " totalSyms=" << symbolStrs.size();
     }
+}
+
+// ── preflight P2 探测: 评估日因子全截面是否有有限值 (§9, 终审 4.1) ──
+
+bool RuntimeFactorSvc::probeFactorCrossSection(
+    const std::vector<std::string>& symbols, std::int32_t tradingDayInt) const
+{
+    // 非因子策略: 无因子实例 → 无因子依赖, 探测通过
+    if (m_factorIds.empty()) return true;
+    if (!m_liveMarketView || !m_engine) return false;
+
+    char dateBuf[16];
+    foundation::utils::formatTradingDayTo(tradingDayInt, dateBuf, sizeof(dateBuf));
+
+    // 完整 symbol (copySnapshots 实盘计算路径口径: 去后缀会导致 findSymbolIndex 失败)
+    std::vector<std::string> fullSymbols;
+    fullSymbols.reserve(symbols.size());
+    for (const auto& sym : symbols)
+        if (!sym.empty()) fullSymbols.push_back(sym);
+    if (fullSymbols.empty()) return false;
+
+    auto* self = const_cast<RuntimeFactorSvc*>(this);
+
+    // 全截面判定: 任一因子实例在评估日存在 >=1 个有限值 → 通过
+    auto& cache = activeTier();
+    for (const auto& iid : m_factorIds) {
+        if (iid.empty()) continue;
+        // 缓存已命中 (copySnapshots 已算过): 只读判定
+        auto cacheIt = cache.find(iid);
+        if (cacheIt != cache.end()) {
+            auto dateIt = cacheIt->second.find(std::string(dateBuf));
+            if (dateIt != cacheIt->second.end()) {
+                for (const auto& [sym, val] : dateIt->second)
+                    if (std::isfinite(val)) return true;
+                continue;  // 该实例当日全空, 换下一实例
+            }
+        }
+        // 纯计算 (不写缓存, 无副作用)
+        auto values = self->computeFactor(iid, std::string(dateBuf), fullSymbols);
+        for (const auto& [sym, val] : values)
+            if (std::isfinite(val)) return true;
+    }
+    INTERNAL_WARN_STREAM << "[RFS] probe: 因子全截面无有限值: 实例数=" << m_factorIds.size()
+                         << " 评估日=" << dateBuf << " 标的=" << fullSymbols.size();
+    return false;
+}
+
+std::unordered_map<std::string, double> RuntimeFactorSvc::computeFactor(
+    const std::string& instanceId, const std::string& dateBuf,
+    const std::vector<std::string>& fullSymbols)
+{
+    if (!m_engine || !m_liveMarketView) return {};
+    return m_engine->computeSingleDate(instanceId, dateBuf, fullSymbols, m_liveMarketView.get());
+}
+
+void RuntimeFactorSvc::warmUpCache(const std::string& strategyId, BarPeriod period,
+                                   const std::vector<std::string>& symbols)
+{
+    // 纯预热: 视图末行(锚点日)全因子全截面计算并写入 period 分区, copySnapshots 后续直接命中
+    // 终审 4.1 + C11 (P3 接线): 由调度器 start() 经 setWarmUpFn 显式调用, 不做引擎全局预热
+    if (m_factorIds.empty() || !m_liveMarketView || !m_engine) return;
+    const auto& dates = m_liveMarketView->dates();
+    if (dates.empty()) return;
+    char dateBuf[16];
+    foundation::utils::formatTradingDayTo(dates.back().value, dateBuf, sizeof(dateBuf));
+
+    std::vector<std::string> fullSymbols;
+    fullSymbols.reserve(symbols.size());
+    for (const auto& sym : symbols)
+        if (!sym.empty()) fullSymbols.push_back(sym);
+    if (fullSymbols.empty()) return;
+
+    auto& cache = tier(period);  // ADR-004: 按 period 物理分区, 跨频零共享
+    for (const auto& iid : m_factorIds) {
+        if (iid.empty()) continue;
+        auto values = computeFactor(iid, std::string(dateBuf), fullSymbols);
+        std::map<std::string, double> dateCache;
+        for (const auto& [sym, val] : values)
+            dateCache[foundation::market::AStockSymbol::codeOnly(sym)] = val;
+        cache[iid][std::string(dateBuf)] = std::move(dateCache);
+    }
+    INTERNAL_INFO_STREAM << "[RFS] warmUpCache: strategyId=" << strategyId
+                         << " period=" << BarPeriodNaming::suffix(period)
+                         << " 实例数=" << m_factorIds.size()
+                         << " 锚点=" << dateBuf << " 标的=" << fullSymbols.size();
 }
 
 } // namespace domain::strategy

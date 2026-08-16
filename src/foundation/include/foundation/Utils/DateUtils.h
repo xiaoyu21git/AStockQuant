@@ -36,5 +36,16 @@ inline int parseTradingDay(const std::string& dateStr) {
     return y * 10000 + m * 100 + d;
 }
 
+/// @brief 从 yyyymmdd 往前回滚 calendarDays 个日历日 (28天/月近似, 回测回看窗口估算用)
+/// 仅用于回看窗口的查询下界估算, 精确交易日以 trade_calendar 为准
+inline int backScrollCalendarDays(int yyyymmdd, int calendarDays) {
+    int y, m, d;
+    decomposeDate(yyyymmdd, y, m, d);
+    while (calendarDays-- > 0) {
+        if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
+    }
+    return y * 10000 + m * 100 + d;
+}
+
 } // namespace utils
 } // namespace foundation

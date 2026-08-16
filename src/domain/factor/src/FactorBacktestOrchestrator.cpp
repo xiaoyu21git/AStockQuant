@@ -1,24 +1,19 @@
 #include "FactorBacktestOrchestrator.h"
 #include "factor_compute/FactorEngine.h"
 #include "factor_compute/ArrowMarketDataView.h"
+#include "factor_compute/FactorValuePipeline.h"
 #include "../../../infrastructure/include/database/MarketDataRepository.h"
 #include "../../../infrastructure/include/database/NativePgConnectionPool.h"
-#include "factor_compute/MarketDataViewHistoricalAdapter.h"
 #include "BacktestScheduler.h"
-#include "BaseFactor.h"
-#include "FactorInstanceManager.h"
 #include "CompositeFactorConfig.h"
 #include "FactorMetricsCalculator.h"
 #include "FactorIcUtils.h"
 #include "foundation/json/json_facade.h"
-#include "foundation/Utils/DateUtils.h"
 #include "foundation/log/logging.hpp"
 
-#include "../../../domain/cleaning/include/DataSourceRegistry.h"
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -60,173 +55,6 @@ std::vector<std::string> FactorBacktestOrchestrator::sortedDatesFrom(
     return dates;
 }
 
-FactorBacktestOrchestrator::FactorFieldInfo
-FactorBacktestOrchestrator::collectFactorFields(const BacktestRunConfig& config,
-                                                const std::vector<std::string>& factorIdList,
-                                                bool isComposite) const
-{
-    FactorFieldInfo info;
-    if (config.hasPreResolvedFields) {
-        info.neededExtraFields = config.preResolvedExtraFields;
-        return info;
-    }
-    auto collectFields = [&](const std::string& fid) {
-        auto factor = m_engine->instanceManager()->createInstance(fid);
-        if (factor) {
-            for (const auto& f : factor->getDataRequirements().requiredFields)
-                info.neededExtraFields.push_back(f);
-            for (const auto& f : factor->getDataRequirements().optionalFields)
-                info.neededExtraFields.push_back(f);
-            int lb = factor->getLookbackDays();
-            if (lb > info.maxLookback) info.maxLookback = lb;
-        }
-    };
-    if (isComposite) {
-        for (const auto& child : config.compositeChildren)
-            collectFields(child.instanceId);
-    } else {
-        for (const auto& fid : factorIdList)
-            collectFields(fid);
-    }
-    std::sort(info.neededExtraFields.begin(), info.neededExtraFields.end());
-    info.neededExtraFields.erase(
-        std::unique(info.neededExtraFields.begin(), info.neededExtraFields.end()),
-        info.neededExtraFields.end());
-    info.neededExtraFields.erase(
-        std::remove_if(info.neededExtraFields.begin(), info.neededExtraFields.end(),
-            [](const std::string& f) {
-                return f == "open" || f == "high" || f == "low" || f == "close"
-                    || f == "volume" || f == "symbol" || f == "trade_date";
-            }),
-        info.neededExtraFields.end());
-    return info;
-}
-
-std::shared_ptr<std::unordered_map<std::string,
-    std::unordered_map<std::string, std::map<std::string, double>>>>
-FactorBacktestOrchestrator::setupDbFallback(const std::vector<domain::DomainDate>& arrowDates,
-                                            int maxLookback) const
-{
-    auto dbCache = std::make_shared<std::unordered_map<std::string,
-        std::unordered_map<std::string, std::map<std::string, double>>>>();
-
-    std::string minReportDate = "2014-01-01", cacheStartDate = "2021-01-01";
-    if (!arrowDates.empty()) {
-        int firstDateVal = arrowDates.front().value;
-        int y,m,d; foundation::utils::decomposeDate(firstDateVal, y, m, d);
-        int totalBack = maxLookback + 60;
-        while (totalBack-- > 0) {
-            if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
-        }
-        char buf[16]; snprintf(buf, sizeof(buf), "%04d-%02d-%02d", y, m, d);
-        minReportDate = buf;
-        foundation::utils::formatTradingDayTo(firstDateVal, buf, sizeof(buf));
-        cacheStartDate = buf;
-    }
-
-    factor::compute::BacktestDataService::DbFallbackFn dbFn =
-        [minReportDate, cacheStartDate, dbCache](const std::string& date, const std::string& field,
-           const std::vector<std::string>& symbols)
-        -> std::unordered_map<std::string, double> {
-        auto& fieldCache = (*dbCache)[field];
-
-        auto cacheIt = fieldCache.find("__loaded__");
-        if (cacheIt == fieldCache.end()) {
-            auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-            if (db && db->isOpen()) {
-                astock::infrastructure::database::MarketDataRepository repo(db);
-
-                const auto& klineNames = cleaning::kline_columns::names();
-                const auto& symInfoNames = cleaning::symbol_info_columns::names();
-                const auto& finNames = cleaning::financial_columns::names();
-                const auto& idxNames = cleaning::index_columns::names();
-                const auto& minNames = cleaning::minute_daily_columns::names();
-
-                const bool isSymInfo = std::find(symInfoNames.begin(), symInfoNames.end(), field) != symInfoNames.end();
-                const bool isFin    = std::find(finNames.begin(),    finNames.end(),    field) != finNames.end();
-                const bool isKline  = std::find(klineNames.begin(),  klineNames.end(),  field) != klineNames.end();
-                const bool isIndex  = std::find(idxNames.begin(),    idxNames.end(),    field) != idxNames.end();
-                const bool isMinute = std::find(minNames.begin(),    minNames.end(),    field) != minNames.end();
-
-                if (isSymInfo) {
-                    auto rows = db->executeQuery(
-                        "SELECT s.symbol, s." + field
-                        + " FROM ref.symbol_info s");
-                    for (std::size_t i = 0; i < rows.rowCount(); ++i) {
-                        auto row = rows.getRow(i);
-                        std::string sym = row.getString("symbol");
-                        double val = row.getDouble(field);
-                        if (!sym.empty() && std::isfinite(val))
-                            fieldCache[sym]["_"] = val;
-                    }
-                } else if (isFin) {
-                    auto rows = repo.queryFinancialFieldAllReports(field, minReportDate, cacheStartDate, symbols);
-                    for (const auto& r : rows)
-                        fieldCache[r.symbol][r.tradeDate] = r.value;
-                } else if (isKline) {
-                    auto rows = repo.queryFieldCrossSectionRange(field, minReportDate, cacheStartDate, symbols);
-                    for (const auto& r : rows)
-                        fieldCache[r.symbol][r.tradeDate] = r.value;
-                } else if (isMinute) {
-                    auto rows = repo.queryMinuteDailyAgg(symbols, minReportDate, cacheStartDate);
-                    for (const auto& mr : rows) {
-                        const auto& mv = mr.getValues();
-                        auto si = mv.find("symbol");
-                        auto ti = mv.find("trade_date");
-                        auto fi = mv.find(field);
-                        if (si != mv.end() && ti != mv.end() && fi != mv.end())
-                            fieldCache[si->second][ti->second] = std::stod(fi->second);
-                    }
-                } else if (isIndex) {
-                    auto rows = db->executeQuery(
-                        "SELECT s.symbol, " + field
-                        + " FROM ref.symbol_info s");
-                    for (std::size_t i = 0; i < rows.rowCount(); ++i) {
-                        auto row = rows.getRow(i);
-                        std::string sym = row.getString("symbol");
-                        double val = row.getDouble(field);
-                        if (!sym.empty() && std::isfinite(val))
-                            fieldCache[sym]["_"] = val;
-                    }
-                } else {
-                    INTERNAL_WARN_STREAM << "[DB查库] 未知字段 '" << field
-                        << "' — 不在 kline/symbol_info/financial/minute_daily 中";
-                }
-                fieldCache["__loaded__"]["_"] = 1.0;
-            }
-        }
-
-        static const std::unordered_set<std::string> symInfoSet(
-            cleaning::symbol_info_columns::names().begin(),
-            cleaning::symbol_info_columns::names().end());
-        static const std::unordered_set<std::string> finSet(
-            cleaning::financial_columns::names().begin(),
-            cleaning::financial_columns::names().end());
-        const bool isStatic = symInfoSet.count(field);
-        const bool isFinLookup = finSet.count(field);
-
-        std::unordered_map<std::string, double> result;
-        for (const auto& sym : symbols) {
-            auto si = fieldCache.find(sym);
-            if (si == fieldCache.end()) continue;
-            if (isStatic) {
-                auto it = si->second.find("_");
-                if (it != si->second.end()) result[sym] = it->second;
-            } else if (isFinLookup) {
-                auto it = si->second.upper_bound(date);
-                if (it != si->second.begin()) { --it; result[sym] = it->second; }
-            } else {
-                auto it = si->second.find(date);
-                if (it != si->second.end()) result[sym] = it->second;
-            }
-        }
-        return result;
-    };
-
-    m_dataService->setDbFallback(std::move(dbFn));
-    return dbCache;
-}
-
 void FactorBacktestOrchestrator::run(
     const BacktestRunConfig& config,
     FactorOrchestratorProgressCallback onProgress,
@@ -238,18 +66,6 @@ void FactorBacktestOrchestrator::run(
         err.set("metrics", foundation::json::JsonFacade::createObject());
         if (onComplete) onComplete(err.toString());
     };
-
-    // ── RAII: 确保任何退出路径都清理 dbFallback（避免 dbCache 泄漏）──
-    struct DbFallbackGuard {
-        factor::compute::BacktestDataService* svc;
-        ~DbFallbackGuard() {
-            if (svc) {
-                svc->setDbFallback({});
-                INTERNAL_INFO_STREAM << "[MEM] DbFallbackGuard: dbFallback 已清除";
-            }
-        }
-    } dbGuard{m_dataService};
-
 
     if (!m_scheduler) { emitError("scheduler 未设置"); return; }
     if (!m_engine)   { emitError("factor engine 未设置"); return; }
@@ -280,19 +96,11 @@ void FactorBacktestOrchestrator::run(
         << " forward=" << config.forwardDays << "d"
         << " rebalance=" << config.rebalanceDays << "d";
 
-    // ── 收集因子需要的额外字段 ──
-    auto fieldInfo = collectFactorFields(config, factorIdList, isComposite);
-    std::vector<std::string>& neededExtraFields = fieldInfo.neededExtraFields;
-    int maxLookback = fieldInfo.maxLookback;
-
     if (onProgress) onProgress(5.0, "data indexed");
 
     // ── 按 config 日期范围过滤 ──
     const auto& arrowDates = arrowView->dates();
 
-    // ── 首块 DB 回看：缓存首日 - 回看 - 60 交易日 → 一次全部拉回 ──
-    auto dbCache = setupDbFallback(arrowDates, maxLookback);
-    INTERNAL_INFO_STREAM << "[MEM] DB回退查询 use_count=" << dbCache.use_count();
     std::vector<factor::compute::DateKey> filteredDatesStorage;
     const std::vector<factor::compute::DateKey>* effectiveDatesPtr = &arrowDates;
     if (config.cacheStartDate.isValid() || config.cacheEndDate.isValid()) {
@@ -338,10 +146,7 @@ void FactorBacktestOrchestrator::run(
     }
     const auto& allDates = *effectiveDatesPtr;
 
-    // ── 分块大小：每块约 60 个交易日 ──
-    constexpr int kChunkDates = 60;
     const size_t totalDates = allDates.size();
-    const size_t totalChunks = (totalDates + kChunkDates - 1) / kChunkDates;
     const int fwdDays = std::max(1, config.forwardDays);
     const int rbDays = std::max(1, config.rebalanceDays);
 
@@ -376,26 +181,6 @@ void FactorBacktestOrchestrator::run(
             << " expectedTradingPeriods~=" << rebalanceCount;
     }
 
-    INTERNAL_INFO_STREAM << "[回测流程] 分块: totalDates=" << totalDates
-        << " chunkSize=" << kChunkDates << " totalChunks=" << totalChunks;
-
-    // 分块加载列名：核心 5 列 + 因子字段 + 基类中性化字段
-    std::vector<std::string> chunkColumns = {"open", "high", "low", "close", "volume"};
-    for (const auto& f : neededExtraFields)
-        chunkColumns.push_back(f);
-    for (const auto& f : factor::BaseFactor::neutralizationFields())
-        if (std::find(chunkColumns.begin(), chunkColumns.end(), f) == chunkColumns.end())
-            chunkColumns.push_back(f);
-
-    {
-        std::ostringstream cols;
-        for (size_t i = 0; i < chunkColumns.size(); ++i) {
-            if (i > 0) cols << ",";
-            cols << chunkColumns[i];
-        }
-        INTERNAL_INFO_STREAM << "[回测流程] chunkColumns(" << chunkColumns.size() << "): " << cols.str();
-    }
-
     factor::compute::BacktestReporterInput reporterInput;
     std::map<std::string, std::vector<std::pair<double, double>>> icByDate; // date→{(fv, fwdRet)}
 
@@ -419,135 +204,50 @@ void FactorBacktestOrchestrator::run(
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // 分块回测主循环
+    // 统一因子值管线 — 因子回测/策略回测共用的唯一因子计算实现
+    // 分块/回看/尾部扩展/DB补齐全部内聚在 FactorValuePipeline, 此处只做统计消费:
+    // 组合合并/缩尾/IC对/非调仓日清理
     // ══════════════════════════════════════════════════════════════════════
-    for (size_t ci = 0; ci < totalChunks; ++ci) {
-        if (onProgress) {
-            double pct = 5.0 + (static_cast<double>(ci) / totalChunks) * 55.0;
-            onProgress(pct, "chunk " + std::to_string(ci + 1) + "/" + std::to_string(totalChunks));
-        }
+    std::vector<std::string> pipelineFactorIds;
+    if (isComposite) {
+        pipelineFactorIds.reserve(config.compositeChildren.size());
+        for (const auto& child : config.compositeChildren)
+            pipelineFactorIds.push_back(child.instanceId);
+    } else {
+        pipelineFactorIds = factorIdList;
+    }
 
-        size_t chunkStart = ci * kChunkDates;
-        size_t loadStart = chunkStart;
-        size_t loadEnd = std::min(chunkStart + kChunkDates + static_cast<size_t>(fwdDays), totalDates);
-        std::vector<factor::compute::DateKey> chunkDates(
-            allDates.begin() + loadStart, allDates.begin() + loadEnd);
-
-            // ── 首块：从 DB 一次性补齐回看数据 ──
-            const size_t warmupRowCount = (ci == 0 && maxLookback > 0 && chunkDates.size() > 0)
-                ? static_cast<size_t>(maxLookback)
-                : 0;
-
-            std::unique_ptr<factor::compute::IMarketDataView> chunkView;
-            size_t computeSkip = 0;
-            if (warmupRowCount > 0) {
-                const auto warmupFields = chunkColumns;
-                // 回看日期：从缓存首日往前，data.trade_calendar 查 maxLookback 个交易日
-                std::vector<factor::compute::DateKey> warmupDates;
-                {
-                    auto db = astock::database::NativePgConnectionPool::instance().getConnection();
-                    if (db && db->isOpen()) {
-                        astock::infrastructure::database::MarketDataRepository repo(db);
-                        int sv = chunkDates[0].value;
-                        int y,m,d; foundation::utils::decomposeDate(sv, y, m, d);
-                        int back = static_cast<int>(warmupRowCount) * 2;
-                        while (back-- > 0) {
-                            if (--d < 1) { if (--m < 1) { m = 12; --y; } d = 28; }
-                        }
-                        char ds[16]; std::snprintf(ds, sizeof(ds), "%04d-%02d-%02d", y, m, d);
-                        char de[16]; foundation::utils::formatTradingDayTo(sv, de, sizeof(de));
-                        auto td = repo.queryTradeCalendar(ds, de);
-                        size_t start = (td.size() > warmupRowCount) ? (td.size() - warmupRowCount) : 0;
-                        for (size_t i = start; i < td.size(); ++i) {
-                            std::string clean; for (char c : td[i]) if (c != '-') clean += c;
-                            warmupDates.push_back({static_cast<int>(std::stoi(clean))});
-                        }
-                    }
-                }
-                computeSkip = warmupDates.size();
-                INTERNAL_INFO_STREAM << "[DB补数据] 开始查库: warmupDays=" << warmupDates.size()
-                    << " (requested=" << warmupRowCount << ")"
-                    << " fields=" << warmupFields.size()
-                    << " symbols=" << arrowView->symbolStrings().size();
-
-                auto extendedDates = warmupDates;
-                extendedDates.insert(extendedDates.end(), chunkDates.begin(), chunkDates.end());
-                chunkView = arrowView->makeChunkView(extendedDates, warmupFields);
-
-                if (chunkView) {
-                    const auto& dbFn = m_dataService->dbFallback();
-                    if (dbFn) {
-                        const auto syms = arrowView->symbolStrings();
-                        const int32_t nInsts = static_cast<int32_t>(syms.size());
-                        size_t totalCells = 0;
-                        for (size_t wi = 0; wi < warmupDates.size(); ++wi) {
-                            char dbuf[16]; int wv = warmupDates[wi].value;
-                            std::snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d",
-                                          wv / 10000, (wv / 100) % 100, wv % 100);
-                            std::string dateStr(dbuf);
-                            for (const auto& col : warmupFields) {
-                                auto* data = chunkView->mutableFieldData(col);
-                                if (!data) continue;
-                                auto dbRes = dbFn(dateStr, col,
-                                    std::vector<std::string>(syms.begin(), syms.end()));
-                                for (int32_t si = 0; si < nInsts; ++si) {
-                                    auto it = dbRes.find(syms[static_cast<size_t>(si)]);
-                                    double v = (it != dbRes.end()) ? it->second
-                                        : std::numeric_limits<double>::quiet_NaN();
-                                    data[wi * static_cast<size_t>(nInsts) + static_cast<size_t>(si)]
-                                        = static_cast<float>(v);
-                                    if (std::isfinite(v)) ++totalCells;
-                                }
-                            }
-                        }
-                        INTERNAL_INFO_STREAM << "[DB补数据] 查库结束: dates=" << warmupDates.size()
-                            << " fields=" << warmupFields.size()
-                            << " symbols=" << nInsts
-                            << " validCells=" << totalCells;
-                    }
-                }
-            } else {
-                chunkView = arrowView->makeChunkView(chunkDates, chunkColumns);
-            }
-
-            if (!chunkView) continue;
-
-            // 构建 MarketMatrixBatch
-            factor::compute::MarketMatrixBatch chunkBatch;
-            chunkBatch.batchIndex = ci;
-            chunkBatch.marketView = chunkView.get();
+    factor::compute::FactorValuePipeline pipeline(*m_engine, *m_dataService);
+    pipeline.run(*arrowView, allDates, pipelineFactorIds, fwdDays,
+        [&](const factor::compute::FactorValuePipeline::ChunkOutput& out) {
+            const size_t ownSize = out.chunkDates->size();
+            const size_t tailSize = out.tailDates->size();
+            // 块视图行布局: [回看]+[本块]+[尾部扩展] — IC 取价行偏移 = 回看行数
+            const size_t rowBase = out.chunkView->dates().size() - ownSize - tailSize;
 
             if (isComposite) {
-                // ── 组合因子：逐子因子计算 → 加权合并 ──
-                std::vector<std::map<std::string, std::map<std::string, double>>> childResults;
-                childResults.reserve(config.compositeChildren.size());
+                // ── 组合因子：子因子值加权合并 ──
                 double totalWeight = 0.0;
-
-                for (const auto& child : config.compositeChildren) {
-                    factor::compute::FactorCacheKey cacheKey;
-                    cacheKey.factorName = child.instanceId;
-                    auto factorResult = m_engine->compute(chunkBatch, cacheKey, computeSkip);
-                    childResults.push_back(std::move(factorResult.factorValues));
+                for (const auto& child : config.compositeChildren)
                     totalWeight += child.weight;
-                }
-
                 if (totalWeight > 0.0) {
                     std::map<std::string, std::map<std::string, double>> combinedValues;
-                    for (const auto& childFV : childResults) {
-                        for (const auto& [date, symMap] : childFV) {
-                            for (const auto& [symbol, _] : symMap) {
+                    for (const auto& child : config.compositeChildren) {
+                        auto it = out.perFactorValues->find(child.instanceId);
+                        if (it == out.perFactorValues->end()) continue;
+                        for (const auto& [date, symMap] : it->second)
+                            for (const auto& [symbol, _] : symMap)
                                 combinedValues[date][symbol] = 0.0;
-                            }
-                        }
                     }
                     for (const auto& [date, symMap] : combinedValues) {
                         for (const auto& [symbol, _] : symMap) {
                             double weightedSum = 0.0;
                             double presentWeight = 0.0;
-                            for (size_t ci2 = 0; ci2 < childResults.size(); ++ci2) {
-                                const auto& childFV = childResults[ci2];
-                                auto dateIt = childFV.find(date);
-                                if (dateIt == childFV.end()) continue;
+                            for (size_t ci2 = 0; ci2 < config.compositeChildren.size(); ++ci2) {
+                                auto it = out.perFactorValues->find(config.compositeChildren[ci2].instanceId);
+                                if (it == out.perFactorValues->end()) continue;
+                                auto dateIt = it->second.find(date);
+                                if (dateIt == it->second.end()) continue;
                                 auto symIt = dateIt->second.find(symbol);
                                 if (symIt == dateIt->second.end()) continue;
                                 const double value = symIt->second;
@@ -564,15 +264,12 @@ void FactorBacktestOrchestrator::run(
                     }
                 }
             } else {
-                // ── 单/多因子：逐因子计算 ──
-                // 多因子时记录每个 (date,symbol) 的累计值和计数，最后取均值
+                // ── 单/多因子：逐因子累加, 多因子取均值 ──
                 std::map<std::string, std::map<std::string, int>> factorValueCounts;
                 for (const auto& factorId : factorIdList) {
-                    factor::compute::FactorCacheKey cacheKey;
-                    cacheKey.factorName = factorId;
-                    auto factorResult = m_engine->compute(chunkBatch, cacheKey, computeSkip);
-
-                    for (const auto& [date, symbolValues] : factorResult.factorValues) {
+                    auto it = out.perFactorValues->find(factorId);
+                    if (it == out.perFactorValues->end()) continue;
+                    for (const auto& [date, symbolValues] : it->second) {
                         for (const auto& [symbol, value] : symbolValues) {
                             if (!std::isfinite(value)) continue;
                             reporterInput.factorValuesByDate[date][symbol] += value;
@@ -580,7 +277,7 @@ void FactorBacktestOrchestrator::run(
                         }
                     }
                 }
-                // 多因子均值归一化
+                // 多因子均值归一化 (管线保证每个日期恰好算一次, 计数即参与因子数)
                 if (factorIdList.size() > 1) {
                     for (auto& [date, symMap] : reporterInput.factorValuesByDate) {
                         auto countIt = factorValueCounts.find(date);
@@ -594,12 +291,12 @@ void FactorBacktestOrchestrator::run(
                 }
             }
 
-            // ── 交叉截面缩尾：IC 和策略共享同一份因子值 ──
+            // ── 交叉截面缩尾：IC 和策略共享同一份因子值 (仅本块交易日) ──
             if (config.winsorizeQuantile > 0.0) {
                 const double q = config.winsorizeQuantile;
-                for (size_t wdi = 0; wdi < chunkDates.size(); ++wdi) {
+                for (const auto& dk : *out.chunkDates) {
                     char wdbuf[16];
-                    int wdv = chunkDates[wdi].value;
+                    int wdv = dk.value;
                     std::snprintf(wdbuf, sizeof(wdbuf), "%04d-%02d-%02d",
                                   wdv / 10000, (wdv / 100) % 100, wdv % 100);
                     std::string wdate(wdbuf);
@@ -645,14 +342,15 @@ void FactorBacktestOrchestrator::run(
             }
 
             // ── 增量累积 IC 对 ──
-            // 只对不超出前向窗口的日期计算
-            size_t computeEnd = (ci < totalChunks - 1)
-                ? chunkDates.size() - static_cast<size_t>(fwdDays)
-                : (chunkDates.size() > static_cast<size_t>(fwdDays) ? chunkDates.size() - fwdDays : 0);
+            // 只对不超出前向窗口的日期计算; 取价行 = rowBase + di (跳过回看行)
+            const size_t computeEnd = (ownSize + tailSize > static_cast<size_t>(fwdDays))
+                ? std::min(ownSize, ownSize + tailSize - static_cast<size_t>(fwdDays))
+                : 0;
+            const auto closeView = out.chunkView->close();
 
             for (size_t di = 0; di < computeEnd; ++di) {
                 char dateBuf[16];
-                int dv = chunkDates[di].value;
+                int dv = (*out.chunkDates)[di].value;
                 std::snprintf(dateBuf, sizeof(dateBuf), "%04d-%02d-%02d",
                               dv / 10000, (dv / 100) % 100, dv % 100);
                 std::string dateNow(dateBuf);
@@ -663,13 +361,12 @@ void FactorBacktestOrchestrator::run(
                 for (const auto& [sym, fv] : itNow->second) {
                     if (!std::isfinite(fv)) continue;
 
-                    auto closeView = chunkView->close();
                     auto itSym = symToCol.find(sym);
                     if (itSym == symToCol.end()) continue;
                     int32_t symCol = itSym->second;
 
-                    double priceNow  = static_cast<double>(closeView.data[static_cast<size_t>(di) * closeView.rowStride + symCol]);
-                    double priceFwd  = static_cast<double>(closeView.data[static_cast<size_t>(di + fwdDays) * closeView.rowStride + symCol]);
+                    double priceNow  = static_cast<double>(closeView.data[(rowBase + di) * closeView.rowStride + symCol]);
+                    double priceFwd  = static_cast<double>(closeView.data[(rowBase + di + static_cast<size_t>(fwdDays)) * closeView.rowStride + symCol]);
 
                     if (priceNow > 1e-9 && std::isfinite(priceNow)
                         && priceFwd > 1e-9 && std::isfinite(priceFwd)) {
@@ -682,17 +379,18 @@ void FactorBacktestOrchestrator::run(
             }
 
             // ── 释放非 rebalance 日的因子值 ──
-            for (size_t di = 0; di < chunkDates.size(); ++di) {
-                int dv = chunkDates[di].value;
+            for (const auto& dk : *out.chunkDates) {
+                int dv = dk.value;
                 char buf[16];
                 std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
                 std::string dateStr(buf);
                 if (!rebalanceDates.count(dateStr))
                     reporterInput.factorValuesByDate.erase(dateStr);
             }
-
-            // chunkView 在此出作用域 → 该块数据释放
-        } // end chunk loop
+        },
+        [&](double frac, const std::string& status) {
+            if (onProgress) onProgress(5.0 + 55.0 * frac, status);
+        });
 
         // ── 从累积的 IC 对计算 Rank IC ──
         ::factor::ICIRResult icir;
@@ -1137,8 +835,8 @@ void FactorBacktestOrchestrator::run(
         }
         if (onProgress) onProgress(100.0, "completed");
 
-    // (dbFallback 由 scope guard DbFallbackGuard 在函数退出时自动清理)
-    INTERNAL_INFO_STREAM << "[MEM] Orchestrator::run() 退出 — DbFallbackGuard + dbCache 即将释放";
+    // (dbFallback 由 FactorValuePipeline 内部 guard 在 run 返回时自动清理)
+    INTERNAL_INFO_STREAM << "[MEM] Orchestrator::run() 退出 — 管线 dbFallback/回看缓存已由管线内部释放";
 }
 
 } // namespace Factor::backtest

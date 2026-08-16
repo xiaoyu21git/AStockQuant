@@ -1,9 +1,9 @@
 #pragma once
 // ══════════════════════════════════════════════════════════════════════════════
 // FactorBacktestOrchestrator — 因子回测编排层 (Bridge 之下的逻辑层)
-// 职责: 控制分批循环、编排 Scheduler/DataSvc/FactorEngine/Reporter
+// 职责: 统计消费 — 因子计算委托 FactorValuePipeline (统一管线),
+//       本类只做组合合并/缩尾/IC/调仓日清理/交易模拟/结果输出
 // 上家: FactorBacktestBridge (只调 start/进度回调/结果回调)
-// 当前状态: 纯类壳 — 只定义接口和持有关系，不包含任何具体逻辑
 // ══════════════════════════════════════════════════════════════════════════════
 
 #include "BacktestRunConfig.h"
@@ -68,24 +68,6 @@ private:
     // 从 reporterInput.factorValuesByDate 构建排序日期列表
     static std::vector<std::string> sortedDatesFrom(
         const std::map<std::string, std::map<std::string, double>>& fvByDate);
-
-    // ── run() 子步骤 (Phase 30a 拆分) ──
-
-    /// @brief 收集因子所需额外字段 + 最大回看天数
-    struct FactorFieldInfo {
-        std::vector<std::string> neededExtraFields;
-        int maxLookback = 0;
-    };
-    FactorFieldInfo collectFactorFields(const BacktestRunConfig& config,
-                                        const std::vector<std::string>& factorIdList,
-                                        bool isComposite) const;
-
-    /// @brief 构造 DB 回看 fallback (dbCache + lambda), 注入 m_dataService
-    /// 返回 dbCache 的 shared_ptr 供 chunk compute 复用
-    std::shared_ptr<std::unordered_map<std::string,
-        std::unordered_map<std::string, std::map<std::string, double>>>>
-    setupDbFallback(const std::vector<domain::DomainDate>& arrowDates,
-                    int maxLookback) const;
 
     // ── 持有的下层组件引用 ──
     domain::scheduler::BacktestScheduler* m_scheduler = nullptr;

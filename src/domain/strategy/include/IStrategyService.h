@@ -5,7 +5,9 @@
 #include "StrategySnapshotTypes.h"
 #include "IFactorSvc.h"
 #include "TradeJournal.h"
-#include "DailyEodScheduler.h"
+#include "EvalTypes.h"
+#include "SignalEvaluationPipeline.h"
+#include "EvaluationScheduler.h"
 #include "FactorSignalProcessor.h"
 #include "SignalBlendCompositor.h"
 #include "RuleGate.h"
@@ -21,16 +23,13 @@
 #include "../../trading/include/OrderBuilder.h"
 
 #include <atomic>
-#include <condition_variable>
 #include <functional>
 #include <future>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <queue>
 #include <chrono>
-#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -45,6 +44,7 @@ struct AccountInfo;
 }
 
 namespace astock { namespace database { class ISqlDatabase; class SqlQueryResultRow; } }
+namespace astock::infrastructure::database { class AppStateStore; class ITradingCalendar; }
 
 namespace domain::backtest {
 struct BacktestRequest;
@@ -60,6 +60,9 @@ class BacktestDataService;
 
 namespace domain::strategy {
 
+class EngineListenerAssembler;
+class PositionBook;
+class SubmissionFinalizer;
 class IRuntimeFactorView {
 public:
     virtual ~IRuntimeFactorView() = default;
@@ -83,16 +86,21 @@ public:
     // ── 数据注入 ──
     /// @brief 注入回测数据服务（生命周期由调用方管理；NoOpFactorService: no-op）
     virtual void setDataService(factor::compute::BacktestDataService* dataSvc) = 0;
-    /// @brief 注入实盘行情视图（生命周期由调用方管理；NoOpFactorService: no-op）
-    virtual void setLiveMarketView(const factor::compute::IMarketDataView* view) = 0;
+    /// @brief 注入实盘行情视图 (P3: 发布即持有 — shared_ptr 发布句柄, 调用方不负责生命周期；
+    ///     调用方如需长期持有可保存返回/同一 shared_ptr; NoOpFactorService: no-op)
+    virtual void setLiveMarketView(
+        std::shared_ptr<const factor::compute::IMarketDataView> view) = 0;
+    /// @brief 设置活跃评估周期 (ADR-004 缓存分区维度; 当前全策略 Daily, 分钟策略由引擎注入)
+    virtual void setActivePeriod(BarPeriod period) = 0;
 
     // ── 行情视图构建与访问 ──
     /// @brief 从 SQL 查询结果构建实盘 MarketView（NoOpFactorService: no-op）
     virtual void buildLiveView(
         const std::vector<astock::database::SqlQueryResultRow>& rows,
         const std::vector<std::string>& extraFields) = 0;
-    /// @brief 获取当前行情视图；无数据返回 nullptr；生命周期与 IRuntimeFactorService 实例一致
-    [[nodiscard]] virtual const factor::compute::IMarketDataView* liveView() const = 0;
+    /// @brief 获取当前行情视图；无数据返回 nullptr。
+    /// P3: shared_ptr 发布句柄 — 调用方持有的拷贝在服务重建视图后依然有效 (禁止 .get() 长期持有)
+    [[nodiscard]] virtual std::shared_ptr<const factor::compute::IMarketDataView> liveView() const = 0;
 
     // ── 因子元数据查询 ──
     /// @brief 从因子需求收集所需的数据字段（NoOpFactorService: 返回空）
@@ -105,6 +113,21 @@ public:
     ///     返回值生命周期与 IRuntimeFactorService 实例一致，调用方不应持有
     [[nodiscard]] virtual const std::map<std::string, double>* backtestValuesBySymbol(
         const std::string& instanceId, std::int32_t date) const = 0;
+
+    // ── 前置自检探测 (preflight P2, §9) ──
+    /// @brief 探测评估日因子全截面是否存在有限值
+    /// 逐因子实例在评估日计算 (与 copySnapshots 实盘路径同口径);
+    /// 任一实例存在 >=1 个有限值 → true。纯探测: 只读缓存, 不写入不更新状态 (无"顺带"副作用)
+    /// 非因子策略 (无因子实例) → true (无因子依赖); 无视图/引擎 → false
+    [[nodiscard]] virtual bool probeFactorCrossSection(
+        const std::vector<std::string>& symbols, std::int32_t tradingDayInt) const = 0;
+
+    // ── 缓存预热 (终审 4.1 + C11, P3 接线) ──
+    /// @brief 纯预热: 锚点日全因子全截面计算并写入 period 对应缓存分区 (copySnapshots 后续直接命中)
+    /// 由调度器 start() 经 setWarmUpFn 显式调用 (不做引擎全局预热);
+    /// 无视图/无因子/无标的 → 内部早退 (NoOpFactorService: no-op)
+    virtual void warmUpCache(const std::string& strategyId, BarPeriod period,
+                             const std::vector<std::string>& symbols) = 0;
 };
 
 namespace rules {
@@ -531,10 +554,10 @@ struct RuleGateConfig {
     [[nodiscard]] bool enabled() const noexcept { return !templateIds.empty(); }
 };
 
-/// @brief 调仓频率配置 — 纯值类型
+/// @brief 调仓频率配置 — 纯值类型 (P4: 死代码清理, period 一等配置 ADR-002)
 struct RebalanceConfig {
-    int interval{1};                  // 调仓间隔(交易日), 0=从不调仓
-    bool isDailyFrequency{true};      // true=日频(不启动drainQueue), false=分钟频/高频
+    BarPeriod period{BarPeriod::Daily};  // 评估周期 (当前全策略日频)
+    int interval{1};                     // 调仓间隔(交易日), 0=从不调仓
 
     [[nodiscard]] bool isValid() const noexcept { return interval >= 0; }
 };
@@ -597,8 +620,7 @@ public:
     // ─── 实盘异步专有接口 ───
 
     /// @brief 启动专属后台线程。
-    /// 日频策略: 只启 riskPatrolLoop (止损巡检) + 注册 EOD 回调
-    /// 分钟频/高频: 启 drainQueue (持续评估+下单+巡检)
+    /// 装配评估核心 + CronEvaluationScheduler (EOD 回调 + 补单)
     void startLiveLoop();
 
     /// @brief 安全停止后台线程并等待完成。
@@ -607,15 +629,12 @@ public:
     /// @brief 查询实盘循环是否正在运行
     [[nodiscard]] bool isLiveLoopRunning() const noexcept;
 
-    /// @brief 是否为日频策略 (fromDb 时根据 behaviorKind 自动设置)
-    [[nodiscard]] bool isDailyFrequency() const noexcept { return m_isDailyFrequency; }
-
     /// @brief 日终评估: 跑一次完整策略评估并生成订单
     /// @param tradingDay 评估目标交易日
     /// @param isCompensation true=补单(历史收盘价), false=实时(当日 tick 价)
-    /// 由 DailyEodScheduler 触发，在专用线程中执行
+    /// 由 CronEvaluationScheduler 触发，在专用线程中执行
     /// @return 评估结果状态，用于决定是否持久化 lastEvalDay
-    EodEvaluationStatus evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
+    EvalStatus evaluateEndOfDay(const std::string& tradingDay, bool isCompensation);
 
     /// @brief 一键清仓：对所有持仓生成市价卖单，篮子提交
     /// @return 生成的订单数量，-1 表示失败
@@ -652,13 +671,8 @@ public:
     void setContextHistoricalView(const void* view);
 
     /// @brief 设置实盘行情视图，供因子计算时提供 HistoricalView
-    /// @param view 包含足够回溯窗口的行情数据视图 (不为 Engine 所有，调用方保证生命周期)
-    void setLiveMarketView(const void* view);
-
-    /// @brief 丢弃的 tick 计数（队列满时触发）
-    [[nodiscard]] std::int64_t droppedTicks() const noexcept {
-        return m_droppedTicks.load(std::memory_order_acquire);
-    }
+    /// @param view 包含足够回溯窗口的行情数据视图 (P3: 引擎持有 m_injectedLiveView, 外部注入的视图不再悬垂)
+    void setLiveMarketView(std::shared_ptr<const factor::compute::IMarketDataView> view);
 
     /// @brief 设置交易账户（风控需要）
     void setAccountId(std::string id) { m_accountId = std::move(id); }
@@ -693,12 +707,13 @@ public:
 
     /// @brief 获取当前持有的行情视图（供外部读取元数据）
     /// 因子策略返回 factorService 持有的视图，非因子策略返回 m_liveMarketView
-    [[nodiscard]] const factor::compute::IMarketDataView* liveMarketView() const noexcept {
+    /// P3: shared_ptr 发布句柄 (禁止 .get() 长期持有)
+    [[nodiscard]] std::shared_ptr<const factor::compute::IMarketDataView> liveMarketView() const noexcept {
         if (factorService_) {
-            auto* v = factorService_->liveView();
+            auto v = factorService_->liveView();
             if (v) return v;
         }
-        return m_liveMarketView.get();
+        return m_liveMarketView;
     }
 
     /// @brief 获取规则闸门统计数据（评估/命中/拦截/数据缺失，按模板聚合）
@@ -723,33 +738,18 @@ private:
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
 
-    /// @brief 后台线程主函数（分钟频/高频）：阻塞等待行情 → step() → 通知订单。
-    void drainQueue();
+    // ── P2: 评估核心装配 (ADR-009④: PipelineDeps 仅 buildPipelineDeps 一处构造) ──
 
-    // ── evaluateEndOfDay 子函数 ──
-    struct EodContext;
-    struct EodDayBar;
-    struct EodPriceData;
-    struct EodGateResult;
-    struct PendingOrder;
+    /// @brief 装配评估核心 (PositionBook/簿记挂钩/Finalizer/管道 + AppStateStore)
+    /// 惰性装配: setLiveDataPath 之后首次调用 (startLiveLoop/buildPipelineDeps/liquidateAll)
+    /// 装配后补装簿记挂钩 (StrategyManager 的 setOrderListener 可能早于装配)
+    void ensureEvaluationCore();
 
-    [[nodiscard]] bool checkRebalanceDay(const std::string& tradingDay);
-    [[nodiscard]] bool prepareEodContext(const std::string& tradingDay, EodContext& ctx);
-    [[nodiscard]] bool fetchTodayPrices(const EodContext& ctx, EodPriceData& prices, bool isCompensation = false);
-    void computeMarketBreadth(const EodContext& ctx, EodPriceData& prices);
-    EodGateResult evaluateEodGates(const EodContext& ctx, const EodPriceData& prices);
-    std::vector<PendingOrder> collectEodSignals(
-        const EodContext& ctx, const EodPriceData& prices,
-        const EodGateResult& gates,
-        const std::unordered_map<std::string, std::int64_t>& posQtyMap,
-        const std::string& tradingDay);
-    EodEvaluationStatus finalizeAndSubmit(
-        const EodContext& ctx,
-        std::vector<PendingOrder>& pendingOrders,
-        const std::unordered_map<std::string, std::int64_t>& posQtyMap,
-        const EodPriceData& prices,
-        const std::string& tradingDay,
-        bool isCompensation);
+    /// @brief 组装管道依赖注入集 (唯一构造点, ADR-009④; C8/P4: 日历经 DbTradingCalendar 注入, 回测 gmsdk 不动)
+    PipelineDeps buildPipelineDeps();
+
+    /// @brief 引擎账户 → 管道账户投影 (转换集中处理, CLAUDE.md 1.2.2)
+    AccountState buildAccountState() const;
 
     // ── backtest 子函数 (Phase 30b 拆分) ──
 
@@ -814,14 +814,17 @@ private:
         }
     };
 
-    /// @brief 回测主循环: for(r=0; r<totalDays; ++r) 逐日驱动
+    /// @brief 回测主循环: for(r=warmupDayCount; r<totalDays; ++r) 逐日驱动
     /// 将原 backtest() 中 ~755 行的循环体提取为独立函数,
     /// 通过 BacktestDayContext 封装 ~35 个可变状态变量
+    /// @param view 扩展视图 = [回看交易日]+[数据集交易日] (WarmupViewBuilder 构建, 回看行由 PG 补全)
+    /// @param warmupDayCount 回看行数 = 循环起点 (之前行仅供指标/规则窗口读取)
     /// @param attributionCollector 归因收集器, 由 backtest() 持有, 循环中写入, 后处理中读取
     void runBacktestLoop(
         BacktestDayContext& ctx,
         StrategyBacktestResult& result,
-        factor::compute::BacktestDataService* dataSvc,
+        const factor::compute::IMarketDataView* view,
+        int warmupDayCount,
         const domain::backtest::BacktestRequest& req,
         domain::backtest::BacktestFillSimulator& fillSim,
         const std::unordered_map<std::string, int>& symbolToCol,
@@ -859,15 +862,9 @@ private:
 
     // 实盘异步线程 —— 每个引擎独立的专属线程池（1线程）
     std::shared_ptr<foundation::thread::IExecutor> m_dedicatedExecutor;
-    std::queue<MarketDataPoint> m_mdpQueue;
-    std::mutex m_queueMutex;
-    std::condition_variable m_queueCv;
-    static constexpr size_t kMaxQueueSize = 5000;
     std::atomic<bool> m_loopRunning{false};
-    std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位，防御 drainQueue 误触发监听器
-    bool m_isDailyFrequency{false};             ///< 日频策略 → 只巡检+日终评估, 不启动 drainQueue
-    std::unique_ptr<DailyEodScheduler> m_dailyScheduler;  ///< 日频调度器 (EOD + 补单)
-    std::atomic<std::int64_t> m_droppedTicks{0};
+    std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位: evaluateEndOfDay 早退 + BacktestGuard 防御监听器误触发
+    std::unique_ptr<CronEvaluationScheduler> m_dailyScheduler;  ///< 日频评估调度器 (EOD + 补单)
     std::atomic<std::int64_t> m_lastProcessedAt{0};
     IOrderListener* m_orderListener{nullptr};
 
@@ -892,7 +889,8 @@ private:
     PositionSizer m_positionSizer;                              ///< 仓位计算器(默认0, Builder/fromDb 注入 baseQty)
     OrderGenerator m_orderGenerator{m_orderBuilder, m_positionSizer};  ///< 持仓感知建单器
     std::uint32_t m_maxOrderQuantity{10000};  ///< 权重建仓基数（targetWeight × base = 目标股数），由策略配置注入
-    std::unique_ptr<factor::compute::IMarketDataView> m_liveMarketView;
+    std::shared_ptr<const factor::compute::IMarketDataView> m_liveMarketView;  // 非因子策略视图 (prepareMarketData 构建; P3: shared 统一发布)
+    std::shared_ptr<const factor::compute::IMarketDataView> m_injectedLiveView;  // P3: 外部注入视图持有 (悬垂修复, Bridge/内部注入共用)
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
     bool m_needsMarketCapField{false};  ///< 权重方案为市值加权时置位，prepareMarketData 追加 market_cap 字段
     FactorSignalProcessor m_factorSignalProcessor;  ///< 因子信号处理(过滤+缩放)
@@ -911,6 +909,15 @@ private:
     std::string m_lastRebalanceDate;       ///< 上次执行调仓的交易日 YYYYMMDD
     int m_minHoldDays{0};                  ///< 最少持有天数, 0=不启用
     std::unordered_map<std::string, std::int64_t> m_positionEntryDates;  ///< symbol→首次建仓日期 YYYYMMDD
+
+    // ── P2: 评估管道装配 (ADR-007/009) ──
+    BarPeriod m_period{BarPeriod::Daily};  ///< 评估周期 (Builder 从 RebalanceConfig 接线)
+    std::shared_ptr<astock::infrastructure::database::AppStateStore> m_appStateStore;  ///< app_state.json 统一写者 (与调度器同路径)
+    std::unique_ptr<PositionBook> m_positionBook;              ///< 内部持仓账本 (ADR-005 P5 簿记校验)
+    std::unique_ptr<EngineListenerAssembler> m_listenerAssembler;  ///< 簿记挂钩一次性装配 (ADR-009①)
+    std::unique_ptr<SubmissionFinalizer> m_finalizer;          ///< 共享提交核心 (幂等去重+生成+投递)
+    std::unique_ptr<SignalEvaluationPipeline> m_pipeline;      ///< 评估主链 (频率无关, 8 阶段)
+    std::unique_ptr<astock::infrastructure::database::ITradingCalendar> m_calendar;  ///< 交易日历 (P4: 实盘路径 DB 日历, 回测 gmsdk 不动)
 
     /// @brief 原始创建参数 (fromDb 时保存，供回测覆写，避免重复 DB 读取)
     StrategyCreationParams m_originalCreationParams;

@@ -285,6 +285,7 @@ set(FACTOR_COMPUTE_SOURCES
     src/factor_compute/SimulatedTradingExecutor.cpp
     src/factor_compute/SignalSetBuilder.cpp
     src/factor_compute/FactorEngine.cpp
+    src/factor_compute/FactorValuePipeline.cpp
     src/factor_compute/MarketDataViewHistoricalAdapter.cpp
     src/factor_compute/OnnxInference.cpp
     src/factor_compute/FeatureTensorBuilder.cpp
@@ -292,6 +293,7 @@ set(FACTOR_COMPUTE_SOURCES
 
 set(FACTOR_COMPUTE_HEADERS
     include/factor_compute/FactorSignalTypes.h
+    include/factor_compute/FactorValuePipeline.h
     include/factor_compute/FactorComputeToken.h
     include/factor_compute/IFactorComputeEngine.h
     include/factor_compute/IFactorSignalSetAssembler.h
