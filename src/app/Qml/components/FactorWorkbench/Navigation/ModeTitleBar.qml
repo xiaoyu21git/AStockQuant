@@ -79,17 +79,14 @@ Rectangle {
         }
         
         // 模式切换按钮 — 可横向滚动，防止溢出
-        // 显式计算 contentWidth: Row.implicitWidth 在 Repeater 动态子项场景下不可靠
         Flickable {
             id: modeButtonsFlickable
             Layout.fillWidth: true
             Layout.preferredHeight: 48
-            // 显式计算避免 Row.implicitWidth 在 Repeater 场景下为 0
-            contentWidth: {
-                var w = 0, kids = modeButtonsRow.children
-                for (var i = 0; i < kids.length; i++) w += kids[i].width
-                return w + Math.max(0, kids.length - 1) * modeButtonsRow.spacing
-            }
+            // Row.implicitWidth 由布局引擎随 Repeater 子项自动维护;
+            // 曾改用手写 children 遍历计算(3c802f4), 首次求值时子项未孵化导致
+            // contentWidth 归 0/NaN, 配合 clip:true 整排按钮被裁剪不可见, 故改回
+            contentWidth: modeButtonsRow.implicitWidth
             clip: true
             flickableDirection: Flickable.HorizontalFlick
             boundsBehavior: Flickable.StopAtBounds

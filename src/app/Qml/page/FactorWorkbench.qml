@@ -335,6 +335,9 @@ Item {
         
         // 顶部导航栏 - 使用外部组件
         ModeTitleBar {
+            // ColumnLayout 对非 fillWidth 子项只给 implicitWidth(Rectangle=0),
+            // 缺此行时整条标题栏宽度为0, 852fc74 起 Flickable clip:true 会把按钮排裁剪不可见
+            Layout.fillWidth: true
             currentMode: root.currentMode
             showBackButton: currentMode !== "library"
             onModeSelected: function(mode) { switchMode(mode) }
