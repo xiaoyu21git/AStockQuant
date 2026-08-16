@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <string>
 #include <thread>
@@ -16,6 +17,8 @@
 namespace foundation::thread { class ThreadPoolExecutor; }
 namespace astock::database { class ISqlDatabase; }
 namespace astock::infrastructure::database {
+
+class AppStateStore;
 
 class PostMarketSyncService {
 public:
@@ -73,14 +76,15 @@ private:
 
     void schedulerLoop();
 
-    /// @brief 同步屏蔽窗口 [start, end) — end 由 EOD 下单时间派生, 不可独立配置/写死
-    /// end = eodTriggerTime: 下单未触发前禁止同步; 同步触发时间同样不得早于下单
+    /// @brief 同步屏蔽窗口 [start, end) — 全部时间由配置文件派生, 零兜底 (P6)
+    /// end = eodTriggerTime (下单未触发前禁止同步); 同步触发 = max(syncTriggerTime, end)
+    /// 任一配置键缺失/非法 → resolveSyncWindow 返回 nullopt (拒绝启动/拒绝执行)
     struct SyncWindow {
-        int blockStartMin{565};   // 默认 09:25
-        int blockEndMin{900};     // 配置缺失时的回退值, 实际派生自 eodTriggerTime
-        int triggerMin{901};      // 有效同步触发 = max(syncTriggerTime, blockEnd)
+        int blockStartMin{0};
+        int blockEndMin{0};
+        int triggerMin{0};
     };
-    [[nodiscard]] SyncWindow resolveSyncWindow() const;
+    [[nodiscard]] std::optional<SyncWindow> resolveSyncWindow() const;
 
     // 频率分层
     void syncAll(int tradingDay);
@@ -190,6 +194,7 @@ private:
     void saveLastSyncDay(int tradingDay);
     std::string m_liveDataPath;   // 实盘数据目录（由 AppBootstrap 注入）
     std::string m_persistPath;    // 统一 JSON 文件全路径 (post_market_state.json)
+    std::shared_ptr<AppStateStore> m_store;  // app_state.json 统一写者 (跨服务互斥)
 };
 
 } // namespace astock::infrastructure::database

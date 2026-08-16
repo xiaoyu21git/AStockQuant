@@ -6,6 +6,7 @@
 #include "factor_compute/FeatureTensorBuilder.h"
 #include "foundation/log/logging.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <mutex>
 
@@ -142,7 +143,37 @@ CalculationResult DLFactor::calculate(const CalculationContext& context)
             }
 
             // ── 构建特征张量 ──
+            // 字段清单以模型目录内 feature_config.json 为准（训练导出的输入契约）：
+            // 不同版本模型特征数不同（V9=16 维，板块版本=23 维），硬编码清单只能匹配其中一版。
+            // 市场特征由 builder 内存计算，须从数据字段中剔除。
             auto fields = getDataRequirements().requiredFields;
+            const std::filesystem::path cfgPath =
+                std::filesystem::path(s_loadedPath).parent_path() / "feature_config.json";
+            if (std::filesystem::exists(cfgPath)) {
+                try {
+                    auto cfg = foundation::json::JsonFacade::parseFile(cfgPath.string());
+                    if (!cfg.isNull() && cfg.isObject() && cfg.has("fields")) {
+                        auto arr = cfg.get("fields");
+                        if (arr.isArray()) {
+                            std::vector<std::string> cfgFields;
+                            for (size_t i = 0; i < arr.size(); ++i)
+                                cfgFields.push_back(arr.at(i).asString());
+                            if (!cfgFields.empty()) {
+                                const auto& market =
+                                    factor::compute::FeatureTensorBuilder::marketFields();
+                                cfgFields.erase(std::remove_if(cfgFields.begin(), cfgFields.end(),
+                                    [&market](const std::string& f) {
+                                        return std::find(market.begin(), market.end(), f) != market.end();
+                                    }), cfgFields.end());
+                                fields = std::move(cfgFields);
+                            }
+                        }
+                    }
+                } catch (const std::exception& e) {
+                    INTERNAL_WARN_STREAM << "[DLFactor] feature_config.json 解析失败, 回退硬编码字段清单: " << e.what();
+                }
+            }
+
             factor::compute::FeatureTensorBuilder builder(
                 fields, params_.lookbackWindow, s_loadedPath);
 
@@ -245,15 +276,16 @@ DataRequirements DLFactor::getDataRequirements() const
 
     // 板块日频聚合列（Phase 1 产出，字段顺序与 train.py SECTOR_FIELDS 一致）
     // 若 Arrow 缓存不含这些列，ffill 后为 NaN → 标的被跳过 → 旧模型不受影响
-    appendRequiredField(req, "sector_vwap_change");
+    // sector_concentration/sector_turnover_ratio 依赖 minute_bar.amount (2015-2025 全 NULL)，
+    // 已从训练侧剔除 (2026-08-13)，C++ 侧同步删除保持 raw=19 + market=4 = 23 维度一致
+    // 2026-08-13: sector_vwap_change 更名 sector_return（板块聚合改 daily_bar 等权涨跌幅口径）
+    appendRequiredField(req, "sector_return");
     appendRequiredField(req, "sector_breadth");
     appendRequiredField(req, "sector_is_reliable");
     appendRequiredField(req, "sector_money_flow_net");
     appendRequiredField(req, "sector_money_flow_ratio");
     appendRequiredField(req, "sector_amplitude");
     appendRequiredField(req, "sector_relative_strength");
-    appendRequiredField(req, "sector_concentration");
-    appendRequiredField(req, "sector_turnover_ratio");
 
     appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;

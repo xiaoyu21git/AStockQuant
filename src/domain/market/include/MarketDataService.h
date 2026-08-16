@@ -13,6 +13,8 @@ namespace engine { struct GmTickData; }
 
 #include "LiveData.h"
 
+#include <atomic>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -34,18 +36,29 @@ class MarketDataService final {
 public:
     using EndOfDayCallback = std::function<void(const std::string& closedTradingDay)>;
 
+    /// @brief 回调注销 token (registerEndOfDayCallback 返回值)
+    using EndOfDayCallbackToken = std::uint64_t;
+
     static MarketDataService& instance();
 
     /// @brief 接收单笔 tick，更新对应标的的全部 K 线
     /// 内部检测 tradingDay 变更 → 自动触发所有 EndOfDay 回调
     void onTick(const engine::GmTickData& td);
 
-    /// @brief 注册日终回调（日频策略评估入口）
+    /// @brief 注册日终回调（日频策略评估入口），返回注销 token
     /// 回调在 onTick() 上下文中同步调用，必须轻量（不应阻塞线程）
-    void registerEndOfDayCallback(EndOfDayCallback cb);
+    EndOfDayCallbackToken registerEndOfDayCallback(EndOfDayCallback cb);
+
+    /// @brief 注销日终回调 (token 来自 registerEndOfDayCallback; 无效 token 为 no-op)
+    void unregisterEndOfDayCallback(EndOfDayCallbackToken token);
 
     /// @brief 获取当前追踪的交易日（0 表示尚未收到任何 tick）
     [[nodiscard]] std::int64_t activeTradingDay() const noexcept { return m_activeTradingDay; }
+
+    /// @brief 设置预收盘 EOD 回调发射窗口 (P6: 时间由配置文件字段决定, 零硬编码零兜底)
+    /// 窗口来自 trading_connection.json eodCallbackStartTime/eodCallbackEndTime, 由 Facade 注入;
+    /// 未设置 (0) → 预收盘回调永不发射 (一次性 WARN 提示配置缺失, 不用硬编码时间顶替)
+    void setEodCallbackWindow(int startMinute, int endMinute);
 
     /// @brief 获取某标的的实时行情（不存在则创建空数据）
     [[nodiscard]] const LiveData& liveData(const std::string& symbol) const;
@@ -67,7 +80,18 @@ private:
 
     std::int64_t m_activeTradingDay = 0;
     std::int64_t m_lastEvalTradingDay = 0;  // 已触发 EOD 的交易日, 防重复
-    std::vector<EndOfDayCallback> m_eodCallbacks;
+
+    // 预收盘 EOD 回调发射窗口 [start, end) 分钟 (配置注入, 0 = 未配置 → 不发射)
+    std::atomic<int> m_eodCallbackStartMin{0};
+    std::atomic<int> m_eodCallbackEndMin{0};
+    std::atomic<bool> m_eodWindowWarned{false};  // 未配置窗口的一次性 WARN 标志
+
+    struct CallbackEntry {
+        EndOfDayCallbackToken token{0};
+        EndOfDayCallback cb;
+    };
+    std::vector<CallbackEntry> m_eodCallbacks;
+    std::uint64_t m_nextCallbackToken{1};  // 单调递增, 0 保留为无效 token
 };
 
 } // namespace domain::market

@@ -6,6 +6,7 @@
 #include "TradingSessionConstants.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/market/AStockSymbol.h"
+#include "foundation/time/LocalClock.h"
 #include "../../domain/market/include/MarketDataService.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 
@@ -373,28 +374,13 @@ bool GmSessionEngine::initialized() const { return m_impl && m_impl->isInitializ
 // ── 交易时段查询（纯基于系统时钟 + 交易日历，零副作用）──
 
 bool GmSessionEngine::isAfterHoursSession() const {
-    auto now = std::chrono::system_clock::now();
-    auto tt = std::chrono::system_clock::to_time_t(now);
-    std::tm local;
-#ifdef _WIN32
-    localtime_s(&local, &tt);
-#else
-    localtime_r(&tt, &local);
-#endif
-    int minutes = local.tm_hour * 60 + local.tm_min;
+    // P6: 分钟换算复用 foundation::time::LocalClock, 消除 localtime 副本
+    const int minutes = foundation::time::LocalClock::minutesOfDay();
     return minutes >= session::kLockEndMinutes && minutes <= session::kAfterHoursEndMinutes;
 }
 
 bool GmSessionEngine::isInLockPeriod() const {
-    auto now = std::chrono::system_clock::now();
-    auto tt = std::chrono::system_clock::to_time_t(now);
-    std::tm local;
-#ifdef _WIN32
-    localtime_s(&local, &tt);
-#else
-    localtime_r(&tt, &local);
-#endif
-    int minutes = local.tm_hour * 60 + local.tm_min;
+    const int minutes = foundation::time::LocalClock::minutesOfDay();
     return minutes >= session::kCloseMinutes && minutes < session::kLockEndMinutes;
 }
 

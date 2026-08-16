@@ -299,7 +299,7 @@ void DataCleaningServiceRefactored::cleanDataFromDataSet(int dataSetId,
 
                 for (int64_t ri = 0; ri < n; ++ri) {
                     auto& row = pool[static_cast<size_t>(ri)];
-                    row = J::createObject();  // 每行重置为全新对象，避免复用行残留上一批规则加的内部字段
+                    row.resetObject();  // 原地重置为全新对象（复用列槽），避免残留上一批规则加的内部字段
                     for (size_t c = 0; c < static_cast<size_t>(nCols); ++c) {
                         if (colIsNum[c]) {
                             if (doublePtrs[c]->IsNull(ri)) row.setNull(colNames[c].c_str());

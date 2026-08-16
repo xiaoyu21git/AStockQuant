@@ -77,7 +77,7 @@ void StrategyManager::stopAll() {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (auto& [id, engine] : m_engines) {
         if (engine) {
-            engine->stopLiveLoop();  // 先停后台 drainQueue 线程
+            engine->stopLiveLoop();  // 先停后台评估调度线程 (P4: 死代码清理)
             engine->stop();          // 再停策略服务状态
         }
     }

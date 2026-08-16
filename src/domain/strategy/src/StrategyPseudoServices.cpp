@@ -228,7 +228,7 @@ StrategyServiceFlowResult DefaultOrderBuilder::buildOrder(
     outputOrder.setExtension(domain::trading::ExtKey::kSignalIntent,
         static_cast<uint64_t>(signal.intent()));
     outputOrder.setOrderType(OrderType::Market);
-    outputOrder.setPrice(0);                         // drainQueue 用 tick 价补
+    outputOrder.setPrice(0);                         // 市价单占位价格 (下单时按实时价补)
 
     // 占位数量, 真实下单量由回测循环/实盘调度按权重×信号强度换算 — TRACE 防刷屏
     INTERNAL_TRACE_STREAM << "[OrderBuild] signal->order: symbol=" << outputOrder.symbol()

@@ -13,7 +13,6 @@
 #include "domain/strategy/include/IStrategyService.h"
 #include "domain/strategy/include/StrategyServiceTypes.h"
 #include "domain/strategy/include/IOrderListener.h"
-#include "domain/strategy/include/DailyEodScheduler.h"
 #include "engine/include/AccountEngine.h"
 #include "engine/include/GmSessionEngine.h"
 #include "database/NativePgConnectionPool.h"
@@ -170,7 +169,7 @@ int main(int argc, char* argv[]) {
         return 4;
     }
 
-    const auto* view = engine->liveMarketView();
+    auto view = engine->liveMarketView();  // P3: shared_ptr 返回
     if (!view) {
         std::cerr << "FATAL: liveMarketView 为空\n";
         return 4;
@@ -197,7 +196,7 @@ int main(int argc, char* argv[]) {
     std::cout << "[6/6] evaluateEndOfDay(" << tradingDay << ", false)...\n";
     std::cout << "───────────────────────────────────────────\n";
 
-    EodEvaluationStatus status = EodEvaluationStatus::Error;
+    EvalStatus status = EvalStatus::Error;
     try {
         status = engine->evaluateEndOfDay(tradingDay, false);
     } catch (const std::exception& e) {
@@ -211,16 +210,16 @@ int main(int argc, char* argv[]) {
     std::cout << "╠══════════════════════════════════════════╣\n";
     const char* statusStr = "Unknown";
     switch (status) {
-    case EodEvaluationStatus::Submitted:   statusStr = "Submitted (已提交)"; break;
-    case EodEvaluationStatus::NoSignal:    statusStr = "NoSignal (无信号)"; break;
-    case EodEvaluationStatus::Skipped:     statusStr = "Skipped (跳过)"; break;
-    case EodEvaluationStatus::AllRejected: statusStr = "AllRejected"; break;
-    case EodEvaluationStatus::Error:       statusStr = "Error"; break;
+    case EvalStatus::Submitted:   statusStr = "Submitted (已提交)"; break;
+    case EvalStatus::NoSignal:    statusStr = "NoSignal (无信号)"; break;
+    case EvalStatus::Skipped:     statusStr = "Skipped (跳过)"; break;
+    case EvalStatus::AllRejected: statusStr = "AllRejected"; break;
+    case EvalStatus::Error:       statusStr = "Error"; break;
     }
     std::cout << "║  状态: " << statusStr << "\n";
     std::cout << "║  订单数: " << listener->m_submittedCount << "\n";
     std::cout << "║  总股数: " << listener->m_totalQuantity << "\n";
     std::cout << "╚══════════════════════════════════════════╝\n";
 
-    return (status == EodEvaluationStatus::Error) ? 6 : 0;
+    return (status == EvalStatus::Error) ? 6 : 0;
 }

@@ -31,7 +31,6 @@
 #include <QDebug>
 
 #include <atomic>
-#include <chrono>
 
 // ── 工具函数 ──
 namespace {
@@ -40,19 +39,6 @@ inline QString toQmlSide(domain::strategy::OrderDirection d) {
     return d == domain::strategy::OrderDirection::Buy
         ? QStringLiteral("BUY") : QStringLiteral("SELL");
 }
-} // anonymous namespace
-
-namespace {
-
-std::string generateClOrdId() {
-    static std::atomic<uint64_t> s_counter{0};
-    auto now = std::chrono::steady_clock::now().time_since_epoch().count();
-    uint64_t seq = s_counter.fetch_add(1, std::memory_order_relaxed);
-    std::ostringstream oss;
-    oss << std::hex << now << "_" << seq;
-    return oss.str();
-}
-
 } // anonymous namespace
 
 namespace bridge {

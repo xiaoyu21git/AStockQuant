@@ -1,4 +1,5 @@
 #include "database/PostMarketSyncService.h"
+#include "database/AppStateStore.h"
 #include "database/NativePgConnectionPool.h"
 #include "database/SchemaNames.h"
 #include "database/ISqlDatabase.h"
@@ -11,6 +12,7 @@
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/json/json_facade.h"
+#include "foundation/time/LocalClock.h"
 #include <cstdlib>
 #include <unordered_set>
 
@@ -61,11 +63,20 @@ void PostMarketSyncService::start() {
     m_persistPath = m_liveDataPath.empty()
         ? "app_state.json"
         : m_liveDataPath + "/app_state.json";
+    m_store = AppStateStore::forPath(m_persistPath);
     loadLastSyncDay();
+    // P6: 同步窗口配置零兜底 — 任一时间键缺失/非法 → 拒绝启动 (不用硬编码时间顶替)
+    const auto window = resolveSyncWindow();
+    if (!window) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] 同步窗口配置无效, 调度器拒绝启动 (修复配置后重启)";
+        return;
+    }
     m_running.store(true);
     m_scheduler = std::make_unique<std::thread>(&PostMarketSyncService::schedulerLoop, this);
     INTERNAL_INFO_STREAM << "[PostMktSync] 调度线程已启动 today=" << getCurrentTradingDay()
-                         << " dataSync=" << m_dataSyncDay.load();
+                         << " dataSync=" << m_dataSyncDay.load()
+                         << " 窗口=[屏蔽 " << window->blockStartMin << "min 起, 截止下单 "
+                         << window->blockEndMin << "min, 同步触发 " << window->triggerMin << "min]";
 }
 
 bool PostMarketSyncService::forceSyncToday() {
@@ -86,11 +97,16 @@ bool PostMarketSyncService::forceSyncToday() {
         std::lock_guard<std::recursive_mutex> gmLock(engine::GmSessionEngine::gmSdkMutex());
 
         // 盘中禁止同步：GM SDK 日线/分钟线 API 在交易时段调用可能崩溃
-        const SyncWindow window = resolveSyncWindow();
+        // (P6 零兜底: 窗口配置无效 → ERROR + 拒绝执行, 不用硬编码时间顶替)
+        const auto window = resolveSyncWindow();
+        if (!window) {
+            INTERNAL_ERROR_STREAM << "[PostMktSync] 同步窗口配置无效, 拒绝手动同步";
+            return;
+        }
         int mins = getCurrentLocalMinutes();
-        if (mins >= window.blockStartMin && mins < window.triggerMin) {
+        if (mins >= window->blockStartMin && mins < window->triggerMin) {
             INTERNAL_WARN_STREAM << "[PostMktSync] 盘中禁止同步 ("
-                << mins << "min, 屏蔽" << window.blockStartMin << "-" << window.triggerMin << ")";
+                << mins << "min, 屏蔽" << window->blockStartMin << "-" << window->triggerMin << ")";
             return;
         }
 
@@ -237,13 +253,12 @@ void PostMarketSyncService::fillAdjFactors() {
         if(!db||!db->isOpen()){INTERNAL_ERROR_STREAM<<"[PostMktSync] fillAdjFactors DB不可用";return;}
 
         // 读取上次复权因子同步日期，只拉该日期之后的新复权事件
-        std::string lastAdjDate = "2000-01-01";
-        {
-            auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
-            if (!json.isNull() && json.isObject() && json.has("lastAdjFactorDate")) {
-                auto val = json.get("lastAdjFactorDate").asString();
-                if (val.size() >= 10) lastAdjDate = val;
-            }
+        // (P6: 走 AppStateStore 统一写者, 不再裸 JsonFacade 直读直写)
+        std::string lastAdjDate = "2000-01-01";   // 首次全量: 合法领域默认值, 非配置兜底
+        if (m_store) {
+            std::string saved;
+            if (m_store->readString("lastAdjFactorDate", saved) && saved.size() >= 10)
+                lastAdjDate = saved;
         }
         INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors lastSync="<<lastAdjDate;
 
@@ -282,19 +297,9 @@ void PostMarketSyncService::fillAdjFactors() {
             if(proc%100==0||proc==total)INTERNAL_INFO_STREAM<<"[PostMktSync] fillAdjFactors "<<(proc*100/total)<<"% "<<proc<<"/"<<total<<" (ok="<<ok<<" fail="<<fail<<")";
         }
 
-        // 保存本次同步日期到统一 JSON
-        {
-            auto root = foundation::json::JsonFacade::createObject();
-            auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
-            if (!existing.isNull() && existing.isObject()) {
-                for (const auto& key : existing.keys()) {
-                    if (key != "lastAdjFactorDate") root.set(key, existing.get(key));
-                }
-            }
-            root.set("lastAdjFactorDate", foundation::json::JsonFacade::createString(endDate));
-            std::string tmpPath = m_persistPath + ".tmp";
-            { std::ofstream f(tmpPath, std::ios::trunc); if (f) f << root.toString() << "\n"; }
-            std::rename(tmpPath.c_str(), m_persistPath.c_str());
+        // 保存本次同步日期 (P6: AppStateStore 原子写, 保留其余顶层键, 与全服务互斥)
+        if (m_store) {
+            m_store->writeString("lastAdjFactorDate", endDate);
         }
     });
 }
@@ -313,32 +318,34 @@ std::string PostMarketSyncService::getSyncStatus(int tradingDay) const {
 // 调度线程
 // ═════════════════════════════════════════════════
 
-PostMarketSyncService::SyncWindow PostMarketSyncService::resolveSyncWindow() const {
+std::optional<PostMarketSyncService::SyncWindow> PostMarketSyncService::resolveSyncWindow() const {
     SyncWindow window;
     auto& cfgMgr = foundation::config::ConfigManager::instance();
     auto cfg = cfgMgr.loadConfigFile(foundation::config::ConfigFile::TradingConnection);
-    int eodTriggerMin = window.blockEndMin;   // 配置缺失时回退默认值
-    int syncTriggerMin = window.triggerMin;
-    if (cfg && !cfg->isNull()) {
-        auto parseTime = [](const std::string& s) -> int {
-            if (s.size() < 5) return -1;
-            return std::stoi(s.substr(0, 2)) * 60 + std::stoi(s.substr(3, 2));
-        };
-        if (cfg->has("syncBlockStart")) {
-            const int parsed = parseTime(cfg->get("syncBlockStart").asString());
-            if (parsed >= 0) window.blockStartMin = parsed;
-        }
-        if (cfg->has("eodTriggerTime")) {
-            const int parsed = parseTime(cfg->get("eodTriggerTime").asString());
-            if (parsed >= 0) eodTriggerMin = parsed;
-        }
-        if (cfg->has("syncTriggerTime")) {
-            const int parsed = parseTime(cfg->get("syncTriggerTime").asString());
-            if (parsed >= 0) syncTriggerMin = parsed;
-        }
+    if (!cfg || cfg->isNull()) {
+        INTERNAL_ERROR_STREAM << "[PostMktSync] trading_connection.json 不可用, 无法解析同步窗口";
+        return std::nullopt;
     }
+    // P6 零兜底: 任一时间键缺失/非法 → ERROR + nullopt (HH:MM 解析复用 LocalClock)
+    const auto applyTime = [&cfg](const char* key, int& target) -> bool {
+        if (!cfg->has(key)) {
+            INTERNAL_ERROR_STREAM << "[PostMktSync] 配置缺失 " << key << ", 拒绝执行";
+            return false;
+        }
+        const int parsed = foundation::time::LocalClock::parseHhMm(cfg->get(key).asString());
+        if (parsed < 0) {
+            INTERNAL_ERROR_STREAM << "[PostMktSync] 配置 " << key << " 非法: '"
+                                  << cfg->get(key).asString() << "' (需 HH:MM), 拒绝执行";
+            return false;
+        }
+        target = parsed;
+        return true;
+    };
+    if (!applyTime("syncBlockStart", window.blockStartMin)) return std::nullopt;
+    if (!applyTime("eodTriggerTime", window.blockEndMin)) return std::nullopt;
+    int syncTriggerMin = 0;
+    if (!applyTime("syncTriggerTime", syncTriggerMin)) return std::nullopt;
     // 屏蔽截止 = EOD 下单时间(唯一来源, 不写死); 同步触发不得早于下单
-    window.blockEndMin = eodTriggerMin;
     window.triggerMin = (std::max)(syncTriggerMin, window.blockEndMin);
     return window;
 }
@@ -350,9 +357,14 @@ void PostMarketSyncService::schedulerLoop() {
             std::this_thread::sleep_for(std::chrono::hours(4));
             continue;
         }
-        const SyncWindow window = resolveSyncWindow();
+        // P6 零兜底: 每轮循环读取配置文件; 任一键缺失/非法 → ERROR + 退出调度循环
+        const auto window = resolveSyncWindow();
+        if (!window) {
+            INTERNAL_ERROR_STREAM << "[PostMktSync] 同步窗口配置无效, 调度循环退出 (修复配置后重启)";
+            break;
+        }
         int mins = getCurrentLocalMinutes();
-        if (mins >= window.triggerMin) {
+        if (mins >= window->triggerMin) {
             if (m_dataSyncDay.load() == today) {
                 INTERNAL_INFO_STREAM << "[PostMktSync] today=" << today << " 已同步过，跳过";
                 std::this_thread::sleep_for(std::chrono::hours(1));
@@ -382,16 +394,16 @@ void PostMarketSyncService::schedulerLoop() {
             saveLastSyncDay(today);
             // 同步完成后睡到下一个交易日
             std::this_thread::sleep_for(std::chrono::hours(8));
-        } else if (mins >= window.blockStartMin && mins < window.blockEndMin) {
+        } else if (mins >= window->blockStartMin && mins < window->blockEndMin) {
             // 屏蔽窗口内: EOD 下单未触发, 禁止同步 — 正常等待状态
             char timeBuf[48];
             std::snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d (屏蔽至 EOD 下单 %02d:%02d)",
                           mins / 60, mins % 60,
-                          window.blockEndMin / 60, window.blockEndMin % 60);
+                          window->blockEndMin / 60, window->blockEndMin % 60);
             INTERNAL_DEBUG_STREAM << "[PostMktSync] 下单前禁止同步, 当前 " << timeBuf;
             std::this_thread::sleep_for(std::chrono::seconds(60));
         } else {
-            int waitMin = window.triggerMin - mins;
+            int waitMin = window->triggerMin - mins;
             if (waitMin > 0) {
                 INTERNAL_INFO_STREAM << "[PostMktSync] 等待 " << waitMin << " 分钟到同步时间";
                 std::this_thread::sleep_for(std::chrono::minutes(waitMin));
@@ -428,10 +440,15 @@ void PostMarketSyncService::syncAll(int tradingDay) {
     INTERNAL_INFO_STREAM << "[PostMktSync] 开始同步 today=" << tradingDay;
 
     // 下单前不允许同步 — 屏蔽窗口与调度循环共用同一派生逻辑(截止=EOD 下单时间)
+    // (P6 零兜底: 窗口配置无效 → ERROR + 拒绝执行)
     int mins = getCurrentLocalMinutes();
     {
-        const SyncWindow window = resolveSyncWindow();
-        if (mins >= window.blockStartMin && mins < window.blockEndMin) {
+        const auto window = resolveSyncWindow();
+        if (!window) {
+            INTERNAL_ERROR_STREAM << "[PostMktSync] 同步窗口配置无效, 拒绝同步";
+            return;
+        }
+        if (mins >= window->blockStartMin && mins < window->blockEndMin) {
             INTERNAL_WARN_STREAM << "[PostMktSync] EOD 下单未触发, 禁止同步";
             return;
         }
@@ -803,15 +820,8 @@ void PostMarketSyncService::logTaskEnd(const std::string& taskType, int tradingD
 }
 
 int PostMarketSyncService::getCurrentLocalMinutes() {
-    auto now = std::chrono::system_clock::now();
-    auto tt = std::chrono::system_clock::to_time_t(now);
-    struct tm local;
-#if defined(_WIN32) || defined(_WIN64)
-    localtime_s(&local, &tt);
-#else
-    localtime_r(&tt, &local);
-#endif
-    return local.tm_hour * 60 + local.tm_min;
+    // P6: 分钟换算复用 foundation::time::LocalClock, 消除 localtime 副本
+    return foundation::time::LocalClock::minutesOfDay();
 }
 
 int PostMarketSyncService::getCurrentTradingDay() {
@@ -879,37 +889,18 @@ PostMarketSyncService::GmSymbolMapping PostMarketSyncService::buildGmSymbolMap(
 }
 
 void PostMarketSyncService::loadLastSyncDay() {
-    if (m_persistPath.empty()) return;
-    auto json = foundation::json::JsonFacade::parseFile(m_persistPath);
-    if (json.isNull() || !json.isObject()) return;
-    if (json.has("dataSyncDay")) {
-        try { m_dataSyncDay.store(json.get("dataSyncDay").asInt()); } catch (...) {}
+    if (!m_store) return;
+    std::int64_t day = 0;
+    if (m_store->readInt("dataSyncDay", day)) {
+        m_dataSyncDay.store(static_cast<int>(day));
     }
     INTERNAL_INFO_STREAM << "[PostMktSync] 加载 dataSyncDay=" << m_dataSyncDay.load();
 }
 
 void PostMarketSyncService::saveLastSyncDay(int tradingDay) {
-    if (m_persistPath.empty()) return;
-    // 读取现有 JSON，保留其他字段，只写新键 dataSyncDay
-    auto root = foundation::json::JsonFacade::createObject();
-    {
-        auto existing = foundation::json::JsonFacade::parseFile(m_persistPath);
-        if (!existing.isNull() && existing.isObject()) {
-            for (const auto& key : existing.keys()) {
-                if (key != "lastSyncDay" && key != "dataSyncDay")
-                    root.set(key, existing.get(key));
-            }
-        }
-    }
-    root.set("dataSyncDay", foundation::json::JsonFacade::createInt(tradingDay));
-    // 原子写入
-    std::string tmpPath = m_persistPath + ".tmp";
-    {
-        std::ofstream f(tmpPath, std::ios::trunc);
-        if (!f.is_open()) return;
-        f << root.toString() << "\n";
-    }
-    std::rename(tmpPath.c_str(), m_persistPath.c_str());
+    if (!m_store) return;
+    // 保留其他字段, 只写新键 dataSyncDay (旧键 lastSyncDay 剔除; AppStateStore 原子写)
+    m_store->writeInt("dataSyncDay", tradingDay, {"lastSyncDay"});
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

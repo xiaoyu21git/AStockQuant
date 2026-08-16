@@ -255,10 +255,10 @@ public:
         const std::string& endDate,
         const std::string& joinColumn = "id");
 
-    /// 板块日频聚合（从 mkt.minute_bar 按 industry_code + trade_date GROUP BY）
+    /// 板块日频聚合（从 mkt.daily_bar 按 industry_code + trade_date GROUP BY）
     /// 返回列: industry_code, trade_date, stock_count, sector_is_reliable,
-    ///         sector_vwap, sector_vwap_change, sector_breadth, sector_amplitude,
-    ///         sector_relative_strength, sector_turnover
+    ///         sector_breadth, sector_amplitude, sector_turnover,
+    ///         sector_return, sector_relative_strength, sector_turnover_ratio
     std::vector<astock::database::SqlQueryResultRow> querySectorDailyAgg(
         const std::string& startDate,
         const std::string& endDate);
@@ -269,7 +269,7 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
-    /// 板块集中度（从 mkt.minute_bar 按个股成交额排名计算 Top3 占比）
+    /// 板块集中度（从 mkt.daily_bar 按个股成交额排名计算 Top3 占比）
     /// 返回列: industry_code, trade_date, sector_concentration
     std::vector<astock::database::SqlQueryResultRow> querySectorConcentration(
         const std::string& startDate,

@@ -1,9 +1,11 @@
 #include "MarketDataService.h"
 #include "../../../engine/include/GmSessionEngine.h"
 
+#include <algorithm>
 #include <ctime>
 #include <sstream>
 #include <foundation/log/logging.hpp>
+#include <foundation/time/LocalClock.h>
 
 namespace domain::market {
 
@@ -13,17 +15,33 @@ MarketDataService& MarketDataService::instance()
     return s_instance;
 }
 
-void MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
+MarketDataService::EndOfDayCallbackToken MarketDataService::registerEndOfDayCallback(EndOfDayCallback cb)
 {
     const std::lock_guard<std::mutex> lock(mutex_);
-    m_eodCallbacks.push_back(std::move(cb));
+    auto token = m_nextCallbackToken++;
+    m_eodCallbacks.push_back(CallbackEntry{token, std::move(cb)});
+    return token;
+}
+
+void MarketDataService::setEodCallbackWindow(int startMinute, int endMinute) {
+    m_eodCallbackStartMin.store(startMinute);
+    m_eodCallbackEndMin.store(endMinute);
+    m_eodWindowWarned.store(false);
+}
+
+void MarketDataService::unregisterEndOfDayCallback(EndOfDayCallbackToken token)
+{
+    const std::lock_guard<std::mutex> lock(mutex_);
+    m_eodCallbacks.erase(std::remove_if(m_eodCallbacks.begin(), m_eodCallbacks.end(),
+        [token](const CallbackEntry& e) { return e.token == token; }),
+        m_eodCallbacks.end());
 }
 
 void MarketDataService::fireCallbacksForDay(std::int64_t day)
 {
     if (day <= 0) return;
     // 拷贝回调列表（持有锁），释放锁后调用
-    std::vector<EndOfDayCallback> callbacks;
+    std::vector<CallbackEntry> callbacks;
     {
         const std::lock_guard<std::mutex> lock(mutex_);
         if (m_eodCallbacks.empty()) return;
@@ -32,8 +50,8 @@ void MarketDataService::fireCallbacksForDay(std::int64_t day)
     std::string dayStr = std::to_string(day);
     INTERNAL_INFO_STREAM << "[MarketDataService] 触发 " << callbacks.size()
                          << " EOD callbacks for day " << dayStr;
-    for (auto& cb : callbacks) {
-        cb(dayStr);
+    for (auto& e : callbacks) {
+        e.cb(dayStr);
     }
 }
 
@@ -119,23 +137,25 @@ void MarketDataService::onTick(const engine::GmTickData& td)
         daily.setAmount(d.period(1).amountSum(d.period(1).count()));
     }
     // ── 锁释放后 → 预收盘触发 + 日切触发 ──
-    // 计算 tick 本地时间
     {
-        auto tt = static_cast<time_t>(td.createdAt);
-        struct tm local;
-#if defined(_WIN32) || defined(_WIN64)
-        localtime_s(&local, &tt);
-#else
-        localtime_r(&tt, &local);
-#endif
-        int minutes = local.tm_hour * 60 + local.tm_min;
+        // tick 本地时间 (P6: 分钟换算复用 foundation::time::LocalClock, 消除 localtime 副本)
+        const int minutes = foundation::time::LocalClock::minutesOfDay(
+            static_cast<time_t>(td.createdAt));
 
-        // ── 预收盘触发: (根据最新规则盘后固定时间是15:05---15:30) 当前交易日 ──
-        if (minutes >= 905 && minutes < 930
-            && m_activeTradingDay > 0
-            && m_activeTradingDay != m_lastEvalTradingDay) {
-            m_lastEvalTradingDay = m_activeTradingDay;
-            fireCallbacksForDay(m_activeTradingDay);
+        // ── 预收盘触发: 窗口由配置文件 eodCallbackStartTime/eodCallbackEndTime 决定 (零硬编码零兜底) ──
+        const int cbStart = m_eodCallbackStartMin.load();
+        const int cbEnd = m_eodCallbackEndMin.load();
+        if (cbStart > 0 && cbEnd > 0 && cbStart < cbEnd) {
+            if (minutes >= cbStart && minutes < cbEnd
+                && m_activeTradingDay > 0
+                && m_activeTradingDay != m_lastEvalTradingDay) {
+                m_lastEvalTradingDay = m_activeTradingDay;
+                fireCallbacksForDay(m_activeTradingDay);
+            }
+        } else if (!m_eodWindowWarned.exchange(true)) {
+            // 窗口未配置 → 不发射 (不用硬编码时间顶替), 一次性 WARN
+            INTERNAL_WARN_STREAM << "[MarketData] EOD 回调窗口未配置 "
+                                 << "(eodCallbackStartTime/eodCallbackEndTime), 预收盘回调不发射";
         }
     }
 

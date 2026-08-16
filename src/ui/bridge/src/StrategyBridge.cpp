@@ -764,11 +764,12 @@ void StrategyBridge::setupLiveMarketView(const QString& strategyId, const QStrin
 
     // QML 手动注入自定义数据集（用于调试/回放）
     auto root = foundation::json::JsonFacade::parse(datasetJson.toStdString());
-    auto customView = factor::compute::CachedMarketDataView::fromJson(root);
+    std::shared_ptr<factor::compute::CachedMarketDataView> customView =
+        factor::compute::CachedMarketDataView::fromJson(root);
     if (customView) {
-        engine->setLiveMarketView(customView.get());
-        // 视图生命周期由 prepareMarketData() 统一管理；
-        // 手动注入的视图在 engine 下次 prepareMarketData() 时被覆盖
+        // P3 悬垂修复: shared_ptr 移交引擎持有 (m_injectedLiveView) — 局部对象析构后视图依然有效;
+        // 引擎下次 prepareMarketData() 重建视图时由新 shared_ptr 接管
+        engine->setLiveMarketView(customView);
     }
 }
 

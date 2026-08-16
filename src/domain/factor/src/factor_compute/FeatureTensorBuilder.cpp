@@ -31,6 +31,10 @@ int fieldIndex(const std::vector<std::string>& fields, const std::string& name) 
 
 namespace factor::compute {
 
+const std::vector<std::string>& FeatureTensorBuilder::marketFields() {
+    return kMarketFields;
+}
+
 FeatureTensorBuilder::FeatureTensorBuilder(
     const std::vector<std::string>& fields, int lookbackWindow,
     const std::string& scalerPath)

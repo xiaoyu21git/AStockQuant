@@ -11,7 +11,13 @@ target_sources(domain_strategy_runtime PRIVATE
     src/StrategyPythonRuleService.cpp
     src/StrategyServer.cpp
     src/StrategyEngineFacade.cpp
-    src/DailyEodScheduler.cpp
+    src/EvaluationScheduler.cpp
+    src/PriceProviders.cpp
+    src/LiveViewPreparer.cpp
+    src/PositionBook.cpp
+    src/SubmissionFinalizer.cpp
+    src/EngineListenerAssembler.cpp
+    src/SignalEvaluationPipeline.cpp
     src/StrategyManager.cpp
     src/RiskEvaluator.cpp
     src/EventRiskSubscriber.cpp

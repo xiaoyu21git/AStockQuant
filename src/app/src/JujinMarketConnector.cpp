@@ -9,6 +9,7 @@
 #include "../../domain/strategy/include/RiskManager.h"
 #include "../../../infrastructure/include/database/OrderRecorder.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "foundation/time/LocalClock.h"
 
 #include <algorithm>
 #include <cctype>
@@ -69,7 +70,8 @@ bool marketSessionAllowsSubscriptions()
 
     if (local->tm_wday < 1 || local->tm_wday > 5) return false; // 周末
 
-    int minutes = local->tm_hour * 60 + local->tm_min;
+    // P6: 分钟换算复用 foundation::time::LocalClock (wday 保留 tm 读取)
+    const int minutes = foundation::time::LocalClock::minutesOfDay();
     return (minutes >= 570 && minutes < 690)   // 9:30-11:30
         || (minutes >= 780 && minutes < 900);   // 13:00-15:00
 }

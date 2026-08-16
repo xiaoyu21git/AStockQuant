@@ -40,6 +40,10 @@ public:
     /// @brief 训练导出的 scaler 是否成功加载（false=回退到在线 zscore，与训练不一致）
     bool hasScaler() const { return m_hasScaler; }
 
+    /// @brief 市场特征字段名（与训练侧 MARKET_FEATURES 一致；推理时由 builder
+    ///        在内存中截面计算，不得作为数据字段传入）
+    static const std::vector<std::string>& marketFields();
+
 private:
     /// 使用 ZScore 标准化 (在线计算，无 scaler 时用)
     static std::vector<double> zscore(const std::vector<double>& series);

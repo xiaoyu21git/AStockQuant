@@ -85,7 +85,12 @@ QVariantMap TradingConnectionConfigService::defaultConfiguration() const {
     cfg["version"] = 1;
     // ── 设置页: 交易执行 ──
     cfg["defaultOrderType"]       = QStringLiteral("Limit");
-    cfg["eodTriggerTime"]         = QStringLiteral("15:00");
+    cfg["eodTriggerTime"]         = QStringLiteral("14:50");
+    cfg["compensationEndTime"]    = QStringLiteral("09:30");
+    cfg["triggerWindowMinutes"]   = 10;
+    // 收盘 EOD 回调兜底窗口 (收盘时段 tick 触发, 时间由配置决定, 零硬编码零兜底)
+    cfg["eodCallbackStartTime"]   = QStringLiteral("14:50");
+    cfg["eodCallbackEndTime"]     = QStringLiteral("15:00");
     cfg["useBoardLot"]            = true;
     cfg["limitPriceTolerance"]    = 9.9;
     // ── 设置页: 同步调度 (封锁结束不单独配置, 由 eodTriggerTime 派生) ──

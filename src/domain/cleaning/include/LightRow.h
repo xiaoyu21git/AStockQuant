@@ -1,14 +1,12 @@
-// LightRow.h — 零堆分配行，替代 JsonFacade 用于清洗热路径
+// LightRow.h — 轻量对象行：按 schema 一次性分配列槽，列数无上限
+// 替代 JsonFacade 用于清洗热路径；行池通过 resetObject() 原地复用列槽，避免反复分配
 #pragma once
-#include <array>
 #include <string>
 #include <variant>
 #include <vector>
 #include <unordered_map>
 
 namespace cleaning {
-
-constexpr int kLightMaxCols = 60;
 
 struct LightValue {
     enum Type : uint8_t { Null, Bool, Double, String } type = Null;
@@ -32,10 +30,11 @@ struct LightValue {
 class LightSchema {
 public:
     static LightSchema& instance() { static LightSchema s; return s; }
+    // 注册全部字段名（无列数上限）；幂等：首次注册生效，重复调用忽略
     void init(const std::vector<std::string>& ns) {
         if (built_) return;
-        for (size_t i = 0; i < ns.size() && i < kLightMaxCols; ++i) nameToIdx_[ns[i]] = static_cast<int>(i);
-        size_ = static_cast<int>(std::min(ns.size(), static_cast<size_t>(kLightMaxCols))); built_ = true;
+        for (size_t i = 0; i < ns.size(); ++i) nameToIdx_[ns[i]] = static_cast<int>(i);
+        size_ = static_cast<int>(ns.size()); built_ = true;
     }
     int index(const char* n) const { if(!built_)return -1; auto it=nameToIdx_.find(n); return it!=nameToIdx_.end()?it->second:-1; }
     int size() const { return size_; } bool built() const { return built_; }
@@ -47,8 +46,8 @@ private:
 
 class LightRow {
 public:
-    static constexpr int kMaxCols = kLightMaxCols;
-    LightRow() : isSingle_(false) { values_.fill(LightValue{}); }
+    // 对象行：按已注册 schema 一次性分配列槽（schema 未注册时列槽为空，写入全部忽略）
+    LightRow() : isSingle_(false), values_(static_cast<size_t>(LightSchema::instance().size())) {}
     explicit LightRow(LightValue v) : isSingle_(true), single_(std::move(v)) {}
 
     static LightRow createNull()   { return LightRow(LightValue(std::monostate{})); }
@@ -58,6 +57,12 @@ public:
     static LightRow createString(const std::string& v){ return LightRow(LightValue(v)); }
     static LightRow createObject(){ LightRow r; return r; }
     static LightRow createArray() { return LightRow(LightValue{}); }
+
+    // 原地重置为全新对象行（列槽复用不释放，供行池批间复用）
+    void resetObject() {
+        isSingle_ = false;
+        for (auto& v : values_) v = LightValue{};
+    }
 
     bool isNull()   const { return isSingle_ && single_.isNull(); }
     bool isBool()   const { return isSingle_ && single_.isBool(); }
@@ -73,37 +78,37 @@ public:
     bool has(const char* key) const {
         if(isSingle_)return false;
         int idx=LightSchema::instance().index(key);
-        return idx>=0 && values_[idx].type!=LightValue::Null;
+        return idx>=0 && static_cast<size_t>(idx)<values_.size() && values_[static_cast<size_t>(idx)].type!=LightValue::Null;
     }
     LightRow get(const char* key) const {
         if(isSingle_)return LightRow(LightValue{});
         int idx=LightSchema::instance().index(key);
-        return idx>=0 ? LightRow(values_[idx]) : LightRow(LightValue{});
+        return (idx>=0 && static_cast<size_t>(idx)<values_.size()) ? LightRow(values_[static_cast<size_t>(idx)]) : LightRow(LightValue{});
     }
     void setNull(const char* key){
         if(isSingle_)return;
         int idx=LightSchema::instance().index(key);
-        if(idx>=0)values_[idx]=LightValue(std::monostate{});
+        if(idx>=0 && static_cast<size_t>(idx)<values_.size())values_[static_cast<size_t>(idx)]=LightValue(std::monostate{});
     }
     void setDouble(const char* key, double v){
         if(isSingle_)return;
         int idx=LightSchema::instance().index(key);
-        if(idx>=0)values_[idx]=LightValue(v);
+        if(idx>=0 && static_cast<size_t>(idx)<values_.size())values_[static_cast<size_t>(idx)]=LightValue(v);
     }
     void setString(const char* key, const std::string& v){
         if(isSingle_)return;
         int idx=LightSchema::instance().index(key);
-        if(idx>=0)values_[idx]=LightValue(v);
+        if(idx>=0 && static_cast<size_t>(idx)<values_.size())values_[static_cast<size_t>(idx)]=LightValue(v);
     }
     void setBool(const char* key, bool v){
         if(isSingle_)return;
         int idx=LightSchema::instance().index(key);
-        if(idx>=0)values_[idx]=LightValue(v);
+        if(idx>=0 && static_cast<size_t>(idx)<values_.size())values_[static_cast<size_t>(idx)]=LightValue(v);
     }
     void set(const char* key, const LightRow& value){
         if(isSingle_)return;
         int idx=LightSchema::instance().index(key);
-        if(idx>=0)values_[idx]=value.asInnerValue();
+        if(idx>=0 && static_cast<size_t>(idx)<values_.size())values_[static_cast<size_t>(idx)]=value.asInnerValue();
     }
     void remove(const char* key) { setNull(key); }
     size_t size() const { return 0; }
@@ -112,11 +117,10 @@ public:
     std::vector<std::string> keys() const { return {}; }
 
     LightValue asInnerValue() const { return isSingle_?single_:LightValue{}; }
-    LightValue& valueAt(int idx){ return values_[idx]; }
 private:
     bool isSingle_;
     LightValue single_;
-    std::array<LightValue, kMaxCols> values_;
+    std::vector<LightValue> values_;
 };
 
 } // namespace cleaning

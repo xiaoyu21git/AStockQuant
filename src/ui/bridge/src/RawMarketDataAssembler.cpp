@@ -92,9 +92,9 @@ RawMarketDataAssembler::Result RawMarketDataAssembler::assemble(
     int totalRows = 0;
     static const int dtab[] = {0,31,28,31,30,31,30,31,31,30,31,30,31};
 
-    // ── 板块日频聚合：全日期范围一次查询，构建 sectorIdx + 市场均值 ──
+    // ── 板块日频聚合：全日期范围一次查询，构建 sectorIdx ──
+    // sector_relative_strength 由 SQL 直接产出（sqlSectorDailyAgg），C++ 侧无需再算
     std::map<std::string, std::unordered_map<std::string, std::string>> sectorIdx;
-    std::map<std::string, double> dailyMarketAvgVwapChg;
     {
         auto dbSector = astock::database::NativePgConnectionPool::instance().getConnection();
         if (dbSector && dbSector->isOpen()) {
@@ -162,25 +162,6 @@ RawMarketDataAssembler::Result RawMarketDataAssembler::assemble(
                     it->second["sector_concentration"] = ci->second;
             }
 
-            // 计算 sector_relative_strength：板块 vwap_change - 全市场均值 vwap_change
-            std::map<std::string, int> dailySectorCount;
-            for (const auto& [key, cols] : sectorIdx) {
-                auto pipe = key.find('|');
-                if (pipe == std::string::npos) continue;
-                std::string td = key.substr(pipe + 1);
-                auto vcIt = cols.find("sector_vwap_change");
-                if (vcIt == cols.end() || vcIt->second.empty()) continue;
-                try {
-                    double vc = std::stod(vcIt->second);
-                    dailyMarketAvgVwapChg[td] += vc;
-                    dailySectorCount[td]++;
-                } catch (...) {}
-            }
-            for (auto& [td, sum] : dailyMarketAvgVwapChg) {
-                auto ci = dailySectorCount.find(td);
-                if (ci != dailySectorCount.end() && ci->second > 0)
-                    sum /= static_cast<double>(ci->second);
-            }
         }
     }
 
@@ -292,18 +273,6 @@ RawMarketDataAssembler::Result RawMarketDataAssembler::assemble(
                     if (it == sectorIdx.end()) continue;
                     for (const auto& [cn, cv] : it->second)
                         row.setValue(cn, cv);
-                    // 写入 sector_relative_strength
-                    std::string tdKey = key.substr(key.find('|') + 1);
-                    auto mktIt = dailyMarketAvgVwapChg.find(tdKey);
-                    if (mktIt != dailyMarketAvgVwapChg.end()) {
-                        auto vcIt = it->second.find("sector_vwap_change");
-                        if (vcIt != it->second.end() && !vcIt->second.empty()) {
-                            try {
-                                double rel = std::stod(vcIt->second) - mktIt->second;
-                                row.setValue("sector_relative_strength", std::to_string(rel));
-                            } catch (...) {}
-                        }
-                    }
                 }
             }
 
