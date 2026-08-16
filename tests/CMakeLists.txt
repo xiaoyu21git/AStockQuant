@@ -508,3 +508,30 @@ target_link_libraries(test_phase1_5_smoke
 )
 
 message(STATUS "[TESTS] Configured test_phase1_5_smoke executable")
+
+# ─── 因子回测性能基准程序 (Phase 0: 基线台账 + 金样 JSON, 需 PG + Arrow 数据集) ───
+add_executable(full_market_benchmark_runner
+    full_market_benchmark_runner.cpp
+)
+
+set_target_properties(full_market_benchmark_runner PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(full_market_benchmark_runner
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src/domain/scheduler/include
+        ${CMAKE_SOURCE_DIR}/src/foundation/include
+        ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+# factor PUBLIC 传递链接: Qt6::Sql/foundation/infrastructure/domain_*/Arrow/onnxruntime
+target_link_libraries(full_market_benchmark_runner
+    PRIVATE
+        factor
+)
+
+message(STATUS "[TESTS] Configured full_market_benchmark_runner executable")
