@@ -228,18 +228,22 @@ std::unique_ptr<IMarketDataView> WarmupViewBuilder::build(
     const std::vector<DateKey>& tailDates,
     const std::vector<std::string>& fields,
     int warmupDays,
-    std::size_t& warmupRowCountOut) const
+    const std::vector<DateKey>& arrowPrefixDates,
+    std::size_t& prefixRowCountOut) const
 {
-    warmupRowCountOut = 0;
+    prefixRowCountOut = 0;
     if (dates.empty()) return nullptr;
 
     // ── 回看日期: 从目标首日往前, data.trade_calendar 查 warmupDays 个交易日 ──
     std::vector<DateKey> warmupDates;
     if (warmupDays > 0)
         warmupDates = queryWarmupDates(dates.front().value, warmupDays);
-    warmupRowCountOut = warmupDates.size();
+    prefixRowCountOut = warmupDates.size() + arrowPrefixDates.size();
 
+    // ── 行布局: [DB回看行][Arrow前缀回看行][本块][尾扩展] ──
     auto extendedDates = warmupDates;
+    extendedDates.insert(extendedDates.end(),
+                         arrowPrefixDates.begin(), arrowPrefixDates.end());
     extendedDates.insert(extendedDates.end(), dates.begin(), dates.end());
     extendedDates.insert(extendedDates.end(), tailDates.begin(), tailDates.end());
 
@@ -358,18 +362,30 @@ void FactorValuePipeline::run(
         std::vector<DateKey> tailDates(dates.begin() + ownEnd, dates.begin() + tailEnd);
         if (chunkDates.empty()) continue;
 
-        // ── 首块: 从 DB 一次性补齐回看数据 ──
+        // ── 回看行: 首块 = 数据集起始前的 DB 回看; 块 N>0 = 数据集内 Arrow 前缀 ──
+        // (块 N>0 缺回看行时 getSeries 起点被钳到块首 → 每块开头 maxLookback 日空洞)
         const int warmupDays = (ci == 0 && maxLookback > 0) ? maxLookback : 0;
-        std::size_t warmupRowCount = 0;
+        std::vector<DateKey> arrowPrefixDates;
+        if (ci > 0 && maxLookback > 0) {
+            const size_t prefixStart =
+                (chunkStart > static_cast<size_t>(maxLookback))
+                    ? chunkStart - static_cast<size_t>(maxLookback)
+                    : 0;
+            arrowPrefixDates.assign(dates.begin() + prefixStart,
+                                    dates.begin() + chunkStart);
+        }
+        std::size_t prefixRowCount = 0;
         auto chunkView = viewBuilder.build(chunkDates, tailDates, chunkColumns,
-                                           warmupDays, warmupRowCount);
+                                           warmupDays, arrowPrefixDates,
+                                           prefixRowCount);
         if (!chunkView) continue;
-        const size_t computeSkip = warmupRowCount;
+        const size_t computeSkip = prefixRowCount;
 
         INTERNAL_INFO_STREAM << "[因子值管线] 块 " << ci + 1 << "/" << totalChunks
             << ": own=" << chunkDates.size()
             << " tail=" << tailDates.size()
-            << " warmup=" << warmupRowCount
+            << " dbWarmup=" << warmupDays
+            << " arrowPrefix=" << arrowPrefixDates.size()
             << " fields=" << chunkColumns.size();
 
         // ── 本块交易日集合 (过滤 compute 对尾部扩展日的产出) ──

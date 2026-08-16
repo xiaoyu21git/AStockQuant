@@ -1691,7 +1691,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     std::size_t loopWarmupRows = 0;
     auto loopView = loopViewBuilder.build(
         view->dates(), {}, {"open", "high", "low", "close", "volume"},
-        kLoopWarmupDays, loopWarmupRows);
+        kLoopWarmupDays, {}, loopWarmupRows);
     if (!loopView) {
         result.errorMessage = "回看扩展视图构建失败";
         return result;

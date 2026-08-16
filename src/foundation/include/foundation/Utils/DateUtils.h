@@ -32,7 +32,7 @@ inline void formatTradingDayTo(int yyyymmdd, char* buf, size_t bufSize) {
 /// @brief 将 "yyyy-mm-dd" 或 "yyyy/mm/dd" 字符串解析为 yyyymmdd 整数
 inline int parseTradingDay(const std::string& dateStr) {
     int y = 0, m = 0, d = 0;
-    std::sscanf(dateStr.c_str(), "%d-%*c%d-%*c%d", &y, &m, &d);
+    std::sscanf(dateStr.c_str(), "%d-%d-%d", &y, &m, &d);
     return y * 10000 + m * 100 + d;
 }
 

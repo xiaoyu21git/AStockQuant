@@ -52,10 +52,11 @@ private:
     std::string m_cacheStartDate;
 };
 
-/// @brief 回看扩展视图构建器 — [warmupDates(回看交易日)] + [dates] + [tailDates]
+/// @brief 回看扩展视图构建器 — [warmupDates(数据集前 DB 回看)] + [arrowPrefix(数据集内回看)] + [dates] + [tailDates]
 ///
-/// warmupDates 在数据集中不存在, makeChunkView 铺 NaN 后从 PG 逐日覆写;
-/// dates/tailDates 为数据集已有交易日, 由 makeChunkView 直接从 Arrow 填充。
+/// warmupDates 在数据集中不存在, makeChunkView 铺 NaN 后从 PG 逐日覆写 (仅管线首块);
+/// arrowPrefix/dates/tailDates 为数据集已有交易日, 由 makeChunkView 直接从 Arrow 填充
+/// (块 N>0 的回看行 — 消除跨块回看缺口)。
 /// 管线首块 (回看=maxLookback) 与策略日循环视图 (回看=90) 共用此构建器。
 class WarmupViewBuilder {
 public:
@@ -65,15 +66,17 @@ public:
     /// @param dates            目标交易日序列
     /// @param tailDates        尾部扩展交易日 (IC 前向收益用, 因子值不产出)
     /// @param fields           需要物化的列名
-    /// @param warmupDays       回看交易日数 (0 = 不回看)
-    /// @param warmupRowCountOut 实际回看行数 (交易日历不可用时为 0)
+    /// @param warmupDays       数据集前 DB 回看交易日数 (0 = 不查 DB)
+    /// @param arrowPrefixDates 数据集内回看交易日 (块 N>0 由调用方从数据集日期切出)
+    /// @param prefixRowCountOut 前置行总数 = warmupDates + arrowPrefixDates (compute 跳过用)
     /// @return 扩展视图, 构建失败返回 nullptr
     [[nodiscard]] std::unique_ptr<IMarketDataView> build(
         const std::vector<DateKey>& dates,
         const std::vector<DateKey>& tailDates,
         const std::vector<std::string>& fields,
         int warmupDays,
-        std::size_t& warmupRowCountOut) const;
+        const std::vector<DateKey>& arrowPrefixDates,
+        std::size_t& prefixRowCountOut) const;
 
 private:
     /// @brief 从目标首日往前, data.trade_calendar 查 warmupDays 个交易日
@@ -91,9 +94,10 @@ private:
 
 /// @brief 因子值管线 — 回测因子计算的唯一实现 (因子回测/策略回测共用)
 ///
-/// 分块编排: 每块 [回看(仅首块)+本块+尾部扩展] 视图 → FactorEngine::compute(skipDates)
-/// → 仅保留本块交易日因子值经 sink 产出。块视图在 sink 回调期间有效,
-/// 消费方 (IC/交易分析) 在回调内读取 close 等矩阵, 块出作用域即释放内存。
+/// 分块编排: 每块 [回看(首块=DB, 后续块=Arrow 前缀)+本块+尾部扩展] 视图
+/// → FactorEngine::compute(skipDates=前置行数) → 仅保留本块交易日因子值经 sink 产出。
+/// 块视图在 sink 回调期间有效, 消费方 (IC/交易分析) 在回调内读取 close 等矩阵,
+/// 块出作用域即释放内存。
 class FactorValuePipeline {
 public:
     using FactorValuesByDate = std::map<std::string, std::map<std::string, double>>;  // date → symbol → value
