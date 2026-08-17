@@ -69,9 +69,9 @@
         <file>components/Backtest/BacktestLabeledDatePicker.qml</file>
         <file>components/Backtest/BacktestLabeledComboBox.qml</file>
         <file>components/Backtest/BacktestMetricCard.qml</file>
-        <file>components/Backtest/AttributionPanel.qml</file>
         <file>components/Backtest/BacktestResultPanel.qml</file>
         <file>components/Backtest/BacktestStatItem.qml</file>
+        <file>components/Backtest/StrategyAttributionPanel.qml</file>
         <file>components/DataAnalysis/CoreModule.qml</file>
         <file>components/DataAnalysis/DataOverviewCard.qml</file>
         <file>components/DataAnalysis/DataSelectionPanel.qml</file>
@@ -102,11 +102,11 @@
         <file>components/FactorWorkbench/Backtest/BacktestConfigDialog.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestPage.qml</file>
         <file>components/FactorWorkbench/Backtest/BacktestResultView.qml</file>
+        <file>components/FactorWorkbench/Backtest/FactorAttributionPanel.qml</file>
         <file>components/FactorWorkbench/Backtest/FactorBacktestPage.qml</file>
         <file>components/FactorWorkbench/Backtest/FactorSelectorDialog.qml</file>
         <file>components/FactorWorkbench/Backtest/GroupConfigPanel.qml</file>
         <file>components/FactorWorkbench/Backtest/GroupResultChart.qml</file>
-        <file>components/FactorWorkbench/Backtest/GroupResultPanel.qml</file>
         <file>components/FactorWorkbench/Backtest/FactorSelectionPanel.qml</file>
         <file>components/FactorWorkbench/Backtest/PreflightFailureDialog.qml</file>
         <file>components/FactorWorkbench/Backtest/RuntimeParamsDialog.qml</file>

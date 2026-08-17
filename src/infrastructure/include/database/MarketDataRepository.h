@@ -2,6 +2,7 @@
 
 #include "ISqlDatabase.h"
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,6 +27,54 @@ struct FieldRow {
     std::string tradeDate;
     std::string fieldName;
     double value = 0.0;
+};
+
+/// 日K线 + 市值行（策略归因 Brinson 基准行业权重构建用）
+struct DailyBarMarketCapRow {
+    std::string symbol;
+    std::string tradeDate;  // "YYYY-MM-DD"
+    double close = 0.0;
+    double marketCap = 0.0;              // 总市值
+    double circulatingMarketCap = 0.0;   // 流通市值
+};
+
+// ═══ 值对象：日终持仓快照（live.daily_position / live.daily_equity_snapshots 入库用） ═══
+
+/// 日终权益快照输入 (live.daily_equity_snapshots)
+struct DailyEquitySnapshotInput {
+    std::string strategyId;
+    std::string tradeDate;    // "YYYY-MM-DD"
+    double totalAsset = 0.0;  // 总资产
+    double dailyReturn = 0.0; // 相对上一快照的总资产日收益率（无前值 → 0）
+};
+
+/// 日终持仓行 (live.daily_position)
+struct DailyPositionRow {
+    std::string symbol;       // 完整代码 "002601.SZ" 或纯代码 "002601"（入库时按 symbol_info 匹配）
+    std::int64_t quantity = 0;
+    double costPrice = 0.0;   // avg_cost 摊薄成本
+    double marketValue = 0.0;
+    double floatingPnl = 0.0;
+    double realizedPnl = 0.0; // 引擎不按标的拆已实现盈亏 → 恒 0
+};
+
+/// 当前持仓行 (live.current_position 实时同步)
+struct CurrentPositionRow {
+    std::string symbol;            // 完整代码 "002601.SZ" 或纯代码 "002601"
+    std::string strategyId;        // 空 = 手动持仓 (入库为 NULL)
+    std::int64_t quantity = 0;
+    std::int64_t availableQty = 0; // 可用股数
+    std::int64_t frozenQty = 0;    // 冻结股数 (quantity − availableQty)
+    double costPrice = 0.0;        // avg_cost 摊薄成本
+    double lastPrice = 0.0;
+    double marketValue = 0.0;
+    double unrealizedPnl = 0.0;
+    double pnlPct = 0.0;           // 当前涨幅 % = (lastPrice − costPrice) / costPrice × 100
+    double prevClose = 0.0;        // 昨收 (掘金 GM 历史日线回看; 缺 → 0)
+    double dayPnl = 0.0;           // 当日盈亏 = (lastPrice − prevClose) × quantity
+    double dayPnlPct = 0.0;        // 当日涨跌幅 % = (lastPrice − prevClose) / prevClose × 100
+    std::int64_t firstHeldAtEpochSec = 0;  // 持仓开始时间 epoch 秒 (0 → NULL)
+    bool removed = false;          // true → 券商已清零, 删行
 };
 
 // ═══ 行情数据仓储：封装所有行情相关 SQL 查询 ═══
@@ -160,9 +209,20 @@ public:
         const std::string& startDate,
         const std::string& endDate);
 
-    /// 标的元数据查询
+    /// 标的元数据查询（含 industry_code 列）
     std::vector<astock::database::SqlQueryResultRow> querySymbolInfo(
         const std::vector<std::string>& symbols);
+
+    /// 行业名表查询（industry_code → industry_name，仅当前有效行）
+    /// 表空时返回空 map，调用方以行业码兜底显示
+    std::map<std::string, std::string> queryIndustryNames();
+
+    /// 日K线 + 市值查询（close/market_cap/circulating_market_cap）
+    /// 用于 Brinson 基准成分权重构建（流通市值加权）
+    std::vector<DailyBarMarketCapRow> queryDailyBarWithMarketCap(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate);
 
     /// 单标的分页K线详情（含 symbol_info 元数据列，用于 QML 详情面板）
     std::vector<astock::database::SqlQueryResultRow> queryKlineDetail(
@@ -274,6 +334,28 @@ public:
     std::vector<astock::database::SqlQueryResultRow> querySectorConcentration(
         const std::string& startDate,
         const std::string& endDate);
+
+    // ═══ live 交易链路: 日终持仓快照持久化 ═══
+
+    /// 日终权益快照 UPSERT (live.daily_equity_snapshots, (strategy_id, trade_date) 唯一)
+    /// @param outSnapshotId 输出快照 id（UUID 字符串，daily_position.summary_id 外键引用）
+    bool upsertDailyEquitySnapshot(const DailyEquitySnapshotInput& input,
+                                   std::string& outSnapshotId);
+
+    /// 上一交易日总资产（日收益率锚点；无前值返回 0）
+    double queryPrevDayTotalAsset(const std::string& strategyId,
+                                  const std::string& tradeDate);
+
+    /// 日终持仓 UPSERT (live.daily_position, (summary_id, trade_date, symbol_id) 唯一)
+    /// @return 成功写入的行数（symbol_info 无匹配的标的跳过）
+    int upsertDailyPositions(const std::string& snapshotId,
+                             const std::string& tradeDate,
+                             const std::vector<DailyPositionRow>& rows);
+
+    /// 当前持仓实时同步 (live.current_position, symbol_id 唯一):
+    /// removed=false → UPSERT 整行; removed=true → 删行 (券商已清零)
+    /// @return 处理行数
+    int syncCurrentPositions(const std::vector<CurrentPositionRow>& rows);
 
 private:
     static DailyBarRow rowToBar(const astock::database::SqlQueryResultRow& row);

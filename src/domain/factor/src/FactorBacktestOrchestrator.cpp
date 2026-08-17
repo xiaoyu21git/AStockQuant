@@ -8,6 +8,7 @@
 #include "CompositeFactorConfig.h"
 #include "FactorMetricsCalculator.h"
 #include "FactorIcUtils.h"
+#include "FactorAttributionCalculator.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/log/logging.hpp"
 #include "foundation/perf/Stopwatch.h"
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -54,6 +56,31 @@ std::vector<std::string> FactorBacktestOrchestrator::sortedDatesFrom(
     }
     std::sort(dates.begin(), dates.end());
     return dates;
+}
+
+double FactorBacktestOrchestrator::rankCorrelation(std::vector<double>& x, std::vector<double>& y)
+{
+    // Spearman 秩相关: 对 x/y 分别排秩后求 Pearson (无并列均值秩修正, 与既有 IC 口径一致)
+    const size_t n = x.size();
+    if (n != y.size() || n < 2) return 0.0;
+    std::vector<size_t> idx(n);
+    for (size_t i = 0; i < n; ++i) idx[i] = i;
+    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return x[a] < x[b]; });
+    std::vector<double> rx(n);
+    for (size_t i = 0; i < n; ++i) rx[idx[i]] = static_cast<double>(i + 1);
+    std::sort(idx.begin(), idx.end(), [&](size_t a, size_t b) { return y[a] < y[b]; });
+    std::vector<double> ry(n);
+    for (size_t i = 0; i < n; ++i) ry[idx[i]] = static_cast<double>(i + 1);
+    double sx = 0, sy = 0, sx2 = 0, sy2 = 0, sxy = 0;
+    const double nDbl = static_cast<double>(n);
+    for (size_t i = 0; i < n; ++i) {
+        sx += rx[i]; sy += ry[i];
+        sx2 += rx[i] * rx[i]; sy2 += ry[i] * ry[i];
+        sxy += rx[i] * ry[i];
+    }
+    const double num = nDbl * sxy - sx * sy;
+    const double den = std::sqrt((nDbl * sx2 - sx * sx) * (nDbl * sy2 - sy * sy));
+    return den > 1e-12 ? num / den : 0.0;
 }
 
 void FactorBacktestOrchestrator::run(
@@ -204,6 +231,15 @@ void FactorBacktestOrchestrator::run(
             rebalanceDates.insert(std::string(buf));
         }
     }
+
+    // ── 组合模式: per-child 标量预聚合 (因子归因输入, P0 禁止保留全截面) ──
+    // childLongShortByDate: instanceId → date → 调仓日多空收益标量
+    //   (交易模拟结束后按 Executor 实际期序列对齐 → childLongShortReturns)
+    // childIcSeries:        instanceId → 逐期 Rank IC (含非调仓日, 仅统计用)
+    // 存储量 ≈ 子因子数 × 期数 × ~100B, 远小于 1MB
+    std::map<std::string, std::map<std::string, double>> childLongShortByDate;
+    std::map<std::string, std::vector<double>> childLongShortReturns;
+    std::map<std::string, std::vector<double>> childIcSeries;
 
     // ══════════════════════════════════════════════════════════════════════
     // 统一因子值管线 — 因子回测/策略回测共用的唯一因子计算实现
@@ -380,6 +416,68 @@ void FactorBacktestOrchestrator::run(
                         }
                     }
                 }
+
+                // ── 组合模式: per-child 标量预聚合 (因子归因, P0 禁止保留全截面) ──
+                // 与 merged IC 同一位置、同一 fwd 窗口、同一停牌剔除规则, 口径一致
+                // 截面即刻消费即刻丢弃; 调仓日多空收益仅存标量, 交易模拟后按实际期序列对齐
+                if (isComposite && !config.compositeChildren.empty()) {
+                    const bool lsDay = rebalanceDates.count(dateNow) != 0;
+                    for (const auto& child : config.compositeChildren) {
+                        auto cIt = out.perFactorValues->find(child.instanceId);
+                        if (cIt == out.perFactorValues->end()) continue;
+                        auto dIt = cIt->second.find(dateNow);
+                        if (dIt == cIt->second.end()) continue;
+
+                        std::vector<std::pair<double, double>> childPairs;  // (directedValue, fwdRet)
+                        childPairs.reserve(dIt->second.size());
+                        for (const auto& [sym, fvChild] : dIt->second) {
+                            if (!std::isfinite(fvChild)) continue;
+                            auto itSym = symToCol.find(sym);
+                            if (itSym == symToCol.end()) continue;
+                            const int32_t symCol = itSym->second;
+                            const double priceNow =
+                                static_cast<double>(closeView.data[(rowBase + di) * closeView.rowStride + symCol]);
+                            const double priceFwd =
+                                static_cast<double>(closeView.data[(rowBase + di + static_cast<size_t>(fwdDays)) * closeView.rowStride + symCol]);
+                            if (priceNow > 1e-9 && std::isfinite(priceNow)
+                                && priceFwd > 1e-9 && std::isfinite(priceFwd)) {
+                                const double fwdRet = (priceFwd / priceNow) - 1.0;
+                                if (std::isfinite(fwdRet) && std::abs(fwdRet) < 0.5)
+                                    childPairs.emplace_back(child.ascending ? fvChild : -fvChild, fwdRet);
+                            }
+                        }
+
+                        // per-child Rank IC (标量入序列, 截面丢弃)
+                        if (childPairs.size() >= 2) {
+                            std::vector<double> cFv, cRet;
+                            cFv.reserve(childPairs.size());
+                            cRet.reserve(childPairs.size());
+                            for (const auto& [f, r] : childPairs) { cFv.push_back(f); cRet.push_back(r); }
+                            childIcSeries[child.instanceId].push_back(rankCorrelation(cFv, cRet));
+                        }
+
+                        // per-child 调仓日多空收益: Top/Bottom = directed 值降序后前/后 1/numGroups 组,
+                        // 组内等权 (口径对齐 SimulatedTradingExecutor 但无成本)
+                        if (lsDay) {
+                            std::sort(childPairs.begin(), childPairs.end(),
+                                      [](const auto& a, const auto& b) { return a.first > b.first; });
+                            const size_t cN = childPairs.size();
+                            const size_t cGroupSize =
+                                cN / static_cast<size_t>(std::max(1, config.numGroups));
+                            double lsValue = 0.0;
+                            if (cGroupSize > 0) {
+                                double topSum = 0.0, botSum = 0.0;
+                                for (size_t gi = 0; gi < cGroupSize; ++gi)
+                                    topSum += childPairs[gi].second;
+                                for (size_t gi = cN - cGroupSize; gi < cN; ++gi)
+                                    botSum += childPairs[gi].second;
+                                lsValue = topSum / static_cast<double>(cGroupSize)
+                                        - botSum / static_cast<double>(cGroupSize);
+                            }
+                            childLongShortByDate[child.instanceId][dateNow] = lsValue;
+                        }
+                    }
+                }
             }
 
             // ── 释放非 rebalance 日的因子值 ──
@@ -414,20 +512,7 @@ void FactorBacktestOrchestrator::run(
             std::vector<double> fv, ret;
             fv.reserve(pairs.size()); ret.reserve(pairs.size());
             for (const auto& [f, r] : pairs) { fv.push_back(f); ret.push_back(r); }
-            auto spearman = [](std::vector<double>& x, std::vector<double>& y) -> double {
-                size_t n = x.size();
-                std::vector<size_t> idx(n);
-                for (size_t i=0;i<n;++i) idx[i]=i;
-                std::sort(idx.begin(),idx.end(),[&](size_t a,size_t b){return x[a]<x[b];});
-                std::vector<double> rx(n); for(size_t i=0;i<n;++i) rx[idx[i]]=static_cast<double>(i+1);
-                std::sort(idx.begin(),idx.end(),[&](size_t a,size_t b){return y[a]<y[b];});
-                std::vector<double> ry(n); for(size_t i=0;i<n;++i) ry[idx[i]]=static_cast<double>(i+1);
-                double sx=0,sy=0,sx2=0,sy2=0,sxy=0,N=static_cast<double>(n);
-                for(size_t i=0;i<n;++i){sx+=rx[i];sy+=ry[i];sx2+=rx[i]*rx[i];sy2+=ry[i]*ry[i];sxy+=rx[i]*ry[i];}
-                double num=N*sxy-sx*sy,den=std::sqrt((N*sx2-sx*sx)*(N*sy2-sy*sy));
-                return den>1e-12 ? num/den : 0.0;
-            };
-            icSeries.push_back(spearman(fv, ret));
+            icSeries.push_back(rankCorrelation(fv, ret));
         }
         icir.icSeries = icSeries;
         icir.icMean   = factor::icir::calculateMean(icSeries);
@@ -558,6 +643,58 @@ void FactorBacktestOrchestrator::run(
             << " totalReturn=" << tradingResult.totalReturn;
 
         if (onProgress) onProgress(80.0, "trading simulated");
+
+        // ── 组合模式: 因子归因 (标量预聚合 → 因子收益法计算) ──
+        // 期序列对齐: Executor 首期建仓/N<numGroups 被跳过的期不 push 收益,
+        // 以 periodTrackings[].date 为权威期序列, per-child 按日期取标量, 缺席期贡献为 0 (权重重归一)
+        std::optional<factor::FactorAttributionReport> factorAttribution;
+        if (isComposite) {
+            for (const auto& pt : tradingResult.periodTrackings) {
+                for (const auto& child : config.compositeChildren) {
+                    double lsValue = 0.0;
+                    auto cIt = childLongShortByDate.find(child.instanceId);
+                    if (cIt != childLongShortByDate.end()) {
+                        auto dIt = cIt->second.find(pt.date);
+                        if (dIt != cIt->second.end()) lsValue = dIt->second;
+                    }
+                    childLongShortReturns[child.instanceId].push_back(lsValue);
+                }
+            }
+            childLongShortByDate.clear();
+
+            factor::FactorAttributionCalculator attrCalc;
+            factor::FactorAttributionCalculator::Inputs attrInputs;
+            attrInputs.children.reserve(config.compositeChildren.size());
+            for (const auto& child : config.compositeChildren) {
+                factor::FactorAttributionCalculator::PerChildSeries series;
+                series.instanceId = child.instanceId;
+                series.weight = child.weight;
+                series.ascending = child.ascending;
+                auto lsIt = childLongShortReturns.find(child.instanceId);
+                if (lsIt != childLongShortReturns.end()) series.longShortReturns = lsIt->second;
+                auto icIt = childIcSeries.find(child.instanceId);
+                if (icIt != childIcSeries.end()) series.icSeries = icIt->second;
+                attrInputs.children.push_back(std::move(series));
+            }
+            attrInputs.compositeRawReturns = tradingResult.rawLongShortReturns;
+            attrInputs.compositeCostAdjReturns = tradingResult.costAdjustedLongShortReturns;
+            factorAttribution = attrCalc.compute(attrInputs);
+
+            // 恒等式裁决 (构造性成立): total = Σ贡献 + 排名交互残差 + 成本残差
+            double sumContrib = 0.0;
+            for (const auto& row : factorAttribution->rows) sumContrib += row.contribution;
+            const double identityError = factorAttribution->totalLongShortReturn
+                - sumContrib
+                - factorAttribution->residualRankingInteraction
+                - factorAttribution->residualCosts;
+            INTERNAL_INFO_STREAM << "[回测流程] 因子归因: 子因子=" << factorAttribution->rows.size()
+                << " 期数=" << factorAttribution->periodCount
+                << " 总多空(扣费后)=" << factorAttribution->totalLongShortReturn
+                << " Σ贡献=" << sumContrib
+                << " 成本残差=" << factorAttribution->residualCosts
+                << " 交互残差=" << factorAttribution->residualRankingInteraction
+                << " 恒等式误差=" << identityError;
+        }
 
         // ── Reporter 分析 ──
         factor::compute::BacktestReporterOutput reporterOutput;
@@ -816,6 +953,43 @@ void FactorBacktestOrchestrator::run(
             for (double v : icSeries)
                 icDailyArr.push_back(J::createDouble(v));
             metrics.set("icSeries", icDailyArr);
+
+            // ── 因子归因 (仅组合模式且有效时产出; 单因子/无期序列不输出该键) ──
+            if (factorAttribution.has_value() && factorAttribution->isValid) {
+                auto attrObj = J::createObject();
+                attrObj.set("isValid", J::createBool(true));
+                attrObj.set("notice", J::createString(factorAttribution->notice));
+                attrObj.set("periodCount", J::createDouble(static_cast<double>(factorAttribution->periodCount)));
+                attrObj.set("totalLongShortReturn", J::createDouble(factorAttribution->totalLongShortReturn));
+                attrObj.set("residualRankingInteraction", J::createDouble(factorAttribution->residualRankingInteraction));
+                attrObj.set("residualCosts", J::createDouble(factorAttribution->residualCosts));
+                auto rowsArr = J::createArray();
+                for (const auto& row : factorAttribution->rows) {
+                    auto rowObj = J::createObject();
+                    rowObj.set("factorId", J::createString(row.factorId));
+                    rowObj.set("weight", J::createDouble(row.weight));
+                    rowObj.set("rankIcMean", J::createDouble(row.rankIcMean));
+                    rowObj.set("rankIcir", J::createDouble(row.rankIcir));
+                    rowObj.set("longShortReturn", J::createDouble(row.longShortReturn));
+                    rowObj.set("contribution", J::createDouble(row.contribution));
+                    rowObj.set("coveredDays", J::createDouble(static_cast<double>(row.coveredDays)));
+                    auto cumArr = J::createArray();
+                    for (double v : row.cumulativeContribution)
+                        cumArr.push_back(J::createDouble(v));
+                    rowObj.set("cumulativeContribution", cumArr);
+                    rowsArr.push_back(rowObj);
+                }
+                attrObj.set("rows", rowsArr);
+                // 组合实际累计曲线 (扣费后, UI 堆叠面积图上叠加虚线)
+                auto compCumArr = J::createArray();
+                double compCum = 0.0;
+                for (double r : tradingResult.costAdjustedLongShortReturns) {
+                    compCum += r;
+                    compCumArr.push_back(J::createDouble(compCum));
+                }
+                attrObj.set("compositeCumulative", compCumArr);
+                metrics.set("factorAttribution", attrObj);
+            }
 
             // ── 交易记录 ──
             auto tradeLogArr = J::createArray();

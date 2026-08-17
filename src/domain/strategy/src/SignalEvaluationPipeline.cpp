@@ -122,7 +122,7 @@ std::optional<EvalResult> SignalEvaluationPipeline::checkRebalance(
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// 阶段2: preflight — P1/P2/P3/P5 (C9; P4 在 fetchPrices 阶段)
+// 阶段2: preflight — P1/P2/P3 (C9; P4 在 fetchPrices 阶段)
 // ══════════════════════════════════════════════════════════════════════════
 
 std::optional<EvalResult> SignalEvaluationPipeline::preflight(
@@ -162,23 +162,8 @@ std::optional<EvalResult> SignalEvaluationPipeline::preflight(
         return fail(deps, req, EvalStage::Preflight, EvalFailureKind::AccountEmpty,
                     "账户 totalAsset<=0");
 
-    // ── P5: 簿记校验 (adopt 双分支在比对前: 键不存在 → 首启采纳券商快照) ──
-    if (deps.positionBook) {
-        std::map<std::string, std::int64_t> brokerSnap;
-        for (const auto& p : s.account.positions)
-            brokerSnap[p.symbol] = p.quantity;
-        deps.positionBook->adoptBrokerSnapshotIfAbsent(brokerSnap);
-        auto check = deps.positionBook->checkAgainstBroker(brokerSnap);
-        if (!check.ok) {
-            std::string detail;
-            for (const auto& m : check.mismatches) {
-                if (!detail.empty()) detail += "; ";
-                detail += m;
-            }
-            return fail(deps, req, EvalStage::Preflight, EvalFailureKind::BookKeepingMismatch,
-                        detail);
-        }
-    }
+    // P5 簿记对账已迁移至 PositionBook::reconcileToBroker 实时路径 (券商快照推送驱动):
+    // 账本跟随券商、对账只修正不拦截, 下单流程与账实一致性零耦合 (ADR-005 修订)
     return std::nullopt;
 }
 
@@ -732,7 +717,7 @@ EvalResult SignalEvaluationPipeline::fail(PipelineDeps& deps, const EvalRequest&
         if (deps.tradeJournal)
             deps.tradeJournal->log(req.tradingDay + " 自检失败 kind=Exception " + reason);
     } else {
-        // §8: 自检失败模板 (BookKeepingMismatch 附 symbol/账本/券商 明细)
+        // §8: 自检失败模板
         INTERNAL_ERROR_STREAM << "[Eval] " << req.tradingDay << " 自检失败 kind="
                               << EvalNaming::kindText(kind) << " stage=" << EvalNaming::stageText(stage)
                               << (reason.empty() ? "" : " " + reason);

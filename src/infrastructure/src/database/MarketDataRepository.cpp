@@ -1,6 +1,8 @@
 #include "database/MarketDataRepository.h"
 #include "database/SqlEscape.h"
 #include "DataSourceRegistry.h"
+#include "foundation/log/logging.hpp"
+#include "foundation/market/AStockSymbol.h"
 
 #include <sstream>
 #include <stdexcept>
@@ -130,7 +132,7 @@ std::vector<std::string> MarketDataRepository::queryIndexConstituents(
     const std::string& date)
 {
     std::ostringstream sql;
-    sql << "SELECT constituent_symbol FROM index_constituents"
+    sql << "SELECT constituent_symbol FROM ref.index_constituents"
         << " WHERE index_symbol = " << safeStr(indexSymbol)
         << " AND start_date <= " << safeStr(date)
         << " AND (end_date IS NULL OR end_date >= " << safeStr(date) << ")";
@@ -559,13 +561,63 @@ std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::querySymb
 {
     if (symbols.empty()) return {};
     std::ostringstream sql;
-    sql << "SELECT symbol, name, exchange, asset_class, list_date, delist_date, status"
+    sql << "SELECT symbol, name, exchange, asset_class, list_date, delist_date, status, industry_code"
         << " FROM ref.symbol_info"
         << " WHERE symbol IN " << symbolList(symbols);
     auto result = db_->executeQuery(sql.str());
     std::vector<astock::database::SqlQueryResultRow> rows;
     rows.reserve(result.rowCount());
     for (std::size_t i = 0; i < result.rowCount(); ++i) rows.push_back(result.getRow(i));
+    return rows;
+}
+
+// ═══ queryIndustryNames ═══
+
+std::map<std::string, std::string> MarketDataRepository::queryIndustryNames()
+{
+    std::map<std::string, std::string> result;
+    const std::string sql =
+        "SELECT DISTINCT industry_code, industry_name FROM ref.industry_classification"
+        " WHERE end_date IS NULL AND industry_code IS NOT NULL AND industry_name IS NOT NULL";
+    auto qr = db_->executeQuery(sql);
+    for (std::size_t i = 0; i < qr.rowCount(); ++i) {
+        const auto& row = qr.getRow(i);
+        std::string code = row.getString("industry_code");
+        std::string name = row.getString("industry_name");
+        if (code.empty() || name.empty()) continue;
+        result[std::move(code)] = std::move(name);  // 同码异名取最后一行
+    }
+    return result;
+}
+
+// ═══ queryDailyBarWithMarketCap ═══
+
+std::vector<DailyBarMarketCapRow> MarketDataRepository::queryDailyBarWithMarketCap(
+    const std::vector<std::string>& symbols,
+    const std::string& startDate,
+    const std::string& endDate)
+{
+    if (symbols.empty()) return {};
+    std::ostringstream sql;
+    sql << "SELECT si.symbol, d.trade_date, d.close, d.market_cap, d.circulating_market_cap"
+        << " FROM mkt.daily_bar d JOIN ref.symbol_info si ON d.symbol_id = si.id"
+        << " WHERE si.symbol IN " << symbolList(symbols)
+        << " AND d.trade_date >= " << safeStr(startDate)
+        << " AND d.trade_date <= " << safeStr(endDate)
+        << " ORDER BY d.trade_date ASC, si.symbol ASC";
+    auto qr = db_->executeQuery(sql.str());
+    std::vector<DailyBarMarketCapRow> rows;
+    rows.reserve(qr.rowCount());
+    for (std::size_t i = 0; i < qr.rowCount(); ++i) {
+        const auto& row = qr.getRow(i);
+        DailyBarMarketCapRow out;
+        out.symbol = row.getString("symbol");
+        out.tradeDate = row.getString("trade_date");
+        out.close = row.getDouble("close");
+        out.marketCap = row.getDouble("market_cap");
+        out.circulatingMarketCap = row.getDouble("circulating_market_cap");
+        rows.push_back(std::move(out));
+    }
     return rows;
 }
 
@@ -1074,6 +1126,136 @@ std::vector<astock::database::SqlQueryResultRow> MarketDataRepository::querySect
     for (std::size_t i = 0; i < result.rowCount(); ++i)
         rows.push_back(result.getRow(i));
     return rows;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// live 交易链路: 日终持仓快照持久化
+// ═══════════════════════════════════════════════════════════════════
+
+bool MarketDataRepository::upsertDailyEquitySnapshot(const DailyEquitySnapshotInput& input,
+                                                     std::string& outSnapshotId)
+{
+    using astock::database::SqlParam;
+    const std::string sql =
+        "INSERT INTO live.daily_equity_snapshots (id, strategy_id, trade_date, total_asset, daily_return) "
+        "VALUES (gen_random_uuid()::varchar, ?, ?::date, ?, ?) "
+        "ON CONFLICT (strategy_id, trade_date) DO UPDATE SET "
+        "total_asset = EXCLUDED.total_asset, daily_return = EXCLUDED.daily_return "
+        "RETURNING id";
+    std::vector<SqlParam> params = {
+        SqlParam{input.strategyId}, SqlParam{input.tradeDate},
+        SqlParam{input.totalAsset}, SqlParam{input.dailyReturn}};
+    auto result = db_->executeQuery(sql, params);
+    if (result.isEmpty()) {
+        INTERNAL_WARN_STREAM << "[日终入库] 权益快照 UPSERT 无返回: " << db_->lastError();
+        return false;
+    }
+    outSnapshotId = result.getRow(0).getString("id");
+    return !outSnapshotId.empty();
+}
+
+double MarketDataRepository::queryPrevDayTotalAsset(const std::string& strategyId,
+                                                    const std::string& tradeDate)
+{
+    using astock::database::SqlParam;
+    const std::string sql =
+        "SELECT total_asset FROM live.daily_equity_snapshots "
+        "WHERE strategy_id = ? AND trade_date < ?::date "
+        "ORDER BY trade_date DESC LIMIT 1";
+    auto result = db_->executeQuery(sql, {SqlParam{strategyId}, SqlParam{tradeDate}});
+    return result.isEmpty() ? 0.0 : result.getRow(0).getDouble("total_asset");
+}
+
+int MarketDataRepository::upsertDailyPositions(const std::string& snapshotId,
+                                               const std::string& tradeDate,
+                                               const std::vector<DailyPositionRow>& rows)
+{
+    if (rows.empty()) return 0;
+    using astock::database::SqlParam;
+    // 标的匹配: 完整代码精确匹配, 纯代码按前缀匹配唯一行 (输入形式由调用方决定, 两分支天然互斥)
+    const std::string sql =
+        "INSERT INTO live.daily_position "
+        "(summary_id, trade_date, symbol_id, position, avg_cost, market_value, floating_pnl, realized_pnl) "
+        "SELECT ?::varchar, ?::date, si.id, ?::int, ?::numeric, ?::numeric, ?::numeric, ?::numeric "
+        "FROM ref.symbol_info si "
+        "WHERE si.symbol = ? OR si.symbol LIKE ? || '.%' "
+        "ON CONFLICT (summary_id, trade_date, symbol_id) DO UPDATE SET "
+        "position = EXCLUDED.position, avg_cost = EXCLUDED.avg_cost, "
+        "market_value = EXCLUDED.market_value, floating_pnl = EXCLUDED.floating_pnl, "
+        "realized_pnl = EXCLUDED.realized_pnl, created_at = now()";
+
+    // 按纯代码去重 (同一标的只保留一行, 避免同批内键冲突)
+    std::map<std::string, DailyPositionRow> unique;
+    for (const auto& r : rows)
+        unique[foundation::market::AStockSymbol::codeOnly(r.symbol)] = r;
+
+    std::vector<std::vector<SqlParam>> batch;
+    batch.reserve(unique.size());
+    for (const auto& [code, r] : unique) {
+        batch.push_back({
+            SqlParam{snapshotId}, SqlParam{tradeDate},
+            SqlParam{static_cast<std::int32_t>(r.quantity)},
+            SqlParam{r.costPrice}, SqlParam{r.marketValue},
+            SqlParam{r.floatingPnl}, SqlParam{r.realizedPnl},
+            SqlParam{r.symbol}, SqlParam{code}});
+    }
+    return db_->executeBatchUpdate(sql, batch);
+}
+
+int MarketDataRepository::syncCurrentPositions(const std::vector<CurrentPositionRow>& rows)
+{
+    if (rows.empty()) return 0;
+    using astock::database::SqlParam;
+    // 策略归属: 空串 → NULL (手动持仓); first_held_at/hold_days 由 epoch 秒推导 (0 → 无持仓时间)
+    const std::string upsertSql =
+        "INSERT INTO live.current_position "
+        "(symbol_id, strategy_id, quantity, available_qty, frozen_qty, avg_cost, "
+        "last_price, market_value, unrealized_pnl, pnl_pct, prev_close, day_pnl, day_pnl_pct, "
+        "first_held_at, held_days, updated_at) "
+        "SELECT si.id, "
+        "CASE WHEN ? = '' THEN NULL ELSE ?::varchar END, "
+        "?::bigint, ?::bigint, ?::bigint, "
+        "?::numeric, ?::numeric, ?::numeric, ?::numeric, ?::numeric, "
+        "?::numeric, ?::numeric, ?::numeric, "
+        "CASE WHEN ?::double precision <= 0 THEN NULL ELSE to_timestamp(?::double precision) END, "
+        "CASE WHEN ?::double precision <= 0 THEN 0 "
+        "     ELSE GREATEST(0, now()::date - to_timestamp(?::double precision)::date)::int END, "
+        "now() "
+        "FROM ref.symbol_info si "
+        "WHERE si.symbol = ? OR si.symbol LIKE ? || '.%' "
+        "ON CONFLICT (symbol_id) DO UPDATE SET "
+        "strategy_id = EXCLUDED.strategy_id, quantity = EXCLUDED.quantity, "
+        "available_qty = EXCLUDED.available_qty, frozen_qty = EXCLUDED.frozen_qty, "
+        "avg_cost = EXCLUDED.avg_cost, last_price = EXCLUDED.last_price, "
+        "market_value = EXCLUDED.market_value, unrealized_pnl = EXCLUDED.unrealized_pnl, "
+        "pnl_pct = EXCLUDED.pnl_pct, prev_close = EXCLUDED.prev_close, "
+        "day_pnl = EXCLUDED.day_pnl, day_pnl_pct = EXCLUDED.day_pnl_pct, "
+        "first_held_at = EXCLUDED.first_held_at, held_days = EXCLUDED.held_days, "
+        "updated_at = now()";
+    const std::string deleteSql =
+        "DELETE FROM live.current_position "
+        "WHERE symbol_id = (SELECT id FROM ref.symbol_info "
+        "                   WHERE symbol = ? OR symbol LIKE ? || '.%' LIMIT 1)";
+
+    int total = 0;
+    for (const auto& r : rows) {
+        const std::string code = foundation::market::AStockSymbol::codeOnly(r.symbol);
+        if (r.removed) {
+            total += db_->executeUpdate(deleteSql, {SqlParam{r.symbol}, SqlParam{code}});
+            continue;
+        }
+        std::vector<SqlParam> params = {
+            SqlParam{r.strategyId}, SqlParam{r.strategyId},
+            SqlParam{r.quantity}, SqlParam{r.availableQty}, SqlParam{r.frozenQty},
+            SqlParam{r.costPrice}, SqlParam{r.lastPrice}, SqlParam{r.marketValue},
+            SqlParam{r.unrealizedPnl}, SqlParam{r.pnlPct},
+            SqlParam{r.prevClose}, SqlParam{r.dayPnl}, SqlParam{r.dayPnlPct},
+            SqlParam{r.firstHeldAtEpochSec}, SqlParam{r.firstHeldAtEpochSec},
+            SqlParam{r.firstHeldAtEpochSec}, SqlParam{r.firstHeldAtEpochSec},
+            SqlParam{r.symbol}, SqlParam{code}};
+        total += db_->executeUpdate(upsertSql, params);
+    }
+    return total;
 }
 
 } // namespace astock::infrastructure::database

@@ -88,7 +88,9 @@ private:
 
     // 频率分层
     void syncAll(int tradingDay);
-    void syncDailyMinute(int tradingDay);
+    /// @brief 通用日线同步: 日线缺则补, 衍生字段/换手率幂等更新, PE/分钟缺才补
+    /// @return 日线就绪(已覆盖或补写成功) → true; 日线拉取失败 → false
+    bool syncDailyMinute(int tradingDay);
     void syncWeeklyMonthly(int tradingDay);
     void syncFinancialData(int tradingDay);
     void syncMoneyFlowData(int tradingDay);

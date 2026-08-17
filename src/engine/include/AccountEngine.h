@@ -35,9 +35,9 @@ public:
     /// 替换 account()+positions() 两次独立调用，消除时间窗口不一致
     [[nodiscard]] Snapshot snapshot();
 
-    // 数据变更通知
+    // 数据变更通知 (多订阅者: UI 刷新 / 账本实时对账; 回调在锁外执行)
     using DataFn = std::function<void()>;
-    void setOnDataChanged(DataFn cb);
+    void addOnDataChanged(DataFn cb);
 
     // gmsdk 回调入口（GmSessionEngine 调用, 线程安全）
     void onCash(const AccountInfo& a);
@@ -51,15 +51,22 @@ private:
     AccountEngine();
     ~AccountEngine() = default;
 
+    /// @brief 通知全部订阅者 (拷贝列表后在锁外执行, 回调可能再次进出本引擎)
+    void notifyDataChanged();
+
+    /// @brief 单条持仓写入缓存 + 首次持仓时间追踪 (调用方持锁外的统一入口)
+    void updatePosition(const Position& p);
+
     ::Strategy* m_strategy = nullptr;
     AccountInfo m_cachedAccount;
     std::unordered_map<std::string, Position> m_cachedPositions;
-    DataFn m_onDataChanged;
+    std::unordered_map<std::string, std::int64_t> m_firstSeenSec;  // sym → 首次出现于券商快照的 epoch 秒 (清零即抹除)
+    std::vector<DataFn> m_onDataChanged;
     bool m_cacheValid = false;
     foundation::utils::Uuid m_accountSub;
     foundation::utils::Uuid m_positionSub;
     foundation::utils::Uuid m_tickSub;
-    mutable std::shared_mutex m_mutex;  // 保护 m_cachedAccount + m_cachedPositions
+    mutable std::shared_mutex m_mutex;  // 保护 m_cachedAccount + m_cachedPositions + m_firstSeenSec
     int m_positionLogThrottle = 0;
 };
 

@@ -29,8 +29,13 @@ std::vector<astock::database::SqlQueryResultRow> LiveViewPreparer::prepareRows(
     if (policy.period != BarPeriod::Daily) return out;
     if (out.empty() || endDate.empty()) return out;
 
-    // 行已按 symbol, trade_date ASC 排序 → 末行即视图最大日期
-    const std::string lastDate = out.back().getString("trade_date");
+    // 行按 symbol, trade_date ASC 排序, 末行只是字母序最后标的的末行(如B股停更日),
+    // 不是全视图最大日期 → 逐行取 max 得到真实视图最后日
+    std::string lastDate;
+    for (const auto& row : out) {
+        const auto& d = row.getString("trade_date");
+        if (d > lastDate) lastDate = d;
+    }
     if (lastDate >= endDate) return out;  // 当日日K已入库, 无需合成
 
     // 交易日校验: 非交易日(周末/节假日)不合成, 避免视图出现无效日期锚点

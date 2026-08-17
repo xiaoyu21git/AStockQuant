@@ -38,7 +38,6 @@ enum class EvalFailureKind : std::uint8_t {
     FactorSnapshotEmpty,  // P2 因子全截面无有限值
     AccountEmpty,         // P3 账户快照空
     PriceDataEmpty,       // P4 价格链全空
-    BookKeepingMismatch,  // P5 账本与券商快照偏差
     Exception             // 未捕获异常
 };
 
@@ -90,7 +89,6 @@ struct EvalNaming {
         case EvalFailureKind::FactorSnapshotEmpty: return "FactorSnapshotEmpty";
         case EvalFailureKind::AccountEmpty:        return "AccountEmpty";
         case EvalFailureKind::PriceDataEmpty:      return "PriceDataEmpty";
-        case EvalFailureKind::BookKeepingMismatch: return "BookKeepingMismatch";
         case EvalFailureKind::Exception:           return "Exception";
         }
         return "Unknown";

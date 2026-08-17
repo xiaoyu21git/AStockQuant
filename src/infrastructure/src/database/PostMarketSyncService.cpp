@@ -218,11 +218,16 @@ auto [s2i, syms] = loadActiveSymbols(db);
         auto cr=db->executeQuery("SELECT trade_date::text AS dt,COUNT(DISTINCT symbol_id) AS cnt FROM mkt.daily_bar WHERE trade_date>=CURRENT_DATE-"+std::to_string(lookbackDays)+" GROUP BY trade_date");
         std::unordered_map<std::string,int> cov;int mc=0;
         for(auto&r:cr.getRows()){int c=r.getInt("cnt");cov[r.getString("dt")]=c;if(c>mc)mc=c;}
+        // 衍生字段覆盖查询: 日线在但 change_pct 未补的天也进缺口 (缺口补链曾漏写衍生字段, 幂等修复)
+        auto dr=db->executeQuery("SELECT trade_date::text AS dt,COUNT(change_pct) AS cpc FROM mkt.daily_bar WHERE trade_date>=CURRENT_DATE-"+std::to_string(lookbackDays)+" GROUP BY trade_date");
+        std::unordered_map<std::string,int> dcov;for(auto&r:dr.getRows())dcov[r.getString("dt")]=r.getInt("cpc");
         std::vector<std::string> md;
-        for(auto&d:tds){int c=cov.count(d)?cov[d]:0;if(c<mc*90/100)md.push_back(d);}
+        for(auto&d:tds){int c=cov.count(d)?cov[d]:0;int cp=dcov.count(d)?dcov[d]:0;
+            if(c<mc*90/100 || (c>0 && cp<c*90/100))md.push_back(d);}
         if(md.empty())return;
+        // 逐日走 syncDailyMinute (日线/衍生/换手率/估值/分钟幂等补齐), 日线失败则资金流不同步
         for(auto&dt:md){int td=foundation::utils::Timestamp(dt,"%Y-%m-%d").to_yyyymmdd();
-            if(syncDaily(db,s2i,syms,td)){syncMinute(db,s2i,syms,td);syncMoneyFlow(db,s2i,syms,td);}syncWeekly(db,td);syncMonthly(db,td);}
+            if(syncDailyMinute(td))syncMoneyFlow(db,s2i,syms,td);syncWeekly(db,td);syncMonthly(db,td);}
         INTERNAL_INFO_STREAM<<"[PostMktSync] 补齐 "<<md.size()<<" 天";
         // 补齐成功后更新 dataSyncDay 到最后一个补齐日
         if (!md.empty()) {
@@ -1178,10 +1183,11 @@ bool PostMarketSyncService::syncDailyRange(std::shared_ptr<astock::database::ISq
     return true;
 }
 
-// 通用日线同步: 任意交易日都走日线→估值→分钟线, 不区分今天还是历史
-void PostMarketSyncService::syncDailyMinute(int tradingDay) {
+// 通用日线同步: 任意交易日都走日线→衍生→估值→分钟线, 不区分今天还是历史
+// (返回 bool: 日线就绪(已覆盖或补写成功)→true, 供 forceSyncMissingDays 决定是否跟随补资金流)
+bool PostMarketSyncService::syncDailyMinute(int tradingDay) {
     auto db=astock::database::NativePgConnectionPool::instance().getConnection();
-    if(!db||!db->isOpen())return;
+    if(!db||!db->isOpen())return false;
 auto [s2i, syms] = loadActiveSymbols(db);
 
     // 日线: 缺则补，满则跳过
@@ -1200,7 +1206,7 @@ auto [s2i, syms] = loadActiveSymbols(db);
     const char* dStatus=dailyExists?"已覆盖":"补";const char* pStatus=peMissing?"补":"已覆盖";const char* mStatus=minMissing?"补":"已覆盖";
     INTERNAL_INFO_STREAM<<"[PostMktSync] "<<tradingDay<<" 日线="<<dStatus<<" PE="<<pStatus<<" 分钟="<<mStatus;
 
-    if(!dailyExists){if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return;}}
+    if(!dailyExists){if(!syncDaily(db,s2i,syms,tradingDay)){INTERNAL_ERROR_STREAM<<"[PostMktSync] 日线失败 "<<tradingDay;return false;}}
     // ── 补派生字段: change_pct/change_amt/amplitude(从已有OHLC计算,一条SQL完成)──
     {
         char dt[16]; foundation::utils::formatTradingDayTo(tradingDay, dt, sizeof(dt));
@@ -1230,6 +1236,7 @@ auto [s2i, syms] = loadActiveSymbols(db);
     }
     if(peMissing)syncValuation(db,s2i,syms,tradingDay);
     if(minMissing)syncMinute(db,s2i,syms,tradingDay);
+    return true;
 }
 
 // 估值补全: PE/PB/市值/换手率 (gmsdk批量)

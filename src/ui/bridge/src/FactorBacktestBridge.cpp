@@ -535,6 +535,29 @@ QVariantMap FactorBacktestBridge::processRunResult(
     metrics["execution"]     = execMap;
     metrics["factorQuality"] = fq.toMap();
 
+    // ══ factorAttribution — 因子归因 (仅组合模式产出; 逐行补中文因子名) ══
+    if (metricsObj.contains("factorAttribution")) {
+        QJsonObject attrObj = metricsObj.value("factorAttribution").toObject();
+        auto* svc = FactorService::instance();
+        QJsonArray rowsArr = attrObj.value("rows").toArray();
+        QVariantList rowsList;
+        for (int i = 0; i < rowsArr.size(); ++i) {
+            QJsonObject rowObj = rowsArr[i].toObject();
+            const QString fid = rowObj.value("factorId").toString();
+            QString displayName = fid;
+            if (svc && svc->isInitialized()) {
+                const QString name = svc->getFactorById(fid)
+                    .value(QStringLiteral("factorName")).toString();
+                if (!name.isEmpty()) displayName = name;
+            }
+            rowObj.insert("factorName", displayName);
+            rowsList.append(rowObj.toVariantMap());
+        }
+        QVariantMap attrMap = attrObj.toVariantMap();
+        attrMap["rows"] = rowsList;
+        metrics["factorAttribution"] = attrMap;
+    }
+
     result["metrics"] = metrics;
 
     // config — QML 读取 config.factorId / startDate / endDate / benchmarkSymbol

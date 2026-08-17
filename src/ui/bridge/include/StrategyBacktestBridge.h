@@ -11,6 +11,8 @@
 
 #include "foundation/thread/ThreadPoolExecutor.h"
 
+namespace domain::attribution { struct StrategyAttributionReport; }
+
 
 class StrategyBacktestBridge : public QObject {
     Q_OBJECT
@@ -42,6 +44,10 @@ private:
     /// @brief 自动从现有单例解析回测模块
     /// @param strategyId 策略 ID，用于在 StrategyBridge 中查找对应的运行时引擎
     void resolveBacktestModules(const QString& strategyId);
+
+    /// @brief 策略归因报告 → QVariantMap（行业/个股/Brinson 三块，纯序列化无业务逻辑）
+    static QVariantMap strategyAttributionToMap(
+        const domain::attribution::StrategyAttributionReport& attr);
 
     std::unique_ptr<foundation::thread::ThreadPoolExecutor> m_workerPool;
     std::atomic<bool> m_isRunning{false};

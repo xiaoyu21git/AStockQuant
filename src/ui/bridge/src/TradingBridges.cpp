@@ -694,7 +694,7 @@ void PositionAccountBridge::initialize() {
     m_initialized = true;
 
     // 订阅 AccountEngine 数据变更 — 成交后 GmSdk 回调 → AccountEngine → 触发 refresh
-    engine::AccountEngine::instance().setOnDataChanged([this]() {
+    engine::AccountEngine::instance().addOnDataChanged([this]() {
         refresh();
     });
 

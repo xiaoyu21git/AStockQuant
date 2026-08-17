@@ -27,4 +27,7 @@ target_include_directories(domain_attribution
         include
     PRIVATE
         src
+        # 归因计算需要 tradeLog 类型 (BacktestTradeRecord) 与行情视图接口 (IMarketDataView)
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
 )

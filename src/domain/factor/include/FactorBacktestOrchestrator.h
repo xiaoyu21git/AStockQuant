@@ -72,6 +72,10 @@ private:
     static std::vector<std::string> sortedDatesFrom(
         const std::map<std::string, std::map<std::string, double>>& fvByDate);
 
+    /// @brief Spearman 秩相关系数 (x/y 等长; 空或退化 → 0.0)
+    /// 组合 IC 与 per-child 因子归因 IC 共用同一实现, 保证口径一致
+    static double rankCorrelation(std::vector<double>& x, std::vector<double>& y);
+
     // ── 持有的下层组件引用 ──
     domain::scheduler::BacktestScheduler* m_scheduler = nullptr;
     factor::compute::BacktestDataService* m_dataService = nullptr;

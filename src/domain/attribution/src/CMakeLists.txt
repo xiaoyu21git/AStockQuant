@@ -1,6 +1,7 @@
 # attribution/src/CMakeLists.txt
 target_sources(domain_attribution PRIVATE
-    AttributionAnalyzer.cpp
+    PositionSnapshotCollector.cpp
+    StrategyAttributionCalculator.cpp
 )
 
 # 设置C++标准

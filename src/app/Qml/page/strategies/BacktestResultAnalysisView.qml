@@ -3,6 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtCharts 2.15
 import AStock.Bridge 1.0
+import "../../components/Backtest" as BacktestComponents
 
 Item {
     id: page
@@ -258,6 +259,12 @@ Item {
                             onClicked: function(point) { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }
                         ScatterSeries { id: sellLoss; axisX: symAxisX; axisY: symAxisY; color: "#10B981"; markerSize: 10
                             onClicked: function(point) { if(selBuyInfo)selSellInfo=findTradeInfo(point,false) } }}}}}
+
+        // 策略归因 (行业盈亏 + 个股盈亏 + Brinson 择时选股分解)
+        BacktestComponents.StrategyAttributionPanel {
+            Layout.fillWidth: true
+            report: page.backtestResult ? page.backtestResult.attribution : null
+        }
 
         Item { Layout.preferredHeight: 10 }}}
 

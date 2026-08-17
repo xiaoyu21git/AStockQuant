@@ -86,6 +86,7 @@ struct Position {
     std::string symbol;
     int64_t quantity = 0, availableQty = 0;
     double costPrice = 0, lastPrice = 0, marketValue = 0, unrealizedPnl = 0;
+    int64_t firstHeldAtEpochSec = 0;  // 持仓开始时间: 首次出现在券商快照的 epoch 秒 (AccountEngine 追踪; 0=未知)
 };
 
 struct OrderRecord {

@@ -4,7 +4,8 @@
 //         → evaluateGates → collectSignals → finalizeAndSubmit
 // 规则: 管道内零周期分支 (ADR-002)、零 gmsdk (C8: 日历经 Deps.prevTradingDayFn 注入)、
 //       EvalSession 栈上按值贯穿; Deps 仅由 StrategyEngine::buildPipelineDeps 一处构造 (ADR-009④)
-// preflight 检查点 (C9): P1 视图空 / P2 锚点+因子快照 / P3 账户空 / P5 簿记校验; P4 价格全空在 fetchPrices 阶段
+// preflight 检查点 (C9): P1 视图空 / P2 锚点+因子快照 / P3 账户空; P4 价格全空在 fetchPrices 阶段
+// (P5 簿记对账已迁至 PositionBook::reconcileToBroker 实时路径 — 对账只修正不拦截, 下单流程零依赖)
 
 #include "EvalTypes.h"
 #include "IOrderListener.h"
@@ -32,7 +33,6 @@ namespace rules { class RuleGate; }
 
 class IRuntimeFactorService;
 class OrderGenerator;
-class PositionBook;
 class SubmissionFinalizer;
 class TimedCircuitBreaker;
 class TradeJournal;
@@ -80,7 +80,7 @@ struct PipelineDeps {
     // P3: shared_ptr 发布句柄 — run() 同步栈帧内由 EvalSession 持有 (禁 .get() 长期持有)
     std::function<std::shared_ptr<const factor::compute::IMarketDataView>()> liveViewFn;
     std::function<std::string(const std::string&)> prevTradingDayFn;        // C8: P2 接 gmsdk 包装, P4 换 DbTradingCalendar
-    std::function<AccountState()> accountSnapshotFn;                        // preflight P3/P5 券商快照
+    std::function<AccountState()> accountSnapshotFn;                        // preflight P3 券商快照
     std::function<void()> onForceLiquidate;                                 // = liquidateAll (择时强平)
 
     // ── 引擎成员引用 (观察者) ──
@@ -92,7 +92,6 @@ struct PipelineDeps {
     MarketTimingGate* timingGate{nullptr};
     TimedCircuitBreaker* circuitBreaker{nullptr};
     IRuntimeFactorService* factorService{nullptr};
-    PositionBook* positionBook{nullptr};
     SubmissionFinalizer* finalizer{nullptr};
     std::unordered_map<std::string, std::int64_t>* positionEntryDates{nullptr};
     std::atomic<std::int64_t>* lastProcessedAt{nullptr};

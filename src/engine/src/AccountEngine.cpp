@@ -6,6 +6,7 @@
 #include "foundation/market/AStockSymbol.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 #include <foundation/log/logging.hpp>
+#include <chrono>
 
 namespace engine {
 
@@ -73,6 +74,7 @@ void AccountEngine::shutdown() {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
     m_cacheValid = false;
     m_cachedPositions.clear();
+    m_firstSeenSec.clear();
     INTERNAL_INFO_STREAM << "[AccountEngine] 关闭完成";
 }
 
@@ -97,9 +99,25 @@ AccountEngine::Snapshot AccountEngine::snapshot() {
     Snapshot s;
     s.account = m_cachedAccount;
     s.positions.reserve(m_cachedPositions.size());
-    for (const auto& [sym, p] : m_cachedPositions)
-        s.positions.push_back(p);
+    for (const auto& [sym, p] : m_cachedPositions) {
+        Position withEntry = p;
+        if (const auto it = m_firstSeenSec.find(sym); it != m_firstSeenSec.end())
+            withEntry.firstHeldAtEpochSec = it->second;
+        s.positions.push_back(withEntry);
+    }
     return s;
+}
+
+void AccountEngine::updatePosition(const Position& p) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    m_cachedPositions[p.symbol] = p;
+    if (p.quantity == 0) {
+        // 券商推送清零 → 持仓已平, 抹除首次时间 (再次出现视为新持仓)
+        m_firstSeenSec.erase(p.symbol);
+    } else if (m_firstSeenSec.find(p.symbol) == m_firstSeenSec.end()) {
+        m_firstSeenSec[p.symbol] = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+    }
 }
 
 std::unordered_map<std::string, int64_t> AccountEngine::Snapshot::posQtyByCode() const {
@@ -109,9 +127,20 @@ std::unordered_map<std::string, int64_t> AccountEngine::Snapshot::posQtyByCode()
     return map;
 }
 
-void AccountEngine::setOnDataChanged(DataFn cb) {
+void AccountEngine::addOnDataChanged(DataFn cb) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    m_onDataChanged = std::move(cb);
+    m_onDataChanged.push_back(std::move(cb));
+}
+
+void AccountEngine::notifyDataChanged() {
+    // 拷贝订阅列表后在锁外执行 (回调可能再次进出本引擎)
+    std::vector<DataFn> cbs;
+    {
+        std::shared_lock<std::shared_mutex> lock(m_mutex);
+        cbs = m_onDataChanged;
+    }
+    for (const auto& cb : cbs)
+        if (cb) cb();
 }
 
 void AccountEngine::onCash(const AccountInfo& a) {
@@ -127,15 +156,12 @@ void AccountEngine::onCash(const AccountInfo& a) {
                               << " 市值=" << a.marketValue
                               << " (节流 #" << m_positionLogThrottle << ")";
     }
-    if (m_onDataChanged) m_onDataChanged();
+    notifyDataChanged();
 }
 
 void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        for (const auto& p : positions)
-            m_cachedPositions[p.symbol] = p;
-    }
+    for (const auto& p : positions)
+        updatePosition(p);
     // 节流: 每 50 次才打印一次日志
     m_positionLogThrottle++;
     if (m_positionLogThrottle % 50 == 1) {
@@ -143,7 +169,7 @@ void AccountEngine::onPositionUpdate(const std::vector<Position>& positions) {
                               << " 个持仓, 缓存大小=" << m_cachedPositions.size()
                               << " (节流 #" << m_positionLogThrottle << ")";
     }
-    if (m_onDataChanged) m_onDataChanged();
+    notifyDataChanged();
 }
 
 void AccountEngine::applyAccountEvent(const AccountInfo& a) {
@@ -151,11 +177,8 @@ void AccountEngine::applyAccountEvent(const AccountInfo& a) {
 }
 
 void AccountEngine::applyPositionEvent(const std::string& symbol, const Position& p) {
-    {
-        std::unique_lock<std::shared_mutex> lock(m_mutex);
-        m_cachedPositions[symbol] = p;
-    }
-    if (m_onDataChanged) m_onDataChanged();
+    updatePosition(p);
+    notifyDataChanged();
 }
 
 } // namespace engine

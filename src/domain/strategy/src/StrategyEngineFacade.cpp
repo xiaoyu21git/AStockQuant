@@ -32,9 +32,8 @@
 #include "RuleVariableProvider.h"
 #include "RuleConditionEvaluator.h"
 #include "RuleAttribution.h"
-#include "../../attribution/include/AttributionTypes.h"
-#include "../../attribution/include/AttributionAnalyzer.h"
 #include "RuleLibrary.h"
+#include "../../attribution/include/StrategyAttributionCalculator.h"
 #include "../include/RiskEvaluator.h"
 #include "../include/RiskManager.h"
 #include "../../../engine/include/AccountEngine.h"
@@ -56,7 +55,9 @@
 #include <chrono>
 #include <ctime>
 #include <iomanip>
+#include <map>
 #include <numeric>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <cstdlib>
@@ -1119,6 +1120,27 @@ void StrategyEngine::ensureEvaluationCore()
     // 簿记挂钩一次性装配 (ADR-009①; onOrders 调用点零改动)
     m_listenerAssembler = std::make_unique<EngineListenerAssembler>(m_positionBook.get());
 
+    // 实时对账接线 (ADR-005 修订): 券商快照推送 → 账本对齐 (GM 回调线程;
+    // PositionBook 内部互斥); 对账只修正不拦截, 下单流程零依赖
+    // 同一回调尾部: 当前持仓实时同步 live.current_position (节流 ≥20s;
+    // 切到引擎专属线程执行 — 不在 GM 回调线程做 PG/GM-history 阻塞调用)
+    engine::AccountEngine::instance().addOnDataChanged([this]() {
+        if (!m_positionBook) return;
+        const auto snap = engine::AccountEngine::instance().snapshot();
+        m_positionBook->reconcileToBroker(snap.posQtyByCode());
+
+        constexpr std::int64_t kSyncIntervalSec = 20;
+        const auto nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        if (nowSec - m_lastPositionSyncSec.load() < kSyncIntervalSec) return;
+        m_lastPositionSyncSec.store(nowSec);
+
+        if (m_dedicatedExecutor)
+            m_dedicatedExecutor->post([this]() { persistCurrentPositions(); });
+        else
+            persistCurrentPositions();
+    });
+
     // 共享提交核心 (幂等去重 ADR-006 + 生成 + 篮子 + journal + 投递)
     m_finalizer = std::make_unique<SubmissionFinalizer>(
         m_strategyId, m_period, m_orderGenerator, m_tradeJournal.get(), m_appStateStore,
@@ -1160,7 +1182,6 @@ PipelineDeps StrategyEngine::buildPipelineDeps()
     deps.timingGate = &m_timingGate;
     deps.circuitBreaker = &m_circuitBreaker;
     deps.factorService = factorService_.get();
-    deps.positionBook = m_positionBook.get();
     deps.finalizer = m_finalizer.get();
     deps.positionEntryDates = &m_positionEntryDates;
     deps.lastProcessedAt = &m_lastProcessedAt;
@@ -1221,7 +1242,158 @@ EvalStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool 
 
     PipelineDeps deps = buildPipelineDeps();
     EvalResult result = m_pipeline->run(req, deps);
+
+    // ── 日终持仓快照入库 (live.daily_equity_snapshots + live.daily_position) ──
+    // 账户快照是券商事实, 与评估结果解耦 (评估失败也要入库); UPSERT 幂等, 补跑窗口重写同日
+    persistDailyPositionSnapshot(tradingDay);
     return result.status;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// persistDailyPositionSnapshot — 日终持仓快照入库 (§6.1 尾部)
+// ═════════════════════════════════════════════════════════════════════════
+
+void StrategyEngine::persistDailyPositionSnapshot(const std::string& tradingDay)
+{
+    if (m_strategyId.empty()) {
+        INTERNAL_WARN_STREAM << "[日终入库] 跳过: 无 strategyId";
+        return;
+    }
+    const auto snap = engine::AccountEngine::instance().snapshot();
+    if (snap.account.totalAsset <= 0.0) {
+        INTERNAL_WARN_STREAM << "[日终入库] 跳过: 账户快照无效 (总资产="
+                             << snap.account.totalAsset << ")";
+        return;
+    }
+
+    auto& pool = astock::database::NativePgConnectionPool::instance();
+    if (!pool.isInitialized()) {
+        INTERNAL_INFO_STREAM << "[日终入库] 跳过: PG 连接池未初始化";
+        return;
+    }
+    auto db = pool.getConnection();
+    if (!db) {
+        INTERNAL_WARN_STREAM << "[日终入库] 跳过: PG 连接获取失败";
+        return;
+    }
+    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+
+    // tradingDay "YYYYMMDD" → "YYYY-MM-DD"
+    std::string dateStr = tradingDay;
+    if (dateStr.size() == 8) {
+        dateStr = dateStr.substr(0, 4) + "-" + dateStr.substr(4, 2) + "-" + dateStr.substr(6, 2);
+    }
+
+    // 日收益率: 相对上一快照日总资产
+    const double prevAsset = repo->queryPrevDayTotalAsset(m_strategyId, dateStr);
+    const double dailyReturn =
+        prevAsset > 0.0 ? (snap.account.totalAsset - prevAsset) / prevAsset : 0.0;
+
+    std::string snapshotId;
+    if (!repo->upsertDailyEquitySnapshot(
+            {m_strategyId, dateStr, snap.account.totalAsset, dailyReturn}, snapshotId)) {
+        INTERNAL_ERROR_STREAM << "[日终入库] 权益快照写入失败: " << dateStr;
+        return;
+    }
+
+    // 券商快照 → 入库行 (GM 提供市值/浮盈优先, 缺省回退成本×数量推算)
+    std::vector<astock::infrastructure::database::DailyPositionRow> rows;
+    rows.reserve(snap.positions.size());
+    for (const auto& p : snap.positions) {
+        if (p.quantity == 0) continue;
+        astock::infrastructure::database::DailyPositionRow r;
+        r.symbol = p.symbol;
+        r.quantity = p.quantity;
+        r.costPrice = p.costPrice;
+        if (p.marketValue != 0.0) {
+            r.marketValue = p.marketValue;
+            r.floatingPnl = p.unrealizedPnl;
+        } else {
+            r.marketValue = p.lastPrice * static_cast<double>(p.quantity);
+            r.floatingPnl = (p.lastPrice - p.costPrice) * static_cast<double>(p.quantity);
+        }
+        rows.push_back(std::move(r));
+    }
+
+    const int affected = repo->upsertDailyPositions(snapshotId, dateStr, rows);
+    INTERNAL_INFO_STREAM << "[日终入库] live.daily_position: " << dateStr
+                         << " 快照=" << snapshotId
+                         << " 持仓行=" << rows.size() << " 写入=" << affected
+                         << " 总资产=" << snap.account.totalAsset
+                         << " 日收益=" << dailyReturn;
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+// persistCurrentPositions — 当前持仓实时同步 (live.current_position)
+// ═════════════════════════════════════════════════════════════════════════
+
+void StrategyEngine::persistCurrentPositions()
+{
+    const auto snap = engine::AccountEngine::instance().snapshot();
+    if (snap.account.totalAsset <= 0.0) return;  // 账户快照未就绪 (券商未推送)
+
+    auto& pool = astock::database::NativePgConnectionPool::instance();
+    if (!pool.isInitialized()) return;
+    auto db = pool.getConnection();
+    if (!db) return;
+    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+
+    // ── 昨收: 掘金 GM 历史日线回看 10 天 (fetchPreClose, 持 GM SDK 全局锁) ──
+    //   GM 拿不到 → prev_close=0, 当日涨跌列记 0 (无兜底渠道)
+    std::vector<std::string> heldSyms;
+    for (const auto& p : snap.positions)
+        if (p.quantity != 0) heldSyms.push_back(p.symbol);
+    std::map<std::string, double> prevClose;
+    if (!heldSyms.empty()) {
+        std::lock_guard<std::recursive_mutex> gmLock(engine::GmSessionEngine::gmSdkMutex());
+        for (const auto& sym : heldSyms) {
+            const double pc = engine::GmSessionEngine::instance().fetchPreClose(sym);
+            if (pc > 0.0) prevClose[sym] = pc;
+        }
+    }
+
+    // 策略归属: 账本持有 → 本策略 id; 券商有账本无 → NULL (手动持仓)
+    const auto held = m_positionBook->heldCodes();
+
+    std::vector<astock::infrastructure::database::CurrentPositionRow> rows;
+    rows.reserve(snap.positions.size());
+    for (const auto& p : snap.positions) {
+        astock::infrastructure::database::CurrentPositionRow r;
+        r.symbol = p.symbol;
+        if (p.quantity == 0) {
+            r.removed = true;  // 券商推送清零 → 删行 (持仓已平)
+        } else {
+            r.quantity = p.quantity;
+            r.availableQty = p.availableQty;
+            r.frozenQty = p.quantity - p.availableQty;
+            r.costPrice = p.costPrice;
+            r.lastPrice = p.lastPrice;
+            r.marketValue = p.marketValue != 0.0
+                                ? p.marketValue
+                                : p.lastPrice * static_cast<double>(p.quantity);
+            r.unrealizedPnl = p.marketValue != 0.0
+                                  ? p.unrealizedPnl
+                                  : (p.lastPrice - p.costPrice) * static_cast<double>(p.quantity);
+            r.pnlPct = p.costPrice > 0.0
+                           ? (p.lastPrice - p.costPrice) / p.costPrice * 100.0
+                           : 0.0;
+            const auto pcIt = prevClose.find(p.symbol);
+            r.prevClose = pcIt != prevClose.end() ? pcIt->second : 0.0;
+            if (r.prevClose > 0.0) {
+                r.dayPnl = (p.lastPrice - r.prevClose) * static_cast<double>(p.quantity);
+                r.dayPnlPct = (p.lastPrice - r.prevClose) / r.prevClose * 100.0;
+            }
+            r.firstHeldAtEpochSec = p.firstHeldAtEpochSec;
+            const auto code = foundation::market::AStockSymbol::codeOnly(p.symbol);
+            r.strategyId = held.count(code) ? m_strategyId : "";
+        }
+        rows.push_back(std::move(r));
+    }
+
+    const int affected = repo->syncCurrentPositions(rows);
+    INTERNAL_DEBUG_STREAM << "[持仓同步] live.current_position: " << rows.size()
+                          << " 行处理=" << affected
+                          << " 昨收覆盖=" << prevClose.size() << "/" << heldSyms.size();
 }
 
 StrategyEngine::Builder::Builder() = default;
@@ -1677,6 +1849,8 @@ StrategyBacktestResult StrategyEngine::backtest(
     // 但它是真实工作，后续逐日循环也是真实工作
     // ── 规则归因收集器 ──
     rules::AttributionCollector attributionCollector;
+    // ── 策略归因持仓快照采集器 (行业/Brinson 用, 循环内只采集不计算) ──
+    domain::attribution::PositionSnapshotCollector positionCollector;
 
     const double kLoopEnd = 90.0;  // 后处理 onProgress 用
 
@@ -1702,7 +1876,7 @@ StrategyBacktestResult StrategyEngine::backtest(
     // ── 主循环 (Phase 30b: 提取到 runBacktestLoop) ──
     runBacktestLoop(ctx, result, loopView.get(), static_cast<int>(loopWarmupRows),
                     req, fillSim, symbolToCol, bmColIdx, onProgress,
-                    attributionCollector, cancelFlag);
+                    attributionCollector, positionCollector, cancelFlag);
 
     INTERNAL_INFO_STREAM << "[backtest] 循环完成: days=" << totalDays << " finalEquity=" << btAccount().totalAsset() << " fills=" << totalFills << " riskRejected=" << riskRejectedCount;
 
@@ -1758,27 +1932,20 @@ StrategyBacktestResult StrategyEngine::backtest(
     // ── 诊断输出 (Phase 30c: 提取到 buildBacktestDiagnostics) ──
     buildBacktestDiagnostics(result, ctx, req, view, totalDays, onProgress, attributionCollector);
 
-    // ── 绩效归因 (v0.16.0: 板块/因子/择时三维拆解) ──
+    // ── 每日持仓数 (快照按日对齐; 窗日外无快照 → 0) ──
+    result.timeSeries.positions.clear();
+    result.timeSeries.positions.resize(result.timeSeries.dates.size(), 0.0);
     {
-        domain::attribution::AttributionAnalyzer::Config attrConfig;
-        // sectorLookup: 引擎层无 DB 查询能力, 暂不注入 (Bridge 层可二次增强)
-        attrConfig.sectorLookup = nullptr;
-        // factorWeightLookup: 从当前回测请求的 FactorOverlaySpec 获取
-        attrConfig.factorWeightLookup = [&](const std::string& fid) -> double {
-            if (req.factorOverlaySpec.enabled) {
-                for (const auto& alloc : req.factorOverlaySpec.allocations) {
-                    if (alloc.factorId.text() == fid)
-                        return alloc.weightPercent / 100.0;
-                }
-            }
-            return 0.0;
-        };
-        // benchmarkLookup: Phase 2 (待基准行业数据就绪)
-        attrConfig.benchmarkLookup = nullptr;
-
-        domain::attribution::AttributionAnalyzer analyzer(std::move(attrConfig));
-        m_lastAttribution = analyzer.analyze(result);
+        std::map<domain::DomainDate, std::size_t> snapshotCountByDate;
+        for (const auto& snap : positionCollector.snapshots())
+            snapshotCountByDate[snap.date] = snap.entries.size();
+        for (std::size_t i = 0; i < result.timeSeries.dates.size(); ++i)
+            result.timeSeries.positions[i] =
+                static_cast<double>(snapshotCountByDate[result.timeSeries.dates[i]]);
     }
+
+    // ── 策略归因 (行业盈亏/个股盈亏/Brinson 择时选股分解) ──
+    buildStrategyAttribution(result, req, view, positionCollector);
 
     result.success = true;
     return result;
@@ -1799,6 +1966,7 @@ void StrategyEngine::runBacktestLoop(
     int bmColIdx,
     const std::function<void(double)>& onProgress,
     rules::AttributionCollector& attributionCollector,
+    domain::attribution::PositionSnapshotCollector& positionCollector,
     const std::atomic<bool>* cancelFlag)
 {
     // ── 引用别名: ctx 成员映射为原局部变量名, 循环体零改动 ──
@@ -2026,26 +2194,42 @@ void StrategyEngine::runBacktestLoop(
             if (!exitOrders.empty()) ordersOpt = std::move(exitOrders);
             strategyService_->updateCandidatePool({});
             double mv = 0.0;
+            std::vector<domain::attribution::PositionSnapshotCollector::Entry> snapEntries;
             for (const auto& kvPos : backtestPositions) {
                 const auto& sym = kvPos.first;
                 if (kvPos.second.quantity() <= 0) continue;
                 const double px = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<size_t>(symbolToCol.at(sym))]);
-                if (px > 0.0) mv += px * static_cast<double>(kvPos.second.quantity());
+                if (px > 0.0) {
+                    const double posMv = px * static_cast<double>(kvPos.second.quantity());
+                    mv += posMv;
+                    snapEntries.push_back({sym, posMv});
+                }
             }
             equity = cash + mv;
             equityCurve.push_back(equity);
+            positionCollector.recordDay(
+                domain::DomainDate{static_cast<std::int32_t>(currentDay)},
+                equity, std::move(snapEntries));
         } else {
         if (!isRebalanceDay) {
             double mv = 0.0;
+            std::vector<domain::attribution::PositionSnapshotCollector::Entry> snapEntries;
             for (const auto& [sym, pos] : backtestPositions) {
                 if (pos.quantity() <= 0) continue;
                 const double px = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<size_t>(symbolToCol.at(sym))]);
-                if (px > 0.0) mv += px * static_cast<double>(pos.quantity());
+                if (px > 0.0) {
+                    const double posMv = px * static_cast<double>(pos.quantity());
+                    mv += posMv;
+                    snapEntries.push_back({sym, posMv});
+                }
             }
             equity = cash + mv;
             equityCurve.push_back(equity);
+            positionCollector.recordDay(
+                domain::DomainDate{static_cast<std::int32_t>(currentDay)},
+                equity, std::move(snapEntries));
             latestEquity = equity;
             if (equity > peakEquity) peakEquity = equity;
             m_circuitBreaker.updateEndOfDay(equity);
@@ -2431,11 +2615,16 @@ void StrategyEngine::runBacktestLoop(
         }
 
         double marketValue = 0.0;
+        std::vector<domain::attribution::PositionSnapshotCollector::Entry> snapEntries;
         for (const auto& [sym, pos] : backtestPositions) {
             if (pos.quantity() <= 0) continue;
             const double px = static_cast<double>(closeMat.data[
                 rowOffset + static_cast<std::size_t>(symbolToCol.at(sym))]);
-            if (px > 0.0) marketValue += px * static_cast<double>(pos.quantity());
+            if (px > 0.0) {
+                const double posMv = px * static_cast<double>(pos.quantity());
+                marketValue += posMv;
+                snapEntries.push_back({sym, posMv});
+            }
         }
         equity = cash + marketValue;
         if (!std::isfinite(equity) && r > 0) {
@@ -2454,6 +2643,9 @@ void StrategyEngine::runBacktestLoop(
         newAcc.setTotalAsset(equity);
         latestEquity = newAcc.totalAsset();
         equityCurve.push_back(equity);
+        positionCollector.recordDay(
+            domain::DomainDate{static_cast<std::int32_t>(currentDay)},
+            equity, std::move(snapEntries));
 
         if (!timing.allowNewEntries && ordersOpt.has_value()) {
             auto& list = ordersOpt.value();
@@ -2916,6 +3108,149 @@ void StrategyEngine::buildBacktestDiagnostics(
             result.rankIC = (varS>0&&varP>0) ? cov/std::sqrt(varS*varP) : 0;
         }
     }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 策略归因: buildBenchmarkStockWeights + buildStrategyAttribution
+// ══════════════════════════════════════════════════════════════════════════════
+
+std::map<domain::DomainDate,
+         std::shared_ptr<const std::unordered_map<std::string, double>>>
+StrategyEngine::buildBenchmarkStockWeights(
+    astock::infrastructure::database::MarketDataRepository& repo,
+    const std::string& benchmarkIndex,
+    const std::vector<domain::DomainDate>& backtestDays)
+{
+    using Weights = std::unordered_map<std::string, double>;
+    std::map<domain::DomainDate, std::shared_ptr<const Weights>> result;
+    if (backtestDays.empty()) return result;
+
+    // 1. 月份 → 月内首个回测日 (月频采样锚点), ym = YYYYMM
+    std::map<int, domain::DomainDate> monthAnchors;
+    for (const auto& d : backtestDays) {
+        const int ym = d.value / 100;
+        if (monthAnchors.find(ym) == monthAnchors.end()) monthAnchors[ym] = d;
+    }
+
+    // 2. 逐月采样: 锚点日成分股 + 流通市值 (停牌缺价/缺市值剔除) → 归一化; 缺月回退上月
+    std::shared_ptr<const Weights> lastWeights;
+    std::map<domain::DomainDate, std::shared_ptr<const Weights>> monthlyWeights;
+    for (const auto& monthAnchor : monthAnchors) {
+        const domain::DomainDate anchor = monthAnchor.second;
+        const std::string anchorStr = std::to_string(anchor.value);
+        const auto constituents = repo.queryIndexConstituents(benchmarkIndex, anchorStr);
+        if (constituents.empty()) {
+            if (lastWeights) monthlyWeights[anchor] = lastWeights;  // 缺月回退上月
+            continue;
+        }
+        auto rows = repo.queryDailyBarWithMarketCap(constituents, anchorStr, anchorStr);
+        auto weights = std::make_shared<Weights>();
+        double totalCap = 0.0;
+        for (const auto& row : rows) {
+            // 基准市值 = 流通市值 (缺则回退总市值; 如需切换口径改这一处)
+            const double cap = (row.circulatingMarketCap > 0.0)
+                                   ? row.circulatingMarketCap : row.marketCap;
+            if (row.close <= 0.0 || cap <= 0.0) continue;
+            (*weights)[row.symbol] = cap;
+            totalCap += cap;
+        }
+        if (totalCap <= 0.0 || weights->empty()) {
+            if (lastWeights) monthlyWeights[anchor] = lastWeights;
+            continue;
+        }
+        for (auto& kv : *weights) kv.second /= totalCap;
+        monthlyWeights[anchor] = weights;
+        lastWeights = weights;
+    }
+
+    // 3. 逐日展开: 回测日取当月锚点权重 (锚点=月内首日, 锚点前无覆盖)
+    for (const auto& d : backtestDays) {
+        const int ym = d.value / 100;
+        const auto anchorIt = monthAnchors.find(ym);
+        if (anchorIt == monthAnchors.end() || d < anchorIt->second) continue;
+        const auto wIt = monthlyWeights.find(anchorIt->second);
+        if (wIt != monthlyWeights.end()) result[d] = wIt->second;
+    }
+    return result;
+}
+
+void StrategyEngine::buildStrategyAttribution(
+    StrategyBacktestResult& result,
+    const domain::backtest::BacktestRequest& req,
+    const factor::compute::IMarketDataView* view,
+    const domain::attribution::PositionSnapshotCollector& positionCollector)
+{
+    m_lastAttribution.reset();
+
+    auto& pool = astock::database::NativePgConnectionPool::instance();
+    if (!pool.isInitialized()) {
+        INTERNAL_INFO_STREAM << "[backtest] 策略归因跳过: PG 连接池未初始化";
+        return;
+    }
+    auto db = pool.getConnection();
+    if (!db) {
+        INTERNAL_INFO_STREAM << "[backtest] 策略归因跳过: PG 连接获取失败";
+        return;
+    }
+    auto repo = std::make_unique<astock::infrastructure::database::MarketDataRepository>(db);
+
+    // 行业码归一化: numeric 列可能返回 "801010.0" → 剥离小数尾
+    const auto normalizeCode = [](std::string code) -> std::string {
+        const auto dotPos = code.find('.');
+        if (dotPos != std::string::npos) code.erase(dotPos);
+        return code;
+    };
+
+    // symbol → industry_code (只查成交过的标的, 全市场查询代价高)
+    std::unordered_map<std::string, std::string> symbolSector;
+    std::unordered_map<std::string, std::string> sectorNames;
+    {
+        std::set<std::string> tradedSymbols;
+        for (const auto& t : result.tradeLog) tradedSymbols.insert(t.symbol);
+        if (!tradedSymbols.empty()) {
+            const std::vector<std::string> tradedSymbolVec(tradedSymbols.begin(), tradedSymbols.end());
+            for (const auto& row : repo->querySymbolInfo(tradedSymbolVec)) {
+                std::string code = normalizeCode(row.getString("industry_code"));
+                if (!code.empty()) symbolSector[row.getString("symbol")] = std::move(code);
+            }
+        }
+        for (auto& kv : repo->queryIndustryNames()) {
+            std::string code = normalizeCode(std::move(kv.first));
+            if (!code.empty() && !kv.second.empty())
+                sectorNames[std::move(code)] = std::move(kv.second);
+        }
+    }
+
+    const std::string benchmarkIndex =
+        req.benchmarkIndex.empty() ? "000300.SH" : req.benchmarkIndex;
+
+    domain::attribution::StrategyAttributionCalculator calculator;
+    domain::attribution::StrategyAttributionCalculator::Inputs inputs;
+    inputs.tradeLog = &result.tradeLog;
+    inputs.snapshots = &positionCollector.snapshots();
+    inputs.symbolSector = [&symbolSector](const std::string& sym) -> const std::string* {
+        const auto it = symbolSector.find(sym);
+        return (it != symbolSector.end()) ? &it->second : nullptr;
+    };
+    inputs.sectorName = [&sectorNames](const std::string& code) -> const std::string* {
+        const auto it = sectorNames.find(code);
+        return (it != sectorNames.end()) ? &it->second : nullptr;
+    };
+    inputs.view = view;
+    inputs.benchmarkStockWeights =
+        buildBenchmarkStockWeights(*repo, benchmarkIndex, result.timeSeries.dates);
+    inputs.backtestDays = result.timeSeries.dates;
+    m_lastAttribution = calculator.compute(inputs);
+
+    const auto& attr = *m_lastAttribution;
+    INTERNAL_INFO_STREAM << "[backtest] 策略归因: 行业=" << attr.sectors.size()
+                         << " 个股=" << attr.stocks.size()
+                         << " Brinson对齐日=" << attr.brinson.alignedDays
+                         << "/" << attr.brinson.totalDays
+                         << " 恒等式误差=" << attr.brinson.identityError
+                         << " AE=" << attr.brinson.allocationEffect
+                         << " SE=" << attr.brinson.selectionEffect
+                         << " IE=" << attr.brinson.interactionEffect;
 }
 
 void StrategyEngine::logExecutionFill(const std::string& symbol, const std::string& side,

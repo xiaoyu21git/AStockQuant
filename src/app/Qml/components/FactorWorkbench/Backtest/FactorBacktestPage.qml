@@ -2499,9 +2499,15 @@ Item {
 
                         FormalExecutionDetailPanel {}
 
-                GroupResultPanel {
+                // 回测结果视图 — 指标卡/基准卡/IC卡/分组列表/分组对比图/因子归因
+                // (吸收 GroupResultPanel; 显式绑定页面数据, 结果选择器经作用域链解析页面函数)
+                BacktestResultView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 640
+                    Layout.preferredHeight: 1840
+                    metricSections: root.resultMetrics
+                    displayedResult: root.displayedBacktestResult
+                    isBacktesting: root.isBacktesting
+                    currentGroup: root.currentGroup
                 }
             } // ColumnLayout 结束
         } // Flickable 结束

@@ -12,7 +12,8 @@
 #include "SignalBlendCompositor.h"
 #include "RuleGate.h"
 #include "RuleAttribution.h"
-#include "../../attribution/include/AttributionTypes.h"
+#include "../../attribution/include/StrategyAttributionTypes.h"
+#include "../../attribution/include/PositionSnapshotCollector.h"
 #include "IBasketInterceptor.h"
 #include "RulePipeline.h"
 #include "RiskEvaluator.h"
@@ -30,6 +31,7 @@
 #include <mutex>
 #include <optional>
 #include <chrono>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -44,7 +46,7 @@ struct AccountInfo;
 }
 
 namespace astock { namespace database { class ISqlDatabase; class SqlQueryResultRow; } }
-namespace astock::infrastructure::database { class AppStateStore; class ITradingCalendar; }
+namespace astock::infrastructure::database { class AppStateStore; class ITradingCalendar; class MarketDataRepository; }
 
 namespace domain::backtest {
 struct BacktestRequest;
@@ -726,11 +728,12 @@ public:
         return m_ruleAttribution;
     }
 
-    /// @brief 获取最近一次回测的绩效归因报告 (板块/因子/择时三维拆解)
-    [[nodiscard]] const std::optional<domain::attribution::AttributionReport>&
+    /// @brief 获取最近一次回测的策略归因报告 (行业盈亏/个股盈亏/Brinson 择时选股分解)
+    [[nodiscard]] const std::optional<domain::attribution::StrategyAttributionReport>&
     lastAttribution() const noexcept {
         return m_lastAttribution;
     }
+
     /// @brief 最近一次回测的日期区间
     [[nodiscard]] std::string backtestDateRange() const noexcept { return m_backtestDateRange; }
 
@@ -832,6 +835,7 @@ private:
         int bmColIdx,
         const std::function<void(double)>& onProgress,
         rules::AttributionCollector& attributionCollector,
+        domain::attribution::PositionSnapshotCollector& positionCollector,
         const std::atomic<bool>* cancelFlag = nullptr);
 
     /// @brief 回测后处理: 指标计算 (Phase 30c 拆分)
@@ -854,6 +858,31 @@ private:
         int totalDays,
         const std::function<void(double)>& onProgress,
         rules::AttributionCollector& attributionCollector);
+
+    /// @brief 构建基准逐日成分权重 (月频采样 × 流通市值, 缺月回退上月)
+    /// 返回 date → (symbol → 归一化权重); key 集合即基准覆盖日集合
+    /// 同月各日共享同一份权重表 (shared_ptr 零拷贝)
+    static std::map<domain::DomainDate,
+                    std::shared_ptr<const std::unordered_map<std::string, double>>>
+    buildBenchmarkStockWeights(astock::infrastructure::database::MarketDataRepository& repo,
+                               const std::string& benchmarkIndex,
+                               const std::vector<domain::DomainDate>& backtestDays);
+
+    /// @brief 策略归因后处理: 行业/个股聚合 + Brinson 分解 (回测尾调用)
+    /// 数据源: tradeLog + 持仓快照 + PG 行业映射 + 基准成分权重
+    void buildStrategyAttribution(
+        StrategyBacktestResult& result,
+        const domain::backtest::BacktestRequest& req,
+        const factor::compute::IMarketDataView* view,
+        const domain::attribution::PositionSnapshotCollector& positionCollector);
+
+    /// @brief 日终持仓快照入库 (live.daily_equity_snapshots + live.daily_position)
+    /// 账户快照是券商事实, 与评估状态解耦; UPSERT 幂等 (主评估/补跑窗口重写同日)
+    void persistDailyPositionSnapshot(const std::string& tradingDay);
+
+    /// @brief 当前持仓实时同步 (live.current_position, 券商快照推送驱动, 内部 ≥20s 节流)
+    /// 策略归属: 账本持有 → 本策略 id; 券商有账本无 → NULL (手动持仓)
+    void persistCurrentPositions();
 
 private:
     std::unique_ptr<IRuntimeFactorService> factorService_;
@@ -884,6 +913,7 @@ private:
     std::string m_accountId;
     std::string m_strategyId;
     std::string m_strategyName;
+    std::atomic<std::int64_t> m_lastPositionSyncSec{0};  ///< 上次 live.current_position 同步 epoch 秒 (节流)
     std::unique_ptr<TradeJournal> m_tradeJournal;  // 交易日志 (按策略名/日期分文件)
     std::string m_liveDataPath;     // 实盘数据目录, 用于统一 JSON 持久化
     domain::trading::OrderBuilder m_orderBuilder;
@@ -900,7 +930,7 @@ private:
     RulePipeline m_rulePipeline{m_ruleGate};  ///< 规则编排器(封装上下文构建+迭代样板代码)
     bool m_enableCandlePatterns{false};       ///< 是否启用 TA-Lib 蜡烛形态计算
     std::map<std::string, rules::RuleAttribution> m_ruleAttribution;  ///< 最近一次回测的规则归因
-    std::optional<domain::attribution::AttributionReport> m_lastAttribution;  ///< 最近一次回测的绩效归因
+    std::optional<domain::attribution::StrategyAttributionReport> m_lastAttribution;  ///< 最近一次回测的策略归因
     std::string m_backtestDateRange;  ///< 最近一次回测的日期区间 (如 "20200102-20260717")
     RiskConfig m_riskConfig = RiskConfig::defaults();
     MarketTimingGate m_timingGate;             ///< 大盘择时闸门
@@ -914,7 +944,7 @@ private:
     // ── P2: 评估管道装配 (ADR-007/009) ──
     BarPeriod m_period{BarPeriod::Daily};  ///< 评估周期 (Builder 从 RebalanceConfig 接线)
     std::shared_ptr<astock::infrastructure::database::AppStateStore> m_appStateStore;  ///< app_state.json 统一写者 (与调度器同路径)
-    std::unique_ptr<PositionBook> m_positionBook;              ///< 内部持仓账本 (ADR-005 P5 簿记校验)
+    std::unique_ptr<PositionBook> m_positionBook;              ///< 内部持仓账本 (ADR-005 实时对账, 不拦下单)
     std::unique_ptr<EngineListenerAssembler> m_listenerAssembler;  ///< 簿记挂钩一次性装配 (ADR-009①)
     std::unique_ptr<SubmissionFinalizer> m_finalizer;          ///< 共享提交核心 (幂等去重+生成+投递)
     std::unique_ptr<SignalEvaluationPipeline> m_pipeline;      ///< 评估主链 (频率无关, 8 阶段)

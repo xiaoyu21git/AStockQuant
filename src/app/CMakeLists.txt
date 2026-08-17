@@ -333,7 +333,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
         Qml/components/FactorWorkbench/Backtest/GroupConfigPanel.qml
         Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
-        Qml/components/FactorWorkbench/Backtest/GroupResultPanel.qml
+        Qml/components/FactorWorkbench/Backtest/FactorAttributionPanel.qml
         Qml/components/FactorWorkbench/Backtest/PreflightFailureDialog.qml
         Qml/components/FactorWorkbench/Backtest/PreflightFailurePanel.qml
         Qml/components/FactorWorkbench/Backtest/RuntimeParamsDialog.qml

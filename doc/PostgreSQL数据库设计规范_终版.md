@@ -295,7 +295,7 @@ CREATE INDEX ON mkt.daily_bar(symbol_id);
 | 列 | 类型 | 约束 | 说明 |
 |---|---|---|---|
 | `position_id` | `bigserial` | **PK** | |
-| `summary_id` | `integer` | NOT NULL | FK → 组合摘要 |
+| `summary_id` | `varchar(36)` | NOT NULL | FK → `live.daily_equity_snapshots(id)` ON DELETE CASCADE（组合摘要） |
 | `trade_date` | `date` | NOT NULL | |
 | `symbol_id` | `bigint` | NOT NULL | FK → `ref.symbol_info(id)` |
 | `position` | `integer` | DEFAULT 0 | 持仓数量 |
@@ -306,6 +306,32 @@ CREATE INDEX ON mkt.daily_bar(symbol_id);
 | `created_at` | `timestamptz` | DEFAULT now() | |
 
 `(summary_id, trade_date, symbol_id)` UNIQUE。
+
+#### `live.current_position`
+当前持仓实时表（2026-08-17 新增）。券商持仓快照推送驱动（~25-50s 一批，C++ 侧 ≥20s 节流）全量同步：新增/变更 UPSERT，券商清零标的删行。
+
+昨收来源：掘金 GM API 历史日线回看 10 天（`fetchPreClose`，持 GM SDK 全局锁，逐日缓存）。GM 拿不到 → prev_close=0，当日涨跌列记 0。
+
+| 列 | 类型 | 约束 | 说明 |
+|---|---|---|---|
+| `symbol_id` | `bigint` | **PK** | FK → `ref.symbol_info(id)` |
+| `strategy_id` | `varchar(128)` | NULL | FK → `live.strategy(strategy_id)`；NULL = 手动持仓（券商有而策略账本无） |
+| `quantity` | `bigint` | NOT NULL DEFAULT 0 | 当前股数 |
+| `available_qty` | `bigint` | DEFAULT 0 | 可用股数 |
+| `frozen_qty` | `bigint` | DEFAULT 0 | 冻结股数 = quantity − available_qty |
+| `avg_cost` | `numeric(12,4)` | NOT NULL | 摊薄成本价 |
+| `last_price` | `numeric(12,4)` | DEFAULT 0 | 现价 |
+| `market_value` | `numeric(15,4)` | DEFAULT 0 | 市值 |
+| `unrealized_pnl` | `numeric(15,4)` | DEFAULT 0 | 浮动盈亏 |
+| `pnl_pct` | `numeric(10,4)` | DEFAULT 0 | 当前涨幅 % = (last_price − avg_cost) / avg_cost × 100 |
+| `prev_close` | `numeric(12,4)` | DEFAULT 0 | 昨收（双渠道获取，缺 → 0） |
+| `day_pnl` | `numeric(15,4)` | DEFAULT 0 | 当日盈亏 = (last_price − prev_close) × quantity |
+| `day_pnl_pct` | `numeric(10,4)` | DEFAULT 0 | 当日涨跌幅 % = (last_price − prev_close) / prev_close × 100 |
+| `first_held_at` | `timestamptz` | NULL | 持仓开始时间 = 首次出现在券商快照的时间（引擎追踪；清零后再次出现视为新持仓） |
+| `held_days` | `integer` | DEFAULT 0 | 持仓天数（自然日，first_held_at 至写入日） |
+| `updated_at` | `timestamptz` | DEFAULT now() | |
+
+与 `live.daily_position`（日终台账，留痕）互补：本表只保留当前状态。
 
 #### `live.daily_equity_snapshots`
 现存 MySQL: `daily_equity_snapshots`，0 行。预留。

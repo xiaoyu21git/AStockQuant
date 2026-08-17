@@ -1,541 +1,506 @@
 // BacktestResultView.qml
-// 回测结果展示组件
+// 回测结果展示组件 — 最终结果视图
+// 上家: FactorBacktestPage (显式绑定 metricSections/displayedResult/isBacktesting/currentGroup)
+// 吸收 GroupResultPanel (结果选择器 + 分组卡片列表), 保留指标卡/基准卡/IC卡/分组对比图
+// ⚠️ QML 绑定陷阱: 函数调用内部读取不被依赖跟踪 → 数据访问一律用直接属性链
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import QtCharts 2.15
 import "../../Backtest" as BacktestComponents
 
-/**
- * 回测结果展示组件
- * 显示因子回测的详细结果和图表
- */
-Item {
+Rectangle {
     id: root
-    
-    // ============ 属�?============
-    
-    property var backtestResult: ({})
+    Layout.fillWidth: true
+    radius: 12
+    color: "#0F172A"
+
+    // ============ 属性 (由 FactorBacktestPage 显式绑定) ============
+    // displayedResult = 当前选中的单条结果; 命名避开 backtestResult,
+    // 以便结果选择器经作用域链解析到页面根的原始结果 (含 .results 列表)
+    property var displayedResult: ({})
     property var metricSections: ({})
+    property bool isBacktesting: false
+    property int currentGroup: 0
 
-    function executionMetrics() {
-        return metricSections && metricSections.execution ? metricSections.execution : ({})
+    // ── 直接属性链数据视图 (绑定可跟踪, 结果切换时自动刷新) ──
+    property var execMetrics: metricSections && metricSections.execution ? metricSections.execution : ({})
+    property var icInfo: metricSections && metricSections.ic ? metricSections.ic : ({})
+    property var groupList: metricSections && metricSections.groups && Array.isArray(metricSections.groups)
+                            ? metricSections.groups : []
+    property var rawRetSeries: metricSections && metricSections.factorQuality
+                               && metricSections.factorQuality.rawReturns
+                               && Array.isArray(metricSections.factorQuality.rawReturns)
+                               ? metricSections.factorQuality.rawReturns : []
+    property var resultChoices: {
+        var touch = metricSections  // 结果切换时页面重设 resultMetrics → 触发重算
+        return displayedBacktestResults()
+    }
+    // 因子归因有效性 (组合模式产出; 单因子模式显示多空收益小卡)
+    property bool attributionValid: {
+        var fa = metricSections && metricSections.factorAttribution
+        return fa ? (fa.isValid === true) : false
+    }
+    // 指标上下文: 有因子结果或指标数据时显示数值, 否则 "N/A"
+    property bool hasContext: {
+        if (displayedResult && (String(displayedResult.factorId || "").length > 0
+                                || String(displayedResult.factorName || "").length > 0)) return true
+        return metricSections && Object.keys(metricSections).length > 0
     }
 
-    function icMetrics() {
-        return metricSections && metricSections.ic ? metricSections.ic : ({})
+    // ============ 格式化工具 (纯函数, 入参直接属性链) ============
+    function hasNumericMetricValue(value) {
+        if (value === undefined || value === null) return false
+        return isFinite(Number(value))
+    }
+    function metricNumberText(ctx, value, digits) {
+        if (!ctx) return "N/A"
+        if (!hasNumericMetricValue(value)) return Number(0).toFixed(digits)
+        return Number(value).toFixed(digits)
+    }
+    function metricPercentText(ctx, value, digits) {
+        if (!ctx) return "N/A"
+        if (!hasNumericMetricValue(value)) return (Number(0) * 100).toFixed(digits) + "%"
+        return (Number(value) * 100).toFixed(digits) + "%"
+    }
+    function metricIntegerText(ctx, value) {
+        if (!ctx) return "N/A"
+        if (!hasNumericMetricValue(value)) return "0"
+        return String(Math.round(Number(value)))
+    }
+    function metricTrend(ctx, value) {
+        if (!ctx || !hasNumericMetricValue(value)) return "neutral"
+        var n = Number(value)
+        if (n > 0) return "up"
+        if (n < 0) return "down"
+        return "neutral"
+    }
+    function pnlColor(v) {
+        var n = Number(v)
+        return isNaN(n) ? "#94A3B8" : (n >= 0 ? "#EF4444" : "#10B981")
     }
 
-    function groupMetrics() {
-        return metricSections && metricSections.groups && Array.isArray(metricSections.groups) ? metricSections.groups : []
-    }
-    
     // ============ UI ============
-    
-    Rectangle {
+    ColumnLayout {
         anchors.fill: parent
-        color: "#0F172A"
-        
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 24
-            spacing: 16
-            
-            // 标题
+        anchors.margins: 16
+        spacing: 12
+
+        // 标题行 + 结果选择器 (仅多结果时可见)
+        RowLayout {
+            Layout.fillWidth: true
             Text {
                 text: "📊 回测结果详情"
-                font.pixelSize: 20
+                font.pixelSize: 16
                 font.weight: Font.DemiBold
                 color: "#F1F5F9"
             }
-            
-            // 结果概览卡片
+            Item { Layout.fillWidth: true }
+            ComboBox {
+                id: resultSelector
+                Layout.preferredWidth: 220
+                visible: resultChoices.length > 1
+                model: resultChoices
+                currentIndex: selectedBacktestResultIndex
+                delegate: ItemDelegate {
+                    width: resultSelector.width
+                    text: displayedBacktestResultName(modelData)
+                }
+                contentItem: Text {
+                    text: resultSelector.currentIndex >= 0 && resultSelector.currentIndex < resultChoices.length
+                        ? displayedBacktestResultName(resultChoices[resultSelector.currentIndex])
+                        : "选择回测结果"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                }
+                background: Rectangle {
+                    radius: 8
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                }
+                onActivated: function(index) {
+                    selectedBacktestResultIndex = index
+                    // backtestResult 经作用域链解析到页面根的原始结果 (含 .results 列表)
+                    applyDisplayedBacktestResult(backtestResult)
+                }
+            }
+            Text {
+                text: groupList.length > 0 ? "共 " + groupList.length + " 个分组" : "等待回测结果"
+                font.pixelSize: 12
+                color: "#94A3B8"
+            }
+        }
+
+        // 执行指标卡: 年化 / 夏普 / 最大回撤 / 胜率
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 120
+            radius: 12
+            color: "#1E293B"
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 16
+                BacktestComponents.BacktestMetricCard {
+                    title: "执行年化"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.annualReturn, 2)
+                    description: "Execution Annual Return"
+                    trend: root.metricTrend(root.hasContext, root.execMetrics.annualReturn)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 100
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "夏普比率"
+                    value: root.metricNumberText(root.hasContext, root.execMetrics.sharpeRatio, 2)
+                    description: "Sharpe Ratio"
+                    trend: root.metricTrend(root.hasContext, root.execMetrics.sharpeRatio)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "最大回撤"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.maxDrawdown, 2)
+                    description: "Max Drawdown"
+                    trend: "down"
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "胜率"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.winRate, 1)
+                    description: "Win Rate"
+                    trend: root.metricTrend(root.hasContext, Number(root.execMetrics.winRate) - 0.5)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+            }
+        }
+
+        // 基准对比卡: 基准年化 / 超额年化 / 信息比率 / 跟踪误差 / Alpha / Beta
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 120
+            radius: 12
+            color: "#1E293B"
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 16
+                BacktestComponents.BacktestMetricCard {
+                    title: "基准年化"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.benchmarkAnnualReturn, 2)
+                    description: "Benchmark Return"
+                    trend: root.metricTrend(root.hasContext, root.execMetrics.benchmarkAnnualReturn)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "超额年化"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.excessAnnualReturn, 2)
+                    description: "Excess Return"
+                    trend: root.metricTrend(root.hasContext, root.execMetrics.excessAnnualReturn)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "信息比率"
+                    value: root.metricNumberText(root.hasContext, root.execMetrics.informationRatio, 2)
+                    description: "Information Ratio"
+                    trend: root.metricTrend(root.hasContext, root.execMetrics.informationRatio)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "跟踪误差"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.trackingError, 2)
+                    description: "Tracking Error"
+                    trend: "neutral"
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "Alpha"
+                    value: root.metricPercentText(root.hasContext, root.execMetrics.alpha, 2)
+                    description: "CAPM Alpha"
+                    trend: root.metricTrend(root.hasContext, root.execMetrics.alpha)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "Beta"
+                    value: root.metricNumberText(root.hasContext, root.execMetrics.beta, 2)
+                    description: "Benchmark Beta"
+                    trend: "neutral"
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+            }
+        }
+
+        // IC 卡: IC / IR / IC标准差 / IC正率
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 100
+            radius: 12
+            color: "#1E293B"
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 16
+                BacktestComponents.BacktestMetricCard {
+                    title: "IC"
+                    value: root.metricNumberText(root.hasContext, root.icInfo.value, 3)
+                    description: "Information Coefficient"
+                    trend: root.metricTrend(root.hasContext, root.icInfo.value)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "IR"
+                    value: root.metricNumberText(root.hasContext, root.icInfo.ir, 2)
+                    description: "Information Ratio"
+                    trend: root.metricTrend(root.hasContext, root.icInfo.ir)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "IC标准差"
+                    value: root.metricNumberText(root.hasContext, root.icInfo.std, 3)
+                    description: "IC Std Dev"
+                    trend: "neutral"
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+                BacktestComponents.BacktestMetricCard {
+                    title: "IC正率"
+                    value: root.metricPercentText(root.hasContext, root.icInfo.positiveRate, 1)
+                    description: "IC Positive Rate"
+                    trend: root.metricTrend(root.hasContext, Number(root.icInfo.positiveRate) - 0.5)
+                    upColor: "#EF4444"; downColor: "#10B981"
+                    cardHeight: 80
+                    Layout.fillWidth: true; Layout.minimumWidth: 80
+                }
+            }
+        }
+
+        // 分组卡片列表 (吸收 GroupResultPanel, 含"正在计算分组..."空态 + currentGroup 高亮)
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 300
+            radius: 12
+            color: "#1E293B"
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+                Text {
+                    text: "📊 分组内容"
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                    color: "#F1F5F9"
+                }
+                ListView {
+                    id: groupListView
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumHeight: 220
+                    model: groupList
+                    clip: true
+                    spacing: 8
+                    delegate: groupCard
+                }
+                Text {
+                    anchors.centerIn: parent
+                    text: isBacktesting ? "正在计算分组..." : "请开始回测查看分组内容"
+                    font.pixelSize: 14
+                    color: "#94A3B8"
+                    visible: groupList.length === 0
+                }
+            }
+        }
+
+        // 分组绩效对比图 (GroupResultChart 保留)
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 380
+            radius: 12
+            color: "#1E293B"
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 16
+                spacing: 12
+                GroupResultChart {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    groupResults: groupList
+                }
+            }
+        }
+
+        // 因子归因 (组合模式) / 单因子多空收益小卡 (单因子模式)
+        FactorAttributionPanel {
+            Layout.fillWidth: true
+            visible: attributionValid
+            report: attributionValid
+                ? (metricSections.factorAttribution || null)
+                : null
+        }
+        SingleFactorReturnCard {
+            Layout.fillWidth: true
+            visible: !attributionValid && rawRetSeries.length > 0
+        }
+    }
+
+    // ============ 内联组件 ============
+    // 分组卡片 (GroupResultPanel 委托原样吸收)
+    component groupCard: Rectangle {
+        width: ListView.view.width
+        height: 60
+        radius: 8
+        color: "#1E293B"
+        RowLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 12
             Rectangle {
+                Layout.preferredWidth: 32
+                Layout.preferredHeight: 32
+                radius: 16
+                color: "#0F172A"
+                Text {
+                    anchors.centerIn: parent
+                    text: modelData.groupIndex || (index + 1)
+                    font.pixelSize: 12
+                    font.weight: Font.Bold
+                    color: "#F1F5F9"
+                }
+            }
+            ColumnLayout {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 120
-                radius: 12
-                color: "#1E293B"
-                
+                spacing: 2
+                Text {
+                    text: "第 " + (modelData.groupIndex || (index + 1)) + " 组"
+                    font.pixelSize: 14
+                    font.weight: Font.Medium
+                    color: "#F1F5F9"
+                }
                 RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
                     spacing: 16
-                    
-                    // 年化收益
-                    BacktestComponents.BacktestMetricCard {
-                        title: "执行年化"
-                        value: root.metricPercentText(executionMetrics().annualReturn, 2)
-                        description: "Execution Annual Return"
-                        trend: root.metricTrend(executionMetrics().annualReturn)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 100
+                    Text {
+                        text: "股票: " + (isFinite(Number(modelData.stockCount)) ? Number(modelData.stockCount).toFixed(0) : "0")
+                        font.pixelSize: 11
+                        color: "#94A3B8"
                     }
-                    
-                    // 夏普比率
-                    BacktestComponents.BacktestMetricCard {
-                        title: "夏普比率"
-                        value: root.metricNumberText(executionMetrics().sharpeRatio, 2)
-                        description: "Sharpe Ratio"
-                        trend: root.metricTrend(executionMetrics().sharpeRatio)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-                    
-                    // 最大回撤
-                    BacktestComponents.BacktestMetricCard {
-                        title: "最大回撤"
-                        value: root.metricPercentText(executionMetrics().maxDrawdown, 2)
-                        description: "Max Drawdown"
-                        trend: "down"
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-                    
-                    // 胜率
-                    BacktestComponents.BacktestMetricCard {
-                        title: "胜率"
-                        value: root.metricPercentText(executionMetrics().winRate, 1)
-                        description: "Win Rate"
-                        trend: root.metricTrend(executionMetrics().winRate - 0.5)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
+                    Text {
+                        text: "因子值: " + (isFinite(Number(modelData.minFactorValue)) ? Number(modelData.minFactorValue).toFixed(2) : "0.00")
+                              + " - " + (isFinite(Number(modelData.maxFactorValue)) ? Number(modelData.maxFactorValue).toFixed(2) : "0.00")
+                        font.pixelSize: 11
+                        color: "#94A3B8"
                     }
                 }
             }
-
-            // 基准对比指标卡片
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 120
-                radius: 12
-                color: "#1E293B"
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 16
-
-                    BacktestComponents.BacktestMetricCard {
-                        title: "基准年化"
-                        value: root.metricPercentText(executionMetrics().benchmarkAnnualReturn, 2)
-                        description: "Benchmark Return"
-                        trend: root.metricTrend(executionMetrics().benchmarkAnnualReturn)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-
-                    BacktestComponents.BacktestMetricCard {
-                        title: "超额年化"
-                        value: root.metricPercentText(executionMetrics().excessAnnualReturn, 2)
-                        description: "Excess Return"
-                        trend: root.metricTrend(executionMetrics().excessAnnualReturn)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-
-                    BacktestComponents.BacktestMetricCard {
-                        title: "信息比率"
-                        value: root.metricNumberText(executionMetrics().informationRatio, 2)
-                        description: "Information Ratio"
-                        trend: root.metricTrend(executionMetrics().informationRatio)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-
-                    BacktestComponents.BacktestMetricCard {
-                        title: "跟踪误差"
-                        value: root.metricPercentText(executionMetrics().trackingError, 2)
-                        description: "Tracking Error"
-                        trend: "neutral"
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-
-                    BacktestComponents.BacktestMetricCard {
-                        title: "Alpha"
-                        value: root.metricPercentText(executionMetrics().alpha, 2)
-                        description: "CAPM Alpha"
-                        trend: root.metricTrend(executionMetrics().alpha)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-
-                    BacktestComponents.BacktestMetricCard {
-                        title: "Beta"
-                        value: root.metricNumberText(executionMetrics().beta, 2)
-                        description: "Benchmark Beta"
-                        trend: "neutral"
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
+            ColumnLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 2
+                Text {
+                    text: (isFinite(Number(modelData.returnRate)) ? (Number(modelData.returnRate) * 100).toFixed(2) + "%" : "0.00%")
+                    font.pixelSize: 16
+                    font.weight: Font.Bold
+                    color: pnlColor(modelData.returnRate)
+                }
+                Text {
+                    text: "收益"
+                    font.pixelSize: 10
+                    color: "#94A3B8"
                 }
             }
-            
-            // ICIR指标卡片
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 100
-                radius: 12
-                color: "#1E293B"
-                
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 16
-                    
-                    // IC指标
-                    BacktestComponents.BacktestMetricCard {
-                        title: "IC"
-                        value: root.metricNumberText(icMetrics().value, 3)
-                        description: "Information Coefficient"
-                        trend: root.metricTrend(icMetrics().value)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-                    
-                    // IR指标
-                    BacktestComponents.BacktestMetricCard {
-                        title: "IR"
-                        value: root.metricNumberText(icMetrics().ir, 2)
-                        description: "Information Ratio"
-                        trend: root.metricTrend(icMetrics().ir)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-                    
-                    // IC标准差
-                    BacktestComponents.BacktestMetricCard {
-                        title: "IC标准差"
-                        value: root.metricNumberText(icMetrics().std, 3)
-                        description: "IC Std Dev"
-                        trend: "neutral"
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-                    
-                    // IC正率
-                    BacktestComponents.BacktestMetricCard {
-                        title: "IC正率"
-                        value: root.metricPercentText(icMetrics().positiveRate, 1)
-                        description: "IC Positive Rate"
-                        trend: root.metricTrend(icMetrics().positiveRate - 0.5)
-                        upColor: "#EF4444"
-                        downColor: "#10B981"
-                        cardHeight: 80
-                        Layout.fillWidth: true; Layout.minimumWidth: 80
-                    }
-                }
+        }
+        Rectangle {
+            anchors.fill: parent
+            radius: 8
+            color: "#3B82F620"
+            border.width: 2
+            border.color: "#3B82F6"
+            visible: isBacktesting && currentGroup === (index + 1)
+        }
+    }
+
+    // 单因子模式: 因子多空收益曲线小卡 (数据 = rawLongShortReturns, 纯 UI 绘制)
+    component SingleFactorReturnCard: Rectangle {
+        radius: 8
+        color: "#1E293B"
+        property var rawData: metricSections && metricSections.factorQuality
+                             && metricSections.factorQuality.rawReturns
+                             && Array.isArray(metricSections.factorQuality.rawReturns)
+                             ? metricSections.factorQuality.rawReturns : []
+        property double cardHeight: 240
+        Layout.preferredHeight: cardHeight
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 10
+            spacing: 6
+            Text {
+                text: "因子多空收益（单因子模式·无成本口径）"
+                font.pixelSize: 12
+                font.weight: Font.Bold
+                color: "#F1F5F9"
             }
-            
-            // 分组结果表格
-            Rectangle {
+            Text {
+                text: "每期多空分组收益与算术累计曲线；组合模式将显示因子归因区块"
+                font.pixelSize: 9
+                color: "#64748B"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            ChartView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 12
-                color: "#1E293B"
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
-                    
-                    Text {
-                        text: "📈 分组绩效表现"
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        color: "#F1F5F9"
-                    }
-                    
-                    // 分组表格
-                    ListView {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        model: groupMetrics()
-                        clip: true
-                        
-                        header: Row {
-                            width: parent.width
-                            height: 40
-                            spacing: 0
-                            
-                            // 表头
-                            TableHeaderCell { text: "组别"; width: 80 }
-                            TableHeaderCell { text: "股票数量"; width: 80 }
-                            TableHeaderCell { text: "收益"; width: 100 }
-                            TableHeaderCell { text: "年化收益"; width: 100 }
-                            TableHeaderCell { text: "最小因子值"; width: 100 }
-                            TableHeaderCell { text: "最大因子值"; width: 100 }
-                        }
-                        
-                        delegate: Row {
-                            width: parent.width
-                            height: 40
-                            spacing: 0
-                            
-                            // 组别
-                            TableCell {
-                                width: 80
-                                text: "组 " + (modelData.groupIndex || (index + 1))
-                                color: index === 0 ? "#EF4444" : index === groupMetrics().length - 1 ? "#10B981" : "#F1F5F9"
-                            }
-                            
-                            // 股票数量
-                            TableCell {
-                                width: 80
-                                text: root.metricIntegerText(modelData.stockCount)
-                            }
-                            
-                            // 收益
-                            TableCell {
-                                width: 100
-                                text: root.metricPercentText(modelData.returnRate, 2)
-                                color: root.metricColor(modelData.returnRate)
-                            }
-                            
-                            // 波动�?
-                            TableCell {
-                                width: 100
-                                text: root.metricPercentText(modelData.returnRate, 2)
-                            }
-                            
-                            // 夏普比率
-                            TableCell {
-                                width: 100
-                                text: root.metricNumberText(modelData.minFactorValue, 2)
-                                color: "#F1F5F9"
-                            }
-                            
-                            // 最大回�?
-                            TableCell {
-                                width: 100
-                                text: root.metricNumberText(modelData.maxFactorValue, 2)
-                                color: "#F1F5F9"
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // 分组结果图表
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 400
-                radius: 12
-                color: "#1E293B"
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
-                    
-                    Text {
-                        text: "📊 分组绩效可视化"
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        color: "#F1F5F9"
-                    }
-                    
-                    // 分组结果图表组件
-                    GroupResultChart {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        groupResults: root.groupMetrics()
-                    }
-                }
-            }
-            
-            // 图表区域（保留原有图表）
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 300
-                radius: 12
-                color: "#1E293B"
-                
-                ColumnLayout {
-                    anchors.fill: parent
-                    anchors.margins: 16
-                    spacing: 12
-                    
-                    Text {
-                        text: "📈 分组收益曲线"
-                        font.pixelSize: 16
-                        font.weight: Font.DemiBold
-                        color: "#F1F5F9"
-                    }
-                    
-                    // 图表占位�?
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: 8
-                        color: "#0F172A"
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "📊 收益曲线图表\n（需要集成QtCharts）"
-                            font.pixelSize: 14
-                            color: "#94A3B8"
-                            horizontalAlignment: Text.AlignHCenter
-                        }
-                    }
-                }
+                antialiasing: true
+                legend.visible: true
+                legend.font.pixelSize: 8
+                legend.labelColor: "#94A3B8"
+                backgroundColor: "transparent"
+                plotAreaColor: "transparent"
+                ValueAxis { id: sfX; min: 0; max: 1; labelsColor: "#64748B"; gridLineColor: "#1E293B"; labelFormat: "%.0f" }
+                ValueAxis { id: sfY; labelsColor: "#94A3B8"; gridLineColor: "#1E293B"; labelFormat: "%.2f" }
+                LineSeries { id: sfRaw; name: "每期多空收益"; axisX: sfX; axisY: sfY; color: "#38BDF8"; width: 1.5 }
+                LineSeries { id: sfCum; name: "算术累计"; axisX: sfX; axisY: sfY; color: "#EF4444"; width: 2 }
             }
         }
-    }
-    
-    // ============ 组件定义 ============
-    
-    // 表格表头单元�?
-    component TableHeaderCell: Rectangle {
-        property string text: ""
-        
-        width: 100
-        height: 40
-        color: "#0F172A"
-        border.width: 1
-        border.color: "#334155"
-        
-        Text {
-            anchors.centerIn: parent
-            text: parent.text
-            font.pixelSize: 12
-            font.weight: Font.Medium
-            color: "#F1F5F9"
-        }
-    }
-    
-    // 表格单元�?
-    component TableCell: Rectangle {
-        property string text: ""
-        property color textColor: "#F1F5F9"
-        
-        width: 100
-        height: 40
-        color: "#0F172A"
-        border.width: 1
-        border.color: "#334155"
-        
-        Text {
-            anchors.centerIn: parent
-            text: parent.text
-            font.pixelSize: 12
-            color: parent.textColor
+
+        onRawDataChanged: refreshSingleFactor()
+        Component.onCompleted: refreshSingleFactor()
+
+        function refreshSingleFactor() {
+            sfRaw.clear(); sfCum.clear()
+            var cum = 0
+            for (var i = 0; i < rawData.length; i++) {
+                var r = Number(rawData[i])
+                sfRaw.append(i, r)
+                cum += isNaN(r) ? 0 : r
+                sfCum.append(i, cum)
+            }
+            sfX.max = Math.max(1, rawData.length - 1)
         }
     }
 
-    function hasFactorContext() {
-        if (backtestResult && String(backtestResult.factorId || "").length > 0) {
-            return true
-        }
-        var config = backtestResult && backtestResult.config ? backtestResult.config : ({})
-        return String(config.factorId || "").length > 0
-    }
-
-    function hasNumericMetricValue(value) {
-        if (value === undefined || value === null) {
-            return false
-        }
-        var numericValue = Number(value)
-        return isFinite(numericValue)
-    }
-
-    function metricNumberText(value, digits) {
-        if (!hasFactorContext()) {
-            return "N/A"
-        }
-        if (!hasNumericMetricValue(value)) {
-            return Number(0).toFixed(digits)
-        }
-        return Number(value).toFixed(digits)
-    }
-
-    function metricPercentText(value, digits) {
-        if (!hasFactorContext()) {
-            return "N/A"
-        }
-        if (!hasNumericMetricValue(value)) {
-            return (Number(0) * 100).toFixed(digits) + "%"
-        }
-        return (Number(value) * 100).toFixed(digits) + "%"
-    }
-
-    function metricIntegerText(value) {
-        if (!hasFactorContext()) {
-            return "N/A"
-        }
-        if (!hasNumericMetricValue(value)) {
-            return "0"
-        }
-        return String(Math.round(Number(value)))
-    }
-
-    function metricTrend(value) {
-        if (!hasFactorContext() || !hasNumericMetricValue(value)) {
-            return "neutral"
-        }
-        var numericValue = Number(value)
-        if (numericValue > 0) {
-            return "up"
-        }
-        if (numericValue < 0) {
-            return "down"
-        }
-        return "neutral"
-    }
-
-    function metricColor(value) {
-        var trend = metricTrend(value)
-        if (trend === "up") {
-            return "#EF4444"
-        }
-        if (trend === "down") {
-            return "#10B981"
-        }
-        return "#F1F5F9"
-    }
-    
-    // ============ 内部函数 ============
-    
-    // 更新结果
-    function updateResults(result) {
-        backtestResult = result
-        metricSections = result && result.metrics ? result.metrics : ({})
-        
-        console.log("更新回测结果:", {
-            groupCount: groupMetrics().length,
-            metricSections: metricSections
-        })
-    }
-    
-    // ============ 初始�?============
-    
     Component.onCompleted: {
         console.log("回测结果视图初始化完成")
     }

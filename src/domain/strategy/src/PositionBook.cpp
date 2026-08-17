@@ -2,6 +2,7 @@
 #include "../../../infrastructure/include/database/AppStateStore.h"
 #include "foundation/log/logging.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <set>
 #include <string>
@@ -14,18 +15,21 @@ PositionBook::PositionBook(std::string strategyId, BarPeriod period,
                            std::shared_ptr<astock::infrastructure::database::AppStateStore> store)
     : m_strategyId(std::move(strategyId)), m_period(period), m_store(std::move(store))
 {
-    if (!m_store || m_strategyId.empty()) return;
+    if (!m_store || m_strategyId.empty()) return;  // 无存储 → 纯内存账本 (测试路径)
 
     std::string payload;
     if (m_store->readString("positionBook", evalKey(), payload)) {
         if (!deserialize(payload)) {
-            // 键存在但载荷损坏 → 不采纳券商快照 (adopt 双分支), 账本按空处理 → P5 校验报偏差人工介入 (保守截断)
-            INTERNAL_ERROR_STREAM << "[PositionBook] 载荷损坏, 账本按空处理 "
-                << "(键已存在 → 不采纳券商快照, P5 校验将报 BookKeepingMismatch)";
+            // 键存在但载荷损坏 → 待首个非空券商快照重建账本 (不再按空处理报偏差)
+            INTERNAL_ERROR_STREAM << "[PositionBook] 载荷损坏, 待券商快照重建账本";
+            m_pendingAdoption = true;
         } else {
             INTERNAL_INFO_STREAM << "[PositionBook] 加载账本: " << m_positions.size()
                                  << " 项持仓, " << m_pendingFills.size() << " 笔在途";
         }
+    } else {
+        // 键不存在 (首次运行) → 待首个非空券商快照采纳
+        m_pendingAdoption = true;
     }
 }
 
@@ -37,7 +41,9 @@ void PositionBook::applyOrder(const std::string& symbol, std::int64_t quantity,
                               std::int64_t submitDay) {
     if (symbol.empty() || quantity == 0) return;
 
-    // 账本即时入账 (C3: 账本含订单效果, 与券商快照的偏差即"未确认成交"部分)
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // 账本即时入账 (账本含订单效果, 与券商快照的偏差即"未确认成交"部分)
     auto it = m_positions.find(symbol);
     const std::int64_t newQty = (it != m_positions.end() ? it->second : 0) + quantity;
     if (newQty == 0) {
@@ -50,19 +56,31 @@ void PositionBook::applyOrder(const std::string& symbol, std::int64_t quantity,
     m_dirty = true;
 }
 
-PositionBook::CheckResult PositionBook::checkAgainstBroker(
-    const std::map<std::string, std::int64_t>& brokerSnapshot)
-{
-    CheckResult res;
+void PositionBook::reconcileToBroker(const std::unordered_map<std::string, std::int64_t>& brokerSnapshot) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // ── 待采纳 (键缺失/载荷损坏): 首个非空快照整体采纳, 与首启语义一致 ──
+    if (m_pendingAdoption) {
+        const bool hasAny = std::any_of(brokerSnapshot.begin(), brokerSnapshot.end(),
+                                        [](const auto& kv) { return kv.second != 0; });
+        if (!hasAny) return;  // 空/全零快照不可信, 等下一次推送
+        m_positions.clear();
+        for (const auto& [sym, qty] : brokerSnapshot)
+            if (qty != 0) m_positions[sym] = qty;
+        m_pendingFills.clear();
+        m_pendingAdoption = false;
+        m_dirty = true;
+        INTERNAL_INFO_STREAM << "[PositionBook] 账本采纳券商快照: " << m_positions.size() << " 项持仓";
+        return;
+    }
 
     std::map<std::string, std::int64_t> pendingSum;
     for (const auto& f : m_pendingFills) pendingSum[f.symbol] += f.quantity;
 
-    // 键集合: 账本 ∪ 券商快照 ∪ 在途
+    // 键集合: 账本 ∪ 券商快照
     std::set<std::string> syms;
     for (const auto& [sym, qty] : m_positions) (void)qty, syms.insert(sym);
     for (const auto& [sym, qty] : brokerSnapshot) (void)qty, syms.insert(sym);
-    for (const auto& [sym, qty] : pendingSum) (void)qty, syms.insert(sym);
 
     for (const auto& sym : syms) {
         const auto bookIt = m_positions.find(sym);
@@ -72,49 +90,64 @@ PositionBook::CheckResult PositionBook::checkAgainstBroker(
         const std::int64_t inFlight = pendingSum[sym];
         const std::int64_t delta = book - snap;
 
-        // C3: 偏差完全归因于在途订单 → 豁免
-        if (delta == inFlight) continue;
-
-        // C3: 在途已(部分)在券商快照体现 → 该部分转正式 (在途缩减至剩余偏差, FIFO)
-        const bool confirmedSome =
-            (delta == 0 && inFlight != 0)
-            || (inFlight != 0 && (delta > 0) == (inFlight > 0)
-                && std::llabs(delta) < std::llabs(inFlight));
-        if (confirmedSome) {
-            trimPendingToDelta(sym, delta);
+        if (delta == 0 || delta == inFlight) {  // 一致 / 偏差全归因于在途订单 → 等券商成交
+            m_confirm.erase(sym);
             continue;
         }
 
-        // 其余偏差 (含快照多出账本没有的持仓) → BookKeepingMismatch 明细
-        res.ok = false;
-        res.mismatches.push_back(sym + " 账本=" + std::to_string(book)
-            + " 券商=" + std::to_string(snap) + " 在途=" + std::to_string(inFlight));
+        // 在途已(部分)在券商快照体现 → 该部分转正式 (在途缩减至剩余偏差, FIFO)
+        const bool confirmedSome =
+            (inFlight != 0 && (delta > 0) == (inFlight > 0)
+             && std::llabs(delta) < std::llabs(inFlight));
+        if (confirmedSome) {
+            trimPendingToDelta(sym, delta);
+            m_confirm.erase(sym);
+            continue;
+        }
+
+        // 剩余偏差 (用户手动交易): 同一券商值连续 kReconcileConfirmations 次确认后对齐,
+        // 防单次快照抖动
+        auto& c = m_confirm[sym];
+        if (c.first != snap) { c = {snap, 1}; continue; }
+        if (++c.second < kReconcileConfirmations) continue;
+        m_confirm.erase(sym);
+
+        if (bookIt != m_positions.end()) {
+            // 账本持有 → 对齐券商 (用户手动卖出跟随; 在途订单保留, 成交后自然回补)
+            if (snap > 0) m_positions[sym] = snap;
+            else m_positions.erase(sym);
+            m_dirty = true;
+            INTERNAL_WARN_STREAM << "[PositionBook] 账本对齐券商: " << sym
+                                 << " 账本=" << book << " → 券商=" << snap
+                                 << " (连续 " << kReconcileConfirmations << " 次快照确认)";
+        } else if (snap != 0 && inFlight != 0 && snap == inFlight) {
+            // 账本无、券商有、与在途股数完全吻合 → 引擎订单成交补记 (账本先对齐后才成交的窗口)
+            m_positions[sym] = snap;
+            m_pendingFills.erase(
+                std::remove_if(m_pendingFills.begin(), m_pendingFills.end(),
+                               [&sym](const PendingFill& f) { return f.symbol == sym; }),
+                m_pendingFills.end());
+            m_dirty = true;
+            INTERNAL_INFO_STREAM << "[PositionBook] 在途订单成交补记: " << sym << " " << snap << " 股";
+        }
+        // 其余券商有、账本无 (用户手动买入) → 不入账本, 策略不替用户管理
     }
-    return res;
-}
-
-bool PositionBook::adoptBrokerSnapshotIfAbsent(
-    const std::map<std::string, std::int64_t>& brokerSnapshot)
-{
-    if (!m_store || m_strategyId.empty()) return false;
-    // adopt 双分支 (§9): 键存在(即使映射为空/载荷损坏) → 不采纳, 直接 P5 校验
-    if (m_store->hasKey("positionBook", evalKey())) return false;
-
-    m_positions.clear();
-    for (const auto& [sym, qty] : brokerSnapshot)
-        if (qty != 0) m_positions[sym] = qty;
-    m_pendingFills.clear();
-    m_dirty = true;
-    INTERNAL_INFO_STREAM << "[PositionBook] 首启采纳券商快照: " << m_positions.size() << " 项持仓";
-    flush();
-    return true;
 }
 
 void PositionBook::flush() {
+    std::lock_guard<std::mutex> lock(m_mutex);
     if (!m_dirty) return;
     m_dirty = false;
     if (!m_store || m_strategyId.empty()) return;
     m_store->writeString("positionBook", evalKey(), serialize());
+}
+
+std::set<std::string> PositionBook::heldCodes() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::set<std::string> out;
+    for (const auto& [sym, qty] : m_positions)
+        if (qty != 0) out.insert(sym);
+    return out;
 }
 
 void PositionBook::trimPendingToDelta(const std::string& symbol, std::int64_t targetDelta) {
