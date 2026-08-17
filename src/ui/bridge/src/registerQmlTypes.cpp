@@ -25,7 +25,6 @@
 #include "RiskConfigService.h"
 #include "TradingFormPanelHelper.h"
 #include "UiLifecycleCoordinator.h"
-#include "BacktestAnalyticsService.h"
 #include "StrategyPerformanceModel.h"
 #include "SymbolSearchModel.h"
 #include "RuleTemplateDetailHelper.h"
@@ -211,15 +210,6 @@ namespace wang{
           url, 1, 0, "RuleTemplateSuggestionService",
           [](QQmlEngine*, QJSEngine*) -> QObject* {
              return new RuleTemplateSuggestionService();
-          });
-
-       // BacktestAnalyticsService — 回测绩效分析
-       qmlRegisterSingletonType<ui::bridge::BacktestAnalyticsService>(
-          url, 1, 0, "BacktestAnalyticsService",
-          [](QQmlEngine*, QJSEngine*) -> QObject* {
-             auto* svc = new ui::bridge::BacktestAnalyticsService();
-             svc->refreshRunList();
-             return svc;
           });
 
        // DataCleaningServiceRefactored — 数据清洗服务

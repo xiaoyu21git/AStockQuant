@@ -323,7 +323,78 @@ Rectangle {
                     model: groupList
                     clip: true
                     spacing: 8
-                    delegate: groupCard
+                    // ⚠️ delegate 必须内联: Qt 6.3.2 内联 component 作 delegate 会静默 count=0 (实测复现)
+                    delegate: Rectangle {
+                        width: groupListView.width
+                        height: 60
+                        radius: 8
+                        color: "#1E293B"
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.margins: 12
+                            spacing: 12
+                            Rectangle {
+                                Layout.preferredWidth: 32
+                                Layout.preferredHeight: 32
+                                radius: 16
+                                color: "#0F172A"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData.groupIndex || (index + 1)
+                                    font.pixelSize: 12
+                                    font.weight: Font.Bold
+                                    color: "#F1F5F9"
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                Text {
+                                    text: "第 " + (modelData.groupIndex || (index + 1)) + " 组"
+                                    font.pixelSize: 14
+                                    font.weight: Font.Medium
+                                    color: "#F1F5F9"
+                                }
+                                RowLayout {
+                                    spacing: 16
+                                    Text {
+                                        text: "股票: " + (isFinite(Number(modelData.stockCount)) ? Number(modelData.stockCount).toFixed(0) : "0")
+                                        font.pixelSize: 11
+                                        color: "#94A3B8"
+                                    }
+                                    Text {
+                                        text: "因子值: " + (isFinite(Number(modelData.minFactorValue)) ? Number(modelData.minFactorValue).toFixed(2) : "0.00")
+                                              + " - " + (isFinite(Number(modelData.maxFactorValue)) ? Number(modelData.maxFactorValue).toFixed(2) : "0.00")
+                                        font.pixelSize: 11
+                                        color: "#94A3B8"
+                                    }
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.alignment: Qt.AlignRight
+                                spacing: 2
+                                Text {
+                                    text: (isFinite(Number(modelData.returnRate)) ? (Number(modelData.returnRate) * 100).toFixed(2) + "%" : "0.00%")
+                                    font.pixelSize: 16
+                                    font.weight: Font.Bold
+                                    color: pnlColor(modelData.returnRate)
+                                }
+                                Text {
+                                    text: "收益"
+                                    font.pixelSize: 10
+                                    color: "#94A3B8"
+                                }
+                            }
+                        }
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 8
+                            color: "#3B82F620"
+                            border.width: 2
+                            border.color: "#3B82F6"
+                            visible: isBacktesting && currentGroup === (index + 1)
+                        }
+                    }
                 }
                 Text {
                     anchors.centerIn: parent
@@ -368,79 +439,6 @@ Rectangle {
     }
 
     // ============ 内联组件 ============
-    // 分组卡片 (GroupResultPanel 委托原样吸收)
-    component groupCard: Rectangle {
-        width: ListView.view.width
-        height: 60
-        radius: 8
-        color: "#1E293B"
-        RowLayout {
-            anchors.fill: parent
-            anchors.margins: 12
-            spacing: 12
-            Rectangle {
-                Layout.preferredWidth: 32
-                Layout.preferredHeight: 32
-                radius: 16
-                color: "#0F172A"
-                Text {
-                    anchors.centerIn: parent
-                    text: modelData.groupIndex || (index + 1)
-                    font.pixelSize: 12
-                    font.weight: Font.Bold
-                    color: "#F1F5F9"
-                }
-            }
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 2
-                Text {
-                    text: "第 " + (modelData.groupIndex || (index + 1)) + " 组"
-                    font.pixelSize: 14
-                    font.weight: Font.Medium
-                    color: "#F1F5F9"
-                }
-                RowLayout {
-                    spacing: 16
-                    Text {
-                        text: "股票: " + (isFinite(Number(modelData.stockCount)) ? Number(modelData.stockCount).toFixed(0) : "0")
-                        font.pixelSize: 11
-                        color: "#94A3B8"
-                    }
-                    Text {
-                        text: "因子值: " + (isFinite(Number(modelData.minFactorValue)) ? Number(modelData.minFactorValue).toFixed(2) : "0.00")
-                              + " - " + (isFinite(Number(modelData.maxFactorValue)) ? Number(modelData.maxFactorValue).toFixed(2) : "0.00")
-                        font.pixelSize: 11
-                        color: "#94A3B8"
-                    }
-                }
-            }
-            ColumnLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 2
-                Text {
-                    text: (isFinite(Number(modelData.returnRate)) ? (Number(modelData.returnRate) * 100).toFixed(2) + "%" : "0.00%")
-                    font.pixelSize: 16
-                    font.weight: Font.Bold
-                    color: pnlColor(modelData.returnRate)
-                }
-                Text {
-                    text: "收益"
-                    font.pixelSize: 10
-                    color: "#94A3B8"
-                }
-            }
-        }
-        Rectangle {
-            anchors.fill: parent
-            radius: 8
-            color: "#3B82F620"
-            border.width: 2
-            border.color: "#3B82F6"
-            visible: isBacktesting && currentGroup === (index + 1)
-        }
-    }
-
     // 单因子模式: 因子多空收益曲线小卡 (数据 = rawLongShortReturns, 纯 UI 绘制)
     component SingleFactorReturnCard: Rectangle {
         radius: 8

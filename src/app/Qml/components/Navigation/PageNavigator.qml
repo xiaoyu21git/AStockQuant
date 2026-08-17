@@ -30,8 +30,7 @@ QtObject {
         "fund_management": { stackIndex: 9, pageName: "资金管理", moduleId: "live-trading" },
         "performance_analysis": { stackIndex: 9, pageName: "绩效分析", moduleId: "live-trading" },
         "dynamic_workspace":  { stackIndex: 11, pageName: "实盘交易执行", moduleId: "live-trading" },
-        "factor_performance":  { stackIndex: 13, pageName: "因子绩效", moduleId: "strategy-factor" },
-        
+
         // 监控面板相关页面
         "real_time_monitoring": { stackIndex: 10, pageName: "实时监控", moduleId: "monitoring" },
         "alert_center": { stackIndex: 10, pageName: "报警中心", moduleId: "monitoring" },
