@@ -535,3 +535,65 @@ target_link_libraries(full_market_benchmark_runner
 )
 
 message(STATUS "[TESTS] Configured full_market_benchmark_runner executable")
+
+# ─── 引擎用途守卫测试 (回测/实盘实例分离契约, 零 DB 依赖) ───
+add_executable(test_engine_purpose_guard
+    test_engine_purpose_guard.cpp
+)
+
+set_target_properties(test_engine_purpose_guard PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_engine_purpose_guard
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/domain/strategy/include
+        ${CMAKE_SOURCE_DIR}/src/domain/backtest/include
+        ${CMAKE_SOURCE_DIR}/src/domain/factor/include
+        ${CMAKE_SOURCE_DIR}/src/domain/trading/include
+        ${CMAKE_SOURCE_DIR}/src/domain/trading
+        ${CMAKE_SOURCE_DIR}/src/domain/market/include
+        ${CMAKE_SOURCE_DIR}/src/foundation/include
+        ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+        ${CMAKE_SOURCE_DIR}/src/engine/include
+        ${CMAKE_SOURCE_DIR}/src
+)
+
+target_link_libraries(test_engine_purpose_guard
+    PRIVATE
+        domain_strategy_runtime
+        domain_strategies
+        domain_attribution
+        engine
+        astock_market
+        infrastructure
+        foundation
+)
+if(TARGET thirdParty)
+    target_link_libraries(test_engine_purpose_guard PRIVATE thirdParty)
+endif()
+
+message(STATUS "[TESTS] Configured test_engine_purpose_guard executable")
+
+# ─── 线程池停止链回归测试 (join 幂等, 零外部依赖) ───
+add_executable(test_threadpool_join
+    test_threadpool_join.cpp
+)
+
+set_target_properties(test_threadpool_join PROPERTIES
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
+)
+
+target_include_directories(test_threadpool_join
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/src/foundation/include
+)
+
+target_link_libraries(test_threadpool_join
+    PRIVATE
+        foundation
+)
+
+message(STATUS "[TESTS] Configured test_threadpool_join executable")

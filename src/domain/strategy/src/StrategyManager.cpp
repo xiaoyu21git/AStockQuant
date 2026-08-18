@@ -16,6 +16,25 @@ StrategyManager& StrategyManager::instance() {
     return s_instance;
 }
 
+std::unique_ptr<StrategyEngine> StrategyManager::extractEngineLocked(const std::string& id)
+{
+    // 仅锁内调用: 取出并移除引擎, 停止动作由调用方在锁外执行 (stopEngineOutsideLock)
+    auto it = m_engines.find(id);
+    if (it == m_engines.end()) return nullptr;
+    auto engine = std::move(it->second);
+    m_engines.erase(it);
+    return engine;
+}
+
+void StrategyManager::stopEngineOutsideLock(std::unique_ptr<StrategyEngine>& engine)
+{
+    // 统一停止序列: 停实盘循环 (阻塞 join 专用线程) → 停策略服务
+    // 必须在锁外 — stopLiveLoop 的 worker 回调可能再取 m_mutex, 持锁 join 有死锁风险
+    if (!engine) return;
+    engine->stopLiveLoop();
+    engine->stop();
+}
+
 StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
                                                std::unique_ptr<IRuntimeFactorService> factorSvc) {
     INTERNAL_INFO_STREAM << "[SM] 创建引擎: id=" << strategyId << " factorSvc=" << static_cast<void*>(factorSvc.get());
@@ -23,16 +42,17 @@ StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
     INTERNAL_INFO_STREAM << "[SM] 创建引擎: fromDb 返回 engine=" << static_cast<void*>(engine.get());
     if (!engine) return nullptr;
 
-    const std::lock_guard<std::mutex> lock(m_mutex);
-    auto* ptr = engine.get();
-    // 移除旧引擎（参数可能已变更），用新引擎替换
-    auto old = m_engines.find(strategyId);
-    if (old != m_engines.end() && old->second) {
-        old->second->stopLiveLoop();
-        m_engines.erase(old);
+    // 旧引擎 (同 id 替换, 参数可能已变更): 锁内取出、锁外停止 (阻塞 join 不持锁)
+    std::unique_ptr<StrategyEngine> old;
+    StrategyEngine* ptr = nullptr;
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        ptr = engine.get();
+        old = extractEngineLocked(strategyId);
+        m_engines[strategyId] = std::move(engine);
+        INTERNAL_INFO_STREAM << "[SM] 创建引擎: 已存储, 数量=" << m_engines.size();
     }
-    m_engines[strategyId] = std::move(engine);
-    INTERNAL_INFO_STREAM << "[SM] 创建引擎: 已存储, 数量=" << m_engines.size();
+    stopEngineOutsideLock(old);
     return ptr;
 }
 
@@ -44,12 +64,12 @@ StrategyEngine* StrategyManager::get(const std::string& id) const {
 
 void StrategyManager::remove(const std::string& id) {
     if (id.empty()) return;
-    const std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_engines.find(id);
-    if (it != m_engines.end() && it->second) {
-        it->second->stopLiveLoop();  // 先停后台线程再销毁
+    std::unique_ptr<StrategyEngine> engine;
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        engine = extractEngineLocked(id);
     }
-    m_engines.erase(id);
+    stopEngineOutsideLock(engine);
 }
 
 void StrategyManager::startAll() {
@@ -74,14 +94,19 @@ void StrategyManager::resumeAll() {
 }
 
 void StrategyManager::stopAll() {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (auto& [id, engine] : m_engines) {
-        if (engine) {
-            engine->stopLiveLoop();  // 先停后台评估调度线程 (P4: 死代码清理)
-            engine->stop();          // 再停策略服务状态
+    // 锁内取出全部引擎并清空注册表, 锁外逐个停止 — 阻塞 join 不持锁
+    std::vector<std::unique_ptr<StrategyEngine>> engines;
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        engines.reserve(m_engines.size());
+        for (auto& [id, engine] : m_engines) {
+            if (engine) engines.push_back(std::move(engine));
         }
+        m_engines.clear();
     }
-    m_engines.clear();
+    for (auto& engine : engines) {
+        stopEngineOutsideLock(engine);
+    }
 }
 
 std::vector<OrderRequest> StrategyManager::stepAll(const MarketDataPoint& mdp) {
@@ -235,15 +260,62 @@ void StrategyManager::startStrategy(const std::string& strategyId)
 
 void StrategyManager::stopStrategy(const std::string& strategyId)
 {
+    // 锁内取出、锁外停止 (stopLiveLoop 阻塞 join, 持锁有死锁风险)
+    std::unique_ptr<StrategyEngine> engine;
+    {
+        const std::lock_guard<std::mutex> lock(m_mutex);
+        engine = extractEngineLocked(strategyId);
+    }
+    if (!engine) return;
+
+    stopEngineOutsideLock(engine);
+    INTERNAL_INFO_STREAM << "[SM] 停止策略成功: " << strategyId << " count=" << count();
+}
+
+// ── 回测产物快照表 (回测/实盘实例分离: 引擎不进注册表, 只发布不可变结果) ──
+
+void StrategyManager::publishBacktestSnapshot(const std::string& strategyId,
+                                              BacktestStatsSnapshot snapshot)
+{
     const std::lock_guard<std::mutex> lock(m_mutex);
-    auto it = m_engines.find(strategyId);
-    if (it == m_engines.end() || !it->second) return;
+    // 关闭清理后丢弃发布 (防御调用顺序被改动; 正常流程 QML 销毁 → worker join 之后才 clear)
+    if (m_snapshotsCleared) {
+        INTERNAL_WARN_STREAM << "[SM] 快照表已清理, 丢弃回测快照发布: " << strategyId;
+        return;
+    }
+    m_backtestSnapshots[strategyId] =
+        std::make_shared<const BacktestStatsSnapshot>(std::move(snapshot));
+    INTERNAL_INFO_STREAM << "[SM] 回测快照已发布: " << strategyId
+                         << " 快照数=" << m_backtestSnapshots.size();
+}
 
-    it->second->stopLiveLoop();
-    it->second->stop();
-    m_engines.erase(it);
+std::shared_ptr<const BacktestStatsSnapshot> StrategyManager::getBacktestSnapshot(const std::string& id) const
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_backtestSnapshots.find(id);
+    return it != m_backtestSnapshots.end() ? it->second : nullptr;
+}
 
-    INTERNAL_INFO_STREAM << "[SM] 停止策略成功: " << strategyId << " count=" << m_engines.size();
+void StrategyManager::removeBacktestSnapshot(const std::string& id)
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    m_backtestSnapshots.erase(id);
+}
+
+void StrategyManager::clearBacktestSnapshots()
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    // 先置标志再清空: 清空过程中任何新发布都被标志拦截 (publish 同锁, 无竞态)
+    // map 只清登记, 不干预已取出的 shared_ptr 对象 (引用计数自然管理其生命周期)
+    m_snapshotsCleared = true;
+    m_backtestSnapshots.clear();
+    INTERNAL_INFO_STREAM << "[SM] 回测快照表已清理";
+}
+
+std::size_t StrategyManager::backtestSnapshotCount() const
+{
+    const std::lock_guard<std::mutex> lock(m_mutex);
+    return m_backtestSnapshots.size();
 }
 
 } // namespace domain::strategy

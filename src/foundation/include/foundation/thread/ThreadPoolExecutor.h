@@ -51,6 +51,10 @@ public:
     bool isInExecutorThread() const override;
     
     // 执行器管理
+    /// @brief 关闭线程池 (幂等, 可安全二次调用)
+    /// @param wait_for_completion true = 阻塞等待全部 worker 完成当前任务并 join, 之后 isTerminated() 为真;
+    ///                           false = 仅置关闭标志并唤醒 worker 自行退出, 不等待
+    ///                           (析构函数始终走 wait=true 路径, 保证 join 必达)
     void shutdown(bool wait_for_completion = true) override;
     void shutdownNow() override;
     bool isShutdown() const override;
@@ -215,16 +219,21 @@ private:
     bool allowCoreThreadTimeOut_;
     RejectionPolicy rejectionPolicy_;
     
-    std::vector<std::shared_ptr<Worker>> workers_;
     std::function<std::thread(std::function<void()>)> threadFactory_;
-    
+
     std::queue<std::function<void()>> taskQueue_;
     mutable std::mutex queueMutex_;
     std::condition_variable queueCondition_;
-    
+
+    // ⚠️ workers_ 必须声明在 queueMutex_/queueCondition_ 之后:
+    // C++ 逆序析构 → workers_ 先析构, Worker::~Worker 的 join 发生在 mutex/condvar 仍存活时
+    // (否则 worker 线程退出时 lock 已销毁的 queueMutex_ → 野指针崩溃)
+    std::vector<std::shared_ptr<Worker>> workers_;
+
     std::atomic<bool> shutdown_{false};
     std::atomic<bool> shutdownNow_{false};
     std::atomic<bool> terminated_{false};
+    std::atomic<bool> joined_{false};  // shutdown(true) 已完成 join (防二次 join)
     std::atomic<size_t> poolSize_{0};
     std::atomic<size_t> activeCount_{0};
     

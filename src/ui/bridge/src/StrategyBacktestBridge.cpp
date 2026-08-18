@@ -219,7 +219,8 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                     }
                 }
             }
-            auto* engine = mgr.createEngine(capturedStrategyId, std::move(factorSvc));
+            // 回测引擎为独立实例, 不进实盘注册表: worker 局部持有, 离开作用域自动析构
+            auto engine = domain::strategy::StrategyEngine::fromDbForBacktest(capturedStrategyId, std::move(factorSvc));
             if (!engine) {
                 QMetaObject::invokeMethod(this, [this]() {
                     m_isRunning.store(false);
@@ -264,6 +265,9 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 }, Qt::QueuedConnection);
                 return;
             }
+
+            // ── 发布规则统计快照 (红线: 必须先发布后析构; 引擎随 worker 结束自动析构) ──
+            mgr.publishBacktestSnapshot(capturedStrategyId, engine->snapshotStats());
 
             // ─── 5. 序列化结果到 QVariantMap ───
             QVariantMap qResult;
@@ -435,7 +439,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             qResult["risk"] = riskMap;
 
             // ── 策略归因 (行业盈亏/个股盈亏/Brinson 择时选股分解) ──
-            // 必须在 stopStrategy 销毁引擎前序列化为值类型
+            // 在引擎析构前序列化为值类型 (回测引擎随 worker 结束自动析构)
             {
                 const auto& attrOpt = engine->lastAttribution();
                 QVariantMap attributionMap;
@@ -491,9 +495,8 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
                 }
             }
 
-            // ── 释放回测内存: 因子缓存 + Arrow 视图 (可达数 GB) ──
-            if (factorSvc) factorSvc->clearSignalCache();
-            mgr.stopStrategy(capturedStrategyId);
+            // ── 释放回测内存: Arrow 视图清列缓存 + 关闭 mmap ──
+            // 因子缓存随回测引擎在 worker 结束时析构 (引擎为局部 unique_ptr, 不触碰实盘注册表)
             // Arrow 视图: 清列缓存 + 关闭 mmap
             if (m_strategyDataSvc) {
                 m_strategyDataSvc->clearColumnCaches();
@@ -629,7 +632,7 @@ void StrategyBacktestBridge::runBacktest(const QString& strategyId, const QVaria
             }
 
         } catch (const std::runtime_error& e) {
-            domain::strategy::StrategyManager::instance().stopStrategy(capturedStrategyId);
+            // 失败/取消不发布快照; 引擎 (局部 unique_ptr) 随异常退出自动析构, 不再误停实盘引擎
             if (m_strategyDataSvc) { m_strategyDataSvc->clearColumnCaches(); m_strategyDataSvc.reset(); }
             std::string what = e.what();
             if (what == "cancelled") {

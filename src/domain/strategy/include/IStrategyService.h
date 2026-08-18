@@ -575,6 +575,15 @@ public:
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDb(const std::string& strategyId,
                                                                  std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr);
 
+    /// @brief 从数据库构建回测用途引擎 (回测/实盘实例分离, 用途不可混用)
+    /// 与 fromDb 的唯一差异: EnginePurpose::Backtest + executionMode=Backtest + TradeJournal 目录隔离 (logs/<策略名>_backtest/)
+    /// 禁止启动实盘循环 (startLiveLoop 守卫拒绝); 仅由回测桥/调优桥调用, 绝不注册进实盘注册表
+    /// @param factorSvc 因子服务 (unique_ptr, 传 nullptr 则只支持非因子策略)
+    /// @return 构建失败返回 nullptr (不产生任何注册副作用)
+    [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDbForBacktest(
+        const std::string& strategyId,
+        std::unique_ptr<IRuntimeFactorService> factorSvc = nullptr);
+
     /// @brief 从策略参数构建完整的引擎实例
     [[nodiscard]] static std::unique_ptr<StrategyEngine> fromParams(const StrategyCreationParams& params);
 
@@ -737,7 +746,21 @@ public:
     /// @brief 最近一次回测的日期区间
     [[nodiscard]] std::string backtestDateRange() const noexcept { return m_backtestDateRange; }
 
+    /// @brief 引擎固定用途 (构造时确定, 不可变) — 回测/实盘显式区分
+    [[nodiscard]] EnginePurpose purpose() const noexcept { return m_purpose; }
+
+    /// @brief 生成回测统计不可变快照 (值拷贝三成员)
+    /// 仅在 backtest() 返回后调用 (返回时统计成员已最终更新, 回测引擎无专用线程, 无并发写)
+    [[nodiscard]] BacktestStatsSnapshot snapshotStats() const;
+
 private:
+    /// @brief fromDb/fromDbForBacktest 共用构建逻辑 (用途仅影响 TradeJournal 目录与 m_purpose)
+    /// 封装为独立函数: 工厂语义统一、单点修改不影响两个入口
+    [[nodiscard]] static std::unique_ptr<StrategyEngine> fromDbImpl(
+        const std::string& strategyId,
+        std::unique_ptr<IRuntimeFactorService> factorSvc,
+        EnginePurpose purpose);
+
     [[nodiscard]] std::optional<std::vector<OrderRequest>> collectOrders(
         const StrategyServiceFlowResult& flowResult);
 
@@ -910,6 +933,7 @@ private:
     std::mutex m_basketMutex;  ///< 保护 m_pendingBasket (引擎线程 ↔ confirmBasket/rejectBasket)
 
     EngineExecutionMode m_executionMode{EngineExecutionMode::Live};
+    EnginePurpose m_purpose{EnginePurpose::Live};  ///< 引擎固定用途 (构造时确定, 不可变; fromDbForBacktest 置 Backtest)
     std::string m_accountId;
     std::string m_strategyId;
     std::string m_strategyName;

@@ -162,8 +162,9 @@ public:
 
 } // anonymous namespace
 
-std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId,
-                                                         std::unique_ptr<IRuntimeFactorService> factorSvc)
+std::unique_ptr<StrategyEngine> StrategyEngine::fromDbImpl(const std::string& strategyId,
+                                                           std::unique_ptr<IRuntimeFactorService> factorSvc,
+                                                           EnginePurpose purpose)
 {
     try {
     auto& pool = astock::database::NativePgConnectionPool::instance();
@@ -415,9 +416,14 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
 
     engine->m_minHoldDays = params.minHoldDays;
     engine->m_strategyName = params.strategyName;
-    // 初始化交易日志: logs/策略名/trade_YYYY-MM-DD.jsonl
+    // 引擎固定用途: 构造时定死, startLiveLoop/backtest 按此守卫 (回测/实盘实例分离)
+    engine->m_purpose = purpose;
+    // 初始化交易日志: 按用途分目录 — 实盘 logs/<策略名>/, 回测 logs/<策略名>_backtest/ (日志不混写)
     if (!params.strategyName.empty()) {
-        engine->m_tradeJournal = std::make_unique<TradeJournal>("logs", params.strategyName);
+        const std::string journalDir = (purpose == EnginePurpose::Backtest)
+            ? params.strategyName + "_backtest"
+            : params.strategyName;
+        engine->m_tradeJournal = std::make_unique<TradeJournal>("logs", journalDir);
     }
     return engine;
 
@@ -428,6 +434,25 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strate
         INTERNAL_ERROR_STREAM << "[fromDb] 未知异常";
         return nullptr;
     }
+}
+
+std::unique_ptr<StrategyEngine> StrategyEngine::fromDb(const std::string& strategyId,
+                                                         std::unique_ptr<IRuntimeFactorService> factorSvc)
+{
+    // 实盘用途工厂 — 唯一调用方 StrategyManager::createEngine (实盘注册表)
+    return fromDbImpl(strategyId, std::move(factorSvc), EnginePurpose::Live);
+}
+
+std::unique_ptr<StrategyEngine> StrategyEngine::fromDbForBacktest(const std::string& strategyId,
+                                                                  std::unique_ptr<IRuntimeFactorService> factorSvc)
+{
+    // 回测用途工厂 — 仅回测桥/调优桥调用, 绝不进实盘注册表
+    auto engine = fromDbImpl(strategyId, std::move(factorSvc), EnginePurpose::Backtest);
+    if (engine) {
+        // 执行模式同步为 Backtest (回测引擎无订单监听器, dispatchOrders 走 no-op; 显式标记用途)
+        engine->m_executionMode = EngineExecutionMode::Backtest;
+    }
+    return engine;
 }
 
 StrategyEngine::Builder StrategyEngine::builder()
@@ -775,6 +800,11 @@ std::optional<std::vector<OrderRequest>> StrategyEngine::collectOrders(
 
 void StrategyEngine::startLiveLoop()
 {
+    // 用途守卫: 回测引擎禁止启动实盘循环 (回测/实盘实例分离, 用途不可混用)
+    if (m_purpose != EnginePurpose::Live) {
+        INTERNAL_ERROR_STREAM << "[StrategyEngine] 回测用途引擎禁止启动实盘循环: " << m_strategyId;
+        return;
+    }
     if (m_loopRunning.load(std::memory_order_acquire)) {
         return; // 已经运行
     }
@@ -1660,6 +1690,13 @@ StrategyBacktestResult StrategyEngine::backtest(
 {
     StrategyBacktestResult result;
 
+    // 用途守卫: 实盘引擎禁止执行回测 (回测/实盘实例分离, 用途不可混用)
+    if (m_purpose != EnginePurpose::Backtest) {
+        result.errorMessage = "实盘用途引擎禁止执行回测";
+        INTERNAL_ERROR_STREAM << "[StrategyEngine] 实盘用途引擎禁止执行回测: " << m_strategyId;
+        return result;
+    }
+
     // 防御：回测期间不得触发 IOrderListener (P4: 死代码清理后置位服务于 evaluateEndOfDay 早退)
     struct BacktestGuard {
         std::atomic<bool>& flag;
@@ -1951,6 +1988,16 @@ StrategyBacktestResult StrategyEngine::backtest(
     return result;
 }
 
+BacktestStatsSnapshot StrategyEngine::snapshotStats() const
+{
+    // 回测统计不可变快照 — 仅在 backtest() 返回后调用 (统计成员已最终更新, 无并发写)
+    BacktestStatsSnapshot snapshot;
+    snapshot.ruleGateStats = m_ruleGate.stats();
+    snapshot.ruleAttribution = m_ruleAttribution;
+    snapshot.backtestDateRange = m_backtestDateRange;
+    return snapshot;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Phase 30b: runBacktestLoop — 回测主循环 (从 backtest() 提取, 引用别名策略)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1969,6 +2016,17 @@ void StrategyEngine::runBacktestLoop(
     domain::attribution::PositionSnapshotCollector& positionCollector,
     const std::atomic<bool>* cancelFlag)
 {
+    // 视图外符号安全查找 (封装为单一函数, 循环内全部取值点复用):
+    // 持仓/订单符号不在视图列中 (卖出路径等边界情形) → 返回 -1, 调用方跳过, 不再抛 .at() 异常
+    const auto findSymbolCol = [&symbolToCol](const std::string& sym) -> int {
+        auto it = symbolToCol.find(sym);
+        if (it == symbolToCol.end()) {
+            INTERNAL_DEBUG_STREAM << "[backtest] 视图外符号 (无列, 跳过): " << sym;
+            return -1;
+        }
+        return it->second;
+    };
+
     // ── 引用别名: ctx 成员映射为原局部变量名, 循环体零改动 ──
     double& latestEquity = ctx.latestEquity;
     double& cash = ctx.cash;
@@ -2198,8 +2256,10 @@ void StrategyEngine::runBacktestLoop(
             for (const auto& kvPos : backtestPositions) {
                 const auto& sym = kvPos.first;
                 if (kvPos.second.quantity() <= 0) continue;
+                const int symCol = findSymbolCol(sym);
+                if (symCol < 0) continue;  // 视图外符号: 跳过本持仓市值快照 (不抛异常)
                 const double px = static_cast<double>(closeMat.data[
-                    rowOffset + static_cast<size_t>(symbolToCol.at(sym))]);
+                    rowOffset + static_cast<size_t>(symCol)]);
                 if (px > 0.0) {
                     const double posMv = px * static_cast<double>(kvPos.second.quantity());
                     mv += posMv;
@@ -2217,8 +2277,10 @@ void StrategyEngine::runBacktestLoop(
             std::vector<domain::attribution::PositionSnapshotCollector::Entry> snapEntries;
             for (const auto& [sym, pos] : backtestPositions) {
                 if (pos.quantity() <= 0) continue;
+                const int symCol = findSymbolCol(sym);
+                if (symCol < 0) continue;  // 视图外符号: 跳过本持仓市值快照 (不抛异常)
                 const double px = static_cast<double>(closeMat.data[
-                    rowOffset + static_cast<size_t>(symbolToCol.at(sym))]);
+                    rowOffset + static_cast<size_t>(symCol)]);
                 if (px > 0.0) {
                     const double posMv = px * static_cast<double>(pos.quantity());
                     mv += posMv;
@@ -2247,8 +2309,10 @@ void StrategyEngine::runBacktestLoop(
                 ++hybridFactorCoveredDays[fid];
                 std::unordered_map<std::string, double> bySymbol;
                 bySymbol.reserve(factorVals->size());
+                // 因子缓存 key 现为 fullSymbol 口径(数据集 symbol 列原样透传),
+                // fromCode 会把整串当代码导致双后缀; fromString 对两种格式均正确解析
                 for (const auto& [code, value] : *factorVals)
-                    bySymbol[foundation::market::AStockSymbol::fromCode(code).fullSymbol()] = value;
+                    bySymbol[foundation::market::AStockSymbol::fromString(code).fullSymbol()] = value;
                 m_factorSignalProcessor.updateSnapshot(fid, bySymbol);
             }
         }
@@ -2306,7 +2370,8 @@ void StrategyEngine::runBacktestLoop(
                 posCtx.holdDays = 0.0;
                 auto bpIt = buyPriceMap.find(fullSymbol);
                 posCtx.entryPrice = bpIt != buyPriceMap.end() ? bpIt->second : 0.0;
-                posCtx.colIndex = symbolToCol.at(fullSymbol);
+                posCtx.colIndex = findSymbolCol(fullSymbol);
+                if (posCtx.colIndex < 0) continue;  // 视图外符号: 跳过持仓退出规则评估 (不抛异常)
                 const double currentPrice = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<std::size_t>(posCtx.colIndex)]);
                 if (posCtx.entryPrice > 0.0 && currentPrice > 0.0)
@@ -2382,7 +2447,8 @@ void StrategyEngine::runBacktestLoop(
                                             + " B股禁买拦截 " + symbol);
                     continue;
                 }
-                const int col = symbolToCol.at(symbol);
+                const int col = findSymbolCol(symbol);
+                if (col < 0) continue;  // 视图外符号 (如卖出路径): 跳过本笔订单 (不抛异常)
                 const double closePrice = static_cast<double>(closeMat.data[
                     rowOffset + static_cast<std::size_t>(col)]);
                 if (!std::isfinite(closePrice) || closePrice <= 0.0) continue;
@@ -2618,8 +2684,10 @@ void StrategyEngine::runBacktestLoop(
         std::vector<domain::attribution::PositionSnapshotCollector::Entry> snapEntries;
         for (const auto& [sym, pos] : backtestPositions) {
             if (pos.quantity() <= 0) continue;
+            const int symCol = findSymbolCol(sym);
+            if (symCol < 0) continue;  // 视图外符号: 跳过本持仓市值快照 (不抛异常)
             const double px = static_cast<double>(closeMat.data[
-                rowOffset + static_cast<std::size_t>(symbolToCol.at(sym))]);
+                rowOffset + static_cast<std::size_t>(symCol)]);
             if (px > 0.0) {
                 const double posMv = px * static_cast<double>(pos.quantity());
                 marketValue += posMv;

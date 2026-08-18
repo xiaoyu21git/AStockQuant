@@ -140,7 +140,7 @@ void ThreadPoolExecutor::workerFunction(Worker* worker) {
         }
     }
     
-    // 清理
+    // 清理 — terminated_ 由 cleanupWorker 在最后一个 worker 退出时置位
     cleanupWorker(worker);
     isWorkerThread_ = false;
     currentExecutor_ = nullptr;
@@ -148,17 +148,12 @@ void ThreadPoolExecutor::workerFunction(Worker* worker) {
 
 // ============ 清理 Worker ============
 void ThreadPoolExecutor::cleanupWorker(Worker* worker) {
-    // worker->running.store(false);
-    // poolSize_--;
-     worker->running.store(false);  // 可选
-    // 从 workers_ 列表中移除
-    // workers_.erase(
-    //     std::remove_if(workers_.begin(), workers_.end(),
-    //         [worker](const std::unique_ptr<Worker>& w) {
-    //             return w.get() == worker;
-    //         }),
-    //     workers_.end()
-    // );
+    worker->running.store(false);
+    // 存活线程数递减; 最后一个 worker 退出时置 terminated_
+    // (与 shutdownNow/shutdown(true) 路径统一, awaitTermination/isTerminated 反映真实退出状态)
+    if (poolSize_.fetch_sub(1) == 1) {
+        terminated_.store(true);
+    }
 }
 
 // ============ 提交任务 ============
@@ -274,22 +269,27 @@ bool ThreadPoolExecutor::isInExecutorThread() const {
 void ThreadPoolExecutor::shutdown(bool wait_for_completion) {
     {
         std::lock_guard<std::mutex> lock(queueMutex_);
-        if (shutdown_) return;
+        // 幂等: 重复置位无害, 不再提前 return —
+        // 保证先 shutdown(false) 后析构 (shutdown(true)) 时 join 必达
         shutdown_ = true;
     }
 
     // 唤醒所有 worker 线程，让它们检测 shutdown_ 信号并退出
     queueCondition_.notify_all();
 
-    // 等待所有线程退出后，再清理 workers_（确保 join 在 clear 之前）
+    // wait=true: 阻塞等待全部 worker 完成当前任务并 join
+    // (joined_ CAS 防二次 join; join 期间不持锁, 避免 worker 回调需要锁时死锁)
     if (wait_for_completion) {
-        for (auto& worker : workers_) {
-            if (worker && worker->thread.joinable()) {
-                worker->thread.join();
+        bool expected = false;
+        if (joined_.compare_exchange_strong(expected, true)) {
+            for (auto& worker : workers_) {
+                if (worker && worker->thread.joinable()) {
+                    worker->thread.join();
+                }
             }
+            workers_.clear();
+            terminated_.store(true);
         }
-        workers_.clear();
-        terminated_.store(true);
     }
 }
 

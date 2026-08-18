@@ -237,7 +237,11 @@ void AppBootstrap::shutdown()
 
     // 按逆序清理
     m_vasAurora.reset();
+    // m_engine 是 QQmlApplicationEngine: reset 时 QML 对象 (含回测桥) 析构 →
+    // ~StrategyBacktestBridge → cancelBacktest → 回测 worker (纯 std::thread) 已 join,
+    // 此后不可能再有在途快照发布 — clearBacktestSnapshots 必须紧跟其后 (红线: 顺序差一行都不行)
     m_engine.reset();
+    domain::strategy::StrategyManager::instance().clearBacktestSnapshots();
     foundation::Foundation::instance().shutdown();
 
     m_initialized = false;

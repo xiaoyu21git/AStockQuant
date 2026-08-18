@@ -3,10 +3,13 @@
 #include "../../strategies/include/StrategyDefinitionTypes.h"
 #include "../../types/InstrumentId.h"
 #include "../../trading/TradingTypes.h"
+#include "../rules/RuleGate.h"
+#include "../rules/RuleAttribution.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -41,6 +44,14 @@ enum class EngineExecutionMode : std::uint8_t {
     Live       = 0,
     Backtest   = 1,
     SemiAuto   = 2,  // v0.16.0: 半自动模式 — 篮子需用户确认后执行
+};
+
+/// @brief 引擎用途 — 构造时确定, 不可变。回测与实盘同逻辑不同实例, 用途不可混用
+/// (注意与 EngineExecutionMode 区分: 后者是可变运行状态, SemiAuto 属实盘变体;
+///  本枚举是引擎的固定身份, startLiveLoop/backtest 按它做用途守卫)
+enum class EnginePurpose : std::uint8_t {
+    Live     = 0,  ///< 实盘引擎: 可启动实盘循环, 禁止执行回测
+    Backtest = 1,  ///< 回测引擎: 仅回测/调优, 禁止启动实盘循环
 };
 
 enum class DiagnosticsEventCode : std::uint8_t {
@@ -516,6 +527,14 @@ public:
     {
         rejectedRuleCount_ = value;
     }
+};
+
+/// @brief 回测统计不可变快照 — 回测完成时在 worker 线程生成 (backtest() 已返回, 无并发写),
+/// 由 StrategyManager 发布为 shared_ptr<const>, 供规则统计页无锁读取
+struct BacktestStatsSnapshot final {
+    rules::RuleGateStats ruleGateStats;                              ///< 规则闸门统计 (按模板聚合)
+    std::map<std::string, rules::RuleAttribution> ruleAttribution;   ///< 规则归因 (templateId → 归因)
+    std::string backtestDateRange;                                   ///< 回测日期区间 (如 "20200102-20260717")
 };
 
 inline constexpr std::size_t kDefaultSignalBufferReserve = 256;

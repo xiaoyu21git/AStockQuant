@@ -18,6 +18,7 @@ SimulatedTradingExecutor::SimulatedTradingExecutor(const SimulatedTradingParams&
 SimulatedTradingResult SimulatedTradingExecutor::execute(
     const FactorValuesByDate& factorValues,
     const std::vector<std::string>& sortedDates,
+    const std::vector<int32_t>& sortedDateRows,
     NumericConstMatrixView priceView,
     NumericConstMatrixView preAdjustView,
     NumericConstMatrixView postAdjustView,
@@ -35,7 +36,13 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     const bool haveAdjust = (usePreAdjust && preAdjustView.isValid())
                          || (!usePreAdjust && postAdjustView.isValid());
 
-    if (sortedDates.size() < static_cast<size_t>(forwardDays + 1) || nGroups <= 0) {
+    // ranked 升序排列: g=0=最低值组, g=nGroups-1=最高值组
+    // 方向感知: ascending=true(值大=好) → long=最高值组, ascending=false(值小=好) → long=最低值组
+    const int32_t longGroupIdx  = params_.ascending ? (nGroups - 1) : 0;
+    const int32_t shortGroupIdx = params_.ascending ? 0 : (nGroups - 1);
+
+    if (sortedDates.empty() || sortedDateRows.size() != sortedDates.size()
+        || nGroups <= 0 || priceView.rowCount <= 0) {
         return result;
     }
 
@@ -76,17 +83,22 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     double maxEquity = params_.initialCapital;
 
     // sortedDates 已是调仓日列表(上游按 rebalanceDays 过滤), 此处按 1 步进逐日调仓
+    // sortedDateRows[i] = sortedDates[i] 在 priceView(全交易日矩阵) 中的行号
+    // 前向窗口按交易日计: 卖出价取买入行 + forwardDays 个交易日 (与 IC 前向窗口同口径)
     const size_t totalSteps = sortedDates.size() > static_cast<size_t>(forwardDays)
         ? sortedDates.size() - forwardDays : 0;
     size_t stepIndex = 0;
 
-    for (size_t di = 0; di + forwardDays < sortedDates.size(); di += 1) {
+    for (size_t di = 0; di < sortedDates.size(); ++di) {
         if (params_.onProgress && totalSteps > 0)
             params_.onProgress(static_cast<double>(stepIndex) / static_cast<double>(totalSteps));
 
-        size_t sellDayIdx = di + forwardDays;
-        const std::string& buyDate  = sortedDates[di];
-        const std::string& sellDate = sortedDates[sellDayIdx];
+        const int32_t buyRow  = sortedDateRows[di];
+        const int32_t sellRow = buyRow + forwardDays;
+        // 行号随 di 单调递增, 越界后后续全部越界 → 直接结束
+        if (buyRow < 0 || sellRow >= priceView.rowCount) break;
+
+        const std::string& buyDate = sortedDates[di];
 
         auto fvIt = factorValues.find(buyDate);
         if (fvIt == factorValues.end()) { ++stepIndex; continue; }
@@ -98,7 +110,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         if (ranked.empty()) { ++stepIndex; continue; }
 
         std::sort(ranked.begin(), ranked.end(),
-            [](const auto& a, const auto& b) { return a.second > b.second; });
+            [](const auto& a, const auto& b) { return a.second < b.second; });
 
         const size_t N = ranked.size();
         if (N < static_cast<size_t>(nGroups)) { ++stepIndex; continue; }
@@ -118,20 +130,18 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                 auto ci = symToCol.find(sym);
                 if (ci == symToCol.end()) continue;
                 int32_t col = ci->second;
-                if (col < 0 || col >= priceView.columnCount
-                    || di >= static_cast<size_t>(priceView.rowCount)
-                    || sellDayIdx >= static_cast<size_t>(priceView.rowCount))
-                    continue;
+                if (col < 0 || col >= priceView.columnCount) continue;
 
-                double bp = priceView.data[static_cast<size_t>(di) * rowStride + col];
-                double sp = priceView.data[sellDayIdx * rowStride + col];
+                double bp = priceView.data[static_cast<size_t>(buyRow) * rowStride + col];
+                double sp = priceView.data[static_cast<size_t>(sellRow) * rowStride + col];
                 if (haveAdjust) {
                     const auto& adjView = usePreAdjust ? preAdjustView : postAdjustView;
-                    if (adjView.isValid() && adjView.rowCount > 0 && col < adjView.columnCount) {
+                    if (adjView.isValid() && adjView.rowCount > 0 && col < adjView.columnCount
+                        && buyRow < adjView.rowCount && sellRow < adjView.rowCount) {
                         const int32_t adjStride = adjView.rowStride >= adjView.columnCount
                             ? adjView.rowStride : adjView.columnCount;
-                        double ba = adjView.data[static_cast<size_t>(di) * adjStride + col];
-                        double sa = adjView.data[sellDayIdx * adjStride + col];
+                        double ba = adjView.data[static_cast<size_t>(buyRow) * adjStride + col];
+                        double sa = adjView.data[static_cast<size_t>(sellRow) * adjStride + col];
                         if (std::isfinite(ba) && ba > 1e-9) bp *= ba;
                         if (std::isfinite(sa) && sa > 1e-9) sp *= sa;
                     }
@@ -159,14 +169,9 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         // ═══ 本期多空篮子 ═══
         // ranked 按因子值升序排列; ascending=true → 值大=好 → long 尾部(高分) short 头部(低分)
         // ascending=false → 值小=好 → long 头部(低分) short 尾部(高分)
+        // longOnly 时空头篮留空 (禁止做空)
         std::unordered_set<std::string> newLong, newShort;
-        if (params_.ascending) {
-            for (size_t i = N - groupSize; i < N; ++i) newLong.insert(ranked[i].first);
-            for (size_t i = 0; i < groupSize; ++i) newShort.insert(ranked[i].first);
-        } else {
-            for (size_t i = 0; i < groupSize; ++i) newLong.insert(ranked[i].first);
-            for (size_t i = N - groupSize; i < N; ++i) newShort.insert(ranked[i].first);
-        }
+        fillBaskets(ranked, N, groupSize, newLong, newShort);
 
         // 首期建仓
         if (longHolding.empty() && shortHolding.empty()) {
@@ -231,7 +236,7 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
         int32_t shortSz = std::max(1, static_cast<int32_t>(shortHolding.size()));
         double periodLongTurnover  = static_cast<double>(longSold + longBought) / longSz;
         double periodShortTurnover = static_cast<double>(shortSold + shortBought) / shortSz;
-        double periodTurnover = (periodLongTurnover + periodShortTurnover) / 2.0;
+        double periodTurnover = composeTurnover(periodLongTurnover, periodShortTurnover);
 
         if (turnoverPeriods > 0) {
             totalTurnover += periodTurnover;
@@ -245,9 +250,9 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                 auto ci = symToCol.find(sym);
                 if (ci == symToCol.end()) return 0.0;
                 int32_t col = ci->second;
-                if (di < static_cast<size_t>(priceView.rowCount)
+                if (buyRow >= 0 && buyRow < priceView.rowCount
                     && col >= 0 && col < priceView.columnCount)
-                    return priceView.data[static_cast<size_t>(di) * rowStride + col];
+                    return priceView.data[static_cast<size_t>(buyRow) * rowStride + col];
                 return 0.0;
             };
             // 只记录实际成交（买入=新进篮子, 卖出=已卖出且持有期满）
@@ -275,12 +280,10 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                 }
             }
 
-            double longRaw  = dayGroupRawReturns[0];
-            double shortRaw = dayGroupRawReturns[nGroups - 1];
+            double longRaw  = dayGroupRawReturns[longGroupIdx];
+            double shortRaw = dayGroupRawReturns[shortGroupIdx];
             double lc = periodLongTurnover  * costPerTrade;
             double sc = periodShortTurnover * costPerTrade;
-            double longNet  = (1.0 + longRaw)  * (1.0 - lc) / (1.0 + lc) - 1.0;
-            double shortNet = (1.0 + shortRaw) * (1.0 - sc) / (1.0 + sc) - 1.0;
             result.periodTrackings.push_back({
                 buyDate,
                 static_cast<int32_t>(longHolding.size()),
@@ -288,21 +291,19 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
                 longBought, longSold, shortBought, shortSold,
                 periodLongTurnover, periodShortTurnover,
                 longRaw, shortRaw,
-                longNet - shortNet
+                composeNetReturn(longRaw, shortRaw, lc, sc)
             });
         }
 
-        // ═══ 策略日收益：多空价差 - 换手成本 ═══
-        double longRaw  = dayGroupRawReturns[0];
-        double shortRaw = dayGroupRawReturns[nGroups - 1];
-        double dailyRawRet = longRaw - shortRaw;
+        // ═══ 策略日收益：多空价差 - 换手成本 (longOnly 时仅多头腿) ═══
+        double longRaw  = dayGroupRawReturns[longGroupIdx];
+        double shortRaw = dayGroupRawReturns[shortGroupIdx];
+        double dailyRawRet = composeRawReturn(longRaw, shortRaw);
 
         // 只对换手部分扣费
         double longCost  = periodLongTurnover  * costPerTrade;
         double shortCost = periodShortTurnover * costPerTrade;
-        double longNet   = (1.0 + longRaw)  * (1.0 - longCost)  / (1.0 + longCost)  - 1.0;
-        double shortNet  = (1.0 + shortRaw) * (1.0 - shortCost) / (1.0 + shortCost) - 1.0;
-        double dailyCostAdjRet = longNet - shortNet;
+        double dailyCostAdjRet = composeNetReturn(longRaw, shortRaw, longCost, shortCost);
 
         rawLongShortReturns.push_back(dailyRawRet);
         costAdjustedLongShortReturns.push_back(dailyCostAdjRet);
@@ -427,6 +428,47 @@ SimulatedTradingResult SimulatedTradingExecutor::execute(
     }
 
     return result;
+}
+
+void SimulatedTradingExecutor::fillBaskets(
+    const std::vector<std::pair<std::string, double>>& ranked,
+    size_t n, size_t groupSize,
+    std::unordered_set<std::string>& outLong,
+    std::unordered_set<std::string>& outShort) const
+{
+    // ranked 升序; ascending=true → long 尾部(高分) short 头部(低分)
+    // ascending=false → long 头部(低分) short 尾部(高分)
+    // longOnly → 空头篮留空, 仅多头腿参与策略收益
+    if (params_.ascending) {
+        for (size_t i = n - groupSize; i < n; ++i) outLong.insert(ranked[i].first);
+        if (!params_.longOnly) {
+            for (size_t i = 0; i < groupSize; ++i) outShort.insert(ranked[i].first);
+        }
+    } else {
+        for (size_t i = 0; i < groupSize; ++i) outLong.insert(ranked[i].first);
+        if (!params_.longOnly) {
+            for (size_t i = n - groupSize; i < n; ++i) outShort.insert(ranked[i].first);
+        }
+    }
+}
+
+double SimulatedTradingExecutor::composeRawReturn(double longRaw, double shortRaw) const
+{
+    return params_.longOnly ? longRaw : longRaw - shortRaw;
+}
+
+double SimulatedTradingExecutor::composeNetReturn(double longRaw, double shortRaw,
+                                                  double longCost, double shortCost) const
+{
+    const double longNet = (1.0 + longRaw) * (1.0 - longCost) / (1.0 + longCost) - 1.0;
+    if (params_.longOnly) return longNet;
+    const double shortNet = (1.0 + shortRaw) * (1.0 - shortCost) / (1.0 + shortCost) - 1.0;
+    return longNet - shortNet;
+}
+
+double SimulatedTradingExecutor::composeTurnover(double longTurnover, double shortTurnover) const
+{
+    return params_.longOnly ? longTurnover : (longTurnover + shortTurnover) / 2.0;
 }
 
 } // namespace factor::compute

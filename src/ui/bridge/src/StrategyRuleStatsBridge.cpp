@@ -330,11 +330,12 @@ QVariantMap StrategyRuleStatsBridge::getTemplateStats(const QString& templateId,
 
     try {
         std::string sid = strategyId.isEmpty() ? "" : strategyId.toStdString();
-        domain::strategy::StrategyEngine* engine = nullptr;
-        if (!sid.empty()) engine = domain::strategy::StrategyManager::instance().get(sid);
+        // 回测产物读不可变快照 (回测完成时发布; 引擎不进注册表, 无并发读风险)
+        std::shared_ptr<const domain::strategy::BacktestStatsSnapshot> snap;
+        if (!sid.empty()) snap = domain::strategy::StrategyManager::instance().getBacktestSnapshot(sid);
 
-        if (engine) {
-            const auto& gs = engine->ruleGateStats();
+        if (snap) {
+            const auto& gs = snap->ruleGateStats;
             auto it = gs.byTemplate.find(templateId.toStdString());
             if (it != gs.byTemplate.end()) {
                 s["evaluated"] = it->second.evaluated;
@@ -592,10 +593,10 @@ QVariantList StrategyRuleStatsBridge::getCrossStrategyRuleStats(const QString& t
                 item["strategyId"] = sid;
                 item["strategyName"] = sid.left(8);
 
-                // 读该策略的归因
-                auto* engine = mgr.get(row.getString("strategy_id"));
-                if (engine) {
-                    const auto& attr = engine->ruleAttribution();
+                // 读该策略的归因 (不可变快照, 回测完成时发布)
+                auto snap = mgr.getBacktestSnapshot(row.getString("strategy_id"));
+                if (snap) {
+                    const auto& attr = snap->ruleAttribution;
                     auto it = attr.find(templateId.toStdString());
                     if (it != attr.end()) {
                         item["preventedTrades"] = it->second.preventedTrades;
@@ -607,8 +608,8 @@ QVariantList StrategyRuleStatsBridge::getCrossStrategyRuleStats(const QString& t
                     }
                 }
                 // 获取命中统计
-                if (engine) {
-                    const auto& gs = engine->ruleGateStats();
+                if (snap) {
+                    const auto& gs = snap->ruleGateStats;
                     auto tIt = gs.byTemplate.find(templateId.toStdString());
                     if (tIt != gs.byTemplate.end()) {
                         item["hits"] = tIt->second.hits;
@@ -628,12 +629,13 @@ QVariantList StrategyRuleStatsBridge::getRuleAttribution(
 {
     QVariantList result;
 
+    // 回测产物读不可变快照 (引擎不进注册表, 数据源为回测完成时发布的 BacktestStatsSnapshot)
     auto& mgr = domain::strategy::StrategyManager::instance();
-    domain::strategy::StrategyEngine* engine = mgr.get(strategyId.toStdString());
-    if (!engine) return result;
+    auto snap = mgr.getBacktestSnapshot(strategyId.toStdString());
+    if (!snap) return result;
 
-    const auto& gateStats = engine->ruleGateStats();
-    const auto& attrMap = engine->ruleAttribution();
+    const auto& gateStats = snap->ruleGateStats;
+    const auto& attrMap = snap->ruleAttribution;
     auto tmplIt = gateStats.byTemplate.find(templateId.toStdString());
     auto attrIt = attrMap.find(templateId.toStdString());
 
@@ -641,7 +643,7 @@ QVariantList StrategyRuleStatsBridge::getRuleAttribution(
 
     QVariantMap item;
     item["ruleId"] = QString::fromStdString(templateId.toStdString());
-    item["dateRange"] = QString::fromStdString(engine->backtestDateRange());
+    item["dateRange"] = QString::fromStdString(snap->backtestDateRange);
 
     if (tmplIt != gateStats.byTemplate.end()) {
         const auto& stats = tmplIt->second;

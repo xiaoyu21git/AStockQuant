@@ -472,8 +472,7 @@ void ParameterTuningBridge::executeTuning(const std::string& strategyId,
 
         ObjectiveSpec objective = ObjectiveSpec::maximize(metric);
 
-        // ── 5. 创建引擎一次 (fromDb) ──
-        auto& mgr = domain::strategy::StrategyManager::instance();
+        // ── 5. 创建回测引擎一次 (fromDbForBacktest; 局部 unique_ptr, 函数所有出口统一析构, 不残留实盘注册表) ──
         std::unique_ptr<domain::strategy::RuntimeFactorSvc> factorSvc;
         auto* factorSvcBridge = FactorService::instance();
         if (factorSvcBridge && factorSvcBridge->isInitialized()) {
@@ -491,7 +490,7 @@ void ParameterTuningBridge::executeTuning(const std::string& strategyId,
                     std::move(factorNameResolver));
             }
         }
-        auto* engine = mgr.createEngine(strategyId, std::move(factorSvc));
+        auto engine = domain::strategy::StrategyEngine::fromDbForBacktest(strategyId, std::move(factorSvc));
         if (!engine) {
             QMetaObject::invokeMethod(this, [this]() {
                 m_isRunning.store(false); emit isRunningChanged();
