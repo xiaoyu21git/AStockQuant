@@ -15,6 +15,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <optional>
 #include <string>
@@ -56,6 +57,82 @@ std::vector<std::string> FactorBacktestOrchestrator::sortedDatesFrom(
     }
     std::sort(dates.begin(), dates.end());
     return dates;
+}
+
+factor::FactorBacktestMetricsCalculator::BenchmarkComparisonSummary
+FactorBacktestOrchestrator::buildBenchmarkSummary(
+    const BacktestRunConfig& config,
+    factor::compute::ArrowMarketDataView* arrowView,
+    const factor::compute::SimulatedTradingResult& tradingResult) const
+{
+    factor::FactorBacktestMetricsCalculator::BenchmarkComparisonSummary summary;
+    if (config.benchmarkSymbol.empty() || !arrowView
+        || tradingResult.costAdjustedLongShortReturns.empty()
+        || tradingResult.periodTrackings.empty()) {
+        return summary;
+    }
+
+    const auto benchSyms = arrowView->symbolStrings();
+    const auto benchDates = arrowView->dates();
+    const auto benchClose = arrowView->getField("close");
+    if (!benchClose.has_value() || benchSyms.empty() || benchDates.empty()) {
+        return summary;
+    }
+
+    // 查找基准标的在 symbols 中的索引
+    int32_t benchCol = -1;
+    for (size_t si = 0; si < benchSyms.size(); ++si) {
+        if (benchSyms[si] == config.benchmarkSymbol) { benchCol = static_cast<int32_t>(si); break; }
+    }
+    if (benchCol < 0 || !benchClose->isValid()) return summary;
+
+    const auto& bcv = benchClose.value();
+    const int32_t bStride = bcv.rowStride >= bcv.columnCount ? bcv.rowStride : bcv.columnCount;
+    const int32_t forwardDays = std::max(1, config.forwardDays);
+
+    // 日期(YYYY-MM-DD) → 全量行号 (与 sortedDateRows 构建同格式)
+    std::unordered_map<std::string, int32_t> dateToRow;
+    dateToRow.reserve(benchDates.size());
+    for (size_t ri = 0; ri < benchDates.size(); ++ri) {
+        const int32_t dv = benchDates[ri].value;
+        char buf[16];
+        std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
+        dateToRow.emplace(std::string(buf), static_cast<int32_t>(ri));
+    }
+
+    // 逐调仓期基准收益: [buyRow, buyRow + forwardDays], 与策略期覆盖同一持有窗口
+    const auto benchmarkLookup = [&](const std::string& dateStr) -> double {
+        const auto it = dateToRow.find(dateStr);
+        if (it == dateToRow.end()) return std::numeric_limits<double>::quiet_NaN();
+        const int32_t buyRow = it->second;
+        if (buyRow + forwardDays >= static_cast<int32_t>(benchDates.size())) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        const double buyPx  = bcv.data[static_cast<int32_t>(buyRow) * bStride + benchCol];
+        const double sellPx = bcv.data[static_cast<int32_t>(buyRow + forwardDays) * bStride + benchCol];
+        if (!std::isfinite(buyPx) || !std::isfinite(sellPx) || buyPx <= 1e-9 || sellPx <= 1e-9) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        return sellPx / buyPx - 1.0;
+    };
+
+    std::vector<std::string> periodDates;
+    periodDates.reserve(tradingResult.periodTrackings.size());
+    for (const auto& pt : tradingResult.periodTrackings) periodDates.push_back(pt.date);
+
+    // 年化按调仓观测频率 (rebalanceDays 交易日一期) 而非持有期 forwardDays:
+    // 期序列每 rebalanceDays 日观测一次, 与分组收益年化口径一致
+    return factor::FactorBacktestMetricsCalculator::calculateBenchmarkComparison(
+        tradingResult.costAdjustedLongShortReturns, periodDates,
+        std::max(1, config.rebalanceDays), config.riskFreeRate, benchmarkLookup);
+}
+
+bool FactorBacktestOrchestrator::detectTopGroupDistortion(
+    const factor::compute::SimulatedTradingResult& tradingResult)
+{
+    // groups[displayIdx]: 0=G1(最好组), 1=G2; G1 期均收益低于 G2 → 顶部组失效
+    return tradingResult.groups.size() >= 2
+        && tradingResult.groups[0].returnRate < tradingResult.groups[1].returnRate;
 }
 
 double FactorBacktestOrchestrator::rankCorrelation(std::vector<double>& x, std::vector<double>& y)
@@ -564,6 +641,8 @@ void FactorBacktestOrchestrator::run(
         params.adjustPriceType = config.adjustPriceType;
         params.winsorizeQuantile = config.winsorizeQuantile;
         params.ascending       = config.ascending;
+        params.longOnly        = config.longOnly;
+        params.maxFwdRetAbsLimit = config.maxFwdRetAbsLimit;
         params.onProgress      = [&](double pct) {
             if (onProgress) onProgress(60.0 + pct * 15.0, "simulating trades");
         };
@@ -575,21 +654,41 @@ void FactorBacktestOrchestrator::run(
             << " firstDate=" << (sortedDates.empty() ? "N/A" : sortedDates.front())
             << " lastDate=" << (sortedDates.empty() ? "N/A" : sortedDates.back());
 
-        // 构建 instrumentIds
+        // ── 调仓日 → 全交易日矩阵行号 (priceView 行 = arrowView->dates() 全量行, 与日期过滤无关) ──
+        std::vector<int32_t> sortedDateRows;
+        sortedDateRows.reserve(sortedDates.size());
+        {
+            const auto& viewDates = arrowView->dates();
+            std::unordered_map<std::string, int32_t> dateToRow;
+            dateToRow.reserve(viewDates.size());
+            for (size_t ri = 0; ri < viewDates.size(); ++ri) {
+                const int32_t dv = viewDates[ri].value;
+                char buf[16];
+                std::snprintf(buf, sizeof(buf), "%04d-%02d-%02d", dv / 10000, (dv / 100) % 100, dv % 100);
+                dateToRow.emplace(std::string(buf), static_cast<int32_t>(ri));
+            }
+            for (const auto& d : sortedDates) {
+                auto it = dateToRow.find(d);
+                if (it != dateToRow.end()) sortedDateRows.push_back(it->second);
+            }
+        }
+        if (sortedDateRows.size() != sortedDates.size()) {
+            INTERNAL_WARN_STREAM << "[回测流程] 调仓日行映射不完整: " << sortedDateRows.size()
+                << "/" << sortedDates.size() << " — 缺失调仓日将导致模拟交易提前结束";
+        }
+
+        // 构建 instrumentIds — 顺序必须与 priceView 列顺序一致 (按 arrowView 标的顺序分配)
         std::unordered_map<uint32_t, std::string> instrumentIdToSymbol;
         std::vector<factor::compute::InstrumentId> instrumentIds;
         {
             uint32_t nextId = 0;
-            std::unordered_map<std::string, uint32_t> symbolToId;
-            for (const auto& [date, symMap] : reporterInput.factorValuesByDate) {
-                for (const auto& [sym, _] : symMap) {
-                    if (symbolToId.find(sym) == symbolToId.end()) {
-                        symbolToId[sym] = nextId;
-                        instrumentIdToSymbol[nextId] = sym;
-                        instrumentIds.push_back(factor::compute::InstrumentId{nextId});
-                        ++nextId;
-                    }
-                }
+            const auto& viewSymbols = arrowView->symbolStrings();
+            instrumentIdToSymbol.reserve(viewSymbols.size());
+            instrumentIds.reserve(viewSymbols.size());
+            for (const auto& sym : viewSymbols) {
+                instrumentIdToSymbol[nextId] = sym;
+                instrumentIds.push_back(factor::compute::InstrumentId{nextId});
+                ++nextId;
             }
         }
 
@@ -634,8 +733,8 @@ void FactorBacktestOrchestrator::run(
             << " instruments=" << instrumentIds.size();
         foundation::perf::Stopwatch swTrade;
         swTrade.start();
-        tradingResult = m_executor->execute(fvByDate, sortedDates, priceView,
-                                             preAdjustView, postAdjustView,
+        tradingResult = m_executor->execute(fvByDate, sortedDates, sortedDateRows,
+                                             priceView, preAdjustView, postAdjustView,
                                              instrumentIds, instrumentIdToSymbol);
         swTrade.stop();
         swTrade.report("模拟成交");
@@ -744,47 +843,10 @@ void FactorBacktestOrchestrator::run(
             btResult.icirResult  = icir;
             btResult.groupResult = groupRes;
 
-            // ── 基准收益序列（若配置了 benchmarkSymbol 则从 Arrow 加载）──
-            std::vector<double> benchmarkDailyReturns;
-            ::factor::FactorBacktestMetricsCalculator::BenchmarkComparisonSummary benchmarkSummary;
-            if (!config.benchmarkSymbol.empty() && arrowView) {
-                auto benchSyms = arrowView->symbolStrings();
-                auto benchDates = arrowView->dates();
-                auto benchClose = arrowView->getField("close");
-                if (benchClose.has_value() && !benchSyms.empty()) {
-                    // 查找基准标的在 symbols 中的索引
-                    int32_t benchCol = -1;
-                    for (size_t si = 0; si < benchSyms.size(); ++si) {
-                        if (benchSyms[si] == config.benchmarkSymbol) { benchCol = static_cast<int32_t>(si); break; }
-                    }
-                    if (benchCol >= 0 && benchClose->isValid()) {
-                        const auto& bcv = benchClose.value();
-                        const int32_t bStride = bcv.rowStride >= bcv.columnCount ? bcv.rowStride : bcv.columnCount;
-                        // 对齐到策略交易日的基准日收益
-                        std::string prevDate;
-                        double prevClose = 0.0;
-                        for (size_t di = 0; di < benchDates.size(); ++di) {
-                            double closePx = bcv.data[static_cast<int32_t>(di) * bStride + benchCol];
-                            if (std::isfinite(closePx) && closePx > 1e-9) {
-                                std::string dateStr = std::to_string(benchDates[di].value);
-                                // 格式化为 YYYY-MM-DD
-                                int dv = benchDates[di].value;
-                                char dbuf[16]; snprintf(dbuf, sizeof(dbuf), "%04d-%02d-%02d",
-                                    dv / 10000, (dv / 100) % 100, dv % 100);
-                                if (!prevDate.empty() && prevClose > 1e-9) {
-                                    benchmarkDailyReturns.push_back(closePx / prevClose - 1.0);
-                                }
-                                prevDate = dbuf;
-                                prevClose = closePx;
-                            }
-                        }
-                        if (!benchmarkDailyReturns.empty() && !tradingResult.costAdjustedLongShortReturns.empty()) {
-                            benchmarkSummary = ::factor::FactorBacktestMetricsCalculator::calculateBenchmarkMetrics(
-                                tradingResult.costAdjustedLongShortReturns, benchmarkDailyReturns);
-                        }
-                    }
-                }
-            }
+            // ── 基准对比摘要（若配置了 benchmarkSymbol 则从 Arrow 加载）──
+            // 期频策略序列 × 日期对齐基准期收益 (封装于 buildBenchmarkSummary, 修复原日频错配)
+            ::factor::FactorBacktestMetricsCalculator::BenchmarkComparisonSummary benchmarkSummary =
+                buildBenchmarkSummary(config, arrowView, tradingResult);
 
             ::factor::FactorBacktestMetricsCalculator::Inputs inputs{
                 btConfig, btResult.icirResult, btResult.groupResult,
@@ -937,12 +999,16 @@ void FactorBacktestOrchestrator::run(
             // ── 分组收益序列 ──
             auto groupRetSeries = J::createArray();
             for (size_t gi = 0; gi < tradingResult.groupDailyReturns.size(); ++gi) {
+                // groupDailyReturns 为内部组序(因子值升序), 套用与 groups 指标一致的展示映射再序列化
+                const int32_t displayIdx = config.ascending
+                    ? (config.numGroups - 1 - static_cast<int32_t>(gi))
+                    : static_cast<int32_t>(gi);
                 auto gArray = J::createArray();
                 for (double r : tradingResult.groupDailyReturns[gi])
                     gArray.push_back(J::createDouble(r));
                 auto gObj = J::createObject();
-                gObj.set("groupIndex", J::createDouble(static_cast<double>(gi)));
-                gObj.set("groupName",  J::createString("G" + std::to_string(gi + 1)));
+                gObj.set("groupIndex", J::createDouble(static_cast<double>(displayIdx)));
+                gObj.set("groupName",  J::createString("G" + std::to_string(displayIdx + 1)));
                 gObj.set("data", gArray);
                 groupRetSeries.push_back(gObj);
             }
@@ -1024,6 +1090,15 @@ void FactorBacktestOrchestrator::run(
                 periodArr.push_back(pj);
             }
             metrics.set("periodTrackings", periodArr);
+
+            // ── 顶部失真警示 (仅报警, 不改变评分/候选池) ──
+            if (detectTopGroupDistortion(tradingResult)) {
+                metrics.set("topGroupDistortion", J::createBool(true));
+                INTERNAL_WARN_STREAM << "[回测流程] 顶部失真警示: G1 期均收益("
+                    << tradingResult.groups[0].returnRate << ") 低于 G2("
+                    << tradingResult.groups[1].returnRate
+                    << ") — 顶部组失效, 建议关注 G2 及以下分组, 勿用 G1 选股";
+            }
 
             root.set("metrics", metrics);
             INTERNAL_INFO_STREAM << "[回测流程] 完成"

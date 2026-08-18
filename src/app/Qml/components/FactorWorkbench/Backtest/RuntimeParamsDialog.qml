@@ -21,6 +21,8 @@ Popup {
     property alias runtimeSlippageRateField: runtimeSlippageRateField
     property alias runtimeRiskFreeRateField: runtimeRiskFreeRateField
     property alias runtimeBenchmarkSymbolField: runtimeBenchmarkSymbolField
+    property alias runtimeLongOnlyBox: runtimeLongOnlyBox
+    property alias runtimeMaxFwdRetAbsLimitField: runtimeMaxFwdRetAbsLimitField
 
     modal: true
     focus: true
@@ -338,6 +340,41 @@ Popup {
                                         }
                                         onEditingFinished: page.applyRuntimeParamsDialog()
                                     }
+
+                                    Text { text: "做空禁止"; font.pixelSize: 11; color: "#94A3B8" }
+                                    CheckBox {
+                                        id: runtimeLongOnlyBox
+                                        Layout.fillWidth: true
+                                        text: "仅多头（禁止做空腿）"
+                                        checked: false
+                                        font.pixelSize: 12
+                                        onToggled: page.applyRuntimeParamsDialog()
+                                    }
+
+                                    Text { text: "|前向收益|上限"; font.pixelSize: 11; color: "#94A3B8" }
+                                    TextField {
+                                        id: runtimeMaxFwdRetAbsLimitField
+                                        Layout.fillWidth: true
+                                        text: "0.50"
+                                        color: "#F1F5F9"
+                                        font.pixelSize: 12
+                                        validator: DoubleValidator { bottom: 0.01; top: 10.0 }
+                                        background: Rectangle {
+                                            radius: 10
+                                            color: "#0B1220"
+                                            border.width: 1
+                                            border.color: runtimeMaxFwdRetAbsLimitField.activeFocus ? "#3B82F6" : "#334155"
+                                        }
+                                        onEditingFinished: page.applyRuntimeParamsDialog()
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "上限 0.5 = 剔除单期 |收益|≥50% 的样本（现有默认）；放大（如 2.0）可减少对真反弹的误杀。仅多头开启后策略收益只含多头腿，分组展示不变。"
+                                    font.pixelSize: 10
+                                    color: "#64748B"
+                                    wrapMode: Text.WordWrap
                                 }
                             }
                         }

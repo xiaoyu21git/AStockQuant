@@ -994,6 +994,14 @@ QList<ParamConfigSpec> reversalConfigs()
         buildToggleConfig(QStringLiteral("useHighOnly"),
                           QStringLiteral("仅用高D组"),
                           QStringLiteral("仅使用高D组收益率作为因子值"),
+                          false, QStringLiteral("是"), QStringLiteral("否")),
+        buildToggleConfig(QStringLiteral("adjustedClose"),
+                          QStringLiteral("前复权价"),
+                          QStringLiteral("用 close×pre_adjust_factor 前复权价计算，消除除权假跌对反转信号的污染；关闭=原始收盘价（默认）"),
+                          false, QStringLiteral("是"), QStringLiteral("否")),
+        buildToggleConfig(QStringLiteral("qualityFilter"),
+                          QStringLiteral("质量过滤"),
+                          QStringLiteral("反转效应语义：仅保留盈利(eps>0)+非ST+非次新(上市≥365天)+非已退市+非除权日的超跌标的；关闭=全市场按跌幅排序（默认）"),
                           false, QStringLiteral("是"), QStringLiteral("否"))
     };
 }

@@ -8,6 +8,7 @@
 
 #include "BacktestRunConfig.h"
 #include "factor_compute/SimulatedTradingExecutor.h"
+#include "FactorMetricsCalculator.h"
 
 #include <atomic>
 #include <cstddef>
@@ -26,6 +27,7 @@ class FactorEngine;
     struct MarketMatrixBatch;
     struct FactorMatrix;
     struct FactorCacheKey;
+    class ArrowMarketDataView;
 }
 
 namespace domain::scheduler {
@@ -75,6 +77,21 @@ private:
     /// @brief Spearman 秩相关系数 (x/y 等长; 空或退化 → 0.0)
     /// 组合 IC 与 per-child 因子归因 IC 共用同一实现, 保证口径一致
     static double rankCorrelation(std::vector<double>& x, std::vector<double>& y);
+
+    /// @brief 构建基准对比摘要 — 期频策略序列 × 日期对齐基准期收益
+    /// 因子回测策略序列为期频(每 rebalanceDays 交易日一期), 不能喂给日频口径的
+    /// calculateBenchmarkMetrics (策略回测路径的日频调用不受影响);
+    /// 本方法按调仓日逐期取 [t, t+forwardDays] 基准期收益后走日期对齐的
+    /// calculateBenchmarkComparison, 年化按调仓观测频率 (rebalanceDays)
+    factor::FactorBacktestMetricsCalculator::BenchmarkComparisonSummary buildBenchmarkSummary(
+        const BacktestRunConfig& config,
+        factor::compute::ArrowMarketDataView* arrowView,
+        const factor::compute::SimulatedTradingResult& tradingResult) const;
+
+    /// @brief 顶部失真检测: G1 期均收益低于 G2 → 顶部组失效 (除权假跌/极端值噪音/熊市年等)
+    /// 仅报警提示 (日志 + JSON 字段), 不改变任何评分/候选池行为
+    static bool detectTopGroupDistortion(
+        const factor::compute::SimulatedTradingResult& tradingResult);
 
     // ── 持有的下层组件引用 ──
     domain::scheduler::BacktestScheduler* m_scheduler = nullptr;

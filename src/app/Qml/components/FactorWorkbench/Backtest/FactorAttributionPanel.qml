@@ -163,7 +163,7 @@ Rectangle {
         // 累计贡献堆叠面积图
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 260
+            Layout.preferredHeight: 220
             visible: valid && curveLength > 0
             spacing: 2
             Text { text: "累计贡献堆叠（X=调仓期序号）"; font.pixelSize: 9; color: "#94A3B8" }

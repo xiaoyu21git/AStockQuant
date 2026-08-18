@@ -224,8 +224,10 @@ Rectangle {
                             contentItem: Text { text: parent.displayText; font.pixelSize: 13; color: "#F1F5F9"; verticalAlignment: Text.AlignVCenter; leftPadding: 10 } } }
                     Column { spacing: 4; width: 170
                         Text { text: "样本外起始"; font.pixelSize: 12; color: root.backtestMode==="out_sample"?"#94A3B8":"#64748B" }
-                        Rectangle { width: parent.width; height: 34; radius: 6; color: root.backtestMode==="out_sample"?"#0F172A":"#0C1320"; border.width: 1; border.color: "#334155"
-                            TextInput { anchors.fill: parent; anchors.leftMargin: 10; anchors.rightMargin: 10; enabled: root.backtestMode==="out_sample"; text: root.outSampleStart; font.pixelSize: 13; color: enabled?"#F1F5F9":"#64748B"; verticalAlignment: TextInput.AlignVCenter } } }
+                        Item { width: parent.width; height: 40; opacity: root.backtestMode==="out_sample" ? 1.0 : 0.45
+                            Shared.DatePicker { width: parent.width; selectedDate: root.outSampleStart
+                                onDateChanged: function(d) { root.outSampleStart = d; root.ec() } }
+                            MouseArea { anchors.fill: parent; enabled: root.backtestMode !== "out_sample" } } }
                     Column { spacing: 4; width: 150
                         Text { text: "业绩基准"; font.pixelSize: 12; color: "#94A3B8" }
                         ComboBox { id: cbBM; width: parent.width; height: 34; model: root.bmOpts; textRole: "l"; font.pixelSize: 13

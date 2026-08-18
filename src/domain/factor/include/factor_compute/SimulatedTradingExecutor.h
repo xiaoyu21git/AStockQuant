@@ -4,9 +4,12 @@
 #include "GroupedBacktestTypes.h"
 #include "IMarketDataView.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace factor::compute {
@@ -36,8 +39,9 @@ public:
 
     /// 执行模拟成交
     /// @param factorValues 按日期×标的的因子值
-    /// @param sortedDates 已排序的日期列表（升序 YYYY-MM-DD）
-    /// @param priceView close 价格矩阵视图
+    /// @param sortedDates 已排序的调仓日期列表（升序 YYYY-MM-DD）
+    /// @param sortedDateRows 与 sortedDates 一一对应：各调仓日在 priceView（全交易日矩阵）中的行号
+    /// @param priceView close 价格矩阵视图（行为全交易日，非仅调仓日）
     /// @param preAdjustView 前复权因子矩阵（adjustPriceType=="pre" 时生效，空视图=不复权）
     /// @param postAdjustView 后复权因子矩阵（adjustPriceType=="post" 时生效）
     /// @param instrumentIds 标的ID列表（uint32_t 值对应 priceView 中的列索引映射密钥）
@@ -46,6 +50,7 @@ public:
     SimulatedTradingResult execute(
         const FactorValuesByDate& factorValues,
         const std::vector<std::string>& sortedDates,
+        const std::vector<int32_t>& sortedDateRows,
         NumericConstMatrixView priceView,
         NumericConstMatrixView preAdjustView,
         NumericConstMatrixView postAdjustView,
@@ -53,6 +58,23 @@ public:
         const std::unordered_map<uint32_t, std::string>& instrumentIdToSymbol) const;
 
 private:
+    /// @brief 按方向与 longOnly 填充本期多空篮子
+    /// ranked 按因子值升序排列; longOnly 时 outShort 留空 (禁止做空, 策略收益=多头净收益)
+    void fillBaskets(const std::vector<std::pair<std::string, double>>& ranked,
+                     size_t n, size_t groupSize,
+                     std::unordered_set<std::string>& outLong,
+                     std::unordered_set<std::string>& outShort) const;
+
+    /// @brief 策略原始收益: longOnly 时仅多头腿, 否则多空价差
+    double composeRawReturn(double longRaw, double shortRaw) const;
+
+    /// @brief 策略净收益 (换手成本按"只对换手部分扣费"口径): longOnly 时仅多头腿
+    double composeNetReturn(double longRaw, double shortRaw,
+                            double longCost, double shortCost) const;
+
+    /// @brief 策略换手率: longOnly 时仅多头腿, 否则多空平均
+    double composeTurnover(double longTurnover, double shortTurnover) const;
+
     SimulatedTradingParams params_;
 };
 

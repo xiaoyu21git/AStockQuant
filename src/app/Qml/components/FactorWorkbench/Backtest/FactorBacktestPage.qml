@@ -217,6 +217,9 @@ Item {
         runtimeSlippageRateField.text = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
         runtimeRiskFreeRateField.text = runtimePercentToText(params.riskFreeRate !== undefined && params.riskFreeRate !== null ? params.riskFreeRate : 0.02)
         runtimeBenchmarkSymbolField.text = resolvedRuntimeBenchmarkSymbol(params)
+        runtimeLongOnlyBox.checked = params.longOnly === true
+        runtimeMaxFwdRetAbsLimitField.text = String(params.maxFwdRetAbsLimit !== undefined && params.maxFwdRetAbsLimit !== null
+            ? params.maxFwdRetAbsLimit : 0.5)
 
         var adjustPriceType = params.adjustPriceType !== undefined && params.adjustPriceType !== null
             ? params.adjustPriceType
@@ -249,6 +252,8 @@ Item {
         runtimeParams.riskFreeRate = parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.02
         runtimeParams.benchmarkSymbol = runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : resolvedRuntimeBenchmarkSymbol(current)
         runtimeParams.adjustPriceType = runtimeAdjustPriceTypePreButton.checked ? preAdjustPriceType : postAdjustPriceType
+        runtimeParams.longOnly = runtimeLongOnlyBox.checked
+        runtimeParams.maxFwdRetAbsLimit = parseFloat(runtimeMaxFwdRetAbsLimitField.text) || current.maxFwdRetAbsLimit || 0.5
 
         factorBacktestController.backtestRuntimeParams = runtimeParams
     }
@@ -2255,6 +2260,8 @@ Item {
     property alias runtimeAdjustPriceTypeGroup: runtimeParamsDialog.runtimeAdjustPriceTypeGroup
     property alias runtimeAdjustPriceTypePreButton: runtimeParamsDialog.runtimeAdjustPriceTypePreButton
     property alias runtimeAdjustPriceTypePostButton: runtimeParamsDialog.runtimeAdjustPriceTypePostButton
+    property alias runtimeLongOnlyBox: runtimeParamsDialog.runtimeLongOnlyBox
+    property alias runtimeMaxFwdRetAbsLimitField: runtimeParamsDialog.runtimeMaxFwdRetAbsLimitField
     property alias runtimeInitialCapitalField: runtimeParamsDialog.runtimeInitialCapitalField
     property alias runtimeForwardDaysField: runtimeParamsDialog.runtimeForwardDaysField
     property alias runtimeMarketEnvironmentComboBox: runtimeParamsDialog.runtimeMarketEnvironmentComboBox
@@ -2291,7 +2298,7 @@ Item {
             ColumnLayout {
                 id: contentColumn
                 width: scrollView.width
-                spacing: 16
+                spacing: 12
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -2323,7 +2330,7 @@ Item {
                     ColumnLayout {
                         id: controlPanelContent
                         anchors.fill: parent
-                        anchors.margins: 16
+                        anchors.margins: 14
                         spacing: 12
 
                         FactorSelectionPanel {
@@ -2503,7 +2510,6 @@ Item {
                 // (吸收 GroupResultPanel; 显式绑定页面数据, 结果选择器经作用域链解析页面函数)
                 BacktestResultView {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 1840
                     metricSections: root.resultMetrics
                     displayedResult: root.displayedBacktestResult
                     isBacktesting: root.isBacktesting

@@ -12,6 +12,8 @@ import "../../Backtest" as BacktestComponents
 Rectangle {
     id: root
     Layout.fillWidth: true
+    // 高度内容驱动: 固定高度会产生区块间死空隙 (实测 Qt 布局把多余空间摊进段间距)
+    Layout.preferredHeight: viewLayout.implicitHeight
     radius: 12
     color: "#0F172A"
 
@@ -82,9 +84,10 @@ Rectangle {
 
     // ============ UI ============
     ColumnLayout {
+        id: viewLayout
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 12
+        spacing: 8
 
         // 标题行 + 结果选择器 (仅多结果时可见)
         RowLayout {
@@ -137,12 +140,12 @@ Rectangle {
         // 执行指标卡: 年化 / 夏普 / 最大回撤 / 胜率
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 120
+            Layout.preferredHeight: 104
             radius: 12
             color: "#1E293B"
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 16
+                anchors.margins: 12
                 spacing: 16
                 BacktestComponents.BacktestMetricCard {
                     title: "执行年化"
@@ -186,12 +189,12 @@ Rectangle {
         // 基准对比卡: 基准年化 / 超额年化 / 信息比率 / 跟踪误差 / Alpha / Beta
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 120
+            Layout.preferredHeight: 104
             radius: 12
             color: "#1E293B"
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 16
+                anchors.margins: 12
                 spacing: 16
                 BacktestComponents.BacktestMetricCard {
                     title: "基准年化"
@@ -253,12 +256,12 @@ Rectangle {
         // IC 卡: IC / IR / IC标准差 / IC正率
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 100
+            Layout.preferredHeight: 104
             radius: 12
             color: "#1E293B"
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 16
+                anchors.margins: 12
                 spacing: 16
                 BacktestComponents.BacktestMetricCard {
                     title: "IC"
@@ -302,12 +305,12 @@ Rectangle {
         // 分组卡片列表 (吸收 GroupResultPanel, 含"正在计算分组..."空态 + currentGroup 高亮)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 300
+            Layout.preferredHeight: 260
             radius: 12
             color: "#1E293B"
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
+                anchors.margins: 12
                 spacing: 12
                 Text {
                     text: "📊 分组内容"
@@ -319,7 +322,7 @@ Rectangle {
                     id: groupListView
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.minimumHeight: 220
+                    Layout.minimumHeight: 180
                     model: groupList
                     clip: true
                     spacing: 8
@@ -409,12 +412,12 @@ Rectangle {
         // 分组绩效对比图 (GroupResultChart 保留)
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 380
+            Layout.preferredHeight: 320
             radius: 12
             color: "#1E293B"
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 16
+                anchors.margins: 12
                 spacing: 12
                 GroupResultChart {
                     Layout.fillWidth: true
@@ -447,7 +450,7 @@ Rectangle {
                              && metricSections.factorQuality.rawReturns
                              && Array.isArray(metricSections.factorQuality.rawReturns)
                              ? metricSections.factorQuality.rawReturns : []
-        property double cardHeight: 240
+        property double cardHeight: 200
         Layout.preferredHeight: cardHeight
 
         ColumnLayout {

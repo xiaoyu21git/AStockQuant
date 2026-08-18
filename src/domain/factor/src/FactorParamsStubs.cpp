@@ -274,6 +274,8 @@ void ReversalFactor::Params::fromJson(const foundation::json::JsonFacade& json)
     if (json.has("window")) window = json.get("window").asInt();
     if (json.has("splitMetric")) splitMetric = json.get("splitMetric").asString();
     if (json.has("useHighOnly")) useHighOnly = json.get("useHighOnly").asBool();
+    if (json.has("adjustedClose")) adjustedClose = json.get("adjustedClose").asBool();
+    if (json.has("qualityFilter")) qualityFilter = json.get("qualityFilter").asBool();
 }
 
 // ============================================================================

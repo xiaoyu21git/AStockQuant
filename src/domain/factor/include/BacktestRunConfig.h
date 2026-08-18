@@ -56,6 +56,8 @@ struct BacktestRunConfig {
     double winsorizeQuantile{0.005};       // 因子值双侧缩尾分位数（0.0=不缩尾），传递给 Orchestrator
     int marketEnvironmentProfile = 0;
     bool ascending{true};                   // 因子方向: true=值越大越好, false=值越小越好
+    bool longOnly{false};                   // 禁止做空开关: true=策略收益仅多头腿(分组展示不变); false=多空(现有行为)
+    double maxFwdRetAbsLimit{0.5};          // |前向收益|上限截断: 剔除 |ret|≥该值的样本, 默认0.5=现有行为, 放宽可减小对真反弹的误杀
     int workerThreads = 1;                  // 块级并行 worker 数 (<2 或块数<2 走串行路径, 同一套代码)
 };
 

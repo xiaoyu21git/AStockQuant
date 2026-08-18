@@ -19,6 +19,7 @@ struct SimulatedTradingParams final {
     double winsorizeQuantile{0.005}; // 双侧缩尾分位数，0.0=不缩尾，默认 0.5%/99.5%
     std::string adjustPriceType{"pre"}; // "pre"=前复权 "post"=后复权
     bool ascending{true};  // 因子方向: true=值越大越好, false=值越小越好
+    bool longOnly{false};  // 禁止做空: true=策略收益仅多头腿(分组展示/空头记录不变); false=多空价差(现有行为)
     std::function<void(double)> onProgress; // 进度回调 (0.0-1.0)
 };
 

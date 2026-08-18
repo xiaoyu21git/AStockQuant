@@ -581,6 +581,8 @@ QVariantMap FactorBacktestBridge::processRunResult(
     cfgMap["riskFreeRate"]    = config.riskFreeRate;
     cfgMap["adjustPriceType"] = QString::fromStdString(config.adjustPriceType);
     cfgMap["winsorizeQuantile"] = config.winsorizeQuantile;
+    cfgMap["longOnly"]          = config.longOnly;
+    cfgMap["maxFwdRetAbsLimit"] = config.maxFwdRetAbsLimit;
     cfgMap["factorMode"]      = static_cast<int>(config.factorMode);
     cfgMap["startDate"] = rootObj.value("startDate").toString();
     cfgMap["endDate"]   = rootObj.value("endDate").toString();
@@ -804,6 +806,8 @@ void FactorBacktestBridge::startBacktestWithFactors(
     config.benchmarkSymbol = m_backtestRuntimeParams.value("benchmarkSymbol", "000300.SH").toString().toUpper().toStdString();
     config.adjustPriceType = m_backtestRuntimeParams.value("adjustPriceType", "pre").toString().toStdString();
     config.winsorizeQuantile = m_backtestRuntimeParams.value("winsorizeQuantile", 0.005).toDouble();
+    config.longOnly = m_backtestRuntimeParams.value("longOnly", false).toBool();
+    config.maxFwdRetAbsLimit = m_backtestRuntimeParams.value("maxFwdRetAbsLimit", 0.5).toDouble();
     config.marketEnvironmentProfile = m_backtestRuntimeParams.value("marketEnvironmentProfile", 0).toInt();
     // ── ascending 从因子参数读取 ──
     {
