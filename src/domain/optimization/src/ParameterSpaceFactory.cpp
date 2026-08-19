@@ -16,7 +16,8 @@ std::vector<ParamRange> ParameterSpaceFactory::commonRanges() {
             {0, "EQUAL"},
             {1, "MARKET_CAP"},
             {2, "SIGNAL_STRENGTH"},
-            {3, "RISK_PARITY"}
+            {3, "RISK_PARITY"},
+            {4, "SIGNAL_STRENGTH_CAPPED"}
         }),
         ParamRange::enumRange("rebalanceFrequency", {
             {0, "DAILY"},

@@ -213,7 +213,8 @@ StrategyAttributionCalculator::buildAlignedDays(const Inputs& inputs) const
         day.rowNext = day.rowToday + 1;
 
         const auto& snap = *itSnap->second;
-        if (snap.equity <= 0.0) continue;
+        // isfinite 守卫: 防 NaN 穿透 (NaN <= 0.0 为 false 会漏过 <= 判断)
+        if (!std::isfinite(snap.equity) || snap.equity <= 0.0) continue;
 
         // 组合侧：逐持仓 w_p(i) = mktval/equity，停牌缺价剔除
         for (const auto& entry : snap.entries) {
@@ -221,8 +222,10 @@ StrategyAttributionCalculator::buildAlignedDays(const Inputs& inputs) const
             if (itCol == symbolCols.end()) continue;
             const double c0 = closeMat.data[day.rowToday * closeMat.rowStride + itCol->second];
             const double c1 = closeMat.data[day.rowNext * closeMat.rowStride + itCol->second];
-            if (c0 <= 0.0 || c1 <= 0.0) continue;
+            if (!std::isfinite(c0) || c0 <= 0.0 || !std::isfinite(c1) || c1 <= 0.0) continue;
+            if (!std::isfinite(entry.marketValue)) continue;
             const double wp = entry.marketValue / snap.equity;
+            if (!std::isfinite(wp) || wp < 0.0) continue;
             const double ret = c1 / c0 - 1.0;
             const std::string code = resolveSectorCode(inputs, entry.symbol);
             day.rawPortfolioWeight[code] += wp;
@@ -237,7 +240,8 @@ StrategyAttributionCalculator::buildAlignedDays(const Inputs& inputs) const
             if (itCol == symbolCols.end()) continue;
             const double c0 = closeMat.data[day.rowToday * closeMat.rowStride + itCol->second];
             const double c1 = closeMat.data[day.rowNext * closeMat.rowStride + itCol->second];
-            if (c0 <= 0.0 || c1 <= 0.0) continue;
+            if (!std::isfinite(c0) || c0 <= 0.0 || !std::isfinite(c1) || c1 <= 0.0) continue;
+            if (!std::isfinite(wb) || wb < 0.0) continue;
             const double ret = c1 / c0 - 1.0;
             const std::string code = resolveSectorCode(inputs, sym);
             day.benchmarkWeight[code] += wb;
@@ -245,7 +249,8 @@ StrategyAttributionCalculator::buildAlignedDays(const Inputs& inputs) const
             day.benchmarkTotalWeight += wb;
         }
 
-        if (day.portfolioTotalWeight <= 0.0 || day.benchmarkTotalWeight <= 0.0) continue;
+        if (!std::isfinite(day.portfolioTotalWeight) || day.portfolioTotalWeight <= 0.0
+            || !std::isfinite(day.benchmarkTotalWeight) || day.benchmarkTotalWeight <= 0.0) continue;
         days.push_back(std::move(day));
     }
     return days;

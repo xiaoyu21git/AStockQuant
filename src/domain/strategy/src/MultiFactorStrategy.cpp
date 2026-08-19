@@ -547,6 +547,34 @@ std::vector<double> MultiFactorStrategy::allocateWeights(
         return raw;
     }
 
+    // ── 因子值加权(上限封顶): 当日选中池内 min-max 拉伸 ──
+    // w = minW + (maxW - minW) × (z - z池min) / (z池max - z池min)
+    // 顶票=maxWeightPerStock, 最低票=minWeightPerStock, 中间线性;
+    // 结果直接落在 [minW, maxW] 内, 下游 clamp 为无操作;
+    // rankAndSelect 已保证 compositeScore > 0
+    case ::domain::strategies::WeightScheme::SIGNAL_STRENGTH_CAPPED: {
+        double zMin = selected.front().compositeScore;  // n >= 1 (selected.empty() 已拦截)
+        double zMax = zMin;
+        for (const auto& rec : selected) {
+            if (rec.compositeScore > zMax) zMax = rec.compositeScore;
+            if (rec.compositeScore < zMin) zMin = rec.compositeScore;
+        }
+        const double span = zMax - zMin;
+        if (zMax <= kEpsilon || span <= kEpsilon) {
+            // 评分全相同或全为 0: 梯度无意义 → 等权兜底
+            const double equalWeight = kFullWeight / static_cast<double>(n);
+            std::fill(raw.begin(), raw.end(), equalWeight);
+            return raw;
+        }
+        const double wMin = std::max(kZeroValue, m_config.minWeightPerStock);
+        const double wMax = std::max(wMin, m_config.maxWeightPerStock);
+        for (std::size_t i = 0; i < n; ++i) {
+            raw[i] = wMin + (wMax - wMin)
+                * (selected[i].compositeScore - zMin) / span;
+        }
+        return raw;
+    }
+
     // ── 市值加权 ──
     case ::domain::strategies::WeightScheme::MARKET_CAP: {
         if (!view) {

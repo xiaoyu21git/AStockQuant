@@ -222,9 +222,6 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDbImpl(const std::string& st
         params.topN = root.has("topN") ? root.get("topN").asInt() : 0;
         params.allowShort = root.has("allowShort") && root.get("allowShort").asBool();
         params.maxPositions = root.has("maxPositions") ? root.get("maxPositions").asInt() : 20;
-        // 因子池容量约束: 最大持仓不能超过因子候选池可提供的标的数
-        if (factorTargetPositionCount > 0 && params.maxPositions > factorTargetPositionCount)
-            params.maxPositions = factorTargetPositionCount;
         params.maxWeightPerStock = root.has("maxWeightPerStock") ? root.get("maxWeightPerStock").asDouble() : 0.1;
         params.minWeightPerStock = root.has("minWeightPerStock") ? root.get("minWeightPerStock").asDouble() : 0.0;
         params.minHoldDays = root.has("minHoldDays") ? root.get("minHoldDays").asInt() : 0;
@@ -277,6 +274,11 @@ std::unique_ptr<StrategyEngine> StrategyEngine::fromDbImpl(const std::string& st
                 }
             }
         }
+        // 因子池容量约束: 最大持仓不能超过因子候选池可提供的标的数
+        // (必须在 factor_overlay 解析完成后判断, 否则读到的是默认值; 因子未启用时不约束)
+        if (factorOverlayEnabled && factorTargetPositionCount > 0
+            && params.maxPositions > factorTargetPositionCount)
+            params.maxPositions = factorTargetPositionCount;
         // 从 factorWeights 派生 factorIds
         params.factorIds.clear();
         for (const auto& fw : params.factorWeights)
@@ -3216,13 +3218,16 @@ StrategyEngine::buildBenchmarkStockWeights(
         double totalCap = 0.0;
         for (const auto& row : rows) {
             // 基准市值 = 流通市值 (缺则回退总市值; 如需切换口径改这一处)
-            const double cap = (row.circulatingMarketCap > 0.0)
+            // isfinite 守卫: 防 NaN 穿透 (NaN <= 0.0 为 false 会漏过 <= 判断)
+            const double cap = (std::isfinite(row.circulatingMarketCap)
+                                && row.circulatingMarketCap > 0.0)
                                    ? row.circulatingMarketCap : row.marketCap;
-            if (row.close <= 0.0 || cap <= 0.0) continue;
+            if (!std::isfinite(row.close) || row.close <= 0.0
+                || !std::isfinite(cap) || cap <= 0.0) continue;
             (*weights)[row.symbol] = cap;
             totalCap += cap;
         }
-        if (totalCap <= 0.0 || weights->empty()) {
+        if (!std::isfinite(totalCap) || totalCap <= 0.0 || weights->empty()) {
             if (lastWeights) monthlyWeights[anchor] = lastWeights;
             continue;
         }

@@ -152,7 +152,11 @@ enum class WeightScheme : std::uint8_t {
     EQUAL = 0,
     MARKET_CAP = 1,
     SIGNAL_STRENGTH = 2,
-    RISK_PARITY = 3
+    RISK_PARITY = 3,
+    // 因子值加权(上限封顶): 当日选中池内 min-max 拉伸,
+    // 顶票=maxWeightPerStock, 最低票=minWeightPerStock, 中间线性;
+    // 不影响其它方案的语义
+    SIGNAL_STRENGTH_CAPPED = 4
 };
 
 enum class RebalanceFrequency : std::uint8_t {

@@ -1038,7 +1038,8 @@ QVariantList StrategyBridge::buildParamConfigs(ContractType type) const {
         option(0, QStringLiteral("等权")),
         option(1, QStringLiteral("市值加权")),
         option(2, QStringLiteral("信号强度")),
-        option(3, QStringLiteral("风险平价"))
+        option(3, QStringLiteral("风险平价")),
+        option(4, QStringLiteral("因子值加权(封顶)"))
     });
     configs << slider("maxWeightPerStock", QStringLiteral("单票最大权重"), 0.1, 0.01, 0.5, 0.01, QStringLiteral(""), 2);
     configs << slider("minWeightPerStock", QStringLiteral("单票最小权重"), 0.01, 0, 0.05, 0.005, QStringLiteral(""), 3);
