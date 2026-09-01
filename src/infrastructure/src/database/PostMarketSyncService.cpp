@@ -1600,7 +1600,7 @@ bool PostMarketSyncService::syncFinancial(std::shared_ptr<astock::database::ISql
                 const char* s=prime->get_string("symbol");
                 if(s){auto it=g2i.find(s);if(it!=g2i.end()){int id=it->second;
                     for(auto&[fn,mp]:std::vector<std::pair<std::string,std::unordered_map<int,double>*>>{{"eps_basic",&eps},{"bps_pcom_ps",&bps},{"roe",&roe},{"net_prof_pcom",&np},{"ttl_inc_oper",&rev},{"ttl_ast",&ast},{"ttl_liab",&liab},{"ttl_eqy_pcom",&eq},{"net_cf_oper",&ocf},{"ttl_prof",&prof}}){double v=prime->get_real(fn.c_str());if(std::isfinite(v))(*mp)[id]=v;}
-                    const char* ed=prime->get_string("end_date");if(ed&&ed[0])rptDate[id]=ed;
+                    const char* ed=prime->get_string("rpt_date");if(ed&&ed[0])rptDate[id]=ed;
                     const char* rt=prime->get_string("rpt_type");if(rt&&rt[0])rptType[id]=rt;
                 }}
                 prime->next();
