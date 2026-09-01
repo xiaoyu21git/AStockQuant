@@ -228,3 +228,6 @@ scripts/
 
 # venv 目录不入库 (venv_gm 为掘金 SDK 本地虚拟环境, 无自带 ignore 文件)
 tools/venv_gm/
+
+# 运行时状态快照不入库 (因子实例转储等临时输出)
+tools/state/
