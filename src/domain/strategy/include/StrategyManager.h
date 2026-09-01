@@ -107,14 +107,15 @@ private:
     [[nodiscard]] std::unique_ptr<IRuntimeFactorService> createFactorService();
 
     /// @brief 锁内取出并移除引擎 (调用方必须已持有 m_mutex)
-    [[nodiscard]] std::unique_ptr<StrategyEngine> extractEngineLocked(const std::string& id);
+    [[nodiscard]] std::shared_ptr<StrategyEngine> extractEngineLocked(const std::string& id);
 
     /// @brief 锁外停止引擎统一序列: 停实盘循环 (阻塞 join) → 停服务 (所有停止路径共用,
     /// 必须在锁外执行 — worker 回调可能再取 m_mutex, 持锁 join 有死锁风险)
-    void stopEngineOutsideLock(std::unique_ptr<StrategyEngine>& engine);
+    /// 引擎以 shared_ptr 持有: 券商回调经 weak_ptr 持锁的在途执行会推迟销毁至回调结束
+    void stopEngineOutsideLock(std::shared_ptr<StrategyEngine>& engine);
 
     mutable std::mutex m_mutex;
-    std::unordered_map<std::string, std::unique_ptr<StrategyEngine>> m_engines;
+    std::unordered_map<std::string, std::shared_ptr<StrategyEngine>> m_engines;
     // 回测产物快照表 (与实盘 m_engines 完全隔离; shared_ptr<const> 供统计页无锁读取)
     std::unordered_map<std::string, std::shared_ptr<const BacktestStatsSnapshot>> m_backtestSnapshots;
     bool m_snapshotsCleared{false};  // 关闭清理标志 (与 m_backtestSnapshots 同锁保护)

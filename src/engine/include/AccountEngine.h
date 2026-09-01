@@ -37,7 +37,15 @@ public:
 
     // 数据变更通知 (多订阅者: UI 刷新 / 账本实时对账; 回调在锁外执行)
     using DataFn = std::function<void()>;
-    void addOnDataChanged(DataFn cb);
+    using CallbackToken = std::uint64_t;
+
+    /// @brief 注册数据变更回调, 返回注销 token (供 removeOnDataChanged 真注销)
+    CallbackToken addOnDataChanged(DataFn cb);
+
+    /// @brief 注销回调 (token 无效/已注销 → 无操作)
+    /// 注意: notifyDataChanged 先拷贝后执行 — 注销前已拷贝的在途回调可能仍执行一次,
+    /// 订阅方须自保 (如 weak_ptr/运行标志), 本接口保证的是不再产生新的执行
+    void removeOnDataChanged(CallbackToken token);
 
     // gmsdk 回调入口（GmSessionEngine 调用, 线程安全）
     void onCash(const AccountInfo& a);
@@ -61,7 +69,8 @@ private:
     AccountInfo m_cachedAccount;
     std::unordered_map<std::string, Position> m_cachedPositions;
     std::unordered_map<std::string, std::int64_t> m_firstSeenSec;  // sym → 首次出现于券商快照的 epoch 秒 (清零即抹除)
-    std::vector<DataFn> m_onDataChanged;
+    std::vector<std::pair<CallbackToken, DataFn>> m_onDataChanged;
+    CallbackToken m_nextCbToken{1};
     bool m_cacheValid = false;
     foundation::utils::Uuid m_accountSub;
     foundation::utils::Uuid m_positionSub;

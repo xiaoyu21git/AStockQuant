@@ -47,6 +47,7 @@ enum class EvalStatus : std::uint8_t {
     NoSignal,     // 策略评估后无交易信号
     AllRejected,  // 有信号但全部被风控/资金拒绝
     Skipped,      // 评估被跳过 (非调仓日/回测/无标的)
+    Cancelled,    // 评估被停止协作取消 (停止策略: 管道逐标的检查点中断, 不提交任何订单)
     Error         // 链断截断 (硬性失败, 不伪装 NoSignal)
 };
 
@@ -101,6 +102,7 @@ struct EvalNaming {
         case EvalStatus::NoSignal:     return "NoSignal";
         case EvalStatus::AllRejected:  return "AllRejected";
         case EvalStatus::Skipped:      return "Skipped";
+        case EvalStatus::Cancelled:    return "Cancelled";
         case EvalStatus::Error:        return "Error";
         }
         return "Unknown";

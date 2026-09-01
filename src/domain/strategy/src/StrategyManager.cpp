@@ -16,7 +16,7 @@ StrategyManager& StrategyManager::instance() {
     return s_instance;
 }
 
-std::unique_ptr<StrategyEngine> StrategyManager::extractEngineLocked(const std::string& id)
+std::shared_ptr<StrategyEngine> StrategyManager::extractEngineLocked(const std::string& id)
 {
     // 仅锁内调用: 取出并移除引擎, 停止动作由调用方在锁外执行 (stopEngineOutsideLock)
     auto it = m_engines.find(id);
@@ -26,7 +26,7 @@ std::unique_ptr<StrategyEngine> StrategyManager::extractEngineLocked(const std::
     return engine;
 }
 
-void StrategyManager::stopEngineOutsideLock(std::unique_ptr<StrategyEngine>& engine)
+void StrategyManager::stopEngineOutsideLock(std::shared_ptr<StrategyEngine>& engine)
 {
     // 统一停止序列: 停实盘循环 (阻塞 join 专用线程) → 停策略服务
     // 必须在锁外 — stopLiveLoop 的 worker 回调可能再取 m_mutex, 持锁 join 有死锁风险
@@ -43,13 +43,14 @@ StrategyEngine* StrategyManager::createEngine(const std::string& strategyId,
     if (!engine) return nullptr;
 
     // 旧引擎 (同 id 替换, 参数可能已变更): 锁内取出、锁外停止 (阻塞 join 不持锁)
-    std::unique_ptr<StrategyEngine> old;
+    std::shared_ptr<StrategyEngine> old;
     StrategyEngine* ptr = nullptr;
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         ptr = engine.get();
         old = extractEngineLocked(strategyId);
-        m_engines[strategyId] = std::move(engine);
+        // 注册表以 shared_ptr 持有 (券商回调 weak_ptr 依赖), unique_ptr 移交所有权
+        m_engines[strategyId] = std::shared_ptr<StrategyEngine>(std::move(engine));
         INTERNAL_INFO_STREAM << "[SM] 创建引擎: 已存储, 数量=" << m_engines.size();
     }
     stopEngineOutsideLock(old);
@@ -64,7 +65,7 @@ StrategyEngine* StrategyManager::get(const std::string& id) const {
 
 void StrategyManager::remove(const std::string& id) {
     if (id.empty()) return;
-    std::unique_ptr<StrategyEngine> engine;
+    std::shared_ptr<StrategyEngine> engine;
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         engine = extractEngineLocked(id);
@@ -95,7 +96,7 @@ void StrategyManager::resumeAll() {
 
 void StrategyManager::stopAll() {
     // 锁内取出全部引擎并清空注册表, 锁外逐个停止 — 阻塞 join 不持锁
-    std::vector<std::unique_ptr<StrategyEngine>> engines;
+    std::vector<std::shared_ptr<StrategyEngine>> engines;
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         engines.reserve(m_engines.size());
@@ -222,6 +223,14 @@ void StrategyManager::startStrategy(const std::string& strategyId)
         } else {
             INTERNAL_ERROR_STREAM << "[SM] 配置中未找到 accountId, 策略将无法下单: " << strategyId;
         }
+
+        // ST禁新买开关 (可选键, 缺省关闭; 缺键不影响现有行为)
+        if (cfg && !cfg->isNull() && cfg->has("stBuyFilterEnabled")) {
+            const bool stFilter = cfg->get("stBuyFilterEnabled").asBool();
+            engine->setStBuyFilterEnabled(stFilter);
+            INTERNAL_INFO_STREAM << "[SM] ST禁新买过滤: " << strategyId
+                                 << " -> " << (stFilter ? "启用" : "禁用");
+        }
     }
 
     auto result = engine->start();
@@ -261,7 +270,7 @@ void StrategyManager::startStrategy(const std::string& strategyId)
 void StrategyManager::stopStrategy(const std::string& strategyId)
 {
     // 锁内取出、锁外停止 (stopLiveLoop 阻塞 join, 持锁有死锁风险)
-    std::unique_ptr<StrategyEngine> engine;
+    std::shared_ptr<StrategyEngine> engine;
     {
         const std::lock_guard<std::mutex> lock(m_mutex);
         engine = extractEngineLocked(strategyId);

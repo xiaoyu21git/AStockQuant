@@ -62,6 +62,7 @@
 #include <unordered_map>
 #include <cstdlib>
 #include <sstream>
+#include <mutex>
 #include <exception>
 #include <string>
 #include <unordered_map>
@@ -814,6 +815,7 @@ void StrategyEngine::startLiveLoop()
         m_dedicatedExecutor = std::make_shared<foundation::thread::ThreadPoolExecutor>(
             1, 1, std::chrono::seconds(60), "StrategyEngineLiveLoop");
     }
+    m_evalCancelled.store(false, std::memory_order_release);  // 启动时清零停止取消标志
     m_loopRunning.store(true, std::memory_order_release);
 
     // P2: 评估核心懒装配 (此处 m_liveDataPath 已最终确定 — StrategyManager 的
@@ -885,18 +887,31 @@ void StrategyEngine::stopLiveLoop()
     if (!m_loopRunning.load(std::memory_order_acquire)) {
         return;
     }
+
+    // 协作取消先行: 评估任务在管道逐标的检查点中断 (Cancelled), 保证工作线程快速退出
+    m_evalCancelled.store(true, std::memory_order_release);
     m_loopRunning.store(false, std::memory_order_release);
 
-    // 先停调度器, 防止回调在 executor 关闭后投递任务
+    // 先停调度器 (注销 EOD 回调 + 轮询线程无条件等待退出), 防止回调在 executor 关闭后投递任务
     if (m_dailyScheduler) {
         m_dailyScheduler->stop();
     }
     // 风控订阅器全局单例，不在此停止
 
+    // 注销券商推送回调: 引擎即将销毁, 残留/在途回调由 weak_ptr 保证不可触达已销毁引擎
+    if (m_accountCbToken != 0) {
+        engine::AccountEngine::instance().removeOnDataChanged(m_accountCbToken);
+        m_accountCbToken = 0;
+    }
+
     if (m_dedicatedExecutor) {
         INTERNAL_DEBUG_STREAM << "[StrategyEngine] 等待专用线程退出...";
         m_dedicatedExecutor->shutdown(false);
-        m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(5000));
+        // 无条件等待至线程终止: 当前任务经协作取消毫秒级退出, 队列排空后 terminated 置位;
+        // 不退完不返回 — 引擎成员 (m_pipeline/m_positionBook) 销毁必须严格晚于工作线程终止
+        while (!m_dedicatedExecutor->isTerminated()) {
+            m_dedicatedExecutor->awaitTermination(std::chrono::milliseconds(20));
+        }
         INTERNAL_DEBUG_STREAM << "[StrategyEngine] 专用线程已退出";
     }
 
@@ -1156,22 +1171,47 @@ void StrategyEngine::ensureEvaluationCore()
     // PositionBook 内部互斥); 对账只修正不拦截, 下单流程零依赖
     // 同一回调尾部: 当前持仓实时同步 live.current_position (节流 ≥20s;
     // 切到引擎专属线程执行 — 不在 GM 回调线程做 PG/GM-history 阻塞调用)
-    engine::AccountEngine::instance().addOnDataChanged([this]() {
-        if (!m_positionBook) return;
-        const auto snap = engine::AccountEngine::instance().snapshot();
-        m_positionBook->reconcileToBroker(snap.posQtyByCode());
+    // 回调捕获 weak_ptr: 停止时注销 token, 注销前已拷贝的在途回调 lock() 失败直接返回 —
+    // 引擎销毁后回调不可能触达任何成员 (注册表以 shared_ptr 持有引擎)
+    std::weak_ptr<StrategyEngine> weakSelf;
+    try {
+        weakSelf = shared_from_this();
+    } catch (const std::bad_weak_ptr&) {
+        // 非 shared_ptr 持有 (防御: 未经注册表创建的引擎) — 不注册回调
+        weakSelf.reset();
+    }
+    if (weakSelf.lock()) {
+        m_accountCbToken = engine::AccountEngine::instance().addOnDataChanged([weakSelf]() {
+            auto self = weakSelf.lock();
+            if (!self) return;  // 引擎已销毁 (停止后残留回调)
+            if (!self->m_positionBook) return;
+            // 停止路径: 对账/同步一并停止 (m_evalCancelled 仅在停止置位;
+            // 未启动的引擎 — 如启动前一键清仓装配 — 对账行为与修复前完全一致)
+            if (self->m_evalCancelled.load(std::memory_order_acquire)) return;
+            const auto snap = engine::AccountEngine::instance().snapshot();
+            self->m_positionBook->reconcileToBroker(snap.posQtyByCode());
 
-        constexpr std::int64_t kSyncIntervalSec = 20;
-        const auto nowSec = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        if (nowSec - m_lastPositionSyncSec.load() < kSyncIntervalSec) return;
-        m_lastPositionSyncSec.store(nowSec);
+            constexpr std::int64_t kSyncIntervalSec = 20;
+            const auto nowSec = std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            if (nowSec - self->m_lastPositionSyncSec.load() < kSyncIntervalSec) return;
+            self->m_lastPositionSyncSec.store(nowSec);
 
-        if (m_dedicatedExecutor)
-            m_dedicatedExecutor->post([this]() { persistCurrentPositions(); });
-        else
-            persistCurrentPositions();
-    });
+            if (self->m_dedicatedExecutor && !self->m_dedicatedExecutor->isShutdown()) {
+                try {
+                    self->m_dedicatedExecutor->post([weakSelf]() {
+                        if (auto s = weakSelf.lock()) s->persistCurrentPositions();
+                    });
+                } catch (const std::exception& e) {
+                    // 停止竞态: isShutdown 检查通过后 stop() 完成 shutdown → post 按 ABORT 拒绝;
+                    // 异常绝不允许逃逸 GM 回调线程; 丢弃本次同步 (停止路径, 账本 flush 负责落盘)
+                    INTERNAL_DEBUG_STREAM << "[持仓同步] 停止竞态, 投递被拒: " << e.what();
+                }
+            } else {
+                self->persistCurrentPositions();
+            }
+        });
+    }
 
     // 共享提交核心 (幂等去重 ADR-006 + 生成 + 篮子 + journal + 投递)
     m_finalizer = std::make_unique<SubmissionFinalizer>(
@@ -1189,6 +1229,34 @@ void StrategyEngine::ensureEvaluationCore()
                          << " persistPath=" << persistPath;
 }
 
+void StrategyEngine::loadStSymbolsOnce()
+{
+    // ST 名单: ref.symbol_info status/name 双源判定 (与清洗链路 STFilterRule 口径一致)
+    // call_once 保证只查一次库; DB 失败 → 名单为空 (不拦, 打印 ERROR, 与开关关闭等价)
+    std::call_once(m_stSymbolsOnce, [this]() {
+        auto& pool = astock::database::NativePgConnectionPool::instance();
+        auto db = pool.getConnection();
+        if (!db || !db->isOpen()) {
+            INTERNAL_ERROR_STREAM << "[Engine] ST 名单加载失败: DB 不可用 — ST 过滤不生效";
+            return;
+        }
+        auto rows = db->executeQuery("SELECT symbol, name, status FROM ref.symbol_info");
+        for (std::size_t i = 0; i < rows.rowCount(); ++i) {
+            auto& row = rows.getRow(i);
+            const std::string status = row.getString("status");
+            const std::string name = row.getString("name");
+            const bool isSt = status == "ST" || status == "*ST" ||
+                (name.size() >= 2 && name.substr(0, 2) == "ST") ||
+                (name.size() >= 3 && name.substr(0, 3) == "*ST");
+            if (!isSt) continue;
+            const std::string code =
+                foundation::market::AStockSymbol::codeOnly(row.getString("symbol"));
+            if (!code.empty()) m_stSymbols.insert(code);
+        }
+        INTERNAL_INFO_STREAM << "[Engine] ST 名单加载完成: " << m_stSymbols.size() << " 标的";
+    });
+}
+
 PipelineDeps StrategyEngine::buildPipelineDeps()
 {
     ensureEvaluationCore();
@@ -1204,6 +1272,15 @@ PipelineDeps StrategyEngine::buildPipelineDeps()
     };
     deps.accountSnapshotFn = [this]() { return buildAccountState(); };
     deps.onForceLiquidate = [this]() { liquidateAll(); };
+    // 停止协作取消: 管道逐标的检查点查询引擎取消标志 (回测不经过 evaluateEndOfDay, 无影响)
+    deps.cancelCheck = [this]() {
+        return m_evalCancelled.load(std::memory_order_acquire);
+    };
+    // ST禁新买: 开关启用 → 惰性加载名单并注入 (默认关闭, nullptr = 管道零行为变化)
+    if (m_stBuyFilterEnabled.load(std::memory_order_acquire)) {
+        loadStSymbolsOnce();
+        deps.stSymbols = &m_stSymbols;
+    }
 
     // ── 引擎成员引用 (观察者) ──
     deps.orderGenerator = &m_orderGenerator;
@@ -1262,6 +1339,12 @@ EvalStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool 
         return EvalStatus::Skipped;
     }
 
+    // 停止协作取消入口检查: 停止前排队的评估任务直接放弃 (管道内另有逐标的检查点)
+    if (m_evalCancelled.load(std::memory_order_acquire)) {
+        INTERNAL_INFO_STREAM << "[StrategyEngine] 停止中, 日终评估取消";
+        return EvalStatus::Cancelled;
+    }
+
     // ── 价格源装配 (ADR-009②: 工厂是唯一周期/模式分支点) ──
     auto provider = PriceProviderFactory::createProvider(
         m_period, isCompensation ? EvalMode::Compensation : EvalMode::Intraday);
@@ -1272,8 +1355,28 @@ EvalStatus StrategyEngine::evaluateEndOfDay(const std::string& tradingDay, bool 
     req.period = m_period;
     req.priceProvider = provider.get();
 
+    // ── 持仓上下文注入 (买卖逻辑一致性的唯一事实源): 券商真实持仓 → 策略上下文 currentWeights ──
+    // 与回测同机制: runBacktestLoop 内 updateCurrentWeights(回测持仓), 此处 updateCurrentWeights(券商持仓)
+    // 无兜底: 券商持仓即实盘唯一真实持仓, 不合成、不回退、不猜测
+    {
+        std::unordered_map<std::string, double> wmap;
+        for (const auto& p : buildAccountState().positions)
+            if (p.quantity > 0) wmap[p.symbol] = static_cast<double>(p.quantity);
+        strategyService_->updateCurrentWeights(wmap);
+    }
+
+    // 每轮评估前重置低延迟信号去重门: 轮内去重 (逐标的 step 重复信号只评估一次),
+    // 跨轮不残留 (次日补单重试/新交易日评估必须重新产生信号, 禁止跨天静默丢篮)
+    strategyService_->resetLastSignalKeys();
+
     PipelineDeps deps = buildPipelineDeps();
     EvalResult result = m_pipeline->run(req, deps);
+
+    // 停止协作取消: 快照入库跳过 (评估未完成, 无快照事实; 下次启动补单窗口重评后自然入库)
+    if (result.status == EvalStatus::Cancelled) {
+        INTERNAL_INFO_STREAM << "[Eval] 已取消, 跳过日终持仓快照入库";
+        return result.status;
+    }
 
     // ── 日终持仓快照入库 (live.daily_equity_snapshots + live.daily_position) ──
     // 账户快照是券商事实, 与评估结果解耦 (评估失败也要入库); UPSERT 幂等, 补跑窗口重写同日
@@ -1361,6 +1464,9 @@ void StrategyEngine::persistDailyPositionSnapshot(const std::string& tradingDay)
 
 void StrategyEngine::persistCurrentPositions()
 {
+    // 停止协作取消入口检查: 已排队的同步任务直接放弃 (账本 flush 负责落盘)
+    if (m_evalCancelled.load(std::memory_order_acquire)) return;
+
     const auto snap = engine::AccountEngine::instance().snapshot();
     if (snap.account.totalAsset <= 0.0) return;  // 账户快照未就绪 (券商未推送)
 
@@ -1379,6 +1485,11 @@ void StrategyEngine::persistCurrentPositions()
     if (!heldSyms.empty()) {
         std::lock_guard<std::recursive_mutex> gmLock(engine::GmSessionEngine::gmSdkMutex());
         for (const auto& sym : heldSyms) {
+            // 停止协作取消: 中断 GM 历史回看 (逐标的检查点)
+            if (m_evalCancelled.load(std::memory_order_acquire)) {
+                INTERNAL_DEBUG_STREAM << "[持仓同步] 停止中断 GM 历史回看";
+                return;
+            }
             const double pc = engine::GmSessionEngine::instance().fetchPreClose(sym);
             if (pc > 0.0) prevClose[sym] = pc;
         }

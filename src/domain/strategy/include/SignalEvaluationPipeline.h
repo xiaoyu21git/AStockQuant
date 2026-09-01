@@ -82,6 +82,10 @@ struct PipelineDeps {
     std::function<std::string(const std::string&)> prevTradingDayFn;        // C8: P2 接 gmsdk 包装, P4 换 DbTradingCalendar
     std::function<AccountState()> accountSnapshotFn;                        // preflight P3 券商快照
     std::function<void()> onForceLiquidate;                                 // = liquidateAll (择时强平)
+    // 停止协作取消: 返回 true 立即中断评估 (逐标的循环检查点); 空=不回测影响 (回测路径不注入)
+    std::function<bool()> cancelCheck;
+    // ST禁新买名单 (纯代码集合, 引擎开关启用时注入); nullptr = 功能关闭 (回测/默认零行为变化)
+    const std::unordered_set<std::string>* stSymbols{nullptr};
 
     // ── 引擎成员引用 (观察者) ──
     OrderGenerator* orderGenerator{nullptr};
@@ -141,6 +145,8 @@ struct EvalSession {
     std::int64_t positionExits{0};
     std::int64_t bShareSymbolsSkipped{0};  // B股标的级跳过 (未持仓整标的, 不计入生成数)
     std::int64_t bShareFiltered{0};        // B股买单拦截 (已持仓加仓, 计入生成数并从审核分母扣除)
+    std::int64_t stSymbolsSkipped{0};      // ST标的级跳过 (未持仓整标的, 不计入生成数)
+    std::int64_t stFiltered{0};            // ST买单拦截 (已持仓加仓, 计入生成数并从审核分母扣除)
 };
 
 /// @brief 评估主链 (频率无关; 不依赖任何具体数据源/日历/引擎单例)
@@ -191,6 +197,9 @@ private:
     /// @brief 链断失败构造 + 引擎日志/journal (ERROR 模板 §8)
     EvalResult fail(PipelineDeps& deps, const EvalRequest& req,
                     EvalStage stage, EvalFailureKind kind, const std::string& reason);
+
+    /// @brief 停止取消结果构造 (INFO 日志; 调度器不持久化, 重启后重评)
+    static EvalResult cancel(const EvalRequest& req);
 };
 
 } // namespace domain::strategy

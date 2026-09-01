@@ -362,6 +362,8 @@ public:
     /// @brief 设置所有策略上下文的当前评估行号 (回测逐日推进用, -1=实盘)
     virtual void setContextEvaluationRow(int row) = 0;
     virtual void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) = 0;
+    /// @brief 重置低延迟信号去重门 (每轮评估入口调用一次; 轮内去重、跨轮不残留)
+    virtual void resetLastSignalKeys() = 0;
     /// @brief 更新所有已注册策略上下文的因子候选池（空池=扫全市场）
     virtual void updateCandidatePool(const std::unordered_set<std::string>& pool) = 0;
     /// @brief 更新所有已注册策略上下文的因子复合评分 (按策略权重加权)
@@ -505,6 +507,7 @@ private:
     /// @brief 设置所有策略上下文的当前评估行号 (回测逐日推进用, -1=实盘)
     void setContextEvaluationRow(int row) override;
     void updateCurrentWeights(const std::unordered_map<std::string, double>& weights) override;
+    void resetLastSignalKeys() override;
     void updateCandidatePool(const std::unordered_set<std::string>& pool) override;
     void updateFactorScores(std::unordered_map<std::string, double> scores) override;
 
@@ -564,7 +567,7 @@ struct RebalanceConfig {
     [[nodiscard]] bool isValid() const noexcept { return interval >= 0; }
 };
 
-class StrategyEngine final {
+class StrategyEngine final : public std::enable_shared_from_this<StrategyEngine> {
 public:
     class Builder;
 
@@ -701,6 +704,12 @@ public:
 
     /// @brief 设置实盘数据目录（lastEvalDay JSON 持久化路径前缀）
     void setLiveDataPath(std::string path) { m_liveDataPath = std::move(path); }
+
+    /// @brief 启用/禁用 ST 禁新买过滤 (默认关闭; 启用后惰性加载 ST 名单注入日终评估管道)
+    /// 过滤口径 (与B股一致): 未持仓ST整标的跳过; 已持仓ST仅拦截加仓买单, 卖单放行
+    void setStBuyFilterEnabled(bool enabled) noexcept {
+        m_stBuyFilterEnabled.store(enabled, std::memory_order_release);
+    }
 
     /// @brief 距上次处理 tick 的毫秒数（>5000 可能卡死）
     [[nodiscard]] std::int64_t lastProcessedMsAgo() const noexcept {
@@ -903,6 +912,10 @@ private:
     /// 账户快照是券商事实, 与评估状态解耦; UPSERT 幂等 (主评估/补跑窗口重写同日)
     void persistDailyPositionSnapshot(const std::string& tradingDay);
 
+    /// @brief ST 名单惰性加载一次 (call_once; ref.symbol_info status/name 双源判定,
+    /// 与清洗链路 STFilterRule 口径一致)。DB 失败 → 名单为空 (不拦, 打印 ERROR)
+    void loadStSymbolsOnce();
+
     /// @brief 当前持仓实时同步 (live.current_position, 券商快照推送驱动, 内部 ≥20s 节流)
     /// 策略归属: 账本持有 → 本策略 id; 券商有账本无 → NULL (手动持仓)
     void persistCurrentPositions();
@@ -916,6 +929,8 @@ private:
     // 实盘异步线程 —— 每个引擎独立的专属线程池（1线程）
     std::shared_ptr<foundation::thread::IExecutor> m_dedicatedExecutor;
     std::atomic<bool> m_loopRunning{false};
+    std::atomic<bool> m_evalCancelled{false};  ///< 停止协作取消标志: stopLiveLoop 置位, 管道逐标的检查点中断评估
+    std::uint64_t m_accountCbToken{0};  ///< AccountEngine 券商推送回调注册 token (stopLiveLoop 注销)
     std::atomic<bool> m_isBacktestMode{false};  ///< 回测运行时置位: evaluateEndOfDay 早退 + BacktestGuard 防御监听器误触发
     std::unique_ptr<CronEvaluationScheduler> m_dailyScheduler;  ///< 日频评估调度器 (EOD + 补单)
     std::atomic<std::int64_t> m_lastProcessedAt{0};
@@ -948,6 +963,9 @@ private:
     std::shared_ptr<const factor::compute::IMarketDataView> m_injectedLiveView;  // P3: 外部注入视图持有 (悬垂修复, Bridge/内部注入共用)
     bool m_hasFactorStrategies{false};  ///< 是否有因子策略注册，fromDb 创建时确定
     bool m_needsMarketCapField{false};  ///< 权重方案为市值加权时置位，prepareMarketData 追加 market_cap 字段
+    std::atomic<bool> m_stBuyFilterEnabled{false};  ///< ST禁新买开关 (默认关闭, 现有行为零变化)
+    std::unordered_set<std::string> m_stSymbols;    ///< ST名单 (纯代码; 开关启用时 call_once 加载, 评估线程只读)
+    std::once_flag m_stSymbolsOnce;                 ///< ST名单一次性加载保护
     FactorSignalProcessor m_factorSignalProcessor;  ///< 因子信号处理(过滤+缩放)
     std::unique_ptr<ICandidatePoolSelector> m_poolSelector;  ///< 因子候选池选择器(因子定池,策略选点)
     rules::RuleGate m_ruleGate;  ///< 规则管线: 市场闸/信号审核/出场, 绑定规则库+策略模板集

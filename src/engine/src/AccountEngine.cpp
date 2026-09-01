@@ -6,6 +6,7 @@
 #include "foundation/market/AStockSymbol.h"
 #include "../../../thirdparty/gmsdk/strategy.h"
 #include <foundation/log/logging.hpp>
+#include <algorithm>
 #include <chrono>
 
 namespace engine {
@@ -127,9 +128,19 @@ std::unordered_map<std::string, int64_t> AccountEngine::Snapshot::posQtyByCode()
     return map;
 }
 
-void AccountEngine::addOnDataChanged(DataFn cb) {
+AccountEngine::CallbackToken AccountEngine::addOnDataChanged(DataFn cb) {
     std::unique_lock<std::shared_mutex> lock(m_mutex);
-    m_onDataChanged.push_back(std::move(cb));
+    const CallbackToken token = m_nextCbToken++;
+    m_onDataChanged.emplace_back(token, std::move(cb));
+    return token;
+}
+
+void AccountEngine::removeOnDataChanged(CallbackToken token) {
+    std::unique_lock<std::shared_mutex> lock(m_mutex);
+    m_onDataChanged.erase(
+        std::remove_if(m_onDataChanged.begin(), m_onDataChanged.end(),
+                       [token](const auto& entry) { return entry.first == token; }),
+        m_onDataChanged.end());
 }
 
 void AccountEngine::notifyDataChanged() {
@@ -137,7 +148,9 @@ void AccountEngine::notifyDataChanged() {
     std::vector<DataFn> cbs;
     {
         std::shared_lock<std::shared_mutex> lock(m_mutex);
-        cbs = m_onDataChanged;
+        cbs.reserve(m_onDataChanged.size());
+        for (const auto& entry : m_onDataChanged)
+            cbs.push_back(entry.second);
     }
     for (const auto& cb : cbs)
         if (cb) cb();

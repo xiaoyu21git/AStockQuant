@@ -593,6 +593,14 @@ void StrategyService::updateCurrentWeights(
     }
 }
 
+void StrategyService::resetLastSignalKeys()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    // 去重门只负责"同一轮评估内重复信号不重复下单"; 轮边界由调用方显式重置,
+    // 跨轮残留会静默吞掉次日补单重试/新交易日的整篮信号 (实盘与回测不一致)
+    s_lastKeys.clear();
+}
+
 void StrategyService::updateCandidatePool(
     const std::unordered_set<std::string>& pool)
 {

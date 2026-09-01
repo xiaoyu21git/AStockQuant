@@ -41,6 +41,9 @@ EvalResult SignalEvaluationPipeline::run(const EvalRequest& req, PipelineDeps& d
                          << " period=" << BarPeriodNaming::suffix(req.period)
                          << " 补单=" << (req.isCompensation ? "是" : "否");
 
+    // 停止协作取消入口检查 (空 cancelCheck = 回测路径, 永不取消)
+    if (deps.cancelCheck && deps.cancelCheck()) return cancel(req);
+
     EvalSession s;
     EvalStage currentStage = EvalStage::CheckRebalance;
     try {
@@ -82,6 +85,9 @@ EvalResult SignalEvaluationPipeline::run(const EvalRequest& req, PipelineDeps& d
         // 阶段7: 信号收集
         currentStage = EvalStage::CollectSignals;
         collectSignals(req, deps, s);
+
+        // 收集被取消中断 → 不进入审核/提交 (停止策略: 不生成任何订单)
+        if (deps.cancelCheck && deps.cancelCheck()) return cancel(req);
 
         // 阶段8: 审核 + 提交
         currentStage = EvalStage::FinalizeSubmit;
@@ -359,6 +365,9 @@ void SignalEvaluationPipeline::collectSignals(const EvalRequest& req,
     }
 
     for (const auto& sym : *s.symbols) {
+        // 停止协作取消: 逐标的检查点 (run() 在收集后复核, 最终以 Cancelled 返回)
+        if (deps.cancelCheck && deps.cancelCheck()) break;
+
         if (blockNewBuys && s.posQtyMap.count(foundation::market::AStockSymbol::codeOnly(sym)) == 0)
             continue;
 
@@ -385,6 +394,17 @@ void SignalEvaluationPipeline::collectSignals(const EvalRequest& req,
             continue;
         }
 
+        // ST禁新买: 未持仓ST整标的跳过 (省掉规则/因子求值); 已持仓ST放行卖单路径 (与B股口径一致)
+        // 名单仅在开关启用时注入 (deps.stSymbols 非空), 关闭/回测路径零行为变化
+        const bool isStBlocked = deps.stSymbols &&
+            deps.stSymbols->count(foundation::market::AStockSymbol::codeOnly(sym)) != 0;
+        if (isStBlocked &&
+            s.posQtyMap.count(foundation::market::AStockSymbol::codeOnly(sym)) == 0) {
+            ++s.stSymbolsSkipped;
+            INTERNAL_DEBUG_STREAM << "[Eval] ST标的跳过: " << sym;
+            continue;
+        }
+
         MarketDataPoint mdp(
             domain::strategy::InstrumentId{aSym.instrumentId()}, price, vol, s.tradingDayInt);
 
@@ -408,6 +428,13 @@ void SignalEvaluationPipeline::collectSignals(const EvalRequest& req,
                 if (order.side() == OrderSide::Buy && aSym.isBShare()) {
                     ++s.bShareFiltered;
                     INTERNAL_DEBUG_STREAM << "[Eval] B股买单拒绝: " << order.symbol();
+                    continue;
+                }
+                // ST禁买: 已持仓ST的加仓买单同样拒绝; 卖单不受影响。
+                // 置于涨跌停过滤之前: 一字涨停ST买单的拒绝原因归为「ST禁买」而非「涨停」
+                if (order.side() == OrderSide::Buy && isStBlocked) {
+                    ++s.stFiltered;
+                    INTERNAL_DEBUG_STREAM << "[Eval] ST买单拒绝: " << order.symbol();
                     continue;
                 }
                 // 涨跌停过滤: 涨停不买, 跌停不卖
@@ -483,6 +510,7 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
             posCtx.code = sym6;
             auto cite = s.symToCol.find(sym6);
             posCtx.colIndex = cite != s.symToCol.end() ? cite->second : -1;
+            if (posCtx.colIndex < 0) continue;  // 视图外符号: 跳过持仓退出规则评估 (与回测一致, 不抛异常)
             posCtx.isHolding = true;
             posCtx.entryPrice = pos.costPrice;
             const double currentPrice = pos.lastPrice;
@@ -492,12 +520,20 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
             const rules::RuleAction action = deps.ruleGate->positionAction(exitProvider);
             if (action == rules::RuleAction::Exit || action == rules::RuleAction::Reduce) {
                 // 最少持有期检查: 买入后持有不足 minHoldDays 个交易日不卖出
+                // hard-stop 豁免: 与回测一致 (runBacktestLoop 同逻辑) — 风控止损不受持有期约束
                 if (deps.minHoldDays > 0 && deps.positionEntryDates) {
-                    auto eit = deps.positionEntryDates->find(pos.symbol);
-                    if (eit != deps.positionEntryDates->end()) {
-                        int heldDays = countTradingDaysBetween(
-                            eit->second, s.tradingDayInt, deps.prevTradingDayFn);
-                        if (heldDays < deps.minHoldDays) continue;
+                    const auto& ruleTags = deps.ruleGate->lastHitRuleTags();
+                    const auto& tmplTags = deps.ruleGate->lastHitTemplateTags();
+                    const bool isHardStop =
+                        std::find(ruleTags.begin(), ruleTags.end(), "hard-stop") != ruleTags.end()
+                     || std::find(tmplTags.begin(), tmplTags.end(), "hard-stop") != tmplTags.end();
+                    if (!isHardStop) {
+                        auto eit = deps.positionEntryDates->find(pos.symbol);
+                        if (eit != deps.positionEntryDates->end()) {
+                            int heldDays = countTradingDaysBetween(
+                                eit->second, s.tradingDayInt, deps.prevTradingDayFn);
+                            if (heldDays < deps.minHoldDays) continue;
+                        }
                     }
                 }
                 // 注意: 规则出场(止损/风控)不检查跌停 — 风控指令必须尝试执行
@@ -561,8 +597,8 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
     }
 
     if (deps.ruleGate && deps.ruleGate->enabled()) {
-        // 分母 = 进入审核的信号数 (原始生成 N − 涨跌停过滤 N2 − B股拦截, B股买单不再进入规则闸门)
-        const std::int64_t audited = s.totalGenerated - s.limitFiltered - s.bShareFiltered;
+        // 分母 = 进入审核的信号数 (原始生成 N − 涨跌停过滤 N2 − B股/ST拦截, 拦截买单不再进入规则闸门)
+        const std::int64_t audited = s.totalGenerated - s.limitFiltered - s.bShareFiltered - s.stFiltered;
         INTERNAL_INFO_STREAM << "[Eval] 规则闸门:"
             << " 信号审核拒绝=" << s.ruleGateRejected
             << "/" << audited
@@ -657,7 +693,8 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
                 + " 规则闸门拒绝=" + std::to_string(s.ruleGateRejected)
                 + " 涨跌停过滤=" + std::to_string(s.limitFiltered)
                 + " 生成器过滤=" + std::to_string(s.generatorFiltered)
-                + " B股拒绝=" + std::to_string(s.bShareFiltered));
+                + " B股拒绝=" + std::to_string(s.bShareFiltered)
+                + " ST拒绝=" + std::to_string(s.stFiltered));
         }
     }
 
@@ -665,7 +702,9 @@ EvalResult SignalEvaluationPipeline::finalizeAndSubmit(const EvalRequest& req,
                          << " 信号=" << s.totalGenerated
                          << " 提交=" << sub.totalSubmitted
                          << " B股跳过=" << s.bShareSymbolsSkipped
-                         << " B股拒绝=" << s.bShareFiltered;
+                         << " B股拒绝=" << s.bShareFiltered
+                         << " ST跳过=" << s.stSymbolsSkipped
+                         << " ST拒绝=" << s.stFiltered;
     return result;
 }
 
@@ -700,6 +739,14 @@ int SignalEvaluationPipeline::countTradingDaysBetween(
         date = prev;
     }
     return count;
+}
+
+EvalResult SignalEvaluationPipeline::cancel(const EvalRequest& req) {
+    EvalResult r;
+    r.status = EvalStatus::Cancelled;
+    r.reason = "停止策略: 评估取消";
+    INTERNAL_INFO_STREAM << "[Eval] " << req.tradingDay << " 取消 status=Cancelled";
+    return r;
 }
 
 EvalResult SignalEvaluationPipeline::fail(PipelineDeps& deps, const EvalRequest& req,

@@ -237,10 +237,13 @@ void CronEvaluationScheduler::stop() {
         m_eodToken = 0;
     }
     m_polling.store(false);
-    // 停轮询线程池: 唤醒 worker 并等待退出 (最多 5s, sleep 分片已改为每秒检查标志位)
+    // 停轮询线程池: 唤醒 worker 并无条件等待退出 — m_polling 标志使分片睡眠 (1s/5s) 快速返回,
+    // 且本线程池只会投递自身续跑任务, 队列必然排空; 不退完不返回 (销毁严格晚于线程终止)
     if (m_pollExecutor) {
         m_pollExecutor->shutdown(false);
-        m_pollExecutor->awaitTermination(std::chrono::milliseconds(5000));
+        while (!m_pollExecutor->isTerminated()) {
+            m_pollExecutor->awaitTermination(std::chrono::milliseconds(20));
+        }
         m_pollExecutor.reset();
     }
 }
@@ -504,9 +507,12 @@ void IntervalEvaluationScheduler::start() {
 
 void IntervalEvaluationScheduler::stop() {
     m_polling.store(false);
+    // 无条件等待退出 (同 CronEvaluationScheduler::stop 语义)
     if (m_pollExecutor) {
         m_pollExecutor->shutdown(false);
-        m_pollExecutor->awaitTermination(std::chrono::milliseconds(5000));
+        while (!m_pollExecutor->isTerminated()) {
+            m_pollExecutor->awaitTermination(std::chrono::milliseconds(20));
+        }
         m_pollExecutor.reset();
     }
 }
