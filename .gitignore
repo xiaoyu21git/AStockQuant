@@ -225,3 +225,6 @@ src/app/Qml/page/dashboard/QtCandlestickChart.qml
 src/app/Qml/utils/RuleTemplatePreviewUtils.js
 scripts/
 
+
+# venv 目录不入库 (venv_gm 为掘金 SDK 本地虚拟环境, 无自带 ignore 文件)
+tools/venv_gm/
